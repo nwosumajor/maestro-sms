@@ -1,0 +1,40 @@
+// =============================================================================
+// Admissions — public application intake (quarantined from student data)
+// =============================================================================
+// A prospective family submits an application via the PUBLIC site (no login).
+// Applications land HERE — never in the student/user tables — until a staff
+// member reviews and (separately) converts an accepted one. Tenant-scoped by the
+// school's slug resolved server-side; the public insert sets the RLS GUC from
+// that resolved school, never from client input. No PII of an enrolled minor.
+// =============================================================================
+
+enum AdmissionStatus {
+  NEW
+  REVIEWING
+  ACCEPTED
+  REJECTED
+}
+
+model AdmissionApplication {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  applicantName  String
+  applicantEmail String
+  applicantPhone String?
+  childName      String
+  childDob       DateTime? @db.Date
+  notes          String?
+  status         AdmissionStatus @default(NEW)
+  reviewedById   String?         @db.Uuid
+  reviewNote     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, status])
+  @@map("admission_application")
+}

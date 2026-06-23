@@ -1,0 +1,56 @@
+// =============================================================================
+// Document Vault — report cards, receipts, certificates, transcripts
+// =============================================================================
+// Postgres holds only METADATA + access control; the file BYTES live in object
+// storage (S3 / Cloudflare R2), NEVER in Postgres (stack rule). Upload/download
+// go through PRESIGNED URLs issued by a pluggable StorageProvider, so bytes never
+// flow through the API server. Storage keys are namespaced by school for tenant
+// isolation at the bucket layer too. All tenant-scoped (non-null schoolId),
+// RLS-enforced; relationship scoping (student / guardian / teacher / staff) lives
+// in DocumentsService. Downloads of a student's document are audit-logged.
+// =============================================================================
+
+enum DocumentType {
+  REPORT_CARD
+  RECEIPT
+  CERTIFICATE
+  TRANSCRIPT
+  OTHER
+}
+
+enum DocumentStatus {
+  /// Metadata created; awaiting the client's direct upload to storage.
+  PENDING
+  /// Upload confirmed; the object exists.
+  UPLOADED
+}
+
+model Document {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+  /// Student this document pertains to (DB FK to user; null = school-level doc,
+  /// staff-only). No Prisma relation, to keep the User model lean.
+  studentId String? @db.Uuid
+
+  type  DocumentType
+  title String
+  /// Object-storage key (e.g. schools/<schoolId>/documents/<id>/<name>). The
+  /// bytes live in S3/R2 under this key — never in Postgres.
+  storageKey  String @unique
+  contentType String
+  sizeBytes   Int?
+  status      DocumentStatus @default(PENDING)
+
+  /// Staff who created it (DB FK to user; audit field, no Prisma relation).
+  uploadedById String @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, studentId])
+  @@index([schoolId, type])
+  @@map("document")
+}

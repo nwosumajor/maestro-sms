@@ -1,0 +1,33 @@
+// =============================================================================
+// Gradebook — grading of submissions
+// =============================================================================
+// A Grade is a MANUAL teacher decision on a submission. // SECURITY (Golden Rule
+// #8): a grade is NEVER auto-derived from integrity signals or any automated
+// score — integrity tooling only surfaces signals for human review; the teacher
+// decides the grade separately. There is intentionally no code path that writes
+// a Grade from a detector. Tenant-scoped, RLS-enforced; writes are audit-logged.
+// =============================================================================
+
+model Grade {
+  id           String   @id @default(uuid()) @db.Uuid
+  schoolId     String   @db.Uuid
+  /// One grade per submission.
+  submissionId String   @unique @db.Uuid
+  score        Float
+  maxScore     Float
+  feedback     String?
+  /// DRAFT (teacher only) | PUBLISHED (visible to student/parent).
+  status       String   @default("DRAFT")
+  /// FK -> User(id) of the teacher who graded it.
+  gradedById   String   @db.Uuid
+  gradedAt     DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  school     School     @relation(fields: [schoolId], references: [id])
+  submission Submission @relation(fields: [submissionId], references: [id])
+  gradedBy   User       @relation("GradesGiven", fields: [gradedById], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, submissionId])
+  @@map("grade")
+}

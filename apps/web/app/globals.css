@@ -1,0 +1,136 @@
+/* ===========================================================================
+   SMS design tokens — the single runtime styling layer
+   ===========================================================================
+   A small, fixed set of tokens (color, spacing, type, radius) drives ALL UI.
+   Per-tenant theming = swap a handful of these CSS variables on a wrapper; we
+   never re-skin components per school (CLAUDE.md design-system rule).
+
+   Layers:
+     1. Primitive ramps live in packages/tokens (TS, cross-platform source).
+     2. Semantic tokens below map roles -> values. shadcn/ui reads these.
+     3. Per-tenant override: set --brand-h/s/l (+ optional radius) on
+        [data-tenant] — see the bottom of this file. Only the BRAND hue moves;
+        neutrals/severity stay constant so contrast & meaning are preserved.
+   All color pairs below meet WCAG AA for their intended text size.
+   =========================================================================== */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* --- brand (the per-tenant swap point) --- default: indigo --- */
+    --brand-h: 243;
+    --brand-s: 75%;
+    --brand-l: 58%;
+
+    /* --- semantic surface + text (neutral slate ramp) --- */
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    --primary: var(--brand-h) var(--brand-s) var(--brand-l);
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 9% 46%;
+    --accent: 220 14% 96%;
+    --accent-foreground: 222 47% 11%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: var(--brand-h) var(--brand-s) var(--brand-l);
+
+    /* --- integrity severity (PRIORITY, not guilt — GR#8) ---
+       Deliberately NOT brand-tinted and NOT tenant-overridable so a "high"
+       always reads the same regardless of school theme. */
+    --severity-info-bg: 220 14% 96%;
+    --severity-info-fg: 220 39% 30%;
+    --severity-low-bg: 48 96% 89%;
+    --severity-low-fg: 28 74% 26%;
+    --severity-medium-bg: 34 100% 92%;
+    --severity-medium-fg: 22 82% 31%;
+    --severity-high-bg: 0 86% 95%;
+    --severity-high-fg: 0 70% 35%;
+
+    /* --- type + radius --- */
+    --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
+    --radius: 0.625rem;
+  }
+
+  .dark {
+    --background: 222 47% 7%;
+    --foreground: 210 20% 96%;
+
+    --card: 222 40% 10%;
+    --card-foreground: 210 20% 96%;
+    --popover: 222 40% 10%;
+    --popover-foreground: 210 20% 96%;
+
+    --primary: var(--brand-h) var(--brand-s) 66%;
+    --primary-foreground: 222 47% 9%;
+
+    --secondary: 217 30% 17%;
+    --secondary-foreground: 210 20% 96%;
+    --muted: 217 30% 17%;
+    --muted-foreground: 220 14% 65%;
+    --accent: 217 30% 17%;
+    --accent-foreground: 210 20% 96%;
+
+    --destructive: 0 63% 50%;
+    --destructive-foreground: 210 20% 98%;
+
+    --border: 217 30% 20%;
+    --input: 217 30% 20%;
+    --ring: var(--brand-h) var(--brand-s) 66%;
+
+    --severity-info-bg: 220 24% 18%;
+    --severity-info-fg: 220 20% 78%;
+    --severity-low-bg: 38 60% 18%;
+    --severity-low-fg: 46 90% 76%;
+    --severity-medium-bg: 26 70% 18%;
+    --severity-medium-fg: 32 95% 75%;
+    --severity-high-bg: 0 55% 20%;
+    --severity-high-fg: 0 90% 84%;
+  }
+
+  * {
+    border-color: hsl(var(--border));
+  }
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family: var(--font-sans);
+    font-feature-settings: "cv11", "ss01";
+    text-rendering: optimizeLegibility;
+  }
+}
+
+/* ===========================================================================
+   Per-tenant theming — example.
+   The web layer reads the school's brand from the verified session and sets it
+   on a wrapping element. ONLY brand + radius move; everything else is constant.
+     <div data-tenant style="--brand-h:160;--brand-s:84%;--brand-l:39%">…</div>
+   Example presets (emerald / rose) shown for reference:
+   =========================================================================== */
+[data-tenant-theme="emerald"] {
+  --brand-h: 160;
+  --brand-s: 84%;
+  --brand-l: 39%;
+}
+[data-tenant-theme="rose"] {
+  --brand-h: 347;
+  --brand-s: 77%;
+  --brand-l: 50%;
+}

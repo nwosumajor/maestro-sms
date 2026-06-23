@@ -1,0 +1,102 @@
+#!/bin/sh
+# =============================================================================
+# Backend startup. By the time this runs, Compose has waited for Postgres + Redis
+# healthchecks (depends_on: service_healthy). Migrations, RLS grants, and seeding
+# run as the PRIVILEGED migration role (DATABASE_MIGRATE_URL); the API server
+# itself then runs as the least-privilege app role (DATABASE_URL) so RLS is
+# enforced. Golden Rule #4.
+# =============================================================================
+set -e
+
+# So `prisma db seed` can find the `tsx` binary in the pruned image.
+export PATH="/app/packages/db/node_modules/.bin:/app/node_modules/.bin:$PATH"
+
+MIGRATE_URL="${DATABASE_MIGRATE_URL:-$DATABASE_URL}"
+
+# RUN_MODE / first-arg control the lifecycle:
+#   migrate  -> bootstrap the app role, migrate + RLS + seed, then EXIT (cloud:
+#              run as a one-off ECS task before flipping services).
+#   server   -> start the API only; NEVER migrate (cloud: the long-lived service).
+#   (unset)  -> legacy local-compose behaviour: migrate then start, in one process.
+MODE="${1:-${RUN_MODE:-all}}"
+
+if [ "$MODE" = "server" ]; then
+  echo "[entrypoint] starting API as the least-privilege app role (no migrations)..."
+  exec node apps/api/dist/main.js
+fi
+
+if [ "$MODE" = "retention" ]; then
+  # One-shot integrity-telemetry purge (scheduled task; privileged DB via
+  # DATABASE_RETENTION_URL). Exits when the sweep completes. No migrations, no
+  # server, no Redis.
+  echo "[entrypoint] running integrity retention sweep..."
+  exec node apps/api/dist/integrity/retention/retention-cli.js
+fi
+
+# In cloud, RDS does not run infrastructure/postgres/init, so the least-privilege
+# app role does not exist yet. The privileged migrate role creates it from
+# APP_DB_PASSWORD. SECURITY: app role gets only CONNECT/USAGE here; table grants
+# come from the RLS SQL files. Golden Rule #4 (app role != migration role).
+if [ "$MODE" = "migrate" ] && [ -n "$APP_DB_PASSWORD" ]; then
+  echo "[entrypoint] ensuring least-privilege app role exists..."
+  APP_DB_USER="${APP_DB_USERNAME:-major_user}"
+  psql "$MIGRATE_URL" -v ON_ERROR_STOP=1 \
+    -v app_user="$APP_DB_USER" -v app_pw="$APP_DB_PASSWORD" <<'EOSQL'
+SELECT format('CREATE ROLE %I LOGIN PASSWORD %L', :'app_user', :'app_pw')
+  WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = :'app_user') \gexec
+SELECT format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), :'app_user') \gexec
+SELECT format('GRANT USAGE ON SCHEMA public TO %I', :'app_user') \gexec
+EOSQL
+fi
+
+echo "[entrypoint] applying migrations (privileged role)..."
+( cd packages/db && DATABASE_URL="$MIGRATE_URL" node node_modules/prisma/build/index.js migrate deploy )
+
+# RLS apply is not idempotent (CREATE POLICY errors if it exists), so each file
+# is guarded by a SENTINEL = the LAST policy it creates. If that policy exists the
+# file is fully applied and is skipped; otherwise it is applied. This handles
+# BOTH a fresh DB (apply all) and adding a NEW rls file to an already-initialised
+# DB (apply only the new one). When you add a prisma/rls/NN_*.sql file, register
+# it here with its last policy name.
+echo "[entrypoint] applying RLS policies (privileged role, per-file idempotent)..."
+apply_rls() {
+  f="$1"; sentinel="$2"
+  if psql "$MIGRATE_URL" -tAc "SELECT 1 FROM pg_policies WHERE policyname='$sentinel'" | grep -q 1; then
+    echo "  -> $f (already applied)"
+  else
+    echo "  -> $f"
+    psql "$MIGRATE_URL" -v ON_ERROR_STOP=1 -f "$f"
+  fi
+}
+apply_rls packages/db/prisma/rls/01_integrity_rls.sql           exemption_update
+apply_rls packages/db/prisma/rls/02_foundation_rls.sql          consent_update
+apply_rls packages/db/prisma/rls/03_lms_rls.sql                 parent_child_select
+apply_rls packages/db/prisma/rls/04_gradebook_rls.sql           grade_update
+apply_rls packages/db/prisma/rls/05_workflow_rls.sql            wal_insert
+apply_rls packages/db/prisma/rls/06_integrity_retention_rls.sql integrity_retention_run_select
+apply_rls packages/db/prisma/rls/07_sis_rls.sql                 medical_record_update
+apply_rls packages/db/prisma/rls/08_attendance_rls.sql          attendance_record_update
+apply_rls packages/db/prisma/rls/09_notifications_rls.sql       notification_delivery_update
+apply_rls packages/db/prisma/rls/10_fees_rls.sql                payment_update
+apply_rls packages/db/prisma/rls/11_documents_rls.sql           document_delete
+apply_rls packages/db/prisma/rls/12_timetable_rls.sql           timetable_entry_delete
+apply_rls packages/db/prisma/rls/13_security_rls.sql            privilege_grant_update
+apply_rls packages/db/prisma/rls/14_privacy_rls.sql             erasure_request_update
+apply_rls packages/db/prisma/rls/15_messaging_events_rls.sql    school_event_delete
+apply_rls packages/db/prisma/rls/16_hr_rls.sql                  employee_update
+apply_rls packages/db/prisma/rls/17_admissions_rls.sql          admission_application_update
+
+# Seed on first provision (compose: SEED_ON_START=true; cloud migrate task: always).
+if [ "${SEED_ON_START}" = "true" ] || [ "$MODE" = "migrate" ]; then
+  echo "[entrypoint] seeding (privileged role)..."
+  ( cd packages/db && DATABASE_URL="$MIGRATE_URL" node node_modules/prisma/build/index.js db seed ) \
+    || echo "[entrypoint] seed skipped/failed (non-fatal)"
+fi
+
+if [ "$MODE" = "migrate" ]; then
+  echo "[entrypoint] migrate task complete; exiting."
+  exit 0
+fi
+
+echo "[entrypoint] starting API as the least-privilege app role..."
+exec node apps/api/dist/main.js

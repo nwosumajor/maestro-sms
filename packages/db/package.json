@@ -1,0 +1,35 @@
+{
+  "name": "@sms/db",
+  "version": "0.0.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }
+  },
+  "prisma": {
+    "schema": "prisma/schema",
+    "seed": "tsx prisma/seed.ts"
+  },
+  "scripts": {
+    "build": "prisma generate && tsc -p tsconfig.build.json",
+    "generate": "prisma generate",
+    "migrate": "prisma migrate dev",
+    "migrate:deploy": "prisma migrate deploy",
+    "rls": "bash -c 'for f in prisma/rls/*.sql; do echo \"applying $f\"; psql \"$DATABASE_MIGRATE_URL\" -v ON_ERROR_STOP=1 -f \"$f\"; done'",
+    "setup": "prisma migrate deploy && pnpm rls && prisma db seed",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo \"(no lint configured)\""
+  },
+  "dependencies": {
+    "@prisma/client": "^5.20.0",
+    "bcryptjs": "^2.4.3",
+    "prisma": "^5.20.0",
+    "tsx": "^4.19.1"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^20.16.10",
+    "typescript": "^5.6.2"
+  }
+}

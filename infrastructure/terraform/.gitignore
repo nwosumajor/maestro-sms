@@ -1,0 +1,9 @@
+# Never commit state (contains generated secrets), local vars, or providers.
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+terraform.tfvars
+*.auto.tfvars
+backend.tf
+crash.log

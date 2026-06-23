@@ -1,0 +1,302 @@
+// =============================================================================
+// Assessment Integrity — data model (FOUNDATION-ADDITIVE)
+// =============================================================================
+// This is a Prisma multi-file schema fragment (`prisma/schema/` folder layout).
+// It defines ONLY the Assessment Integrity module. The foundation models
+// (School, User, AuditLog) live in the foundation schema files. Cross-table
+// references use real `@relation`s; the User/School ENDS of those relations are
+// STUBBED in `_foundation-stubs.prisma` so this schema validates standalone.
+//
+// AT INTEGRATION: move the back-relation FIELDS from the stub models into the
+// real foundation User/School models and DELETE the stub file, so there is
+// exactly one User and one School model. Adjust the stub `@@map` names if the
+// foundation tables are named differently. Nothing about the foundation's
+// security model changes — these are FK + relation fields only.
+//
+// Golden Rules honored here:
+//  #1  every table below has a non-null `schoolId`.
+//  #5  IntegritySignal / SubmissionDraft are sensitive minors' PII — modeled
+//      APPEND-ONLY (enforced at the DB layer in the RLS migration, not here).
+//  #8  NO model carries a verdict / score / penalty field. Signals only.
+//
+// RLS is NOT expressed in Prisma. See the companion migration:
+//   prisma/migrations/<ts>_integrity_rls/migration.sql
+// which is delivered SEPARATELY for review per CLAUDE.md.
+// =============================================================================
+
+/// What kind of work a submission holds — selects the similarity algorithm
+/// downstream (PROSE → embeddings, CODE → n-gram/shingling). Detection logic
+/// lives in the server workers, not here.
+enum SubmissionContentKind {
+  PROSE
+  CODE
+}
+
+enum SubmissionStatus {
+  IN_PROGRESS
+  SUBMITTED
+}
+
+/// Source of a signal. CLIENT signals are friction/telemetry from the browser
+/// and are, per spec, trivially bypassable — treated as hints only. SERVER
+/// signals come from the async detectors and carry the real weight.
+enum IntegritySignalSource {
+  CLIENT
+  SERVER
+}
+
+enum IntegritySignalType {
+  PASTE
+  FOCUS_LOSS
+  TYPING_ANOMALY
+  SIMILARITY
+  DRAFT_ANOMALY
+}
+
+/// Severity is a reviewer-facing PRIORITY, never a determination of guilt.
+/// HIGH means "look at this first", not "this student cheated" (Golden Rule #8).
+enum IntegritySignalSeverity {
+  INFO
+  LOW
+  MEDIUM
+  HIGH
+}
+
+/// An assignment or test. Integrity friction/telemetry is OFF by default and
+/// opt-in per-assessment, so monitoring is never silent or accidental
+/// (transparency requirement, Golden Rule #5).
+model Assessment {
+  id     String @id @default(uuid()) @db.Uuid
+  /// Tenant key — set from the verified JWT, enforced by RLS. Never from input.
+  schoolId String @db.Uuid
+
+  title       String
+  description String?
+
+  /// FK -> User(id) of the teacher who created it. Ownership (teacher sees only
+  /// their assessments) is enforced in the NestJS guard layer, backstopped by RLS.
+  createdById String @db.Uuid
+
+  /// FK -> Class(id) the assessment belongs to (LMS). Nullable for assessments
+  /// created before the LMS link; when set, it scopes integrity reports to the
+  /// teachers of that class.
+  classId String? @db.Uuid
+
+  // --- Integrity toggles (all default OFF; opt-in only) ---
+  /// Capture (NOT silently block) paste events into answer fields.
+  pasteBlocked     Boolean @default(false)
+  /// Track visibilitychange/blur focus-loss events.
+  focusTracked     Boolean @default(false)
+  /// Capture coarse typing cadence (derived metrics only, never raw keystrokes).
+  typingTracked    Boolean @default(false)
+  /// Master switch: when false, NO signals are accepted or generated for this
+  /// assessment regardless of the flags above.
+  integrityEnabled Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school    School @relation(fields: [schoolId], references: [id])
+  createdBy User   @relation("AssessmentCreatedBy", fields: [createdById], references: [id])
+  class     Class? @relation(fields: [classId], references: [id])
+
+  submissions Submission[]
+  exemptions  StudentIntegrityExemption[]
+
+  @@index([schoolId])
+  @@index([schoolId, createdById])
+  @@map("assessment")
+}
+
+/// One student's attempt at one assessment. Holds the latest content; the
+/// evolution of that content lives in append-only SubmissionDraft rows.
+model Submission {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  assessmentId String @db.Uuid
+  /// FK -> User(id) of the student. PII of a minor — RLS + audit-logged access.
+  studentId    String @db.Uuid
+
+  status      SubmissionStatus      @default(IN_PROGRESS)
+  contentKind SubmissionContentKind @default(PROSE)
+  /// The student's work. Sensitive PII; tenant-isolated by RLS. Stored as text
+  /// (not in S3) because detectors need to read it; large file attachments still
+  /// go to S3/R2 per stack rules.
+  content     String?
+  submittedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school     School               @relation(fields: [schoolId], references: [id])
+  student    User                 @relation("SubmissionStudent", fields: [studentId], references: [id])
+  assessment Assessment           @relation(fields: [assessmentId], references: [id])
+  drafts     SubmissionDraft[]
+  signals    IntegritySignal[]
+  telemetry  SubmissionTelemetry[]
+  grade      Grade?
+
+  /// A student has at most one submission per assessment.
+  @@unique([assessmentId, studentId])
+  @@index([schoolId])
+  @@index([schoolId, assessmentId])
+  @@map("submission")
+}
+
+/// Append-only autosave snapshot. Supports draft-evolution analysis: a believable
+/// edit history lowers suspicion, a single fully-formed version raises it.
+/// IMMUTABLE — no updatedAt, and the RLS migration grants INSERT/SELECT only.
+model SubmissionDraft {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  submissionId String @db.Uuid
+  /// Monotonic order of snapshots within a submission.
+  sequence     Int
+  /// SHA-256 of `content` at snapshot time — lets us detect duplicate/no-op saves
+  /// and verify integrity of the history cheaply.
+  contentHash  String
+  /// Snapshot of the work at this point. Sensitive PII (see Submission.content).
+  content      String?
+
+  createdAt DateTime @default(now())
+
+  school     School     @relation(fields: [schoolId], references: [id])
+  submission Submission @relation(fields: [submissionId], references: [id])
+
+  @@unique([submissionId, sequence])
+  @@index([schoolId])
+  @@index([schoolId, submissionId])
+  @@map("submission_draft")
+}
+
+/// Append-only integrity SIGNAL. This is the heart of Golden Rule #8: it records
+/// evidence for a human, never a conclusion. There is deliberately NO "cheated"
+/// boolean, no score, no penalty, and no auto-action field. IMMUTABLE — the RLS
+/// migration grants INSERT/SELECT only (mirrors the AuditLog pattern).
+model IntegritySignal {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  submissionId String                  @db.Uuid
+  type         IntegritySignalType
+  severity     IntegritySignalSeverity
+  source       IntegritySignalSource
+  /// Detector confidence in [0,1]. A measure of signal strength, NOT probability
+  /// of guilt — surfaced to teachers as context only.
+  confidence   Float
+  /// Structured evidence a teacher needs to judge (e.g. paste length+offset,
+  /// blur duration, matched-cohort similarity score, draft-jump bytes). Never
+  /// raw keystroke content.
+  evidence     Json
+  /// Which detector produced it (e.g. "paste-origin@v1"), for auditability.
+  detector     String?
+
+  createdAt DateTime @default(now())
+
+  school     School     @relation(fields: [schoolId], references: [id])
+  submission Submission @relation(fields: [submissionId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, submissionId])
+  @@index([schoolId, submissionId, type])
+  @@map("integrity_signal")
+}
+
+/// Append-only RAW client telemetry that is NOT itself a reviewed signal —
+/// derived metrics only (e.g. typing-cadence windows). It feeds the SERVER
+/// detectors, which may emit an IntegritySignal from it. Kept OUT of
+/// IntegritySignal so the reviewed-evidence stream stays clean and so the client
+/// can never write a TYPING_ANOMALY (Golden Rule #8: clients don't label).
+/// IMMUTABLE — the RLS migration grants INSERT/SELECT only. Sensitive PII of a
+/// minor: consent-gated at write, retention-bounded like the other append tables.
+model SubmissionTelemetry {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  submissionId String @db.Uuid
+  /// e.g. "TYPING_CADENCE". Extensible; never includes content.
+  kind         String
+  /// Derived metrics only (see packages/types client signal contracts).
+  payload      Json
+
+  createdAt DateTime @default(now())
+
+  school     School     @relation(fields: [schoolId], references: [id])
+  submission Submission @relation(fields: [submissionId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, submissionId])
+  @@index([schoolId, submissionId, kind])
+  @@map("submission_telemetry")
+}
+
+/// Accessibility / accommodation bypass. When an active exemption applies, the
+/// client MUST skip friction (paste capture, etc.) yet still let the student
+/// submit normally. Without this the feature is discriminatory (spec requirement).
+/// Revocation is a soft-delete (revokedAt) so accommodation history is never
+/// destroyed. // SECURITY: granting/revoking is a mutation -> audit-logged.
+model StudentIntegrityExemption {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  /// FK -> User(id) of the student receiving the accommodation.
+  studentId    String  @db.Uuid
+  /// Null = global exemption for this student across all assessments.
+  assessmentId String? @db.Uuid
+
+  reason      String
+  /// FK -> User(id) of the staff member who granted it (school_admin/teacher).
+  grantedById String   @db.Uuid
+
+  /// Soft-delete: active when null. We never hard-delete an accommodation record.
+  revokedAt   DateTime?
+  revokedById String?   @db.Uuid
+
+  createdAt DateTime @default(now())
+
+  school     School      @relation(fields: [schoolId], references: [id])
+  student    User        @relation("ExemptionStudent", fields: [studentId], references: [id])
+  grantedBy  User        @relation("ExemptionGrantedBy", fields: [grantedById], references: [id])
+  revokedBy  User?       @relation("ExemptionRevokedBy", fields: [revokedById], references: [id])
+  assessment Assessment? @relation(fields: [assessmentId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, studentId])
+  @@index([schoolId, studentId, assessmentId])
+  @@map("student_integrity_exemption")
+}
+
+/// Immutable audit record of one retention/purge run for one school (Golden Rule
+/// #5: purging minors' data is itself a logged event). Written by the PRIVILEGED
+/// retention job — NOT the app role; the RLS migration grants the app role SELECT
+/// only (school_admin can view their history), with no INSERT/UPDATE/DELETE, so
+/// the trail is tamper-evident like the audit/workflow logs. The purge job
+/// bypasses RLS (BYPASSRLS/superuser) to delete the expired append-only rows and
+/// to insert this record. Tenant-scoped (non-null schoolId), RLS-enforced read.
+model IntegrityRetentionRun {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  /// The window applied (copied from School.integrityRetentionDays at run time,
+  /// so history is interpretable even if the policy later changes).
+  retentionDays Int
+  /// now() - retentionDays at run time; rows with createdAt < cutoff were purged.
+  cutoff        DateTime
+
+  signalsDeleted   Int
+  draftsDeleted    Int
+  telemetryDeleted Int
+
+  /// SCHEDULED (cron worker) | MANUAL (admin-triggered).
+  trigger   String
+  startedAt DateTime
+  createdAt DateTime @default(now())
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, createdAt])
+  @@map("integrity_retention_run")
+}

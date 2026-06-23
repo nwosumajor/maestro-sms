@@ -1,0 +1,3 @@
+# Internal multi-tenant SMS — not for public indexing.
+User-agent: *
+Disallow: /

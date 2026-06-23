@@ -1,0 +1,34 @@
+// =============================================================================
+// Calendar — school events
+// =============================================================================
+// Staff create events with an audience (everyone, or staff-only); everyone reads
+// the events that apply to them. Tenant-scoped (non-null schoolId), RLS-enforced.
+// The web calendar merges these with timetable + fee due dates client-side.
+// =============================================================================
+
+enum EventAudience {
+  ALL
+  STAFF
+}
+
+model SchoolEvent {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  title       String
+  description String?
+  startsAt    DateTime
+  endsAt      DateTime?
+  allDay      Boolean       @default(false)
+  audience    EventAudience @default(ALL)
+  createdById String        @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, startsAt])
+  @@map("school_event")
+}

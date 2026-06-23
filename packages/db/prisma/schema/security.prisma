@@ -1,0 +1,49 @@
+// =============================================================================
+// Security — Just-In-Time privilege elevation / break-glass
+// =============================================================================
+// No standing super-powers: a user REQUESTS a temporary extra permission with a
+// reason; a DIFFERENT person approves it (separation of duties), and it
+// AUTO-EXPIRES. Break-glass is a self-activated emergency grant, flagged and
+// loudly audited. The PermissionGuard, on a permission MISS, consults active
+// grants — so elevation is additive to the JWT's role permissions, never baked
+// into a long-lived token. Every request/approve/use/revoke is audit-logged.
+// All tenant-scoped (non-null schoolId), RLS-enforced. The audit VIEWER reads the
+// existing append-only audit_log; it needs no new table.
+// =============================================================================
+
+enum GrantStatus {
+  PENDING
+  ACTIVE
+  EXPIRED
+  REVOKED
+}
+
+model PrivilegeGrant {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  /// The grantee (DB FK to user; scalar, no Prisma relation).
+  userId String @db.Uuid
+  /// The fine-grained permission being temporarily granted (e.g. "fee.manage").
+  permission String
+  reason     String
+  status     GrantStatus @default(PENDING)
+  /// Emergency self-grant: ACTIVE immediately, flagged for alerting.
+  breakGlass Boolean     @default(false)
+
+  /// Who asked (DB FK to user; audit field).
+  requestedById String  @db.Uuid
+  /// Who approved — MUST differ from requestedById (DB FK to user; audit field).
+  approvedById  String? @db.Uuid
+  /// When the elevation stops being honored.
+  expiresAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, userId, status])
+  @@map("privilege_grant")
+}

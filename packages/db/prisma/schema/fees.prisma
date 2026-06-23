@@ -1,0 +1,158 @@
+// =============================================================================
+// Fees / Billing — fee catalog, invoices, line items, payments
+// =============================================================================
+// A staff member (accountant / school_admin / principal) defines FeeItems
+// (catalog), issues an Invoice to a student (payable by the guardian), and
+// records Payments against it. Parents read their children's invoices/balances;
+// students read their own; finance staff + board read all. All tenant-scoped
+// (non-null schoolId), RLS-enforced; relationship scoping in FeesService.
+//
+// MONEY: every amount is an INTEGER in MINOR units (e.g. kobo) — never a float —
+// to avoid rounding error. `currency` is an ISO code (default NGN). Invoices and
+// payments are corrected via status/new rows, never hard-deleted (auditability).
+// All financial mutations are audit-logged (Golden Rule #5/#7). Producers notify
+// guardians on issue (amount due) and on full payment (receipt).
+//
+// User references (studentId / createdById / recordedById) are scalar uuid
+// columns with DB-level FKs but NO Prisma relations, to keep the User model lean
+// (same approach as the workflow audit log).
+// =============================================================================
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PARTIALLY_PAID
+  PAID
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CASH
+  BANK_TRANSFER
+  CARD
+  MOBILE_MONEY
+  OTHER
+}
+
+/// Maker-checker: large payments and ALL refunds post as PENDING_APPROVAL and
+/// only affect the balance once a DIFFERENT staff member approves them.
+enum PaymentStatus {
+  POSTED
+  PENDING_APPROVAL
+  REJECTED
+}
+
+enum PaymentKind {
+  PAYMENT
+  REFUND
+}
+
+/// A reusable catalog fee (e.g. "Tuition — Term 1", "Bus Fee").
+model FeeItem {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  name        String
+  description String?
+  /// Default amount in MINOR units (integer; e.g. kobo).
+  amountMinor Int
+  currency    String  @default("NGN")
+  /// Deactivated items stay for history; they are never hard-deleted.
+  active      Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId])
+  @@map("fee_item")
+}
+
+/// A bill issued to a student, payable by their guardian.
+model Invoice {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  /// Student the invoice is for (DB FK to user; no Prisma relation).
+  studentId String @db.Uuid
+  /// Human-friendly invoice number, unique within the school.
+  reference String
+  status    InvoiceStatus @default(DRAFT)
+  currency  String        @default("NGN")
+  /// Sum of line totals (amountMinor * quantity), in minor units.
+  totalMinor Int          @default(0)
+  dueDate   DateTime      @db.Date
+  issuedAt  DateTime?
+  notes     String?
+  /// Staff who created it (DB FK to user; audit field, no Prisma relation).
+  createdById String @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school    School            @relation(fields: [schoolId], references: [id])
+  lineItems InvoiceLineItem[]
+  payments  Payment[]
+
+  @@unique([schoolId, reference])
+  @@index([schoolId])
+  @@index([schoolId, studentId])
+  @@index([schoolId, status])
+  @@map("invoice")
+}
+
+model InvoiceLineItem {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  invoiceId String  @db.Uuid
+  /// Optional link back to the catalog item (DB FK; nullable).
+  feeItemId String? @db.Uuid
+
+  description String
+  /// Per-unit amount in minor units.
+  amountMinor Int
+  quantity    Int @default(1)
+
+  createdAt DateTime @default(now())
+
+  school  School  @relation(fields: [schoolId], references: [id])
+  invoice Invoice @relation(fields: [invoiceId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, invoiceId])
+  @@map("invoice_line_item")
+}
+
+/// A payment recorded against an invoice (supports partial payments).
+model Payment {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  invoiceId   String        @db.Uuid
+  /// Amount in minor units (always positive; REFUND kind subtracts on balance).
+  amountMinor Int
+  method      PaymentMethod
+  kind        PaymentKind   @default(PAYMENT)
+  /// POSTED affects the balance immediately; PENDING_APPROVAL awaits a second
+  /// approver (maker-checker); REJECTED never counts.
+  status      PaymentStatus @default(POSTED)
+  /// Staff who approved a PENDING_APPROVAL payment (≠ recordedById).
+  approvedById String?      @db.Uuid
+  /// External transaction reference (bank/gateway), if any.
+  reference   String?
+  note        String?
+  paidAt      DateTime      @default(now())
+  /// Staff who recorded it (DB FK to user; audit field, no Prisma relation).
+  recordedById String @db.Uuid
+
+  createdAt DateTime @default(now())
+
+  school  School  @relation(fields: [schoolId], references: [id])
+  invoice Invoice @relation(fields: [invoiceId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, invoiceId])
+  @@map("payment")
+}

@@ -1,0 +1,40 @@
+// =============================================================================
+// HR — staff employment records
+// =============================================================================
+// One employment record per staff user (job, department, dates, status, salary).
+// Salary is sensitive: stored field-ENCRYPTED (per-tenant key), decrypted only
+// for HR readers. Leave is already handled by the Approval Workflow Engine
+// (WORKFLOW_TYPES includes LEAVE), so it is not duplicated here. All tenant-scoped
+// (non-null schoolId), RLS-enforced. userId is a scalar FK (no Prisma relation).
+// =============================================================================
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+}
+
+model Employee {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+  /// The staff user this record belongs to (DB FK to user; one record per user).
+  userId String @db.Uuid
+
+  jobTitle       String
+  department     String?
+  employmentType EmploymentType @default(FULL_TIME)
+  startDate      DateTime       @db.Date
+  endDate        DateTime?      @db.Date
+  /// Encrypted salary (minor units, base64 ciphertext via field-crypto).
+  salaryEnc      String?
+  status         String         @default("ACTIVE")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@unique([userId])
+  @@index([schoolId])
+  @@map("employee")
+}

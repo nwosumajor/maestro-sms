@@ -1,0 +1,74 @@
+// =============================================================================
+// Attendance — per-class, per-day attendance for enrolled students
+// =============================================================================
+// A teacher of a class takes attendance for a date: one AttendanceSession per
+// (class, date), with one AttendanceRecord per enrolled student. Parents see
+// their child's records; students see their own; school staff see all. All
+// tenant-scoped (non-null schoolId), RLS-enforced; relationship scoping
+// (teacher-of-class / parent-of-child / self / school staff) lives in
+// AttendanceService — same model as LMS/SIS. Mutations are audit-logged.
+//
+// Records are CORRECTED, not deleted (an absence wrongly marked is updated, with
+// the change audited) — so there is no delete path. Status is a fact recorded by
+// a human, never an automated judgement (Golden Rule #8).
+// =============================================================================
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  EXCUSED
+}
+
+/// One attendance "register" for a class on a given day.
+model AttendanceSession {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+  classId  String @db.Uuid
+  /// The school day this register is for (DATE, no time).
+  date     DateTime @db.Date
+  /// FK -> User(id) of the staff member who took it.
+  takenById String  @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school  School @relation(fields: [schoolId], references: [id])
+  class   Class  @relation(fields: [classId], references: [id])
+  takenBy User   @relation("AttendanceTakenBy", fields: [takenById], references: [id])
+
+  records AttendanceRecord[]
+
+  /// One register per class per day.
+  @@unique([classId, date])
+  @@index([schoolId])
+  @@index([schoolId, classId])
+  @@index([schoolId, date])
+  @@map("attendance_session")
+}
+
+/// One student's status within a session.
+model AttendanceRecord {
+  id        String @id @default(uuid()) @db.Uuid
+  schoolId  String @db.Uuid
+  sessionId String @db.Uuid
+  /// FK -> User(id) of the student.
+  studentId String @db.Uuid
+
+  status AttendanceStatus
+  note   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school  School            @relation(fields: [schoolId], references: [id])
+  session AttendanceSession @relation(fields: [sessionId], references: [id])
+  student User              @relation("AttendanceStudent", fields: [studentId], references: [id])
+
+  /// One record per student per session.
+  @@unique([sessionId, studentId])
+  @@index([schoolId])
+  @@index([schoolId, sessionId])
+  @@index([schoolId, studentId])
+  @@map("attendance_record")
+}

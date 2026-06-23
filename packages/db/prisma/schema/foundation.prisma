@@ -1,0 +1,254 @@
+// =============================================================================
+// Foundation models — multi-tenancy, users, custom RBAC, audit, consent
+// =============================================================================
+// Replaces the earlier id-only stubs with the REAL foundation. Global (non-
+// tenant) tables — School registry, Role/Permission/RolePermission — are
+// RLS-EXEMPT and listed explicitly. Tenant-scoped tables (User, UserRole,
+// AuditLog, IntegrityConsent) carry a non-null schoolId and are RLS-enforced
+// (see prisma/migrations/<ts>_foundation_rls/migration.sql). Golden Rules #1–#5.
+// =============================================================================
+
+/// GLOBAL (RLS-exempt): the tenant registry.
+model School {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  slug      String   @unique
+  status    String   @default("ACTIVE")
+  /// NDPR-aligned retention window (days) for integrity TELEMETRY on minors —
+  /// integrity_signal / submission_draft / submission_telemetry. Read by the
+  /// privileged retention job; rows older than this are purged. Per-school policy
+  /// on the global registry (RLS-exempt). 0 disables purging for the school.
+  integrityRetentionDays Int @default(365)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // foundation relations
+  users             User[]
+  userRoles         UserRole[]
+  auditLogs         AuditLog[]
+  integrityConsents IntegrityConsent[]
+
+  // LMS relations
+  classes        Class[]
+  classTeachers  ClassTeacher[]
+  enrollments    Enrollment[]
+  parentChildren ParentChild[]
+
+  // Gradebook
+  grades         Grade[]
+
+  // Approval workflow
+  workflowRequests  WorkflowRequest[]
+  workflowAuditLogs WorkflowAuditLog[]
+
+  // integrity-module relations
+  assessments                Assessment[]
+  submissions                Submission[]
+  submissionDrafts           SubmissionDraft[]
+  integritySignals           IntegritySignal[]
+  submissionTelemetry        SubmissionTelemetry[]
+  studentIntegrityExemptions StudentIntegrityExemption[]
+  integrityRetentionRuns     IntegrityRetentionRun[]
+
+  // SIS relations
+  studentProfiles   StudentProfile[]
+  emergencyContacts EmergencyContact[]
+  medicalRecords    MedicalRecord[]
+
+  // Attendance relations
+  attendanceSessions AttendanceSession[]
+  attendanceRecords  AttendanceRecord[]
+
+  // Notifications relations
+  notifications        Notification[]
+  notificationDeliveries NotificationDelivery[]
+
+  // Fees / Billing relations
+  feeItems         FeeItem[]
+  invoices         Invoice[]
+  invoiceLineItems InvoiceLineItem[]
+  payments         Payment[]
+
+  // Document Vault relations
+  documents Document[]
+
+  // Timetabling relations
+  periods         Period[]
+  rooms           Room[]
+  timetableEntries TimetableEntry[]
+
+  // Security relations
+  privilegeGrants PrivilegeGrant[]
+
+  // Privacy relations
+  erasureRequests ErasureRequest[]
+
+  // Messaging + Calendar relations
+  messageThreads     MessageThread[]
+  threadParticipants ThreadParticipant[]
+  messages           Message[]
+  schoolEvents       SchoolEvent[]
+
+  // HR
+  employees Employee[]
+
+  // Admissions
+  admissionApplications AdmissionApplication[]
+
+  @@map("school")
+}
+
+/// TENANT-SCOPED: a person in a school. Email is globally unique so login is
+/// unambiguous. passwordHash is bcrypt; the app NEVER stores plaintext.
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  schoolId     String   @db.Uuid
+  email        String   @unique
+  name         String
+  passwordHash String
+  status       String   @default("ACTIVE")
+  /// TOTP MFA: base32 secret (null until enrolled) + whether it's confirmed/on.
+  mfaSecret    String?
+  mfaEnabled   Boolean  @default(false)
+  /// Brute-force protection: consecutive failed logins + a lockout deadline.
+  failedLoginCount Int      @default(0)
+  lockedUntil      DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  school School     @relation(fields: [schoolId], references: [id])
+  roles  UserRole[]
+
+  // integrity-module relations
+  createdAssessments           Assessment[]                @relation("AssessmentCreatedBy")
+  submissions                  Submission[]                @relation("SubmissionStudent")
+  integrityExemptionsAsStudent StudentIntegrityExemption[] @relation("ExemptionStudent")
+  integrityExemptionsGranted   StudentIntegrityExemption[] @relation("ExemptionGrantedBy")
+  integrityExemptionsRevoked   StudentIntegrityExemption[] @relation("ExemptionRevokedBy")
+
+  // audit + consent relations
+  auditLogs         AuditLog[]         @relation("AuditActor")
+  consentsAsStudent IntegrityConsent[] @relation("ConsentStudent")
+  consentsGranted   IntegrityConsent[] @relation("ConsentGrantedBy")
+  consentsRevoked   IntegrityConsent[] @relation("ConsentRevokedBy")
+
+  // LMS relations
+  teacherClasses    ClassTeacher[] @relation("TeacherClasses")
+  studentEnrollments Enrollment[]  @relation("StudentEnrollments")
+  parentLinks       ParentChild[]  @relation("ParentLinks")
+  childLinks        ParentChild[]  @relation("ChildLinks")
+
+  // Gradebook
+  gradesGiven       Grade[]        @relation("GradesGiven")
+
+  // Approval workflow
+  initiatedWorkflows WorkflowRequest[] @relation("InitiatedWorkflows")
+
+  // SIS
+  studentProfile StudentProfile? @relation("StudentProfileUser")
+
+  // Attendance
+  attendanceTaken   AttendanceSession[] @relation("AttendanceTakenBy")
+  attendanceRecords AttendanceRecord[]  @relation("AttendanceStudent")
+
+  // Notifications
+  notifications Notification[] @relation("NotificationRecipient")
+
+  @@index([schoolId])
+  @@map("user")
+}
+
+/// GLOBAL (RLS-exempt): system roles (super_admin, school_admin, teacher,
+/// student, parent, finance). All but super_admin are scoped to a school via
+/// the UserRole assignment, not the role itself.
+model Role {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique
+  description String?
+
+  permissions RolePermission[]
+  userRoles   UserRole[]
+
+  @@map("role")
+}
+
+/// GLOBAL (RLS-exempt): fine-grained permission strings (e.g. "grade.write").
+model Permission {
+  id  String @id @default(uuid()) @db.Uuid
+  key String @unique
+
+  roles RolePermission[]
+
+  @@map("permission")
+}
+
+/// GLOBAL (RLS-exempt): role -> permission mapping.
+model RolePermission {
+  roleId       String @db.Uuid
+  permissionId String @db.Uuid
+
+  role       Role       @relation(fields: [roleId], references: [id])
+  permission Permission @relation(fields: [permissionId], references: [id])
+
+  @@id([roleId, permissionId])
+  @@map("role_permission")
+}
+
+/// TENANT-SCOPED: a user's role assignment within their school.
+model UserRole {
+  id        String   @id @default(uuid()) @db.Uuid
+  schoolId  String   @db.Uuid
+  userId    String   @db.Uuid
+  roleId    String   @db.Uuid
+  createdAt DateTime @default(now())
+
+  school School @relation(fields: [schoolId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+  role   Role   @relation(fields: [roleId], references: [id])
+
+  @@unique([userId, roleId])
+  @@index([schoolId])
+  @@map("user_role")
+}
+
+/// TENANT-SCOPED, APPEND-ONLY: the durable audit trail (Golden Rule #5). The RLS
+/// migration grants INSERT/SELECT only — never UPDATE/DELETE — so entries are
+/// tamper-evident. Every mutation across the app writes one of these.
+model AuditLog {
+  id        String   @id @default(uuid()) @db.Uuid
+  schoolId  String   @db.Uuid
+  actorId   String   @db.Uuid
+  action    String
+  entity    String
+  entityId  String
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  school School @relation(fields: [schoolId], references: [id])
+  actor  User   @relation("AuditActor", fields: [actorId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, entity, entityId])
+  @@index([schoolId, createdAt])
+  @@map("audit_log")
+}
+
+/// TENANT-SCOPED: NDPR consent for integrity telemetry on a minor (Golden Rule
+/// #5). Active when revokedAt IS NULL. Granting/revoking is audit-logged.
+model IntegrityConsent {
+  id          String    @id @default(uuid()) @db.Uuid
+  schoolId    String    @db.Uuid
+  studentId   String    @db.Uuid
+  grantedById String    @db.Uuid
+  grantedAt   DateTime  @default(now())
+  revokedAt   DateTime?
+  revokedById String?   @db.Uuid
+
+  school    School @relation(fields: [schoolId], references: [id])
+  student   User   @relation("ConsentStudent", fields: [studentId], references: [id])
+  grantedBy User   @relation("ConsentGrantedBy", fields: [grantedById], references: [id])
+  revokedBy User?  @relation("ConsentRevokedBy", fields: [revokedById], references: [id])
+
+  @@index([schoolId, studentId])
+  @@map("integrity_consent")
+}

@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sms_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # Privileged (migration/admin) connection — runs DDL + RLS, seeds test data.
+      ADMIN_URL: postgresql://postgres:postgres@localhost:5432/sms_test
+      # App role connection — least privilege; RLS is in force for it.
+      APP_URL: postgresql://major_user:major_pw@localhost:5432/sms_test
+      AUTH_SECRET: ci-dummy-secret
+      REDIS_HOST: 127.0.0.1
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Create least-privilege app role
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -d sms_test \
+            -c "CREATE ROLE major_user LOGIN PASSWORD 'major_pw';" \
+            -c "GRANT CONNECT ON DATABASE sms_test TO major_user;" \
+            -c "GRANT USAGE ON SCHEMA public TO major_user;"
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Apply migrations (tables)
+        run: pnpm --filter @sms/db exec prisma migrate deploy
+        env:
+          DATABASE_URL: ${{ env.ADMIN_URL }}
+
+      - name: Apply RLS policies + grants (separate, privileged)
+        run: pnpm --filter @sms/db rls
+        env:
+          DATABASE_MIGRATE_URL: ${{ env.ADMIN_URL }}
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test (incl. RLS e2e against Postgres)
+        run: pnpm test
+        env:
+          # App role for assertions (RLS enforced), admin for cross-FK setup.
+          TEST_DATABASE_URL: ${{ env.APP_URL }}
+          TEST_ADMIN_URL: ${{ env.ADMIN_URL }}
+
+      - name: Build
+        run: pnpm build

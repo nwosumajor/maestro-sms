@@ -1,0 +1,56 @@
+// =============================================================================
+// Approval Workflow Engine — requests + immutable audit trail
+// =============================================================================
+// A WorkflowRequest moves deterministically through DRAFT -> PENDING_REVIEW ->
+// REVISION_REQUESTED -> APPROVED | REJECTED (see WORKFLOW_TRANSITIONS in
+// @sms/types). EVERY transition writes a WorkflowAuditLog row capturing
+// old_state, new_state, initiator, approver, comments — APPEND-ONLY (the RLS
+// migration grants INSERT/SELECT only, so the trail is tamper-evident).
+// Both tenant-scoped (non-null schoolId), RLS-enforced.
+// =============================================================================
+
+model WorkflowRequest {
+  id          String   @id @default(uuid()) @db.Uuid
+  schoolId    String   @db.Uuid
+  /// LEAVE | PURCHASE_ORDER | DISCIPLINARY
+  type        String
+  title       String
+  /// Flexible request body (leave dates, PO line items, etc.).
+  payload     Json
+  /// Current state of the machine.
+  state       String   @default("DRAFT")
+  initiatorId String   @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  school    School             @relation(fields: [schoolId], references: [id])
+  initiator User               @relation("InitiatedWorkflows", fields: [initiatorId], references: [id])
+  auditLogs WorkflowAuditLog[]
+
+  @@index([schoolId])
+  @@index([schoolId, state])
+  @@index([schoolId, initiatorId])
+  @@map("workflow_request")
+}
+
+/// IMMUTABLE per the spec: one row per state transition. initiatorId/approverId
+/// are captured as ids (audit fields), not enforced relations, to keep the trail
+/// self-contained. createdAt is the transition `timestamp`.
+model WorkflowAuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  schoolId    String   @db.Uuid
+  requestId   String   @db.Uuid
+  initiatorId String   @db.Uuid
+  approverId  String?  @db.Uuid
+  oldState    String?
+  newState    String
+  comments    String?
+  timestamp   DateTime @default(now())
+
+  school  School          @relation(fields: [schoolId], references: [id])
+  request WorkflowRequest @relation(fields: [requestId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, requestId])
+  @@map("workflow_audit_log")
+}

@@ -1,0 +1,63 @@
+import { Module } from "@nestjs/common";
+import { BullModule } from "@nestjs/bullmq";
+import { FoundationModule } from "./foundation/foundation.module";
+import { IntegrityModule } from "./integrity/integrity.module";
+import { LmsModule } from "./lms/lms.module";
+import { GradebookModule } from "./gradebook/gradebook.module";
+import { WorkflowModule } from "./workflow/workflow.module";
+import { SisModule } from "./sis/sis.module";
+import { AttendanceModule } from "./attendance/attendance.module";
+import { NotificationModule } from "./notifications/notification.module";
+import { FeesModule } from "./fees/fees.module";
+import { DocumentsModule } from "./documents/documents.module";
+import { TimetableModule } from "./timetable/timetable.module";
+import { SecurityModule } from "./security/security.module";
+import { AnalyticsModule } from "./analytics/analytics.module";
+import { PrivacyModule } from "./privacy/privacy.module";
+import { CommunicationModule } from "./communication/communication.module";
+import { ReportCardModule } from "./reportcards/reportcard.module";
+import { HrModule } from "./hr/hr.module";
+import { AdminModule } from "./admin/admin.module";
+import { OperatorModule } from "./operator/operator.module";
+import { AdmissionsModule } from "./admissions/admissions.module";
+import { HealthController } from "./health.controller";
+
+@Module({
+  imports: [
+    // Redis connection for BullMQ (notifications, reports, integrity jobs).
+    BullModule.forRoot({
+      connection: {
+        host: process.env.REDIS_HOST ?? "127.0.0.1",
+        port: Number(process.env.REDIS_PORT ?? 6379),
+        // Set only when ElastiCache transit encryption + auth are enabled. An
+        // empty REDIS_TLS leaves both off for the local/dev Redis.
+        ...(process.env.REDIS_PASSWORD
+          ? { password: process.env.REDIS_PASSWORD }
+          : {}),
+        ...(process.env.REDIS_TLS === "true" ? { tls: {} } : {}),
+      },
+    }),
+    FoundationModule,
+    IntegrityModule,
+    LmsModule,
+    GradebookModule,
+    WorkflowModule,
+    SisModule,
+    NotificationModule,
+    AttendanceModule,
+    FeesModule,
+    DocumentsModule,
+    TimetableModule,
+    SecurityModule,
+    AnalyticsModule,
+    PrivacyModule,
+    CommunicationModule,
+    ReportCardModule,
+    HrModule,
+    AdminModule,
+    OperatorModule,
+    AdmissionsModule,
+  ],
+  controllers: [HealthController],
+})
+export class AppModule {}

@@ -1,0 +1,98 @@
+// =============================================================================
+// Timetabling — bell schedule (periods), rooms, and the weekly lesson grid
+// =============================================================================
+// A Period defines a recurring time block (the bell schedule); a Room is a
+// bookable space; a TimetableEntry places a class + subject + teacher (+ room)
+// into a (dayOfWeek, period) cell. The scheduling logic is CONFLICT DETECTION:
+// the same teacher, room, or class can never occupy two lessons in the same
+// day+period (enforced in TimetableService; the class case is also a DB unique
+// constraint). This is conflict-free manual placement, not an auto-generating
+// constraint solver (that — a CSP/ILP solver — is future work).
+//
+// All tenant-scoped (non-null schoolId), RLS-enforced. Relationship scoping
+// (teacher -> own lessons, student -> enrolled class, parent -> children, staff
+// -> all) lives in the service. classId / teacherId are scalar uuid columns with
+// DB-level FKs but no Prisma relations, to keep the LMS/User models lean.
+// =============================================================================
+
+enum DayOfWeek {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+/// A recurring time block in the school day (e.g. "Period 1", 08:00–08:45).
+model Period {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  name     String
+  /// Order within the day (1-based). Unique per school.
+  sequence Int
+  /// "HH:MM" 24h local school time (no timezone math at this layer).
+  startTime String
+  endTime   String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school  School           @relation(fields: [schoolId], references: [id])
+  entries TimetableEntry[]
+
+  @@unique([schoolId, sequence])
+  @@index([schoolId])
+  @@map("period")
+}
+
+/// A bookable physical space.
+model Room {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  name     String
+  capacity Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school  School           @relation(fields: [schoolId], references: [id])
+  entries TimetableEntry[]
+
+  @@unique([schoolId, name])
+  @@index([schoolId])
+  @@map("room")
+}
+
+/// One scheduled lesson: a class in a (dayOfWeek, period) cell.
+model TimetableEntry {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  /// Class (DB FK to class; scalar, no Prisma relation).
+  classId   String    @db.Uuid
+  dayOfWeek DayOfWeek
+  periodId  String    @db.Uuid
+  subject   String
+  /// Teacher (DB FK to user; scalar, no Prisma relation).
+  teacherId String    @db.Uuid
+  roomId    String?   @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+  period Period @relation(fields: [periodId], references: [id])
+  room   Room?  @relation(fields: [roomId], references: [id])
+
+  /// A class has at most one lesson per (day, period).
+  @@unique([schoolId, classId, dayOfWeek, periodId])
+  @@index([schoolId])
+  @@index([schoolId, classId])
+  @@index([schoolId, teacherId, dayOfWeek, periodId])
+  @@index([schoolId, roomId, dayOfWeek, periodId])
+  @@map("timetable_entry")
+}

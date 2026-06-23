@@ -1,0 +1,85 @@
+// =============================================================================
+// Notifications — in-app inbox + async multi-channel delivery
+// =============================================================================
+// A Notification is the canonical message + its recipient; it IS the in-app
+// inbox item (readAt = read receipt). External delivery (email/SMS/push) is
+// recorded per-channel in NotificationDelivery and performed ASYNC by a BullMQ
+// worker through a pluggable channel provider (CLAUDE.md: "Async: BullMQ for
+// notifications"). All tenant-scoped (non-null schoolId), RLS-enforced.
+//
+// Recipients read ONLY their own inbox (self-scoped in the service). Producers
+// are other modules (e.g. Attendance: an ABSENT mark notifies the student's
+// guardians) calling NotificationService — not the client.
+// =============================================================================
+
+enum NotificationChannel {
+  EMAIL
+  SMS
+  PUSH
+}
+
+enum NotificationDeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+model Notification {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+  /// FK -> User(id) of the recipient. The in-app inbox is scoped to this.
+  recipientId String @db.Uuid
+  /// Optional actor who triggered it (staff id, or null for system events).
+  /// Stored as an audit field (no relation), like the workflow audit log.
+  actorId String? @db.Uuid
+
+  /// e.g. ATTENDANCE_ABSENCE | GRADE_POSTED | WORKFLOW_UPDATE | ANNOUNCEMENT.
+  type  String
+  title String
+  body  String
+  /// Structured context (e.g. classId, date) for deep-linking. Never PII beyond
+  /// what the recipient may already see.
+  data  Json?
+
+  /// In-app read receipt; null = unread.
+  readAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school    School @relation(fields: [schoolId], references: [id])
+  recipient User   @relation("NotificationRecipient", fields: [recipientId], references: [id])
+
+  deliveries NotificationDelivery[]
+
+  @@index([schoolId])
+  @@index([schoolId, recipientId])
+  @@index([schoolId, recipientId, readAt])
+  @@map("notification")
+}
+
+/// One external delivery attempt for a notification on a channel. The worker
+/// resolves `target` (email/phone) at send time and records SENT/FAILED.
+model NotificationDelivery {
+  id             String @id @default(uuid()) @db.Uuid
+  schoolId       String @db.Uuid
+  notificationId String @db.Uuid
+
+  channel NotificationChannel
+  status  NotificationDeliveryStatus @default(PENDING)
+  /// Resolved recipient address (email/phone) at send time.
+  target  String?
+  error   String?
+  sentAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school       School       @relation(fields: [schoolId], references: [id])
+  notification Notification @relation(fields: [notificationId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, notificationId])
+  @@index([schoolId, status])
+  @@map("notification_delivery")
+}

@@ -1,0 +1,112 @@
+// =============================================================================
+// SIS — Student Information System: contact profile, emergency contacts, medical
+// =============================================================================
+// The canonical student record the rest of the system references (notifications
+// need contact channels; fees need the bill-to party; attendance alerts need
+// emergency contacts). All tenant-scoped (non-null schoolId), RLS-enforced.
+//
+// Golden Rule #5: minors' data — and ESPECIALLY medical data — is sensitive PII.
+//   - Profile / contacts: mutations are audit-logged (foundation convention).
+//   - MedicalRecord: BOTH reads AND writes are audit-logged in the service, and
+//     access is gated by relationship scoping (guardian / school staff) on top
+//     of RLS. There is no auto-action on this data; it is a record, not a verdict.
+// Relationship scoping (teacher-of-student / parent-of-child / self / school-wide
+// staff) lives in SisService, backstopped by RLS — same model as the LMS.
+// =============================================================================
+
+/// One demographic/contact profile per student (1:1 with a student User).
+model StudentProfile {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+  /// FK -> User(id) of the student. One profile per student per school.
+  studentId String @db.Uuid
+
+  admissionNumber String?
+  /// Stored as a DATE (no time) — a birth date, not an instant.
+  dateOfBirth     DateTime? @db.Date
+  gender          String?
+
+  // Household contact for the student (guardian channels also come via
+  // ParentChild + EmergencyContact).
+  phone        String?
+  email        String?
+  addressLine1 String?
+  addressLine2 String?
+  city         String?
+  state        String?
+  country      String?
+  postalCode   String?
+
+  notes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school  School @relation(fields: [schoolId], references: [id])
+  student User   @relation("StudentProfileUser", fields: [studentId], references: [id])
+
+  emergencyContacts EmergencyContact[]
+  medicalRecord     MedicalRecord?
+
+  @@unique([studentId])
+  @@index([schoolId])
+  @@index([schoolId, studentId])
+  @@map("student_profile")
+}
+
+/// An emergency / guardian contact for a student. A contact need NOT be a system
+/// User (e.g. a grandparent), so this is a plain record, not a User link.
+model EmergencyContact {
+  id        String @id @default(uuid()) @db.Uuid
+  schoolId  String @db.Uuid
+  profileId String @db.Uuid
+
+  name         String
+  /// e.g. Mother, Father, Guardian, Grandparent.
+  relationship String
+  phone        String
+  email        String?
+  /// Call order; lower is contacted first.
+  priority     Int    @default(1)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school  School         @relation(fields: [schoolId], references: [id])
+  profile StudentProfile @relation(fields: [profileId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, profileId])
+  @@map("emergency_contact")
+}
+
+/// SENSITIVE medical record, one per student profile. Mutable (info is corrected
+/// over time) but every read AND write is audit-logged in the service. No
+/// derived score / flag — a record for human care, never an automated judgement.
+model MedicalRecord {
+  id        String @id @default(uuid()) @db.Uuid
+  schoolId  String @db.Uuid
+  profileId String @db.Uuid
+
+  bloodGroup   String?
+  /// Free text (e.g. "peanuts, penicillin"). Critical for safeguarding.
+  allergies    String?
+  /// Chronic conditions (e.g. asthma, epilepsy).
+  conditions   String?
+  /// Current medications.
+  medications  String?
+  dietaryNotes String?
+  /// Free-form clinical notes (school nurse / admin).
+  notes        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school  School         @relation(fields: [schoolId], references: [id])
+  profile StudentProfile @relation(fields: [profileId], references: [id])
+
+  @@unique([profileId])
+  @@index([schoolId])
+  @@index([schoolId, profileId])
+  @@map("medical_record")
+}

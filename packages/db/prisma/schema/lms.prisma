@@ -1,0 +1,89 @@
+// =============================================================================
+// LMS core — Classes, Enrollment, Teaching assignments, Guardian links
+// =============================================================================
+// The keystone for relationship-scoping (RBAC beyond role, per CLAUDE.md):
+//   - a teacher sees only THEIR classes      (ClassTeacher)
+//   - a student sees only THEIR classes      (Enrollment)
+//   - a parent sees only THEIR children      (ParentChild) and their classes
+// All tenant-scoped (non-null schoolId, RLS-enforced). These are MEMBERSHIP
+// tables; the relationship checks live in the service layer on top of RLS.
+// =============================================================================
+
+/// A class/section within a school (e.g. "History 101"). Assessments belong to
+/// a class, which is how integrity reports become teacher-of-class scoped.
+model Class {
+  id        String   @id @default(uuid()) @db.Uuid
+  schoolId  String   @db.Uuid
+  name      String
+  subject   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school      School         @relation(fields: [schoolId], references: [id])
+  teachers    ClassTeacher[]
+  enrollments Enrollment[]
+  assessments Assessment[]
+  attendanceSessions AttendanceSession[]
+
+  @@index([schoolId])
+  @@map("class")
+}
+
+/// Teaching assignment: which teachers teach a class. Drives "teacher sees only
+/// their classes".
+model ClassTeacher {
+  id        String   @id @default(uuid()) @db.Uuid
+  schoolId  String   @db.Uuid
+  classId   String   @db.Uuid
+  teacherId String   @db.Uuid
+  createdAt DateTime @default(now())
+
+  school  School @relation(fields: [schoolId], references: [id])
+  class   Class  @relation(fields: [classId], references: [id])
+  teacher User   @relation("TeacherClasses", fields: [teacherId], references: [id])
+
+  @@unique([classId, teacherId])
+  @@index([schoolId])
+  @@index([schoolId, teacherId])
+  @@map("class_teacher")
+}
+
+/// Student enrollment in a class. Drives "student sees only their classes" and
+/// (via ParentChild) "parent sees only their children's classes".
+model Enrollment {
+  id         String   @id @default(uuid()) @db.Uuid
+  schoolId   String   @db.Uuid
+  classId    String   @db.Uuid
+  studentId  String   @db.Uuid
+  status     String   @default("ACTIVE")
+  enrolledAt DateTime @default(now())
+
+  school  School @relation(fields: [schoolId], references: [id])
+  class   Class  @relation(fields: [classId], references: [id])
+  student User   @relation("StudentEnrollments", fields: [studentId], references: [id])
+
+  @@unique([classId, studentId])
+  @@index([schoolId])
+  @@index([schoolId, studentId])
+  @@map("enrollment")
+}
+
+/// Guardian link: a parent/guardian to a student. Drives "parent sees only their
+/// own children". // SECURITY: every parent-facing query joins through this.
+model ParentChild {
+  id           String   @id @default(uuid()) @db.Uuid
+  schoolId     String   @db.Uuid
+  parentId     String   @db.Uuid
+  studentId    String   @db.Uuid
+  relationship String?
+  createdAt    DateTime @default(now())
+
+  school  School @relation(fields: [schoolId], references: [id])
+  parent  User   @relation("ParentLinks", fields: [parentId], references: [id])
+  student User   @relation("ChildLinks", fields: [studentId], references: [id])
+
+  @@unique([parentId, studentId])
+  @@index([schoolId])
+  @@index([schoolId, parentId])
+  @@map("parent_child")
+}

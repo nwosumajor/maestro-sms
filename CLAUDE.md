@@ -1,0 +1,297 @@
+# CLAUDE.md — School Management System (SMS)
+
+## What this is
+A multi-tenant, enterprise School Management System serving up to ~50 schools
+concurrently from one deployment. Each school (tenant) gets: an LMS for students,
+monitoring dashboards for teachers, a parent monitoring dashboard, and a
+BPMN-style approval engine. Security posture: least-privilege access control and
+defense in depth throughout.
+
+This file is durable project context. Follow it on every task. If a request
+conflicts with it, flag the conflict before proceeding.
+
+## Golden rules (non-negotiable)
+1. EVERY tenant-scoped table has a non-null `school_id`. No exceptions.
+2. Tenant isolation is enforced at THREE layers: JWT claim → NestJS guard →
+   Postgres Row-Level Security. Never rely on a single layer.
+3. Never trust `school_id` from the request body or query params. It comes only
+   from the verified JWT, set into the DB session, and enforced by RLS.
+4. Least privilege everywhere: the app DB role cannot DROP/ALTER/TRUNCATE;
+   migrations run under a separate privileged role. No wildcard permissions.
+5. Minors' data (student records, AND behavioral/integrity telemetry) is
+   sensitive. All reads/writes to student PII and all integrity events are
+   audit-logged. Apply NDPR-aligned consent and retention rules.
+6. No secrets in code or committed env files. Use env vars / secrets manager.
+7. When unsure about a security or multi-tenancy decision, choose the more
+   restrictive option and leave a `// SECURITY:` comment explaining why.
+8. No automated punitive action against a student. Integrity tooling produces
+   SIGNALS for human review only — never a verdict, score penalty, or record
+   entry on its own.
+
+## Stack
+- Frontend (web): Next.js (App Router) + TypeScript, Server Components,
+  TanStack Query, Tailwind + shadcn/ui.
+- Design system: a small fixed set of design tokens (color, spacing, type,
+  radius) drives all UI and enables per-tenant theming via theme swap, not
+  per-school redesigns. AI tools (Google AI Studio / Stitch / v0) may be used to
+  EXPLORE visual direction, but shipped UI is rebuilt in shadcn/ui + tokens.
+  Generated one-off screens are never the foundation.
+- Mobile (later): React Native (Expo), sharing types via a shared package.
+- Auth: Auth.js (NextAuth) in the Next.js layer. It owns login + session and
+  issues a signed JWT containing `userId`, `school_id`, `roles`, `permissions`.
+- Backend API: NestJS + TypeScript. Stateless. VERIFIES the JWT on every
+  request; never issues sessions itself.
+- ORM: Prisma. RLS is enforced at the Postgres layer, NOT only via Prisma.
+- DB: PostgreSQL with Row-Level Security. Redis for cache/rate-limit/queues.
+- Storage: S3 / Cloudflare R2 for files (report cards, assignments). Never
+  store files in Postgres.
+- Async: BullMQ (Redis) for notifications, report generation, AND integrity
+  detection jobs.
+- Approval engine: BUILT as an internal Postgres state machine (deterministic
+  transitions + an immutable WorkflowAuditLog), NOT Temporal/Camunda. See
+  `apps/api/src/workflow`.
+- DB content: flexible/unstructured data (LMS course/quiz/forum content) lives in
+  Postgres JSONB, NOT MongoDB — one DB keeps the RLS tenant-isolation model intact.
+- Infra: Docker + docker-compose for local orchestration (`infrastructure/`).
+  Target cloud: ECS Fargate, Terraform, GitHub Actions OIDC, CloudFront + WAF,
+  ALB, private subnets, NAT. Write container-ready code.
+
+## Multi-tenancy model
+- Shared schema + Postgres Row-Level Security (RLS). One `school_id` column on
+  every tenant-scoped table. This scales smoothly past 50 tenants.
+- App opens each request transaction with `SET LOCAL app.current_school_id` (and
+  `app.current_user_id`) so RLS policies can read them via
+  `current_setting('app.current_school_id')`.
+- RLS policies: `USING (school_id = current_setting('app.current_school_id')::uuid)`
+  on SELECT/UPDATE/DELETE, plus a matching `WITH CHECK` on INSERT/UPDATE.
+- Global (non-tenant) tables — the `School` registry, system roles/permissions —
+  are explicitly marked and RLS-exempt. List them; never leave it implicit.
+
+## RBAC model (custom, data-driven)
+- Roles live in DB tables (`Role`/`Permission`/`RolePermission`/`UserRole`),
+  seeded in `packages/db/prisma/seed.ts`: super_admin (cross-tenant), board
+  (read-only oversight + workflow veto), principal, school_admin, teacher,
+  student, parent, accountant, hr_clerk. All except super_admin are scoped to a
+  single `school_id`. Adding a role/permission is a seed change, not new code.
+- Permissions are fine-grained strings (e.g. `student.read`, `grade.write`,
+  `workflow.review`, `integrity.report.read`) in `packages/types/src/permissions`.
+- Authorization is checked in NestJS via `@RequirePermission('grade.write')` +
+  the global PermissionGuard, AND backstopped by RLS at the DB.
+- Relationship scoping beyond role IS IMPLEMENTED (LmsService is the reference):
+  teacher→their classes, student→enrolled, parent→their children. Coarse
+  permission gates the endpoint; membership joins narrow the rows; RLS backstops.
+
+## Project structure
+- Monorepo (Turborepo + pnpm workspaces).
+  - `apps/web` — Next.js + Auth.js
+  - `apps/api` — NestJS; modules: `foundation` (auth/RBAC/audit/consent/tenant-db
+    runner), `integrity`, `lms`, `gradebook`, `workflow`
+  - `packages/types` — shared TS types / DTOs / permission constants. NOTE:
+    `apps/api` imports these via the package BARREL (`@sms/types`), not subpaths.
+  - `packages/db` — Prisma multi-file schema (`prisma/schema/`), tracked
+    migrations (`prisma/migrations/`), and RLS SQL applied SEPARATELY
+    (`prisma/rls/*.sql`, ordered) — NOT inside Prisma migrations.
+  - `packages/tokens` — design tokens
+  - `infrastructure/` — docker-compose, nginx, Postgres init
+- DTOs and permission string constants live in `packages/types` as the single
+  source of truth across web, api, and (later) mobile.
+
+## Build status
+BUILT & verified (RLS-isolated, relationship-scoped, audited, tested, CI-gated):
+foundation auth/RBAC/audit/consent, Assessment Integrity (incl. the NDPR
+retention/purge job), LMS core (classes / enrollment / teaching / guardians),
+Gradebook (manual grading), SIS Contact/Medical (student profile / emergency
+contacts / medical record — medical reads AND writes audited), Attendance
+(per-class daily register, teacher-of-class scoped, parent/student read),
+Notifications (in-app inbox + async BullMQ multi-channel delivery via a pluggable
+channel provider; self-scoped reads, relationship-scoped staff send; Attendance
+ABSENT/LATE auto-notifies guardians), Fees/Billing (fee catalog + invoices +
+payments; integer minor-unit money; DRAFT→ISSUED→PARTIALLY_PAID→PAID lifecycle;
+parent→children / student→self / finance-staff→all scoping; issue + full-payment
+notify guardians; no hard-delete of financial records), Document Vault (report
+cards / receipts / certificates — METADATA in Postgres, bytes in S3/R2 via
+presigned upload/download URLs from a pluggable StorageProvider; student /
+guardian / teacher / staff scoping; downloads audited; guardians notified on
+shareable docs), Timetabling (periods / rooms / weekly lesson grid with
+teacher/room/class double-booking conflict detection -> 409; teacher→own /
+student→enrolled / parent→children / staff→all scoping; CSP auto-generation is
+future), the Approval Workflow Engine, the Docker/Compose orchestration, and a
+role-filtered web UI (login + AppShell nav gated by permissions; pages for
+Notifications, Students/SIS profile, Classes, Timetable, Attendance incl.
+take-register, Fees incl. record-payment, Documents incl. signed download,
+Assessments, Approvals — server components via `apiGet`, client islands hit the
+BFF). Staff admin/create UIs are built too: an `/admin` overview dashboard
+(stats + quick actions, gated by `fee.manage`) plus per-module create/edit forms
+— fee items & invoices (+issue/cancel/record-payment), SIS profile/contacts/
+medical editing, timetable periods/rooms/conflict-checked lessons, document
+upload, announcement send, and class create/assign-teacher/enroll/link-guardian.
+A staff-gated `GET /users` and relationship-scoped `GET /students` back the
+pickers. Security/access governance is BUILT: a scoped, filterable **audit-log
+viewer** (`security.audit.read`) and **Just-In-Time privilege elevation** —
+request → approve by a DIFFERENT person (separation of duties) → auto-expire, or
+break-glass (self-activated, flagged); the global PermissionGuard consults active
+`PrivilegeGrant` rows on a permission MISS and audit-logs the elevated use, so
+elevation is additive to the JWT and never long-lived. `/admin/audit` +
+`/admin/security` UIs. Auth hardening is BUILT: **TOTP MFA** (hand-rolled
+RFC-6238 via node crypto — enroll/verify/disable + login challenge; `/account`
+setup UI + optional 2FA field on login), **account lockout** (5 failed logins →
+15-min lock, counters on the user row, committed even when the login throws), and
+**step-up re-auth** (`POST /security/stepup` mints a 5-min token; `@RequireStepUp`
++ guard enforce it — applied to medical edits and MFA-disable; BFF forwards the
+`x-stepup` header). **Maker-checker on money** (large payments ≥ ₦50k and ALL
+refunds post as PENDING_APPROVAL and don't move the balance until a DIFFERENT
+staff member with `fee.approve` approves; separation of duties enforced),
+**field-level PII encryption** (medical fields AES-256-GCM with a per-tenant HKDF
+key from `DATA_ENCRYPTION_KEY` — ciphertext at rest, decrypted only for
+authorized readers), and an **access-recertification report** + anomaly signals
+(`/admin/recertification`) are BUILT. Cross-cutting BUILT so far: **role-scoped
+analytics** (`/analytics` — attendance %, fee collection, ops counts; school-wide
+for staff, family-scoped for parents/students) and **NDPR data-subject rights**
+(`privacy.*`: scoped + audited data export bundle, and a governed right-to-erasure
+request → controller review at `/admin/privacy`). **Two-way messaging**
+(participant-scoped threads; non-staff may only message staff/teachers; new
+messages notify via Notifications), a **calendar** (`school_event`, ALL vs STAFF
+audience), and **report-card PDFs** (pdfkit, from grades + attendance, streamed
+through the binary-aware BFF, guardians notified) are BUILT. **Online payments**
+are scaffolded (Paystack via `fetch`: `POST /invoices/:id/pay/init` → hosted
+checkout; `@Public` HMAC-SHA512-verified webhook → records a POSTED payment on
+charge.success; gracefully 503-disabled when `PAYSTACK_SECRET_KEY` is unset —
+the disabled/public paths are verified, but live charging needs real creds +
+outbound network). #14 (cross-cutting) is DONE. By-role (#15) so far: **HR module**
+(`/hr` — staff employment records with field-encrypted salaries; the `hr_clerk`
+role's home), **tenant-scoped RBAC management** (`/admin/roles` — assign/remove a
+user's roles; role→permission defs stay platform-level), and **bulk student
+import** (`/admin/import` — CSV→accounts, idempotent on email) are BUILT
+(`rbac.manage` + reuses `class.write`). Student/parent self-service is already
+covered by the scoped analytics/fees/attendance/documents/messages/notifications
+pages.
+By-role (#15) is now DONE: **finance reports** (`/fees/reports` — receivables
+aging + collection, billing-wide only), the **super_admin operator console**
+(`/operator` — cross-tenant registry via per-school GUC; **audited, step-up-gated
+impersonation** minting a scoped HS256 token), and the **public admissions portal**
+(`/apply` → `@Public` intake quarantined from student data; staff review at
+`/admin/admissions`) are all built. The full suggested-functionality program
+(security spine + cross-cutting + by-role) is IMPLEMENTED and verified.
+Other not-built: (analytics, messaging,
+calendar/search, report-card generation, online payments, NDPR data-rights),
+the remaining by-role features (operator console + audited impersonation, HR
+module, finance reports/refunds, bulk import + permission-management UI,
+student/parent self-service, public admissions/visitor portal), and cloud infra
+(Terraform / secrets / TLS). Auth is JWT-only — the dev `x-dev-principal` guard
+bypass has been removed.
+NOTE: MFA/throttler/payment-SDK need new deps the offline sandbox can't fetch —
+TOTP will be hand-rolled (RFC-6238 via node crypto); rate-limiter/gateway need a
+network-enabled install step.
+
+## Repo workflow & gotchas
+- DB setup order: `prisma migrate deploy` → `pnpm --filter @sms/db rls` →
+  `prisma db seed` (or `pnpm --filter @sms/db setup`). RLS lives in `prisma/rls/`,
+  NOT prisma migrations — Prisma's shadow DB rejects the `major_user` GRANT.
+- New tenant table: add the model to `TenantTx` in
+  `apps/api/src/integrity/integrity.foundation.ts`, add an `prisma/rls/NN_*.sql`
+  file, and add a cross-tenant case to `apps/api/test/rls.e2e-spec.ts`. Also
+  register the new rls file in `apps/api/docker-entrypoint.sh` (`apply_rls <file>
+  <last-policy-name>`) — the entrypoint applies RLS per-file idempotently, keyed
+  on each file's LAST policy as a sentinel, so a new file applies onto an
+  already-initialised DB without re-running the others.
+- Integrity retention: telemetry on minors (integrity_signal / submission_draft /
+  submission_telemetry) is purged past each school's `School.integrityRetentionDays`
+  window by a privileged BullMQ daily sweep + a per-school manual endpoint
+  (`POST /integrity/retention/run`, perm `integrity.retention.run`). The app role
+  has NO DELETE on those tables; the purge connects via `DATABASE_RETENTION_URL`
+  (falls back to `DATABASE_MIGRATE_URL`); unset → retention DISABLED. See
+  `apps/api/src/integrity/retention` and `prisma/rls/06_*`.
+- Tests: the RLS e2e needs `TEST_DATABASE_URL` (app role) + `TEST_ADMIN_URL`
+  (superuser, to seed across FKs); both are declared in `turbo.json`
+  `test.passThroughEnv` — Turbo 2 strict env will otherwise SKIP the suite.
+- Raw SQL in tests must supply `updatedAt` (Prisma `@updatedAt` has no DB
+  default) and quote `"user"` (reserved word).
+- Demo logins (password `password123`): `teacher@` / `student@` / `parent@` /
+  `admin@` / `principal@` / `board@` / `accountant@` / `hr@demo.school`.
+- Local stack: `cd infrastructure && cp .env.example .env && docker compose up
+  --build` → app at http://localhost (nginx). Postgres/Redis are NOT host-exposed.
+
+## Coding conventions
+- TypeScript strict mode on. No `any` without a `// reason:` comment.
+- All API inputs validated (Zod or class-validator) at the boundary.
+- Every mutation writes an audit-log entry (actor, action, entity, school_id, ts).
+- Errors never leak cross-tenant existence — return 404, not 403, for
+  cross-tenant access attempts.
+- Tests: every RLS policy and every permission guard gets a test proving
+  cross-tenant access is denied. This is the most important test category.
+
+## MODULE: Assessment Integrity — BUILT (`apps/api/src/integrity`, `apps/web`)
+Purpose: deter and DETECT copy/paste and contract cheating on assignments and
+tests, and surface signals to teachers for human review. It does NOT prevent or
+punish.
+
+### Design principles
+- Layered deterrence + server-side detection. Client-side measures are friction
+  and signal-collection only; they are NEVER enforcement and are trivially
+  bypassable — code must treat them that way.
+- All detection produces an `IntegritySignal`, reviewed by a human. See Golden
+  Rule #8.
+- Telemetry on minors is sensitive PII: consent-gated, audit-logged, retention-
+  bounded, and disclosed to schools/parents. Monitoring must be transparent,
+  never covert.
+- Accessibility: paste-blocking and similar friction MUST have an exemption flag
+  per student (assistive-tech / disability accommodation). The feature must
+  degrade gracefully or it becomes discriminatory.
+
+### Client-side (friction + signal capture, in apps/web assessment UI)
+- Optionally disable paste into answer fields; capture attempted paste events
+  (length, timestamp) and POST them as signals rather than silently blocking.
+- Detect tab/window blur via `visibilitychange` / `blur` — log as a focus-loss
+  signal with duration.
+- Capture coarse keystroke timing (cadence, burst detection) — NOT full
+  keylogging of content. Store derived metrics, not raw keystroke streams.
+- All of the above are toggleable per-assignment and per-student (exemptions).
+
+### Server-side detection (the real value, async via BullMQ workers)
+- Paste-origin analysis: large single-event inserts flagged with size + context.
+- Typing-behavior analysis: text appearing in one burst, or implausibly fast
+  input, flagged. Natural writing has edits/pauses; absence is a signal.
+- Similarity detection: compare a submission against (a) others in the same
+  class/cohort and (b) prior submissions — embedding cosine similarity for prose,
+  n-gram/shingling (MOSS-style) for code. High similarity flagged.
+- Draft/version history: autosave drafts; a believable edit evolution lowers
+  suspicion, a fully-formed single-version submission raises it.
+- Each detector emits a typed signal with a confidence/severity and the evidence
+  needed for a teacher to judge — never a boolean "cheated".
+
+### Surfacing
+- Signals aggregate into a per-submission Integrity Report on the TEACHER
+  dashboard: flags + evidence + context. Teacher reviews and decides.
+- `integrity.report.read` permission gates access (teacher, school_admin).
+  Students/parents do not see raw signals; disclosure of monitoring is policy-
+  level, handled at enrollment/consent.
+
+### Data model (Prisma sketch — all tenant-scoped, school_id non-null)
+- `Assessment` — assignment/test; flags: pasteBlocked, focusTracked,
+  integrityEnabled.
+- `Submission` — studentId, assessmentId, status, submittedAt; relations to
+  drafts and signals.
+- `SubmissionDraft` — append-only autosave snapshots (submissionId, content
+  hash/diff, ts) — supports version-history analysis.
+- `IntegritySignal` — submissionId, type (PASTE | FOCUS_LOSS | TYPING_ANOMALY |
+  SIMILARITY | DRAFT_ANOMALY), severity, evidence (jsonb), source (CLIENT |
+  SERVER), createdAt. APPEND-ONLY. Mirrors the audit-log pattern.
+- `StudentIntegrityExemption` — studentId, assessmentId (nullable = global),
+  reason, grantedBy — accessibility/accommodation bypass.
+- All integrity reads/writes are audit-logged per Golden Rule #5.
+
+### Detection flow
+1. Student works in assessment UI → client signals POST to api as they occur.
+2. On submit (and on autosave), api enqueues a BullMQ integrity job.
+3. Worker runs server-side detectors, writes `IntegritySignal` rows.
+4. Teacher dashboard reads aggregated signals via `integrity.report.read`.
+5. Human reviews; any consequence is a manual teacher action, separately logged.
+
+## When generating code
+- Explain the multi-tenancy/security implication of each new table or endpoint.
+- After scaffolding, output RLS SQL and migrations SEPARATELY for review before
+  applying (RLS goes in `packages/db/prisma/rls/`, not Prisma migrations).
+- Every new module follows the built pattern: tenant-scoped tables + non-null
+  `school_id` + RLS, a service with relationship scoping (404 not 403), audited
+  mutations, an RLS-e2e cross-tenant case, and a unit test for the scoping logic.
+- Prefer small, reviewable commits over one giant change.

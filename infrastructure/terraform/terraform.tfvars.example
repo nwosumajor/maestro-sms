@@ -1,0 +1,26 @@
+# Copy to terraform.tfvars and fill in. NEVER commit the real file.
+# Secrets here are bootstrap-only; rotate in Secrets Manager afterwards.
+
+project         = "sms"
+environment     = "prod"
+region          = "eu-west-1"
+azs             = ["eu-west-1a", "eu-west-1b"]
+
+# DNS / TLS — the hosted zone must already exist in this account.
+domain_name     = "app.school.example"
+route53_zone_id = "Z0123456789ABCDEFGHIJ"
+
+# CI/CD — repo allowed to assume the OIDC deploy role.
+github_repo     = "your-org/sms"
+
+# Sizing (defaults are prod-lean; bump for load).
+# db_instance_class = "db.t4g.small"
+# db_multi_az       = true
+# api_desired_count = 2
+# web_desired_count = 2
+
+# Redis in-transit TLS + auth token (recommended for prod).
+# redis_transit_encryption = true
+
+# Optional online payments. Leave empty to disable Paystack.
+# paystack_secret_key = "sk_live_xxx"

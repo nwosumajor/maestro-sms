@@ -1,0 +1,95 @@
+name: deploy
+
+# Build the api/web images, push to ECR, run the one-off DB migrate task, then
+# roll the services. Auth is keyless via GitHub OIDC -> the Terraform-created
+# deploy role (no long-lived AWS keys). Golden Rule #6.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+permissions:
+  id-token: write # required for OIDC
+  contents: read
+
+env:
+  AWS_REGION: eu-west-1
+  PROJECT: sms
+  CLUSTER: sms-prod
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & push images
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          TAG: ${{ github.sha }}
+        run: |
+          for svc in api web; do
+            docker build -f apps/$svc/Dockerfile \
+              -t "$REGISTRY/$PROJECT/$svc:$TAG" \
+              -t "$REGISTRY/$PROJECT/$svc:latest" .
+            docker push "$REGISTRY/$PROJECT/$svc:$TAG"
+            docker push "$REGISTRY/$PROJECT/$svc:latest"
+          done
+
+      - name: Run DB migrate (one-off task, wait for completion)
+        run: |
+          SUBNETS=$(aws ec2 describe-subnets \
+            --filters "Name=tag:Name,Values=${PROJECT}-prod-private-*" \
+            --query 'Subnets[].SubnetId' --output text | tr '\t' ',')
+          SG=$(aws ec2 describe-security-groups \
+            --filters "Name=group-name,Values=${PROJECT}-prod-api" \
+            --query 'SecurityGroups[0].GroupId' --output text)
+          TASK_ARN=$(aws ecs run-task --cluster "$CLUSTER" \
+            --task-definition "${PROJECT}-prod-migrate" \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG],assignPublicIp=DISABLED}" \
+            --query 'tasks[0].taskArn' --output text)
+          echo "migrate task: $TASK_ARN"
+          aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK_ARN"
+          CODE=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK_ARN" \
+            --query 'tasks[0].containers[0].exitCode' --output text)
+          echo "migrate exit code: $CODE"
+          test "$CODE" = "0"
+
+      - name: Deploy services (new image tag)
+        env:
+          TAG: ${{ github.sha }}
+        run: |
+          for svc in api web; do
+            # Pull the live task def, swap only the image, re-register, update.
+            DEF=$(aws ecs describe-task-definition \
+              --task-definition "${PROJECT}-prod-$svc" --query 'taskDefinition')
+            REGISTRY="${{ steps.ecr.outputs.registry }}"
+            NEW=$(echo "$DEF" | jq \
+              --arg img "$REGISTRY/$PROJECT/$svc:$TAG" '
+              .containerDefinitions[0].image = $img
+              | del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)')
+            ARN=$(aws ecs register-task-definition \
+              --cli-input-json "$NEW" \
+              --query 'taskDefinition.taskDefinitionArn' --output text)
+            aws ecs update-service --cluster "$CLUSTER" \
+              --service "${PROJECT}-prod-$svc" --task-definition "$ARN"
+          done
+          aws ecs wait services-stable --cluster "$CLUSTER" \
+            --services "${PROJECT}-prod-api" "${PROJECT}-prod-web"

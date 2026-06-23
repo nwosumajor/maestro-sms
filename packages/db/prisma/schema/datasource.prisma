@@ -1,0 +1,16 @@
+// Datasource + generator for the multi-file Prisma schema (this folder).
+// Models live in integrity.prisma; foundation User/School stubs live in
+// _foundation-stubs.prisma (replace at integration). RLS is applied separately
+// via the SQL migration, NOT managed by Prisma.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["prismaSchemaFolder"]
+  // `native` for local dev; the musl/openssl-3 target is for the Alpine container.
+  binaryTargets   = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
