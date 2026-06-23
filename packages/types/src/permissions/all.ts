@@ -15,6 +15,7 @@ import type { AttendancePermission } from "./attendance";
 import type { CommunicationPermission } from "./communication";
 import type { DocumentPermission } from "./documents";
 import type { FeesPermission } from "./fees";
+import type { GamePermission } from "./game";
 import type { GradebookPermission } from "./gradebook";
 import type { HrPermission } from "./hr";
 import type { IntegrityPermission } from "./integrity";
@@ -35,6 +36,7 @@ export type Permission =
   | CommunicationPermission
   | DocumentPermission
   | FeesPermission
+  | GamePermission
   | GradebookPermission
   | HrPermission
   | IntegrityPermission

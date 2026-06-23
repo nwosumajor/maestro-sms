@@ -1,0 +1,139 @@
+// =============================================================================
+// Dead & Wounded game — durable records (platform spec §10)
+// =============================================================================
+// SMS integration of the 2-player game (build step 3). Live play (turn pointer,
+// timers, sockets) stays in memory; everything referenced AFTER a game ends is
+// persisted here. All tables are tenant-scoped (non-null schoolId) + RLS
+// (18_game_rls.sql); relationship scoping (a player only acts in games they're a
+// participant in) is enforced in GameService. 404-not-403 cross-tenant.
+//
+// SECURITY: GamePlayer.secret is SERVER-ONLY — never serialized to any client
+// (spec §9) and cleared once the game finishes (retention; Golden Rule #5).
+// userId/createdById are scalar uuid columns (DB FK to school only; no Prisma
+// relation to User, matching the other modules).
+// =============================================================================
+
+enum GameMode {
+  DUEL
+  RING
+  RACE
+  LEAGUE_MATCH
+  KNOCKOUT_MATCH
+  ULTIMATE
+}
+
+enum GameStatus {
+  LOBBY
+  SETUP
+  ACTIVE
+  FINISHED
+  ABANDONED
+}
+
+enum GameOutcome {
+  WON
+  LOST
+  ELIMINATED
+  FORFEIT
+}
+
+/// One game instance (any mode). Step 3 only creates DUEL.
+model Game {
+  id               String     @id @default(uuid()) @db.Uuid
+  schoolId         String     @db.Uuid
+  mode             GameMode   @default(DUEL)
+  difficultyLength Int
+  status           GameStatus @default(LOBBY)
+  /// The user who opened the game (DB FK to school; audit field).
+  createdById String @db.Uuid
+  /// GamePlayer.id whose turn it is (null in lobby/setup/finished).
+  currentTurnPlayerId String? @db.Uuid
+  /// GamePlayer.id of the winner (null until finished).
+  winnerPlayerId String? @db.Uuid
+  /// FK to a Competition when part of a league/knockout/tournament (step 4+).
+  competitionId String? @db.Uuid
+
+  startedAt  DateTime?
+  finishedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  school  School       @relation(fields: [schoolId], references: [id])
+  players GamePlayer[]
+  guesses Guess[]
+  results GameResult[]
+
+  @@index([schoolId])
+  @@index([schoolId, status])
+  @@map("game")
+}
+
+/// A player's participation in one game.
+model GamePlayer {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+  gameId   String @db.Uuid
+  userId   String @db.Uuid
+
+  /// SECURITY: server-only secret (distinct digits). Never sent to a client;
+  /// nulled when the game finishes (retention).
+  secret String?
+  /// GamePlayer.id this player targets (Ring; for a duel = the opponent).
+  targetId          String?  @db.Uuid
+  eliminated        Boolean  @default(false)
+  consecutiveMisses Int      @default(0)
+  joinedAt          DateTime @default(now())
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@unique([gameId, userId])
+  @@index([schoolId])
+  @@index([schoolId, gameId])
+  @@map("game_player")
+}
+
+/// Durable guess history (append-only). Powers post-game review.
+model Guess {
+  id        String @id @default(uuid()) @db.Uuid
+  schoolId  String @db.Uuid
+  gameId    String @db.Uuid
+  guesserId String @db.Uuid
+  targetId  String @db.Uuid
+  value     String
+  dead      Int
+  wounded   Int
+
+  createdAt DateTime @default(now())
+
+  school School @relation(fields: [schoolId], references: [id])
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@index([schoolId])
+  @@index([schoolId, gameId])
+  @@map("guess")
+}
+
+/// One outcome row per participant (the durable record of achievement).
+model GameResult {
+  id         String      @id @default(uuid()) @db.Uuid
+  schoolId   String      @db.Uuid
+  gameId     String      @db.Uuid
+  userId     String      @db.Uuid
+  rank       Int
+  guessCount Int
+  elapsedMs  Int?
+  outcome    GameOutcome
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@unique([gameId, userId])
+  @@index([schoolId])
+  @@map("game_result")
+}

@@ -50,6 +50,10 @@ d("RLS cross-tenant isolation", () => {
   const erasureA = randomUUID();
   const eventA = randomUUID();
   const threadA = randomUUID();
+  const gameA = randomUUID();
+  const gamePlayerA = randomUUID();
+  const guessA = randomUUID();
+  const gameResultA = randomUUID();
 
   beforeAll(async () => {
     appPool = new Pool({ connectionString: APP_URL });
@@ -169,12 +173,34 @@ d("RLS cross-tenant isolation", () => {
       `INSERT INTO message_thread (id,"schoolId",subject,"createdById","updatedAt") VALUES ($1,$2,'S',$3,now())`,
       [threadA, A, userA],
     );
+    // Dead & Wounded game (step 3): a game + a player + a guess + a result in A.
+    await a.query(
+      `INSERT INTO game (id,"schoolId","difficultyLength","createdById","updatedAt") VALUES ($1,$2,4,$3,now())`,
+      [gameA, A, userA],
+    );
+    await a.query(
+      `INSERT INTO game_player (id,"schoolId","gameId","userId","updatedAt") VALUES ($1,$2,$3,$4,now())`,
+      [gamePlayerA, A, gameA, userA],
+    );
+    await a.query(
+      `INSERT INTO guess (id,"schoolId","gameId","guesserId","targetId",value,dead,wounded) VALUES ($1,$2,$3,$4,$4,'1234',1,2)`,
+      [guessA, A, gameA, gamePlayerA],
+    );
+    await a.query(
+      `INSERT INTO game_result (id,"schoolId","gameId","userId",rank,"guessCount",outcome,"updatedAt") VALUES ($1,$2,$3,$4,1,3,'WON',now())`,
+      [gameResultA, A, gameA, userA],
+    );
   });
 
   afterAll(async () => {
     const a = adminPool;
     for (const t of [
       "audit_log",
+      // game children before game (FK), game before user/school.
+      "guess",
+      "game_result",
+      "game_player",
+      "game",
       "message",
       "thread_participant",
       "message_thread",
@@ -250,6 +276,10 @@ d("RLS cross-tenant isolation", () => {
     ["erasure_request", erasureA],
     ["school_event", eventA],
     ["message_thread", threadA],
+    ["game", gameA],
+    ["game_player", gamePlayerA],
+    ["guess", guessA],
+    ["game_result", gameResultA],
   ];
 
   it.each(cases)("school B cannot SELECT school A's %s; school A can", async (table, id) => {

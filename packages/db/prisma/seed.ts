@@ -60,6 +60,9 @@ const PERMS = [
   "platform.operate",
   // Admissions
   "admission.review",
+  // Dead & Wounded game (step 3 wires play + leaderboard; rest finalized in @sms/types)
+  "game.play",
+  "game.leaderboard.read",
   // LMS
   "class.read",
   "class.write",
@@ -130,6 +133,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     "document.read", "document.write",
     "timetable.read",
     "security.elevation.request", "message.read", "message.send", "event.read", "event.write",
+    "game.play", "game.leaderboard.read",
   ],
   student: [
     "assessment.read", "submission.read", "submission.write",
@@ -137,6 +141,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     "student.profile.read", "attendance.read",
     "notification.read", "fee.read", "document.read",
     "timetable.read", "message.read", "message.send", "event.read",
+    "game.play", "game.leaderboard.read",
   ],
   parent: [
     "class.read", "grade.read",

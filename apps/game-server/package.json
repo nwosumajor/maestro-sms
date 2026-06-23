@@ -1,0 +1,25 @@
+{
+  "name": "@sms/game-server",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Standalone server-authoritative 2-player Dead & Wounded game over WebSockets (platform spec §11 step 2).",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "jest",
+    "start": "node dist/index.js",
+    "lint": "echo \"(no lint configured)\""
+  },
+  "dependencies": {
+    "@sms/game-engine": "workspace:*",
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.13",
+    "@types/node": "^20.19.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
+    "typescript": "^5.6.2"
+  }
+}

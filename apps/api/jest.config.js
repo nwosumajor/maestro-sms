@@ -8,6 +8,7 @@ module.exports = {
   moduleNameMapper: {
     "^@sms/types/(.*)$": "<rootDir>/../../packages/types/src/$1",
     "^@sms/types$": "<rootDir>/../../packages/types/src/index.ts",
+    "^@sms/game-engine$": "<rootDir>/../../packages/game-engine/src/index.ts",
   },
   transform: {
     "^.+\\.ts$": ["ts-jest", { tsconfig: "<rootDir>/tsconfig.json" }],

@@ -1,0 +1,24 @@
+{
+  "name": "@sms/game-engine",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Dead & Wounded pure scoring engine (platform spec §2) — standalone, framework-independent.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "jest",
+    "lint": "echo \"(no lint configured)\""
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.13",
+    "@types/node": "^20.19.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
+    "typescript": "^5.6.2"
+  }
+}

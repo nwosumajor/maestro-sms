@@ -95,6 +95,12 @@ model School {
   // Admissions
   admissionApplications AdmissionApplication[]
 
+  // Dead & Wounded game
+  games       Game[]
+  gamePlayers GamePlayer[]
+  guesses     Guess[]
+  gameResults GameResult[]
+
   @@map("school")
 }
 

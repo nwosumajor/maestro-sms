@@ -309,6 +309,42 @@ punish.
 4. Teacher dashboard reads aggregated signals via `integrity.report.read`.
 5. Human reviews; any consequence is a manual teacher action, separately logged.
 
+## MODULE: Dead & Wounded Gaming Platform — NOT BUILT (spec: `DEAD_AND_WOUNDED_PLATFORM_SPEC.md`)
+A competitive number-guessing game (Bulls & Cows / Mastermind family) with five
+game modes built on one shared, pure scoring engine. The FULL spec lives in
+`DEAD_AND_WOUNDED_PLATFORM_SPEC.md` at the repo root — READ IT before any work on
+the game. This module is OUT OF SCOPE until explicitly prompted; do not build any
+part of it during other work.
+
+Binding points even from here:
+- Build order: pure scoring engine first (variable length — 4/5/6 distinct
+  digits; `length` is a PARAMETER, never hard-coded; test N=4/5/6), then a
+  standalone 2-player online game (WebSockets, server-authoritative), then SMS
+  integration, then the five modes. The cross-school "Ultimate" mode is built
+  LAST (spec §10 build sequence).
+- Server authority is absolute: secrets stored server-side only and NEVER sent to
+  an opponent's client; scoring, turn order, finish order, and win detection are
+  computed server-side; clients are display-only. Validate every secret/guess
+  server-side (N distinct digits 0–9).
+- Tenant model: all per-school game tables are tenant-scoped (non-null `school_id`
+  + RLS) and follow the standard built-module pattern (relationship scoping,
+  404-not-403, audited mutations, an RLS-e2e cross-tenant case). The ONE exception
+  is the cross-school "Ultimate" arena — a deliberately separate, super_admin-
+  gated cross-tenant surface (spec §7) that must NEVER leak student PII or other
+  tenant data across the boundary; document exactly which fields cross it.
+- New-table mechanics follow "Repo workflow & gotchas": add `prisma/rls/NN_*.sql`,
+  register it in `docker-entrypoint.sh` (`apply_rls`), add the RLS-e2e case +
+  FK-ordered afterAll cleanup. `TenantTx` is `Prisma.TransactionClient`, so new
+  models are typed automatically — do NOT hand-edit it or add `any` casts.
+- Type-safety spine applies: server DTOs in `packages/types/src/dto/`, web consumes
+  `Serialized<XDto>`; `game.*` permissions are `<DOMAIN>_PERMISSIONS` constants in
+  `packages/types/src/permissions`, added + seeded in `seed.ts` ONLY when the
+  module is built (spec §8 has the finalized set and the Principal=operations /
+  School-Admin=configuration split). Don't add unused permissions now.
+- Minors' privacy (Golden Rule #5): display names within a school; handles —
+  never real names — across schools; cross-school play requires two-tier consent
+  (school enrollment + a per-student guardian consent flag), audit-logged.
+
 ## When generating code
 - Explain the multi-tenancy/security implication of each new table or endpoint.
 - After scaffolding, output RLS SQL and migrations SEPARATELY for review before
