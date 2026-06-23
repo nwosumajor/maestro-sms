@@ -1,5 +1,6 @@
 "use client";
 
+import type { PendingPaymentDto, Serialized } from "@sms/types";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -7,13 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { money, titleCase } from "@/lib/format";
 
-export interface PendingPayment {
-  id: string;
-  amountMinor: number;
-  kind: string;
-  method: string;
-  invoiceId: string;
-}
+export type PendingPayment = Serialized<PendingPaymentDto>;
 
 export function PendingPayments({ payments }: { payments: PendingPayment[] }) {
   const router = useRouter();

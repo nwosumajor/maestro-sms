@@ -173,7 +173,7 @@ export class LmsService {
         id: u.id,
         name: u.name,
         email: u.email,
-        roles: u.roles.map((r) => roleName.get(r.roleId)).filter(Boolean),
+        roles: u.roles.map((r) => roleName.get(r.roleId)).filter((x): x is string => Boolean(x)),
       }));
     });
   }

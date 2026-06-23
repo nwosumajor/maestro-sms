@@ -16,6 +16,7 @@
 
 import { InjectQueue } from "@nestjs/bullmq";
 import { ForbiddenException, Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
+import { Prisma } from "@sms/db";
 import type { Queue } from "bullmq";
 import type { NotificationChannelValue, NotificationTypeValue } from "@sms/types";
 import {
@@ -184,7 +185,7 @@ export class NotificationService {
         type: input.type,
         title: input.title,
         body: input.body,
-        data: input.data ?? undefined,
+        data: (input.data ?? undefined) as Prisma.InputJsonValue | undefined,
       },
     });
     const channels = [...new Set(input.channels ?? [])];

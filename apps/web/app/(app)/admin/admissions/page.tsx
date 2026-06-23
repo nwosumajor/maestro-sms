@@ -1,3 +1,4 @@
+import { hasPermission } from "@/lib/permissions";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
@@ -11,7 +12,7 @@ export const dynamic = "force-dynamic";
 export default async function AdminAdmissionsPage() {
   const session = await auth();
   const user = session!.user;
-  if (!user.permissions.includes("admission.review")) redirect("/dashboard");
+  if (!hasPermission(user.permissions, "admission.review")) redirect("/dashboard");
   const apps = (await apiGet<Application[]>("/admissions")) ?? [];
 
   return (

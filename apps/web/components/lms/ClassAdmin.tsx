@@ -1,5 +1,6 @@
 "use client";
 
+import type { IdNameDto, UserSummaryDto, Serialized } from "@sms/types";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -7,8 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-interface Named { id: string; name: string }
-interface User extends Named { roles: string[] }
+type Named = Serialized<IdNameDto>;
+type User = Serialized<UserSummaryDto>;
 
 export function ClassAdmin({
   classes,

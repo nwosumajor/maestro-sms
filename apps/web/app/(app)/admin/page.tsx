@@ -1,3 +1,5 @@
+import type { InvoiceListItemDto, WorkflowSummaryDto, Serialized } from "@sms/types";
+import { hasPermission, type Permission } from "@/lib/permissions";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
@@ -8,14 +10,14 @@ import { money } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-interface InvoiceRow { status: string; totalMinor: number; currency: string }
-interface WorkflowRow { state: string }
+type InvoiceRow = Serialized<InvoiceListItemDto>;
+type WorkflowRow = Serialized<WorkflowSummaryDto>;
 
 export default async function AdminPage() {
   const session = await auth();
   const user = session!.user;
   // Staff gate: the Admin area is for roles that can manage something.
-  if (!user.permissions.includes("fee.manage")) redirect("/dashboard");
+  if (!hasPermission(user.permissions, "fee.manage")) redirect("/dashboard");
 
   const [students, classes, invoices, workflows] = await Promise.all([
     apiGet<{ id: string }[]>("/students"),
@@ -37,7 +39,7 @@ export default async function AdminPage() {
     { label: "Approvals pending", value: String(pendingApprovals), href: "/workflows" },
   ];
 
-  const actions: { label: string; href: string; perm: string; desc: string }[] = [
+  const actions = ([
     { label: "New invoice", href: "/fees", perm: "fee.manage", desc: "Bill a student for fees" },
     { label: "Fee catalog", href: "/fees", perm: "fee.manage", desc: "Manage reusable fee items" },
     { label: "Send announcement", href: "/notifications", perm: "notification.send", desc: "Notify a student/guardian" },
@@ -53,7 +55,9 @@ export default async function AdminPage() {
     { label: "Bulk import students", href: "/admin/import", perm: "class.write", desc: "Create accounts from a roster" },
     { label: "Finance reports", href: "/fees/reports", perm: "fee.manage", desc: "Receivables aging + collection" },
     { label: "Admissions", href: "/admin/admissions", perm: "admission.review", desc: "Review public applications" },
-  ].filter((a) => user.permissions.includes(a.perm));
+  ] satisfies { label: string; href: string; perm: Permission; desc: string }[]).filter(
+    (a) => user.permissions.includes(a.perm),
+  );
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="admin" permissions={user.permissions}>

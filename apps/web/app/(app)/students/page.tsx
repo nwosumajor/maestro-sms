@@ -1,3 +1,4 @@
+import type { IdNameDto, Serialized } from "@sms/types";
 import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
@@ -7,7 +8,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 export const dynamic = "force-dynamic";
 
-interface Student { id: string; name: string }
+type Student = Serialized<IdNameDto>;
 
 export default async function StudentsPage() {
   const session = await auth();

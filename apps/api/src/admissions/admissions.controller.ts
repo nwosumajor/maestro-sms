@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import type { AdmissionApplicationDto } from "@sms/types";
 import { z } from "zod";
 import { ADMISSION_PERMISSIONS } from "@sms/types";
 import { Public } from "../auth/public.decorator";
@@ -35,7 +36,7 @@ export class AdmissionsController {
 
   @Get("admissions")
   @RequirePermission(ADMISSION_PERMISSIONS.ADMISSION_REVIEW)
-  list(@CurrentPrincipal() p: Principal) {
+  list(@CurrentPrincipal() p: Principal): Promise<AdmissionApplicationDto[]> {
     return this.admissions.list(p);
   }
 

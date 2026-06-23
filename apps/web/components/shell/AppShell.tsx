@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { TenantTheme } from "@sms/tokens";
+import type { Permission } from "@sms/types";
 
 // App shell: persistent left nav + top bar. The brand mark + active-nav color
 // come from --primary, so a tenant theme swap re-skins the whole shell with no
@@ -46,7 +47,7 @@ type NavKey =
   | "operator"
   | "account";
 
-const NAV: { key: NavKey; label: string; icon: LucideIcon; href: string; perm?: string }[] = [
+const NAV: { key: NavKey; label: string; icon: LucideIcon; href: string; perm?: Permission }[] = [
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboardIcon, href: "/dashboard" },
   { key: "analytics", label: "Analytics", icon: BarChart3Icon, href: "/analytics" },
   { key: "operator", label: "Operator", icon: Building2Icon, href: "/operator", perm: "platform.operate" },

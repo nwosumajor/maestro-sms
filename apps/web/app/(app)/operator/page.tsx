@@ -1,3 +1,5 @@
+import type { TenantDto, Serialized } from "@sms/types";
+import { hasPermission } from "@/lib/permissions";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
@@ -8,12 +10,12 @@ import { shortDate } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-interface Tenant { id: string; name: string; slug: string; status: string; createdAt: string; users: number }
+type Tenant = Serialized<TenantDto>;
 
 export default async function OperatorPage() {
   const session = await auth();
   const user = session!.user;
-  if (!user.permissions.includes("platform.operate")) redirect("/dashboard");
+  if (!hasPermission(user.permissions, "platform.operate")) redirect("/dashboard");
   const tenants = (await apiGet<Tenant[]>("/operator/tenants")) ?? [];
 
   return (

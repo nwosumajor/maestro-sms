@@ -1,3 +1,4 @@
+import { hasPermission } from "@/lib/permissions";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
@@ -10,7 +11,7 @@ export const dynamic = "force-dynamic";
 export default async function SecurityPage() {
   const session = await auth();
   const user = session!.user;
-  if (!user.permissions.includes("security.elevation.request")) redirect("/dashboard");
+  if (!hasPermission(user.permissions, "security.elevation.request")) redirect("/dashboard");
 
   const grants = (await apiGet<Grant[]>("/security/elevation")) ?? [];
 
@@ -31,7 +32,7 @@ export default async function SecurityPage() {
         <ElevationPanel
           grants={grants}
           userId={user.id}
-          canApprove={user.permissions.includes("security.elevation.approve")}
+          canApprove={hasPermission(user.permissions, "security.elevation.approve")}
         />
       </div>
     </AppShell>

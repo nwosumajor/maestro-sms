@@ -1,5 +1,6 @@
 "use client";
 
+import type { UserSummaryDto, Serialized } from "@sms/types";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -7,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
-interface Contact { id: string; name: string; roles: string[] }
+type Contact = Serialized<UserSummaryDto>;
 
 export function Composer({ contacts }: { contacts: Contact[] }) {
   const router = useRouter();

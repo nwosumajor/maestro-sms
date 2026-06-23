@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import type { WorkflowInboxItemDto } from "@sms/types";
 import { z } from "zod";
 import { WORKFLOW_PERMISSIONS, WORKFLOW_TYPES } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -65,7 +66,7 @@ export class WorkflowController {
 
   @Get()
   @RequirePermission(WORKFLOW_PERMISSIONS.READ)
-  list(@CurrentPrincipal() p: Principal) {
+  list(@CurrentPrincipal() p: Principal): Promise<WorkflowInboxItemDto[]> {
     return this.workflow.listRequests(p);
   }
 

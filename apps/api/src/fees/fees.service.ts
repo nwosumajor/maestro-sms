@@ -361,6 +361,7 @@ export class FeesService {
         data: { status: "POSTED", approvedById: p.userId },
       });
       const inv = await tx.invoice.findFirst({ where: { id: pay.invoiceId } });
+      if (!inv) throw new NotFoundException("Invoice not found");
       const net = await this.paidMinor(tx, pay.invoiceId);
       const invoice = await this.applyToInvoiceStatus(tx, inv, net);
       await this.log(tx, p, "fee.payment.approve", "invoice", pay.invoiceId, {
@@ -459,14 +460,14 @@ export class FeesService {
     });
   }
 
-  private withBalance(
-    inv: {
+  private withBalance<
+    T extends {
       totalMinor: number;
       status: string;
       dueDate: Date;
       payments: { amountMinor: number; kind: string; status: string }[];
     },
-  ) {
+  >(inv: T) {
     const amountPaidMinor = inv.payments
       .filter((pmt) => pmt.status === "POSTED")
       .reduce((n, pmt) => n + (pmt.kind === "REFUND" ? -pmt.amountMinor : pmt.amountMinor), 0);

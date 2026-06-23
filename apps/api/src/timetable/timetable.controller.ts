@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from "@nestjs/common";
+import type { IdNameDto, PeriodDto, TimetableEntryDto } from "@sms/types";
 import { z } from "zod";
 import { DAYS_OF_WEEK, TIMETABLE_PERMISSIONS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -34,7 +35,7 @@ export class TimetableController {
   // --- periods ---
   @Get("periods")
   @RequirePermission(TIMETABLE_PERMISSIONS.TIMETABLE_READ)
-  listPeriods(@CurrentPrincipal() p: Principal) {
+  listPeriods(@CurrentPrincipal() p: Principal): Promise<PeriodDto[]> {
     return this.timetable.listPeriods(p);
   }
 
@@ -60,7 +61,7 @@ export class TimetableController {
   // --- rooms ---
   @Get("rooms")
   @RequirePermission(TIMETABLE_PERMISSIONS.TIMETABLE_READ)
-  listRooms(@CurrentPrincipal() p: Principal) {
+  listRooms(@CurrentPrincipal() p: Principal): Promise<IdNameDto[]> {
     return this.timetable.listRooms(p);
   }
 
@@ -123,7 +124,7 @@ export class TimetableController {
 
   @Get("classes/:classId")
   @RequirePermission(TIMETABLE_PERMISSIONS.TIMETABLE_READ)
-  classTimetable(@CurrentPrincipal() p: Principal, @Param("classId") classId: string) {
+  classTimetable(@CurrentPrincipal() p: Principal, @Param("classId") classId: string): Promise<TimetableEntryDto[]> {
     return this.timetable.getClassTimetable(p, classId);
   }
 }

@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Post } from "@nestjs/common";
+import type { CalendarEventDto } from "@sms/types";
 import { z } from "zod";
 import { COMMUNICATION_PERMISSIONS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -22,7 +23,7 @@ export class EventsController {
 
   @Get()
   @RequirePermission(COMMUNICATION_PERMISSIONS.EVENT_READ)
-  list(@CurrentPrincipal() p: Principal) {
+  list(@CurrentPrincipal() p: Principal): Promise<CalendarEventDto[]> {
     return this.events.listEvents(p);
   }
 

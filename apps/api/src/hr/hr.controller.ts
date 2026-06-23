@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Put } from "@nestjs/common";
+import type { EmployeeDto } from "@sms/types";
 import { z } from "zod";
 import { HR_PERMISSIONS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -23,7 +24,7 @@ export class HrController {
 
   @Get("employees")
   @RequirePermission(HR_PERMISSIONS.HR_READ)
-  list(@CurrentPrincipal() p: Principal) {
+  list(@CurrentPrincipal() p: Principal): Promise<EmployeeDto[]> {
     return this.hr.listEmployees(p);
   }
 

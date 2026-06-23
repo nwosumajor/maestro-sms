@@ -1,3 +1,4 @@
+import { hasPermission } from "@/lib/permissions";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
@@ -11,7 +12,7 @@ export const dynamic = "force-dynamic";
 export default async function ImportPage() {
   const session = await auth();
   const user = session!.user;
-  if (!user.permissions.includes("class.write")) redirect("/dashboard");
+  if (!hasPermission(user.permissions, "class.write")) redirect("/dashboard");
   const classes = (await apiGet<{ id: string; name: string }[]>("/classes/mine")) ?? [];
 
   return (

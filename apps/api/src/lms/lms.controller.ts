@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import type { ClassDto, IdNameDto, UserWithEmailDto } from "@sms/types";
 import { z } from "zod";
 import { LMS_PERMISSIONS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -57,21 +58,21 @@ export class LmsController {
   /** Relationship-scoped: returns only classes the caller may see. */
   @Get("classes/mine")
   @RequirePermission(LMS_PERMISSIONS.CLASS_READ)
-  myClasses(@CurrentPrincipal() p: Principal) {
+  myClasses(@CurrentPrincipal() p: Principal): Promise<ClassDto[]> {
     return this.lms.listMyClasses(p);
   }
 
   /** Relationship-scoped student directory (id + name) for UI pickers. */
   @Get("students")
   @RequirePermission(LMS_PERMISSIONS.CLASS_READ)
-  students(@CurrentPrincipal() p: Principal) {
+  students(@CurrentPrincipal() p: Principal): Promise<IdNameDto[]> {
     return this.lms.listStudents(p);
   }
 
   /** Staff user directory (id + name + roles) for admin pickers. class.write-gated. */
   @Get("users")
   @RequirePermission(LMS_PERMISSIONS.CLASS_WRITE)
-  users(@CurrentPrincipal() p: Principal) {
+  users(@CurrentPrincipal() p: Principal): Promise<UserWithEmailDto[]> {
     return this.lms.listUsers(p);
   }
 

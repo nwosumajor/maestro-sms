@@ -1,4 +1,5 @@
 import { Controller, Get } from "@nestjs/common";
+import type { AnalyticsOverviewDto } from "@sms/types";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import type { Principal } from "../integrity/integrity.foundation";
 import { AnalyticsService } from "./analytics.service";
@@ -10,7 +11,7 @@ export class AnalyticsController {
   constructor(private readonly analytics: AnalyticsService) {}
 
   @Get("overview")
-  overview(@CurrentPrincipal() p: Principal) {
+  overview(@CurrentPrincipal() p: Principal): Promise<AnalyticsOverviewDto> {
     return this.analytics.overview(p);
   }
 }

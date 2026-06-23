@@ -1,3 +1,5 @@
+import type { AuditLogRowDto, Serialized } from "@sms/types";
+import { hasPermission } from "@/lib/permissions";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
@@ -9,19 +11,12 @@ import { dateTime } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-interface AuditRow {
-  id: string;
-  action: string;
-  entity: string;
-  entityId: string;
-  actorName: string;
-  createdAt: string;
-}
+type AuditRow = Serialized<AuditLogRowDto>;
 
 export default async function AuditPage({ searchParams }: { searchParams: { action?: string; entity?: string } }) {
   const session = await auth();
   const user = session!.user;
-  if (!user.permissions.includes("security.audit.read")) redirect("/dashboard");
+  if (!hasPermission(user.permissions, "security.audit.read")) redirect("/dashboard");
 
   const qs = new URLSearchParams();
   if (searchParams.action) qs.set("action", searchParams.action);

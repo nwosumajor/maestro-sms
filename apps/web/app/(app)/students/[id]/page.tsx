@@ -1,3 +1,5 @@
+import type { ContactDto, MedicalRecordDto, StudentProfileDto, Serialized } from "@sms/types";
+import { hasPermission } from "@/lib/permissions";
 import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
@@ -17,27 +19,9 @@ import { ReportCardButton } from "@/components/reportcards/ReportCardButton";
 
 export const dynamic = "force-dynamic";
 
-interface Profile {
-  studentId: string;
-  admissionNumber: string | null;
-  dateOfBirth: string | null;
-  gender: string | null;
-  phone: string | null;
-  email: string | null;
-  addressLine1: string | null;
-  city: string | null;
-  state: string | null;
-  country: string | null;
-}
-interface Contact { id: string; name: string; relationship: string; phone: string; email: string | null; priority: number }
-interface Medical {
-  bloodGroup: string | null;
-  allergies: string | null;
-  conditions: string | null;
-  medications: string | null;
-  dietaryNotes: string | null;
-  notes: string | null;
-}
+type Profile = Serialized<StudentProfileDto>;
+type Contact = Serialized<ContactDto>;
+type Medical = Serialized<MedicalRecordDto>;
 
 function Field({ label, value }: { label: string; value: string | null | undefined }) {
   return (
@@ -134,15 +118,15 @@ export default async function StudentProfilePage({ params }: { params: { id: str
 
         <StudentAdmin
           studentId={params.id}
-          canProfile={user.permissions.includes("student.profile.write")}
-          canContact={user.permissions.includes("student.contact.write")}
-          canMedical={user.permissions.includes("student.medical.write")}
+          canProfile={hasPermission(user.permissions, "student.profile.write")}
+          canContact={hasPermission(user.permissions, "student.contact.write")}
+          canMedical={hasPermission(user.permissions, "student.medical.write")}
           profile={profile}
           contacts={contacts}
           medical={medical}
         />
 
-        {user.permissions.includes("grade.read") && (
+        {hasPermission(user.permissions, "grade.read") && (
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Report card</CardTitle>

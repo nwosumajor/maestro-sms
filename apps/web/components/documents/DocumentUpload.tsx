@@ -1,5 +1,6 @@
 "use client";
 
+import type { IdNameDto, Serialized } from "@sms/types";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -8,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 const TYPES = ["REPORT_CARD", "RECEIPT", "CERTIFICATE", "TRANSCRIPT", "OTHER"] as const;
-interface Student { id: string; name: string }
+type Student = Serialized<IdNameDto>;
 
 export function DocumentUpload({ students }: { students: Student[] }) {
   const router = useRouter();

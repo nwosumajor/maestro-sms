@@ -1,3 +1,5 @@
+import type { InvoiceDetailDto, Serialized } from "@sms/types";
+import { hasPermission } from "@/lib/permissions";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
@@ -18,27 +20,14 @@ import { PayOnlineButton } from "@/components/fees/PayOnlineButton";
 
 export const dynamic = "force-dynamic";
 
-interface InvoiceDetail {
-  id: string;
-  reference: string;
-  status: string;
-  currency: string;
-  totalMinor: number;
-  amountPaidMinor: number;
-  balanceMinor: number;
-  overdue: boolean;
-  dueDate: string;
-  notes: string | null;
-  lineItems: { id: string; description: string; amountMinor: number; quantity: number }[];
-  payments: { id: string; amountMinor: number; method: string; paidAt: string; reference: string | null }[];
-}
+type InvoiceDetail = Serialized<InvoiceDetailDto>;
 
 export default async function InvoiceDetailPage({ params }: { params: { id: string } }) {
   const session = await auth();
   const user = session!.user;
   const inv = await apiGet<InvoiceDetail>(`/invoices/${params.id}`);
   if (!inv) notFound();
-  const canManage = user.permissions.includes("fee.manage");
+  const canManage = hasPermission(user.permissions, "fee.manage");
   // Payments when there's a balance; refunds even on a PAID invoice. Not DRAFT/CANCELLED.
   const payable = canManage && inv.status !== "CANCELLED" && inv.status !== "DRAFT";
 

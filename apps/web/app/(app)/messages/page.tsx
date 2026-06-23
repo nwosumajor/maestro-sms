@@ -1,3 +1,5 @@
+import type { MessageDto, ThreadSummaryDto, ThreadViewDto, UserSummaryDto, Serialized } from "@sms/types";
+import { hasPermission } from "@/lib/permissions";
 import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
@@ -11,15 +13,15 @@ import { ReplyBox } from "@/components/messaging/ReplyBox";
 
 export const dynamic = "force-dynamic";
 
-interface Thread { id: string; subject: string; updatedAt: string; unread: number; lastMessage: { body: string } | null }
-interface Message { id: string; senderId: string; body: string; createdAt: string }
-interface ThreadView { thread: { id: string; subject: string }; messages: Message[] }
-interface Contact { id: string; name: string; roles: string[] }
+type Thread = Serialized<ThreadSummaryDto>;
+type Message = Serialized<MessageDto>;
+type ThreadView = Serialized<ThreadViewDto>;
+type Contact = Serialized<UserSummaryDto>;
 
 export default async function MessagesPage({ searchParams }: { searchParams: { thread?: string } }) {
   const session = await auth();
   const user = session!.user;
-  const canSend = user.permissions.includes("message.send");
+  const canSend = hasPermission(user.permissions, "message.send");
   const [threads, contacts] = await Promise.all([
     apiGet<Thread[]>("/messages/threads"),
     canSend ? apiGet<Contact[]>("/messages/contacts") : Promise.resolve(null),

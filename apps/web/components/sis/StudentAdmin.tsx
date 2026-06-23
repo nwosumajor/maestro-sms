@@ -1,5 +1,6 @@
 "use client";
 
+import type { ContactDto, MedicalRecordDto, StudentProfileDto, Serialized } from "@sms/types";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -7,27 +8,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-interface Profile {
-  admissionNumber?: string | null;
-  dateOfBirth?: string | null;
-  gender?: string | null;
-  phone?: string | null;
-  email?: string | null;
-  addressLine1?: string | null;
-  city?: string | null;
-  state?: string | null;
-  country?: string | null;
-  postalCode?: string | null;
-}
-interface Contact { id: string; name: string; relationship: string; phone: string; email: string | null; priority: number }
-interface Medical {
-  bloodGroup?: string | null;
-  allergies?: string | null;
-  conditions?: string | null;
-  medications?: string | null;
-  dietaryNotes?: string | null;
-  notes?: string | null;
-}
+type Profile = Serialized<Partial<StudentProfileDto>>;
+type Contact = Serialized<ContactDto>;
+type Medical = Serialized<Partial<MedicalRecordDto>>;
 
 async function send(path: string, method: string, body?: unknown) {
   return fetch(`/api/sms${path}`, {

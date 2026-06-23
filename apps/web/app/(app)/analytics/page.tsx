@@ -1,3 +1,4 @@
+import type { AnalyticsOverviewDto, Serialized } from "@sms/types";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
@@ -6,12 +7,7 @@ import { money } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-interface Overview {
-  scope: "school" | "family";
-  attendance?: { PRESENT: number; ABSENT: number; LATE: number; EXCUSED: number; total: number; ratePct: number | null };
-  fees?: { invoicedMinor: number; collectedMinor: number; outstandingMinor: number; invoices: number };
-  operations?: { students?: number; classes?: number; pendingApprovals?: number; integritySignals?: number };
-}
+type Overview = Serialized<AnalyticsOverviewDto>;
 
 function Bar({ label, value, total, tone }: { label: string; value: number; total: number; tone: string }) {
   const pct = total ? Math.round((value / total) * 100) : 0;

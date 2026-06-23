@@ -1,5 +1,6 @@
 "use client";
 
+import type { AdmissionApplicationDto, Serialized } from "@sms/types";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -7,14 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { dateTime, titleCase } from "@/lib/format";
 
-export interface Application {
-  id: string;
-  applicantName: string;
-  applicantEmail: string;
-  childName: string;
-  status: string;
-  createdAt: string;
-}
+export type Application = Serialized<AdmissionApplicationDto>;
 
 const VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   NEW: "default", REVIEWING: "secondary", ACCEPTED: "secondary", REJECTED: "destructive",

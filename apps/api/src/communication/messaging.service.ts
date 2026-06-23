@@ -70,6 +70,8 @@ export class MessagingService {
         tx.messageThread.findFirst({ where: { id: threadId } }),
         tx.message.findMany({ where: { threadId }, orderBy: { createdAt: "asc" } }),
       ]);
+      // assertParticipant guarantees the thread exists; satisfy the type.
+      if (!thread) throw new NotFoundException("Thread not found");
       await tx.threadParticipant.updateMany({
         where: { threadId, userId: p.userId },
         data: { lastReadAt: new Date() },

@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Post, Query } from "@nestjs/common";
+import type { DocumentRowDto } from "@sms/types";
 import { z } from "zod";
 import { DOCUMENT_PERMISSIONS, DOCUMENT_TYPES } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -47,7 +48,7 @@ export class DocumentsController {
     @CurrentPrincipal() p: Principal,
     @Query("studentId") studentId?: string,
     @Query("type") type?: string,
-  ) {
+  ): Promise<DocumentRowDto[]> {
     const t = type && DOCUMENT_TYPES.includes(type as never) ? (type as never) : undefined;
     return this.documents.listDocuments(p, { studentId, type: t });
   }

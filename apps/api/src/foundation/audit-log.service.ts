@@ -1,4 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
+import { Prisma } from "@sms/db";
 import type {
   AuditEntry,
   AuditLogService as IAuditLogService,
@@ -31,7 +32,8 @@ export class AuditLogService implements IAuditLogService {
         action: entry.action,
         entity: entry.entity,
         entityId: entry.entityId,
-        metadata: entry.metadata ?? undefined,
+        // Audit metadata is arbitrary JSON; assert Prisma's JSON-input type.
+        metadata: (entry.metadata ?? undefined) as Prisma.InputJsonValue | undefined,
       },
     });
   }

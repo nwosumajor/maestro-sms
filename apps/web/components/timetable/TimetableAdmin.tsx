@@ -1,5 +1,6 @@
 "use client";
 
+import type { IdNameDto, PeriodDto, Serialized } from "@sms/types";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -8,8 +9,8 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 const DAYS = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"] as const;
-interface Named { id: string; name: string }
-interface Period extends Named { startTime: string; endTime: string }
+type Named = Serialized<IdNameDto>;
+type Period = Serialized<PeriodDto>;
 
 export function TimetableAdmin({
   classes,

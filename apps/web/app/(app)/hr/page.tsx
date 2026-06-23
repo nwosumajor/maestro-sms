@@ -1,3 +1,5 @@
+import type { EmployeeDto, Serialized } from "@sms/types";
+import { hasPermission } from "@/lib/permissions";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
@@ -10,22 +12,13 @@ import { EmployeeForm } from "@/components/hr/EmployeeForm";
 
 export const dynamic = "force-dynamic";
 
-interface Employee {
-  id: string;
-  jobTitle: string;
-  department: string | null;
-  employmentType: string;
-  startDate: string;
-  status: string;
-  salaryMinor: number | null;
-  user: { name: string; email: string } | null;
-}
+type Employee = Serialized<EmployeeDto>;
 
 export default async function HrPage() {
   const session = await auth();
   const user = session!.user;
-  if (!user.permissions.includes("hr.read")) redirect("/dashboard");
-  const canWrite = user.permissions.includes("hr.write");
+  if (!hasPermission(user.permissions, "hr.read")) redirect("/dashboard");
+  const canWrite = hasPermission(user.permissions, "hr.write");
   const [employees, users] = await Promise.all([
     apiGet<Employee[]>("/hr/employees"),
     canWrite ? apiGet<{ id: string; name: string; roles: string[] }[]>("/users") : Promise.resolve(null),

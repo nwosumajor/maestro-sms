@@ -1,3 +1,5 @@
+import type { AttendanceRecordDto, IdNameDto, Serialized } from "@sms/types";
+import { hasPermission } from "@/lib/permissions";
 import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
@@ -11,14 +13,9 @@ import { TakeRegister } from "@/components/attendance/TakeRegister";
 
 export const dynamic = "force-dynamic";
 
-interface Student { id: string; name: string }
-interface ClassRow { id: string; name: string }
-interface Record_ {
-  id: string;
-  status: string;
-  note: string | null;
-  session: { classId: string; date: string };
-}
+type Student = Serialized<IdNameDto>;
+type ClassRow = Serialized<IdNameDto>;
+type Record_ = Serialized<AttendanceRecordDto>;
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   PRESENT: "secondary",
@@ -34,7 +31,7 @@ export default async function AttendancePage({
 }) {
   const session = await auth();
   const user = session!.user;
-  const canWrite = user.permissions.includes("attendance.write");
+  const canWrite = hasPermission(user.permissions, "attendance.write");
 
   const [students, classes] = await Promise.all([
     apiGet<Student[]>("/students"),

@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
+import type { AuditLogRowDto, PrivilegeGrantDto, RecertificationDto, SecurityAnomaliesDto } from "@sms/types";
 import { z } from "zod";
 import { SECURITY_PERMISSIONS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -32,7 +33,7 @@ export class SecurityController {
     @Query("from") from?: string,
     @Query("to") to?: string,
     @Query("limit") limit?: string,
-  ) {
+  ): Promise<AuditLogRowDto[]> {
     return this.security.listAudit(p, {
       actorId,
       action,
@@ -46,21 +47,21 @@ export class SecurityController {
   /** Access recertification snapshot (roles->perms, users->roles, elevations). */
   @Get("recertification")
   @RequirePermission(SECURITY_PERMISSIONS.AUDIT_READ)
-  recertification(@CurrentPrincipal() p: Principal) {
+  recertification(@CurrentPrincipal() p: Principal): Promise<RecertificationDto> {
     return this.security.recertification(p);
   }
 
   /** Anomaly signals over the recent audit log. */
   @Get("anomalies")
   @RequirePermission(SECURITY_PERMISSIONS.AUDIT_READ)
-  anomalies(@CurrentPrincipal() p: Principal) {
+  anomalies(@CurrentPrincipal() p: Principal): Promise<SecurityAnomaliesDto> {
     return this.security.anomalies(p);
   }
 
   /** List elevation grants (own, or tenant-wide for approvers). */
   @Get("elevation")
   @RequirePermission(SECURITY_PERMISSIONS.ELEVATION_REQUEST)
-  list(@CurrentPrincipal() p: Principal) {
+  list(@CurrentPrincipal() p: Principal): Promise<PrivilegeGrantDto[]> {
     return this.security.listElevations(p);
   }
 

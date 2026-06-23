@@ -3,6 +3,13 @@ import type { RawBodyRequest } from "@nestjs/common";
 import type { Request } from "express";
 import { z } from "zod";
 import { FEES_PERMISSIONS, INVOICE_STATUSES, PAYMENT_METHODS } from "@sms/types";
+import type {
+  FeeItemDto,
+  FeeReportDto,
+  InvoiceListItemDto,
+  InvoiceDetailDto,
+  PendingPaymentDto,
+} from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { Public } from "../auth/public.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -74,7 +81,7 @@ export class FeesController {
   // --- fee catalog (manage) ---
   @Get("fees/items")
   @RequirePermission(FEES_PERMISSIONS.FEE_MANAGE)
-  listItems(@CurrentPrincipal() p: Principal) {
+  listItems(@CurrentPrincipal() p: Principal): Promise<FeeItemDto[]> {
     return this.fees.listFeeItems(p);
   }
 
@@ -110,7 +117,7 @@ export class FeesController {
   /** Receivables aging + collection summary (billing-wide staff). */
   @Get("fees/reports")
   @RequirePermission(FEES_PERMISSIONS.FEE_READ)
-  reports(@CurrentPrincipal() p: Principal) {
+  reports(@CurrentPrincipal() p: Principal): Promise<FeeReportDto> {
     return this.fees.financeReport(p);
   }
 
@@ -120,14 +127,14 @@ export class FeesController {
     @CurrentPrincipal() p: Principal,
     @Query("studentId") studentId?: string,
     @Query("status") status?: string,
-  ) {
+  ): Promise<InvoiceListItemDto[]> {
     const parsed = status && INVOICE_STATUSES.includes(status as never) ? (status as never) : undefined;
     return this.fees.listInvoices(p, { studentId, status: parsed });
   }
 
   @Get("invoices/:id")
   @RequirePermission(FEES_PERMISSIONS.FEE_READ)
-  getInvoice(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+  getInvoice(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<InvoiceDetailDto> {
     return this.fees.getInvoice(p, id);
   }
 
@@ -163,7 +170,7 @@ export class FeesController {
   // --- maker-checker: the "checker" approves/rejects pending payments ---
   @Get("fees/payments/pending")
   @RequirePermission(FEES_PERMISSIONS.FEE_APPROVE)
-  pending(@CurrentPrincipal() p: Principal) {
+  pending(@CurrentPrincipal() p: Principal): Promise<PendingPaymentDto[]> {
     return this.fees.listPendingPayments(p);
   }
 

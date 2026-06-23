@@ -8,6 +8,8 @@ import {
   WORKFLOW_TYPES,
   type WorkflowState,
   type WorkflowType,
+  type WorkflowInboxItemDto,
+  type Serialized,
 } from "@sms/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,14 +23,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-export interface WorkflowDto {
-  id: string;
-  type: string;
-  title: string;
-  state: string;
-  initiatorId: string;
-  createdAt: string;
-}
+export type WorkflowDto = Serialized<WorkflowInboxItemDto>;
 
 const STATE_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   DRAFT: "outline",

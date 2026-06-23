@@ -1,5 +1,6 @@
 "use client";
 
+import type { FeeItemDto, IdNameDto, Serialized } from "@sms/types";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -8,8 +9,8 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { money } from "@/lib/format";
 
-interface Student { id: string; name: string }
-interface FeeItem { id: string; name: string; amountMinor: number; currency: string }
+type Student = Serialized<IdNameDto>;
+type FeeItem = Serialized<FeeItemDto>;
 interface Line { description: string; amountMajor: string; quantity: number }
 
 const toMinor = (major: string) => Math.round(parseFloat(major || "0") * 100);

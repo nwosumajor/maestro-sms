@@ -1,5 +1,6 @@
 "use client";
 
+import type { UserSummaryDto, Serialized } from "@sms/types";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -8,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-interface User { id: string; name: string; roles: string[] }
+type User = Serialized<UserSummaryDto>;
 
 export function SendAnnouncement({ users }: { users: User[] }) {
   const router = useRouter();

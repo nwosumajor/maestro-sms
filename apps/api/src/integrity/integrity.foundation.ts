@@ -7,68 +7,16 @@
 // the module. Do NOT reimplement these here.
 // =============================================================================
 
-/** Whatever Prisma-ish surface the modules need inside a tenant tx. Typed as
- *  `any` so this module doesn't depend on the generated Prisma client. */
-export interface TenantTx {
-  assessment: any; // eslint-disable-line @typescript-eslint/no-explicit-any -- reason: foundation Prisma types live in packages/db
-  submission: any; // reason: see above
-  submissionDraft: any; // reason: see above
-  submissionTelemetry: any; // reason: see above
-  integritySignal: any; // reason: see above
-  studentIntegrityExemption: any; // reason: see above
-  integrityRetentionRun: any; // reason: see above (app role: read-only history)
-  // SIS tables
-  studentProfile: any; // reason: see above
-  emergencyContact: any; // reason: see above
-  medicalRecord: any; // reason: see above
-  // Attendance tables
-  attendanceSession: any; // reason: see above
-  attendanceRecord: any; // reason: see above
-  // Notifications tables
-  notification: any; // reason: see above
-  notificationDelivery: any; // reason: see above
-  // Fees / Billing tables
-  feeItem: any; // reason: see above
-  invoice: any; // reason: see above
-  invoiceLineItem: any; // reason: see above
-  payment: any; // reason: see above
-  // Document Vault
-  document: any; // reason: see above
-  // Timetabling
-  period: any; // reason: see above
-  room: any; // reason: see above
-  timetableEntry: any; // reason: see above
-  // Security
-  privilegeGrant: any; // reason: see above
-  // Privacy
-  erasureRequest: any; // reason: see above
-  // Messaging + Calendar
-  messageThread: any; // reason: see above
-  threadParticipant: any; // reason: see above
-  message: any; // reason: see above
-  schoolEvent: any; // reason: see above
-  // HR
-  employee: any; // reason: see above
-  // Admissions
-  admissionApplication: any; // reason: see above
-  // foundation tables
-  user: any; // reason: see above
-  userRole: any; // reason: see above
-  role: any; // reason: see above (global/RLS-exempt; readable for staff pickers)
-  auditLog: any; // reason: see above
-  integrityConsent: any; // reason: see above
-  school: any; // reason: see above (global/RLS-exempt, but reachable on the client)
-  // LMS tables
-  class: any; // reason: see above
-  classTeacher: any; // reason: see above
-  enrollment: any; // reason: see above
-  parentChild: any; // reason: see above
-  // Gradebook
-  grade: any; // reason: see above
-  // Approval workflow
-  workflowRequest: any; // reason: see above
-  workflowAuditLog: any; // reason: see above
-}
+import type { Prisma } from "@sms/db";
+
+// The tenant-scoped Prisma surface available inside a runAsTenant() transaction.
+// This is EXACTLY the interactive-transaction client Prisma hands to
+// `$transaction((tx) => …)` (see PrismaTenantService), so every `tx.<model>`
+// call is fully typed against the generated schema. `import type` keeps this a
+// compile-time-only dependency — no runtime coupling to the generated client.
+// SECURITY: real types mean a service that stops producing a field, or reads a
+// column that no longer exists, now fails the build instead of returning `any`.
+export type TenantTx = Prisma.TransactionClient;
 
 export interface TenantContext {
   schoolId: string;

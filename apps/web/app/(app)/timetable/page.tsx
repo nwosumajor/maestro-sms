@@ -1,3 +1,5 @@
+import type { IdNameDto, PeriodDto, TimetableEntryDto, Serialized } from "@sms/types";
+import { hasPermission } from "@/lib/permissions";
 import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
@@ -11,16 +13,10 @@ export const dynamic = "force-dynamic";
 
 const DAYS = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"] as const;
 
-interface Period { id: string; name: string; sequence: number; startTime: string; endTime: string }
-interface ClassRow { id: string; name: string }
-interface Room { id: string; name: string }
-interface Entry {
-  id: string;
-  dayOfWeek: string;
-  periodId: string;
-  subject: string;
-  room: { name: string } | null;
-}
+type Period = Serialized<PeriodDto>;
+type ClassRow = Serialized<IdNameDto>;
+type Room = Serialized<IdNameDto>;
+type Entry = Serialized<TimetableEntryDto>;
 
 export default async function TimetablePage({
   searchParams,
@@ -29,7 +25,7 @@ export default async function TimetablePage({
 }) {
   const session = await auth();
   const user = session!.user;
-  const canWrite = user.permissions.includes("timetable.write");
+  const canWrite = hasPermission(user.permissions, "timetable.write");
   const [periods, classes, rooms] = await Promise.all([
     apiGet<Period[]>("/timetable/periods"),
     apiGet<ClassRow[]>("/classes/mine"),

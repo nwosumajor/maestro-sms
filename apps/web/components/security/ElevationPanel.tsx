@@ -1,5 +1,6 @@
 "use client";
 
+import type { PrivilegeGrantDto, Serialized } from "@sms/types";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -9,17 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { dateTime, titleCase } from "@/lib/format";
 
-export interface Grant {
-  id: string;
-  userId: string;
-  permission: string;
-  reason: string;
-  status: string;
-  breakGlass: boolean;
-  requestedById: string;
-  expiresAt: string | null;
-  createdAt: string;
-}
+export type Grant = Serialized<PrivilegeGrantDto>;
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   PENDING: "default",

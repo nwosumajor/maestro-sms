@@ -1,3 +1,5 @@
+import type { CalendarEventDto, Serialized } from "@sms/types";
+import { hasPermission } from "@/lib/permissions";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
@@ -9,13 +11,13 @@ import { EventForm } from "@/components/calendar/EventForm";
 
 export const dynamic = "force-dynamic";
 
-interface Ev { id: string; title: string; startsAt: string; audience: string }
+type Ev = Serialized<CalendarEventDto>;
 
 export default async function CalendarPage() {
   const session = await auth();
   const user = session!.user;
   const events = await apiGet<Ev[]>("/events");
-  const canWrite = user.permissions.includes("event.write");
+  const canWrite = hasPermission(user.permissions, "event.write");
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="calendar" permissions={user.permissions}>

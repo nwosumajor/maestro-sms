@@ -1,3 +1,5 @@
+import type { ClassDto } from "@sms/types";
+import { hasPermission } from "@/lib/permissions";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
@@ -13,16 +15,11 @@ import { ClassAdmin } from "@/components/lms/ClassAdmin";
 
 export const dynamic = "force-dynamic";
 
-interface ClassDto {
-  id: string;
-  name: string;
-  subject: string | null;
-}
 
 export default async function ClassesPage() {
   const session = await auth();
   const user = session!.user;
-  const canWrite = user.permissions.includes("class.write");
+  const canWrite = hasPermission(user.permissions, "class.write");
   const [classes, students, users] = await Promise.all([
     apiGet<ClassDto[]>("/classes/mine"),
     canWrite ? apiGet<{ id: string; name: string }[]>("/students") : Promise.resolve(null),

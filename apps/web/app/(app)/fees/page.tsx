@@ -1,3 +1,5 @@
+import type { InvoiceListItemDto, Serialized } from "@sms/types";
+import { hasPermission } from "@/lib/permissions";
 import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
@@ -11,14 +13,7 @@ import { PendingPayments, type PendingPayment } from "@/components/fees/PendingP
 
 export const dynamic = "force-dynamic";
 
-interface InvoiceRow {
-  id: string;
-  reference: string;
-  status: string;
-  currency: string;
-  totalMinor: number;
-  dueDate: string;
-}
+type InvoiceRow = Serialized<InvoiceListItemDto>;
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   DRAFT: "outline",
@@ -32,8 +27,8 @@ export default async function FeesPage() {
   const session = await auth();
   const user = session!.user;
   const invoices = await apiGet<InvoiceRow[]>("/invoices");
-  const canManage = user.permissions.includes("fee.manage");
-  const canApprove = user.permissions.includes("fee.approve");
+  const canManage = hasPermission(user.permissions, "fee.manage");
+  const canApprove = hasPermission(user.permissions, "fee.approve");
   const [students, feeItems] = canManage
     ? await Promise.all([
         apiGet<{ id: string; name: string }[]>("/students"),

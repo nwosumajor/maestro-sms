@@ -8,6 +8,7 @@
 // =============================================================================
 
 import { Inject, Injectable } from "@nestjs/common";
+import type { AnalyticsOverviewDto } from "@sms/types";
 import {
   TENANT_DATABASE,
   type Principal,
@@ -35,7 +36,7 @@ export class AnalyticsService {
       const studentIds = staff ? null : await this.scopedStudentIds(tx, p);
       const since = new Date(Date.now() - 30 * 86_400_000);
 
-      const out: Record<string, unknown> = { scope: staff ? "school" : "family" };
+      const out: AnalyticsOverviewDto = { scope: staff ? "school" : "family" };
 
       // --- attendance (last 30 days) ---
       if (p.permissions.includes("attendance.read")) {
@@ -45,8 +46,8 @@ export class AnalyticsService {
           else where.studentId = { in: studentIds };
         }
         const recs = await tx.attendanceRecord.findMany({ where, select: { status: true } });
-        const by = { PRESENT: 0, ABSENT: 0, LATE: 0, EXCUSED: 0 } as Record<string, number>;
-        for (const r of recs as Array<{ status: string }>) by[r.status] = (by[r.status] ?? 0) + 1;
+        const by = { PRESENT: 0, ABSENT: 0, LATE: 0, EXCUSED: 0 };
+        for (const r of recs) if (r.status in by) by[r.status as keyof typeof by] += 1;
         const total = recs.length;
         out.attendance = {
           ...by,

@@ -1,3 +1,5 @@
+import type { FeeReportBucketDto, FeeReportDto, Serialized } from "@sms/types";
+import { hasPermission } from "@/lib/permissions";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
@@ -8,18 +10,13 @@ import { money } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-interface Bucket { count: number; amountMinor: number }
-interface Report {
-  scope: "school" | "none";
-  totals?: { invoicedMinor: number; collectedMinor: number; outstandingMinor: number };
-  aging?: { current: Bucket; d1_30: Bucket; d31_60: Bucket; d60plus: Bucket };
-  pendingApprovals?: { count: number; amountMinor: number };
-}
+type Bucket = Serialized<FeeReportBucketDto>;
+type Report = Serialized<FeeReportDto>;
 
 export default async function FinanceReportsPage() {
   const session = await auth();
   const user = session!.user;
-  if (!user.permissions.includes("fee.read")) redirect("/dashboard");
+  if (!hasPermission(user.permissions, "fee.read")) redirect("/dashboard");
   const r = await apiGet<Report>("/fees/reports");
   if (!r || r.scope !== "school") redirect("/fees");
 

@@ -36,10 +36,10 @@ export class HrService {
   async listEmployees(p: Principal) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const employees = await tx.employee.findMany({ orderBy: { createdAt: "desc" } });
-      const ids = (employees as Array<{ userId: string }>).map((e) => e.userId);
+      const ids = employees.map((e) => e.userId);
       const users = await tx.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, email: true } });
-      const byId = new Map(users.map((u: { id: string; name: string; email: string }) => [u.id, u]));
-      return (employees as Array<Record<string, unknown> & { userId: string; salaryEnc: string | null }>).map((e) => ({
+      const byId = new Map(users.map((u) => [u.id, u]));
+      return employees.map((e) => ({
         ...this.decorate(e, p.schoolId),
         user: byId.get(e.userId) ?? null,
       }));
@@ -89,7 +89,7 @@ export class HrService {
   }
 
   /** Replace the encrypted salary with a decrypted numeric for the reader. */
-  private decorate(e: Record<string, unknown> & { salaryEnc: string | null }, schoolId: string) {
+  private decorate<T extends { salaryEnc: string | null }>(e: T, schoolId: string) {
     const { salaryEnc, ...rest } = e;
     const dec = salaryEnc ? decryptField(salaryEnc, schoolId) : null;
     return { ...rest, salaryMinor: dec ? Number(dec) : null };

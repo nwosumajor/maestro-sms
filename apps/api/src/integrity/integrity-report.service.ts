@@ -9,6 +9,7 @@
 // =============================================================================
 
 import { ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { Prisma } from "@sms/db";
 import {
   IntegritySignalSeverity,
   type IntegritySignalType,
@@ -116,7 +117,7 @@ export class IntegrityReportService {
       severity: IntegritySignalSeverity;
       confidence: number;
       detector: string | null;
-      evidence: Record<string, unknown>;
+      evidence: Prisma.JsonValue;
       createdAt: Date;
     }>,
   ): IntegrityReportDto {
@@ -140,7 +141,8 @@ export class IntegrityReportService {
         severity: r.severity,
         confidence: r.confidence,
         detector: r.detector,
-        evidence: r.evidence,
+        // DB evidence is JSON; the report DTO presents it as an object map.
+        evidence: r.evidence as Record<string, unknown>,
         createdAt: r.createdAt.toISOString(),
       };
     });

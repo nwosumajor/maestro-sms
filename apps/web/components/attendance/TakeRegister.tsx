@@ -1,5 +1,6 @@
 "use client";
 
+import type { IdNameDto, Serialized } from "@sms/types";
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,7 +9,7 @@ import { Label } from "@/components/ui/label";
 const STATUSES = ["PRESENT", "ABSENT", "LATE", "EXCUSED"] as const;
 type Status = (typeof STATUSES)[number];
 
-interface Student { id: string; name: string }
+type Student = Serialized<IdNameDto>;
 
 export function TakeRegister({ classes }: { classes: { id: string; name: string }[] }) {
   const [classId, setClassId] = React.useState(classes[0]?.id ?? "");

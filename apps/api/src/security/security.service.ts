@@ -75,7 +75,7 @@ export class SecurityService {
         select: { id: true, name: true },
       });
       const name = new Map(users.map((u: { id: string; name: string }) => [u.id, u.name]));
-      return rows.map((r: { actorId: string }) => ({ ...r, actorName: name.get(r.actorId) ?? "system" }));
+      return rows.map((r) => ({ ...r, actorName: name.get(r.actorId) ?? "system" }));
     });
   }
 

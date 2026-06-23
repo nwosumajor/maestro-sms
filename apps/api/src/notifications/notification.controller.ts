@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
+import type { NotificationInboxDto } from "@sms/types";
 import { z } from "zod";
 import { NOTIFICATION_CHANNELS, NOTIFICATION_PERMISSIONS, NOTIFICATION_TYPES } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -23,7 +24,7 @@ export class NotificationController {
   /** The caller's own inbox (self-scoped). `?unread=1` for unread only. */
   @Get()
   @RequirePermission(NOTIFICATION_PERMISSIONS.NOTIFICATION_READ)
-  list(@CurrentPrincipal() p: Principal, @Query("unread") unread?: string) {
+  list(@CurrentPrincipal() p: Principal, @Query("unread") unread?: string): Promise<NotificationInboxDto> {
     return this.notifications.listMine(p, { unreadOnly: unread === "1" || unread === "true" });
   }
 

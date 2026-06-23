@@ -17,6 +17,7 @@
 // =============================================================================
 
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import type { MedicalRecordDto } from "@sms/types";
 import { decryptField, encryptField } from "../foundation/field-crypto";
 import {
   AUDIT_LOG_SERVICE,
@@ -212,12 +213,14 @@ export class SisService {
     "notes",
   ] as const;
 
-  private decryptMedical(record: Record<string, unknown>, schoolId: string) {
+  private decryptMedical(record: Record<string, unknown>, schoolId: string): MedicalRecordDto {
     const out = { ...record };
     for (const f of this.MEDICAL_FIELDS) {
       if (typeof out[f] === "string") out[f] = decryptField(out[f] as string, schoolId);
     }
-    return out;
+    // Decryption is dynamic per-field; the row carries the typed MedicalRecordDto
+    // columns plus internal ids, which the DTO narrows to the reader's view.
+    return out as unknown as MedicalRecordDto;
   }
 
   async upsertMedical(p: Principal, studentId: string, input: MedicalInput) {

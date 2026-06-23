@@ -1,5 +1,6 @@
 "use client";
 
+import type { ErasureRequestDto, Serialized } from "@sms/types";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -7,13 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { dateTime, titleCase } from "@/lib/format";
 
-export interface ErasureRequest {
-  id: string;
-  studentId: string;
-  reason: string;
-  status: string;
-  createdAt: string;
-}
+export type ErasureRequest = Serialized<ErasureRequestDto>;
 
 const VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   PENDING: "default",

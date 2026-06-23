@@ -1,3 +1,4 @@
+import { hasPermission } from "@/lib/permissions";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
@@ -11,7 +12,7 @@ export const dynamic = "force-dynamic";
 export default async function RolesPage() {
   const session = await auth();
   const user = session!.user;
-  if (!user.permissions.includes("rbac.manage")) redirect("/dashboard");
+  if (!hasPermission(user.permissions, "rbac.manage")) redirect("/dashboard");
   const [users, roles] = await Promise.all([
     apiGet<{ id: string; name: string; email: string; roles: string[] }[]>("/users"),
     apiGet<{ name: string }[]>("/admin/roles"),

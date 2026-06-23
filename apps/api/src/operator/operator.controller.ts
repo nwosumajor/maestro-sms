@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Post } from "@nestjs/common";
+import type { TenantDto } from "@sms/types";
 import { z } from "zod";
 import { OPERATOR_PERMISSIONS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -16,7 +17,7 @@ export class OperatorController {
 
   @Get("tenants")
   @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
-  tenants(@CurrentPrincipal() p: Principal) {
+  tenants(@CurrentPrincipal() p: Principal): Promise<TenantDto[]> {
     return this.operator.listTenants(p);
   }
 

@@ -1,3 +1,5 @@
+import type { DocumentRowDto, Serialized } from "@sms/types";
+import { hasPermission } from "@/lib/permissions";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
@@ -10,18 +12,12 @@ import { DocumentUpload } from "@/components/documents/DocumentUpload";
 
 export const dynamic = "force-dynamic";
 
-interface DocRow {
-  id: string;
-  type: string;
-  title: string;
-  status: string;
-  createdAt: string;
-}
+type DocRow = Serialized<DocumentRowDto>;
 
 export default async function DocumentsPage() {
   const session = await auth();
   const user = session!.user;
-  const canWrite = user.permissions.includes("document.write");
+  const canWrite = hasPermission(user.permissions, "document.write");
   const [docs, students] = await Promise.all([
     apiGet<DocRow[]>("/documents"),
     canWrite ? apiGet<{ id: string; name: string }[]>("/students") : Promise.resolve(null),

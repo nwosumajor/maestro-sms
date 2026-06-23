@@ -1,11 +1,12 @@
 "use client";
 
+import type { UserWithEmailDto, Serialized } from "@sms/types";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 
-interface User { id: string; name: string; email: string; roles: string[] }
+type User = Serialized<UserWithEmailDto>;
 
 export function UserRolesManager({ users, allRoles }: { users: User[]; allRoles: string[] }) {
   const router = useRouter();

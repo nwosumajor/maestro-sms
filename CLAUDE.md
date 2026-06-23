@@ -172,28 +172,32 @@ impersonation** minting a scoped HS256 token), and the **public admissions porta
 (`/apply` → `@Public` intake quarantined from student data; staff review at
 `/admin/admissions`) are all built. The full suggested-functionality program
 (security spine + cross-cutting + by-role) is IMPLEMENTED and verified.
-Other not-built: (analytics, messaging,
-calendar/search, report-card generation, online payments, NDPR data-rights),
-the remaining by-role features (operator console + audited impersonation, HR
-module, finance reports/refunds, bulk import + permission-management UI,
-student/parent self-service, public admissions/visitor portal), and cloud infra
-(Terraform / secrets / TLS). Auth is JWT-only — the dev `x-dev-principal` guard
-bypass has been removed.
-NOTE: MFA/throttler/payment-SDK need new deps the offline sandbox can't fetch —
-TOTP will be hand-rolled (RFC-6238 via node crypto); rate-limiter/gateway need a
-network-enabled install step.
+Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
+API verifies HS256 with `algorithms: ["HS256"]` pinned.
+**Cloud infra is BUILT** as Terraform in `infrastructure/terraform/` (VPC + 3
+subnet tiers, ECS Fargate web/api, ALB, CloudFront + WAFv2, RDS Postgres 16,
+ElastiCache Redis, S3 Document Vault + customer-managed KMS, Secrets Manager,
+ECR, GitHub OIDC deploy role, EventBridge-scheduled retention task). It is
+write-only/`validate`-clean here — `plan`/`apply` need real AWS creds (the
+sandbox has none). Deploy via `.github/workflows/deploy.yml` (OIDC → build/push
+ECR → run the one-off `migrate` task → roll services). The real S3 presigner is
+bound when `STORAGE_PROVIDER=s3` (`apps/api/src/documents/s3-storage.provider.ts`);
+the local stub stays otherwise.
+**End-to-end type-safety spine is BUILT** (single source of truth in
+`@sms/types`): see Coding conventions.
 
 ## Repo workflow & gotchas
 - DB setup order: `prisma migrate deploy` → `pnpm --filter @sms/db rls` →
   `prisma db seed` (or `pnpm --filter @sms/db setup`). RLS lives in `prisma/rls/`,
   NOT prisma migrations — Prisma's shadow DB rejects the `major_user` GRANT.
-- New tenant table: add the model to `TenantTx` in
-  `apps/api/src/integrity/integrity.foundation.ts`, add an `prisma/rls/NN_*.sql`
-  file, and add a cross-tenant case to `apps/api/test/rls.e2e-spec.ts`. Also
-  register the new rls file in `apps/api/docker-entrypoint.sh` (`apply_rls <file>
-  <last-policy-name>`) — the entrypoint applies RLS per-file idempotently, keyed
-  on each file's LAST policy as a sentinel, so a new file applies onto an
-  already-initialised DB without re-running the others.
+- New tenant table: add an `prisma/rls/NN_*.sql` file and a cross-tenant case to
+  `apps/api/test/rls.e2e-spec.ts` (and its afterAll cleanup, child rows BEFORE
+  parents — FK order matters). Register the new rls file in
+  `apps/api/docker-entrypoint.sh` (`apply_rls <file> <last-policy-name>`) — the
+  entrypoint applies RLS per-file idempotently, keyed on each file's LAST policy
+  as a sentinel, so a new file applies onto an already-initialised DB without
+  re-running the others. NOTE: you NO LONGER hand-edit `TenantTx` — it is
+  `Prisma.TransactionClient` (see below), so new models are typed automatically.
 - Integrity retention: telemetry on minors (integrity_signal / submission_draft /
   submission_telemetry) is purged past each school's `School.integrityRetentionDays`
   window by a privileged BullMQ daily sweep + a per-school manual endpoint
@@ -219,6 +223,24 @@ network-enabled install step.
   cross-tenant access attempts.
 - Tests: every RLS policy and every permission guard gets a test proving
   cross-tenant access is denied. This is the most important test category.
+
+### Type-safety spine — `@sms/types` is the single source of truth
+- Tenant DB handle: `TenantTx = Prisma.TransactionClient` (in
+  `integrity.foundation.ts`) — every `tx.<model>` call is fully typed against the
+  generated schema, so a wrong/renamed column fails the build. Do NOT reintroduce
+  `any` casts (`as Array<Record<...>>`) on tx results.
+- JSON columns: cast writes with `as Prisma.InputJsonValue` and narrow reads with
+  `as unknown as <Shape>`. `Prisma.InputJsonValue`/`JsonValue` only resolve under a
+  VALUE import (`import { Prisma } from "@sms/db"`), not `import type`.
+- Response shapes: define server-form DTOs (Date fields are `Date`) in
+  `packages/types/src/dto/`. Backend READ controllers annotate return types with
+  them (`: Promise<XDto>`) so a service that drops/mistypes a field fails to
+  compile. The web consumes `Serialized<XDto>` (the `Serialized<T>` mapped type
+  turns Date→string for the JSON wire). One rename breaks producer AND consumer.
+- Permissions: backend uses the `<DOMAIN>_PERMISSIONS` constant objects; the web
+  uses `hasPermission(perms, perm: Permission)` from `@/lib/permissions` (the
+  `Permission` union is every domain's values) — typo'd permission strings fail
+  the build. Adding a permission = a new constant + seed change, never a literal.
 
 ## MODULE: Assessment Integrity — BUILT (`apps/api/src/integrity`, `apps/web`)
 Purpose: deter and DETECT copy/paste and contract cheating on assignments and

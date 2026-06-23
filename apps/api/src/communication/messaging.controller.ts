@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import type { ThreadSummaryDto, ThreadViewDto, UserSummaryDto } from "@sms/types";
 import { z } from "zod";
 import { COMMUNICATION_PERMISSIONS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -20,19 +21,19 @@ export class MessagingController {
 
   @Get("contacts")
   @RequirePermission(COMMUNICATION_PERMISSIONS.MESSAGE_SEND)
-  contacts(@CurrentPrincipal() p: Principal) {
+  contacts(@CurrentPrincipal() p: Principal): Promise<UserSummaryDto[]> {
     return this.messaging.contacts(p);
   }
 
   @Get("threads")
   @RequirePermission(COMMUNICATION_PERMISSIONS.MESSAGE_READ)
-  threads(@CurrentPrincipal() p: Principal) {
+  threads(@CurrentPrincipal() p: Principal): Promise<ThreadSummaryDto[]> {
     return this.messaging.listThreads(p);
   }
 
   @Get("threads/:id")
   @RequirePermission(COMMUNICATION_PERMISSIONS.MESSAGE_READ)
-  thread(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+  thread(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<ThreadViewDto> {
     return this.messaging.getThread(p, id);
   }
 

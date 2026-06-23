@@ -1,5 +1,6 @@
 "use client";
 
+import type { NotificationInboxDto, NotificationItemDto, Serialized } from "@sms/types";
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -7,18 +8,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { dateTime, titleCase } from "@/lib/format";
 
-export interface NotificationItem {
-  id: string;
-  type: string;
-  title: string;
-  body: string;
-  readAt: string | null;
-  createdAt: string;
-}
-export interface InboxData {
-  items: NotificationItem[];
-  unread: number;
-}
+export type NotificationItem = Serialized<NotificationItemDto>;
+export type InboxData = Serialized<NotificationInboxDto>;
 
 const TYPE_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   ATTENDANCE_ABSENCE: "destructive",

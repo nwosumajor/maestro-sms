@@ -1,3 +1,5 @@
+import type { RecertificationDto, SecurityAnomaliesDto, Serialized } from "@sms/types";
+import { hasPermission } from "@/lib/permissions";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
@@ -8,20 +10,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 
 export const dynamic = "force-dynamic";
 
-interface Recert {
-  roles: { name: string; permissions: string[] }[];
-  assignments: { id: string; name: string; email: string; roles: string[] }[];
-  activeElevations: { id: string; permission: string; reason: string; breakGlass: boolean }[];
-}
-interface Anomalies {
-  breakGlassCount: number;
-  topMedicalReaders: { actorName: string; count: number }[];
-}
+type Recert = Serialized<RecertificationDto>;
+type Anomalies = Serialized<SecurityAnomaliesDto>;
 
 export default async function RecertificationPage() {
   const session = await auth();
   const user = session!.user;
-  if (!user.permissions.includes("security.audit.read")) redirect("/dashboard");
+  if (!hasPermission(user.permissions, "security.audit.read")) redirect("/dashboard");
 
   const [rec, anom] = await Promise.all([
     apiGet<Recert>("/security/recertification"),

@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Put } from "@nestjs/common";
+import type { ContactDto, MedicalRecordDto, StudentProfileDto } from "@sms/types";
 import { z } from "zod";
 import { SIS_PERMISSIONS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -49,7 +50,7 @@ export class SisController {
   // --- profile ---
   @Get("profile")
   @RequirePermission(SIS_PERMISSIONS.STUDENT_PROFILE_READ)
-  getProfile(@CurrentPrincipal() p: Principal, @Param("studentId") studentId: string) {
+  getProfile(@CurrentPrincipal() p: Principal, @Param("studentId") studentId: string): Promise<StudentProfileDto> {
     return this.sis.getProfile(p, studentId);
   }
 
@@ -66,7 +67,7 @@ export class SisController {
   // --- emergency contacts ---
   @Get("contacts")
   @RequirePermission(SIS_PERMISSIONS.STUDENT_CONTACT_READ)
-  listContacts(@CurrentPrincipal() p: Principal, @Param("studentId") studentId: string) {
+  listContacts(@CurrentPrincipal() p: Principal, @Param("studentId") studentId: string): Promise<ContactDto[]> {
     return this.sis.listContacts(p, studentId);
   }
 
@@ -104,7 +105,10 @@ export class SisController {
   // --- medical (read + write both audited in the service) ---
   @Get("medical")
   @RequirePermission(SIS_PERMISSIONS.STUDENT_MEDICAL_READ)
-  getMedical(@CurrentPrincipal() p: Principal, @Param("studentId") studentId: string) {
+  getMedical(
+    @CurrentPrincipal() p: Principal,
+    @Param("studentId") studentId: string,
+  ): Promise<MedicalRecordDto | null> {
     return this.sis.getMedical(p, studentId);
   }
 

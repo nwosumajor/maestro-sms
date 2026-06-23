@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import type { ErasureRequestDto } from "@sms/types";
 import { z } from "zod";
 import { PRIVACY_PERMISSIONS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -34,7 +35,7 @@ export class PrivacyController {
 
   /** List erasure requests (own, or tenant-wide for reviewers). */
   @Get("erasure")
-  list(@CurrentPrincipal() p: Principal) {
+  list(@CurrentPrincipal() p: Principal): Promise<ErasureRequestDto[]> {
     return this.privacy.listErasureRequests(p);
   }
 

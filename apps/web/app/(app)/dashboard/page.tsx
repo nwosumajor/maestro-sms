@@ -1,3 +1,4 @@
+import type { ClassDto, WorkflowSummaryDto, Serialized } from "@sms/types";
 import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
@@ -13,15 +14,7 @@ import { Badge } from "@/components/ui/badge";
 
 export const dynamic = "force-dynamic";
 
-interface ClassDto {
-  id: string;
-  name: string;
-  subject: string | null;
-}
-interface WorkflowDto {
-  id: string;
-  state: string;
-}
+type WorkflowDto = Serialized<WorkflowSummaryDto>;
 
 export default async function DashboardPage() {
   const session = await auth();

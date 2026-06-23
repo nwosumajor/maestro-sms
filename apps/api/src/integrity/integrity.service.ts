@@ -12,6 +12,7 @@
 // =============================================================================
 
 import { Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
+import { Prisma } from "@sms/db";
 import { createHash } from "node:crypto";
 import { InjectQueue } from "@nestjs/bullmq";
 import type { Queue } from "bullmq";
@@ -340,7 +341,7 @@ export class IntegrityService {
             source: IntegritySignalSource.SERVER,
             severity: s.severity,
             confidence: s.confidence,
-            evidence: s.evidence,
+            evidence: s.evidence as Prisma.InputJsonValue,
             detector: s.detector,
           },
         });
@@ -400,13 +401,14 @@ export class IntegrityService {
       }),
     ]);
 
-    const pasteEvents: PasteEvidence[] = pasteSignals.map((row: { evidence: PasteEvidence }) => ({
-      pastedLength: row.evidence.pastedLength,
-      wasBlocked: row.evidence.wasBlocked,
-      at: row.evidence.at,
-    }));
+    // evidence / payload are JSON columns (Prisma.JsonValue); narrow to the
+    // shape the producing detector wrote.
+    const pasteEvents: PasteEvidence[] = pasteSignals.map((row) => {
+      const ev = row.evidence as unknown as PasteEvidence;
+      return { pastedLength: ev.pastedLength, wasBlocked: ev.wasBlocked, at: ev.at };
+    });
     const cadenceSamples: TypingCadenceSample[] = cadenceRows.map(
-      (r: { payload: TypingCadenceSample }) => r.payload,
+      (r) => r.payload as unknown as TypingCadenceSample,
     );
 
     return {
