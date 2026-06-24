@@ -1,4 +1,6 @@
 import { Body, Controller, Get, Param, Put } from "@nestjs/common";
+import { MODULES } from "@sms/types";
+import { RequireModule } from "../auth/require-module.decorator";
 import type { EmployeeDto } from "@sms/types";
 import { z } from "zod";
 import { HR_PERMISSIONS } from "@sms/types";
@@ -18,6 +20,7 @@ const employeeSchema = z.object({
   status: z.string().max(40).optional(),
 });
 
+@RequireModule(MODULES.HR)
 @Controller("hr")
 export class HrController {
   constructor(private readonly hr: HrService) {}

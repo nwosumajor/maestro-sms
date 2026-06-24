@@ -1,4 +1,6 @@
 import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
+import { MODULES } from "@sms/types";
+import { RequireModule } from "../auth/require-module.decorator";
 import { z } from "zod";
 import { ATTENDANCE_PERMISSIONS, ATTENDANCE_STATUSES } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -20,6 +22,7 @@ const markSchema = z.object({
     .min(1),
 });
 
+@RequireModule(MODULES.ATTENDANCE)
 @Controller()
 export class AttendanceController {
   constructor(private readonly attendance: AttendanceService) {}

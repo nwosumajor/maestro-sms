@@ -1,4 +1,6 @@
 import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { MODULES } from "@sms/types";
+import { RequireModule } from "../auth/require-module.decorator";
 import { z } from "zod";
 import { GRADEBOOK_PERMISSIONS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -14,6 +16,7 @@ const gradeSchema = z.object({
   status: z.enum(["DRAFT", "PUBLISHED"]).optional(),
 });
 
+@RequireModule(MODULES.GRADEBOOK)
 @Controller()
 export class GradebookController {
   constructor(private readonly gradebook: GradebookService) {}

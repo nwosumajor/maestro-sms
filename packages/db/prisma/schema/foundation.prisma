@@ -109,7 +109,30 @@ model School {
   ultimateConsents    UltimateConsent[]
   ultimateEntryLinks  UltimateEntryLink[]
 
+  // Subscription / module entitlement (one row per school)
+  subscription SchoolSubscription?
+
   @@map("school")
+}
+
+/// TENANT-SCOPED: a school's subscription plan + per-school module overrides.
+/// The platform (super_admin) sets this; the ModuleGuard reads it to gate routes
+/// and the web nav hides disabled modules. RLS scopes a school to its OWN row;
+/// super_admin writes via a per-school GUC (like the rest of the operator console).
+/// A school with no row defaults to ENTERPRISE (everything on) — see DEFAULT_PLAN.
+model SchoolSubscription {
+  id        String   @id @default(uuid()) @db.Uuid
+  schoolId  String   @unique @db.Uuid
+  /// BASIC | STANDARD | ENTERPRISE (validated in app against @sms/types PLANS).
+  plan      String   @default("ENTERPRISE")
+  /// { enabled?: string[]; disabled?: string[] } — per-school deviations.
+  overrides Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@map("school_subscription")
 }
 
 /// TENANT-SCOPED: a person in a school. Email is globally unique so login is

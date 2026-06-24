@@ -1,4 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Post } from "@nestjs/common";
+import { MODULES } from "@sms/types";
+import { RequireModule } from "../auth/require-module.decorator";
 import type { CalendarEventDto } from "@sms/types";
 import { z } from "zod";
 import { COMMUNICATION_PERMISSIONS } from "@sms/types";
@@ -17,6 +19,7 @@ const eventSchema = z.object({
   audience: z.enum(["ALL", "STAFF"]).optional(),
 });
 
+@RequireModule(MODULES.CALENDAR)
 @Controller("events")
 export class EventsController {
   constructor(private readonly events: EventsService) {}

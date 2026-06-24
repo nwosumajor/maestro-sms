@@ -9,6 +9,8 @@ declare module "next-auth" {
       schoolName: string;
       roles: string[];
       permissions: string[];
+      /** Subscription-enabled modules — drives nav visibility. */
+      modules: string[];
     } & DefaultSession["user"];
   }
 }
@@ -20,5 +22,6 @@ declare module "next-auth/jwt" {
     schoolName?: string;
     roles?: string[];
     permissions?: string[];
+    modules?: string[];
   }
 }

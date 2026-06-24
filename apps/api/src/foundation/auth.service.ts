@@ -2,6 +2,7 @@ import { Inject, Injectable, UnauthorizedException } from "@nestjs/common";
 import bcrypt from "bcryptjs";
 import { prisma } from "@sms/db";
 import { verifyTotp } from "../auth/totp";
+import { ModuleEntitlementService } from "./module-entitlement.service";
 import {
   TENANT_DATABASE,
   type TenantDatabase,
@@ -15,6 +16,8 @@ export interface LoginResult {
   name: string;
   roles: string[];
   permissions: string[];
+  /** The school's subscription-enabled modules — drives the web nav. */
+  modules: string[];
 }
 
 // A valid bcrypt hash of a random string — compared against when the user is not
@@ -26,7 +29,10 @@ const LOCK_MINUTES = 15;
 
 @Injectable()
 export class AuthService {
-  constructor(@Inject(TENANT_DATABASE) private readonly db: TenantDatabase) {}
+  constructor(
+    @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
+    private readonly modules: ModuleEntitlementService,
+  ) {}
 
   /**
    * Verify credentials and resolve the caller's roles + permissions. The email
@@ -118,6 +124,9 @@ export class AuthService {
     }
     if (outcome.status === "BAD_PASSWORD") throw new UnauthorizedException("Invalid credentials");
     if (outcome.status === "MFA_REQUIRED") throw new UnauthorizedException("MFA_REQUIRED");
-    return outcome.result;
+    // Resolve the school's subscription-enabled modules (outside the login tx) so
+    // the web can hide modules the plan doesn't include.
+    const modules = await this.modules.effectiveModules(outcome.result.schoolId);
+    return { ...outcome.result, modules };
   }
 }

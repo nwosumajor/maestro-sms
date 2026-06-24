@@ -1,4 +1,6 @@
 import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { MODULES } from "@sms/types";
+import { RequireModule } from "../auth/require-module.decorator";
 import type { AdmissionApplicationDto } from "@sms/types";
 import { z } from "zod";
 import { ADMISSION_PERMISSIONS } from "@sms/types";
@@ -23,6 +25,7 @@ const statusSchema = z.object({
   note: z.string().max(1000).optional(),
 });
 
+@RequireModule(MODULES.ADMISSIONS)
 @Controller()
 export class AdmissionsController {
   constructor(private readonly admissions: AdmissionsService) {}

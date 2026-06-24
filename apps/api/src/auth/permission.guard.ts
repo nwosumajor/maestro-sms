@@ -4,11 +4,14 @@ import {
   ForbiddenException,
   Inject,
   Injectable,
+  NotFoundException,
   UnauthorizedException,
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import type { Request } from "express";
+import type { ModuleKey } from "@sms/types";
 import { PERMISSION_KEY } from "./require-permission.decorator";
+import { MODULE_KEY } from "./require-module.decorator";
 import { STEPUP_KEY } from "./require-stepup.decorator";
 import { PUBLIC_KEY } from "./public.decorator";
 import { verifyToken } from "./jwt";
@@ -20,6 +23,7 @@ import {
   type AuditLogService,
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
+import { ModuleEntitlementService } from "../foundation/module-entitlement.service";
 
 export interface AuthedRequest extends Request {
   principal?: Principal;
@@ -43,6 +47,7 @@ export class PermissionGuard implements CanActivate {
     private readonly reflector: Reflector,
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
+    private readonly modules: ModuleEntitlementService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -55,6 +60,17 @@ export class PermissionGuard implements CanActivate {
     const req = context.switchToHttp().getRequest<AuthedRequest>();
     const principal = this.authenticate(req);
     req.principal = principal;
+
+    // Module-entitlement gate: if this route belongs to a subscription module the
+    // school's plan doesn't include, it doesn't exist for them → 404 (never-leak).
+    // Orthogonal to permission; untagged routes are never module-gated.
+    const requiredModule = this.reflector.getAllAndOverride<ModuleKey | undefined>(MODULE_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (requiredModule && !(await this.modules.isEnabled(principal.schoolId, requiredModule))) {
+      throw new NotFoundException();
+    }
 
     const required = this.reflector.getAllAndOverride<string | undefined>(PERMISSION_KEY, [
       context.getHandler(),

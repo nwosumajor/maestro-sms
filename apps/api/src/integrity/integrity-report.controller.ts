@@ -7,6 +7,8 @@
 // =============================================================================
 
 import { Controller, Get, Param } from "@nestjs/common";
+import { MODULES } from "@sms/types";
+import { RequireModule } from "../auth/require-module.decorator";
 import type { IntegrityReportDto } from "@sms/types";
 import { INTEGRITY_PERMISSIONS } from "@sms/types";
 // --- foundation primitives (do not reimplement) ---
@@ -15,6 +17,7 @@ import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import type { Principal } from "./integrity.foundation";
 import { IntegrityReportService } from "./integrity-report.service";
 
+@RequireModule(MODULES.INTEGRITY)
 @Controller("assessments/:assessmentId/submissions/:submissionId")
 export class IntegrityReportController {
   constructor(private readonly reports: IntegrityReportService) {}

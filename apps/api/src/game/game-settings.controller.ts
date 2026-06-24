@@ -7,6 +7,8 @@
 // =============================================================================
 
 import { Body, Controller, Get, Put } from "@nestjs/common";
+import { MODULES } from "@sms/types";
+import { RequireModule } from "../auth/require-module.decorator";
 import { z } from "zod";
 import { GAME_PERMISSIONS } from "@sms/types";
 import type { GameSettingsDto } from "@sms/types";
@@ -27,6 +29,7 @@ const patchSchema = z
   })
   .partial();
 
+@RequireModule(MODULES.GAMES)
 @Controller("game-settings")
 export class GameSettingsController {
   constructor(private readonly settings: GameSettingsService) {}

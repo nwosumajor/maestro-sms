@@ -9,6 +9,7 @@ import { PermissionGuard } from "../auth/permission.guard";
 import { PrismaTenantService } from "./prisma-tenant.service";
 import { AuditLogService } from "./audit-log.service";
 import { ConsentService } from "./consent.service";
+import { ModuleEntitlementService } from "./module-entitlement.service";
 import { AuthService } from "./auth.service";
 import { AuthController } from "./auth.controller";
 
@@ -25,10 +26,11 @@ import { AuthController } from "./auth.controller";
     { provide: TENANT_DATABASE, useClass: PrismaTenantService },
     { provide: AUDIT_LOG_SERVICE, useClass: AuditLogService },
     { provide: CONSENT_SERVICE, useClass: ConsentService },
+    ModuleEntitlementService,
     AuthService,
     // EMBEDDING_PROVIDER intentionally unbound — prose similarity is skipped
     // when absent (the integrity service injects it @Optional()).
   ],
-  exports: [TENANT_DATABASE, AUDIT_LOG_SERVICE, CONSENT_SERVICE],
+  exports: [TENANT_DATABASE, AUDIT_LOG_SERVICE, CONSENT_SERVICE, ModuleEntitlementService],
 })
 export class FoundationModule {}

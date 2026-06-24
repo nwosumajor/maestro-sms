@@ -1,4 +1,6 @@
 import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { MODULES } from "@sms/types";
+import { RequireModule } from "../auth/require-module.decorator";
 import type { ClassDto, IdNameDto, UserWithEmailDto } from "@sms/types";
 import { z } from "zod";
 import { LMS_PERMISSIONS } from "@sms/types";
@@ -13,6 +15,7 @@ const teacherSchema = z.object({ teacherId: z.string().uuid() });
 const studentSchema = z.object({ studentId: z.string().uuid() });
 const guardianSchema = z.object({ parentId: z.string().uuid(), studentId: z.string().uuid() });
 
+@RequireModule(MODULES.LMS)
 @Controller()
 export class LmsController {
   constructor(private readonly lms: LmsService) {}

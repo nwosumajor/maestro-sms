@@ -8,6 +8,8 @@
 // =============================================================================
 
 import { Controller, Get, Inject, Post } from "@nestjs/common";
+import { MODULES } from "@sms/types";
+import { RequireModule } from "../../auth/require-module.decorator";
 import { INTEGRITY_PERMISSIONS } from "@sms/types";
 // --- foundation primitives (do not reimplement) ---
 import { RequirePermission } from "../../auth/require-permission.decorator";
@@ -19,6 +21,7 @@ import {
 } from "../integrity.foundation";
 import { IntegrityRetentionService } from "./integrity-retention.service";
 
+@RequireModule(MODULES.INTEGRITY)
 @Controller("integrity/retention")
 export class IntegrityRetentionController {
   constructor(

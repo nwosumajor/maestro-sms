@@ -1,4 +1,6 @@
 import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { MODULES } from "@sms/types";
+import { RequireModule } from "../auth/require-module.decorator";
 import type { WorkflowInboxItemDto } from "@sms/types";
 import { z } from "zod";
 import { WORKFLOW_PERMISSIONS, WORKFLOW_TYPES } from "@sms/types";
@@ -19,6 +21,7 @@ const reviewSchema = z.object({
 });
 const commentSchema = z.object({ comments: z.string().max(2000).optional() });
 
+@RequireModule(MODULES.WORKFLOW)
 @Controller("workflows")
 export class WorkflowController {
   constructor(private readonly workflow: WorkflowService) {}

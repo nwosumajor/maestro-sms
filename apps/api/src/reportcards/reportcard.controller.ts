@@ -1,4 +1,6 @@
 import { Controller, Param, Post, Res, StreamableFile } from "@nestjs/common";
+import { MODULES } from "@sms/types";
+import { RequireModule } from "../auth/require-module.decorator";
 import type { Response } from "express";
 import { GRADEBOOK_PERMISSIONS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -6,6 +8,7 @@ import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import type { Principal } from "../integrity/integrity.foundation";
 import { ReportCardService } from "./reportcard.service";
 
+@RequireModule(MODULES.DOCUMENTS)
 @Controller("reportcards")
 export class ReportCardController {
   constructor(private readonly reportcards: ReportCardService) {}

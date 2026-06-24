@@ -12,6 +12,8 @@
 // =============================================================================
 
 import { Body, Controller, Get, Param, Post, Put } from "@nestjs/common";
+import { MODULES } from "@sms/types";
+import { RequireModule } from "../auth/require-module.decorator";
 import { z } from "zod";
 import { GAME_PERMISSIONS } from "@sms/types";
 import type {
@@ -35,6 +37,7 @@ const consentSchema = z.object({ studentId: z.string().uuid(), granted: z.boolea
 const enterSchema = z.object({ handle: z.string() });
 const guessSchema = z.object({ value: z.string() });
 
+@RequireModule(MODULES.GAMES)
 @Controller("ultimate")
 export class UltimateController {
   constructor(private readonly ultimate: UltimateService) {}

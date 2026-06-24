@@ -8,6 +8,8 @@
 // =============================================================================
 
 import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { MODULES } from "@sms/types";
+import { RequireModule } from "../auth/require-module.decorator";
 import { z } from "zod";
 import { GAME_PERMISSIONS } from "@sms/types";
 import type { RingDto } from "@sms/types";
@@ -21,6 +23,7 @@ const openSchema = z.object({ difficultyLength: z.number().int().optional() });
 const secretSchema = z.object({ secret: z.string() });
 const guessSchema = z.object({ value: z.string() });
 
+@RequireModule(MODULES.GAMES)
 @Controller("rings")
 export class RingController {
   constructor(private readonly rings: RingService) {}

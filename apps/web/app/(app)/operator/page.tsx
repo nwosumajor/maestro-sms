@@ -5,8 +5,9 @@ import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { shortDate } from "@/lib/format";
+import { SubscriptionManager } from "@/components/operator/SubscriptionManager";
 
 export const dynamic = "force-dynamic";
 
@@ -24,36 +25,33 @@ export default async function OperatorPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Platform operator</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Cross-tenant overview. Impersonation is API-driven, step-up gated, and
-            fully audit-logged — never silent.
+            Cross-tenant overview. Set each school&apos;s subscription plan and toggle modules to fit their budget —
+            disabled modules vanish from their app and return 404 at the API. Impersonation is step-up gated and audited.
           </p>
         </div>
-        <Card>
-          <CardContent className="p-0">
-            <table className="w-full text-sm">
-              <thead className="border-b border-border text-left text-muted-foreground">
-                <tr>
-                  <th className="px-4 py-2.5 font-medium">School</th>
-                  <th className="px-4 py-2.5 font-medium">Slug</th>
-                  <th className="px-4 py-2.5 font-medium">Users</th>
-                  <th className="px-4 py-2.5 font-medium">Status</th>
-                  <th className="px-4 py-2.5 font-medium">Since</th>
-                </tr>
-              </thead>
-              <tbody>
-                {tenants.map((t) => (
-                  <tr key={t.id} className="border-b border-border last:border-0">
-                    <td className="px-4 py-2.5 font-medium">{t.name}</td>
-                    <td className="px-4 py-2.5 font-mono text-xs text-muted-foreground">{t.slug}</td>
-                    <td className="px-4 py-2.5">{t.users}</td>
-                    <td className="px-4 py-2.5"><Badge variant={t.status === "ACTIVE" ? "secondary" : "outline"}>{t.status}</Badge></td>
-                    <td className="px-4 py-2.5 text-muted-foreground">{shortDate(t.createdAt)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </CardContent>
-        </Card>
+
+        <div className="space-y-3">
+          {tenants.map((t) => (
+            <Card key={t.id}>
+              <CardHeader className="flex-row items-center justify-between space-y-0">
+                <div>
+                  <CardTitle className="text-base">{t.name}</CardTitle>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    <span className="font-mono">{t.slug}</span> · {t.users} users · since {shortDate(t.createdAt)}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline">{t.plan}</Badge>
+                  <Badge variant="secondary">{t.moduleCount} modules</Badge>
+                  <Badge variant={t.status === "ACTIVE" ? "secondary" : "outline"}>{t.status}</Badge>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <SubscriptionManager schoolId={t.id} plan={t.plan} />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
       </div>
     </AppShell>
   );

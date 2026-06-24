@@ -19,6 +19,7 @@ interface LoginResult {
   name: string;
   roles: string[];
   permissions: string[];
+  modules: string[];
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -54,6 +55,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           schoolName: u.schoolName,
           roles: u.roles,
           permissions: u.permissions,
+          modules: u.modules ?? [],
         };
       },
     }),
@@ -70,12 +72,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           schoolName: string;
           roles: string[];
           permissions: string[];
+          modules: string[];
         };
         token.userId = u.id;
         token.schoolId = u.schoolId;
         token.schoolName = u.schoolName;
         token.roles = u.roles;
         token.permissions = u.permissions;
+        token.modules = u.modules;
       }
       return token;
     },
@@ -85,6 +89,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       session.user.schoolName = token.schoolName as string;
       session.user.roles = (token.roles as string[]) ?? [];
       session.user.permissions = (token.permissions as string[]) ?? [];
+      session.user.modules = (token.modules as string[]) ?? [];
       return session;
     },
   },

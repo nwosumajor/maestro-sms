@@ -1,4 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Post, Query } from "@nestjs/common";
+import { MODULES } from "@sms/types";
+import { RequireModule } from "../auth/require-module.decorator";
 import type { DocumentRowDto } from "@sms/types";
 import { z } from "zod";
 import { DOCUMENT_PERMISSIONS, DOCUMENT_TYPES } from "@sms/types";
@@ -17,6 +19,7 @@ const createSchema = z.object({
 });
 const confirmSchema = z.object({ sizeBytes: z.number().int().min(0).optional() });
 
+@RequireModule(MODULES.DOCUMENTS)
 @Controller("documents")
 export class DocumentsController {
   constructor(private readonly documents: DocumentsService) {}

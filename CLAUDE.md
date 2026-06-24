@@ -81,6 +81,30 @@ conflicts with it, flag the conflict before proceeding.
   teacher→their classes, student→enrolled, parent→their children. Coarse
   permission gates the endpoint; membership joins narrow the rows; RLS backstops.
 
+## Subscription / module entitlements (platform billing layer) — BUILT
+- A SECOND, orthogonal gate above RBAC: which product MODULES a school's
+  subscription enables. super_admin-owned (schools can't self-upgrade). Source of
+  truth in `@sms/types/modules.ts`: `MODULES` keys, `MODULE_CATALOG`, named tiers
+  `PLANS` (BASIC|STANDARD|ENTERPRISE) → `PLAN_MODULES` bundles, `ModuleOverrides`
+  (per-school force-on/off), and the pure `resolveModules(plan, overrides)`.
+- Storage: `SchoolSubscription` (tenant-scoped, RLS `22_subscription_rls.sql`,
+  migration `20260629000000_subscription`) — `plan` + `overrides` JSON, one row per
+  school. NO row ⇒ `DEFAULT_PLAN` = ENTERPRISE (everything on), so the layer only
+  ever RESTRICTS and never breaks a pre-existing tenant.
+- Enforcement: controllers carry `@RequireModule(MODULES.X)` (class-level);
+  `PermissionGuard` resolves the school's effective modules via
+  `ModuleEntitlementService` (foundation, 30s cache) and returns **404** if the
+  module is off — orthogonal to `@RequirePermission`, before the permission check.
+  ALWAYS-ON (untagged) controllers: foundation/auth, security, privacy,
+  notifications, admin dashboard, operator. The public `/apply` intake is `@Public`
+  so it bypasses the gate regardless of the admissions module.
+- super_admin surface: `GET/PUT /operator/tenants/:schoolId/subscription`
+  (`platform.operate`, audited; cache invalidated on write). Web: `/operator`
+  shows each tenant's plan + a `SubscriptionManager` (tier select + per-module
+  toggles); the AppShell nav hides modules not in the plan (modules ride the JWT
+  session, set at login from `/auth/login`). Adding a module = a key in
+  `@sms/types` + `@RequireModule` on its controller + a nav `module:` tag.
+
 ## Project structure
 - Monorepo (Turborepo + pnpm workspaces).
   - `apps/web` — Next.js + Auth.js

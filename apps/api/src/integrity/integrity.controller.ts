@@ -11,6 +11,8 @@
 // =============================================================================
 
 import { Body, Controller, Param, Post, HttpCode } from "@nestjs/common";
+import { MODULES } from "@sms/types";
+import { RequireModule } from "../auth/require-module.decorator";
 import { z } from "zod";
 import { clientSignalBatchSchema } from "@sms/types";
 import { INTEGRITY_PERMISSIONS } from "@sms/types";
@@ -23,6 +25,7 @@ import { IntegrityService } from "./integrity.service";
 
 const contentSchema = z.object({ content: z.string().max(200_000) });
 
+@RequireModule(MODULES.INTEGRITY)
 @Controller("assessments/:assessmentId/submissions/:submissionId")
 export class IntegrityController {
   constructor(private readonly integrity: IntegrityService) {}

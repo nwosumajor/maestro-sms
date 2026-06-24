@@ -1,4 +1,6 @@
 import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { MODULES } from "@sms/types";
+import { RequireModule } from "../auth/require-module.decorator";
 import type { ThreadSummaryDto, ThreadViewDto, UserSummaryDto } from "@sms/types";
 import { z } from "zod";
 import { COMMUNICATION_PERMISSIONS } from "@sms/types";
@@ -15,6 +17,7 @@ const threadSchema = z.object({
 });
 const replySchema = z.object({ body: z.string().min(1).max(5000) });
 
+@RequireModule(MODULES.MESSAGING)
 @Controller("messages")
 export class MessagingController {
   constructor(private readonly messaging: MessagingService) {}

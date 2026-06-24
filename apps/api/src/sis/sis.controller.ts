@@ -1,4 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Put } from "@nestjs/common";
+import { MODULES } from "@sms/types";
+import { RequireModule } from "../auth/require-module.decorator";
 import type { ContactDto, MedicalRecordDto, StudentProfileDto } from "@sms/types";
 import { z } from "zod";
 import { SIS_PERMISSIONS } from "@sms/types";
@@ -43,6 +45,7 @@ const medicalSchema = z.object({
   notes: nullableStr,
 });
 
+@RequireModule(MODULES.SIS)
 @Controller("students/:studentId")
 export class SisController {
   constructor(private readonly sis: SisService) {}

@@ -7,4 +7,8 @@ export interface TenantDto {
   status: string;
   createdAt: Date;
   users: number;
+  /** Subscription plan (BASIC | STANDARD | ENTERPRISE). */
+  plan: string;
+  /** Count of subscription-enabled modules. */
+  moduleCount: number;
 }

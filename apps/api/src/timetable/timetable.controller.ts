@@ -1,4 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from "@nestjs/common";
+import { MODULES } from "@sms/types";
+import { RequireModule } from "../auth/require-module.decorator";
 import type { IdNameDto, PeriodDto, TimetableEntryDto } from "@sms/types";
 import { z } from "zod";
 import { DAYS_OF_WEEK, TIMETABLE_PERMISSIONS } from "@sms/types";
@@ -28,6 +30,7 @@ const entrySchema = z.object({
 });
 const entryUpdateSchema = entrySchema.partial();
 
+@RequireModule(MODULES.TIMETABLE)
 @Controller("timetable")
 export class TimetableController {
   constructor(private readonly timetable: TimetableService) {}

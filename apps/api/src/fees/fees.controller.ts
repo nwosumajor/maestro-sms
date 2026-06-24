@@ -1,4 +1,6 @@
 import { Body, Controller, Get, Headers, Param, Patch, Post, Query, Req } from "@nestjs/common";
+import { MODULES } from "@sms/types";
+import { RequireModule } from "../auth/require-module.decorator";
 import type { RawBodyRequest } from "@nestjs/common";
 import type { Request } from "express";
 import { z } from "zod";
@@ -53,6 +55,7 @@ const paymentSchema = z.object({
   paidAt: z.string().datetime().optional(),
 });
 
+@RequireModule(MODULES.FEES)
 @Controller()
 export class FeesController {
   constructor(

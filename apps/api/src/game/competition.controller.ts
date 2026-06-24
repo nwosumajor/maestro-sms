@@ -9,6 +9,8 @@
 // =============================================================================
 
 import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { MODULES } from "@sms/types";
+import { RequireModule } from "../auth/require-module.decorator";
 import { z } from "zod";
 import { GAME_PERMISSIONS } from "@sms/types";
 import type { CompetitionDetailDto, CompetitionDto } from "@sms/types";
@@ -27,6 +29,7 @@ const createSchema = z.object({
   participantUserIds: z.array(z.string().uuid()).min(2),
 });
 
+@RequireModule(MODULES.GAMES)
 @Controller("competitions")
 export class CompetitionController {
   constructor(private readonly competitions: CompetitionService) {}

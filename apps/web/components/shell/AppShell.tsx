@@ -21,8 +21,9 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { auth } from "@/lib/auth";
 import type { TenantTheme } from "@sms/tokens";
-import type { Permission } from "@sms/types";
+import { MODULES, type ModuleKey, type Permission } from "@sms/types";
 
 // App shell: persistent left nav + top bar. The brand mark + active-nav color
 // come from --primary, so a tenant theme swap re-skins the whole shell with no
@@ -49,24 +50,34 @@ type NavKey =
   | "operator"
   | "account";
 
-const NAV: { key: NavKey; label: string; icon: LucideIcon; href: string; perm?: Permission }[] = [
+// `module` ties a nav item to a subscription module: when the school's plan
+// doesn't include it, the item is hidden (and the backend 404s the routes too).
+// Items with no `module` are always-on (auth/admin/notifications/account).
+const NAV: {
+  key: NavKey;
+  label: string;
+  icon: LucideIcon;
+  href: string;
+  perm?: Permission;
+  module?: ModuleKey;
+}[] = [
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboardIcon, href: "/dashboard" },
-  { key: "analytics", label: "Analytics", icon: BarChart3Icon, href: "/analytics" },
+  { key: "analytics", label: "Analytics", icon: BarChart3Icon, href: "/analytics", module: MODULES.ANALYTICS },
   { key: "operator", label: "Operator", icon: Building2Icon, href: "/operator", perm: "platform.operate" },
   { key: "admin", label: "Admin", icon: SettingsIcon, href: "/admin", perm: "fee.manage" },
   { key: "notifications", label: "Notifications", icon: BellIcon, href: "/notifications", perm: "notification.read" },
-  { key: "messages", label: "Messages", icon: MessageSquareIcon, href: "/messages", perm: "message.read" },
-  { key: "calendar", label: "Calendar", icon: CalendarIcon, href: "/calendar", perm: "event.read" },
-  { key: "students", label: "Students", icon: IdCardIcon, href: "/students", perm: "student.profile.read" },
-  { key: "classes", label: "Classes", icon: UsersIcon, href: "/classes", perm: "class.read" },
-  { key: "timetable", label: "Timetable", icon: CalendarDaysIcon, href: "/timetable", perm: "timetable.read" },
-  { key: "attendance", label: "Attendance", icon: CalendarCheckIcon, href: "/attendance", perm: "attendance.read" },
-  { key: "fees", label: "Fees", icon: CreditCardIcon, href: "/fees", perm: "fee.read" },
-  { key: "documents", label: "Documents", icon: FolderIcon, href: "/documents", perm: "document.read" },
-  { key: "hr", label: "HR", icon: BriefcaseIcon, href: "/hr", perm: "hr.read" },
-  { key: "assessments", label: "Assessments", icon: BookOpenIcon, href: "/assessments", perm: "assessment.read" },
-  { key: "workflows", label: "Approvals", icon: ClipboardCheckIcon, href: "/workflows", perm: "workflow.read" },
-  { key: "games", label: "Games", icon: Gamepad2Icon, href: "/games", perm: "game.leaderboard.read" },
+  { key: "messages", label: "Messages", icon: MessageSquareIcon, href: "/messages", perm: "message.read", module: MODULES.MESSAGING },
+  { key: "calendar", label: "Calendar", icon: CalendarIcon, href: "/calendar", perm: "event.read", module: MODULES.CALENDAR },
+  { key: "students", label: "Students", icon: IdCardIcon, href: "/students", perm: "student.profile.read", module: MODULES.SIS },
+  { key: "classes", label: "Classes", icon: UsersIcon, href: "/classes", perm: "class.read", module: MODULES.LMS },
+  { key: "timetable", label: "Timetable", icon: CalendarDaysIcon, href: "/timetable", perm: "timetable.read", module: MODULES.TIMETABLE },
+  { key: "attendance", label: "Attendance", icon: CalendarCheckIcon, href: "/attendance", perm: "attendance.read", module: MODULES.ATTENDANCE },
+  { key: "fees", label: "Fees", icon: CreditCardIcon, href: "/fees", perm: "fee.read", module: MODULES.FEES },
+  { key: "documents", label: "Documents", icon: FolderIcon, href: "/documents", perm: "document.read", module: MODULES.DOCUMENTS },
+  { key: "hr", label: "HR", icon: BriefcaseIcon, href: "/hr", perm: "hr.read", module: MODULES.HR },
+  { key: "assessments", label: "Assessments", icon: BookOpenIcon, href: "/assessments", perm: "assessment.read", module: MODULES.INTEGRITY },
+  { key: "workflows", label: "Approvals", icon: ClipboardCheckIcon, href: "/workflows", perm: "workflow.read", module: MODULES.WORKFLOW },
+  { key: "games", label: "Games", icon: Gamepad2Icon, href: "/games", perm: "game.leaderboard.read", module: MODULES.GAMES },
   { key: "account", label: "Account", icon: UserIcon, href: "/account" },
 ];
 
@@ -92,7 +103,7 @@ function brandStyle(t?: TenantTheme): React.CSSProperties | undefined {
   };
 }
 
-export function AppShell({
+export async function AppShell({
   schoolName,
   userName,
   active,
@@ -100,7 +111,15 @@ export function AppShell({
   tenantTheme,
   children,
 }: AppShellProps) {
-  const items = NAV.filter((item) => !item.perm || permissions.includes(item.perm));
+  // Nav is filtered by BOTH permission and subscription module. Modules come from
+  // the session (set at login); if absent (older session) we don't module-gate.
+  const session = await auth();
+  const modules = session?.user?.modules ?? null;
+  const items = NAV.filter(
+    (item) =>
+      (!item.perm || permissions.includes(item.perm)) &&
+      (!item.module || !modules || modules.includes(item.module)),
+  );
   return (
     <div data-tenant style={brandStyle(tenantTheme)} className="min-h-screen bg-background">
       {/* Top bar */}
