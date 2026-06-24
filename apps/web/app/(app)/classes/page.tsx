@@ -1,4 +1,5 @@
 import type { ClassDto } from "@sms/types";
+import Link from "next/link";
 import { hasPermission } from "@/lib/permissions";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
@@ -11,6 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { buttonVariants } from "@/components/ui/button";
 import { ClassAdmin } from "@/components/lms/ClassAdmin";
 
 export const dynamic = "force-dynamic";
@@ -20,6 +22,7 @@ export default async function ClassesPage() {
   const session = await auth();
   const user = session!.user;
   const canWrite = hasPermission(user.permissions, "class.write");
+  const canReview = hasPermission(user.permissions, "lms.content.approve");
   const [classes, students, users] = await Promise.all([
     apiGet<ClassDto[]>("/classes/mine"),
     canWrite ? apiGet<{ id: string; name: string }[]>("/students") : Promise.resolve(null),
@@ -29,13 +32,20 @@ export default async function ClassesPage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="classes" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">My classes</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Scoped to you: teachers see classes they teach, students see classes
-            they are enrolled in. Enforced server-side by relationship checks on
-            top of Row-Level Security.
-          </p>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">My classes</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Scoped to you: teachers see classes they teach, students see classes
+              they are enrolled in. Enforced server-side by relationship checks on
+              top of Row-Level Security.
+            </p>
+          </div>
+          {canReview && (
+            <Link href="/content/approvals" className={buttonVariants({ size: "sm", variant: "outline" })}>
+              Content approvals
+            </Link>
+          )}
         </div>
 
         {canWrite && classes && students && users && (
@@ -65,8 +75,14 @@ export default async function ClassesPage() {
                   <CardTitle className="text-base">{c.name}</CardTitle>
                   <CardDescription>{c.subject ?? "General"}</CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="flex items-center justify-between gap-2">
                   <code className="text-xs text-muted-foreground">{c.id}</code>
+                  <Link
+                    href={`/classes/${c.id}/content`}
+                    className={buttonVariants({ size: "sm", variant: "outline" })}
+                  >
+                    Content
+                  </Link>
                 </CardContent>
               </Card>
             ))}

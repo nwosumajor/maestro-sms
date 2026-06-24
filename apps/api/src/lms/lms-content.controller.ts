@@ -66,6 +66,12 @@ export class LmsContentController {
     return this.content.listContent(p, classId);
   }
 
+  @Get("content/approvals/pending")
+  @RequirePermission(LMS_PERMISSIONS.CONTENT_APPROVE)
+  pending(@CurrentPrincipal() p: Principal): Promise<LmsContentDto[]> {
+    return this.content.listPendingApprovals(p);
+  }
+
   @Get("content/:id")
   @RequirePermission(LMS_PERMISSIONS.CONTENT_READ)
   get(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<LmsContentDto> {
