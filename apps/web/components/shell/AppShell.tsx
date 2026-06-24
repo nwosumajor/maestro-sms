@@ -17,6 +17,7 @@ import {
   CalendarIcon,
   BriefcaseIcon,
   Building2Icon,
+  Gamepad2Icon,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -44,6 +45,7 @@ type NavKey =
   | "messages"
   | "calendar"
   | "hr"
+  | "games"
   | "operator"
   | "account";
 
@@ -64,6 +66,7 @@ const NAV: { key: NavKey; label: string; icon: LucideIcon; href: string; perm?: 
   { key: "hr", label: "HR", icon: BriefcaseIcon, href: "/hr", perm: "hr.read" },
   { key: "assessments", label: "Assessments", icon: BookOpenIcon, href: "/assessments", perm: "assessment.read" },
   { key: "workflows", label: "Approvals", icon: ClipboardCheckIcon, href: "/workflows", perm: "workflow.read" },
+  { key: "games", label: "Games", icon: Gamepad2Icon, href: "/games", perm: "game.leaderboard.read" },
   { key: "account", label: "Account", icon: UserIcon, href: "/account" },
 ];
 

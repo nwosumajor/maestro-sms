@@ -39,3 +39,8 @@ export * from "./dto/admissions";
 export * from "./dto/analytics";
 export * from "./dto/calendar";
 export * from "./dto/game";
+export * from "./dto/competition";
+export * from "./dto/race";
+export * from "./dto/ring";
+export * from "./dto/game-settings";
+export * from "./dto/ultimate";

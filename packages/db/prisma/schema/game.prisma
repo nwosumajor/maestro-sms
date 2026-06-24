@@ -37,6 +37,21 @@ enum GameOutcome {
   FORFEIT
 }
 
+/// Competition shape (spec §6/§10). RACE_TOURNAMENT/ULTIMATE land in later steps.
+enum CompetitionType {
+  LEAGUE
+  KNOCKOUT
+  RACE_TOURNAMENT
+  ULTIMATE
+}
+
+enum CompetitionStatus {
+  DRAFT
+  ACTIVE
+  FINISHED
+  CANCELLED
+}
+
 /// One game instance (any mode). Step 3 only creates DUEL.
 model Game {
   id               String     @id @default(uuid()) @db.Uuid
@@ -50,22 +65,127 @@ model Game {
   currentTurnPlayerId String? @db.Uuid
   /// GamePlayer.id of the winner (null until finished).
   winnerPlayerId String? @db.Uuid
+  /// When the current turn began — used to validate the 60s turn limit
+  /// server-side (Elimination Ring, spec §4). Null when not in a timed turn.
+  turnStartedAt DateTime?
   /// FK to a Competition when part of a league/knockout/tournament (step 4+).
   competitionId String? @db.Uuid
+  /// Round this match belongs to within a competition (knockout brackets / league
+  /// schedule rounds). Null for ad-hoc duels.
+  roundNumber Int?
+  /// Play window close for a competition match (spec §6: 48h). No-show → forfeit.
+  deadlineAt DateTime?
+  /// Class Race (RACE mode, spec §5): the class this race belongs to. Null for
+  /// duels and league/knockout matches. Scalar uuid (relationship scoping in the
+  /// service joins via Enrollment/ClassTeacher), matching the timetable pattern.
+  classId String? @db.Uuid
+  /// SECURITY: a Class Race's ONE shared target secret — server-only (spec §9),
+  /// like GamePlayer.secret: never serialized to any client, cleared on finish.
+  /// Null for duels (per-player secrets) and competition matches.
+  targetSecret String?
 
   startedAt  DateTime?
   finishedAt DateTime?
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
 
-  school  School       @relation(fields: [schoolId], references: [id])
-  players GamePlayer[]
-  guesses Guess[]
-  results GameResult[]
+  school      School       @relation(fields: [schoolId], references: [id])
+  competition Competition? @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  players     GamePlayer[]
+  guesses     Guess[]
+  results     GameResult[]
 
   @@index([schoolId])
   @@index([schoolId, status])
+  @@index([competitionId])
+  @@index([schoolId, classId])
   @@map("game")
+}
+
+/// A league, knockout (or, later, race tournament / Ultimate) — spec §6/§10.
+/// Tenant-scoped: school_id non-null + RLS. School-admin/principal create it;
+/// matchmaking + bracket + standings are layered on top of the 2-player engine.
+model Competition {
+  id               String            @id @default(uuid()) @db.Uuid
+  schoolId         String            @db.Uuid
+  type             CompetitionType
+  name             String
+  /// Difficulty (4|5|6) fixed for ALL matches — separate lengths = separate
+  /// competitions (spec §2). Leaderboards are segmented by this.
+  difficultyLength Int
+  status           CompetitionStatus @default(DRAFT)
+  /// Play period (spec §6). Per-match 48h windows are derived from round starts.
+  startAt DateTime
+  endAt   DateTime
+  /// Highest round generated so far (knockout advances round by round).
+  currentRound Int    @default(0)
+  createdById  String @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school    School     @relation(fields: [schoolId], references: [id])
+  games     Game[]
+  standings Standing[]
+
+  @@index([schoolId])
+  @@index([schoolId, status])
+  @@map("competition")
+}
+
+/// Durable per-competition leaderboard row (spec §10). Recomputed as matches
+/// finish. League: points/wins/losses/totalGuesses. Knockout: roundNumber reached
+/// + eliminated/byes. One row per (competition, user).
+model Standing {
+  id            String  @id @default(uuid()) @db.Uuid
+  schoolId      String  @db.Uuid
+  competitionId String  @db.Uuid
+  userId        String  @db.Uuid
+  points        Int     @default(0)
+  wins          Int     @default(0)
+  losses        Int     @default(0)
+  totalGuesses  Int     @default(0)
+  rank          Int?
+  /// Knockout: deepest round the player reached. League: unused.
+  roundNumber Int?
+  eliminated  Boolean @default(false)
+  /// Knockout: how many byes this player has received (never give two — §6).
+  byes Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school      School      @relation(fields: [schoolId], references: [id])
+  competition Competition @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+
+  @@unique([competitionId, userId])
+  @@index([schoolId])
+  @@index([schoolId, competitionId])
+  @@map("standing")
+}
+
+/// Per-school game configuration (spec §8 `game.settings.manage`, §12 tunables).
+/// ONE row per school (tenant-scoped + RLS); school_admin owns it. The game
+/// services read the effective values (falling back to defaults when absent), so
+/// changing a setting actually changes behaviour. `crossSchoolEnabled` is the
+/// school's opt-in posture for the cross-school Ultimate (consumed in step 8).
+model GameSettings {
+  id                     String  @id @default(uuid()) @db.Uuid
+  schoolId               String  @unique @db.Uuid
+  gamesEnabled           Boolean @default(true)
+  defaultDifficulty      Int     @default(4)
+  guessRateLimitMs       Int     @default(750)
+  ringTurnLimitSec       Int     @default(60)
+  leagueMatchWindowHours Int     @default(48)
+  crossSchoolEnabled     Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId])
+  @@map("game_settings")
 }
 
 /// A player's participation in one game.
@@ -82,7 +202,11 @@ model GamePlayer {
   targetId          String?  @db.Uuid
   eliminated        Boolean  @default(false)
   consecutiveMisses Int      @default(0)
-  joinedAt          DateTime @default(now())
+  /// Ring (spec §4): the GamePlayer.id who cracked/eliminated this player. Scopes
+  /// the "inherited history" reward — the cracker may read THIS player's session
+  /// guess history, nobody else. Null if not yet eliminated or self-forfeited.
+  eliminatedById String?  @db.Uuid
+  joinedAt       DateTime @default(now())
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 

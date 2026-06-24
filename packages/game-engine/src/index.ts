@@ -7,3 +7,5 @@
 export * from "./scoring";
 export * from "./match";
 export * from "./store";
+// Step 4 (§11.4): pure League/Knockout matchmaking, brackets & standings.
+export * from "./competition";

@@ -54,6 +54,17 @@ d("RLS cross-tenant isolation", () => {
   const gamePlayerA = randomUUID();
   const guessA = randomUUID();
   const gameResultA = randomUUID();
+  const competitionA = randomUUID();
+  const standingA = randomUUID();
+  const gameSettingsA = randomUUID();
+  // Ultimate: ONLY the tenant-scoped governance/bridge tables are isolation-tested.
+  // The arena tables (ultimate_competition / ultimate_participant) are
+  // CROSS-TENANT by design (RLS-exempt — see 21_ultimate_rls.sql) and carry no PII.
+  const ultimateCompA = randomUUID(); // cross-tenant arena row (not in the deny set)
+  const ultimateParticipantA = randomUUID();
+  const ultimateEnrollA = randomUUID();
+  const ultimateConsentA = randomUUID();
+  const ultimateLinkA = randomUUID();
 
   beforeAll(async () => {
     appPool = new Pool({ connectionString: APP_URL });
@@ -190,17 +201,63 @@ d("RLS cross-tenant isolation", () => {
       `INSERT INTO game_result (id,"schoolId","gameId","userId",rank,"guessCount",outcome,"updatedAt") VALUES ($1,$2,$3,$4,1,3,'WON',now())`,
       [gameResultA, A, gameA, userA],
     );
+    // League/Knockout (step 4): a competition + a standing in A.
+    await a.query(
+      `INSERT INTO competition (id,"schoolId",type,name,"difficultyLength","startAt","endAt","createdById","updatedAt") VALUES ($1,$2,'LEAGUE','L',4,now(),now(),$3,now())`,
+      [competitionA, A, userA],
+    );
+    await a.query(
+      `INSERT INTO standing (id,"schoolId","competitionId","userId","updatedAt") VALUES ($1,$2,$3,$4,now())`,
+      [standingA, A, competitionA, userA],
+    );
+    // Per-school game settings (step 7).
+    await a.query(
+      `INSERT INTO game_settings (id,"schoolId","updatedAt") VALUES ($1,$2,now())`,
+      [gameSettingsA, A],
+    );
+    // Ultimate (step 8): an arena competition (cross-tenant) + the tenant-scoped
+    // enrollment/consent/entry-link governance rows for school A.
+    await a.query(
+      `INSERT INTO ultimate_competition (id,name,"difficultyLength","startAt","endAt","createdById","updatedAt") VALUES ($1,'U',4,now(),now(),$2,now())`,
+      [ultimateCompA, userA],
+    );
+    await a.query(
+      `INSERT INTO ultimate_enrollment (id,"schoolId","competitionId","enrolledById") VALUES ($1,$2,$3,$4)`,
+      [ultimateEnrollA, A, ultimateCompA, userA],
+    );
+    await a.query(
+      `INSERT INTO ultimate_consent (id,"schoolId","studentId","grantedById","updatedAt") VALUES ($1,$2,$3,$4,now())`,
+      [ultimateConsentA, A, userA, userA],
+    );
+    await a.query(
+      `INSERT INTO ultimate_participant (id,"competitionId","schoolId",handle,"updatedAt") VALUES ($1,$2,$3,'acer',now())`,
+      [ultimateParticipantA, ultimateCompA, A],
+    );
+    await a.query(
+      `INSERT INTO ultimate_entry_link (id,"schoolId","competitionId","userId","participantId",handle) VALUES ($1,$2,$3,$4,$5,'acer')`,
+      [ultimateLinkA, A, ultimateCompA, userA, ultimateParticipantA],
+    );
   });
 
   afterAll(async () => {
     const a = adminPool;
     for (const t of [
       "audit_log",
-      // game children before game (FK), game before user/school.
+      // game children before game (FK), game before competition (game.competitionId
+      // FK), standing before competition, competition before user/school.
       "guess",
       "game_result",
       "game_player",
       "game",
+      "standing",
+      "competition",
+      "game_settings",
+      // Ultimate: bridge/governance + participant are schoolId-scoped; the arena
+      // `ultimate_competition` has NO schoolId (cross-tenant) → deleted by id below.
+      "ultimate_entry_link",
+      "ultimate_enrollment",
+      "ultimate_consent",
+      "ultimate_participant",
       "message",
       "thread_participant",
       "message_thread",
@@ -232,6 +289,8 @@ d("RLS cross-tenant isolation", () => {
     ]) {
       await a.query(`DELETE FROM ${t} WHERE "schoolId" = ANY($1)`, [[A, B]]);
     }
+    // Cross-tenant arena competition has no schoolId — delete by id.
+    await a.query(`DELETE FROM ultimate_competition WHERE id = $1`, [ultimateCompA]);
     await a.query(`DELETE FROM "user" WHERE "schoolId" = ANY($1)`, [[A, B]]);
     await a.query(`DELETE FROM school WHERE id = ANY($1)`, [[A, B]]);
     await appPool.end();
@@ -280,6 +339,9 @@ d("RLS cross-tenant isolation", () => {
     ["game_player", gamePlayerA],
     ["guess", guessA],
     ["game_result", gameResultA],
+    ["competition", competitionA],
+    ["standing", standingA],
+    ["game_settings", gameSettingsA],
   ];
 
   it.each(cases)("school B cannot SELECT school A's %s; school A can", async (table, id) => {

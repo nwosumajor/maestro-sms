@@ -96,10 +96,18 @@ model School {
   admissionApplications AdmissionApplication[]
 
   // Dead & Wounded game
-  games       Game[]
-  gamePlayers GamePlayer[]
-  guesses     Guess[]
-  gameResults GameResult[]
+  games        Game[]
+  gamePlayers  GamePlayer[]
+  guesses      Guess[]
+  gameResults  GameResult[]
+  competitions Competition[]
+  standings    Standing[]
+  gameSettings GameSettings[]
+  // Ultimate (cross-school) — ONLY the tenant-scoped governance/bridge tables
+  // relate back to School; the cross-tenant arena tables deliberately do not.
+  ultimateEnrollments UltimateEnrollment[]
+  ultimateConsents    UltimateConsent[]
+  ultimateEntryLinks  UltimateEntryLink[]
 
   @@map("school")
 }

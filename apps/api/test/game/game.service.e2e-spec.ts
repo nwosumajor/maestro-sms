@@ -17,6 +17,7 @@ import { Pool } from "pg";
 import { randomUUID } from "node:crypto";
 import { prisma } from "@sms/db";
 import { GameService } from "../../src/game/game.service";
+import { CompetitionService } from "../../src/game/competition.service";
 import { PrismaTenantService } from "../../src/foundation/prisma-tenant.service";
 import { AuditLogService } from "../../src/foundation/audit-log.service";
 import type { Principal } from "../../src/integrity/integrity.foundation";
@@ -66,7 +67,9 @@ d("GameService integration (RLS + persistence + server authority)", () => {
         [u, s, u + "@t", name],
       );
     }
-    svc = new GameService(new PrismaTenantService() as never, new AuditLogService() as never);
+    const tenant = new PrismaTenantService() as never;
+    const auditSvc = new AuditLogService() as never;
+    svc = new GameService(tenant, auditSvc, new CompetitionService(tenant, auditSvc));
   });
 
   afterAll(async () => {
@@ -112,7 +115,12 @@ d("GameService integration (RLS + persistence + server authority)", () => {
     const final = await svc.getGame(p1, gid);
     expect(final.status).toBe("FINISHED");
     expect(final.winnerPlayerId).toBe(final.players.find((pl) => pl.userId === oppUserId)!.playerId);
-    assertNoSecret(final);
+    // The winner's CRACKING guess necessarily equals the cracked secret and shows
+    // in the PUBLIC move log — that's a legitimately-made guess, not a server leak.
+    // The invariants: the OTHER (un-cracked) secret never appears, and both stored
+    // secrets are cleared (asserted against the DB just below).
+    const uncrackedSecret = curIsP1 ? "5678" : "1234";
+    expect(JSON.stringify(final)).not.toContain(uncrackedSecret);
 
     // DB: secrets cleared, two result rows (one WON)
     const secrets = await admin.query<{ secret: string | null }>(

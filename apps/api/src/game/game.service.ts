@@ -20,11 +20,13 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
 import { isDifficultyLength, isWin, score, validate } from "@sms/game-engine";
+import { effectiveGameSettings } from "./game-settings.util";
 import type { DeadWoundedDto, GameDto, GamePlayerDto, OpenGameDto } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -35,12 +37,15 @@ import {
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
+import { CompetitionService } from "./competition.service";
 
 @Injectable()
 export class GameService {
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
+    // Post-match hook for competition matches (one-way dep; see GameModule).
+    private readonly competitions: CompetitionService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -49,16 +54,23 @@ export class GameService {
 
   // --- create / discover --------------------------------------------------
   /** Open a new 2-player duel; the creator is seated as the first player. */
-  async createGame(p: Principal, input: { difficultyLength: number }): Promise<GameDto> {
-    if (!isDifficultyLength(input.difficultyLength)) {
-      throw new BadRequestException("difficultyLength must be 4, 5, or 6");
-    }
+  async createGame(p: Principal, input: { difficultyLength?: number }): Promise<GameDto> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const settings = effectiveGameSettings(
+        await tx.gameSettings.findFirst({ where: { schoolId: p.schoolId } }),
+      );
+      if (!settings.gamesEnabled) {
+        throw new ForbiddenException("Games are disabled for your school");
+      }
+      const difficultyLength = input.difficultyLength ?? settings.defaultDifficulty;
+      if (!isDifficultyLength(difficultyLength)) {
+        throw new BadRequestException("difficultyLength must be 4, 5, or 6");
+      }
       const game = await tx.game.create({
         data: {
           schoolId: p.schoolId,
           mode: "DUEL",
-          difficultyLength: input.difficultyLength,
+          difficultyLength,
           status: "LOBBY",
           createdById: p.userId,
         },
@@ -66,9 +78,7 @@ export class GameService {
       await tx.gamePlayer.create({
         data: { schoolId: p.schoolId, gameId: game.id, userId: p.userId },
       });
-      await this.log(tx, p, "game.create", "game", game.id, {
-        difficultyLength: input.difficultyLength,
-      });
+      await this.log(tx, p, "game.create", "game", game.id, { difficultyLength });
       return this.buildGameView(tx, game.id, p.userId);
     });
   }
@@ -183,6 +193,8 @@ export class GameService {
 
       if (isWin(result, game.difficultyLength)) {
         await this.finish(tx, gameId, me.id);
+        // Competition match resolved → update standings / advance the bracket.
+        if (game.competitionId) await this.competitions.afterMatchFinished(tx, gameId);
       } else {
         await tx.game.update({
           where: { id: gameId },
@@ -203,6 +215,8 @@ export class GameService {
       }
       const opponent = await this.opponent(tx, gameId, me.id);
       await this.finish(tx, gameId, opponent.id, "FORFEIT", me.id);
+      // Competition match resolved → update standings / advance the bracket.
+      if (game.competitionId) await this.competitions.afterMatchFinished(tx, gameId);
       await this.log(tx, p, "game.forfeit", "game", gameId);
       return this.buildGameView(tx, gameId, p.userId);
     });

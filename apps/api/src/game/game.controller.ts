@@ -17,7 +17,7 @@ import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { GameService } from "./game.service";
 
-const createSchema = z.object({ difficultyLength: z.number().int() });
+const createSchema = z.object({ difficultyLength: z.number().int().optional() });
 const secretSchema = z.object({ secret: z.string() });
 const guessSchema = z.object({ value: z.string() });
 

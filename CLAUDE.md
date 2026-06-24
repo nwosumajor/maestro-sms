@@ -210,6 +210,12 @@ the local stub stays otherwise.
   `test.passThroughEnv` — Turbo 2 strict env will otherwise SKIP the suite.
 - Raw SQL in tests must supply `updatedAt` (Prisma `@updatedAt` has no DB
   default) and quote `"user"` (reserved word).
+- Time columns like `Game.turnStartedAt` are `timestamp without time zone`. The
+  app round-trips them via Prisma (consistently UTC), but a test that BACK-DATES
+  one with raw SQL `now() - interval '…'` stores the DB session's LOCAL wall-clock
+  while Prisma reads it back as UTC — a skew on a non-UTC DB. So run the e2e DB on
+  UTC (RDS/CI default) OR write the value as `now() AT TIME ZONE 'UTC'`. The full
+  api suite (165 tests) is green against a real local Postgres set to UTC.
 - Demo logins (password `password123`): `teacher@` / `student@` / `parent@` /
   `admin@` / `principal@` / `board@` / `accountant@` / `hr@demo.school`.
 - Local stack: `cd infrastructure && cp .env.example .env && docker compose up
@@ -309,12 +315,140 @@ punish.
 4. Teacher dashboard reads aggregated signals via `integrity.report.read`.
 5. Human reviews; any consequence is a manual teacher action, separately logged.
 
-## MODULE: Dead & Wounded Gaming Platform — NOT BUILT (spec: `DEAD_AND_WOUNDED_PLATFORM_SPEC.md`)
+## MODULE: Dead & Wounded Gaming Platform — BUILT (spec: `DEAD_AND_WOUNDED_PLATFORM_SPEC.md`)
 A competitive number-guessing game (Bulls & Cows / Mastermind family) with five
 game modes built on one shared, pure scoring engine. The FULL spec lives in
 `DEAD_AND_WOUNDED_PLATFORM_SPEC.md` at the repo root — READ IT before any work on
-the game. This module is OUT OF SCOPE until explicitly prompted; do not build any
-part of it during other work.
+the game. The entire spec §11 build sequence (steps 1–8) is now implemented;
+typecheck (11/11 turbo tasks) and the 81 game-engine unit tests pass. The DB-backed
+e2e/RLS suites need a provisioned Postgres (TEST_DATABASE_URL app role +
+TEST_ADMIN_URL superuser) and run in CI / locally-with-creds, not the sandbox.
+
+BUILT (spec §11 steps 1–8):
+- **Step 1 — pure scoring engine** (`packages/game-engine/scoring.ts`): `score`/
+  `isWin`/`validate`/`generateSecret`, variable length N=4/5/6, exhaustively tested.
+- **Step 2 — standalone 2-player online game** (`apps/game-server`): native-ws,
+  server-authoritative match (`match.ts`) behind a swappable store seam.
+- **Step 3 — SMS integration of the duel** (`apps/api/src/game`, schema
+  `game.prisma`, RLS `18_game_rls.sql`): tenant-scoped Game/GamePlayer/Guess/
+  GameResult, relationship-scoped (participant-only, 404-not-403), audited,
+  secrets server-only + cleared on finish. `game.play`/`game.leaderboard.read`.
+- **Step 4 — Category 3 League/Knockout** (`competition.service.ts` +
+  `competition.controller.ts`, schema Competition/Standing, RLS
+  `19_competition_rls.sql`): pure round-robin/knockout-bracket/standings logic in
+  `game-engine/competition.ts` (byes never twice, 3/0 points, guess-count then
+  head-to-head tiebreak — all unit-tested); matches are normal duels played
+  through GameService; `GameService.finish` hooks `CompetitionService.afterMatchFinished`
+  (one-way dep, no cycle) to update standings / advance the bracket; an overdue
+  `sweep` forfeits no-shows (48h window). `game.league.create` (principal/
+  school_admin) + leaderboard read.
+- **Step 5 — Category 2 Class Race** (`race.service.ts` + `race.controller.ts`,
+  schema: `Game.classId` + server-only `Game.targetSecret`, migration
+  `20260625000000_race` — NO new RLS file, reuses the `game`/`competition`/
+  `standing` policies): teacher opens a race for THEIR class around one shared
+  server-only target; enrolled students join and race in PARALLEL (no turns,
+  routed through RaceService NOT GameService); first 3 to crack win (top-3 by
+  finish order). Per-student guess redaction (a racer sees only their own
+  guesses; target never serialized, cleared on finish), per-racer guess
+  rate-limit, own-start `elapsedMs`. Cross-class **tournament** = one RACE per
+  class (each its own target) under a `Competition(RACE_TOURNAMENT)`, with
+  per-class + combined standings via the pure `computeRaceStandings` (fewest
+  guesses → fastest own-start elapsed). `game.race.open` (teacher own-class /
+  principal / school_admin) + `game.race.tournament` (principal / school_admin).
+- **Step 6 — Category 1 Elimination Ring** (`ring.service.ts` + `ring.controller.ts`,
+  schema: `Game.turnStartedAt` + `GamePlayer.eliminatedById`, migration
+  `20260626000000_ring` — NO new RLS file, reuses the `game` policies): N players
+  in a ring, each targeting the next; a crack ELIMINATES the target, the ring
+  RE-CLOSES (cracker inherits the eliminated player's target), and the cracker
+  gains the eliminated player's session guess history (the §4 reward, scoped via
+  `eliminatedById` — nobody else sees it). One guess per turn, turn order enforced
+  server-side; the 60s limit is validated from `turnStartedAt` with the graduated
+  rule (skip ×2 → forfeit on 3rd consecutive timeout). Last standing wins;
+  placings recorded (reverse elimination order); secrets cleared on finish. A RING
+  is turn-based and owns its lifecycle (does NOT route through GameService). Live
+  sockets / 15s countdown / hard-disconnect stay in the real-time transport (step
+  2), out of this durable core. `game.play` to play; `game.match.moderate`
+  (teacher/principal/school_admin) to force-end.
+- **Step 7 — Category 5 Administration / RBAC** (`game-settings.service.ts` +
+  `game-settings.controller.ts` + `game-settings.util.ts`, schema GameSettings,
+  migration `20260627000000_game_settings`, RLS `20_game_settings_rls.sql`):
+  finalizes the per-mode RBAC and makes `game.settings.manage` (school_admin)
+  REAL via per-school config — one tenant-scoped GameSettings row (gamesEnabled,
+  defaultDifficulty, guessRateLimitMs, ringTurnLimitSec, leagueMatchWindowHours,
+  crossSchoolEnabled). `effectiveGameSettings` merges the row over platform
+  defaults; the four game services CONSULT it via a tx helper (no constructor
+  churn): `gamesEnabled` gates open/create; `defaultDifficulty` fills an omitted
+  difficulty (difficulty is now optional on open/create); race guess rate-limit,
+  ring turn limit, and league match window all come from settings. GET is broad
+  (`game.leaderboard.read`); PUT is `game.settings.manage` (school_admin only —
+  principal does NOT get it, per §8 config-vs-operations split). `crossSchoolEnabled`
+  is consulted by step 8.
+- **Step 8 — Category 4 Ultimate (cross-school)** (`ultimate.service.ts` +
+  `ultimate.controller.ts`, schema `ultimate.prisma`, migration
+  `20260628000000_ultimate`, RLS `21_ultimate_rls.sql`): the ONE deliberate
+  tenant-boundary crossing, built as a SEPARATE surface with TWO opposite-posture
+  halves. (A) CROSS-TENANT, RLS-EXEMPT arena (`UltimateCompetition` /
+  `UltimateParticipant`) — explicitly listed in the RLS file like `school`/`role`;
+  safe because it carries NO PII (opaque participant id, handle, schoolId for
+  grouping, server-only per-entry secret never serialized, scores). (B)
+  TENANT-SCOPED governance/bridge (`UltimateEnrollment` tier-1 school opt-in,
+  `UltimateConsent` tier-2 per-student guardian consent, `UltimateEntryLink` the
+  ONLY userId↔participantId map) under standard RLS — so an arena row
+  de-anonymises only WITHIN its owning school. Entry requires BOTH consent tiers
+  PLUS the school's `crossSchoolEnabled` posture (step 7). What crosses the wire:
+  handle + school NAME + scores, nothing else. Each player guesses their OWN
+  per-entry target; the cross-school leaderboard ranks finishers via the pure
+  `computeRaceStandings` (fewest guesses → fastest own-start elapsed). Admin
+  (create/cancel) `game.ultimate.admin` (super_admin only); `game.ultimate.enroll`
+  (principal/school_admin); `game.ultimate.consent` (school_admin); enter/guess/me
+  `game.play`; list/leaderboard `game.leaderboard.read`. All mutations (incl. every
+  consent change + arena entry) audit-logged. RLS-e2e covers the tenant-scoped
+  bridge tables (arena tables excluded by design — cross-tenant, no PII).
+
+The full §11 build sequence is COMPLETE. `game.ultimate.*` perms are now seeded.
+
+**Game web UI is BUILT** (`apps/web/app/(app)/games/*` + `apps/web/components/game/*`):
+a permission-gated Games section reachable from the AppShell nav (gated on
+`game.leaderboard.read` so students/teachers/principal/school_admin all see it).
+A hub (`/games`) offers Quick Duel + Elimination Ring start buttons, an open-duels
+join list, a teacher Class-Race opener, a Leagues/Knockouts list + create form
+(`game.league.create`), an Ultimate entry point, and the school GameSettings form
+(`game.settings.manage`). Per-mode play screens poll the BFF (REST-only; live
+sockets remain the step-2 transport, deliberately out of this UI): `/games/duel/[id]`
+(`DuelPlay`), `/games/ring/[id]` (`RingPlay`, incl. inherited-history reveal +
+turn countdown), `/games/race/[id]` (`RacePlay`), `/games/league/[id]`
+(server-rendered standings + matches linking to the duel screen), and `/games/ultimate`
++ `/games/ultimate/[id]` (`UltimatePlay` handle entry + cross-school leaderboard,
+plus staff enroll/consent and super_admin create via `UltimateAdmin`). Shared
+client primitives (`play-ui.tsx`): `GuessForm`/`GuessList`/`ScorePips`/`usePolled`/
+`postSms` + a client-side N-distinct-digit pre-check (server re-validates). All
+screens consume `Serialized<…>` DTOs and gate affordances with `hasPermission`.
+The hub also lists joinable Class Races via `GET /races` (`RaceService.listRaces`
+→ `RaceSummaryDto[]`): relationship-scoped exactly like the per-race view
+(school-wide staff see all open races; teachers see races for classes they teach;
+students see races for classes they're enrolled in, plus any they've joined),
+LOBBY/ACTIVE only, no target ever serialized; covered by a relationship-scoping
+case in `race.service.e2e-spec.ts`. Verified by `tsc --noEmit` (web typecheck clean; the only
+diagnostic is the Next TS-plugin 71007 "serializable props" warning on shared
+client-to-client components — editor-only, not a tsc/CI failure).
+
+Still out of this durable core (live in the real-time transport, step 2): live
+sockets and the Ultimate 15s countdown / hard-disconnect handling.
+
+**FULL-STACK VERIFIED end-to-end (2026-06-24) against a real Postgres 18 (UTC):**
+migrate deploy (all migrations incl. all 6 game ones) → all 21 RLS files apply
+clean (`ON_ERROR_STOP=1`) → seed OK (game RBAC confirmed in DB: 10 `game.*` perms;
+ultimate.admin→super_admin, ultimate.consent→school_admin, ultimate.enroll→
+principal+school_admin). The ENTIRE api jest suite passes: **22 suites / 165 tests**
+(every module + RLS cross-tenant incl. ultimate + all 5 game modes + the new
+`GET /races`). game-engine **81/81**, monorepo typecheck **11/11**, and the web
+**production build** compiles all routes incl. the 7 game screens. Two pre-existing
+game e2e assertions were FIXED (a winner's cracking guess necessarily equals the
+secret and legitimately shows in the public move log / own history — the naive
+`not.toContain(secret)` over the whole view was wrong; now asserts the UN-cracked
+secret never leaks + the stored secret/target column is cleared). NOTE: these DB
+suites `describe.skip` without `TEST_DATABASE_URL`+`TEST_ADMIN_URL`, so they had
+never actually executed before this run.
 
 Binding points even from here:
 - Build order: pure scoring engine first (variable length — 4/5/6 distinct

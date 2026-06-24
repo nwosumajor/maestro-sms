@@ -60,9 +60,19 @@ const PERMS = [
   "platform.operate",
   // Admissions
   "admission.review",
-  // Dead & Wounded game (step 3 wires play + leaderboard; rest finalized in @sms/types)
+  // Dead & Wounded game (steps 3–8: play/leaderboard + league create + class race
+  // open/tournament + match moderate + settings manage + the cross-school Ultimate
+  // enroll/consent/admin) — the full finalized §8 permission set
   "game.play",
   "game.leaderboard.read",
+  "game.league.create",
+  "game.race.open",
+  "game.race.tournament",
+  "game.match.moderate",
+  "game.settings.manage",
+  "game.ultimate.enroll",
+  "game.ultimate.consent",
+  "game.ultimate.admin",
   // LMS
   "class.read",
   "class.write",
@@ -82,7 +92,9 @@ const PERMS = [
 // Role -> permission matrix (CLAUDE.md RBAC + spec section 2).
 const ROLE_PERMS: Record<string, string[]> = {
   // Platform owner: cross-tenant operator console + audited impersonation.
-  super_admin: ["platform.operate", "security.audit.read"],
+  // super_admin is the cross-tenant operator; the ONLY game permission it holds
+  // is the cross-school Ultimate admin (+ leaderboard read to view it).
+  super_admin: ["platform.operate", "security.audit.read", "game.ultimate.admin", "game.leaderboard.read"],
   // Board: read-only oversight + ultimate veto on workflows.
   board: ["class.read", "grade.read", "integrity.report.read", "workflow.read", "workflow.veto", "notification.read", "fee.read", "document.read", "timetable.read", "message.read", "message.send", "event.read",
   ],
@@ -104,6 +116,9 @@ const ROLE_PERMS: Record<string, string[]> = {
     "security.audit.read", "security.elevation.request", "security.elevation.approve",
     "privacy.erasure.review", "message.read", "message.send", "event.read", "event.write",
     "hr.read", "hr.write", "rbac.manage", "admission.review",
+    "game.league.create", "game.leaderboard.read",
+    "game.race.open", "game.race.tournament", "game.match.moderate",
+    "game.ultimate.enroll",
   ],
   // School Administrator: SIS / enrollment / workflows — but NOT grade books, NOT veto.
   school_admin: [
@@ -121,6 +136,10 @@ const ROLE_PERMS: Record<string, string[]> = {
     "security.audit.read", "security.elevation.request", "security.elevation.approve",
     "privacy.erasure.review", "message.read", "message.send", "event.read", "event.write",
     "hr.read", "hr.write", "rbac.manage", "admission.review",
+    "game.league.create", "game.leaderboard.read",
+    "game.race.open", "game.race.tournament", "game.match.moderate",
+    "game.settings.manage",
+    "game.ultimate.enroll", "game.ultimate.consent",
   ],
   teacher: [
     "assessment.read", "assessment.write", "submission.read",
@@ -133,7 +152,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     "document.read", "document.write",
     "timetable.read",
     "security.elevation.request", "message.read", "message.send", "event.read", "event.write",
-    "game.play", "game.leaderboard.read",
+    "game.play", "game.leaderboard.read", "game.race.open", "game.match.moderate",
   ],
   student: [
     "assessment.read", "submission.read", "submission.write",
