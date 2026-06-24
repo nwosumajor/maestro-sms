@@ -65,6 +65,9 @@ d("RLS cross-tenant isolation", () => {
   const ultimateEnrollA = randomUUID();
   const ultimateConsentA = randomUUID();
   const ultimateLinkA = randomUUID();
+  const lmsContentA = randomUUID();
+  const quizAttemptA = randomUUID();
+  const forumPostA = randomUUID();
 
   beforeAll(async () => {
     appPool = new Pool({ connectionString: APP_URL });
@@ -237,12 +240,29 @@ d("RLS cross-tenant isolation", () => {
       `INSERT INTO ultimate_entry_link (id,"schoolId","competitionId","userId","participantId",handle) VALUES ($1,$2,$3,$4,$5,'acer')`,
       [ultimateLinkA, A, ultimateCompA, userA, ultimateParticipantA],
     );
+    // LMS learning content + quiz attempt + forum post (tenant-scoped).
+    await a.query(
+      `INSERT INTO lms_content (id,"schoolId","classId",type,title,body,"authorId","updatedAt") VALUES ($1,$2,$3,'LESSON','L','{}'::jsonb,$4,now())`,
+      [lmsContentA, A, classA, userA],
+    );
+    await a.query(
+      `INSERT INTO quiz_attempt (id,"schoolId","contentId","studentId",answers,score,total) VALUES ($1,$2,$3,$4,'{}'::jsonb,1,1)`,
+      [quizAttemptA, A, lmsContentA, userA],
+    );
+    await a.query(
+      `INSERT INTO forum_post (id,"schoolId","contentId","authorId",body) VALUES ($1,$2,$3,$4,'hi')`,
+      [forumPostA, A, lmsContentA, userA],
+    );
   });
 
   afterAll(async () => {
     const a = adminPool;
     for (const t of [
       "audit_log",
+      // LMS content children (forum/quiz) before lms_content; lms_content before class/user.
+      "forum_post",
+      "quiz_attempt",
+      "lms_content",
       // game children before game (FK), game before competition (game.competitionId
       // FK), standing before competition, competition before user/school.
       "guess",
@@ -342,6 +362,9 @@ d("RLS cross-tenant isolation", () => {
     ["competition", competitionA],
     ["standing", standingA],
     ["game_settings", gameSettingsA],
+    ["lms_content", lmsContentA],
+    ["quiz_attempt", quizAttemptA],
+    ["forum_post", forumPostA],
   ];
 
   it.each(cases)("school B cannot SELECT school A's %s; school A can", async (table, id) => {

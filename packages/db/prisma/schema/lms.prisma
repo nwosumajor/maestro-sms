@@ -24,6 +24,7 @@ model Class {
   enrollments Enrollment[]
   assessments Assessment[]
   attendanceSessions AttendanceSession[]
+  lmsContents LmsContent[]
 
   @@index([schoolId])
   @@map("class")

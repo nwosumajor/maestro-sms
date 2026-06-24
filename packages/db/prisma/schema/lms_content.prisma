@@ -1,0 +1,86 @@
+// =============================================================================
+// LMS learning content — materials / lessons / quizzes / forum threads
+// =============================================================================
+// Flexible content bodies live in JSONB (CLAUDE.md: LMS content is Postgres JSONB,
+// not Mongo — one DB keeps the RLS tenant-isolation model intact). All tenant-
+// scoped (non-null schoolId + RLS). Authoring is relationship-scoped (teacher of
+// the class / school_admin); publication is APPROVAL-GATED through the workflow
+// engine (status driven by a linked WorkflowRequest), so only PUBLISHED content
+// reaches enrolled students.
+// =============================================================================
+
+/// One approval-gated content item attached to a class.
+model LmsContent {
+  id        String   @id @default(uuid()) @db.Uuid
+  schoolId  String   @db.Uuid
+  classId   String   @db.Uuid
+  /// MATERIAL | LESSON | QUIZ | FORUM_THREAD
+  type      String
+  title     String
+  /// Polymorphic body (lesson html / quiz definition incl. answer key / forum
+  /// intro / material description). The quiz answer key is stripped server-side
+  /// before a student sees it.
+  body      Json     @default("{}")
+  /// DRAFT | PENDING_APPROVAL | PUBLISHED | REJECTED | REVISION_REQUESTED
+  status    String   @default("DRAFT")
+  authorId  String   @db.Uuid
+  /// The linked approval WorkflowRequest id (plain uuid, cross-module decoupled).
+  approvalRequestId String? @db.Uuid
+  /// MATERIAL PDF: object-storage key + original filename + upload-confirmed flag.
+  fileKey      String?
+  fileName     String?
+  fileUploaded Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school  School @relation(fields: [schoolId], references: [id])
+  class   Class  @relation(fields: [classId], references: [id])
+  author  User   @relation("ContentAuthor", fields: [authorId], references: [id])
+  attempts QuizAttempt[]
+  posts    ForumPost[]
+
+  @@index([schoolId])
+  @@index([schoolId, classId])
+  @@map("lms_content")
+}
+
+/// A student's (single) attempt at a published quiz, auto-graded server-side.
+model QuizAttempt {
+  id        String   @id @default(uuid()) @db.Uuid
+  schoolId  String   @db.Uuid
+  contentId String   @db.Uuid
+  studentId String   @db.Uuid
+  /// The student's submitted answers (per-question), kept for review.
+  answers   Json     @default("{}")
+  score     Int
+  total     Int
+  createdAt DateTime @default(now())
+
+  school  School     @relation(fields: [schoolId], references: [id])
+  content LmsContent @relation(fields: [contentId], references: [id])
+  student User       @relation("StudentQuizAttempts", fields: [studentId], references: [id])
+
+  @@unique([contentId, studentId])
+  @@index([schoolId])
+  @@index([schoolId, contentId])
+  @@map("quiz_attempt")
+}
+
+/// A reply in a published forum thread. Enrolled students + staff; NOT per-post
+/// approval-gated (the thread itself is the approval unit).
+model ForumPost {
+  id        String   @id @default(uuid()) @db.Uuid
+  schoolId  String   @db.Uuid
+  contentId String   @db.Uuid
+  authorId  String   @db.Uuid
+  body      String
+  createdAt DateTime @default(now())
+
+  school  School     @relation(fields: [schoolId], references: [id])
+  content LmsContent @relation(fields: [contentId], references: [id])
+  author  User       @relation("ForumAuthor", fields: [authorId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, contentId])
+  @@map("forum_post")
+}

@@ -27,6 +27,7 @@ export * from "./permissions/all";
 export * from "./dto/common";
 export * from "./dto/fees";
 export * from "./dto/lms";
+export * from "./dto/lms-content";
 export * from "./dto/attendance";
 export * from "./dto/sis";
 export * from "./dto/timetable";

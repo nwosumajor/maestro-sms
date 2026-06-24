@@ -79,6 +79,12 @@ const PERMS = [
   "enrollment.read",
   "enrollment.write",
   "guardian.write",
+  // LMS learning content
+  "lms.content.read",
+  "lms.content.write",
+  "lms.content.approve",
+  "lms.quiz.attempt",
+  "lms.forum.post",
   // Gradebook
   "grade.read",
   "grade.write",
@@ -119,6 +125,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     "game.league.create", "game.leaderboard.read",
     "game.race.open", "game.race.tournament", "game.match.moderate",
     "game.ultimate.enroll",
+    "lms.content.read", "lms.content.approve",
   ],
   // School Administrator: SIS / enrollment / workflows — but NOT grade books, NOT veto.
   school_admin: [
@@ -140,6 +147,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     "game.race.open", "game.race.tournament", "game.match.moderate",
     "game.settings.manage",
     "game.ultimate.enroll", "game.ultimate.consent",
+    "lms.content.read", "lms.content.write", "lms.forum.post",
   ],
   teacher: [
     "assessment.read", "assessment.write", "submission.read",
@@ -153,6 +161,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     "timetable.read",
     "security.elevation.request", "message.read", "message.send", "event.read", "event.write",
     "game.play", "game.leaderboard.read", "game.race.open", "game.match.moderate",
+    "lms.content.read", "lms.content.write", "lms.forum.post",
   ],
   student: [
     "assessment.read", "submission.read", "submission.write",
@@ -161,6 +170,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     "notification.read", "fee.read", "document.read",
     "timetable.read", "message.read", "message.send", "event.read",
     "game.play", "game.leaderboard.read",
+    "lms.content.read", "lms.quiz.attempt", "lms.forum.post",
   ],
   parent: [
     "class.read", "grade.read",
@@ -168,6 +178,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     "attendance.read",
     "notification.read", "fee.read", "document.read",
     "timetable.read", "message.read", "message.send", "event.read",
+    "lms.content.read",
   ],
   // Non-teaching staff: narrow. Both can raise workflow requests (POs / leave).
   // The accountant owns Fees/Billing.

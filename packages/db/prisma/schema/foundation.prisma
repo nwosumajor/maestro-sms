@@ -112,6 +112,11 @@ model School {
   // Subscription / module entitlement (one row per school)
   subscription SchoolSubscription?
 
+  // LMS learning content
+  lmsContents  LmsContent[]
+  quizAttempts QuizAttempt[]
+  forumPosts   ForumPost[]
+
   @@map("school")
 }
 
@@ -174,6 +179,11 @@ model User {
   studentEnrollments Enrollment[]  @relation("StudentEnrollments")
   parentLinks       ParentChild[]  @relation("ParentLinks")
   childLinks        ParentChild[]  @relation("ChildLinks")
+
+  // LMS learning content
+  authoredContent   LmsContent[]  @relation("ContentAuthor")
+  quizAttempts      QuizAttempt[] @relation("StudentQuizAttempts")
+  forumPosts        ForumPost[]   @relation("ForumAuthor")
 
   // Gradebook
   gradesGiven       Grade[]        @relation("GradesGiven")

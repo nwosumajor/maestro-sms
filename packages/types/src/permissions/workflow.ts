@@ -70,7 +70,12 @@ export const WORKFLOW_ACTION_PERMISSION: Record<WorkflowAction, WorkflowPermissi
   VETO: WORKFLOW_PERMISSIONS.VETO,
 };
 
-export const WORKFLOW_TYPES = ["LEAVE", "PURCHASE_ORDER", "DISCIPLINARY"] as const;
+export const WORKFLOW_TYPES = [
+  "LEAVE",
+  "PURCHASE_ORDER",
+  "DISCIPLINARY",
+  "LMS_CONTENT_PUBLISH",
+] as const;
 export type WorkflowType = (typeof WORKFLOW_TYPES)[number];
 
 /** Role -> workflow permissions (section 2 matrix). */

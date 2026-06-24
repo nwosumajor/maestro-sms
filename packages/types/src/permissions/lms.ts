@@ -18,6 +18,16 @@ export const LMS_PERMISSIONS = {
   ENROLLMENT_WRITE: "enrollment.write",
   /** Link/unlink a guardian to a student. school_admin. */
   GUARDIAN_WRITE: "guardian.write",
+  /** Read learning content (published; authors also see their own drafts). */
+  CONTENT_READ: "lms.content.read",
+  /** Create/edit/submit learning content. teacher (own class), school_admin. */
+  CONTENT_WRITE: "lms.content.write",
+  /** Approve/reject submitted content. PRINCIPAL only (process-maker approver). */
+  CONTENT_APPROVE: "lms.content.approve",
+  /** Take a published quiz. student. */
+  QUIZ_ATTEMPT: "lms.quiz.attempt",
+  /** Post a reply in a published forum thread. student + teaching staff. */
+  FORUM_POST: "lms.forum.post",
 } as const;
 
 export type LmsPermission = (typeof LMS_PERMISSIONS)[keyof typeof LMS_PERMISSIONS];
@@ -30,8 +40,24 @@ export const LMS_ROLE_PERMISSIONS = {
     LMS_PERMISSIONS.ENROLLMENT_READ,
     LMS_PERMISSIONS.ENROLLMENT_WRITE,
     LMS_PERMISSIONS.GUARDIAN_WRITE,
+    LMS_PERMISSIONS.CONTENT_READ,
+    LMS_PERMISSIONS.CONTENT_WRITE,
+    LMS_PERMISSIONS.FORUM_POST,
   ],
-  teacher: [LMS_PERMISSIONS.CLASS_READ, LMS_PERMISSIONS.ENROLLMENT_READ],
-  student: [LMS_PERMISSIONS.CLASS_READ],
-  parent: [LMS_PERMISSIONS.CLASS_READ],
+  // Principal authors nothing by default but is the content APPROVER.
+  principal: [LMS_PERMISSIONS.CONTENT_READ, LMS_PERMISSIONS.CONTENT_APPROVE],
+  teacher: [
+    LMS_PERMISSIONS.CLASS_READ,
+    LMS_PERMISSIONS.ENROLLMENT_READ,
+    LMS_PERMISSIONS.CONTENT_READ,
+    LMS_PERMISSIONS.CONTENT_WRITE,
+    LMS_PERMISSIONS.FORUM_POST,
+  ],
+  student: [
+    LMS_PERMISSIONS.CLASS_READ,
+    LMS_PERMISSIONS.CONTENT_READ,
+    LMS_PERMISSIONS.QUIZ_ATTEMPT,
+    LMS_PERMISSIONS.FORUM_POST,
+  ],
+  parent: [LMS_PERMISSIONS.CLASS_READ, LMS_PERMISSIONS.CONTENT_READ],
 } as const;

@@ -90,6 +90,7 @@ apply_rls packages/db/prisma/rls/19_competition_rls.sql         standing_update
 apply_rls packages/db/prisma/rls/20_game_settings_rls.sql       game_settings_update
 apply_rls packages/db/prisma/rls/21_ultimate_rls.sql            ultimate_entry_link_update
 apply_rls packages/db/prisma/rls/22_subscription_rls.sql        school_subscription_update
+apply_rls packages/db/prisma/rls/23_lms_content_rls.sql         forum_post_update
 
 # Seed on first provision (compose: SEED_ON_START=true; cloud migrate task: always).
 if [ "${SEED_ON_START}" = "true" ] || [ "$MODE" = "migrate" ]; then
