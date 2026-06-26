@@ -1,6 +1,7 @@
 import { InMemoryGameStore } from "@sms/game-engine";
 import { GameService } from "./game-service";
 import type { ClientMessage, ServerMessage } from "./protocol";
+import type { GamePrincipal } from "./auth";
 
 /** A test connection: captures every frame the server sends to it. */
 class FakeClient {
@@ -9,14 +10,17 @@ class FakeClient {
   gameId: string | null = null;
   playerId: string | null = null;
 
-  constructor(private readonly svc: GameService) {
+  constructor(
+    private readonly svc: GameService,
+    principal?: GamePrincipal,
+  ) {
     this.connId = svc.connect((m) => {
       this.received.push(m);
       if (m.type === "joined") {
         this.gameId = m.gameId;
         this.playerId = m.playerId;
       }
-    });
+    }, principal);
   }
 
   send(msg: ClientMessage): void {
@@ -185,6 +189,92 @@ describe("GameService — server-authoritative orchestration (spec §11 step 2)"
     const over = b.of("over");
     expect(over).toHaveLength(1);
     expect(over[0]?.winnerId).toBe(b.playerId); // Bob wins by Alice's forfeit
+  });
+
+  it("warns the current player 15s before the turn deadline (§4)", () => {
+    jest.useFakeTimers();
+    const svc = newService({ turnMs: 1000, turnWarningMs: 200 });
+    const a = new FakeClient(svc);
+    const b = new FakeClient(svc);
+    a.send({ type: "create", difficultyLength: 4, displayName: "Alice" });
+    b.send({ type: "join", gameId: a.gameId as string, displayName: "Bob" });
+    a.send({ type: "secret", value: "1234" });
+    b.send({ type: "secret", value: "5678" });
+
+    const curId = a.latestState()!.game.currentTurnPlayerId as string;
+
+    // Nothing fires before the warning window opens (1000 - 200 = 800ms in).
+    jest.advanceTimersByTime(799);
+    expect(a.of("turn_warning")).toHaveLength(0);
+
+    // At the window, BOTH players are told whose turn is running out.
+    jest.advanceTimersByTime(1);
+    for (const client of [a, b]) {
+      const warns = client.of("turn_warning");
+      expect(warns).toHaveLength(1);
+      expect(warns[0]?.playerId).toBe(curId);
+      expect(warns[0]?.remainingMs).toBe(200);
+    }
+    svc.shutdown();
+  });
+
+  it("does not warn once the turn has already passed", () => {
+    jest.useFakeTimers();
+    const svc = newService({ turnMs: 1000, turnWarningMs: 200 });
+    const a = new FakeClient(svc);
+    const b = new FakeClient(svc);
+    a.send({ type: "create", difficultyLength: 4, displayName: "Alice" });
+    b.send({ type: "join", gameId: a.gameId as string, displayName: "Bob" });
+    a.send({ type: "secret", value: "1234" });
+    b.send({ type: "secret", value: "5678" });
+
+    // The current player guesses (non-winning) well before the warning, passing
+    // the turn — the pending warning for the old turn must be cancelled.
+    const st = a.latestState()!.game;
+    const cur = st.currentTurnPlayerId === a.playerId ? a : b;
+    jest.advanceTimersByTime(100);
+    cur.send({ type: "guess", value: "9013" });
+    jest.advanceTimersByTime(701); // crosses the original 800ms warning mark
+
+    // Only the NEW turn's warning may exist, and never one naming the player who
+    // already moved.
+    for (const client of [a, b]) {
+      for (const w of client.of("turn_warning")) {
+        expect(w.playerId).not.toBe(cur.playerId);
+      }
+    }
+    svc.shutdown();
+  });
+
+  it("uses the verified identity for the display name when authenticated", () => {
+    const svc = newService();
+    const ada: GamePrincipal = { userId: "u1", schoolId: "s1", roles: ["student"], name: "Ada" };
+    const a = new FakeClient(svc, ada);
+    // The client tries to spoof a different name; the token's name wins.
+    a.send({ type: "create", difficultyLength: 4, displayName: "Imposter" });
+    const names = a.latestState()?.game.players.map((p) => p.displayName);
+    expect(names).toEqual(["Ada"]);
+  });
+
+  it("enforces tenant isolation — a different school cannot join (404 not 403)", () => {
+    const svc = newService();
+    const host: GamePrincipal = { userId: "u1", schoolId: "school-A", roles: [], name: "Ada" };
+    const sameSchool: GamePrincipal = { userId: "u2", schoolId: "school-A", roles: [], name: "Bob" };
+    const otherSchool: GamePrincipal = { userId: "u3", schoolId: "school-B", roles: [], name: "Eve" };
+
+    const a = new FakeClient(svc, host);
+    a.send({ type: "create", difficultyLength: 4 });
+    const gameId = a.gameId as string;
+
+    const eve = new FakeClient(svc, otherSchool);
+    eve.send({ type: "join", gameId });
+    // Cross-tenant join is indistinguishable from a non-existent game.
+    expect(eve.of("error").pop()?.code).toBe("GAME_NOT_FOUND");
+
+    const bob = new FakeClient(svc, sameSchool);
+    bob.send({ type: "join", gameId });
+    expect(bob.of("error")).toHaveLength(0);
+    expect(bob.gameId).toBe(gameId);
   });
 
   it("times out a stalling turn and eventually forfeits (§9 graduated)", () => {

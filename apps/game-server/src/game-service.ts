@@ -12,6 +12,7 @@
 import { randomUUID } from "node:crypto";
 import { Duel, DuelError, type DuelStatus, type GameStore } from "@sms/game-engine";
 import type { ClientMessage, ServerMessage } from "./protocol";
+import type { GamePrincipal } from "./auth";
 
 export type Send = (msg: ServerMessage) => void;
 
@@ -21,12 +22,17 @@ interface Connection {
   gameId: string | null;
   playerId: string | null;
   lastActionAt: number;
+  /** Verified identity when the handshake was authenticated; undefined in open mode. */
+  principal?: GamePrincipal;
 }
 
 export interface GameServiceOptions {
   store: GameStore;
   /** Per-turn time limit before a miss (ms). Default 60s (spec §4 rationale). */
   turnMs?: number;
+  /** How long before the turn deadline to emit a `turn_warning` (ms). Default 15s
+   *  (spec §4: "a warning at 15 seconds remaining"). No-op if >= turnMs. */
+  turnWarningMs?: number;
   /** Grace after a disconnect before the absent player forfeits (ms). Default 2m. */
   disconnectGraceMs?: number;
   /** Minimum gap between a connection's gameplay actions (ms). Anti-abuse §9. */
@@ -36,25 +42,32 @@ export interface GameServiceOptions {
 export class GameService {
   private readonly store: GameStore;
   private readonly turnMs: number;
+  private readonly turnWarningMs: number;
   private readonly disconnectGraceMs: number;
   private readonly minActionIntervalMs: number;
 
   private readonly connections = new Map<string, Connection>();
   private readonly gameConnections = new Map<string, Set<string>>();
+  /** gameId → owning school (from the creator's verified token), for tenant
+   *  isolation. null in open dev mode (no auth). */
+  private readonly gameSchool = new Map<string, string | null>();
   private readonly turnTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly turnWarnTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(opts: GameServiceOptions) {
     this.store = opts.store;
     this.turnMs = opts.turnMs ?? 60_000;
+    this.turnWarningMs = opts.turnWarningMs ?? 15_000;
     this.disconnectGraceMs = opts.disconnectGraceMs ?? 120_000;
     this.minActionIntervalMs = opts.minActionIntervalMs ?? 250;
   }
 
-  /** Register a new connection. Returns its server-assigned connection id. */
-  connect(send: Send): string {
+  /** Register a new connection. `principal` is the verified identity when the
+   *  handshake was authenticated (undefined in open dev mode). */
+  connect(send: Send, principal?: GamePrincipal): string {
     const id = randomUUID();
-    this.connections.set(id, { id, send, gameId: null, playerId: null, lastActionAt: 0 });
+    this.connections.set(id, { id, send, gameId: null, playerId: null, lastActionAt: 0, principal });
     return id;
   }
 
@@ -122,21 +135,26 @@ export class GameService {
   /** Stop all timers (for clean shutdown / tests). */
   shutdown(): void {
     for (const t of this.turnTimers.values()) clearTimeout(t);
+    for (const t of this.turnWarnTimers.values()) clearTimeout(t);
     for (const t of this.disconnectTimers.values()) clearTimeout(t);
     this.turnTimers.clear();
+    this.turnWarnTimers.clear();
     this.disconnectTimers.clear();
   }
 
   // --- handlers -----------------------------------------------------------
   private onCreate(conn: Connection, msg: Extract<ClientMessage, { type: "create" }>): void {
     if (conn.gameId) throw new DuelError("ALREADY_IN_GAME", "this connection is already in a game");
-    const displayName = requireName(msg.displayName);
+    // SECURITY: when authenticated, the display name comes from the verified token,
+    // never the client frame; the client value is only a fallback in open dev mode.
+    const displayName = conn.principal?.name ?? requireName(msg.displayName);
     const gameId = randomUUID();
     // Duel() validates difficultyLength (throws BAD_LENGTH on 4/5/6 violation).
     const duel = new Duel({ id: gameId, difficultyLength: msg.difficultyLength });
     const playerId = randomUUID();
     duel.join(playerId, displayName);
     this.store.save(duel);
+    this.gameSchool.set(gameId, conn.principal?.schoolId ?? null);
     this.bind(conn, gameId, playerId);
     conn.send({ type: "joined", gameId, playerId });
     this.broadcastState(gameId);
@@ -144,9 +162,15 @@ export class GameService {
 
   private onJoin(conn: Connection, msg: Extract<ClientMessage, { type: "join" }>): void {
     if (conn.gameId) throw new DuelError("ALREADY_IN_GAME", "this connection is already in a game");
-    const displayName = requireName(msg.displayName);
+    const displayName = conn.principal?.name ?? requireName(msg.displayName);
     const duel = this.store.get(requireString(msg.gameId, "gameId"));
     if (!duel) throw new DuelError("GAME_NOT_FOUND", "no such game");
+    // SECURITY: tenant isolation — you may only join a game in your own school.
+    // 404-not-403 (CLAUDE.md): never reveal that a cross-tenant game exists.
+    const owner = this.gameSchool.get(duel.id) ?? null;
+    if (owner !== null && conn.principal?.schoolId !== owner) {
+      throw new DuelError("GAME_NOT_FOUND", "no such game");
+    }
     const playerId = randomUUID();
     duel.join(playerId, displayName);
     this.bind(conn, duel.id, playerId);
@@ -183,14 +207,39 @@ export class GameService {
 
   // --- timers -------------------------------------------------------------
   private refreshTurnTimer(gameId: string): void {
-    const existing = this.turnTimers.get(gameId);
-    if (existing) clearTimeout(existing);
-    this.turnTimers.delete(gameId);
+    this.clearTurnTimers(gameId);
 
     const duel = this.store.get(gameId);
     if (!duel || duel.status !== "active") return;
     const timer = setTimeout(() => this.onTurnTimeout(gameId), this.turnMs);
     this.turnTimers.set(gameId, timer);
+
+    // Advisory "X seconds left" nudge before the deadline (spec §4). Skip when
+    // the warning window doesn't fit inside the turn (e.g. tiny test turnMs).
+    if (this.turnWarningMs > 0 && this.turnWarningMs < this.turnMs) {
+      const warn = setTimeout(() => this.onTurnWarning(gameId), this.turnMs - this.turnWarningMs);
+      this.turnWarnTimers.set(gameId, warn);
+    }
+  }
+
+  private clearTurnTimers(gameId: string): void {
+    const turn = this.turnTimers.get(gameId);
+    if (turn) clearTimeout(turn);
+    this.turnTimers.delete(gameId);
+    const warn = this.turnWarnTimers.get(gameId);
+    if (warn) clearTimeout(warn);
+    this.turnWarnTimers.delete(gameId);
+  }
+
+  private onTurnWarning(gameId: string): void {
+    this.turnWarnTimers.delete(gameId);
+    const duel = this.store.get(gameId);
+    if (!duel || duel.status !== "active" || !duel.currentTurnPlayerId) return;
+    this.broadcast(gameId, {
+      type: "turn_warning",
+      playerId: duel.currentTurnPlayerId,
+      remainingMs: this.turnWarningMs,
+    });
   }
 
   private onTurnTimeout(gameId: string): void {
@@ -212,9 +261,7 @@ export class GameService {
 
   // --- broadcast helpers --------------------------------------------------
   private finishUp(gameId: string): void {
-    const timer = this.turnTimers.get(gameId);
-    if (timer) clearTimeout(timer);
-    this.turnTimers.delete(gameId);
+    this.clearTurnTimers(gameId);
 
     const duel = this.store.get(gameId);
     if (!duel) return;
@@ -222,6 +269,7 @@ export class GameService {
     if (duel.status === "finished" && duel.winnerId) {
       this.broadcast(gameId, { type: "over", winnerId: duel.winnerId, results: duel.results() });
     }
+    this.gameSchool.delete(gameId);
   }
 
   private broadcastState(gameId: string): void {
