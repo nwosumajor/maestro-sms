@@ -76,10 +76,14 @@ d("LmsContentService integration (authoring, approval, quiz, forum, RLS)", () =>
     await admin.query(`INSERT INTO enrollment (id,"schoolId","classId","studentId") VALUES ($1,$2,$3,$4)`, [randomUUID(), SA, CLS, S1]);
 
     const tenant = new PrismaTenantService() as never;
+    // Stub the notifier: publish alerts are best-effort and need a BullMQ queue
+    // (Redis) we don't run here; the service swallows failures regardless.
+    const notifier = { enqueue: async () => undefined } as never;
     svc = new LmsContentService(
       tenant,
       new AuditLogService() as never,
       new WorkflowService(tenant),
+      notifier,
       new StubStorageProvider(),
     );
   });

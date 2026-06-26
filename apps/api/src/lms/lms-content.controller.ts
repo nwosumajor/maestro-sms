@@ -139,6 +139,15 @@ export class LmsContentController {
     return this.content.attemptQuiz(p, id, b.answers);
   }
 
+  @Get("content/:id/quiz/me")
+  @RequirePermission(LMS_PERMISSIONS.CONTENT_READ)
+  myQuizResult(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+  ): Promise<QuizAttemptResultDto | null> {
+    return this.content.myQuizResult(p, id);
+  }
+
   @Get("content/:id/forum")
   @RequirePermission(LMS_PERMISSIONS.CONTENT_READ)
   forum(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<ForumPostDto[]> {

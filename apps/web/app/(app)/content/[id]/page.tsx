@@ -1,4 +1,4 @@
-import type { ForumPostDto, LmsContentDto, Serialized } from "@sms/types";
+import type { ForumPostDto, LmsContentDto, QuizAttemptResultDto, Serialized } from "@sms/types";
 import Link from "next/link";
 import { hasPermission } from "@/lib/permissions";
 import { auth } from "@/lib/auth";
@@ -19,14 +19,21 @@ export default async function ContentDetailPage({ params }: { params: { id: stri
   const user = session!.user;
 
   const content = await apiGet<Serialized<LmsContentDto>>(`/content/${params.id}`);
-  const forum =
-    content?.type === "FORUM_THREAD"
-      ? await apiGet<Serialized<ForumPostDto>[]>(`/content/${params.id}/forum`)
-      : null;
 
   const canQuiz = hasPermission(user.permissions, "lms.quiz.attempt");
   const canPost = hasPermission(user.permissions, "lms.forum.post");
   const isStaff = hasPermission(user.permissions, "lms.content.write");
+
+  const forum =
+    content?.type === "FORUM_THREAD"
+      ? await apiGet<Serialized<ForumPostDto>[]>(`/content/${params.id}/forum`)
+      : null;
+  // A student who already attempted a quiz sees their (server re-graded) result
+  // instead of the form. Staff don't have an attempt of their own.
+  const priorResult =
+    content?.type === "QUIZ" && canQuiz && !isStaff
+      ? await apiGet<Serialized<QuizAttemptResultDto> | null>(`/content/${params.id}/quiz/me`)
+      : null;
 
   return (
     <AppShell
@@ -55,6 +62,7 @@ export default async function ContentDetailPage({ params }: { params: { id: stri
             <ContentDetail
               content={content}
               forum={forum ?? []}
+              priorResult={priorResult ?? null}
               canQuiz={canQuiz}
               canPost={canPost}
               isStaff={isStaff}

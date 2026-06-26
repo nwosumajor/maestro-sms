@@ -4,6 +4,7 @@ import { LmsService } from "./lms.service";
 import { LmsContentController } from "./lms-content.controller";
 import { LmsContentService } from "./lms-content.service";
 import { WorkflowModule } from "../workflow/workflow.module";
+import { NotificationModule } from "../notifications/notification.module";
 import { STORAGE_PROVIDER, StubStorageProvider } from "../documents/storage.provider";
 import { S3StorageProvider } from "../documents/s3-storage.provider";
 
@@ -12,7 +13,7 @@ import { S3StorageProvider } from "../documents/s3-storage.provider";
 // binds the same pluggable StorageProvider as the Document Vault for PDF uploads
 // (STORAGE_PROVIDER=s3 -> real presigner; otherwise the local stub).
 @Module({
-  imports: [WorkflowModule],
+  imports: [WorkflowModule, NotificationModule],
   controllers: [LmsController, LmsContentController],
   providers: [
     LmsService,

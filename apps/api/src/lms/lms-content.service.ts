@@ -15,6 +15,7 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from "@nestjs/common";
 import { Prisma } from "@sms/db";
@@ -39,6 +40,7 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 import { WorkflowService } from "../workflow/workflow.service";
+import { NotificationService } from "../notifications/notification.service";
 import { STORAGE_PROVIDER, type StorageProvider } from "../documents/storage.provider";
 import { gradeQuiz, isValidQuiz, redactQuiz } from "./lms-content.util";
 
@@ -64,10 +66,13 @@ type ContentRow = {
 
 @Injectable()
 export class LmsContentService {
+  private readonly logger = new Logger(LmsContentService.name);
+
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly workflow: WorkflowService,
+    private readonly notifications: NotificationService,
     @Inject(STORAGE_PROVIDER) private readonly storage: StorageProvider,
   ) {}
 
@@ -236,13 +241,69 @@ export class LmsContentService {
 
     const status: LmsContentStatus =
       action === "APPROVE" ? "PUBLISHED" : action === "REJECT" ? "REJECTED" : "REVISION_REQUESTED";
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    const { dto, recipients } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const updated = (await tx.lmsContent.update({
         where: { id: contentId },
         data: { status },
       })) as ContentRow;
       await this.log(tx, p, "lms.content.review", contentId, { action, status });
-      return this.toDto(updated, true, await this.nameOf(tx, updated.authorId));
+      // On publish, resolve the audience (enrolled students + their guardians)
+      // inside the tenant tx; the actual enqueue happens best-effort post-commit.
+      const recipients = status === "PUBLISHED" ? await this.contentAudience(tx, row.classId) : [];
+      return { dto: this.toDto(updated, true, await this.nameOf(tx, updated.authorId)), recipients };
+    });
+
+    if (recipients.length > 0) await this.notifyPublished(p, dto, recipients);
+    return dto;
+  }
+
+  /** Enrolled students of a class + their linked guardians (de-duplicated). */
+  private async contentAudience(tx: TenantTx, classId: string): Promise<string[]> {
+    const enrolled = await tx.enrollment.findMany({ where: { classId }, select: { studentId: true } });
+    const studentIds = enrolled.map((e: { studentId: string }) => e.studentId);
+    const recipients = new Set<string>(studentIds);
+    if (studentIds.length > 0) {
+      const links = await tx.parentChild.findMany({
+        where: { studentId: { in: studentIds } },
+        select: { parentId: true },
+      });
+      for (const l of links) recipients.add(l.parentId);
+    }
+    return [...recipients];
+  }
+
+  /** Best-effort: alert each recipient that new content was published. */
+  private async notifyPublished(p: Principal, dto: LmsContentDto, recipients: string[]): Promise<void> {
+    for (const recipientId of recipients) {
+      try {
+        await this.notifications.enqueue(this.ctx(p), {
+          recipientId,
+          type: "ANNOUNCEMENT",
+          title: "New learning content",
+          body: `"${dto.title}" is now available in your class.`,
+          data: { contentId: dto.id, classId: dto.classId, contentType: dto.type },
+        });
+      } catch (err) {
+        this.logger.error(`LMS publish notification failed for ${recipientId}: ${String(err)}`);
+      }
+    }
+  }
+
+  /** The calling student's own quiz result (re-graded server-side), or null. */
+  async myQuizResult(p: Principal, contentId: string): Promise<QuizAttemptResultDto | null> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const row = await this.requireContent(tx, contentId);
+      if (row.type !== "QUIZ") throw new BadRequestException("Not a quiz");
+      await this.assertCanRead(tx, p, row);
+      const attempt = await tx.quizAttempt.findFirst({
+        where: { contentId, studentId: p.userId },
+        select: { answers: true },
+      });
+      if (!attempt) return null;
+      const quiz = (row.body as unknown as { quiz?: QuizDefDto }).quiz;
+      if (!quiz) return null;
+      // Re-grade with the full server-side key; never exposes the key itself.
+      return gradeQuiz(quiz, (attempt.answers ?? {}) as Record<string, string>);
     });
   }
 

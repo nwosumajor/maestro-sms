@@ -52,12 +52,14 @@ async function post<T = unknown>(
 export function ContentDetail({
   content,
   forum,
+  priorResult,
   canQuiz,
   canPost,
   isStaff,
 }: {
   content: Content;
   forum: Post[];
+  priorResult: QuizAttemptResultDto | null;
   canQuiz: boolean;
   canPost: boolean;
   isStaff: boolean;
@@ -90,7 +92,13 @@ export function ContentDetail({
         )}
 
         {body.kind === "QUIZ" && (
-          <QuizView contentId={content.id} quiz={body.quiz} canQuiz={canQuiz} isStaff={isStaff} />
+          <QuizView
+            contentId={content.id}
+            quiz={body.quiz}
+            canQuiz={canQuiz}
+            isStaff={isStaff}
+            priorResult={priorResult}
+          />
         )}
 
         {body.kind === "FORUM_THREAD" && (
@@ -140,16 +148,21 @@ function QuizView({
   quiz,
   canQuiz,
   isStaff,
+  priorResult,
 }: {
   contentId: string;
   quiz: QuizDefDto;
   canQuiz: boolean;
   isStaff: boolean;
+  priorResult: QuizAttemptResultDto | null;
 }) {
   const [answers, setAnswers] = React.useState<Record<string, string>>({});
-  const [result, setResult] = React.useState<QuizAttemptResultDto | null>(null);
+  const [result, setResult] = React.useState<QuizAttemptResultDto | null>(priorResult);
   const [error, setError] = React.useState<string | null>(null);
   const questions = quiz.questions ?? [];
+  // Once a result exists (a prior attempt, or this session's submission), the
+  // quiz is read-only and per-question correctness is shown.
+  const done = !!result;
 
   const submit = async () => {
     setError(null);
@@ -162,7 +175,11 @@ function QuizView({
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
         {questions.length} question{questions.length === 1 ? "" : "s"}.
-        {isStaff ? " You are viewing the answer key." : " You may attempt this once."}
+        {isStaff
+          ? " You are viewing the answer key."
+          : done
+            ? " You have already attempted this quiz."
+            : " You may attempt this once."}
       </p>
 
       {questions.map((q, i) => (
