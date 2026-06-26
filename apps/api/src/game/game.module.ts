@@ -11,6 +11,7 @@ import { GameSettingsController } from "./game-settings.controller";
 import { GameSettingsService } from "./game-settings.service";
 import { UltimateController } from "./ultimate.controller";
 import { UltimateService } from "./ultimate.service";
+import { GameEventsService } from "./game-events.service";
 
 // Depends on the global FoundationModule (TENANT_DATABASE, AUDIT_LOG_SERVICE,
 // auth guard) — no re-import needed. Reuses @sms/game-engine for the pure
@@ -39,6 +40,7 @@ import { UltimateService } from "./ultimate.service";
     RingService,
     GameSettingsService,
     UltimateService,
+    GameEventsService,
   ],
   exports: [
     GameService,
@@ -47,6 +49,7 @@ import { UltimateService } from "./ultimate.service";
     RingService,
     GameSettingsService,
     UltimateService,
+    GameEventsService,
   ],
 })
 export class GameModule {}

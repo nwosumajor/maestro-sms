@@ -2,10 +2,16 @@ import { createHmac } from "node:crypto";
 import { WebSocket } from "ws";
 import { generateSecret } from "@sms/game-engine";
 import { createGameServer, type RunningGameServer } from "./server";
-import type { ClientMessage, ServerMessage } from "./protocol";
-import type { RingClientMessage, RingServerMessage } from "./ring-protocol";
-import type { RaceClientMessage, RaceServerMessage } from "./race-protocol";
-import type { ArenaClientMessage, ArenaServerMessage } from "./arena-protocol";
+import type {
+  ArenaClientMessage,
+  ArenaServerMessage,
+  ClientMessage,
+  RaceClientMessage,
+  RaceServerMessage,
+  RingClientMessage,
+  RingServerMessage,
+  ServerMessage,
+} from "@sms/game-transport";
 
 /** A real WebSocket client wrapper with a typed `wait(...)` helper. */
 function connectClient(port: number) {

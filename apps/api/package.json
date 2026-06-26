@@ -19,6 +19,7 @@
     "@nestjs/platform-express": "^10.4.4",
     "@sms/db": "workspace:*",
     "@sms/game-engine": "workspace:*",
+    "@sms/game-transport": "workspace:*",
     "@sms/types": "workspace:*",
     "bcryptjs": "^2.4.3",
     "bullmq": "^5.13.2",
@@ -26,6 +27,7 @@
     "pdfkit": "^0.19.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
+    "ws": "^8.21.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
@@ -38,6 +40,7 @@
     "@types/node": "^20.16.10",
     "@types/pdfkit": "^0.17.6",
     "@types/pg": "^8.11.10",
+    "@types/ws": "^8.5.12",
     "jest": "^29.7.0",
     "pg": "^8.13.0",
     "ts-jest": "^29.2.5",

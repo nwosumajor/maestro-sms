@@ -21,6 +21,7 @@ import { AdminModule } from "./admin/admin.module";
 import { OperatorModule } from "./operator/operator.module";
 import { AdmissionsModule } from "./admissions/admissions.module";
 import { GameModule } from "./game/game.module";
+import { GameSocketModule } from "./game-socket/game-socket.module";
 import { HealthController } from "./health.controller";
 
 @Module({
@@ -59,6 +60,7 @@ import { HealthController } from "./health.controller";
     OperatorModule,
     AdmissionsModule,
     GameModule,
+    GameSocketModule,
   ],
   controllers: [HealthController],
 })

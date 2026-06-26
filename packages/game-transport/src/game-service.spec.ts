@@ -277,6 +277,33 @@ describe("GameService — server-authoritative orchestration (spec §11 step 2)"
     expect(bob.gameId).toBe(gameId);
   });
 
+  it("keeps tenant isolation after the game has FINISHED (no existence leak)", () => {
+    const svc = newService();
+    const host: GamePrincipal = { userId: "u1", schoolId: "school-A", roles: [], name: "Ada" };
+    const opp: GamePrincipal = { userId: "u2", schoolId: "school-A", roles: [], name: "Bob" };
+    const a = new FakeClient(svc, host);
+    const b = new FakeClient(svc, opp);
+    a.send({ type: "create", difficultyLength: 4 });
+    const gameId = a.gameId as string;
+    b.send({ type: "join", gameId });
+    a.send({ type: "secret", value: "1234" });
+    b.send({ type: "secret", value: "5678" });
+    // Play to a finish.
+    const st = a.latestState()!.game;
+    const secretOf: Record<string, string> = { [a.playerId as string]: "1234", [b.playerId as string]: "5678" };
+    const cur = st.currentTurnPlayerId === a.playerId ? a : b;
+    const opc = cur === a ? b : a;
+    cur.send({ type: "guess", value: "9013" });
+    opc.send({ type: "guess", value: secretOf[cur.playerId as string] as string });
+    expect(a.latestState()?.game.status).toBe("finished");
+
+    // A cross-tenant late join of the FINISHED game must still be a clean 404,
+    // never FULL/NOT_LOBBY (which would disclose the game's existence).
+    const eve = new FakeClient(svc, { userId: "u9", schoolId: "school-B", roles: [], name: "Eve" });
+    eve.send({ type: "join", gameId });
+    expect(eve.of("error").pop()?.code).toBe("GAME_NOT_FOUND");
+  });
+
   it("times out a stalling turn and eventually forfeits (§9 graduated)", () => {
     jest.useFakeTimers();
     const svc = newService({ turnMs: 1000 });

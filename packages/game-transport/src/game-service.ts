@@ -269,7 +269,10 @@ export class GameService {
     if (duel.status === "finished" && duel.winnerId) {
       this.broadcast(gameId, { type: "over", winnerId: duel.winnerId, results: duel.results() });
     }
-    this.gameSchool.delete(gameId);
+    // SECURITY: keep the gameId→school mapping for as long as the game lives in
+    // the store. Deleting it here would make a later cross-tenant join of a
+    // FINISHED game fall through the tenant check and leak its existence (FULL/
+    // NOT_LOBBY instead of 404). The map shares the store's (un-evicted) lifetime.
   }
 
   private broadcastState(gameId: string): void {

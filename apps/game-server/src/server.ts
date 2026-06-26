@@ -19,11 +19,15 @@
 
 import { WebSocket, WebSocketServer } from "ws";
 import { InMemoryGameStore, type GameStore } from "@sms/game-engine";
-import { GameService } from "./game-service";
-import { RingService } from "./ring-service";
-import { RaceService } from "./race-service";
-import { ArenaService } from "./arena-service";
-import { AuthError, verifyJwt, type GamePrincipal } from "./auth";
+import {
+  ArenaService,
+  AuthError,
+  GameService,
+  RaceService,
+  RingService,
+  verifyJwt,
+  type GamePrincipal,
+} from "@sms/game-transport";
 
 export interface GameServerOptions {
   /** 0 (default) binds an ephemeral port — handy for tests. */
