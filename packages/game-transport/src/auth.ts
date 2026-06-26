@@ -21,6 +21,10 @@ export interface GamePrincipal {
   userId: string;
   schoolId: string;
   roles: string[];
+  /** Fine-grained permission strings from the token. The in-memory transport
+   *  modes don't read these, but the SMS-hosted gateway uses them to honor the
+   *  same coarse permission gate the HTTP controllers enforce. */
+  permissions: string[];
   /** Display name from the token; falls back to a short id slice if absent. */
   name: string;
 }
@@ -76,6 +80,7 @@ export function verifyJwt(token: string, secret: string, now: number = Date.now(
     userId,
     schoolId,
     roles: Array.isArray(payload.roles) ? (payload.roles as string[]) : [],
+    permissions: Array.isArray(payload.permissions) ? (payload.permissions as string[]) : [],
     name,
   };
 }

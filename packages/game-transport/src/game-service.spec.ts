@@ -248,7 +248,7 @@ describe("GameService — server-authoritative orchestration (spec §11 step 2)"
 
   it("uses the verified identity for the display name when authenticated", () => {
     const svc = newService();
-    const ada: GamePrincipal = { userId: "u1", schoolId: "s1", roles: ["student"], name: "Ada" };
+    const ada: GamePrincipal = { userId: "u1", schoolId: "s1", roles: ["student"], permissions: [], name: "Ada" };
     const a = new FakeClient(svc, ada);
     // The client tries to spoof a different name; the token's name wins.
     a.send({ type: "create", difficultyLength: 4, displayName: "Imposter" });
@@ -258,9 +258,9 @@ describe("GameService — server-authoritative orchestration (spec §11 step 2)"
 
   it("enforces tenant isolation — a different school cannot join (404 not 403)", () => {
     const svc = newService();
-    const host: GamePrincipal = { userId: "u1", schoolId: "school-A", roles: [], name: "Ada" };
-    const sameSchool: GamePrincipal = { userId: "u2", schoolId: "school-A", roles: [], name: "Bob" };
-    const otherSchool: GamePrincipal = { userId: "u3", schoolId: "school-B", roles: [], name: "Eve" };
+    const host: GamePrincipal = { userId: "u1", schoolId: "school-A", roles: [], permissions: [], name: "Ada" };
+    const sameSchool: GamePrincipal = { userId: "u2", schoolId: "school-A", roles: [], permissions: [], name: "Bob" };
+    const otherSchool: GamePrincipal = { userId: "u3", schoolId: "school-B", roles: [], permissions: [], name: "Eve" };
 
     const a = new FakeClient(svc, host);
     a.send({ type: "create", difficultyLength: 4 });
@@ -279,8 +279,8 @@ describe("GameService — server-authoritative orchestration (spec §11 step 2)"
 
   it("keeps tenant isolation after the game has FINISHED (no existence leak)", () => {
     const svc = newService();
-    const host: GamePrincipal = { userId: "u1", schoolId: "school-A", roles: [], name: "Ada" };
-    const opp: GamePrincipal = { userId: "u2", schoolId: "school-A", roles: [], name: "Bob" };
+    const host: GamePrincipal = { userId: "u1", schoolId: "school-A", roles: [], permissions: [], name: "Ada" };
+    const opp: GamePrincipal = { userId: "u2", schoolId: "school-A", roles: [], permissions: [], name: "Bob" };
     const a = new FakeClient(svc, host);
     const b = new FakeClient(svc, opp);
     a.send({ type: "create", difficultyLength: 4 });
@@ -299,7 +299,7 @@ describe("GameService — server-authoritative orchestration (spec §11 step 2)"
 
     // A cross-tenant late join of the FINISHED game must still be a clean 404,
     // never FULL/NOT_LOBBY (which would disclose the game's existence).
-    const eve = new FakeClient(svc, { userId: "u9", schoolId: "school-B", roles: [], name: "Eve" });
+    const eve = new FakeClient(svc, { userId: "u9", schoolId: "school-B", roles: [], permissions: [], name: "Eve" });
     eve.send({ type: "join", gameId });
     expect(eve.of("error").pop()?.code).toBe("GAME_NOT_FOUND");
   });

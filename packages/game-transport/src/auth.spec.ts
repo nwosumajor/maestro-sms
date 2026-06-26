@@ -19,6 +19,7 @@ const claims = {
   userId: "user-123",
   school_id: "school-abc",
   roles: ["student"],
+  permissions: ["game.play"],
   name: "Ada Lovelace",
   exp: Math.floor(Date.now() / 1000) + 3600,
 };
@@ -30,6 +31,7 @@ describe("verifyJwt — handshake auth (spec §11 step 3)", () => {
       userId: "user-123",
       schoolId: "school-abc",
       roles: ["student"],
+      permissions: ["game.play"],
       name: "Ada Lovelace",
     });
   });
@@ -40,6 +42,7 @@ describe("verifyJwt — handshake auth (spec §11 step 3)", () => {
     expect(p.schoolId).toBe("s-9");
     expect(p.name).toBe("Player u-9");
     expect(p.roles).toEqual([]);
+    expect(p.permissions).toEqual([]);
   });
 
   it("rejects a tampered signature", () => {

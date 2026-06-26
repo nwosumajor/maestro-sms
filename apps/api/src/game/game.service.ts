@@ -38,6 +38,7 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 import { CompetitionService } from "./competition.service";
+import { GameEventsService } from "./game-events.service";
 
 @Injectable()
 export class GameService {
@@ -46,6 +47,10 @@ export class GameService {
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     // Post-match hook for competition matches (one-way dep; see GameModule).
     private readonly competitions: CompetitionService,
+    // In-process "game changed" pub/sub — the live socket gateway re-reads the
+    // RLS-scoped, viewer-redacted view on each nudge. Emitted AFTER the tx commits
+    // so a subscriber that re-reads always observes the persisted state (§10).
+    private readonly events: GameEventsService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -55,7 +60,7 @@ export class GameService {
   // --- create / discover --------------------------------------------------
   /** Open a new 2-player duel; the creator is seated as the first player. */
   async createGame(p: Principal, input: { difficultyLength?: number }): Promise<GameDto> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    const view = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const settings = effectiveGameSettings(
         await tx.gameSettings.findFirst({ where: { schoolId: p.schoolId } }),
       );
@@ -81,6 +86,8 @@ export class GameService {
       await this.log(tx, p, "game.create", "game", game.id, { difficultyLength });
       return this.buildGameView(tx, game.id, p.userId);
     });
+    this.events.emitChanged(view.id);
+    return view;
   }
 
   /** Lobbies in the caller's school still waiting for a second player. */
@@ -114,7 +121,7 @@ export class GameService {
 
   // --- join / setup -------------------------------------------------------
   async joinGame(p: Principal, gameId: string): Promise<GameDto> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    const view = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const game = await this.requireGame(tx, gameId);
       if (game.status !== "LOBBY") throw new ConflictException("Game is not open to join");
       const players = await tx.gamePlayer.findMany({ where: { gameId }, select: { userId: true } });
@@ -129,12 +136,16 @@ export class GameService {
       await this.log(tx, p, "game.join", "game", gameId);
       return this.buildGameView(tx, gameId, p.userId);
     });
+    this.events.emitChanged(gameId);
+    return view;
   }
 
   /** Submit the caller's secret. Both secrets present → the game activates. */
   async submitSecret(p: Principal, gameId: string, secret: string): Promise<GameDto> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    let competitionId: string | null = null;
+    const view = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const game = await this.requireGame(tx, gameId);
+      competitionId = game.competitionId; // a league match SETUP→ACTIVE shows in standings
       const me = await this.requireSeat(tx, gameId, p.userId);
       if (game.status !== "SETUP") throw new ConflictException("Game is not awaiting secrets");
       if (!validate(secret, game.difficultyLength)) {
@@ -153,6 +164,8 @@ export class GameService {
       }
       return this.buildGameView(tx, gameId, p.userId);
     });
+    this.emitGameAndCompetition(gameId, competitionId);
+    return view;
   }
 
   // --- play ---------------------------------------------------------------
@@ -163,7 +176,8 @@ export class GameService {
    * guess, and finishes the game on a crack.
    */
   async guess(p: Principal, gameId: string, value: string): Promise<DeadWoundedDto> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    let finishedCompetitionId: string | null = null;
+    const result = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const game = await this.requireGame(tx, gameId);
       const me = await this.requireSeat(tx, gameId, p.userId);
       if (game.status !== "ACTIVE") throw new ConflictException("Game is not in play");
@@ -194,7 +208,10 @@ export class GameService {
       if (isWin(result, game.difficultyLength)) {
         await this.finish(tx, gameId, me.id);
         // Competition match resolved → update standings / advance the bracket.
-        if (game.competitionId) await this.competitions.afterMatchFinished(tx, gameId);
+        if (game.competitionId) {
+          await this.competitions.afterMatchFinished(tx, gameId);
+          finishedCompetitionId = game.competitionId; // nudge the league only on resolve
+        }
       } else {
         await tx.game.update({
           where: { id: gameId },
@@ -203,11 +220,14 @@ export class GameService {
       }
       return { dead: result.dead, wounded: result.wounded };
     });
+    this.emitGameAndCompetition(gameId, finishedCompetitionId);
+    return result;
   }
 
   /** Abandon the game; the opponent wins by forfeit. */
   async forfeit(p: Principal, gameId: string): Promise<GameDto> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    let competitionId: string | null = null;
+    const view = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const game = await this.requireGame(tx, gameId);
       const me = await this.requireSeat(tx, gameId, p.userId);
       if (game.status !== "ACTIVE" && game.status !== "SETUP") {
@@ -216,10 +236,15 @@ export class GameService {
       const opponent = await this.opponent(tx, gameId, me.id);
       await this.finish(tx, gameId, opponent.id, "FORFEIT", me.id);
       // Competition match resolved → update standings / advance the bracket.
-      if (game.competitionId) await this.competitions.afterMatchFinished(tx, gameId);
+      if (game.competitionId) {
+        await this.competitions.afterMatchFinished(tx, gameId);
+        competitionId = game.competitionId;
+      }
       await this.log(tx, p, "game.forfeit", "game", gameId);
       return this.buildGameView(tx, gameId, p.userId);
     });
+    this.emitGameAndCompetition(gameId, competitionId);
+    return view;
   }
 
   // --- read ---------------------------------------------------------------
@@ -376,5 +401,16 @@ export class GameService {
       { actorId: p.userId, action, entity, entityId, schoolId: p.schoolId, metadata },
       tx,
     );
+  }
+
+  /**
+   * Announce a committed change to a game AND, when it belongs to a competition,
+   * to the competition itself — so a league/knockout watcher (keyed by the
+   * competitionId) re-reads its standings/bracket. Both ids ride the one event
+   * bus; the bus is just a gameId nudge with no authority (§10).
+   */
+  private emitGameAndCompetition(gameId: string, competitionId: string | null): void {
+    this.events.emitChanged(gameId);
+    if (competitionId) this.events.emitChanged(competitionId);
   }
 }

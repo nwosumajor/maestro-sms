@@ -62,6 +62,7 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 import { effectiveGameSettings } from "./game-settings.util";
+import { GameEventsService } from "./game-events.service";
 
 const cryptoRng = () => randomInt(0, 1_000_000) / 1_000_000;
 
@@ -70,6 +71,12 @@ export class UltimateService {
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
+    // In-process "game changed" pub/sub — the /ws/watch ultimate gateway re-reads
+    // the pseudonymous cross-school leaderboard on each nudge (§10 live push). The
+    // arena id is GLOBAL (cross-tenant), so a guess in ANY school nudges every
+    // watcher of that competition; the re-read carries handles+school names+scores
+    // only — never PII (the leaderboard DTO is the boundary).
+    private readonly events: GameEventsService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -115,7 +122,7 @@ export class UltimateService {
   }
 
   async cancelCompetition(p: Principal, competitionId: string): Promise<UltimateCompetitionDto> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    const dto = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const comp = await this.requireCompetition(tx, competitionId);
       if (comp.status === "CANCELLED" || comp.status === "FINISHED") {
         throw new ConflictException("competition is already closed");
@@ -127,6 +134,8 @@ export class UltimateService {
       await this.log(tx, p, "ultimate.competition.cancel", competitionId);
       return this.toCompetitionDto(updated, false, false);
     });
+    this.events.emitChanged(competitionId);
+    return dto;
   }
 
   // =========================================================================
@@ -227,7 +236,7 @@ export class UltimateService {
     if (!isValidHandle(trimmed)) {
       throw new BadRequestException("handle must be 3–24 chars: letters, digits, space, _ or -");
     }
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    const entry = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const comp = await this.requireCompetition(tx, competitionId);
       if (comp.status !== "ACTIVE") throw new ConflictException("competition is not open");
 
@@ -286,6 +295,8 @@ export class UltimateService {
       await this.log(tx, p, "ultimate.enter", competitionId, { participantId });
       return this.myEntryView(tx, competitionId, participantId, trimmed);
     });
+    this.events.emitChanged(competitionId); // a new participant appears on the board
+    return entry;
   }
 
   /** Guess against the caller's OWN per-entry target. Returns only the score. */
@@ -294,7 +305,7 @@ export class UltimateService {
     competitionId: string,
     value: string,
   ): Promise<{ dead: number; wounded: number }> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    const result = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const link = await tx.ultimateEntryLink.findFirst({
         where: { competitionId, userId: p.userId },
       });
@@ -345,6 +356,8 @@ export class UltimateService {
       });
       return { dead: result.dead, wounded: result.wounded };
     });
+    this.events.emitChanged(competitionId); // scores / finishes move the board
+    return result;
   }
 
   /** The caller's own entry (never the secret). 404 if not entered. */

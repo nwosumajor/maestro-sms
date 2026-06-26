@@ -10,13 +10,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { GuessForm, GuessList, StatusLine, postSms, usePolled } from "./play-ui";
+import { GuessForm, GuessList, LiveDot, StatusLine, postSms, useLiveGame } from "./play-ui";
 
 type Race = Serialized<RaceDto>;
 
 export function RacePlay({ initial, canOpen }: { initial: Race; canOpen: boolean }) {
-  const { data: race, refresh } = usePolled<Race>(`races/${initial.id}`, initial, {
-    intervalMs: 2000,
+  const { data: race, refresh, live } = useLiveGame<Race>(initial.id, `races/${initial.id}`, initial, {
+    mode: "race",
+    fallbackMs: 2000,
     stop: (r) => r.status === "FINISHED" || r.status === "ABANDONED",
   });
   const [msg, setMsg] = React.useState<string | null>(null);
@@ -41,7 +42,10 @@ export function RacePlay({ initial, canOpen }: { initial: Race; canOpen: boolean
       <Card>
         <CardHeader className="flex-row items-center justify-between space-y-0">
           <CardTitle className="text-base">Class Race</CardTitle>
-          <Badge variant={race.status === "ACTIVE" ? "default" : "secondary"}>{race.status}</Badge>
+          <div className="flex items-center gap-2">
+            <LiveDot live={live} />
+            <Badge variant={race.status === "ACTIVE" ? "default" : "secondary"}>{race.status}</Badge>
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">

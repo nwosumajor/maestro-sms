@@ -57,6 +57,7 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 import { effectiveGameSettings } from "./game-settings.util";
+import { GameEventsService } from "./game-events.service";
 
 /** CSPRNG-backed RNG in [0,1) for unguessable round-1 seeding (server authority). */
 function cryptoRng(): () => number {
@@ -78,10 +79,30 @@ export class CompetitionService {
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
+    // In-process "game changed" pub/sub — the /ws/watch league gateway re-reads
+    // the RLS-scoped standings/bracket on each nudge (§10 live push). Per-match
+    // resolution also nudges this competitionId from GameService.
+    private readonly events: GameEventsService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
     return { schoolId: p.schoolId, userId: p.userId };
+  }
+
+  /**
+   * Run a competition mutation, then announce the changed competition AFTER the
+   * tx commits so a league/knockout watcher (keyed by competitionId) re-reads the
+   * persisted standings/bracket. `id` is known up front except for `create`,
+   * where it's derived from the result.
+   */
+  private async withEmit<T extends { id: string }>(
+    p: Principal,
+    id: string | null,
+    fn: (tx: TenantTx) => Promise<T>,
+  ): Promise<T> {
+    const out = await this.db.runAsTenant(this.ctx(p), fn);
+    this.events.emitChanged(id ?? out.id);
+    return out;
   }
 
   // --- create -------------------------------------------------------------
@@ -102,7 +123,7 @@ export class CompetitionService {
     const ids = [...new Set(input.participantUserIds ?? [])];
     if (ids.length < 2) throw new BadRequestException("a competition needs at least 2 participants");
 
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    return this.withEmit(p, null, async (tx) => {
       const settings = await this.settings(tx, p.schoolId);
       if (!settings.gamesEnabled) {
         throw new ForbiddenException("Games are disabled for your school");
@@ -149,7 +170,7 @@ export class CompetitionService {
   /** Transition DRAFT → ACTIVE and generate the first round (knockout) or the
    *  whole round-robin schedule (league). */
   async start(p: Principal, competitionId: string): Promise<CompetitionDetailDto> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    return this.withEmit(p, competitionId, async (tx) => {
       const comp = await this.requireCompetition(tx, competitionId);
       if (comp.status !== "DRAFT") throw new ConflictException("competition is not in DRAFT");
       const standings = await tx.standing.findMany({ where: { competitionId } });
@@ -186,7 +207,7 @@ export class CompetitionService {
   // --- sweep overdue matches (no-show forfeits, spec §6) ------------------
   /** Forfeit every competition match whose play window has closed unfinished. */
   async sweep(p: Principal, competitionId: string): Promise<CompetitionDetailDto> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    return this.withEmit(p, competitionId, async (tx) => {
       const comp = await this.requireCompetition(tx, competitionId);
       if (comp.status !== "ACTIVE") throw new ConflictException("competition is not active");
       const now = new Date();
@@ -222,7 +243,7 @@ export class CompetitionService {
 
   /** Cancel a competition (DRAFT or ACTIVE). No hard-delete — durable record. */
   async cancel(p: Principal, competitionId: string): Promise<CompetitionDetailDto> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    return this.withEmit(p, competitionId, async (tx) => {
       const comp = await this.requireCompetition(tx, competitionId);
       if (comp.status === "FINISHED" || comp.status === "CANCELLED") {
         throw new ConflictException("competition is already closed");

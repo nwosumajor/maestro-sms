@@ -18,6 +18,7 @@ import { Pool } from "pg";
 import { randomUUID } from "node:crypto";
 import { prisma } from "@sms/db";
 import { RingService } from "../../src/game/ring.service";
+import { GameEventsService } from "../../src/game/game-events.service";
 import { PrismaTenantService } from "../../src/foundation/prisma-tenant.service";
 import { AuditLogService } from "../../src/foundation/audit-log.service";
 import type { Principal } from "../../src/integrity/integrity.foundation";
@@ -65,7 +66,7 @@ d("RingService integration (Elimination Ring, RLS, server authority)", () => {
         [u, s, u + "@t", name],
       );
     }
-    svc = new RingService(new PrismaTenantService() as never, new AuditLogService() as never);
+    svc = new RingService(new PrismaTenantService() as never, new AuditLogService() as never, new GameEventsService());
   });
 
   afterAll(async () => {

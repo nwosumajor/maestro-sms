@@ -12,16 +12,23 @@
 // The transport SERVICES are the shared @sms/game-transport core (also driven by
 // the standalone apps/game-server); this gateway is the thin SMS-hosted shell.
 //
+// /ws/watch is different: a READ-ONLY spectator of a DURABLE duel. It does NOT use
+// the in-memory transport — it subscribes to GameEventsService (commits to the
+// Postgres-backed GameService) and pushes the same RLS-scoped, viewer-redacted
+// view the HTTP GET returns. This is the §10 live-push bridge over the durable
+// authority; the durable API stays the sole source of truth.
+//
 // Live game state is in-memory per the §10 model (transient: sockets, timers, the
 // current match). Durable results persistence (GameResult/Standing) is a separate,
 // later slice — this gateway owns only the live session.
 // =============================================================================
 
-import { Injectable, Logger, type OnApplicationShutdown } from "@nestjs/common";
+import { Injectable, Logger, NotFoundException, type OnApplicationShutdown } from "@nestjs/common";
 import type { IncomingMessage, Server as HttpServer } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, type WebSocket } from "ws";
 import { InMemoryGameStore } from "@sms/game-engine";
+import { GAME_PERMISSIONS } from "@sms/types";
 import {
   ArenaService,
   AuthError,
@@ -31,10 +38,31 @@ import {
   verifyJwt,
   type GamePrincipal,
 } from "@sms/game-transport";
+import type { Principal } from "../integrity/integrity.foundation";
+import { GameService as DurableGameService } from "../game/game.service";
+import { RingService as DurableRingService } from "../game/ring.service";
+import { RaceService as DurableRaceService } from "../game/race.service";
+import { CompetitionService as DurableCompetitionService } from "../game/competition.service";
+import { UltimateService } from "../game/ultimate.service";
+import { GameEventsService } from "../game/game-events.service";
 
 @Injectable()
 export class GameSocketGateway implements OnApplicationShutdown {
   private readonly logger = new Logger(GameSocketGateway.name);
+
+  // The durable, RLS-scoped game cores + their shared "game changed" pub/sub. The
+  // /ws/watch path subscribes to changes and re-reads the viewer-redacted view
+  // through these — so live pushes carry exactly what the HTTP GET would, never
+  // more. One mode per durable getter; all share the single GameEventsService bus
+  // (keyed by gameId, which is unique across modes).
+  constructor(
+    private readonly durableGames: DurableGameService,
+    private readonly durableRings: DurableRingService,
+    private readonly durableRaces: DurableRaceService,
+    private readonly durableCompetitions: DurableCompetitionService,
+    private readonly durableUltimate: UltimateService,
+    private readonly events: GameEventsService,
+  ) {}
 
   // One process-local instance per mode (the shared transport-agnostic core).
   private readonly duel = new GameService({ store: new InMemoryGameStore() });
@@ -87,13 +115,117 @@ export class GameSocketGateway implements OnApplicationShutdown {
           return this.wire(socket, this.race.connect(send), this.race);
         case "arena":
           return this.wire(socket, this.arena.connect(send), this.arena);
+        case "watch":
+          return this.watch(
+            socket,
+            send,
+            principal,
+            url.searchParams.get("gameId"),
+            url.searchParams.get("mode"),
+          );
         default:
           send({ type: "error", code: "NOT_FOUND", message: "unknown game mode" });
           socket.close(4404, "not found");
       }
     });
 
-    this.logger.log("Game socket gateway attached at /ws/{duel,ring,race,arena}.");
+    this.logger.log("Game socket gateway attached at /ws/{duel,ring,race,arena,watch}.");
+  }
+
+  /**
+   * Live spectator of a DURABLE game (the §10 push bridge), across the three
+   * turn/parallel modes that have a single durable game id: `duel`, `ring`,
+   * `race` (the `mode` query param; default `duel`). Read-only: the socket never
+   * mutates — the HTTP API stays the sole authority. On every committed change to
+   * `gameId`, re-reads the RLS-scoped, viewer-redacted view via the matching
+   * durable service and pushes it, so the wire carries exactly what the mode's
+   * `GET` returns — no secrets, no cross-tenant rows, same per-viewer redaction.
+   *
+   * SECURITY: three checks, same as each HTTP path — the mode's coarse permission
+   * (from the verified token), relationship scope + RLS inside the getter (a
+   * non-participant or cross-tenant id reads back as 404, never 403), and the
+   * token-derived identity (never the query).
+   */
+  private watch(
+    socket: WebSocket,
+    send: (msg: unknown) => void,
+    principal: GamePrincipal,
+    gameId: string | null,
+    mode: string | null,
+  ): void {
+    // Per-mode: the coarse permission the HTTP GET enforces + its viewer-redacted
+    // reader. duel/ring gate on game.play; race/league/ultimate views gate on
+    // game.leaderboard.read. `league`/`ultimate` ids are competition ids, not game
+    // ids; `ultimate` reads the CROSS-SCHOOL leaderboard — pseudonymous handles +
+    // school names + scores only, no PII (the leaderboard DTO is the boundary).
+    const readers: Record<
+      string,
+      { permission: string; read: (p: Principal, id: string) => Promise<unknown> }
+    > = {
+      duel: { permission: GAME_PERMISSIONS.PLAY, read: (p, id) => this.durableGames.getGame(p, id) },
+      ring: { permission: GAME_PERMISSIONS.PLAY, read: (p, id) => this.durableRings.getRing(p, id) },
+      race: { permission: GAME_PERMISSIONS.LEADERBOARD_READ, read: (p, id) => this.durableRaces.getRace(p, id) },
+      league: { permission: GAME_PERMISSIONS.LEADERBOARD_READ, read: (p, id) => this.durableCompetitions.get(p, id) },
+      ultimate: { permission: GAME_PERMISSIONS.LEADERBOARD_READ, read: (p, id) => this.durableUltimate.leaderboard(p, id) },
+    };
+    const reader = readers[mode ?? "duel"];
+    if (!reader) {
+      send({ type: "error", code: "BAD_REQUEST", message: "unknown watch mode" });
+      socket.close(4400, "bad request");
+      return;
+    }
+    if (!principal.permissions.includes(reader.permission)) {
+      send({ type: "error", code: "FORBIDDEN", message: `missing ${reader.permission}` });
+      socket.close(4403, "forbidden");
+      return;
+    }
+    if (!gameId) {
+      send({ type: "error", code: "BAD_REQUEST", message: "gameId is required" });
+      socket.close(4400, "bad request");
+      return;
+    }
+
+    // The durable services want the full Principal shape; project it from the
+    // token. permissions/roles ride along but the getter's guard is the seat + RLS.
+    const p: Principal = {
+      schoolId: principal.schoolId,
+      userId: principal.userId,
+      roles: principal.roles,
+      permissions: principal.permissions,
+    };
+
+    let closed = false;
+    const pushView = async (): Promise<void> => {
+      if (closed) return;
+      try {
+        const game = await reader.read(p, gameId);
+        send({ type: "state", game });
+      } catch (err) {
+        // 404 = not a participant / cross-tenant / gone. Don't leak which.
+        if (err instanceof NotFoundException) {
+          send({ type: "error", code: "NOT_FOUND", message: "game not found" });
+        } else {
+          this.logger.warn(`watch push failed for ${gameId}: ${String(err)}`);
+          send({ type: "error", code: "INTERNAL", message: "view unavailable" });
+        }
+        closed = true;
+        socket.close(4404, "not found");
+      }
+    };
+
+    // Subscribe to commits, filtered to this game; nudges trigger a fresh re-read.
+    const unsubscribe = this.events.onChanged((changedId) => {
+      if (changedId === gameId) void pushView();
+    });
+    const teardown = () => {
+      closed = true;
+      unsubscribe();
+    };
+    socket.on("close", teardown);
+    socket.on("error", teardown);
+
+    // Push the current state immediately so a late joiner is in sync at once.
+    void pushView();
   }
 
   /** Wire a socket's lifecycle to the connection id its service assigned. */

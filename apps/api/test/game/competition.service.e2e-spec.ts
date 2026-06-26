@@ -18,6 +18,7 @@ import { randomUUID } from "node:crypto";
 import { prisma } from "@sms/db";
 import { GameService } from "../../src/game/game.service";
 import { CompetitionService } from "../../src/game/competition.service";
+import { GameEventsService } from "../../src/game/game-events.service";
 import { PrismaTenantService } from "../../src/foundation/prisma-tenant.service";
 import { AuditLogService } from "../../src/foundation/audit-log.service";
 import type { Principal } from "../../src/integrity/integrity.foundation";
@@ -70,8 +71,8 @@ d("CompetitionService integration (League/Knockout, RLS, server authority)", () 
     }
     const tenant = new PrismaTenantService() as never;
     const auditSvc = new AuditLogService() as never;
-    comps = new CompetitionService(tenant, auditSvc);
-    games = new GameService(tenant, auditSvc, comps);
+    comps = new CompetitionService(tenant, auditSvc, new GameEventsService());
+    games = new GameService(tenant, auditSvc, comps, new GameEventsService());
   });
 
   afterAll(async () => {

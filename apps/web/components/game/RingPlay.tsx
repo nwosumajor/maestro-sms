@@ -11,14 +11,15 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { GuessForm, GuessList, StatusLine, digitsValid, postSms, usePolled } from "./play-ui";
+import { GuessForm, GuessList, LiveDot, StatusLine, digitsValid, postSms, useLiveGame } from "./play-ui";
 import { Input } from "@/components/ui/input";
 
 type Ring = Serialized<RingDto>;
 
 export function RingPlay({ initial, canModerate }: { initial: Ring; canModerate: boolean }) {
-  const { data: ring, refresh } = usePolled<Ring>(`rings/${initial.id}`, initial, {
-    intervalMs: 2000,
+  const { data: ring, refresh, live } = useLiveGame<Ring>(initial.id, `rings/${initial.id}`, initial, {
+    mode: "ring",
+    fallbackMs: 2000,
     stop: (r) => r.status === "FINISHED" || r.status === "ABANDONED",
   });
   const [msg, setMsg] = React.useState<string | null>(null);
@@ -47,7 +48,10 @@ export function RingPlay({ initial, canModerate }: { initial: Ring; canModerate:
       <Card>
         <CardHeader className="flex-row items-center justify-between space-y-0">
           <CardTitle className="text-base">Elimination Ring</CardTitle>
-          <Badge variant={ring.status === "ACTIVE" ? "default" : "secondary"}>{ring.status}</Badge>
+          <div className="flex items-center gap-2">
+            <LiveDot live={live} />
+            <Badge variant={ring.status === "ACTIVE" ? "default" : "secondary"}>{ring.status}</Badge>
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">

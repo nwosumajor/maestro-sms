@@ -1,7 +1,8 @@
 "use client";
 
 // 2-player duel play surface (spec §3). Lobby → set secrets → turn-based guessing
-// → result. Server-authoritative throughout; this view polls and posts moves.
+// → result. Server-authoritative throughout; this view watches over the live
+// /ws/watch push bridge (with a REST poll fallback) and posts moves.
 
 import type { GameDto, Serialized } from "@sms/types";
 import * as React from "react";
@@ -9,13 +10,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { GuessForm, ScorePips, StatusLine, digitsValid, postSms, usePolled } from "./play-ui";
+import { GuessForm, LiveDot, ScorePips, StatusLine, digitsValid, postSms, useLiveGame } from "./play-ui";
 import { Input } from "@/components/ui/input";
 
 type Game = Serialized<GameDto>;
 
 export function DuelPlay({ initial }: { initial: Game }) {
-  const { data: game, refresh } = usePolled<Game>(`games/${initial.id}`, initial, {
+  const { data: game, refresh, live } = useLiveGame<Game>(initial.id, `games/${initial.id}`, initial, {
     stop: (g) => g.status === "FINISHED" || g.status === "ABANDONED",
   });
   const [msg, setMsg] = React.useState<string | null>(null);
@@ -46,7 +47,10 @@ export function DuelPlay({ initial }: { initial: Game }) {
           <CardTitle className="text-base">
             {me?.displayName ?? "You"} vs {opponent?.displayName ?? "—"}
           </CardTitle>
-          <StatusBadge status={game.status} />
+          <div className="flex items-center gap-2">
+            <LiveDot live={live} />
+            <StatusBadge status={game.status} />
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">

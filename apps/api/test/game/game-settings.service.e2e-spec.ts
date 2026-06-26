@@ -18,6 +18,7 @@ import { prisma } from "@sms/db";
 import { GameSettingsService } from "../../src/game/game-settings.service";
 import { GameService } from "../../src/game/game.service";
 import { CompetitionService } from "../../src/game/competition.service";
+import { GameEventsService } from "../../src/game/game-events.service";
 import { PrismaTenantService } from "../../src/foundation/prisma-tenant.service";
 import { AuditLogService } from "../../src/foundation/audit-log.service";
 import type { Principal } from "../../src/integrity/integrity.foundation";
@@ -61,7 +62,7 @@ d("GameSettingsService integration (per-school config, RLS, effective behaviour)
     const tenant = new PrismaTenantService() as never;
     const auditSvc = new AuditLogService() as never;
     settings = new GameSettingsService(tenant, auditSvc);
-    games = new GameService(tenant, auditSvc, new CompetitionService(tenant, auditSvc));
+    games = new GameService(tenant, auditSvc, new CompetitionService(tenant, auditSvc, new GameEventsService()), new GameEventsService());
   });
 
   afterAll(async () => {

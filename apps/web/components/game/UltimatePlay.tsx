@@ -19,7 +19,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { GuessForm, ScorePips, StatusLine, postSms, usePolled } from "./play-ui";
+import { GuessForm, LiveDot, ScorePips, StatusLine, postSms, useLiveGame } from "./play-ui";
 
 type Comp = Serialized<UltimateCompetitionDto>;
 type Entry = Serialized<UltimateEntryDto>;
@@ -36,10 +36,14 @@ export function UltimatePlay({
   initialBoard: Board;
   canEnter: boolean;
 }) {
-  const { data: board, refresh: refreshBoard } = usePolled<Board>(
+  // Live cross-school leaderboard over /ws/watch (mode "ultimate", keyed by the
+  // global arena competition id) with a REST poll fallback. A guess in ANY school
+  // pushes the refreshed pseudonymous board here.
+  const { data: board, refresh: refreshBoard, live } = useLiveGame<Board>(
+    comp.id,
     `ultimate/competitions/${comp.id}/leaderboard`,
     initialBoard,
-    { intervalMs: 4000, stop: () => comp.status !== "ACTIVE" },
+    { mode: "ultimate", fallbackMs: 4000, stop: () => comp.status !== "ACTIVE" },
   );
   const [entry, setEntry] = React.useState<Entry | null>(initialEntry);
   const [handle, setHandle] = React.useState("");
@@ -150,8 +154,9 @@ export function UltimatePlay({
       </Card>
 
       <Card>
-        <CardHeader>
+        <CardHeader className="flex-row items-center justify-between space-y-0">
           <CardTitle className="text-base">Cross-school leaderboard</CardTitle>
+          <LiveDot live={live} />
         </CardHeader>
         <CardContent className="p-0">
           {board.rows.length === 0 ? (

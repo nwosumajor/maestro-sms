@@ -49,6 +49,7 @@ import {
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
+import { GameEventsService } from "./game-events.service";
 
 const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal", "super_admin"]);
 /** Graduated timeout rule (spec §4): skip the first two, forfeit on the third. */
@@ -61,10 +62,29 @@ export class RingService {
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
+    // In-process "game changed" pub/sub — the /ws/watch gateway re-reads the
+    // RLS-scoped, viewer-redacted ring view on each nudge (§10 live push).
+    private readonly events: GameEventsService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
     return { schoolId: p.schoolId, userId: p.userId };
+  }
+
+  /**
+   * Run a mutation, then announce the changed ring AFTER the tx commits so a
+   * subscriber that re-reads always observes the persisted state. `id` is the
+   * ring id when known up front; for `openRing` it's derived from the result.
+   */
+  private async withEmit<T>(
+    p: Principal,
+    id: string | null,
+    fn: (tx: TenantTx) => Promise<T>,
+  ): Promise<T> {
+    const out = await this.db.runAsTenant(this.ctx(p), fn);
+    const ringId = id ?? (out as { id?: string }).id ?? null;
+    if (ringId) this.events.emitChanged(ringId);
+    return out;
   }
   private isSchoolWide(p: Principal): boolean {
     return p.roles.some((r) => SCHOOL_WIDE_ROLES.has(r));
@@ -73,7 +93,7 @@ export class RingService {
   // --- lobby / setup ------------------------------------------------------
   /** Open a ring; the creator is seated as the first player. */
   async openRing(p: Principal, input: { difficultyLength?: number }): Promise<RingDto> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    return this.withEmit(p, null, async (tx) => {
       const settings = await this.settings(tx, p.schoolId);
       if (!settings.gamesEnabled) {
         throw new ForbiddenException("Games are disabled for your school");
@@ -98,7 +118,7 @@ export class RingService {
   }
 
   async joinRing(p: Principal, ringId: string): Promise<RingDto> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    return this.withEmit(p, ringId, async (tx) => {
       const ring = await this.requireRing(tx, ringId);
       if (ring.status !== "LOBBY") throw new ConflictException("Ring is not open to join");
       const players = await tx.gamePlayer.findMany({ where: { gameId: ringId }, select: { userId: true } });
@@ -114,7 +134,7 @@ export class RingService {
 
   /** Creator locks the roster and moves to secret submission (needs ≥3). */
   async startRing(p: Principal, ringId: string): Promise<RingDto> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    return this.withEmit(p, ringId, async (tx) => {
       const ring = await this.requireRing(tx, ringId);
       if (ring.createdById !== p.userId) throw new NotFoundException("Ring not found");
       if (ring.status !== "LOBBY") throw new ConflictException("Ring is not in the lobby");
@@ -130,7 +150,7 @@ export class RingService {
 
   /** Submit the caller's secret. All secrets in → the ring activates. */
   async submitSecret(p: Principal, ringId: string, secret: string): Promise<RingDto> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    return this.withEmit(p, ringId, async (tx) => {
       const ring = await this.requireRing(tx, ringId);
       const me = await this.requireParticipant(tx, ringId, p.userId);
       if (ring.status !== "SETUP") throw new ConflictException("Ring is not awaiting secrets");
@@ -162,7 +182,7 @@ export class RingService {
     ringId: string,
     value: string,
   ): Promise<{ dead: number; wounded: number }> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    return this.withEmit(p, ringId, async (tx) => {
       const ring = await this.requireRing(tx, ringId);
       const me = await this.requireParticipant(tx, ringId, p.userId);
       if (ring.status !== "ACTIVE") throw new ConflictException("Ring is not in play");
@@ -209,7 +229,7 @@ export class RingService {
    * miss 3 forfeits the stalling player (spec §4). Any participant may nudge.
    */
   async timeoutTurn(p: Principal, ringId: string): Promise<RingDto> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    return this.withEmit(p, ringId, async (tx) => {
       const ring = await this.requireRing(tx, ringId);
       await this.requireParticipant(tx, ringId, p.userId);
       if (ring.status !== "ACTIVE") throw new ConflictException("Ring is not in play");
@@ -239,7 +259,7 @@ export class RingService {
 
   /** Voluntarily quit an active ring; the ring re-closes around you. */
   async forfeit(p: Principal, ringId: string): Promise<RingDto> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    return this.withEmit(p, ringId, async (tx) => {
       const ring = await this.requireRing(tx, ringId);
       const me = await this.requireParticipant(tx, ringId, p.userId);
       if (ring.status !== "ACTIVE") throw new ConflictException("Ring is not in play");
@@ -255,7 +275,7 @@ export class RingService {
 
   /** Moderator force-ends a ring (abandoned / stuck). No winner is declared. */
   async endRing(p: Principal, ringId: string): Promise<RingDto> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    return this.withEmit(p, ringId, async (tx) => {
       const ring = await this.requireRing(tx, ringId);
       if (ring.status === "FINISHED" || ring.status === "ABANDONED") {
         throw new ConflictException("Ring is already over");

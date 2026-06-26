@@ -63,6 +63,7 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 import { effectiveGameSettings } from "./game-settings.util";
+import { GameEventsService } from "./game-events.service";
 
 const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal", "super_admin"]);
 /** First N finishers who win (spec §5: 1st/2nd/3rd places). */
@@ -73,6 +74,9 @@ export class RaceService {
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
+    // In-process "game changed" pub/sub — the /ws/watch gateway re-reads the
+    // RLS-scoped, viewer-redacted race view on each nudge (§10 live push).
+    private readonly events: GameEventsService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -82,13 +86,29 @@ export class RaceService {
     return p.roles.some((r) => SCHOOL_WIDE_ROLES.has(r));
   }
 
+  /**
+   * Run a mutation, then announce the changed race AFTER the tx commits so a
+   * subscriber that re-reads always observes the persisted state. `id` is the
+   * race id when known up front; for `openRace` it's derived from the result.
+   */
+  private async withEmit<T>(
+    p: Principal,
+    id: string | null,
+    fn: (tx: TenantTx) => Promise<T>,
+  ): Promise<T> {
+    const out = await this.db.runAsTenant(this.ctx(p), fn);
+    const raceId = id ?? (out as { id?: string }).id ?? null;
+    if (raceId) this.events.emitChanged(raceId);
+    return out;
+  }
+
   // --- class race lifecycle ----------------------------------------------
   /** Teacher (own class) / school staff opens a race; target is set server-side. */
   async openRace(
     p: Principal,
     input: { classId: string; difficultyLength?: number; targetSecret?: string },
   ): Promise<RaceDto> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    return this.withEmit(p, null, async (tx) => {
       const settings = await this.settings(tx, p.schoolId);
       if (!settings.gamesEnabled) {
         throw new ForbiddenException("Games are disabled for your school");
@@ -124,7 +144,7 @@ export class RaceService {
 
   /** An enrolled student joins the race lobby. */
   async joinRace(p: Principal, raceId: string): Promise<RaceDto> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    return this.withEmit(p, raceId, async (tx) => {
       const race = await this.requireRace(tx, raceId);
       if (race.status !== "LOBBY") throw new ConflictException("Race is not open to join");
       await this.assertEnrolled(tx, p, race.classId);
@@ -138,7 +158,7 @@ export class RaceService {
 
   /** Host starts the race: everyone's clock starts now (spec §5 own-start). */
   async startRace(p: Principal, raceId: string): Promise<RaceDto> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    return this.withEmit(p, raceId, async (tx) => {
       const race = await this.requireRace(tx, raceId);
       await this.assertTeacherOfClass(tx, p, race.classId);
       if (race.status !== "LOBBY") throw new ConflictException("Race is not in the lobby");
@@ -163,7 +183,7 @@ export class RaceService {
     raceId: string,
     value: string,
   ): Promise<{ dead: number; wounded: number }> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    return this.withEmit(p, raceId, async (tx) => {
       const race = await this.requireRace(tx, raceId);
       const me = await this.requireParticipant(tx, raceId, p.userId);
       if (race.status !== "ACTIVE") throw new ConflictException("Race is not in play");
@@ -208,7 +228,7 @@ export class RaceService {
 
   /** Host ends the race early; current finishers keep their ranks. */
   async endRace(p: Principal, raceId: string): Promise<RaceDto> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    return this.withEmit(p, raceId, async (tx) => {
       const race = await this.requireRace(tx, raceId);
       await this.assertTeacherOfClass(tx, p, race.classId);
       if (race.status === "FINISHED" || race.status === "ABANDONED") {

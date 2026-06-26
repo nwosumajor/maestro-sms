@@ -17,6 +17,7 @@ import { Pool } from "pg";
 import { randomUUID } from "node:crypto";
 import { prisma } from "@sms/db";
 import { RaceService } from "../../src/game/race.service";
+import { GameEventsService } from "../../src/game/game-events.service";
 import { PrismaTenantService } from "../../src/foundation/prisma-tenant.service";
 import { AuditLogService } from "../../src/foundation/audit-log.service";
 import type { Principal } from "../../src/integrity/integrity.foundation";
@@ -105,7 +106,7 @@ d("RaceService integration (Class Race + tournament, RLS, server authority)", ()
       );
     }
     const tenant = new PrismaTenantService() as never;
-    svc = new RaceService(tenant, new AuditLogService() as never);
+    svc = new RaceService(tenant, new AuditLogService() as never, new GameEventsService());
   });
 
   afterAll(async () => {
