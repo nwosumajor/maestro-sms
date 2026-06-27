@@ -16,6 +16,7 @@ export function signStepUp(userId: string, schoolId: string): { token: string; e
   const secret = process.env.AUTH_SECRET;
   if (!secret) throw new Error("Auth is not configured");
   const token = jwt.sign({ sub: userId, schoolId, typ: "stepup" }, secret, {
+    algorithm: "HS256",
     expiresIn: TTL_SECONDS,
   });
   return { token, expiresIn: TTL_SECONDS };
@@ -25,7 +26,8 @@ export function verifyStepUp(token: string, userId: string, schoolId: string): b
   const secret = process.env.AUTH_SECRET;
   if (!secret) return false;
   try {
-    const p = jwt.verify(token, secret) as { typ?: string; sub?: string; schoolId?: string };
+    // Pin HS256 to match the session-token guard; forecloses algorithm substitution.
+    const p = jwt.verify(token, secret, { algorithms: ["HS256"] }) as { typ?: string; sub?: string; schoolId?: string };
     return p.typ === "stepup" && p.sub === userId && p.schoolId === schoolId;
   } catch {
     return false;

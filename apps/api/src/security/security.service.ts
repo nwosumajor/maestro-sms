@@ -10,7 +10,7 @@
 
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException, UnauthorizedException } from "@nestjs/common";
 import bcrypt from "bcryptjs";
-import { SECURITY_PERMISSIONS } from "@sms/types";
+import { SECURITY_PERMISSIONS, isElevatable } from "@sms/types";
 import { generateSecret, otpauthUri, verifyTotp } from "../auth/totp";
 import { signStepUp } from "../auth/stepup";
 import {
@@ -83,6 +83,12 @@ export class SecurityService {
   async requestElevation(p: Principal, input: ElevationRequestInput) {
     if (!input.permission || !input.reason) {
       throw new BadRequestException("permission and reason are required");
+    }
+    // SECURITY: platform/cross-tenant, role-assignment, and maker-checker
+    // permissions can NEVER be self-elevated (incl. break-glass). They must come
+    // from a durable, separate identity. See NON_ELEVATABLE_PERMISSIONS.
+    if (!isElevatable(input.permission)) {
+      throw new ForbiddenException(`"${input.permission}" cannot be granted via elevation`);
     }
     const minutes = Math.min(Math.max(input.minutes ?? 60, 1), MAX_MINUTES);
     const expiresAt = new Date(Date.now() + minutes * 60_000);

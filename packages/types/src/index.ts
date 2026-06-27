@@ -50,3 +50,4 @@ export * from "./dto/ring";
 export * from "./dto/game-settings";
 export * from "./dto/ultimate";
 export * from "./payroll";
+export * from "./elevation";

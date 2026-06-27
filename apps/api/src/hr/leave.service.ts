@@ -117,10 +117,19 @@ export class LeaveService implements OnModuleInit {
     if (new Date(input.endDate) < new Date(input.startDate)) {
       throw new BadRequestException("endDate must be on/after startDate");
     }
-    // Validate the leave type exists in this tenant.
-    const type = await this.db.runAsTenant(this.ctx(p), (tx) =>
-      tx.leaveType.findFirst({ where: { id: input.leaveTypeId } }),
-    );
+    // Validate the leave type exists in this tenant; and if an attachment is given,
+    // verify it is a document the CALLER uploaded (in-tenant, owned) — so a
+    // request can't reference a foreign/arbitrary document id.
+    const type = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      if (input.attachmentDocId) {
+        const doc = await tx.document.findFirst({
+          where: { id: input.attachmentDocId, uploadedById: p.userId },
+          select: { id: true },
+        });
+        if (!doc) throw new BadRequestException("Attachment must be a document you uploaded");
+      }
+      return tx.leaveType.findFirst({ where: { id: input.leaveTypeId } });
+    });
     if (!type) throw new NotFoundException("Leave type not found");
 
     // 1) staged workflow request (head → HR → principal), 2) the leave row, 3) submit.

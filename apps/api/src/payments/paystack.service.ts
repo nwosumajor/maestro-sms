@@ -73,7 +73,12 @@ export class PaystackService {
     const secret = process.env.PAYSTACK_SECRET_KEY;
     if (!secret || !rawBody) return null; // disabled / nothing to verify
     const hash = crypto.createHmac("sha512", secret).update(rawBody).digest("hex");
-    if (!signature || hash !== signature) throw new UnauthorizedException("Bad signature");
+    // Constant-time compare so a bad signature can't be brute-forced via timing.
+    const expected = Buffer.from(hash);
+    const got = signature ? Buffer.from(signature) : Buffer.alloc(0);
+    if (expected.length !== got.length || !crypto.timingSafeEqual(expected, got)) {
+      throw new UnauthorizedException("Bad signature");
+    }
     return JSON.parse(rawBody.toString("utf8")) as PaystackEvent;
   }
 }

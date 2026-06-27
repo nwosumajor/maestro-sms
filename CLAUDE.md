@@ -183,8 +183,14 @@ viewer** (`security.audit.read`) and **Just-In-Time privilege elevation** —
 request → approve by a DIFFERENT person (separation of duties) → auto-expire, or
 break-glass (self-activated, flagged); the global PermissionGuard consults active
 `PrivilegeGrant` rows on a permission MISS and audit-logs the elevated use, so
-elevation is additive to the JWT and never long-lived. `/admin/audit` +
-`/admin/security` UIs. Auth hardening is BUILT: **TOTP MFA** (hand-rolled
+elevation is additive to the JWT and never long-lived. **SECURITY: elevation
+(incl. break-glass) can NEVER grant a platform/cross-tenant or maker-checker
+permission** — `NON_ELEVATABLE_PERMISSIONS` / `isElevatable` in `@sms/types`
+(platform.operate, billing.manage, billing.dunning.run, rbac.manage,
+security.elevation.approve, fee.approve, hr.salary.approve, game.ultimate.admin)
+is enforced BOTH at request time (`SecurityService.requestElevation`) and at use
+time (`PermissionGuard.hasActiveGrant`), so a teacher can't self-escalate to
+super_admin. `/admin/audit` + `/admin/security` UIs. Auth hardening is BUILT: **TOTP MFA** (hand-rolled
 RFC-6238 via node crypto — enroll/verify/disable + login challenge; `/account`
 setup UI + optional 2FA field on login), **account lockout** (5 failed logins →
 15-min lock, counters on the user row, committed even when the login throws), and
@@ -389,7 +395,7 @@ unit tests + an `observability.module` DI smoke test.
   one with raw SQL `now() - interval '…'` stores the DB session's LOCAL wall-clock
   while Prisma reads it back as UTC — a skew on a non-UTC DB. So run the e2e DB on
   UTC (RDS/CI default) OR write the value as `now() AT TIME ZONE 'UTC'`. The full
-  api suite (296 tests) is green against a real local Postgres set to UTC.
+  api suite (298 tests) is green against a real local Postgres set to UTC.
 - RLS coverage gate: `rls.e2e-spec.ts` ends with a meta-test that introspects
   `pg_class`/`information_schema` for every table that has a `schoolId` column AND
   `relrowsecurity=true`, and FAILS if any is missing a cross-tenant deny case (or
@@ -664,7 +670,7 @@ sockets.
 migrate deploy (all migrations incl. all 6 game ones) → all 24 RLS files apply
 clean (`ON_ERROR_STOP=1`) → seed OK (game RBAC confirmed in DB: 10 `game.*` perms;
 ultimate.admin→super_admin, ultimate.consent→school_admin, ultimate.enroll→
-principal+school_admin). The ENTIRE api jest suite passes: **40 suites / 296 tests**
+principal+school_admin). The ENTIRE api jest suite passes: **40 suites / 298 tests**
 (every module + RLS cross-tenant incl. ultimate + all 5 game modes + the new
 `GET /races`; the RLS suite now proves isolation for EVERY one of the 71 RLS-enabled
 tenant tables + a coverage meta-test that fails if a new one is added untested).

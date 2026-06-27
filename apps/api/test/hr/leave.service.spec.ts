@@ -12,6 +12,7 @@ function makeService(over: {
   balances?: Array<Record<string, unknown>>;
   balance?: Record<string, unknown> | null;
   leaveRequest?: Record<string, unknown> | null;
+  document?: Record<string, unknown> | null;
 } = {}) {
   const leaveBalanceCreate = jest.fn().mockResolvedValue({});
   const leaveBalanceUpdate = jest.fn().mockResolvedValue({});
@@ -35,6 +36,7 @@ function makeService(over: {
       update: leaveRequestUpdate,
     },
     user: { findMany: jest.fn().mockResolvedValue([]) },
+    document: { findFirst: jest.fn().mockResolvedValue(over.document ?? null) },
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
@@ -73,6 +75,13 @@ describe("LeaveService", () => {
     await expect(
       bad.service.requestLeave(p(), { leaveTypeId: "t1", startDate: "2026-02-01", endDate: "2026-02-03", days: 0 }),
     ).rejects.toThrow(/positive/i);
+  });
+
+  it("requestLeave rejects an attachment the caller did not upload", async () => {
+    const { service } = makeService({ leaveType: { id: "t1", name: "Annual" }, document: null });
+    await expect(
+      service.requestLeave(p(), { leaveTypeId: "t1", startDate: "2026-02-01", endDate: "2026-02-03", days: 3, attachmentDocId: "11111111-1111-1111-1111-111111111111" }),
+    ).rejects.toThrow(/document you uploaded/i);
   });
 
   it("myBalances synthesises a full-entitlement row when none exists yet", async () => {

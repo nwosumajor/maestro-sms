@@ -9,7 +9,7 @@ import {
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import type { Request } from "express";
-import type { ModuleKey } from "@sms/types";
+import { isElevatable, type ModuleKey } from "@sms/types";
 import { PERMISSION_KEY } from "./require-permission.decorator";
 import { MODULE_KEY } from "./require-module.decorator";
 import { STEPUP_KEY } from "./require-stepup.decorator";
@@ -112,6 +112,10 @@ export class PermissionGuard implements CanActivate {
 
   /** True if an ACTIVE, unexpired grant for `permission` exists; audits the use. */
   private async hasActiveGrant(principal: Principal, permission: string): Promise<boolean> {
+    // SECURITY: platform/cross-tenant + maker-checker permissions are NEVER
+    // honoured from a JIT grant, even if an ACTIVE row exists (legacy/tampered).
+    // They must come from the verified JWT. Mirrors the request-time check.
+    if (!isElevatable(permission)) return false;
     try {
       return await this.db.runAsTenant(
         { schoolId: principal.schoolId, userId: principal.userId },

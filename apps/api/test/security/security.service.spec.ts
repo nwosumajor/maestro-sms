@@ -49,6 +49,17 @@ describe("SecurityService elevation", () => {
     );
   });
 
+  it("a non-elevatable permission is REJECTED (no self-escalation to platform/cross-tenant)", async () => {
+    const { service } = makeService();
+    // Normal request and break-glass both refuse platform.operate / maker-checker perms.
+    await expect(
+      service.requestElevation(principal("u-1"), { permission: "platform.operate", reason: "x" }),
+    ).rejects.toThrow(/cannot be granted via elevation/i);
+    await expect(
+      service.requestElevation(principal("u-1"), { permission: "fee.approve", reason: "x", breakGlass: true }),
+    ).rejects.toThrow(/cannot be granted via elevation/i);
+  });
+
   it("the requester cannot approve their own request (separation of duties)", async () => {
     const { service } = makeService({ id: "g-1", status: "PENDING", requestedById: "u-1", permission: "fee.manage" });
     await expect(service.approveElevation(principal("u-1"), "g-1")).rejects.toThrow(/cannot approve your own/i);

@@ -24,11 +24,15 @@ export class MetricsController {
     @Headers("x-metrics-token") tokenHeader?: string,
   ): Promise<string> {
     const required = process.env.METRICS_TOKEN;
-    if (required) {
-      const bearer = auth?.startsWith("Bearer ") ? auth.slice("Bearer ".length) : undefined;
-      const presented = bearer ?? tokenHeader;
-      if (presented !== required) throw new ForbiddenException();
+    if (!required) {
+      // Open only in non-production. In production an unset token fails CLOSED, so
+      // /metrics is never inadvertently exposed without authentication.
+      if (process.env.NODE_ENV === "production") throw new ForbiddenException();
+      return this.metrics.render();
     }
+    const bearer = auth?.startsWith("Bearer ") ? auth.slice("Bearer ".length) : undefined;
+    const presented = bearer ?? tokenHeader;
+    if (presented !== required) throw new ForbiddenException();
     return this.metrics.render();
   }
 }
