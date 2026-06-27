@@ -79,7 +79,7 @@ const NAV: {
   // Billing is the platform subscription itself — ALWAYS-ON (no module tag).
   { key: "billing", label: "Billing", icon: WalletIcon, href: "/billing", perm: "billing.read" },
   { key: "documents", label: "Documents", icon: FolderIcon, href: "/documents", perm: "document.read", module: MODULES.DOCUMENTS },
-  { key: "leave", label: "Leave", icon: CalendarCheckIcon, href: "/leave", perm: "workflow.create", module: MODULES.HR },
+  { key: "leave", label: "Leave", icon: CalendarCheckIcon, href: "/leave", perm: "hr.self", module: MODULES.HR },
   { key: "hr", label: "HR", icon: BriefcaseIcon, href: "/hr", perm: "hr.read", module: MODULES.HR },
   { key: "assessments", label: "Assessments", icon: BookOpenIcon, href: "/assessments", perm: "assessment.read", module: MODULES.INTEGRITY },
   { key: "workflows", label: "Approvals", icon: ClipboardCheckIcon, href: "/workflows", perm: "workflow.read", module: MODULES.WORKFLOW },

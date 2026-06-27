@@ -105,6 +105,8 @@ model LeaveRequest {
   status            String   @default("PENDING")
   /// The WorkflowRequest that drives the head → HR → principal approval chain.
   workflowRequestId String?  @db.Uuid
+  /// Optional supporting document (Document Vault link, e.g. a medical note).
+  attachmentDocId   String?  @db.Uuid
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -320,4 +322,49 @@ model DisciplinaryEntry {
   @@index([schoolId])
   @@index([schoolId, caseId])
   @@map("disciplinary_entry")
+}
+
+// =============================================================================
+// HR — recruitment (ATS-lite): job requisitions + applicants
+// =============================================================================
+
+/// A job opening. DRAFT → OPEN → CLOSED | FILLED.
+model JobRequisition {
+  id          String   @id @default(uuid()) @db.Uuid
+  schoolId    String   @db.Uuid
+  title       String
+  department  String?
+  description String?
+  /// DRAFT | OPEN | CLOSED | FILLED.
+  status      String   @default("DRAFT")
+  openings    Int      @default(1)
+  createdById String   @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([schoolId])
+  @@map("job_requisition")
+}
+
+/// An applicant moving through the pipeline for a requisition. On HIRE the HR may
+/// convert them into a User + Employee (see RecruitmentService.convert).
+model Applicant {
+  id              String   @id @default(uuid()) @db.Uuid
+  schoolId        String   @db.Uuid
+  requisitionId   String   @db.Uuid
+  name            String
+  email           String
+  phone           String?
+  /// APPLIED | SCREENING | INTERVIEW | OFFER | HIRED | REJECTED.
+  stage           String   @default("APPLIED")
+  notes           String?
+  /// Set when converted to a staff account.
+  convertedUserId String?  @db.Uuid
+  createdById     String   @db.Uuid
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([schoolId])
+  @@index([schoolId, requisitionId])
+  @@map("applicant")
 }

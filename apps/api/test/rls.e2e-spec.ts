@@ -86,6 +86,9 @@ d("RLS cross-tenant isolation", () => {
   const telemetryA = randomUUID();
   const threadParticipantA = randomUUID();
   const admissionA = randomUUID();
+  // HR recruitment
+  const jobReqA = randomUUID();
+  const applicantA = randomUUID();
   // HR appraisals / disciplinary
   const appraisalA = randomUUID();
   const disciplinaryCaseA = randomUUID();
@@ -413,12 +416,24 @@ d("RLS cross-tenant isolation", () => {
       `INSERT INTO disciplinary_entry (id,"schoolId","caseId",note,"authorId") VALUES ($1,$2,$3,'Initial note',$4)`,
       [disciplinaryEntryA, A, disciplinaryCaseA, userA],
     );
+    // HR recruitment: a requisition + an applicant.
+    await a.query(
+      `INSERT INTO job_requisition (id,"schoolId",title,"createdById","updatedAt") VALUES ($1,$2,'Teacher',$3,now())`,
+      [jobReqA, A, userA],
+    );
+    await a.query(
+      `INSERT INTO applicant (id,"schoolId","requisitionId",name,email,"createdById","updatedAt") VALUES ($1,$2,$3,'Jane','jane@x',$4,now())`,
+      [applicantA, A, jobReqA, userA],
+    );
   });
 
   afterAll(async () => {
     const a = adminPool;
     for (const t of [
       "audit_log",
+      // HR recruitment — applicant before requisition.
+      "applicant",
+      "job_requisition",
       // HR appraisals / disciplinary — entry before case.
       "disciplinary_entry",
       "disciplinary_case",
@@ -590,6 +605,8 @@ d("RLS cross-tenant isolation", () => {
     ["appraisal", appraisalA],
     ["disciplinary_case", disciplinaryCaseA],
     ["disciplinary_entry", disciplinaryEntryA],
+    ["job_requisition", jobReqA],
+    ["applicant", applicantA],
   ];
 
   it.each(cases)("school B cannot SELECT school A's %s; school A can", async (table, id) => {

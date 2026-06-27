@@ -147,6 +147,54 @@ export class HrService {
     });
   }
 
+  // --- NDPR: staff data-subject rights (self-service) ------------------------
+  /** Export ALL of the caller's own HR data as a JSON bundle (NDPR access right). */
+  async exportMyData(p: Principal): Promise<Record<string, unknown>> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const e = await tx.employee.findFirst({ where: { userId: p.userId } });
+      const profile = e ? this.selfProfile(e, p.schoolId) : null;
+      const employment = e
+        ? { jobTitle: e.jobTitle, department: e.department, employmentType: e.employmentType, startDate: e.startDate, status: e.status, salaryMinor: e.salaryEnc ? Number(decryptField(e.salaryEnc, p.schoolId)) : null }
+        : null;
+      const [leave, balances, appraisals, training, documents] = await Promise.all([
+        tx.leaveRequest.findMany({ where: { userId: p.userId }, orderBy: { createdAt: "desc" } }),
+        tx.leaveBalance.findMany({ where: { userId: p.userId } }),
+        tx.appraisal.findMany({ where: { userId: p.userId, status: { in: ["SUBMITTED", "ACKNOWLEDGED"] } } }),
+        tx.trainingRecord.findMany({ where: { userId: p.userId } }),
+        tx.staffDocument.findMany({ where: { userId: p.userId }, select: { kind: true, name: true, expiresAt: true, createdAt: true } }),
+      ]);
+      const payslips = e
+        ? (await tx.payslip.findMany({ where: { userId: p.userId } })).map((s) => ({
+            grossMinor: s.grossEnc ? Number(decryptField(s.grossEnc, p.schoolId)) : null,
+            netMinor: s.netEnc ? Number(decryptField(s.netEnc, p.schoolId)) : null,
+          }))
+        : [];
+      await this.audit.record(
+        { actorId: p.userId, action: "hr.self.export", entity: "user", entityId: p.userId, schoolId: p.schoolId },
+        tx,
+      );
+      return { exportedAt: new Date().toISOString(), employment, profile, leave, balances, payslips, appraisals, training, documents };
+    });
+  }
+
+  /** Erase the caller's own self-service personal/bank fields (NDPR erasure). The
+   *  employment/payroll record itself is retained (statutory). */
+  async eraseMyPersonal(p: Principal): Promise<{ erased: boolean }> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const e = await tx.employee.findFirst({ where: { userId: p.userId }, select: { id: true } });
+      if (!e) throw new NotFoundException("No employee record");
+      await tx.employee.update({
+        where: { id: e.id },
+        data: { phoneEnc: null, addressEnc: null, nextOfKinEnc: null, nextOfKinPhoneEnc: null, bankNameEnc: null, bankAccountEnc: null },
+      });
+      await this.audit.record(
+        { actorId: p.userId, action: "hr.self.erase", entity: "employee", entityId: e.id, schoolId: p.schoolId },
+        tx,
+      );
+      return { erased: true };
+    });
+  }
+
   private selfProfile(
     e: {
       jobTitle: string; department: string | null;

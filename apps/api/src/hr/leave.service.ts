@@ -35,6 +35,7 @@ interface LeavePayload {
   endDate: string;
   days: number;
   reason?: string | null;
+  attachmentDocId?: string | null;
 }
 
 @Injectable()
@@ -141,6 +142,7 @@ export class LeaveService implements OnModuleInit {
           reason: input.reason ?? null,
           status: "PENDING",
           workflowRequestId: wf.id,
+          attachmentDocId: input.attachmentDocId ?? null,
         },
       });
       await this.audit.record(
@@ -195,7 +197,7 @@ export class LeaveService implements OnModuleInit {
   }
 
   private decorateRequest(
-    r: { id: string; leaveTypeId: string; startDate: Date; endDate: Date; days: number; reason: string | null; status: string; workflowRequestId: string | null; createdAt: Date },
+    r: { id: string; leaveTypeId: string; startDate: Date; endDate: Date; days: number; reason: string | null; status: string; workflowRequestId: string | null; attachmentDocId: string | null; createdAt: Date },
     leaveTypeName: string | null,
     userName: string | null,
   ): LeaveRequestDto {
@@ -209,6 +211,7 @@ export class LeaveService implements OnModuleInit {
       reason: r.reason,
       status: r.status,
       workflowRequestId: r.workflowRequestId,
+      attachmentDocId: r.attachmentDocId,
       user: userName ? { name: userName } : null,
       createdAt: r.createdAt,
     };

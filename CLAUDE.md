@@ -298,8 +298,31 @@ acknowledge gated `workflow.create` + 404-not-403 scoped to the appraisee); **#1
 disciplinary case files** (`disciplinary_case` + APPEND-ONLY `disciplinary_entry`;
 open/entry/status; `hr.disciplinary.manage`). 3 RLS cross-tenant cases + a
 `reviews.service` unit suite; new perms seeded to principal/school_admin/hr_manager.
-Remaining roadmap (#13 HR analytics, #14 recruitment, #15 staff NDPR; plus #3's
-leave attachment + the #8 daily sweep) is not yet built.
+Batch 5 (final) COMPLETED the 15-item HR roadmap: **#13 HR analytics**
+(`HrAnalyticsService` + `GET /hr/analytics` + `/hr/analytics` — headcount, leave
+utilisation, latest payroll cost, expiring docs, training/disciplinary/appraisal
+counts; no salary/PII); **#14 recruitment / ATS-lite** (`job_requisition` +
+`applicant`, RLS `28_hr_recruitment_rls.sql`; requisitions → applicant pipeline →
+`convert` provisions a User+Employee in-tenant via the app role, step-up-gated;
+`hr.recruit.manage`; web `/hr/recruitment`); **#15 staff NDPR** (`GET /hr/me/export`
+self-service data bundle + `POST /hr/me/erase-personal` clearing the encrypted
+self-service fields while RETAINING the statutory employment/payroll record;
+buttons on `/leave`). Plus the two follow-ups: **#3 leave attachment**
+(`leave_request.attachmentDocId` Document-Vault link, accepted by the API) and
+**#8 daily reminder sweep** (`StaffReminderService` + `HrReminderDatabaseService`
+privileged client + BullMQ scheduler/processor, mirroring billing dunning — cron
+`HR_REMINDER_CRON`, disabled when no privileged URL). The full 15-item HR program
+(#1–#15) is now BUILT + verified. 2 new RLS cross-tenant cases (coverage gate green)
++ a `recruitment.service` unit suite.
+Post-build consistency/security hardening: (a) `hr.salary.approve` granted to
+principal + school_admin (not just hr_manager) so salary maker-checker actually has
+a distinct second approver in single-HR schools; (b) `RecruitmentService.convert`
+catches the GLOBAL `user.email` unique violation (P2002) → clean 409 instead of a
+500 on a cross-school email collision (the RLS-scoped pre-check only sees same-school);
+(c) a dedicated `hr.self` permission (seeded to all 8 staff roles) now gates HR
+self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` page
++ nav) instead of overloading `workflow.create`; (d) appraisal + disciplinary LIST
+reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 **Cloud infra is BUILT** as Terraform in `infrastructure/terraform/` (VPC + 3
@@ -366,7 +389,7 @@ unit tests + an `observability.module` DI smoke test.
   one with raw SQL `now() - interval '…'` stores the DB session's LOCAL wall-clock
   while Prisma reads it back as UTC — a skew on a non-UTC DB. So run the e2e DB on
   UTC (RDS/CI default) OR write the value as `now() AT TIME ZONE 'UTC'`. The full
-  api suite (290 tests) is green against a real local Postgres set to UTC.
+  api suite (296 tests) is green against a real local Postgres set to UTC.
 - RLS coverage gate: `rls.e2e-spec.ts` ends with a meta-test that introspects
   `pg_class`/`information_schema` for every table that has a `schoolId` column AND
   `relrowsecurity=true`, and FAILS if any is missing a cross-tenant deny case (or
@@ -641,9 +664,9 @@ sockets.
 migrate deploy (all migrations incl. all 6 game ones) → all 24 RLS files apply
 clean (`ON_ERROR_STOP=1`) → seed OK (game RBAC confirmed in DB: 10 `game.*` perms;
 ultimate.admin→super_admin, ultimate.consent→school_admin, ultimate.enroll→
-principal+school_admin). The ENTIRE api jest suite passes: **39 suites / 290 tests**
+principal+school_admin). The ENTIRE api jest suite passes: **40 suites / 296 tests**
 (every module + RLS cross-tenant incl. ultimate + all 5 game modes + the new
-`GET /races`; the RLS suite now proves isolation for EVERY one of the 69 RLS-enabled
+`GET /races`; the RLS suite now proves isolation for EVERY one of the 71 RLS-enabled
 tenant tables + a coverage meta-test that fails if a new one is added untested).
 game-engine **118/118**, monorepo typecheck **13/13**, and the web
 **production build** compiles all routes incl. the 7 game screens. Two pre-existing

@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Post, Query } from "@nestjs/common";
-import { MODULES, WORKFLOW_PERMISSIONS, HR_PERMISSIONS } from "@sms/types";
+import { MODULES, HR_PERMISSIONS } from "@sms/types";
 import type { LeaveBalanceDto, LeaveRequestDto, LeaveTypeDto } from "@sms/types";
 import { z } from "zod";
 import { RequireModule } from "../auth/require-module.decorator";
@@ -21,6 +21,7 @@ const requestSchema = z.object({
   // Fractional leave in 0.5-day steps (half-day support).
   days: z.number().min(0.5).max(365).refine((d) => Number.isInteger(d * 2), "days must be in 0.5 increments"),
   reason: z.string().max(500).nullish(),
+  attachmentDocId: z.string().uuid().nullish(),
 });
 
 @RequireModule(MODULES.HR)
@@ -30,19 +31,19 @@ export class LeaveController {
 
   // --- self-service (any staff who can raise workflow requests) -------------
   @Get("types")
-  @RequirePermission(WORKFLOW_PERMISSIONS.CREATE)
+  @RequirePermission(HR_PERMISSIONS.HR_SELF)
   listTypes(@CurrentPrincipal() p: Principal): Promise<LeaveTypeDto[]> {
     return this.leave.listLeaveTypes(p);
   }
 
   @Get("balances/me")
-  @RequirePermission(WORKFLOW_PERMISSIONS.CREATE)
+  @RequirePermission(HR_PERMISSIONS.HR_SELF)
   myBalances(@CurrentPrincipal() p: Principal): Promise<LeaveBalanceDto[]> {
     return this.leave.myBalances(p);
   }
 
   @Post("requests")
-  @RequirePermission(WORKFLOW_PERMISSIONS.CREATE)
+  @RequirePermission(HR_PERMISSIONS.HR_SELF)
   request(
     @CurrentPrincipal() p: Principal,
     @Body(new ZodValidationPipe(requestSchema)) body: z.infer<typeof requestSchema>,
@@ -51,7 +52,7 @@ export class LeaveController {
   }
 
   @Get("requests/me")
-  @RequirePermission(WORKFLOW_PERMISSIONS.CREATE)
+  @RequirePermission(HR_PERMISSIONS.HR_SELF)
   myRequests(@CurrentPrincipal() p: Principal): Promise<LeaveRequestDto[]> {
     return this.leave.myRequests(p);
   }

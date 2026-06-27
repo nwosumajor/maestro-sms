@@ -136,6 +136,11 @@ export class HrReviewsService {
       const rows = await tx.appraisal.findMany({ where, orderBy: { createdAt: "desc" } });
       const users = await tx.user.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.userId))] } }, select: { id: true, name: true } });
       const nameById = new Map(users.map((u) => [u.id, u.name]));
+      // Appraisals are sensitive staff records — audit the read (GR#5).
+      await this.audit.record(
+        { actorId: p.userId, action: "hr.appraisal.read", entity: "appraisal", entityId: p.schoolId, schoolId: p.schoolId, metadata: { count: rows.length } },
+        tx,
+      );
       return rows.map((a) => this.appraisalDto(a, nameById.get(a.userId) ?? null));
     });
   }
@@ -194,6 +199,11 @@ export class HrReviewsService {
       const nameById = new Map(users.map((u) => [u.id, u.name]));
       const byCase = new Map<string, typeof entries>();
       for (const e of entries) (byCase.get(e.caseId) ?? byCase.set(e.caseId, []).get(e.caseId)!).push(e);
+      // Disciplinary records are highly sensitive — audit the read (GR#5).
+      await this.audit.record(
+        { actorId: p.userId, action: "hr.disciplinary.read", entity: "disciplinary_case", entityId: p.schoolId, schoolId: p.schoolId, metadata: { count: cases.length } },
+        tx,
+      );
       return cases.map((c) => this.caseDto(c, nameById.get(c.userId) ?? null, byCase.get(c.id) ?? []));
     });
   }

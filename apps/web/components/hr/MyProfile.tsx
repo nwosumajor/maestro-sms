@@ -48,6 +48,18 @@ export function MyProfile({ profile }: { profile: Profile | null }) {
     if (res.ok) { setMsg("Saved."); router.refresh(); } else setMsg(`Failed (${res.status}).`);
   };
 
+  const erasePersonal = async () => {
+    if (!window.confirm("Erase your contact, next-of-kin and bank details? Your employment record is retained.")) return;
+    setBusy(true);
+    setMsg(null);
+    const res = await fetch("/api/sms/hr/me/erase-personal", { method: "POST" });
+    setBusy(false);
+    if (res.ok) {
+      setPhone(""); setAddress(""); setNextOfKin(""); setNextOfKinPhone(""); setBankName(""); setBankAccount("");
+      setMsg("Personal details erased."); router.refresh();
+    } else setMsg(`Failed (${res.status}).`);
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -62,8 +74,10 @@ export function MyProfile({ profile }: { profile: Profile | null }) {
           <div className="space-y-1.5"><Label htmlFor="mp-nokp">Next-of-kin phone</Label><Input id="mp-nokp" value={nextOfKinPhone} onChange={(e) => setNextOfKinPhone(e.target.value)} /></div>
           <div className="space-y-1.5"><Label htmlFor="mp-bank">Bank name</Label><Input id="mp-bank" value={bankName} onChange={(e) => setBankName(e.target.value)} /></div>
           <div className="space-y-1.5"><Label htmlFor="mp-acct">Bank account</Label><Input id="mp-acct" value={bankAccount} onChange={(e) => setBankAccount(e.target.value)} /></div>
-          <div className="sm:col-span-2 flex items-center gap-3">
+          <div className="sm:col-span-2 flex flex-wrap items-center gap-3">
             <Button type="submit" disabled={busy}>{busy ? "Saving…" : "Save profile"}</Button>
+            <a href="/api/sms/hr/me/export" className="text-sm text-primary underline">Export my data (NDPR)</a>
+            <Button type="button" variant="outline" disabled={busy} onClick={erasePersonal}>Erase personal details</Button>
             {msg && <span className="text-sm text-muted-foreground">{msg}</span>}
           </div>
         </form>

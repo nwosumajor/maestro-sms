@@ -128,7 +128,43 @@ export interface LeaveRequestDto {
   reason: string | null;
   status: string;
   workflowRequestId: string | null;
+  attachmentDocId: string | null;
   user: { name: string } | null;
+  createdAt: Date;
+}
+
+export interface HrAnalyticsDto {
+  headcount: { active: number; total: number };
+  byDepartment: { department: string; count: number }[];
+  byEmploymentType: { type: string; count: number }[];
+  leave: { pendingRequests: number; approvedThisYear: number; daysTakenThisYear: number };
+  payroll: { latestPeriod: string | null; totalNetMinor: number; payslipCount: number };
+  documents: { expiringSoon: number };
+  training: { planned: number; completed: number };
+  disciplinary: { openCases: number };
+  appraisals: { draft: number; submitted: number; acknowledged: number };
+}
+
+export interface JobRequisitionDto {
+  id: string;
+  title: string;
+  department: string | null;
+  description: string | null;
+  status: string;
+  openings: number;
+  applicantCount: number;
+  createdAt: Date;
+}
+
+export interface ApplicantDto {
+  id: string;
+  requisitionId: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  stage: string;
+  notes: string | null;
+  convertedUserId: string | null;
   createdAt: Date;
 }
 

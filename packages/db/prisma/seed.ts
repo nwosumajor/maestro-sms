@@ -53,6 +53,7 @@ const PERMS = [
   "event.write",
   // HR
   "hr.read",
+  "hr.self",
   "hr.write",
   "hr.salary.request",
   "hr.salary.approve",
@@ -60,6 +61,7 @@ const PERMS = [
   "hr.payroll.run",
   "hr.appraisal.manage",
   "hr.disciplinary.manage",
+  "hr.recruit.manage",
   // Admin / RBAC
   "rbac.manage",
   // Platform operator
@@ -135,7 +137,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     "timetable.read", "timetable.write",
     "security.audit.read", "security.elevation.request", "security.elevation.approve",
     "privacy.erasure.review", "message.read", "message.send", "event.read", "event.write",
-    "hr.read", "hr.write", "hr.appraisal.manage", "hr.disciplinary.manage", "rbac.manage", "admission.review",
+    "hr.read", "hr.self", "hr.write", "hr.salary.approve", "hr.appraisal.manage", "hr.disciplinary.manage", "hr.recruit.manage", "rbac.manage", "admission.review",
     "game.league.create", "game.leaderboard.read",
     "game.race.open", "game.race.tournament", "game.match.moderate",
     "game.ultimate.enroll",
@@ -157,7 +159,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     "timetable.read", "timetable.write",
     "security.audit.read", "security.elevation.request", "security.elevation.approve",
     "privacy.erasure.review", "message.read", "message.send", "event.read", "event.write",
-    "hr.read", "hr.write", "hr.appraisal.manage", "hr.disciplinary.manage", "rbac.manage", "admission.review",
+    "hr.read", "hr.self", "hr.write", "hr.salary.approve", "hr.appraisal.manage", "hr.disciplinary.manage", "hr.recruit.manage", "rbac.manage", "admission.review",
     "game.league.create", "game.leaderboard.read",
     "game.race.open", "game.race.tournament", "game.match.moderate",
     "game.settings.manage",
@@ -165,7 +167,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     "lms.content.read", "lms.content.write", "lms.forum.post",
     "billing.read", "billing.manage",
   ],
-  teacher: [
+  teacher: ["hr.self", 
     "assessment.read", "assessment.write", "submission.read",
     "integrity.report.read", "integrity.exemption.read", "integrity.exemption.write",
     "student.profile.read", "student.contact.read",
@@ -198,28 +200,28 @@ const ROLE_PERMS: Record<string, string[]> = {
   ],
   // Non-teaching staff: narrow. Both can raise workflow requests (POs / leave).
   // The accountant owns Fees/Billing.
-  accountant: ["workflow.create", "workflow.read", "notification.read", "fee.read", "fee.manage", "document.read", "document.write", "security.elevation.request", "message.read", "message.send", "event.read", "billing.read",
+  accountant: ["hr.self", "workflow.create", "workflow.read", "notification.read", "fee.read", "fee.manage", "document.read", "document.write", "security.elevation.request", "message.read", "message.send", "event.read", "billing.read",
   ],
-  hr_clerk: ["workflow.create", "workflow.read", "notification.read", "security.elevation.request", "hr.read", "hr.write", "message.read", "message.send", "event.read",
+  hr_clerk: ["hr.self", "workflow.create", "workflow.read", "notification.read", "security.elevation.request", "hr.read", "hr.write", "message.read", "message.send", "event.read",
   ],
   // HR Manager: owns leave/salary/payroll + is the HR (stage-2) approver of the
   // staff-request chain. Salary maker-checker still needs TWO distinct managers.
-  hr_manager: [
+  hr_manager: ["hr.self", 
     "workflow.create", "workflow.read", "workflow.review", "workflow.review.hr",
     "hr.read", "hr.write", "hr.salary.request", "hr.salary.approve", "hr.leave.manage", "hr.payroll.run",
-    "hr.appraisal.manage", "hr.disciplinary.manage",
+    "hr.appraisal.manage", "hr.disciplinary.manage", "hr.recruit.manage",
     "notification.read", "notification.send", "security.elevation.request",
     "message.read", "message.send", "event.read",
   ],
   // Head of teaching: stage-1 approver for teaching staff requests.
-  head_teacher: [
+  head_teacher: ["hr.self", 
     "class.read", "enrollment.read", "attendance.read", "grade.read",
     "workflow.create", "workflow.read", "workflow.review", "workflow.review.head",
     "notification.read", "notification.send", "security.elevation.request",
     "message.read", "message.send", "event.read",
   ],
   // Head of administration: stage-1 approver for non-teaching staff requests.
-  head_admin: [
+  head_admin: ["hr.self", 
     "workflow.create", "workflow.read", "workflow.review", "workflow.review.head",
     "document.read", "notification.read", "notification.send", "security.elevation.request",
     "message.read", "message.send", "event.read",

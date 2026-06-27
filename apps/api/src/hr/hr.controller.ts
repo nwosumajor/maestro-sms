@@ -1,9 +1,9 @@
-import { Body, Controller, Get, Param, Put } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Put } from "@nestjs/common";
 import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
 import type { EmployeeDto, SelfProfileDto } from "@sms/types";
 import { z } from "zod";
-import { HR_PERMISSIONS, WORKFLOW_PERMISSIONS } from "@sms/types";
+import { HR_PERMISSIONS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
@@ -36,18 +36,32 @@ export class HrController {
 
   // --- self-service (any staff member, their OWN record) --------------------
   @Get("me")
-  @RequirePermission(WORKFLOW_PERMISSIONS.CREATE)
+  @RequirePermission(HR_PERMISSIONS.HR_SELF)
   myProfile(@CurrentPrincipal() p: Principal): Promise<SelfProfileDto> {
     return this.hr.getMyProfile(p);
   }
 
   @Put("me")
-  @RequirePermission(WORKFLOW_PERMISSIONS.CREATE)
+  @RequirePermission(HR_PERMISSIONS.HR_SELF)
   updateMyProfile(
     @CurrentPrincipal() p: Principal,
     @Body(new ZodValidationPipe(selfProfileSchema)) body: z.infer<typeof selfProfileSchema>,
   ): Promise<SelfProfileDto> {
     return this.hr.updateMyProfile(p, body);
+  }
+
+  /** NDPR data-subject ACCESS: export all of my own HR data. */
+  @Get("me/export")
+  @RequirePermission(HR_PERMISSIONS.HR_SELF)
+  exportMyData(@CurrentPrincipal() p: Principal): Promise<Record<string, unknown>> {
+    return this.hr.exportMyData(p);
+  }
+
+  /** NDPR ERASURE of self-service personal/bank fields (employment record retained). */
+  @Post("me/erase-personal")
+  @RequirePermission(HR_PERMISSIONS.HR_SELF)
+  erasePersonal(@CurrentPrincipal() p: Principal): Promise<{ erased: boolean }> {
+    return this.hr.eraseMyPersonal(p);
   }
 
   @Get("employees")

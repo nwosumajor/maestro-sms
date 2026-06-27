@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Post, Put, Query } from "@nestjs/common";
-import { MODULES, HR_PERMISSIONS, WORKFLOW_PERMISSIONS } from "@sms/types";
+import { MODULES, HR_PERMISSIONS } from "@sms/types";
 import type { AppraisalDto, DisciplinaryCaseDto } from "@sms/types";
 import { z } from "zod";
 import { RequireModule } from "../auth/require-module.decorator";
@@ -70,13 +70,13 @@ export class HrReviewsController {
 
   // --- appraisals (self-service: appraisee) ----------------------------------
   @Get("appraisals/me")
-  @RequirePermission(WORKFLOW_PERMISSIONS.CREATE)
+  @RequirePermission(HR_PERMISSIONS.HR_SELF)
   myAppraisals(@CurrentPrincipal() p: Principal): Promise<AppraisalDto[]> {
     return this.reviews.myAppraisals(p);
   }
 
   @Post("appraisals/:id/acknowledge")
-  @RequirePermission(WORKFLOW_PERMISSIONS.CREATE)
+  @RequirePermission(HR_PERMISSIONS.HR_SELF)
   acknowledge(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<AppraisalDto> {
     return this.reviews.acknowledgeAppraisal(p, id);
   }

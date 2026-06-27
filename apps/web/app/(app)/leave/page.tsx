@@ -13,8 +13,8 @@ export const dynamic = "force-dynamic";
 export default async function LeavePage() {
   const session = await auth();
   const user = session!.user;
-  // Self-service leave is open to any staff member who can raise workflow requests.
-  if (!hasPermission(user.permissions, "workflow.create")) redirect("/dashboard");
+  // Self-service leave is open to any staff member (hr.self).
+  if (!hasPermission(user.permissions, "hr.self")) redirect("/dashboard");
 
   const [types, balances, requests, profile, appraisals] = await Promise.all([
     apiGet<Serialized<LeaveTypeDto>[]>("/hr/leave/types"),

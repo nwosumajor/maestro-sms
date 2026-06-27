@@ -44,7 +44,13 @@ export default async function HrPage() {
               Employment records. Salaries are encrypted at rest and shown only to HR readers.
             </p>
           </div>
-          <Link href="/hr/payroll" className="inline-flex h-9 shrink-0 items-center rounded-md border border-input px-3 text-sm font-medium hover:bg-accent">Payroll →</Link>
+          <div className="flex shrink-0 gap-2">
+            <Link href="/hr/analytics" className="inline-flex h-9 items-center rounded-md border border-input px-3 text-sm font-medium hover:bg-accent">Analytics</Link>
+            {hasPermission(user.permissions, "hr.recruit.manage") && (
+              <Link href="/hr/recruitment" className="inline-flex h-9 items-center rounded-md border border-input px-3 text-sm font-medium hover:bg-accent">Recruitment</Link>
+            )}
+            <Link href="/hr/payroll" className="inline-flex h-9 items-center rounded-md border border-input px-3 text-sm font-medium hover:bg-accent">Payroll →</Link>
+          </div>
         </div>
 
         {canWrite && users && <EmployeeForm users={users} />}

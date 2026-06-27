@@ -3,6 +3,9 @@
 export const HR_PERMISSIONS = {
   /** Read employee records (salary decrypted for readers). */
   HR_READ: "hr.read",
+  /** Staff self-service: a staff member acts on their OWN HR records (profile,
+   *  leave, payslip, appraisal acknowledgement, NDPR export/erase). */
+  HR_SELF: "hr.self",
   /** Create/update employee records (non-salary fields + initial salary on create). */
   HR_WRITE: "hr.write",
   /** Request a salary change (maker — goes to a separate approver). */
@@ -17,5 +20,7 @@ export const HR_PERMISSIONS = {
   HR_APPRAISAL_MANAGE: "hr.appraisal.manage",
   /** Open + manage disciplinary case files. */
   HR_DISCIPLINARY_MANAGE: "hr.disciplinary.manage",
+  /** Manage recruitment: job requisitions + applicants (incl. convert-to-staff). */
+  HR_RECRUIT_MANAGE: "hr.recruit.manage",
 } as const;
 export type HrPermission = (typeof HR_PERMISSIONS)[keyof typeof HR_PERMISSIONS];
