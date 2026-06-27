@@ -12,6 +12,7 @@ import { ConsentService } from "./consent.service";
 import { ModuleEntitlementService } from "./module-entitlement.service";
 import { AuthService } from "./auth.service";
 import { AuthController } from "./auth.controller";
+import { RedisPubSubService } from "../common/redis-pubsub.service";
 
 /**
  * The real foundation: tenant-scoped DB runner, durable audit log, NDPR consent,
@@ -26,11 +27,12 @@ import { AuthController } from "./auth.controller";
     { provide: TENANT_DATABASE, useClass: PrismaTenantService },
     { provide: AUDIT_LOG_SERVICE, useClass: AuditLogService },
     { provide: CONSENT_SERVICE, useClass: ConsentService },
+    RedisPubSubService,
     ModuleEntitlementService,
     AuthService,
     // EMBEDDING_PROVIDER intentionally unbound — prose similarity is skipped
     // when absent (the integrity service injects it @Optional()).
   ],
-  exports: [TENANT_DATABASE, AUDIT_LOG_SERVICE, CONSENT_SERVICE, ModuleEntitlementService],
+  exports: [TENANT_DATABASE, AUDIT_LOG_SERVICE, CONSENT_SERVICE, ModuleEntitlementService, RedisPubSubService],
 })
 export class FoundationModule {}

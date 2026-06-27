@@ -12,7 +12,7 @@
 // layer only ever RESTRICTS — it never breaks a tenant predating subscriptions.
 // =============================================================================
 
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional, type OnModuleInit } from "@nestjs/common";
 import {
   BILLING_CYCLES,
   DEFAULT_PLAN,
@@ -35,8 +35,11 @@ import {
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
+import { RedisPubSubService } from "../common/redis-pubsub.service";
 
 const CACHE_TTL_MS = 30_000;
+/** Redis channel: "drop the cached entitlements for this school on every task". */
+const INVALIDATE_CHANNEL = "entitlement:invalidate";
 
 interface Resolved {
   /** The PURCHASED tier (never downgraded by delinquency). */
@@ -54,10 +57,21 @@ interface Resolved {
 }
 
 @Injectable()
-export class ModuleEntitlementService {
-  constructor(@Inject(TENANT_DATABASE) private readonly db: TenantDatabase) {}
+export class ModuleEntitlementService implements OnModuleInit {
+  constructor(
+    @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
+    @Optional() private readonly pubsub?: RedisPubSubService,
+  ) {}
 
   private cache = new Map<string, { at: number; value: Resolved }>();
+
+  onModuleInit(): void {
+    // A billing webhook / operator write on ANOTHER task must drop our stale copy.
+    this.pubsub?.subscribe(INVALIDATE_CHANNEL, (payload) => {
+      const schoolId = (payload as { schoolId?: string })?.schoolId;
+      if (schoolId) this.cache.delete(schoolId);
+    });
+  }
 
   /** Effective enabled modules for a school (cached). */
   async effectiveModules(schoolId: string): Promise<ModuleKey[]> {
@@ -129,9 +143,11 @@ export class ModuleEntitlementService {
     };
   }
 
-  /** Invalidate the cache for a school (call after a subscription write). */
+  /** Invalidate the cache for a school (call after a subscription write). Clears
+   *  this task immediately AND tells every other task to do the same. */
   invalidate(schoolId: string): void {
     this.cache.delete(schoolId);
+    this.pubsub?.publish(INVALIDATE_CHANNEL, { schoolId });
   }
 }
 

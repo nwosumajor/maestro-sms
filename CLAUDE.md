@@ -93,7 +93,8 @@ conflicts with it, flag the conflict before proceeding.
   ever RESTRICTS and never breaks a pre-existing tenant.
 - Enforcement: controllers carry `@RequireModule(MODULES.X)` (class-level);
   `PermissionGuard` resolves the school's effective modules via
-  `ModuleEntitlementService` (foundation, 30s cache) and returns **404** if the
+  `ModuleEntitlementService` (foundation, 30s cache; invalidation fans across ECS
+  tasks via `RedisPubSubService` — see Live push) and returns **404** if the
   module is off — orthogonal to `@RequirePermission`, before the permission check.
   ALWAYS-ON (untagged) controllers: foundation/auth, security, privacy,
   notifications, admin dashboard, operator, **billing**. The public `/apply` intake
@@ -234,6 +235,29 @@ bound when `STORAGE_PROVIDER=s3` (`apps/api/src/documents/s3-storage.provider.ts
 the local stub stays otherwise.
 **End-to-end type-safety spine is BUILT** (single source of truth in
 `@sms/types`): see Coding conventions.
+**Observability spine is BUILT** (`apps/api/src/observability`, industry-standard
+libs — `nestjs-pino`/`pino`, `prom-client`, `@sentry/node`):
+(1) **structured JSON logging** — `nestjs-pino` (`LoggerModule.forRoot` in
+`ObservabilityModule`; `app.useLogger(pino)` in `main.ts` routes ALL Nest logs
+through it) auto-logs one line per request with a `request_id` (from `x-request-id`
+or minted; echoed back as a response header), the `school_id`/`user_id` from the
+verified JWT (`customProps`), method/route/status/latency. Auth/cookie/step-up/
+webhook-sig headers are REDACTED and the query string is stripped (no `?token=`
+ever logged); `/metrics` + `/health` scrapes are ignored. `LOG_LEVEL` tunes it.
+(2) **Prometheus `/metrics`** — `MetricsService` (a `prom-client` Registry:
+default Node.js process/GC/event-loop metrics + `http_requests_total{method,route,
+status}`, an `http_request_duration_seconds` histogram, a bounded per-tenant
+`tenant_requests_total{school_id}`) fed by `MetricsMiddleware` (applied in
+`AppModule.configure`) and exposed by a `@Public` `MetricsController` gated by
+`METRICS_TOKEN` (bearer/`x-metrics-token`; open when unset for dev — SET it in
+cloud). Route LABEL is the matched pattern, never the raw path, so scanners can't
+explode cardinality. (3) **error tracking** — a global `ErrorLoggingInterceptor`
+captures 5xx to **Sentry** (`Sentry.init` in `main.ts`, active only when
+`SENTRY_DSN` is set — `SENTRY_TRACES_SAMPLE_RATE`/`APP_RELEASE` tune it) with
+request/tenant context + logs them, then RE-THROWS unchanged so response semantics
+(404-not-403, all status codes) are preserved. Guard rejections (401/403) are
+captured by the pino request log. Verified by `metrics.service`/`metrics.controller`
+unit tests + an `observability.module` DI smoke test.
 
 ## Repo workflow & gotchas
 - DB setup order: `prisma migrate deploy` → `pnpm --filter @sms/db rls` →
@@ -491,8 +515,15 @@ thin read-only spectator bridge layered on top:
   pub/sub. Each durable mutation, AFTER its tx commits, emits the changed id
   (gameId; for league matches ALSO the `competitionId`; for Ultimate the GLOBAL
   arena competition id). Carries NO data and NO authority — just an id nudge — so
-  it can't become a second source of truth or leak across tenants. Process-local
-  by design (swap for Redis pub/sub behind the same two methods to scale out).
+  it can't become a second source of truth or leak across tenants. **Cross-instance
+  via Redis** (`RedisPubSubService`, `apps/api/src/common`): the producer delivers
+  to its OWN local subscribers directly and fans the nudge to other ECS tasks over
+  Redis pub/sub (echo-skipped by per-instance id → exactly-once); degrades to the
+  original process-local EventEmitter when Redis is absent (`REDIS_PUBSUB_DISABLED`
+  or unreachable). The SAME `RedisPubSubService` also fans `ModuleEntitlementService`
+  cache invalidation across tasks — so a billing/operator subscription write on one
+  replica drops the stale entitlement on ALL replicas (channel `entitlement:invalidate`),
+  not just the one that handled the request.
 - `GameSocketGateway` hosts `ws` on the SAME http server via the `noServer`
   upgrade pattern, claiming only `/ws/*`. `/ws/duel|ring|race|arena` are the
   in-memory step-2 transport; `/ws/watch?mode=…&gameId=…` is the durable bridge:

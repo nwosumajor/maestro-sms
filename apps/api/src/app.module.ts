@@ -1,6 +1,8 @@
-import { Module } from "@nestjs/common";
+import { Module, type MiddlewareConsumer, type NestModule } from "@nestjs/common";
 import { BullModule } from "@nestjs/bullmq";
 import { FoundationModule } from "./foundation/foundation.module";
+import { ObservabilityModule } from "./observability/observability.module";
+import { MetricsMiddleware } from "./observability/metrics.middleware";
 import { IntegrityModule } from "./integrity/integrity.module";
 import { LmsModule } from "./lms/lms.module";
 import { GradebookModule } from "./gradebook/gradebook.module";
@@ -40,6 +42,7 @@ import { HealthController } from "./health.controller";
         ...(process.env.REDIS_TLS === "true" ? { tls: {} } : {}),
       },
     }),
+    ObservabilityModule,
     FoundationModule,
     IntegrityModule,
     LmsModule,
@@ -66,4 +69,11 @@ import { HealthController } from "./health.controller";
   ],
   controllers: [HealthController],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  // Per-request prom-client metrics on EVERY route (records on response finish, so
+  // it sees the final status + the matched principal). Request LOGGING is handled
+  // automatically by nestjs-pino (ObservabilityModule).
+  configure(consumer: MiddlewareConsumer): void {
+    consumer.apply(MetricsMiddleware).forRoutes("*");
+  }
+}
