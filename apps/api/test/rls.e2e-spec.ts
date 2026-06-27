@@ -68,6 +68,7 @@ d("RLS cross-tenant isolation", () => {
   const lmsContentA = randomUUID();
   const quizAttemptA = randomUUID();
   const forumPostA = randomUUID();
+  const subPaymentA = randomUUID();
 
   beforeAll(async () => {
     appPool = new Pool({ connectionString: APP_URL });
@@ -253,12 +254,21 @@ d("RLS cross-tenant isolation", () => {
       `INSERT INTO forum_post (id,"schoolId","contentId","authorId",body) VALUES ($1,$2,$3,$4,'hi')`,
       [forumPostA, A, lmsContentA, userA],
     );
+    // Platform billing: an append-only subscription payment for school A.
+    await a.query(
+      `INSERT INTO platform_subscription_payment
+         (id,"schoolId",plan,"billingCycle",seats,"amountMinor",reference,status,"initiatedById","updatedAt")
+       VALUES ($1,$2,'STANDARD','TERM',1,1000,$3,'PENDING',$4,now())`,
+      [subPaymentA, A, `SUBR-${subPaymentA}`, userA],
+    );
   });
 
   afterAll(async () => {
     const a = adminPool;
     for (const t of [
       "audit_log",
+      // Platform billing payment references school/user — delete before them.
+      "platform_subscription_payment",
       // LMS content children (forum/quiz) before lms_content; lms_content before class/user.
       "forum_post",
       "quiz_attempt",
@@ -365,6 +375,7 @@ d("RLS cross-tenant isolation", () => {
     ["lms_content", lmsContentA],
     ["quiz_attempt", quizAttemptA],
     ["forum_post", forumPostA],
+    ["platform_subscription_payment", subPaymentA],
   ];
 
   it.each(cases)("school B cannot SELECT school A's %s; school A can", async (table, id) => {

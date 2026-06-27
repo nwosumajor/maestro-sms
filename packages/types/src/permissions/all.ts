@@ -12,6 +12,7 @@
 import type { AdminPermission } from "./admin";
 import type { AdmissionPermission } from "./admissions";
 import type { AttendancePermission } from "./attendance";
+import type { BillingPermission } from "./billing";
 import type { CommunicationPermission } from "./communication";
 import type { DocumentPermission } from "./documents";
 import type { FeesPermission } from "./fees";
@@ -33,6 +34,7 @@ export type Permission =
   | AdminPermission
   | AdmissionPermission
   | AttendancePermission
+  | BillingPermission
   | CommunicationPermission
   | DocumentPermission
   | FeesPermission

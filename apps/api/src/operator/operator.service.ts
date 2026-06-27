@@ -14,10 +14,11 @@ import { Prisma } from "@sms/db";
 import {
   isModuleKey,
   isPlan,
-  resolveModules,
+  isSubscriptionStatus,
   type ModuleOverrides,
   type Plan,
   type SubscriptionDto,
+  type SubscriptionStatus,
 } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -44,21 +45,26 @@ export class OperatorService {
   }
 
   // --- subscription / module entitlements (super_admin, platform.operate) ----
-  /** Read a school's subscription + resolved effective modules. */
+  /** Read a school's subscription + resolved effective modules + billing posture. */
   async getSubscription(p: Principal, schoolId: string): Promise<SubscriptionDto> {
     return this.db.runAsTenant({ schoolId, userId: p.userId }, async (tx) => {
       const school = await tx.school.findFirst({ where: { id: schoolId }, select: { id: true } });
       if (!school) throw new NotFoundException("School not found");
       const resolved = await this.entitlements.resolve(schoolId);
-      return { schoolId, plan: resolved.plan, overrides: resolved.overrides, modules: resolved.modules };
+      return this.entitlements.dtoFrom(schoolId, resolved);
     });
   }
 
-  /** Set a school's plan + per-school module overrides (upsert). Audited. */
+  /** Set a school's plan + overrides; optionally comp/grant status + period. Audited. */
   async setSubscription(
     p: Principal,
     schoolId: string,
-    input: { plan: string; overrides?: { enabled?: string[]; disabled?: string[] } },
+    input: {
+      plan: string;
+      overrides?: { enabled?: string[]; disabled?: string[] };
+      status?: string;
+      currentPeriodEnd?: string | Date | null;
+    },
   ): Promise<SubscriptionDto> {
     if (!isPlan(input.plan)) throw new BadRequestException("plan must be BASIC, STANDARD or ENTERPRISE");
     const plan: Plan = input.plan;
@@ -66,15 +72,34 @@ export class OperatorService {
     const disabled = (input.overrides?.disabled ?? []).filter(isModuleKey);
     const overrides: ModuleOverrides = { enabled, disabled };
 
-    const result = await this.db.runAsTenant({ schoolId, userId: p.userId }, async (tx) => {
+    let status: SubscriptionStatus | undefined;
+    if (input.status !== undefined) {
+      if (!isSubscriptionStatus(input.status)) throw new BadRequestException("invalid status");
+      status = input.status;
+    }
+    const currentPeriodEnd =
+      input.currentPeriodEnd === undefined
+        ? undefined
+        : input.currentPeriodEnd === null
+          ? null
+          : new Date(input.currentPeriodEnd);
+
+    await this.db.runAsTenant({ schoolId, userId: p.userId }, async (tx) => {
       const school = await tx.school.findFirst({ where: { id: schoolId }, select: { id: true } });
       if (!school) throw new NotFoundException("School not found");
       const existing = await tx.schoolSubscription.findFirst({ where: { schoolId }, select: { id: true } });
-      const data = { plan, overrides: overrides as unknown as Prisma.InputJsonValue };
+      const data: Prisma.SchoolSubscriptionUncheckedUpdateInput = {
+        plan,
+        overrides: overrides as unknown as Prisma.InputJsonValue,
+        ...(status !== undefined ? { status } : {}),
+        ...(currentPeriodEnd !== undefined ? { currentPeriodEnd } : {}),
+      };
       if (existing) {
         await tx.schoolSubscription.update({ where: { id: existing.id }, data });
       } else {
-        await tx.schoolSubscription.create({ data: { schoolId, ...data } });
+        await tx.schoolSubscription.create({
+          data: { schoolId, plan, overrides: overrides as unknown as Prisma.InputJsonValue, ...(status !== undefined ? { status } : {}), ...(currentPeriodEnd !== undefined ? { currentPeriodEnd } : {}) },
+        });
       }
       await this.audit.record(
         {
@@ -83,15 +108,15 @@ export class OperatorService {
           entity: "school_subscription",
           entityId: schoolId,
           schoolId: p.schoolId,
-          metadata: { targetSchoolId: schoolId, plan, overrides },
+          metadata: { targetSchoolId: schoolId, plan, overrides, status, currentPeriodEnd },
         },
         tx,
       );
-      return { schoolId, plan, overrides, modules: resolveModules(plan, overrides) };
     });
     // Drop the cached entitlements so the new posture takes effect immediately.
     this.entitlements.invalidate(schoolId);
-    return result;
+    const resolved = await this.entitlements.resolve(schoolId);
+    return this.entitlements.dtoFrom(schoolId, resolved);
   }
 
   /** Every tenant + a user count each. School registry is global/RLS-exempt. */
@@ -103,7 +128,7 @@ export class OperatorService {
     for (const s of schools as Array<{ id: string; name: string; slug: string; status: string; createdAt: Date }>) {
       const users = await this.db.runAsTenant({ schoolId: s.id, userId: p.userId }, (tx) => tx.user.count());
       const ent = await this.entitlements.resolve(s.id);
-      out.push({ ...s, users, plan: ent.plan, moduleCount: ent.modules.length });
+      out.push({ ...s, users, plan: ent.plan, moduleCount: ent.modules.length, subscriptionStatus: ent.status });
     }
     return out;
   }

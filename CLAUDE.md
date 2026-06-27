@@ -96,14 +96,39 @@ conflicts with it, flag the conflict before proceeding.
   `ModuleEntitlementService` (foundation, 30s cache) and returns **404** if the
   module is off — orthogonal to `@RequirePermission`, before the permission check.
   ALWAYS-ON (untagged) controllers: foundation/auth, security, privacy,
-  notifications, admin dashboard, operator. The public `/apply` intake is `@Public`
-  so it bypasses the gate regardless of the admissions module.
+  notifications, admin dashboard, operator, **billing**. The public `/apply` intake
+  is `@Public` so it bypasses the gate regardless of the admissions module.
 - super_admin surface: `GET/PUT /operator/tenants/:schoolId/subscription`
   (`platform.operate`, audited; cache invalidated on write). Web: `/operator`
   shows each tenant's plan + a `SubscriptionManager` (tier select + per-module
   toggles); the AppShell nav hides modules not in the plan (modules ride the JWT
   session, set at login from `/auth/login`). Adding a module = a key in
   `@sms/types` + `@RequireModule` on its controller + a nav `module:` tag.
+- **Self-serve BILLING ENGINE — BUILT** (`apps/api/src/billing`, `apps/web/.../billing`):
+  turns the entitlement gate into recurring revenue. A school's principal/
+  school_admin self-checks-out a tier (`@RequireStepUp`) at `/billing`; pricing is
+  **per-seat** (active students × tier monthly rate × cycle months — pure
+  `computeSubscriptionPriceMinor` in `@sms/types`), money in integer kobo. Paystack
+  is reused via a shared `PaystackService` (`apps/api/src/payments`); the ONE
+  account-wide webhook stays on the `@Public` fees route and is dispatched by
+  `metadata.kind` (`"subscription"` → `BillingService.applySubscriptionPayment`,
+  one-way dep fees→billing). A paid webhook EXTENDS `currentPeriodEnd` (renewals
+  stack) and sets status ACTIVE. `SchoolSubscription` gained `status`/`billingCycle`/
+  `currentPeriodEnd`/`seats`/`priceMinor`; new append-only tenant table
+  `PlatformSubscriptionPayment` (RLS `24_subscription_billing_rls.sql`, migration
+  `20260701000000_subscription_billing`, no hard-delete). **Delinquency is
+  status-driven, never destructive:** the purchased `plan` is never overwritten —
+  `ModuleEntitlementService` resolves modules against a computed `effectivePlan`
+  (pure; BASIC once PAST_DUE beyond `SUBSCRIPTION_GRACE_DAYS`), so paying restores
+  access instantly. A privileged cross-tenant **dunning sweep** (`BillingDunningService`,
+  mirrors the retention job: BullMQ daily + manual `POST /billing/dunning/run` for
+  `billing.dunning.run`/super_admin; reuses the `DATABASE_RETENTION_URL`→`MIGRATE_URL`
+  client) flips elapsed ACTIVE subs to PAST_DUE + sends renewal reminders.
+  super_admin keeps override/comp via the operator PUT (now also accepts
+  `status`/`currentPeriodEnd`). Perms `billing.read`/`billing.manage`/`billing.dunning.run`
+  seeded. Verified: 8 pure pricing/effective-plan unit tests + DB-gated
+  `billing.service.e2e` (checkout-503 / webhook apply+extend+idempotency / dunning→
+  PAST_DUE→effective-BASIC) + an RLS cross-tenant case on the new payment table.
 
 ## Project structure
 - Monorepo (Turborepo + pnpm workspaces).
@@ -389,10 +414,11 @@ BUILT (spec §11 steps 1–8):
   server-side; the 60s limit is validated from `turnStartedAt` with the graduated
   rule (skip ×2 → forfeit on 3rd consecutive timeout). Last standing wins;
   placings recorded (reverse elimination order); secrets cleared on finish. A RING
-  is turn-based and owns its lifecycle (does NOT route through GameService). Live
-  sockets / 15s countdown / hard-disconnect stay in the real-time transport (step
-  2), out of this durable core. `game.play` to play; `game.match.moderate`
-  (teacher/principal/school_admin) to force-end.
+  is turn-based and owns its lifecycle (does NOT route through GameService). The
+  in-memory real-time transport (step 2) still owns the 15s countdown /
+  hard-disconnect; live *spectating* of a durable ring is now served by the
+  `/ws/watch` push bridge (see "Live push" below). `game.play` to play;
+  `game.match.moderate` (teacher/principal/school_admin) to force-end.
 - **Step 7 — Category 5 Administration / RBAC** (`game-settings.service.ts` +
   `game-settings.controller.ts` + `game-settings.util.ts`, schema GameSettings,
   migration `20260627000000_game_settings`, RLS `20_game_settings_rls.sql`):
@@ -437,16 +463,18 @@ a permission-gated Games section reachable from the AppShell nav (gated on
 A hub (`/games`) offers Quick Duel + Elimination Ring start buttons, an open-duels
 join list, a teacher Class-Race opener, a Leagues/Knockouts list + create form
 (`game.league.create`), an Ultimate entry point, and the school GameSettings form
-(`game.settings.manage`). Per-mode play screens poll the BFF (REST-only; live
-sockets remain the step-2 transport, deliberately out of this UI): `/games/duel/[id]`
+(`game.settings.manage`). Per-mode play screens are LIVE over the `/ws/watch` push
+bridge with a REST poll fallback (see "Live push" below): `/games/duel/[id]`
 (`DuelPlay`), `/games/ring/[id]` (`RingPlay`, incl. inherited-history reveal +
 turn countdown), `/games/race/[id]` (`RacePlay`), `/games/league/[id]`
-(server-rendered standings + matches linking to the duel screen), and `/games/ultimate`
-+ `/games/ultimate/[id]` (`UltimatePlay` handle entry + cross-school leaderboard,
-plus staff enroll/consent and super_admin create via `UltimateAdmin`). Shared
-client primitives (`play-ui.tsx`): `GuessForm`/`GuessList`/`ScorePips`/`usePolled`/
-`postSms` + a client-side N-distinct-digit pre-check (server re-validates). All
-screens consume `Serialized<…>` DTOs and gate affordances with `hasPermission`.
+(`LeagueView` — live standings + matches linking to the duel screen), and
+`/games/ultimate` + `/games/ultimate/[id]` (`UltimatePlay` handle entry +
+live cross-school leaderboard, plus staff enroll/consent and super_admin create via
+`UltimateAdmin`). Shared client primitives (`play-ui.tsx`):
+`GuessForm`/`GuessList`/`ScorePips`/`useLiveGame` (WS-primary + poll fallback;
+`usePolled` remains for non-live lists)/`LiveDot`/`postSms` + a client-side
+N-distinct-digit pre-check (server re-validates). All screens consume
+`Serialized<…>` DTOs and gate affordances with `hasPermission`.
 The hub also lists joinable Class Races via `GET /races` (`RaceService.listRaces`
 → `RaceSummaryDto[]`): relationship-scoped exactly like the per-race view
 (school-wide staff see all open races; teachers see races for classes they teach;
@@ -456,8 +484,41 @@ case in `race.service.e2e-spec.ts`. Verified by `tsc --noEmit` (web typecheck cl
 diagnostic is the Next TS-plugin 71007 "serializable props" warning on shared
 client-to-client components — editor-only, not a tsc/CI failure).
 
-Still out of this durable core (live in the real-time transport, step 2): live
-sockets and the Ultimate 15s countdown / hard-disconnect handling.
+**Live push — BUILT** (`apps/api/src/game-socket`, `GameEventsService`, web
+`useLiveGame`). The durable REST core stays the SOLE authority; live updates are a
+thin read-only spectator bridge layered on top:
+- `GameEventsService` (`apps/api/src/game/game-events.service.ts`) — an in-process
+  pub/sub. Each durable mutation, AFTER its tx commits, emits the changed id
+  (gameId; for league matches ALSO the `competitionId`; for Ultimate the GLOBAL
+  arena competition id). Carries NO data and NO authority — just an id nudge — so
+  it can't become a second source of truth or leak across tenants. Process-local
+  by design (swap for Redis pub/sub behind the same two methods to scale out).
+- `GameSocketGateway` hosts `ws` on the SAME http server via the `noServer`
+  upgrade pattern, claiming only `/ws/*`. `/ws/duel|ring|race|arena` are the
+  in-memory step-2 transport; `/ws/watch?mode=…&gameId=…` is the durable bridge:
+  on each matching nudge it re-reads the RLS-scoped, viewer-redacted view via the
+  matching durable service and pushes it — exactly what the mode's HTTP GET
+  returns. Modes + their getter/permission (mirrors each GET): `duel`→`getGame`/
+  `game.play`, `ring`→`getRing`/`game.play`, `race`→`getRace`/`leaderboard.read`,
+  `league`→`competition.get`/`leaderboard.read`, `ultimate`→`ultimate.leaderboard`/
+  `leaderboard.read` (pseudonymous board only — no PII crosses). 404-not-403 +
+  token-derived identity preserved. Handshake auth: HS256 `?token=` (the web BFF
+  `GET /api/ws-ticket` mints a short-lived token from the session — the same
+  established `?token=` mechanism the step-2 sockets use). Unit-tested in
+  `game-socket.gateway.spec.ts` (per-mode permission gates, mode routing,
+  404-not-403, filtered re-read, teardown) + `game-events.service.spec.ts`.
+- Web `useLiveGame` (`play-ui.tsx`): fetches a ws-ticket, opens the watch socket,
+  pushes `{type:"state"}` frames into the view; pauses polling while connected and
+  resumes + reconnects (backoff) on any failure, so a screen NEVER goes stale even
+  where sockets are unavailable. `LiveDot` shows Live vs Polling.
+- Routing: local `infrastructure/nginx` proxies `/ws/` → backend; cloud Terraform
+  forwards ONLY `/ws/*` to a dedicated API ALB target group (secret-header-gated
+  listener rule; REST still flows web→api via Cloud Map). Dev sets
+  `NEXT_PUBLIC_WS_URL=ws://localhost:3001`; behind nginx/CloudFront it's same-origin.
+
+Still in the in-memory step-2 transport only (NOT the durable bridge): the live
+turn timers / 15s countdown / hard-disconnect handling for actively-played
+sockets.
 
 **FULL-STACK VERIFIED end-to-end (2026-06-24) against a real Postgres 18 (UTC):**
 migrate deploy (all migrations incl. all 6 game ones) → all 21 RLS files apply

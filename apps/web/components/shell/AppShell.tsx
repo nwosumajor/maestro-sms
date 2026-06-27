@@ -18,6 +18,7 @@ import {
   BriefcaseIcon,
   Building2Icon,
   Gamepad2Icon,
+  WalletIcon,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -38,6 +39,7 @@ type NavKey =
   | "timetable"
   | "attendance"
   | "fees"
+  | "billing"
   | "documents"
   | "assessments"
   | "workflows"
@@ -73,6 +75,8 @@ const NAV: {
   { key: "timetable", label: "Timetable", icon: CalendarDaysIcon, href: "/timetable", perm: "timetable.read", module: MODULES.TIMETABLE },
   { key: "attendance", label: "Attendance", icon: CalendarCheckIcon, href: "/attendance", perm: "attendance.read", module: MODULES.ATTENDANCE },
   { key: "fees", label: "Fees", icon: CreditCardIcon, href: "/fees", perm: "fee.read", module: MODULES.FEES },
+  // Billing is the platform subscription itself — ALWAYS-ON (no module tag).
+  { key: "billing", label: "Billing", icon: WalletIcon, href: "/billing", perm: "billing.read" },
   { key: "documents", label: "Documents", icon: FolderIcon, href: "/documents", perm: "document.read", module: MODULES.DOCUMENTS },
   { key: "hr", label: "HR", icon: BriefcaseIcon, href: "/hr", perm: "hr.read", module: MODULES.HR },
   { key: "assessments", label: "Assessments", icon: BookOpenIcon, href: "/assessments", perm: "assessment.read", module: MODULES.INTEGRITY },

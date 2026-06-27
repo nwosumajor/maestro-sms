@@ -38,6 +38,12 @@ resource "aws_cloudfront_distribution" "main" {
 
     # Managed policies: CachingDisabled + AllViewerExceptHostHeader. The app is
     # dynamic/auth'd; CloudFront is for TLS, WAF and edge, not caching.
+    #
+    # Live game WebSockets (/ws/*) ride THIS behavior: CloudFront supports WS
+    # natively, and AllViewerExceptHostHeader forwards the Upgrade/Connection/
+    # Sec-WebSocket-* headers to the ALB (which routes /ws/* to the API target
+    # group — see alb.tf). No separate behavior is needed; do NOT switch this to a
+    # caching policy that strips those headers or WS upgrades will break.
     cache_policy_id          = data.aws_cloudfront_cache_policy.disabled.id
     origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
   }

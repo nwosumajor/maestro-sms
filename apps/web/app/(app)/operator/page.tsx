@@ -44,6 +44,9 @@ export default async function OperatorPage() {
                   <Badge variant="outline">{t.plan}</Badge>
                   <Badge variant="secondary">{t.moduleCount} modules</Badge>
                   <Badge variant={t.status === "ACTIVE" ? "secondary" : "outline"}>{t.status}</Badge>
+                  <Badge variant={t.subscriptionStatus === "PAST_DUE" ? "destructive" : "outline"}>
+                    billing: {t.subscriptionStatus.toLowerCase()}
+                  </Badge>
                 </div>
               </CardHeader>
               <CardContent>

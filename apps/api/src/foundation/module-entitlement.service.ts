@@ -14,12 +14,21 @@
 
 import { Inject, Injectable } from "@nestjs/common";
 import {
+  BILLING_CYCLES,
   DEFAULT_PLAN,
+  SUBSCRIPTION_GRACE_DAYS,
+  SUBSCRIPTION_STATUS,
+  effectivePlan,
+  isBillingCycle,
   isPlan,
+  isSubscriptionStatus,
   resolveModules,
+  type BillingCycle,
   type ModuleKey,
   type ModuleOverrides,
   type Plan,
+  type SubscriptionDto,
+  type SubscriptionStatus,
 } from "@sms/types";
 import {
   TENANT_DATABASE,
@@ -30,9 +39,18 @@ import {
 const CACHE_TTL_MS = 30_000;
 
 interface Resolved {
+  /** The PURCHASED tier (never downgraded by delinquency). */
   plan: Plan;
+  /** The tier ENFORCED right now (BASIC when past-due beyond grace). */
+  effectivePlan: Plan;
   overrides: ModuleOverrides;
+  /** Effective enabled modules, resolved against `effectivePlan`. */
   modules: ModuleKey[];
+  status: SubscriptionStatus;
+  billingCycle: BillingCycle;
+  currentPeriodEnd: Date | null;
+  seats: number | null;
+  priceMinor: number | null;
 }
 
 @Injectable()
@@ -57,16 +75,61 @@ export class ModuleEntitlementService {
     if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.value;
 
     const row = await this.db.runAsTenant({ schoolId, userId: schoolId }, async (tx: TenantTx) =>
-      tx.schoolSubscription.findFirst({ where: { schoolId }, select: { plan: true, overrides: true } }),
+      tx.schoolSubscription.findFirst({
+        where: { schoolId },
+        select: {
+          plan: true,
+          overrides: true,
+          status: true,
+          billingCycle: true,
+          currentPeriodEnd: true,
+          seats: true,
+          priceMinor: true,
+        },
+      }),
     );
     const plan: Plan = row && isPlan(row.plan) ? (row.plan as Plan) : DEFAULT_PLAN;
     const overrides = (row?.overrides ?? {}) as ModuleOverrides;
-    const value: Resolved = { plan, overrides, modules: resolveModules(plan, overrides) };
+    const status: SubscriptionStatus =
+      row && isSubscriptionStatus(row.status) ? (row.status as SubscriptionStatus) : SUBSCRIPTION_STATUS.ACTIVE;
+    const billingCycle: BillingCycle =
+      row && isBillingCycle(row.billingCycle) ? (row.billingCycle as BillingCycle) : BILLING_CYCLES.TERM;
+    const currentPeriodEnd = row?.currentPeriodEnd ?? null;
+    // Delinquency downgrades the EFFECTIVE plan only — the stored `plan` stands,
+    // so a payment restores access (next cache cycle / on invalidate).
+    const eff = effectivePlan(plan, status, currentPeriodEnd, SUBSCRIPTION_GRACE_DAYS, new Date());
+    const value: Resolved = {
+      plan,
+      effectivePlan: eff,
+      overrides,
+      modules: resolveModules(eff, overrides),
+      status,
+      billingCycle,
+      currentPeriodEnd,
+      seats: row?.seats ?? null,
+      priceMinor: row?.priceMinor ?? null,
+    };
     this.cache.set(schoolId, { at: Date.now(), value });
     return value;
   }
 
-  /** Invalidate the cache for a school (call after an operator writes the row). */
+  /** Build the wire DTO from a resolved subscription (operator + billing reads). */
+  dtoFrom(schoolId: string, r: Resolved): SubscriptionDto {
+    return {
+      schoolId,
+      plan: r.plan,
+      overrides: r.overrides,
+      modules: r.modules,
+      status: r.status,
+      billingCycle: r.billingCycle,
+      currentPeriodEnd: r.currentPeriodEnd,
+      seats: r.seats,
+      priceMinor: r.priceMinor,
+      effectivePlan: r.effectivePlan,
+    };
+  }
+
+  /** Invalidate the cache for a school (call after a subscription write). */
   invalidate(schoolId: string): void {
     this.cache.delete(schoolId);
   }

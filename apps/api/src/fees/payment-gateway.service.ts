@@ -1,17 +1,18 @@
 // =============================================================================
-// PaymentGatewayService — online card payments via Paystack (no SDK; fetch)
+// PaymentGatewayService — online card payments via Paystack (parent -> school)
 // =============================================================================
 // initInvoicePayment starts a Paystack transaction for an invoice's balance and
-// returns the hosted checkout URL. The webhook (HMAC-SHA512 verified) records a
-// POSTED payment on charge.success. Requires PAYSTACK_SECRET_KEY + outbound
-// network; UNSET => the feature is gracefully disabled (503), never a crash.
+// returns the hosted checkout URL. The single account-wide webhook is verified by
+// PaystackService and dispatched HERE by `metadata.kind`: "subscription" events
+// go to BillingService (school -> platform); everything else is an invoice
+// charge. Requires PAYSTACK_SECRET_KEY + outbound network; UNSET => the feature is
+// gracefully disabled (503 / no-op), never a crash.
 //
 // NOTE: not live-testable in an offline sandbox (it calls api.paystack.co); the
 // disabled path and signature verification are testable.
 // =============================================================================
 
-import { ForbiddenException, Inject, Injectable, Logger, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
-import crypto from "node:crypto";
+import { ForbiddenException, Inject, Injectable, ServiceUnavailableException } from "@nestjs/common";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -20,30 +21,27 @@ import {
   type TenantContext,
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
-
-const PAYSTACK = "https://api.paystack.co";
+import { BillingService } from "../billing/billing.service";
+import { PaystackService, type PaystackEvent } from "../payments/paystack.service";
 
 @Injectable()
 export class PaymentGatewayService {
-  private readonly logger = new Logger("PaymentGateway");
-
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
+    private readonly paystack: PaystackService,
+    private readonly billing: BillingService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
     return { schoolId: p.schoolId, userId: p.userId };
   }
-  private secret(): string {
-    const s = process.env.PAYSTACK_SECRET_KEY;
-    if (!s) throw new ServiceUnavailableException("Online payments are not configured");
-    return s;
-  }
 
   /** Start a hosted Paystack checkout for the invoice's outstanding balance. */
   async initInvoicePayment(p: Principal, invoiceId: string) {
-    const secret = this.secret();
+    if (!this.paystack.isConfigured()) {
+      throw new ServiceUnavailableException("Online payments are not configured");
+    }
     const { email, amountMinor, reference } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const inv = await tx.invoice.findFirst({ where: { id: invoiceId } });
       if (!inv) throw new ForbiddenException("Invoice not found");
@@ -58,32 +56,31 @@ export class PaymentGatewayService {
       return { email: user?.email ?? "payer@school", amountMinor: balance, reference: `PAY-${invoiceId.slice(0, 8)}-${Date.now()}` };
     });
 
-    const res = await fetch(`${PAYSTACK}/transaction/initialize`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ email, amount: amountMinor, reference, metadata: { invoiceId, schoolId: p.schoolId } }),
+    const { authorizationUrl } = await this.paystack.initialize({
+      email,
+      amountMinor,
+      reference,
+      metadata: { kind: "invoice", invoiceId, schoolId: p.schoolId },
     });
-    if (!res.ok) {
-      this.logger.error(`Paystack init failed: ${res.status}`);
-      throw new ServiceUnavailableException("Payment provider error");
-    }
-    const json = (await res.json()) as { data: { authorization_url: string } };
-    return { authorizationUrl: json.data.authorization_url, reference };
+    return { authorizationUrl, reference };
   }
 
-  /** Verified Paystack webhook. On charge.success, post the payment. */
+  /**
+   * Account-wide Paystack webhook. Verify once, then dispatch by metadata.kind:
+   * "subscription" -> platform billing; otherwise an invoice charge.
+   */
   async handleWebhook(rawBody: Buffer | undefined, signature: string | undefined): Promise<{ ok: boolean }> {
-    const secret = process.env.PAYSTACK_SECRET_KEY;
-    if (!secret || !rawBody) return { ok: true }; // disabled / nothing to do
-    const hash = crypto.createHmac("sha512", secret).update(rawBody).digest("hex");
-    if (!signature || hash !== signature) throw new UnauthorizedException("Bad signature");
-
-    const event = JSON.parse(rawBody.toString("utf8")) as {
-      event: string;
-      data: { amount: number; reference: string; metadata?: { invoiceId?: string; schoolId?: string } };
-    };
+    const event = this.paystack.verify(rawBody, signature);
+    if (!event) return { ok: true }; // disabled / nothing to do
+    const kind = (event.data.metadata as { kind?: string } | undefined)?.kind;
+    if (kind === "subscription") return this.billing.applySubscriptionPayment(event);
     if (event.event !== "charge.success") return { ok: true };
-    const { invoiceId, schoolId } = event.data.metadata ?? {};
+    return this.handleInvoiceCharge(event);
+  }
+
+  /** On charge.success for an invoice, post the payment + advance the status. */
+  private async handleInvoiceCharge(event: PaystackEvent): Promise<{ ok: boolean }> {
+    const { invoiceId, schoolId } = (event.data.metadata ?? {}) as { invoiceId?: string; schoolId?: string };
     if (!invoiceId || !schoolId) return { ok: true };
 
     // System-context write (no user): the actor is the invoice's creator.

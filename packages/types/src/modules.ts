@@ -109,3 +109,87 @@ export function isModuleKey(value: string): value is ModuleKey {
 export function isPlan(value: string): value is Plan {
   return (Object.values(PLANS) as string[]).includes(value);
 }
+
+// =============================================================================
+// Platform billing — per-seat pricing, billing cycles, subscription status
+// =============================================================================
+// Schools self-serve a tier (per-seat × active students × cycle), paid via the
+// existing Paystack path. Money is integer MINOR units (kobo), NGN — same as
+// Fees. Delinquency is STATUS-DRIVEN: the purchased `plan` is NEVER overwritten;
+// `effectivePlan` drops to BASIC while past-due-beyond-grace, so a payment
+// instantly restores the paid tier without re-resolving overrides.
+
+export const BILLING_CYCLES = {
+  MONTH: "MONTH",
+  TERM: "TERM",
+  YEAR: "YEAR",
+} as const;
+export type BillingCycle = (typeof BILLING_CYCLES)[keyof typeof BILLING_CYCLES];
+
+/** Months billed per cycle (a Nigerian school TERM ≈ 4 months, 3 terms/year). */
+export const CYCLE_MONTHS: Record<BillingCycle, number> = {
+  MONTH: 1,
+  TERM: 4,
+  YEAR: 12,
+};
+
+export function isBillingCycle(value: string): value is BillingCycle {
+  return (Object.values(BILLING_CYCLES) as string[]).includes(value);
+}
+
+export const SUBSCRIPTION_STATUS = {
+  ACTIVE: "ACTIVE",
+  PAST_DUE: "PAST_DUE",
+  CANCELED: "CANCELED",
+} as const;
+export type SubscriptionStatus = (typeof SUBSCRIPTION_STATUS)[keyof typeof SUBSCRIPTION_STATUS];
+
+export function isSubscriptionStatus(value: string): value is SubscriptionStatus {
+  return (Object.values(SUBSCRIPTION_STATUS) as string[]).includes(value);
+}
+
+/**
+ * Per-seat (per active student) price each MONTH, in kobo, by tier. BASIC is the
+ * free floor a delinquent school falls back to, so it is ₦0 — the entitlement
+ * layer can ALWAYS downgrade to it without owing a charge.
+ */
+export const PLAN_PRICING: Record<Plan, { perSeatMonthlyMinor: number }> = {
+  BASIC: { perSeatMonthlyMinor: 0 },
+  STANDARD: { perSeatMonthlyMinor: 20_000 }, // ₦200 / student / month
+  ENTERPRISE: { perSeatMonthlyMinor: 35_000 }, // ₦350 / student / month
+};
+
+/** Days a school keeps its paid plan after period end before the dunning downgrade. */
+export const SUBSCRIPTION_GRACE_DAYS = 7;
+/** Days before period end to send a renewal reminder. */
+export const RENEWAL_REMINDER_DAYS = 7;
+
+/** Pure: price to run `plan` for `activeStudents` over one `cycle` (minor units). */
+export function computeSubscriptionPriceMinor(
+  plan: Plan,
+  activeStudents: number,
+  cycle: BillingCycle,
+): number {
+  const seats = Math.max(1, Math.floor(activeStudents));
+  return PLAN_PRICING[plan].perSeatMonthlyMinor * seats * CYCLE_MONTHS[cycle];
+}
+
+/**
+ * Pure: the plan a school is ENTITLED to right now. An ACTIVE school gets its
+ * purchased `plan`. A PAST_DUE school keeps it through a grace window past the
+ * period end, then falls back to BASIC. A CANCELED school keeps it only until
+ * the period end. The stored `plan` is never mutated — paying restores it.
+ */
+export function effectivePlan(
+  plan: Plan,
+  status: SubscriptionStatus,
+  currentPeriodEnd: Date | null,
+  graceDays: number = SUBSCRIPTION_GRACE_DAYS,
+  now: Date = new Date(),
+): Plan {
+  if (status === SUBSCRIPTION_STATUS.ACTIVE) return plan;
+  if (!currentPeriodEnd) return PLANS.BASIC;
+  const grace = status === SUBSCRIPTION_STATUS.PAST_DUE ? graceDays : 0;
+  const cutoff = new Date(currentPeriodEnd.getTime() + grace * 24 * 60 * 60 * 1000);
+  return now > cutoff ? PLANS.BASIC : plan;
+}

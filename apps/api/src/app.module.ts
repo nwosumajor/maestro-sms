@@ -9,6 +9,7 @@ import { SisModule } from "./sis/sis.module";
 import { AttendanceModule } from "./attendance/attendance.module";
 import { NotificationModule } from "./notifications/notification.module";
 import { FeesModule } from "./fees/fees.module";
+import { BillingModule } from "./billing/billing.module";
 import { DocumentsModule } from "./documents/documents.module";
 import { TimetableModule } from "./timetable/timetable.module";
 import { SecurityModule } from "./security/security.module";
@@ -48,6 +49,7 @@ import { HealthController } from "./health.controller";
     NotificationModule,
     AttendanceModule,
     FeesModule,
+    BillingModule,
     DocumentsModule,
     TimetableModule,
     SecurityModule,

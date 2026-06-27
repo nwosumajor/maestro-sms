@@ -75,6 +75,18 @@ resource "aws_vpc_security_group_ingress_rule" "api_from_web" {
   referenced_security_group_id = aws_security_group.web.id
 }
 
+# The ALB also reaches the API on 3001 — but ONLY the /ws/* path is forwarded
+# there (alb.tf listener rule), plus the /health target-group check. REST still
+# flows web → api. This keeps the "internet → ALB → web → api" chain intact while
+# letting browsers hold a same-origin WebSocket to the in-API game gateway.
+resource "aws_vpc_security_group_ingress_rule" "api_from_alb" {
+  security_group_id            = aws_security_group.api.id
+  ip_protocol                  = "tcp"
+  from_port                    = 3001
+  to_port                      = 3001
+  referenced_security_group_id = aws_security_group.alb.id
+}
+
 resource "aws_vpc_security_group_egress_rule" "api_all" {
   security_group_id = aws_security_group.api.id
   ip_protocol       = "-1"

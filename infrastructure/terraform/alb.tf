@@ -1,7 +1,9 @@
 # =============================================================================
 # Application Load Balancer — public entry for CloudFront. Terminates TLS with a
-# regional ACM cert, forwards to the web (Next.js) target group. The API is NOT
-# exposed here; web reaches it privately via Cloud Map service discovery.
+# regional ACM cert and forwards to the web (Next.js) target group. The API is
+# reached privately via Cloud Map service discovery for REST; the ONE exception
+# is the /ws/* path (live game WebSockets), forwarded to the API target group by
+# a dedicated, secret-gated listener rule below — see ws_to_api.
 # =============================================================================
 
 resource "aws_lb" "main" {
@@ -31,6 +33,30 @@ resource "aws_lb_target_group" "web" {
   }
 
   deregistration_delay = 30
+}
+
+# API target group — ONLY for live game WebSockets (/ws/*). REST traffic still
+# reaches the API privately via Cloud Map (web BFF → api); this exposes just the
+# /ws/* path through the ALB (see the listener rule below) so browsers can hold a
+# same-origin WebSocket to the in-API gateway. Health-checked on the API's public
+# /health route. Longer deregistration drain so a deploy lets live sockets close
+# gracefully (clients then reconnect) instead of being cut mid-frame.
+resource "aws_lb_target_group" "api" {
+  name        = "${local.name}-api"
+  port        = 3001
+  protocol    = "HTTP"
+  vpc_id      = aws_vpc.main.id
+  target_type = "ip"
+
+  health_check {
+    path                = "/health"
+    matcher             = "200"
+    interval            = 30
+    healthy_threshold   = 2
+    unhealthy_threshold = 4
+  }
+
+  deregistration_delay = 120
 }
 
 # --- Regional cert for the ALB HTTPS listener (CloudFront origin is HTTPS) ----
@@ -97,9 +123,38 @@ resource "aws_lb_listener" "https" {
   }
 }
 
-resource "aws_lb_listener_rule" "require_cloudfront_secret" {
+# Live game WebSockets → the API target group. Highest priority so /ws/* is
+# pulled off before the catch-all web rule below (which matches the header on ALL
+# paths). Still requires the CloudFront secret header, so the gateway is reachable
+# only through CloudFront/WAF — never the ALB directly. The in-API gateway then
+# verifies the HS256 handshake token (?token=) and closes 4401 without one, so
+# exposing this one path widens nothing an authenticated REST call couldn't reach.
+resource "aws_lb_listener_rule" "ws_to_api" {
   listener_arn = aws_lb_listener.https.arn
   priority     = 1
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.api.arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/ws/*"]
+    }
+  }
+
+  condition {
+    http_header {
+      http_header_name = "X-Origin-Verify"
+      values           = [random_password.cloudfront_secret.result]
+    }
+  }
+}
+
+resource "aws_lb_listener_rule" "require_cloudfront_secret" {
+  listener_arn = aws_lb_listener.https.arn
+  priority     = 2
 
   action {
     type             = "forward"
@@ -117,7 +172,7 @@ resource "aws_lb_listener_rule" "require_cloudfront_secret" {
 # Anything without the secret header gets a fixed 403.
 resource "aws_lb_listener_rule" "deny_direct" {
   listener_arn = aws_lb_listener.https.arn
-  priority     = 2
+  priority     = 3
 
   action {
     type = "fixed-response"

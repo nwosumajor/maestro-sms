@@ -58,6 +58,10 @@ const PERMS = [
   "rbac.manage",
   // Platform operator
   "platform.operate",
+  // Platform billing (self-serve subscription + dunning)
+  "billing.read",
+  "billing.manage",
+  "billing.dunning.run",
   // Admissions
   "admission.review",
   // Dead & Wounded game (steps 3–8: play/leaderboard + league create + class race
@@ -100,9 +104,9 @@ const ROLE_PERMS: Record<string, string[]> = {
   // Platform owner: cross-tenant operator console + audited impersonation.
   // super_admin is the cross-tenant operator; the ONLY game permission it holds
   // is the cross-school Ultimate admin (+ leaderboard read to view it).
-  super_admin: ["platform.operate", "security.audit.read", "game.ultimate.admin", "game.leaderboard.read"],
+  super_admin: ["platform.operate", "billing.dunning.run", "security.audit.read", "game.ultimate.admin", "game.leaderboard.read"],
   // Board: read-only oversight + ultimate veto on workflows.
-  board: ["class.read", "grade.read", "integrity.report.read", "workflow.read", "workflow.veto", "notification.read", "fee.read", "document.read", "timetable.read", "message.read", "message.send", "event.read",
+  board: ["class.read", "grade.read", "integrity.report.read", "workflow.read", "workflow.veto", "notification.read", "fee.read", "document.read", "timetable.read", "message.read", "message.send", "event.read", "billing.read",
   ],
   // Principal: full operational view of their school (can grade, review workflows).
   principal: [
@@ -126,6 +130,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     "game.race.open", "game.race.tournament", "game.match.moderate",
     "game.ultimate.enroll",
     "lms.content.read", "lms.content.approve",
+    "billing.read", "billing.manage",
   ],
   // School Administrator: SIS / enrollment / workflows — but NOT grade books, NOT veto.
   school_admin: [
@@ -148,6 +153,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     "game.settings.manage",
     "game.ultimate.enroll", "game.ultimate.consent",
     "lms.content.read", "lms.content.write", "lms.forum.post",
+    "billing.read", "billing.manage",
   ],
   teacher: [
     "assessment.read", "assessment.write", "submission.read",
@@ -182,7 +188,7 @@ const ROLE_PERMS: Record<string, string[]> = {
   ],
   // Non-teaching staff: narrow. Both can raise workflow requests (POs / leave).
   // The accountant owns Fees/Billing.
-  accountant: ["workflow.create", "workflow.read", "notification.read", "fee.read", "fee.manage", "document.read", "document.write", "security.elevation.request", "message.read", "message.send", "event.read",
+  accountant: ["workflow.create", "workflow.read", "notification.read", "fee.read", "fee.manage", "document.read", "document.write", "security.elevation.request", "message.read", "message.send", "event.read", "billing.read",
   ],
   hr_clerk: ["workflow.create", "workflow.read", "notification.read", "security.elevation.request", "hr.read", "hr.write", "message.read", "message.send", "event.read",
   ],

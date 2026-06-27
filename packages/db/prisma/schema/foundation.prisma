@@ -111,6 +111,8 @@ model School {
 
   // Subscription / module entitlement (one row per school)
   subscription SchoolSubscription?
+  // Platform billing — append-only payment ledger (school -> platform)
+  platformPayments PlatformSubscriptionPayment[]
 
   // LMS learning content
   lmsContents  LmsContent[]
@@ -129,15 +131,63 @@ model SchoolSubscription {
   id        String   @id @default(uuid()) @db.Uuid
   schoolId  String   @unique @db.Uuid
   /// BASIC | STANDARD | ENTERPRISE (validated in app against @sms/types PLANS).
+  /// This is the PURCHASED tier; delinquency NEVER overwrites it — the effective
+  /// plan is computed (effectivePlan) from `status` + `currentPeriodEnd` instead.
   plan      String   @default("ENTERPRISE")
   /// { enabled?: string[]; disabled?: string[] } — per-school deviations.
   overrides Json     @default("{}")
+  /// ACTIVE | PAST_DUE | CANCELED (validated against @sms/types SUBSCRIPTION_STATUS).
+  status            String    @default("ACTIVE")
+  /// MONTH | TERM | YEAR.
+  billingCycle      String    @default("TERM")
+  /// End of the currently-paid period; null for never-paid (default/comp).
+  currentPeriodEnd  DateTime?
+  /// Seat count (active students) last billed.
+  seats             Int?
+  /// Amount last charged (minor units, NGN kobo).
+  priceMinor        Int?
+  /// Paystack customer code (reserved for future saved-card recurring).
+  paystackCustomerCode String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   school School @relation(fields: [schoolId], references: [id])
 
   @@map("school_subscription")
+}
+
+/// Append-only ledger of a school's PLATFORM subscription payments (school ->
+/// platform — orthogonal to parent->school Fees). Tenant-scoped (non-null
+/// schoolId + RLS); no hard-delete (financial record). A PENDING row is created
+/// at checkout and flipped to PAID by the verified Paystack webhook.
+model PlatformSubscriptionPayment {
+  id            String    @id @default(uuid()) @db.Uuid
+  schoolId      String    @db.Uuid
+  /// Tier being purchased.
+  plan          String
+  /// MONTH | TERM | YEAR.
+  billingCycle  String
+  /// Seat count snapshot the price was computed from.
+  seats         Int
+  /// Charge amount (minor units, NGN kobo).
+  amountMinor   Int
+  /// Idempotency + Paystack transaction reference.
+  reference     String    @unique
+  /// PENDING | PAID | FAILED.
+  status        String    @default("PENDING")
+  /// Period this payment covers (set when PAID).
+  periodStart   DateTime?
+  periodEnd     DateTime?
+  paidAt        DateTime?
+  /// The staff member who initiated the checkout.
+  initiatedById String    @db.Uuid
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId])
+  @@map("platform_subscription_payment")
 }
 
 /// TENANT-SCOPED: a person in a school. Email is globally unique so login is

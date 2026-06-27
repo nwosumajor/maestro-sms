@@ -196,16 +196,30 @@ resource "aws_ecs_service" "api" {
     security_groups = [aws_security_group.api.id]
   }
 
+  # REST stays on Cloud Map (web BFF → api privately). Cloud Map and the ALB are
+  # additive: web reaches the API by service discovery, while the ALB forwards
+  # ONLY /ws/* (see alb.tf listener rule) to these same tasks for live sockets.
   service_registries {
     registry_arn = aws_service_discovery_service.api.arn
   }
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.api.arn
+    container_name   = "api"
+    container_port   = 3001
+  }
+
+  # Long-lived WebSockets: don't let a slow-draining socket trip the health
+  # grace window during a fresh deploy.
+  health_check_grace_period_seconds = 60
 
   deployment_circuit_breaker {
     enable   = true
     rollback = true
   }
 
-  depends_on = [aws_elasticache_replication_group.main, aws_db_instance.main]
+  # Must exist before the service can register targets (load_balancer).
+  depends_on = [aws_elasticache_replication_group.main, aws_db_instance.main, aws_lb_listener.https]
 }
 
 resource "aws_ecs_service" "web" {

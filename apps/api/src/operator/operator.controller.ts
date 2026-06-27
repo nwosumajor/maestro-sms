@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Post, Put } from "@nestjs/common";
 import type { SubscriptionDto, TenantDto } from "@sms/types";
 import { z } from "zod";
-import { OPERATOR_PERMISSIONS, PLANS } from "@sms/types";
+import { OPERATOR_PERMISSIONS, PLANS, SUBSCRIPTION_STATUS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { RequireStepUp } from "../auth/require-stepup.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -18,6 +18,9 @@ const subSchema = z.object({
       disabled: z.array(z.string()).optional(),
     })
     .optional(),
+  // super_admin comp/grant: force a status and/or extend the paid period.
+  status: z.enum([SUBSCRIPTION_STATUS.ACTIVE, SUBSCRIPTION_STATUS.PAST_DUE, SUBSCRIPTION_STATUS.CANCELED]).optional(),
+  currentPeriodEnd: z.string().datetime().nullable().optional(),
 });
 
 @Controller("operator")

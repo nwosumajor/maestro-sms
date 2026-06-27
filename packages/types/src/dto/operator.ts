@@ -11,4 +11,6 @@ export interface TenantDto {
   plan: string;
   /** Count of subscription-enabled modules. */
   moduleCount: number;
+  /** Billing status (ACTIVE | PAST_DUE | CANCELED). */
+  subscriptionStatus: string;
 }
