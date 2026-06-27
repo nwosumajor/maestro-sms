@@ -29,6 +29,15 @@ model Employee {
   salaryEnc      String?
   status         String         @default("ACTIVE")
 
+  /// Self-service personal fields — field-ENCRYPTED at rest; the staff member
+  /// maintains these via /hr/me, HR owns the employment fields above.
+  phoneEnc          String?
+  addressEnc        String?
+  nextOfKinEnc      String?
+  nextOfKinPhoneEnc String?
+  bankNameEnc       String?
+  bankAccountEnc    String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -37,4 +46,278 @@ model Employee {
   @@unique([userId])
   @@index([schoolId])
   @@map("employee")
+}
+
+// =============================================================================
+// HR — leave tracking, salary-change approval/history, and payroll
+// =============================================================================
+// All tenant-scoped (non-null schoolId), RLS-enforced. Following the game/ultimate
+// convention, schoolId / userId / employeeId are scalar FKs (no Prisma relation)
+// so the School relation block stays untouched. Money/salary figures are stored
+// field-ENCRYPTED at rest (per-tenant key) and decrypted only for HR readers.
+// =============================================================================
+
+/// Per-school leave category (e.g. Annual, Sick) + its yearly entitlement.
+model LeaveType {
+  id          String   @id @default(uuid()) @db.Uuid
+  schoolId    String   @db.Uuid
+  name        String
+  daysPerYear Int      @default(0)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([schoolId, name])
+  @@index([schoolId])
+  @@map("leave_type")
+}
+
+/// A staff member's running balance for a leave type in a given year.
+model LeaveBalance {
+  id           String   @id @default(uuid()) @db.Uuid
+  schoolId     String   @db.Uuid
+  userId       String   @db.Uuid
+  leaveTypeId  String   @db.Uuid
+  year         Int
+  entitledDays Float    @default(0)
+  usedDays     Float    @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([schoolId, userId, leaveTypeId, year])
+  @@index([schoolId])
+  @@map("leave_balance")
+}
+
+/// A leave application. Routed through the multi-stage workflow engine
+/// (workflowRequestId); on FINAL approval the balance is decremented.
+model LeaveRequest {
+  id                String   @id @default(uuid()) @db.Uuid
+  schoolId          String   @db.Uuid
+  userId            String   @db.Uuid
+  leaveTypeId       String   @db.Uuid
+  startDate         DateTime @db.Date
+  endDate           DateTime @db.Date
+  /// Fractional days supported (0.5 = half day).
+  days              Float
+  reason            String?
+  /// PENDING | APPROVED | REJECTED | CANCELLED.
+  status            String   @default("PENDING")
+  /// The WorkflowRequest that drives the head → HR → principal approval chain.
+  workflowRequestId String?  @db.Uuid
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([schoolId])
+  @@index([schoolId, userId])
+  @@map("leave_request")
+}
+
+/// Salary change request + its approval record — this IS the salary history
+/// (one APPROVED row per change). Maker-checker: requestedById != decidedById.
+/// Old/new salary stored ENCRYPTED (minor units, per-tenant key). No hard delete.
+model SalaryChangeRequest {
+  id            String    @id @default(uuid()) @db.Uuid
+  schoolId      String    @db.Uuid
+  employeeId    String    @db.Uuid
+  oldSalaryEnc  String?
+  newSalaryEnc  String?
+  reason        String?
+  effectiveDate DateTime? @db.Date
+  /// PENDING | APPROVED | REJECTED.
+  status        String    @default("PENDING")
+  requestedById String    @db.Uuid
+  decidedById   String?   @db.Uuid
+  decidedAt     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([schoolId])
+  @@index([schoolId, employeeId])
+  @@map("salary_change_request")
+}
+
+/// A monthly payroll run for a school. Snapshots active employees' salaries into
+/// payslips; DRAFT until finalized. Totals are aggregate (minor units).
+model PayrollRun {
+  id              String    @id @default(uuid()) @db.Uuid
+  schoolId        String    @db.Uuid
+  periodYear      Int
+  periodMonth     Int
+  /// DRAFT | FINALIZED.
+  status          String    @default("DRAFT")
+  totalGrossMinor Int       @default(0)
+  totalNetMinor   Int       @default(0)
+  runById         String    @db.Uuid
+  finalizedById   String?   @db.Uuid
+  finalizedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([schoolId, periodYear, periodMonth])
+  @@index([schoolId])
+  @@map("payroll_run")
+}
+
+/// One employee's payslip within a run. Amounts ENCRYPTED at rest (per-tenant key).
+model Payslip {
+  id             String   @id @default(uuid()) @db.Uuid
+  schoolId       String   @db.Uuid
+  payrollRunId   String   @db.Uuid
+  userId         String   @db.Uuid
+  grossEnc       String?
+  deductionsEnc  String?
+  netEnc         String?
+  createdAt      DateTime @default(now())
+
+  @@unique([payrollRunId, userId])
+  @@index([schoolId])
+  @@map("payslip")
+}
+
+// =============================================================================
+// HR — staff lifecycle: onboarding/offboarding, documents (expiry), training
+// =============================================================================
+// All tenant-scoped (non-null schoolId), RLS-enforced; scalar FKs (no relations).
+// =============================================================================
+
+/// An onboarding/offboarding checklist instance for a staff member.
+model StaffChecklist {
+  id          String   @id @default(uuid()) @db.Uuid
+  schoolId    String   @db.Uuid
+  userId      String   @db.Uuid
+  /// ONBOARDING | OFFBOARDING.
+  type        String
+  /// OPEN | COMPLETED.
+  status      String   @default("OPEN")
+  createdById String   @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([schoolId])
+  @@index([schoolId, userId])
+  @@map("staff_checklist")
+}
+
+/// A single task on a checklist.
+model StaffChecklistItem {
+  id          String    @id @default(uuid()) @db.Uuid
+  schoolId    String    @db.Uuid
+  checklistId String    @db.Uuid
+  label       String
+  sequence    Int       @default(0)
+  done        Boolean   @default(false)
+  doneById    String?   @db.Uuid
+  doneAt      DateTime?
+
+  @@index([schoolId])
+  @@index([schoolId, checklistId])
+  @@map("staff_checklist_item")
+}
+
+/// A staff compliance document with an optional expiry (drives reminders). The
+/// bytes (if any) live in the Document Vault — `documentId` is the optional link.
+model StaffDocument {
+  id             String    @id @default(uuid()) @db.Uuid
+  schoolId       String    @db.Uuid
+  userId         String    @db.Uuid
+  /// CONTRACT | WORK_PERMIT | CERTIFICATION | MEDICAL | OTHER.
+  kind           String
+  name           String
+  documentId     String?   @db.Uuid
+  expiresAt      DateTime? @db.Date
+  /// Set when an expiry reminder has been sent (idempotency).
+  reminderSentAt DateTime?
+  createdById    String    @db.Uuid
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([schoolId])
+  @@index([schoolId, userId])
+  @@map("staff_document")
+}
+
+/// A training / CPD record for a staff member (optionally expiring).
+model TrainingRecord {
+  id          String    @id @default(uuid()) @db.Uuid
+  schoolId    String    @db.Uuid
+  userId      String    @db.Uuid
+  title       String
+  provider    String?
+  /// PLANNED | COMPLETED.
+  status      String    @default("PLANNED")
+  completedAt DateTime? @db.Date
+  expiresAt   DateTime? @db.Date
+  createdById String    @db.Uuid
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([schoolId])
+  @@index([schoolId, userId])
+  @@map("training_record")
+}
+
+// =============================================================================
+// HR — performance appraisals + disciplinary case files
+// =============================================================================
+// Sensitive staff records; all reads/writes audited. Tenant-scoped, RLS-enforced,
+// scalar FKs. (Golden Rule #8 is about STUDENTS — staff disciplinary is HR, not
+// student integrity — but the same audit discipline applies.)
+// =============================================================================
+
+/// A periodic performance appraisal. DRAFT → SUBMITTED (reviewer) → ACKNOWLEDGED
+/// (the appraisee acknowledges). Rating 1..5.
+model Appraisal {
+  id             String    @id @default(uuid()) @db.Uuid
+  schoolId       String    @db.Uuid
+  userId         String    @db.Uuid
+  reviewerId     String    @db.Uuid
+  period         String
+  /// DRAFT | SUBMITTED | ACKNOWLEDGED.
+  status         String    @default("DRAFT")
+  overallRating  Int?
+  summary        String?
+  goals          String?
+  acknowledgedAt DateTime?
+  createdById    String    @db.Uuid
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([schoolId])
+  @@index([schoolId, userId])
+  @@map("appraisal")
+}
+
+/// A disciplinary case against a staff member, with an append-only entry log.
+model DisciplinaryCase {
+  id          String   @id @default(uuid()) @db.Uuid
+  schoolId    String   @db.Uuid
+  userId      String   @db.Uuid
+  title       String
+  category    String?
+  /// LOW | MEDIUM | HIGH.
+  severity    String   @default("LOW")
+  /// OPEN | UNDER_REVIEW | RESOLVED | DISMISSED.
+  status      String   @default("OPEN")
+  openedById  String   @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([schoolId])
+  @@index([schoolId, userId])
+  @@map("disciplinary_case")
+}
+
+/// An append-only note on a disciplinary case.
+model DisciplinaryEntry {
+  id        String   @id @default(uuid()) @db.Uuid
+  schoolId  String   @db.Uuid
+  caseId    String   @db.Uuid
+  note      String
+  authorId  String   @db.Uuid
+  createdAt DateTime @default(now())
+
+  @@index([schoolId])
+  @@index([schoolId, caseId])
+  @@map("disciplinary_entry")
 }

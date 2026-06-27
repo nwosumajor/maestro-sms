@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { shortDate } from "@/lib/format";
 import { SubscriptionManager } from "@/components/operator/SubscriptionManager";
+import { Provisioning } from "@/components/operator/Provisioning";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +30,8 @@ export default async function OperatorPage() {
             disabled modules vanish from their app and return 404 at the API. Impersonation is step-up gated and audited.
           </p>
         </div>
+
+        <Provisioning tenants={tenants.map((t) => ({ id: t.id, name: t.name }))} />
 
         <div className="space-y-3">
           {tenants.map((t) => (

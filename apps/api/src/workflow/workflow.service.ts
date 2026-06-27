@@ -1,10 +1,17 @@
 // =============================================================================
-// WorkflowService — the approval state machine
+// WorkflowService — the approval state machine (single- AND multi-stage)
 // =============================================================================
 // Deterministic transitions only (WORKFLOW_TRANSITIONS). Every transition writes
 // an immutable WorkflowAuditLog row (old/new state, initiator, approver,
 // comments). Tenant-isolated (RLS); reviewers cannot act on their OWN request
 // (separation of duties); not-visible -> 404.
+//
+// MULTI-STAGE: a request may carry an ordered `stages` chain (e.g. the staff
+// leave chain head → HR → principal). An APPROVE advances `currentStage` and
+// stays PENDING_REVIEW until the LAST stage finalizes to APPROVED. Each stage's
+// approver must hold that stage's granular permission AND must not have acted on
+// the request before (so every stage is decided by a different person). On the
+// terminal state a finalized-hook fan-out runs IN-TX (HR leave reacts there).
 // =============================================================================
 
 import {
@@ -15,9 +22,14 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
+import { Prisma } from "@sms/db";
 import {
+  STAGED_WORKFLOW_TYPES,
+  STAFF_REQUEST_CHAIN,
   WORKFLOW_TRANSITIONS,
   type WorkflowAction,
+  type WorkflowInboxItemDto,
+  type WorkflowStage,
   type WorkflowState,
   type WorkflowType,
 } from "@sms/types";
@@ -28,18 +40,33 @@ import {
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
+import { WorkflowHooksService } from "./workflow-hooks.service";
 
 const REVIEW_PERMS = new Set(["workflow.review", "workflow.veto"]);
 
+interface StageApproval {
+  stageKey: string;
+  approverId: string;
+  at: string;
+}
+
 interface RequestRow {
   id: string;
+  type: string;
   state: WorkflowState;
   initiatorId: string;
+  payload: unknown;
+  stages: unknown;
+  currentStage: number;
+  approvals: unknown;
 }
 
 @Injectable()
 export class WorkflowService {
-  constructor(@Inject(TENANT_DATABASE) private readonly db: TenantDatabase) {}
+  constructor(
+    @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
+    private readonly hooks: WorkflowHooksService,
+  ) {}
 
   private ctx(p: Principal): TenantContext {
     return { schoolId: p.schoolId, userId: p.userId };
@@ -50,16 +77,22 @@ export class WorkflowService {
 
   async createRequest(
     p: Principal,
-    input: { type: WorkflowType; title: string; payload: unknown },
+    input: { type: WorkflowType; title: string; payload: unknown; stages?: WorkflowStage[] },
   ) {
+    // Staged types route through the standard chain unless a custom one is given.
+    const stages =
+      input.stages ?? (STAGED_WORKFLOW_TYPES.has(input.type) ? STAFF_REQUEST_CHAIN : []);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const req = await tx.workflowRequest.create({
         data: {
           schoolId: p.schoolId,
           type: input.type,
           title: input.title,
-          payload: input.payload ?? {},
+          payload: (input.payload ?? {}) as Prisma.InputJsonValue,
           state: "DRAFT",
+          stages: stages as unknown as Prisma.InputJsonValue,
+          currentStage: 0,
+          approvals: [] as unknown as Prisma.InputJsonValue,
           initiatorId: p.userId,
         },
       });
@@ -95,11 +128,26 @@ export class WorkflowService {
   }
 
   // --- reads (scoped) --------------------------------------------------------
-  async listRequests(p: Principal) {
+  async listRequests(p: Principal): Promise<WorkflowInboxItemDto[]> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       // Reviewers/board see all in-tenant; everyone else sees only what they raised.
       const where = this.isReviewer(p) ? {} : { initiatorId: p.userId };
-      return tx.workflowRequest.findMany({ where, orderBy: { createdAt: "desc" } });
+      const rows = await tx.workflowRequest.findMany({ where, orderBy: { createdAt: "desc" } });
+      return rows.map((r) => {
+        const stages = (r.stages as WorkflowStage[] | null) ?? [];
+        const pending = r.state === "PENDING_REVIEW" ? (stages[r.currentStage]?.label ?? null) : null;
+        return {
+          id: r.id,
+          type: r.type,
+          title: r.title,
+          state: r.state,
+          initiatorId: r.initiatorId,
+          createdAt: r.createdAt,
+          currentStage: r.currentStage,
+          stageCount: stages.length,
+          stageLabel: pending,
+        };
+      });
     });
   }
 
@@ -139,23 +187,88 @@ export class WorkflowService {
       }
 
       // Deterministic transition check.
-      const next = WORKFLOW_TRANSITIONS[req.state]?.[action];
-      if (!next) {
+      const baseNext = WORKFLOW_TRANSITIONS[req.state]?.[action];
+      if (!baseNext) {
         throw new ConflictException(`Cannot ${action} from ${req.state}`);
       }
 
-      await tx.workflowRequest.update({ where: { id }, data: { state: next } });
+      const stages = (req.stages as WorkflowStage[] | null) ?? [];
+      const isStaged = stages.length > 0;
+      const approvals = (req.approvals as StageApproval[] | null) ?? [];
+
+      let nextState: WorkflowState = baseNext;
+      let nextStage = req.currentStage;
+      let nextApprovals = approvals;
+      let stageNote: string | undefined;
+
+      if (isStaged && (action === "APPROVE" || action === "REJECT")) {
+        const stage = stages[req.currentStage];
+        if (!stage) throw new ConflictException("No active approval stage");
+        // The actor must hold THIS stage's granular permission.
+        if (!p.permissions.includes(stage.permission)) {
+          throw new ForbiddenException(`You are not the ${stage.label} approver`);
+        }
+        // …and must not have already acted on this request (distinct approver/stage).
+        if (approvals.some((a) => a.approverId === p.userId)) {
+          throw new ForbiddenException("You have already acted on this request");
+        }
+        const record: StageApproval = {
+          stageKey: stage.key,
+          approverId: p.userId,
+          at: new Date().toISOString(),
+        };
+        if (action === "APPROVE") {
+          nextApprovals = [...approvals, record];
+          if (req.currentStage < stages.length - 1) {
+            // Not the last stage → advance, remain pending.
+            nextState = "PENDING_REVIEW";
+            nextStage = req.currentStage + 1;
+            stageNote = `stage ${stage.key} approved (${req.currentStage + 1}/${stages.length})`;
+          } else {
+            nextState = "APPROVED"; // final stage → finalize
+            stageNote = `stage ${stage.key} approved (final)`;
+          }
+        } else {
+          // REJECT at any stage is terminal.
+          nextApprovals = [...approvals, record];
+          stageNote = `rejected at stage ${stage.key}`;
+        }
+      } else if (isStaged && action === "REQUEST_REVISION") {
+        // Send back to the initiator; restart the chain on resubmission.
+        nextStage = 0;
+        nextApprovals = [];
+      }
+
+      await tx.workflowRequest.update({
+        where: { id },
+        data: {
+          state: nextState,
+          currentStage: nextStage,
+          approvals: nextApprovals as unknown as Prisma.InputJsonValue,
+        },
+      });
       await this.writeAudit(tx, {
         schoolId: p.schoolId,
         requestId: id,
         initiatorId: req.initiatorId,
-        // The actor of a review/veto is an approver; for SUBMIT it's the initiator.
         approverId: action === "SUBMIT" ? null : p.userId,
         oldState: req.state,
-        newState: next,
-        comments: comments ?? null,
+        newState: nextState,
+        comments: comments ?? stageNote ?? null,
       });
-      return { id, state: next };
+
+      // Fan out to reactors (e.g. HR leave) on a terminal state, in-tx.
+      if (nextState === "APPROVED" || nextState === "REJECTED") {
+        await this.hooks.runFinalized(tx, {
+          id: req.id,
+          schoolId: p.schoolId,
+          type: req.type,
+          state: nextState,
+          payload: req.payload,
+          initiatorId: req.initiatorId,
+        });
+      }
+      return { id, state: nextState, currentStage: nextStage };
     });
   }
 

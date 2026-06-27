@@ -8,8 +8,21 @@ import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { OperatorService } from "./operator.service";
+import { OperatorProvisioningService } from "./operator-provisioning.service";
 
 const impSchema = z.object({ schoolId: z.string().uuid(), userId: z.string().uuid() });
+const adminSchema = z.object({
+  name: z.string().min(1).max(120),
+  email: z.string().email(),
+  password: z.string().min(8).max(200).optional(),
+  role: z.enum(["school_admin", "principal", "head_admin", "hr_manager"]).optional(),
+});
+const provisionSchema = z.object({
+  name: z.string().min(1).max(160),
+  slug: z.string().min(2).max(40),
+  plan: z.enum([PLANS.BASIC, PLANS.STANDARD, PLANS.ENTERPRISE]).optional(),
+  admin: adminSchema,
+});
 const subSchema = z.object({
   plan: z.enum([PLANS.BASIC, PLANS.STANDARD, PLANS.ENTERPRISE]),
   overrides: z
@@ -25,7 +38,33 @@ const subSchema = z.object({
 
 @Controller("operator")
 export class OperatorController {
-  constructor(private readonly operator: OperatorService) {}
+  constructor(
+    private readonly operator: OperatorService,
+    private readonly provisioning: OperatorProvisioningService,
+  ) {}
+
+  /** Self-serve onboard a NEW school + its first admin (step-up: creates creds). */
+  @Post("tenants")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  @RequireStepUp()
+  provision(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(provisionSchema)) body: z.infer<typeof provisionSchema>,
+  ) {
+    return this.provisioning.provisionSchool(p, body);
+  }
+
+  /** Add another admin user to an existing school (step-up: creates creds). */
+  @Post("tenants/:schoolId/admins")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  @RequireStepUp()
+  addAdmin(
+    @CurrentPrincipal() p: Principal,
+    @Param("schoolId") schoolId: string,
+    @Body(new ZodValidationPipe(adminSchema)) body: z.infer<typeof adminSchema>,
+  ) {
+    return this.provisioning.createAdmin(p, schoolId, body);
+  }
 
   @Get("tenants")
   @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)

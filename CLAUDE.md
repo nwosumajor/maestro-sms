@@ -71,8 +71,10 @@ conflicts with it, flag the conflict before proceeding.
 - Roles live in DB tables (`Role`/`Permission`/`RolePermission`/`UserRole`),
   seeded in `packages/db/prisma/seed.ts`: super_admin (cross-tenant), board
   (read-only oversight + workflow veto), principal, school_admin, teacher,
-  student, parent, accountant, hr_clerk. All except super_admin are scoped to a
-  single `school_id`. Adding a role/permission is a seed change, not new code.
+  student, parent, accountant, hr_clerk, hr_manager (owns leave/salary/payroll +
+  stage-2 approver), head_teacher / head_admin (stage-1 approvers for the staff-
+  request chain). All except super_admin are scoped to a single `school_id`.
+  Adding a role/permission is a seed change, not new code.
 - Permissions are fine-grained strings (e.g. `student.read`, `grade.write`,
   `workflow.review`, `integrity.report.read`) in `packages/types/src/permissions`.
 - Authorization is checked in NestJS via `@RequirePermission('grade.write')` +
@@ -209,7 +211,11 @@ charge.success; gracefully 503-disabled when `PAYSTACK_SECRET_KEY` is unset —
 the disabled/public paths are verified, but live charging needs real creds +
 outbound network). #14 (cross-cutting) is DONE. By-role (#15) so far: **HR module**
 (`/hr` — staff employment records with field-encrypted salaries; the `hr_clerk`
-role's home), **tenant-scoped RBAC management** (`/admin/roles` — assign/remove a
+role's home; `hr.read`/`hr.write`. BOTH reads audited — incl. the list view, which
+decrypts every salary — and an upsert records a `created` boolean in the
+audit metadata WITHOUT ever writing the plaintext salary. Covered by an
+`hr.service.spec` unit suite + the `employee` RLS cross-tenant case),
+**tenant-scoped RBAC management** (`/admin/roles` — assign/remove a
 user's roles; role→permission defs stay platform-level), and **bulk student
 import** (`/admin/import` — CSV→accounts, idempotent on email) are BUILT
 (`rbac.manage` + reuses `class.write`). Student/parent self-service is already
@@ -222,6 +228,78 @@ impersonation** minting a scoped HS256 token), and the **public admissions porta
 (`/apply` → `@Public` intake quarantined from student data; staff review at
 `/admin/admissions`) are all built. The full suggested-functionality program
 (security spine + cross-cutting + by-role) is IMPLEMENTED and verified.
+
+**HR maturity + multi-stage approvals + self-serve onboarding — BUILT**
+(`apps/api/src/hr`, `apps/api/src/workflow`, `apps/api/src/operator`; migration
+`20260627144259_*`, RLS `25_hr_payroll_rls.sql`; web `/leave`, `/hr`, `/hr/payroll`,
+`/operator`). (1) The **Approval Workflow Engine is now multi-stage**: a
+`WorkflowRequest` carries an ordered `stages` chain + a `currentStage` pointer +
+an `approvals` log. An APPROVE advances the pointer (staying PENDING_REVIEW) until
+the LAST stage finalizes to APPROVED; each stage's approver must hold that stage's
+GRANULAR permission AND must not have acted before (separation of duties — every
+stage decided by a different person). Empty `stages` = legacy single-stage (back-
+compat). The staff chain `STAFF_REQUEST_CHAIN` (in `@sms/types`) is head
+(`workflow.review.head`) → HR manager (`workflow.review.hr`) → principal
+(`workflow.review.principal`); types `LEAVE` + `STAFF_REQUEST` auto-route through it.
+A one-way `WorkflowHooksService` fan-out runs reactors IN-TX on a terminal state
+(no engine→HR cycle). (2) **HR leave** (`leave_type`/`leave_balance`/`leave_request`):
+any staff self-applies at `/leave`; the request rides the staged workflow, and the
+finalized-hook (idempotent, PENDING-only) flips APPROVED + decrements the year's
+balance, or REJECTED. (3) **Salary change approval + history** (`salary_change_request`):
+maker-checker — request (`hr.salary.request`, step-up) then approve by a DIFFERENT
+person (`hr.salary.approve`, step-up) applies the new salary to `employee.salaryEnc`;
+each row IS the append-only history; old/new salaries encrypted at rest; `upsertEmployee`
+no longer changes salary (create-only). (4) **Payroll** (`payroll_run`/`payslip`,
+`hr.payroll.run`): a run snapshots active employees' decrypted salary into
+field-encrypted payslips + aggregate totals; DRAFT→finalize. (5) **super_admin
+self-serve onboarding** (`POST /operator/tenants` + `/operator/tenants/:id/admins`,
+`platform.operate` + step-up, audited): creates a school + subscription + first
+admin, or adds admins to an existing school. Because the least-privilege app role
+has SELECT-only on the GLOBAL `school`/`role` tables, provisioning uses a PRIVILEGED
+client (`DATABASE_MIGRATE_URL`→`DATABASE_RETENTION_URL`, like retention/dunning) —
+503-disabled when unset. Verified: staged-chain + leave-hook + salary maker-checker +
+payroll unit suites, the 6 new RLS cross-tenant cases (coverage gate green), web
+typecheck + production build.
+HR roadmap progress (of a 15-item list): **#1 structured special requests** — a
+`STAFF_REQUEST` carries `{category,details}` (`SPECIAL_REQUEST_CATEGORIES` in
+`@sms/types`); per-type initiation rules (`WORKFLOW_TYPE_META` + pure
+`canInitiateWorkflowType`) enforced in the workflow controller (PO needs
+`fee.manage`, disciplinary `rbac.manage`, content-publish is system-only) and used
+to filter the web create dropdown; **#2 payslip PDF** (`GET /hr/payroll/runs/:id/
+payslips/:userId/pdf`, pdfkit, audited); **#4 leave coverage** ("who's out",
+`GET /hr/leave/calendar`); **#5 statutory payroll** — pure `computeMonthlyPayslip`
+(Nigerian PAYE bands + 8% pension) replaces the zero-deduction baseline, and
+payroll **finalize is maker-checker** (creator ≠ finalizer). Batch 2 added:
+**#3 fractional leave** — half-day support (`leave_request.days` + `leave_balance`
+entitled/used are now `DOUBLE PRECISION`; 0.5-day steps; web half-day toggle;
+attachment deferred to the doc-vault batch); **#6 payroll bank export** (`GET
+/hr/payroll/runs/:id/bank-export` → CSV of name/bank/account/net, audited);
+**#9 staff self-service profile** — six field-ENCRYPTED personal/bank columns on
+`employee` (`phoneEnc`/`addressEnc`/`nextOfKinEnc`/`nextOfKinPhoneEnc`/`bankNameEnc`/
+`bankAccountEnc`); `GET/PUT /hr/me` (gated `workflow.create` = any staff; edits ONLY
+personal fields, HR still owns employment + salary); web `MyProfile` on `/leave`.
+Migration `20260627160233_*` (no new tables → no RLS file). Batch 3 added the
+staff-lifecycle cluster (`apps/api/src/hr/staff-lifecycle.*`, schema 4 tables,
+migration `20260627*_hr_staff_lifecycle`, RLS `26_hr_lifecycle_rls.sql`, web
+`/hr/staff/[userId]`): **#7 onboarding/offboarding checklists** (`staff_checklist`
++ `staff_checklist_item`, seeded with default tasks per type; toggling the last
+task flips the checklist to COMPLETED); **#8 document expiry reminders**
+(`staff_document` with `expiresAt`; `POST /hr/staff/documents/reminders/run`
+notifies HR of docs due within 30 days, idempotent via `reminderSentAt` — the
+cross-tenant DAILY BullMQ sweep mirroring dunning is the only follow-up); **#11
+training records** (`training_record`). All gated hr.read/hr.write, audited, with
+4 RLS cross-tenant cases (coverage gate green) + a `staff-lifecycle.service` unit
+suite. Batch 4 added the reviews cluster (`apps/api/src/hr/reviews.*`, schema 3
+tables, migration `20260627*_hr_appraisals_disciplinary`, RLS
+`27_hr_appraisals_disciplinary_rls.sql`, web on `/hr/staff/[userId]` + `/leave`):
+**#10 performance appraisals** (`appraisal`: DRAFT → SUBMITTED by the reviewer →
+ACKNOWLEDGED by the appraisee themselves; rating 1–5; `hr.appraisal.manage`, self-
+acknowledge gated `workflow.create` + 404-not-403 scoped to the appraisee); **#12
+disciplinary case files** (`disciplinary_case` + APPEND-ONLY `disciplinary_entry`;
+open/entry/status; `hr.disciplinary.manage`). 3 RLS cross-tenant cases + a
+`reviews.service` unit suite; new perms seeded to principal/school_admin/hr_manager.
+Remaining roadmap (#13 HR analytics, #14 recruitment, #15 staff NDPR; plus #3's
+leave attachment + the #8 daily sweep) is not yet built.
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
 **Cloud infra is BUILT** as Terraform in `infrastructure/terraform/` (VPC + 3
@@ -288,9 +366,17 @@ unit tests + an `observability.module` DI smoke test.
   one with raw SQL `now() - interval '…'` stores the DB session's LOCAL wall-clock
   while Prisma reads it back as UTC — a skew on a non-UTC DB. So run the e2e DB on
   UTC (RDS/CI default) OR write the value as `now() AT TIME ZONE 'UTC'`. The full
-  api suite (165 tests) is green against a real local Postgres set to UTC.
+  api suite (290 tests) is green against a real local Postgres set to UTC.
+- RLS coverage gate: `rls.e2e-spec.ts` ends with a meta-test that introspects
+  `pg_class`/`information_schema` for every table that has a `schoolId` column AND
+  `relrowsecurity=true`, and FAILS if any is missing a cross-tenant deny case (or
+  an append-only INSERT/UPDATE test). So a NEW tenant table can't silently skip the
+  most-important test category — add it to the `cases` array (seed a row + an
+  afterAll cleanup entry) or the meta-test goes red. The only documented exempt is
+  the RLS-disabled `ultimate_participant` arena table (cross-tenant by design, no PII).
 - Demo logins (password `password123`): `teacher@` / `student@` / `parent@` /
-  `admin@` / `principal@` / `board@` / `accountant@` / `hr@demo.school`.
+  `admin@` / `principal@` / `board@` / `accountant@` / `hr@` (hr_clerk) /
+  `hrmanager@` / `headteacher@` / `headadmin@demo.school`.
 - Local stack: `cd infrastructure && cp .env.example .env && docker compose up
   --build` → app at http://localhost (nginx). Postgres/Redis are NOT host-exposed.
 
@@ -393,7 +479,7 @@ A competitive number-guessing game (Bulls & Cows / Mastermind family) with five
 game modes built on one shared, pure scoring engine. The FULL spec lives in
 `DEAD_AND_WOUNDED_PLATFORM_SPEC.md` at the repo root — READ IT before any work on
 the game. The entire spec §11 build sequence (steps 1–8) is now implemented;
-typecheck (11/11 turbo tasks) and the 81 game-engine unit tests pass. The DB-backed
+typecheck (13/13 turbo tasks) and the 118 game-engine unit tests pass. The DB-backed
 e2e/RLS suites need a provisioned Postgres (TEST_DATABASE_URL app role +
 TEST_ADMIN_URL superuser) and run in CI / locally-with-creds, not the sandbox.
 
@@ -551,13 +637,15 @@ Still in the in-memory step-2 transport only (NOT the durable bridge): the live
 turn timers / 15s countdown / hard-disconnect handling for actively-played
 sockets.
 
-**FULL-STACK VERIFIED end-to-end (2026-06-24) against a real Postgres 18 (UTC):**
-migrate deploy (all migrations incl. all 6 game ones) → all 21 RLS files apply
+**FULL-STACK VERIFIED end-to-end (2026-06-27) against a real Postgres 18 (UTC):**
+migrate deploy (all migrations incl. all 6 game ones) → all 24 RLS files apply
 clean (`ON_ERROR_STOP=1`) → seed OK (game RBAC confirmed in DB: 10 `game.*` perms;
 ultimate.admin→super_admin, ultimate.consent→school_admin, ultimate.enroll→
-principal+school_admin). The ENTIRE api jest suite passes: **22 suites / 165 tests**
+principal+school_admin). The ENTIRE api jest suite passes: **39 suites / 290 tests**
 (every module + RLS cross-tenant incl. ultimate + all 5 game modes + the new
-`GET /races`). game-engine **81/81**, monorepo typecheck **11/11**, and the web
+`GET /races`; the RLS suite now proves isolation for EVERY one of the 69 RLS-enabled
+tenant tables + a coverage meta-test that fails if a new one is added untested).
+game-engine **118/118**, monorepo typecheck **13/13**, and the web
 **production build** compiles all routes incl. the 7 game screens. Two pre-existing
 game e2e assertions were FIXED (a winner's cracking guess necessarily equals the
 secret and legitimately shows in the public move log / own history — the naive

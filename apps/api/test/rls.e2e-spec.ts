@@ -69,6 +69,39 @@ d("RLS cross-tenant isolation", () => {
   const quizAttemptA = randomUUID();
   const forumPostA = randomUUID();
   const subPaymentA = randomUUID();
+  // HR + the remaining tenant tables — seeded so the coverage meta-test
+  // ("every RLS-enabled table has a deny case") holds for the whole schema.
+  const employeeA = randomUUID();
+  const classTeacherA = randomUUID();
+  const enrollmentA = randomUUID();
+  const parentChildA = randomUUID();
+  const userRoleA = randomUUID();
+  const roleX = randomUUID(); // a global role row to satisfy user_role.roleId FK
+  const integrityConsentA = randomUUID();
+  const retentionRunA = randomUUID();
+  const messageA = randomUUID();
+  const schoolSubA = randomUUID();
+  const exemptionA = randomUUID();
+  const draftA = randomUUID();
+  const telemetryA = randomUUID();
+  const threadParticipantA = randomUUID();
+  const admissionA = randomUUID();
+  // HR appraisals / disciplinary
+  const appraisalA = randomUUID();
+  const disciplinaryCaseA = randomUUID();
+  const disciplinaryEntryA = randomUUID();
+  // HR staff lifecycle
+  const staffChecklistA = randomUUID();
+  const staffChecklistItemA = randomUUID();
+  const staffDocumentA = randomUUID();
+  const trainingRecordA = randomUUID();
+  // HR leave / salary / payroll
+  const leaveTypeA = randomUUID();
+  const leaveBalanceA = randomUUID();
+  const leaveReqA = randomUUID();
+  const salaryChangeA = randomUUID();
+  const payrollRunA = randomUUID();
+  const payslipA = randomUUID();
 
   beforeAll(async () => {
     appPool = new Pool({ connectionString: APP_URL });
@@ -261,12 +294,161 @@ d("RLS cross-tenant isolation", () => {
        VALUES ($1,$2,'STANDARD','TERM',1,1000,$3,'PENDING',$4,now())`,
       [subPaymentA, A, `SUBR-${subPaymentA}`, userA],
     );
+    // HR: an employment record for staff userA.
+    await a.query(
+      `INSERT INTO employee (id,"schoolId","userId","jobTitle","startDate","updatedAt") VALUES ($1,$2,$3,'Teacher',current_date,now())`,
+      [employeeA, A, userA],
+    );
+    // LMS relationship/junction rows (class membership + teaching + guardianship).
+    await a.query(
+      `INSERT INTO class_teacher (id,"schoolId","classId","teacherId") VALUES ($1,$2,$3,$4)`,
+      [classTeacherA, A, classA, userA],
+    );
+    await a.query(
+      `INSERT INTO enrollment (id,"schoolId","classId","studentId") VALUES ($1,$2,$3,$4)`,
+      [enrollmentA, A, classA, userA],
+    );
+    await a.query(
+      `INSERT INTO parent_child (id,"schoolId","parentId","studentId") VALUES ($1,$2,$3,$4)`,
+      [parentChildA, A, userA, userA],
+    );
+    // RBAC assignment: a global role row + a tenant-scoped user_role link.
+    await a.query(`INSERT INTO role (id,name) VALUES ($1,$2)`, [roleX, `role-${roleX}`]);
+    await a.query(
+      `INSERT INTO user_role (id,"schoolId","userId","roleId") VALUES ($1,$2,$3,$4)`,
+      [userRoleA, A, userA, roleX],
+    );
+    // Integrity: consent + a retention-run record + a student exemption + draft/telemetry.
+    await a.query(
+      `INSERT INTO integrity_consent (id,"schoolId","studentId","grantedById") VALUES ($1,$2,$3,$3)`,
+      [integrityConsentA, A, userA],
+    );
+    await a.query(
+      `INSERT INTO integrity_retention_run (id,"schoolId","retentionDays",cutoff,"signalsDeleted","draftsDeleted","telemetryDeleted",trigger,"startedAt")
+       VALUES ($1,$2,30,now(),0,0,0,'MANUAL',now())`,
+      [retentionRunA, A],
+    );
+    await a.query(
+      `INSERT INTO student_integrity_exemption (id,"schoolId","studentId",reason,"grantedById") VALUES ($1,$2,$3,'accommodation',$3)`,
+      [exemptionA, A, userA],
+    );
+    await a.query(
+      `INSERT INTO submission_draft (id,"schoolId","submissionId",sequence,"contentHash") VALUES ($1,$2,$3,1,'h')`,
+      [draftA, A, submissionA],
+    );
+    await a.query(
+      `INSERT INTO submission_telemetry (id,"schoolId","submissionId",kind,payload) VALUES ($1,$2,$3,'PASTE','{}'::jsonb)`,
+      [telemetryA, A, submissionA],
+    );
+    // Messaging: a message + a participant on threadA.
+    await a.query(
+      `INSERT INTO message (id,"schoolId","threadId","senderId",body) VALUES ($1,$2,$3,$4,'hi')`,
+      [messageA, A, threadA, userA],
+    );
+    await a.query(
+      `INSERT INTO thread_participant (id,"schoolId","threadId","userId") VALUES ($1,$2,$3,$4)`,
+      [threadParticipantA, A, threadA, userA],
+    );
+    // Platform subscription (one row per school) + a public admissions application.
+    await a.query(
+      `INSERT INTO school_subscription (id,"schoolId","updatedAt") VALUES ($1,$2,now())`,
+      [schoolSubA, A],
+    );
+    await a.query(
+      `INSERT INTO admission_application (id,"schoolId","applicantName","applicantEmail","childName","updatedAt") VALUES ($1,$2,'Parent','p@t','Kid',now())`,
+      [admissionA, A],
+    );
+    // HR leave / salary / payroll (employeeA seeded above is the salary target).
+    await a.query(
+      `INSERT INTO leave_type (id,"schoolId",name,"daysPerYear","updatedAt") VALUES ($1,$2,'Annual',20,now())`,
+      [leaveTypeA, A],
+    );
+    await a.query(
+      `INSERT INTO leave_balance (id,"schoolId","userId","leaveTypeId",year,"updatedAt") VALUES ($1,$2,$3,$4,2026,now())`,
+      [leaveBalanceA, A, userA, leaveTypeA],
+    );
+    await a.query(
+      `INSERT INTO leave_request (id,"schoolId","userId","leaveTypeId","startDate","endDate",days,"updatedAt") VALUES ($1,$2,$3,$4,current_date,current_date,1,now())`,
+      [leaveReqA, A, userA, leaveTypeA],
+    );
+    await a.query(
+      `INSERT INTO salary_change_request (id,"schoolId","employeeId","requestedById","updatedAt") VALUES ($1,$2,$3,$4,now())`,
+      [salaryChangeA, A, employeeA, userA],
+    );
+    await a.query(
+      `INSERT INTO payroll_run (id,"schoolId","periodYear","periodMonth","runById","updatedAt") VALUES ($1,$2,2026,1,$3,now())`,
+      [payrollRunA, A, userA],
+    );
+    await a.query(
+      `INSERT INTO payslip (id,"schoolId","payrollRunId","userId") VALUES ($1,$2,$3,$4)`,
+      [payslipA, A, payrollRunA, userA],
+    );
+    // HR staff lifecycle: a checklist (+ item), a document, a training record.
+    await a.query(
+      `INSERT INTO staff_checklist (id,"schoolId","userId",type,"createdById","updatedAt") VALUES ($1,$2,$3,'ONBOARDING',$3,now())`,
+      [staffChecklistA, A, userA],
+    );
+    await a.query(
+      `INSERT INTO staff_checklist_item (id,"schoolId","checklistId",label) VALUES ($1,$2,$3,'Sign contract')`,
+      [staffChecklistItemA, A, staffChecklistA],
+    );
+    await a.query(
+      `INSERT INTO staff_document (id,"schoolId","userId",kind,name,"createdById","updatedAt") VALUES ($1,$2,$3,'CONTRACT','Contract',$3,now())`,
+      [staffDocumentA, A, userA],
+    );
+    await a.query(
+      `INSERT INTO training_record (id,"schoolId","userId",title,"createdById","updatedAt") VALUES ($1,$2,$3,'First Aid',$3,now())`,
+      [trainingRecordA, A, userA],
+    );
+    // HR appraisal + disciplinary case (+ entry).
+    await a.query(
+      `INSERT INTO appraisal (id,"schoolId","userId","reviewerId",period,"createdById","updatedAt") VALUES ($1,$2,$3,$3,'2026-H1',$3,now())`,
+      [appraisalA, A, userA],
+    );
+    await a.query(
+      `INSERT INTO disciplinary_case (id,"schoolId","userId",title,"openedById","updatedAt") VALUES ($1,$2,$3,'Lateness',$3,now())`,
+      [disciplinaryCaseA, A, userA],
+    );
+    await a.query(
+      `INSERT INTO disciplinary_entry (id,"schoolId","caseId",note,"authorId") VALUES ($1,$2,$3,'Initial note',$4)`,
+      [disciplinaryEntryA, A, disciplinaryCaseA, userA],
+    );
   });
 
   afterAll(async () => {
     const a = adminPool;
     for (const t of [
       "audit_log",
+      // HR appraisals / disciplinary — entry before case.
+      "disciplinary_entry",
+      "disciplinary_case",
+      "appraisal",
+      // HR staff lifecycle — items before checklist.
+      "staff_checklist_item",
+      "staff_checklist",
+      "staff_document",
+      "training_record",
+      // HR leave / salary / payroll — children first (payslip before payroll_run).
+      "payslip",
+      "payroll_run",
+      "salary_change_request",
+      "leave_request",
+      "leave_balance",
+      "leave_type",
+      // Newly-covered tenant tables — child rows; safe to purge first (none are
+      // parents of the tables listed below).
+      "employee",
+      "class_teacher",
+      "enrollment",
+      "parent_child",
+      "user_role",
+      "integrity_consent",
+      "integrity_retention_run",
+      "student_integrity_exemption",
+      "submission_draft",
+      "submission_telemetry",
+      "school_subscription",
+      "admission_application",
       // Platform billing payment references school/user — delete before them.
       "platform_subscription_payment",
       // LMS content children (forum/quiz) before lms_content; lms_content before class/user.
@@ -323,6 +505,8 @@ d("RLS cross-tenant isolation", () => {
     await a.query(`DELETE FROM ultimate_competition WHERE id = $1`, [ultimateCompA]);
     await a.query(`DELETE FROM "user" WHERE "schoolId" = ANY($1)`, [[A, B]]);
     await a.query(`DELETE FROM school WHERE id = ANY($1)`, [[A, B]]);
+    // Global (RLS-exempt) role row created for the user_role case — delete by id.
+    await a.query(`DELETE FROM role WHERE id = $1`, [roleX]);
     await appPool.end();
     await adminPool.end();
   });
@@ -376,6 +560,36 @@ d("RLS cross-tenant isolation", () => {
     ["quiz_attempt", quizAttemptA],
     ["forum_post", forumPostA],
     ["platform_subscription_payment", subPaymentA],
+    ["employee", employeeA],
+    ["class_teacher", classTeacherA],
+    ["enrollment", enrollmentA],
+    ["parent_child", parentChildA],
+    ["user_role", userRoleA],
+    ["integrity_consent", integrityConsentA],
+    ["integrity_retention_run", retentionRunA],
+    ["student_integrity_exemption", exemptionA],
+    ["submission_draft", draftA],
+    ["submission_telemetry", telemetryA],
+    ["message", messageA],
+    ["thread_participant", threadParticipantA],
+    ["school_subscription", schoolSubA],
+    ["admission_application", admissionA],
+    ["ultimate_consent", ultimateConsentA],
+    ["ultimate_enrollment", ultimateEnrollA],
+    ["ultimate_entry_link", ultimateLinkA],
+    ["leave_type", leaveTypeA],
+    ["leave_balance", leaveBalanceA],
+    ["leave_request", leaveReqA],
+    ["salary_change_request", salaryChangeA],
+    ["payroll_run", payrollRunA],
+    ["payslip", payslipA],
+    ["staff_checklist", staffChecklistA],
+    ["staff_checklist_item", staffChecklistItemA],
+    ["staff_document", staffDocumentA],
+    ["training_record", trainingRecordA],
+    ["appraisal", appraisalA],
+    ["disciplinary_case", disciplinaryCaseA],
+    ["disciplinary_entry", disciplinaryEntryA],
   ];
 
   it.each(cases)("school B cannot SELECT school A's %s; school A can", async (table, id) => {
@@ -388,6 +602,40 @@ d("RLS cross-tenant isolation", () => {
       const r = await c.query(`SELECT 1 FROM "${table}" WHERE id = $1`, [id]);
       expect(r.rowCount).toBe(1);
     });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Coverage gate: prove the suite ITSELF stays exhaustive. Any table that is
+  // tenant-scoped (has a `schoolId` column) AND has row-level security enabled
+  // MUST be proven isolated — either by a SELECT-deny case above or an
+  // append-only INSERT/UPDATE test. A NEW tenant table fails this test until it
+  // gets a deny case, so the "every RLS policy gets a cross-tenant test" rule
+  // (CLAUDE.md) can no longer be silently skipped.
+  // ---------------------------------------------------------------------------
+  it("every RLS-enabled tenant table has a cross-tenant deny case (coverage gate)", async () => {
+    const covered = new Set<string>([
+      ...cases.map(([t]) => t),
+      "audit_log", // append-only test below
+      "integrity_signal", // append-only test below
+      "workflow_audit_log", // append-only test below
+    ]);
+    // Documented RLS-EXEMPT: cross-tenant BY DESIGN (carries no PII). It has a
+    // schoolId for grouping but intentionally no RLS (see 21_ultimate_rls.sql),
+    // so it won't appear in the query below — listed here for the record.
+    const exempt = new Set<string>(["ultimate_participant"]);
+    const { rows } = await adminPool.query<{ relname: string }>(`
+      SELECT c.relname
+      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relrowsecurity = true
+        AND EXISTS (
+          SELECT 1 FROM information_schema.columns col
+          WHERE col.table_schema = 'public' AND col.table_name = c.relname
+            AND col.column_name = 'schoolId')
+      ORDER BY 1`);
+    const uncovered = rows
+      .map((r) => r.relname)
+      .filter((t) => !covered.has(t) && !exempt.has(t));
+    expect(uncovered).toEqual([]);
   });
 
   it("audit_log is append-only: INSERT allowed, UPDATE denied", async () => {

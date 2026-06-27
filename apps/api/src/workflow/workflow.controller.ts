@@ -1,9 +1,9 @@
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { Body, Controller, ForbiddenException, Get, Param, Post } from "@nestjs/common";
 import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
 import type { WorkflowInboxItemDto } from "@sms/types";
 import { z } from "zod";
-import { WORKFLOW_PERMISSIONS, WORKFLOW_TYPES } from "@sms/types";
+import { canInitiateWorkflowType, WORKFLOW_PERMISSIONS, WORKFLOW_TYPES } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
@@ -33,6 +33,13 @@ export class WorkflowController {
     @Body(new ZodValidationPipe(createSchema))
     body: { type: (typeof WORKFLOW_TYPES)[number]; title: string; payload: Record<string, unknown> },
   ) {
+    // Per-type initiation rules: PURCHASE_ORDER/DISCIPLINARY need an extra perm;
+    // LMS_CONTENT_PUBLISH is system-only (LmsContentService calls the service
+    // directly, bypassing this endpoint). Self-service types (LEAVE/STAFF_REQUEST)
+    // pass for any staff member with workflow.create.
+    if (!canInitiateWorkflowType(body.type, p.permissions)) {
+      throw new ForbiddenException("You cannot initiate this type of request");
+    }
     return this.workflow.createRequest(p, body);
   }
 

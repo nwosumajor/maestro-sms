@@ -49,3 +49,4 @@ export * from "./dto/race";
 export * from "./dto/ring";
 export * from "./dto/game-settings";
 export * from "./dto/ultimate";
+export * from "./payroll";

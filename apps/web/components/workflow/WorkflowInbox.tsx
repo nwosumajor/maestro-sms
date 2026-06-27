@@ -6,6 +6,10 @@ import {
   WORKFLOW_PERMISSIONS,
   WORKFLOW_TRANSITIONS,
   WORKFLOW_TYPES,
+  WORKFLOW_TYPE_META,
+  SPECIAL_REQUEST_CATEGORIES,
+  canInitiateWorkflowType,
+  type SpecialRequestCategory,
   type WorkflowState,
   type WorkflowType,
   type WorkflowInboxItemDto,
@@ -48,10 +52,15 @@ export function WorkflowInbox({
   const canReview = has(WORKFLOW_PERMISSIONS.REVIEW);
   const canVeto = has(WORKFLOW_PERMISSIONS.VETO);
 
-  const [type, setType] = React.useState<WorkflowType>("LEAVE");
+  const [type, setType] = React.useState<WorkflowType>("STAFF_REQUEST");
   const [title, setTitle] = React.useState("");
+  const [category, setCategory] = React.useState<SpecialRequestCategory>("EQUIPMENT");
+  const [details, setDetails] = React.useState("");
   const [busy, setBusy] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  // Only the types this user may initiate (PO needs finance, disciplinary needs
+  // rbac.manage, content-publish is system-only).
+  const initiatableTypes = WORKFLOW_TYPES.filter((t) => canInitiateWorkflowType(t, permissions));
 
   // All mutating calls go through the same-origin BFF, which injects the Bearer.
   const call = async (path: string, body: unknown, key: string) => {
@@ -78,9 +87,14 @@ export function WorkflowInbox({
 
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim()) return;
-    await call("workflows", { type, title: title.trim(), payload: {} }, "create");
+    const isSpecial = type === "STAFF_REQUEST";
+    const finalTitle =
+      title.trim() || (isSpecial ? `${category.replace(/_/g, " ").toLowerCase()} request` : "");
+    if (!finalTitle) return;
+    const payload = isSpecial ? { category, details: details.trim() } : {};
+    await call("workflows", { type, title: finalTitle, payload }, "create");
     setTitle("");
+    setDetails("");
   };
 
   // Which transitions are legal from this state, given the actor's permissions
@@ -146,22 +160,48 @@ export function WorkflowInbox({
                   onChange={(e) => setType(e.target.value as WorkflowType)}
                   className="h-9 rounded-md border border-input bg-background px-3 text-sm"
                 >
-                  {WORKFLOW_TYPES.map((t) => (
+                  {initiatableTypes.map((t) => (
                     <option key={t} value={t}>
-                      {t.replace("_", " ")}
+                      {WORKFLOW_TYPE_META[t].label}
                     </option>
                   ))}
                 </select>
               </div>
+              {type === "STAFF_REQUEST" && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="wf-cat">Category</Label>
+                  <select
+                    id="wf-cat"
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value as SpecialRequestCategory)}
+                    className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                  >
+                    {SPECIAL_REQUEST_CATEGORIES.map((c) => (
+                      <option key={c} value={c}>{c.replace(/_/g, " ").toLowerCase()}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div className="flex-1 space-y-1.5">
                 <Label htmlFor="wf-title">Title</Label>
                 <Input
                   id="wf-title"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  placeholder="e.g. Annual leave — 3 days"
+                  placeholder={type === "STAFF_REQUEST" ? "Optional — defaults from category" : "e.g. Annual leave — 3 days"}
                 />
               </div>
+              {type === "STAFF_REQUEST" && (
+                <div className="flex-1 space-y-1.5">
+                  <Label htmlFor="wf-details">Details</Label>
+                  <Input
+                    id="wf-details"
+                    value={details}
+                    onChange={(e) => setDetails(e.target.value)}
+                    placeholder="What you need and why"
+                  />
+                </div>
+              )}
               <Button type="submit" disabled={busy === "create"}>
                 {busy === "create" ? "Creating…" : "Create"}
               </Button>
@@ -188,9 +228,17 @@ export function WorkflowInbox({
                       {w.initiatorId === userId ? "you initiated" : "from a colleague"}
                     </CardDescription>
                   </div>
-                  <Badge variant={STATE_VARIANT[w.state] ?? "secondary"}>
-                    {w.state.replace("_", " ")}
-                  </Badge>
+                  <div className="flex flex-col items-end gap-1">
+                    <Badge variant={STATE_VARIANT[w.state] ?? "secondary"}>
+                      {w.state.replace("_", " ")}
+                    </Badge>
+                    {w.stageCount > 0 && w.state === "PENDING_REVIEW" && (
+                      <span className="text-xs text-muted-foreground">
+                        Stage {w.currentStage + 1}/{w.stageCount}
+                        {w.stageLabel ? ` · ${w.stageLabel}` : ""}
+                      </span>
+                    )}
+                  </div>
                 </CardHeader>
                 {actions.length > 0 && (
                   <CardContent>

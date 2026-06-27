@@ -20,4 +20,9 @@ export interface WorkflowInboxItemDto {
   state: string;
   initiatorId: string;
   createdAt: Date;
+  /** Multi-stage progress (0/0 for a single-stage request). */
+  currentStage: number;
+  stageCount: number;
+  /** Label of the stage currently awaiting approval (null when not staged/terminal). */
+  stageLabel: string | null;
 }

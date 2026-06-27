@@ -17,6 +17,7 @@ import { randomUUID } from "node:crypto";
 import { prisma } from "@sms/db";
 import { LmsContentService } from "../../src/lms/lms-content.service";
 import { WorkflowService } from "../../src/workflow/workflow.service";
+import { WorkflowHooksService } from "../../src/workflow/workflow-hooks.service";
 import { StubStorageProvider } from "../../src/documents/storage.provider";
 import { PrismaTenantService } from "../../src/foundation/prisma-tenant.service";
 import { AuditLogService } from "../../src/foundation/audit-log.service";
@@ -82,7 +83,7 @@ d("LmsContentService integration (authoring, approval, quiz, forum, RLS)", () =>
     svc = new LmsContentService(
       tenant,
       new AuditLogService() as never,
-      new WorkflowService(tenant),
+      new WorkflowService(tenant, new WorkflowHooksService()),
       notifier,
       new StubStorageProvider(),
     );

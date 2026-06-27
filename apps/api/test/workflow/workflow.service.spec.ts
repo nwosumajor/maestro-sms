@@ -3,6 +3,7 @@
 // =============================================================================
 
 import { WorkflowService } from "../../src/workflow/workflow.service";
+import { STAFF_REQUEST_CHAIN, canInitiateWorkflowType } from "@sms/types";
 import type { Principal, TenantContext, TenantTx } from "../../src/integrity/integrity.foundation";
 
 function makeService(request: Record<string, unknown> | null) {
@@ -23,7 +24,8 @@ function makeService(request: Record<string, unknown> | null) {
     },
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
-  return { service: new WorkflowService(db as never), update, auditCreate };
+  const hooks = { onFinalized: jest.fn(), runFinalized: jest.fn().mockResolvedValue(undefined) };
+  return { service: new WorkflowService(db as never, hooks as never), update, auditCreate, hooks };
 }
 
 const p = (permissions: string[], userId = "me"): Principal => ({
@@ -52,7 +54,7 @@ describe("WorkflowService state machine", () => {
     const r = (await service.submit(p(["workflow.create"], "me"), "w1")) as { state: string };
     expect(r.state).toBe("PENDING_REVIEW");
     expect(update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { state: "PENDING_REVIEW" } }),
+      expect.objectContaining({ data: expect.objectContaining({ state: "PENDING_REVIEW" }) }),
     );
   });
 
@@ -104,5 +106,88 @@ describe("WorkflowService state machine", () => {
     await expect(service.submit(p(["workflow.create"], "intruder"), "w1")).rejects.toThrow(
       /not found/i,
     );
+  });
+});
+
+describe("canInitiateWorkflowType (per-type initiation rules)", () => {
+  const staff = ["workflow.create"];
+  it("any staff can initiate LEAVE and STAFF_REQUEST", () => {
+    expect(canInitiateWorkflowType("LEAVE", staff)).toBe(true);
+    expect(canInitiateWorkflowType("STAFF_REQUEST", staff)).toBe(true);
+  });
+  it("PURCHASE_ORDER needs fee.manage; DISCIPLINARY needs rbac.manage", () => {
+    expect(canInitiateWorkflowType("PURCHASE_ORDER", staff)).toBe(false);
+    expect(canInitiateWorkflowType("PURCHASE_ORDER", [...staff, "fee.manage"])).toBe(true);
+    expect(canInitiateWorkflowType("DISCIPLINARY", staff)).toBe(false);
+    expect(canInitiateWorkflowType("DISCIPLINARY", [...staff, "rbac.manage"])).toBe(true);
+  });
+  it("LMS_CONTENT_PUBLISH is system-only — never initiable via the API", () => {
+    expect(canInitiateWorkflowType("LMS_CONTENT_PUBLISH", [...staff, "fee.manage", "rbac.manage"])).toBe(false);
+  });
+  it("a non-staff principal (no workflow.create) can initiate nothing", () => {
+    expect(canInitiateWorkflowType("STAFF_REQUEST", [])).toBe(false);
+  });
+});
+
+describe("WorkflowService multi-stage chain (head -> HR -> principal)", () => {
+  const staged = (over: Record<string, unknown> = {}) => ({
+    id: "w1",
+    type: "LEAVE",
+    state: "PENDING_REVIEW",
+    initiatorId: "staff",
+    payload: {},
+    stages: STAFF_REQUEST_CHAIN,
+    currentStage: 0,
+    approvals: [],
+    ...over,
+  });
+
+  it("stage-1 (HEAD) approve advances the pointer and stays PENDING_REVIEW (not finalized)", async () => {
+    const { service, update, hooks } = makeService(staged());
+    const r = (await service.review(p(["workflow.review", "workflow.review.head"], "head1"), "w1", "APPROVE")) as {
+      state: string;
+      currentStage: number;
+    };
+    expect(r.state).toBe("PENDING_REVIEW");
+    expect(r.currentStage).toBe(1);
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ state: "PENDING_REVIEW", currentStage: 1 }) }),
+    );
+    expect(hooks.runFinalized).not.toHaveBeenCalled(); // not terminal yet
+  });
+
+  it("the wrong-stage approver is rejected (HR can't approve the HEAD stage)", async () => {
+    const { service } = makeService(staged({ currentStage: 0 }));
+    await expect(
+      service.review(p(["workflow.review", "workflow.review.hr"], "hr1"), "w1", "APPROVE"),
+    ).rejects.toThrow(/not the .* approver/i);
+  });
+
+  it("final stage (PRINCIPAL) approve finalizes to APPROVED and fires the finalized hook", async () => {
+    const { service, hooks } = makeService(
+      staged({ currentStage: 2, approvals: [{ stageKey: "HEAD", approverId: "head1", at: "t" }, { stageKey: "HR", approverId: "hr1", at: "t" }] }),
+    );
+    const r = (await service.review(p(["workflow.review", "workflow.review.principal"], "principal1"), "w1", "APPROVE")) as {
+      state: string;
+    };
+    expect(r.state).toBe("APPROVED");
+    expect(hooks.runFinalized).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ type: "LEAVE", state: "APPROVED" }),
+    );
+  });
+
+  it("a user who already approved an earlier stage cannot approve a later one", async () => {
+    const { service } = makeService(
+      staged({ currentStage: 1, approvals: [{ stageKey: "HEAD", approverId: "super", at: "t" }] }),
+    );
+    // 'super' holds every granular perm but already acted at the HEAD stage.
+    await expect(
+      service.review(
+        p(["workflow.review", "workflow.review.head", "workflow.review.hr", "workflow.review.principal"], "super"),
+        "w1",
+        "APPROVE",
+      ),
+    ).rejects.toThrow(/already acted/i);
   });
 });

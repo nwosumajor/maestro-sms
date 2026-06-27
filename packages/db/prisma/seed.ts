@@ -54,6 +54,12 @@ const PERMS = [
   // HR
   "hr.read",
   "hr.write",
+  "hr.salary.request",
+  "hr.salary.approve",
+  "hr.leave.manage",
+  "hr.payroll.run",
+  "hr.appraisal.manage",
+  "hr.disciplinary.manage",
   // Admin / RBAC
   "rbac.manage",
   // Platform operator
@@ -97,6 +103,10 @@ const PERMS = [
   "workflow.read",
   "workflow.review",
   "workflow.veto",
+  // Multi-stage staff-request chain (head -> HR -> principal)
+  "workflow.review.head",
+  "workflow.review.hr",
+  "workflow.review.principal",
 ];
 
 // Role -> permission matrix (CLAUDE.md RBAC + spec section 2).
@@ -118,14 +128,14 @@ const ROLE_PERMS: Record<string, string[]> = {
     "attendance.read", "attendance.write",
     "class.read", "class.write", "enrollment.read", "enrollment.write", "guardian.write",
     "grade.read", "grade.write",
-    "workflow.create", "workflow.read", "workflow.review",
+    "workflow.create", "workflow.read", "workflow.review", "workflow.review.principal",
     "notification.read", "notification.send",
     "fee.read", "fee.manage", "fee.approve",
     "document.read", "document.write",
     "timetable.read", "timetable.write",
     "security.audit.read", "security.elevation.request", "security.elevation.approve",
     "privacy.erasure.review", "message.read", "message.send", "event.read", "event.write",
-    "hr.read", "hr.write", "rbac.manage", "admission.review",
+    "hr.read", "hr.write", "hr.appraisal.manage", "hr.disciplinary.manage", "rbac.manage", "admission.review",
     "game.league.create", "game.leaderboard.read",
     "game.race.open", "game.race.tournament", "game.match.moderate",
     "game.ultimate.enroll",
@@ -147,7 +157,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     "timetable.read", "timetable.write",
     "security.audit.read", "security.elevation.request", "security.elevation.approve",
     "privacy.erasure.review", "message.read", "message.send", "event.read", "event.write",
-    "hr.read", "hr.write", "rbac.manage", "admission.review",
+    "hr.read", "hr.write", "hr.appraisal.manage", "hr.disciplinary.manage", "rbac.manage", "admission.review",
     "game.league.create", "game.leaderboard.read",
     "game.race.open", "game.race.tournament", "game.match.moderate",
     "game.settings.manage",
@@ -191,6 +201,28 @@ const ROLE_PERMS: Record<string, string[]> = {
   accountant: ["workflow.create", "workflow.read", "notification.read", "fee.read", "fee.manage", "document.read", "document.write", "security.elevation.request", "message.read", "message.send", "event.read", "billing.read",
   ],
   hr_clerk: ["workflow.create", "workflow.read", "notification.read", "security.elevation.request", "hr.read", "hr.write", "message.read", "message.send", "event.read",
+  ],
+  // HR Manager: owns leave/salary/payroll + is the HR (stage-2) approver of the
+  // staff-request chain. Salary maker-checker still needs TWO distinct managers.
+  hr_manager: [
+    "workflow.create", "workflow.read", "workflow.review", "workflow.review.hr",
+    "hr.read", "hr.write", "hr.salary.request", "hr.salary.approve", "hr.leave.manage", "hr.payroll.run",
+    "hr.appraisal.manage", "hr.disciplinary.manage",
+    "notification.read", "notification.send", "security.elevation.request",
+    "message.read", "message.send", "event.read",
+  ],
+  // Head of teaching: stage-1 approver for teaching staff requests.
+  head_teacher: [
+    "class.read", "enrollment.read", "attendance.read", "grade.read",
+    "workflow.create", "workflow.read", "workflow.review", "workflow.review.head",
+    "notification.read", "notification.send", "security.elevation.request",
+    "message.read", "message.send", "event.read",
+  ],
+  // Head of administration: stage-1 approver for non-teaching staff requests.
+  head_admin: [
+    "workflow.create", "workflow.read", "workflow.review", "workflow.review.head",
+    "document.read", "notification.read", "notification.send", "security.elevation.request",
+    "message.read", "message.send", "event.read",
   ],
 };
 
@@ -249,6 +281,9 @@ async function main() {
   const board = await mkUser("board@demo.school", "Demo Board Member");
   const accountant = await mkUser("accountant@demo.school", "Demo Accountant");
   const hrClerk = await mkUser("hr@demo.school", "Demo HR Clerk");
+  const hrManager = await mkUser("hrmanager@demo.school", "Demo HR Manager");
+  const headTeacher = await mkUser("headteacher@demo.school", "Demo Head Teacher");
+  const headAdmin = await mkUser("headadmin@demo.school", "Demo Head of Admin");
   const owner = await mkUser("owner@sms.platform", "Platform Owner");
 
   const roleByName = async (name: string) =>
@@ -262,12 +297,24 @@ async function main() {
     [board.id, await roleByName("board")],
     [accountant.id, await roleByName("accountant")],
     [hrClerk.id, await roleByName("hr_clerk")],
+    [hrManager.id, await roleByName("hr_manager")],
+    [headTeacher.id, await roleByName("head_teacher")],
+    [headAdmin.id, await roleByName("head_admin")],
     [owner.id, await roleByName("super_admin")],
   ] as const) {
     await prisma.userRole.upsert({
       where: { userId_roleId: { userId, roleId } },
       update: {},
       create: { schoolId: school.id, userId, roleId },
+    });
+  }
+
+  // --- HR: a couple of leave types so staff can apply immediately ---
+  for (const [name, daysPerYear] of [["Annual", 20], ["Sick", 10]] as const) {
+    await prisma.leaveType.upsert({
+      where: { schoolId_name: { schoolId: school.id, name } },
+      update: {},
+      create: { schoolId: school.id, name, daysPerYear },
     });
   }
 

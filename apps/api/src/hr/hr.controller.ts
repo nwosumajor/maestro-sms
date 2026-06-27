@@ -1,9 +1,9 @@
 import { Body, Controller, Get, Param, Put } from "@nestjs/common";
 import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
-import type { EmployeeDto } from "@sms/types";
+import type { EmployeeDto, SelfProfileDto } from "@sms/types";
 import { z } from "zod";
-import { HR_PERMISSIONS } from "@sms/types";
+import { HR_PERMISSIONS, WORKFLOW_PERMISSIONS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
@@ -20,10 +20,35 @@ const employeeSchema = z.object({
   status: z.string().max(40).optional(),
 });
 
+const selfProfileSchema = z.object({
+  phone: z.string().max(40).nullish(),
+  address: z.string().max(300).nullish(),
+  nextOfKin: z.string().max(160).nullish(),
+  nextOfKinPhone: z.string().max(40).nullish(),
+  bankName: z.string().max(120).nullish(),
+  bankAccount: z.string().max(40).nullish(),
+});
+
 @RequireModule(MODULES.HR)
 @Controller("hr")
 export class HrController {
   constructor(private readonly hr: HrService) {}
+
+  // --- self-service (any staff member, their OWN record) --------------------
+  @Get("me")
+  @RequirePermission(WORKFLOW_PERMISSIONS.CREATE)
+  myProfile(@CurrentPrincipal() p: Principal): Promise<SelfProfileDto> {
+    return this.hr.getMyProfile(p);
+  }
+
+  @Put("me")
+  @RequirePermission(WORKFLOW_PERMISSIONS.CREATE)
+  updateMyProfile(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(selfProfileSchema)) body: z.infer<typeof selfProfileSchema>,
+  ): Promise<SelfProfileDto> {
+    return this.hr.updateMyProfile(p, body);
+  }
 
   @Get("employees")
   @RequirePermission(HR_PERMISSIONS.HR_READ)

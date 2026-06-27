@@ -92,6 +92,9 @@ apply_rls packages/db/prisma/rls/21_ultimate_rls.sql            ultimate_entry_l
 apply_rls packages/db/prisma/rls/22_subscription_rls.sql        school_subscription_update
 apply_rls packages/db/prisma/rls/23_lms_content_rls.sql         forum_post_update
 apply_rls packages/db/prisma/rls/24_subscription_billing_rls.sql platform_subscription_payment_update
+apply_rls packages/db/prisma/rls/25_hr_payroll_rls.sql          payslip_insert
+apply_rls packages/db/prisma/rls/26_hr_lifecycle_rls.sql        training_record_update
+apply_rls packages/db/prisma/rls/27_hr_appraisals_disciplinary_rls.sql disciplinary_entry_insert
 
 # Seed on first provision (compose: SEED_ON_START=true; cloud migrate task: always).
 if [ "${SEED_ON_START}" = "true" ] || [ "$MODE" = "migrate" ]; then
