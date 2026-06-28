@@ -12,11 +12,13 @@ WORKDIR /app
 # ---- deps: install the whole workspace (cached on lockfile) ------------------
 FROM base AS deps
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json .npmrc* ./
-COPY packages/types/package.json   packages/types/package.json
-COPY packages/tokens/package.json  packages/tokens/package.json
-COPY packages/db/package.json      packages/db/package.json
-COPY apps/api/package.json         apps/api/package.json
-COPY apps/web/package.json         apps/web/package.json
+COPY packages/types/package.json          packages/types/package.json
+COPY packages/tokens/package.json         packages/tokens/package.json
+COPY packages/db/package.json             packages/db/package.json
+COPY packages/game-engine/package.json    packages/game-engine/package.json
+COPY packages/game-transport/package.json packages/game-transport/package.json
+COPY apps/api/package.json                apps/api/package.json
+COPY apps/web/package.json                apps/web/package.json
 RUN pnpm install --frozen-lockfile
 
 # ---- build: generate client, build packages + api ---------------------------
@@ -26,8 +28,13 @@ RUN pnpm --filter @sms/db generate \
  && pnpm --filter @sms/types build \
  && pnpm --filter @sms/tokens build \
  && pnpm --filter @sms/db build \
- && pnpm --filter @sms/api build \
- && pnpm prune --prod
+ && pnpm --filter @sms/game-engine build \
+ && pnpm --filter @sms/game-transport build \
+ && pnpm --filter @sms/api build
+# NOTE: do NOT `pnpm prune --prod` here — it strips the Prisma query-engine binary
+# that `prisma generate` bundled into node_modules/.prisma, and the runtime
+# container has no egress to binaries.prisma.sh to re-download it. Keeping the full
+# node_modules makes the image larger but self-contained (no runtime downloads).
 
 # ---- runtime: prod deps + dist only, drop root ------------------------------
 FROM base AS runtime
