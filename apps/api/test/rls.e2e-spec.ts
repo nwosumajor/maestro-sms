@@ -91,6 +91,9 @@ d("RLS cross-tenant isolation", () => {
   const classSubjectA = randomUUID();
   const importBatchA = randomUUID();
   const promotionBatchA = randomUUID();
+  const sessionA = randomUUID();
+  const termA = randomUUID();
+  const announcementA = randomUUID();
   // HR recruitment
   const jobReqA = randomUUID();
   const applicantA = randomUUID();
@@ -331,6 +334,20 @@ d("RLS cross-tenant isolation", () => {
       `INSERT INTO promotion_batch (id,"schoolId","sourceClassId","studentIds","initiatedById","updatedAt") VALUES ($1,$2,$3,'[]'::jsonb,$4,now())`,
       [promotionBatchA, A, classA, userA],
     );
+    // Academic calendar: a session + a term.
+    await a.query(
+      `INSERT INTO academic_session (id,"schoolId",name,"updatedAt") VALUES ($1,$2,'2025/2026',now())`,
+      [sessionA, A],
+    );
+    await a.query(
+      `INSERT INTO term (id,"schoolId","sessionId",name,sequence,"updatedAt") VALUES ($1,$2,$3,'First Term',1,now())`,
+      [termA, A, sessionA],
+    );
+    // School announcement (created by userA).
+    await a.query(
+      `INSERT INTO announcement (id,"schoolId",title,body,"createdById","updatedAt") VALUES ($1,$2,'Hi','Body',$3,now())`,
+      [announcementA, A, userA],
+    );
     await a.query(
       `INSERT INTO enrollment (id,"schoolId","classId","studentId") VALUES ($1,$2,$3,$4)`,
       [enrollmentA, A, classA, userA],
@@ -482,10 +499,14 @@ d("RLS cross-tenant isolation", () => {
       // Newly-covered tenant tables — child rows; safe to purge first (none are
       // parents of the tables listed below).
       "employee",
-      // SIS import batch: FK to school only (uploadedById is a scalar) — leaf.
+      // SIS import batch + announcement: FK to school only (scalar author) — leaves.
       "student_import_batch",
-      // promotion_batch references class (source/target) -> purge before class.
+      "announcement",
+      // promotion_batch references class (source/target) AND term -> purge before
+      // both; term references academic_session -> term before session.
       "promotion_batch",
+      "term",
+      "academic_session",
       // class_subject_teacher references class + subject + user -> purge first;
       // subject is its parent (and FK-free of class), so it follows.
       "class_subject_teacher",
@@ -649,6 +670,9 @@ d("RLS cross-tenant isolation", () => {
     ["class_subject_teacher", classSubjectA],
     ["student_import_batch", importBatchA],
     ["promotion_batch", promotionBatchA],
+    ["academic_session", sessionA],
+    ["term", termA],
+    ["announcement", announcementA],
   ];
 
   it.each(cases)("school B cannot SELECT school A's %s; school A can", async (table, id) => {

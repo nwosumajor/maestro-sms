@@ -1,4 +1,4 @@
-import type { ClassDto, PromotionBatchDto, SubjectDto, Serialized } from "@sms/types";
+import type { AcademicSessionDto, ClassDto, PromotionBatchDto, SubjectDto, Serialized } from "@sms/types";
 import Link from "next/link";
 import { hasPermission } from "@/lib/permissions";
 import { auth } from "@/lib/auth";
@@ -16,6 +16,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { ClassAdmin } from "@/components/lms/ClassAdmin";
 import { ClassSubjectsAdmin } from "@/components/lms/ClassSubjectsAdmin";
 import { PromotionManager } from "@/components/lms/PromotionManager";
+import { AcademicCalendar } from "@/components/lms/AcademicCalendar";
 
 export const dynamic = "force-dynamic";
 
@@ -27,13 +28,15 @@ export default async function ClassesPage() {
   const canManageSubjects = hasPermission(user.permissions, "subject.manage");
   const canPromote = hasPermission(user.permissions, "class.promote");
   const canApprovePromotion = hasPermission(user.permissions, "class.promote.approve");
+  const canManageAcademic = hasPermission(user.permissions, "academic.manage");
   const canReview = hasPermission(user.permissions, "lms.content.approve");
-  const [classes, students, users, subjects, promotions] = await Promise.all([
+  const [classes, students, users, subjects, promotions, sessions] = await Promise.all([
     apiGet<ClassDto[]>("/classes/mine"),
     canWrite ? apiGet<{ id: string; name: string }[]>("/students") : Promise.resolve(null),
     canWrite ? apiGet<{ id: string; name: string; roles: string[] }[]>("/users") : Promise.resolve(null),
     canManageSubjects ? apiGet<SubjectDto[]>("/subjects") : Promise.resolve(null),
     canPromote ? apiGet<Serialized<PromotionBatchDto>[]>("/promotions") : Promise.resolve(null),
+    canManageAcademic ? apiGet<Serialized<AcademicSessionDto>[]>("/academic/sessions") : Promise.resolve(null),
   ]);
 
   return (
@@ -62,6 +65,8 @@ export default async function ClassesPage() {
         {canManageSubjects && classes && users && subjects && (
           <ClassSubjectsAdmin classes={classes} subjects={subjects} users={users} />
         )}
+
+        {canManageAcademic && sessions && <AcademicCalendar sessions={sessions} />}
 
         {canPromote && classes && promotions && (
           <PromotionManager
@@ -99,11 +104,19 @@ export default async function ClassesPage() {
                   <code className="text-xs text-muted-foreground">{c.id}</code>
                   <div className="flex gap-2">
                     <Link
-                      href={`/classes/${c.id}/roster`}
+                      href={`/classes/${c.id}/info`}
                       className={buttonVariants({ size: "sm", variant: "outline" })}
                     >
-                      Roster
+                      Info
                     </Link>
+                    {hasPermission(user.permissions, "enrollment.read") && (
+                      <Link
+                        href={`/classes/${c.id}/roster`}
+                        className={buttonVariants({ size: "sm", variant: "outline" })}
+                      >
+                        Roster
+                      </Link>
+                    )}
                     <Link
                       href={`/classes/${c.id}/content`}
                       className={buttonVariants({ size: "sm", variant: "outline" })}

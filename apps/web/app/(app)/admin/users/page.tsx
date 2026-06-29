@@ -10,7 +10,7 @@ import { CreateUserForm } from "@/components/admin/CreateUserForm";
 
 export const dynamic = "force-dynamic";
 
-type SchoolUser = { id: string; name: string; email: string; status: string; roles: string[] };
+type SchoolUser = { id: string; uniqueId: string; name: string; email: string; status: string; roles: string[] };
 
 export default async function AdminUsersPage() {
   const session = await auth();
@@ -50,6 +50,7 @@ export default async function AdminUsersPage() {
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">
                     {u.name} <span className="font-normal text-muted-foreground">· {u.email}</span>
+                    <span className="ml-2 font-mono text-[10px] text-muted-foreground">{u.uniqueId}</span>
                   </p>
                   <div className="mt-1 flex flex-wrap items-center gap-1">
                     <Badge variant={u.status === "ACTIVE" ? "secondary" : "destructive"}>{u.status.toLowerCase()}</Badge>

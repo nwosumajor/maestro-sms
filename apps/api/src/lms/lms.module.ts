@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { LmsController } from "./lms.controller";
 import { LmsService } from "./lms.service";
 import { PromotionService } from "./promotion.service";
+import { AcademicService } from "./academic.service";
 import { LmsContentController } from "./lms-content.controller";
 import { LmsContentService } from "./lms-content.service";
 import { WorkflowModule } from "../workflow/workflow.module";
@@ -19,6 +20,7 @@ import { S3StorageProvider } from "../documents/s3-storage.provider";
   providers: [
     LmsService,
     PromotionService,
+    AcademicService,
     LmsContentService,
     {
       provide: STORAGE_PROVIDER,

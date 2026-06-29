@@ -49,19 +49,31 @@ export function TimetableAdmin({
   };
 
   // add entry
+  type Offering = { subjectName: string; teacherId: string; teacherName: string };
   const [classId, setClassId] = React.useState(classes[0]?.id ?? "");
   const [teachers, setTeachers] = React.useState<Named[]>([]);
+  const [offerings, setOfferings] = React.useState<Offering[]>([]);
   const [entry, setEntry] = React.useState({ dayOfWeek: "MONDAY", periodId: periods[0]?.id ?? "", subject: "", teacherId: "", roomId: "" });
 
-  const loadTeachers = React.useCallback(async (cid: string) => {
+  const loadClassData = React.useCallback(async (cid: string) => {
     if (!cid) return;
-    const res = await fetch(`/api/sms/classes/${cid}`);
-    if (!res.ok) { setTeachers([]); return; }
-    const data = (await res.json()) as { teachers: Named[] };
-    setTeachers(data.teachers);
-    setEntry((s) => ({ ...s, teacherId: data.teachers[0]?.id ?? "" }));
+    // Roster teachers (for the teacher select) + the class's subject offerings
+    // (to auto-seed subject + assigned teacher).
+    const [rosterRes, subjRes] = await Promise.all([
+      fetch(`/api/sms/classes/${cid}`),
+      fetch(`/api/sms/classes/${cid}/subjects`),
+    ]);
+    const roster = rosterRes.ok ? ((await rosterRes.json()) as { teachers: Named[] }).teachers : [];
+    const subs = subjRes.ok ? ((await subjRes.json()) as { subjectName: string; teacherId: string; teacherName: string }[]) : [];
+    setOfferings(subs.map((s) => ({ subjectName: s.subjectName, teacherId: s.teacherId, teacherName: s.teacherName })));
+    // Merge offering teachers into the option list so a picked offering's teacher exists.
+    const merged = new Map<string, Named>();
+    roster.forEach((t) => merged.set(t.id, t));
+    subs.forEach((s) => merged.set(s.teacherId, { id: s.teacherId, name: s.teacherName }));
+    setTeachers([...merged.values()]);
+    setEntry((s) => ({ ...s, teacherId: roster[0]?.id ?? subs[0]?.teacherId ?? "" }));
   }, []);
-  React.useEffect(() => { loadTeachers(classId); }, [classId, loadTeachers]);
+  React.useEffect(() => { loadClassData(classId); }, [classId, loadClassData]);
 
   const addEntry = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -113,6 +125,20 @@ export function TimetableAdmin({
             <select aria-label="Period" value={entry.periodId} onChange={(e) => setEntry({ ...entry, periodId: e.target.value })} className={selCls}>
               {periods.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.startTime})</option>)}
             </select>
+            {offerings.length > 0 && (
+              <select
+                aria-label="From class offerings"
+                className={selCls}
+                value=""
+                onChange={(e) => {
+                  const o = offerings[Number(e.target.value)];
+                  if (o) setEntry((s) => ({ ...s, subject: o.subjectName, teacherId: o.teacherId }));
+                }}
+              >
+                <option value="">From offerings…</option>
+                {offerings.map((o, i) => <option key={i} value={i}>{o.subjectName} — {o.teacherName}</option>)}
+              </select>
+            )}
             <Input placeholder="Subject" value={entry.subject} onChange={(e) => setEntry({ ...entry, subject: e.target.value })} className="w-36" required />
             <select aria-label="Teacher" value={entry.teacherId} onChange={(e) => setEntry({ ...entry, teacherId: e.target.value })} className={selCls}>
               {teachers.length === 0 && <option value="">No class teacher</option>}

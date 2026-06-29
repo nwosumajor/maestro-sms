@@ -125,6 +125,7 @@ export function OperatorUsers({ schoolId }: { schoolId: string }) {
                 <p className="truncate text-sm font-medium">
                   {u.name}{" "}
                   <span className="font-normal text-muted-foreground">· {u.email}</span>
+                  <span className="ml-2 font-mono text-[10px] text-muted-foreground">{u.uniqueId}</span>
                 </p>
                 <div className="mt-1 flex flex-wrap items-center gap-1">
                   <Badge variant={u.status === "ACTIVE" ? "secondary" : "destructive"}>

@@ -129,6 +129,32 @@ export class PromotionService {
 
       const studentIds = (batch.studentIds as string[] | null) ?? [];
       const graduating = !batch.targetClassId;
+
+      // Capacity guardrail: refuse before moving anyone if the target would overflow.
+      if (!graduating) {
+        const target = await tx.class.findFirst({
+          where: { id: batch.targetClassId as string },
+          select: { capacity: true },
+        });
+        if (target?.capacity != null) {
+          const activeNow = await tx.enrollment.count({
+            where: { classId: batch.targetClassId as string, status: "ACTIVE" },
+          });
+          // Count only students not already enrolled in the target.
+          let incoming = 0;
+          for (const studentId of studentIds) {
+            const exists = await tx.enrollment.findFirst({
+              where: { classId: batch.targetClassId as string, studentId },
+              select: { id: true },
+            });
+            if (!exists) incoming++;
+          }
+          if (activeNow + incoming > target.capacity) {
+            throw new ConflictException(`Target class is at capacity (${target.capacity})`);
+          }
+        }
+      }
+
       let moved = 0;
       let graduated = 0;
       for (const studentId of studentIds) {

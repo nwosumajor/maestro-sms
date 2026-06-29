@@ -107,6 +107,7 @@ export class OperatorUserService implements OnModuleInit, OnModuleDestroy {
       orderBy: { name: "asc" },
       select: {
         id: true,
+        uniqueId: true,
         name: true,
         email: true,
         status: true,
@@ -118,6 +119,7 @@ export class OperatorUserService implements OnModuleInit, OnModuleDestroy {
     });
     return users.map((u) => ({
       id: u.id,
+      uniqueId: u.uniqueId,
       name: u.name,
       email: u.email,
       roles: u.roles.map((r) => r.role.name),

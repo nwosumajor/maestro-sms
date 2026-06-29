@@ -25,6 +25,24 @@ export interface ClassSubjectDto {
   teacherName: string;
 }
 
+/** Member-facing class info (parent/student/teacher view). No classmate roster. */
+export interface ClassInfoDto {
+  id: string;
+  name: string;
+  supervisorName: string | null;
+  subjects: { subjectName: string; teacherName: string }[];
+}
+
+/** Promotion eligibility SIGNAL per student (never a verdict — Golden Rule #8). */
+export interface ClassEligibilityDto {
+  studentId: string;
+  name: string;
+  /** Average published score as a percentage, or null if ungraded. */
+  averageScore: number | null;
+  /** Attendance percentage, or null if no records. */
+  attendancePercent: number | null;
+}
+
 /** A staged end-of-session promotion batch (maker-checker). */
 export interface PromotionBatchDto {
   id: string;

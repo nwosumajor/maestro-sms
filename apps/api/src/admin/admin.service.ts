@@ -50,6 +50,7 @@ export class AdminService {
         orderBy: { name: "asc" },
         select: {
           id: true,
+          uniqueId: true,
           name: true,
           email: true,
           status: true,
@@ -58,6 +59,7 @@ export class AdminService {
       });
       return users.map((u) => ({
         id: u.id,
+        uniqueId: u.uniqueId,
         name: u.name,
         email: u.email,
         status: u.status,

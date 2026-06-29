@@ -11,7 +11,7 @@
 // audit-logged. Not-visible -> 404 (never 403), no cross-tenant/owner leak.
 // =============================================================================
 
-import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -75,7 +75,7 @@ export class LmsService {
   async updateClass(
     p: Principal,
     classId: string,
-    input: { name?: string; subject?: string | null; level?: number | null; nextClassId?: string | null; supervisorId?: string | null },
+    input: { name?: string; subject?: string | null; level?: number | null; nextClassId?: string | null; supervisorId?: string | null; capacity?: number | null },
   ) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.requireClass(tx, classId);
@@ -97,12 +97,14 @@ export class LmsService {
           level: input.level === undefined ? undefined : input.level,
           nextClassId: input.nextClassId === undefined ? undefined : input.nextClassId,
           supervisorId: input.supervisorId === undefined ? undefined : input.supervisorId,
+          capacity: input.capacity === undefined ? undefined : input.capacity,
         },
       });
       await this.log(tx, p, "lms.class.update", "class", classId, {
         supervisorId: input.supervisorId,
         level: input.level,
         nextClassId: input.nextClassId,
+        capacity: input.capacity,
       });
       return cls;
     });
@@ -179,12 +181,45 @@ export class LmsService {
   async enrollStudent(p: Principal, classId: string, studentId: string) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.requireClass(tx, classId);
+      await this.assertCapacity(tx, classId, 1);
       const row = await tx.enrollment.create({
         data: { schoolId: p.schoolId, classId, studentId },
       });
       await this.log(tx, p, "lms.student.enroll", "class", classId, { studentId });
       return row;
     });
+  }
+
+  /** Transfer/withdraw a student: set an enrollment's status + reason (audited). */
+  async setEnrollmentStatus(
+    p: Principal,
+    classId: string,
+    studentId: string,
+    status: "ACTIVE" | "TRANSFERRED" | "WITHDRAWN",
+    reason?: string,
+  ) {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const enr = await tx.enrollment.findFirst({ where: { classId, studentId }, select: { id: true } });
+      if (!enr) throw new NotFoundException("Enrollment not found");
+      // Reactivating must still respect capacity.
+      if (status === "ACTIVE") await this.assertCapacity(tx, classId, 1);
+      const updated = await tx.enrollment.update({
+        where: { id: enr.id },
+        data: { status, statusReason: reason ?? null },
+      });
+      await this.log(tx, p, "lms.enrollment.status", "class", classId, { studentId, status });
+      return updated;
+    });
+  }
+
+  /** Throw 409 if adding `adding` active enrollments would exceed the class capacity. */
+  private async assertCapacity(tx: TenantTx, classId: string, adding: number) {
+    const cls = await tx.class.findFirst({ where: { id: classId }, select: { capacity: true } });
+    if (!cls || cls.capacity == null) return; // unlimited
+    const active = await tx.enrollment.count({ where: { classId, status: "ACTIVE" } });
+    if (active + adding > cls.capacity) {
+      throw new ConflictException(`Class is at capacity (${cls.capacity})`);
+    }
   }
 
   async linkGuardian(p: Principal, parentId: string, studentId: string) {
@@ -320,15 +355,122 @@ export class LmsService {
           include: { teacher: { select: { id: true, name: true, email: true } } },
         }),
         tx.enrollment.findMany({
-          where: { classId },
+          where: { classId, status: "ACTIVE" },
           include: { student: { select: { id: true, name: true, email: true } } },
         }),
       ]);
+      // Golden Rule #5: a roster is minors' PII — the read is audit-logged.
+      await this.log(tx, p, "lms.roster.read", "class", classId, { students: students.length });
       return {
         class: cls,
         teachers: teachers.map((t: { teacher: unknown }) => t.teacher),
         students: students.map((e: { student: unknown }) => e.student),
       };
+    });
+  }
+
+  /** Member-facing class info (parent/student/teacher see their class's subjects,
+   *  teachers, and supervisor — NOT the full classmate roster). 404 to non-members. */
+  async getClassInfo(p: Principal, classId: string) {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const cls = await tx.class.findFirst({ where: { id: classId } });
+      if (!cls) throw new NotFoundException("Class not found");
+
+      if (!this.isRosterWide(p)) {
+        // Members: enrolled student, a parent of an enrolled child, a class/subject
+        // teacher, or the supervisor.
+        let member = cls.supervisorId === p.userId;
+        if (!member) member = Boolean(await tx.enrollment.findFirst({ where: { classId, studentId: p.userId }, select: { id: true } }));
+        if (!member) member = Boolean(await tx.classTeacher.findFirst({ where: { classId, teacherId: p.userId }, select: { id: true } }));
+        if (!member) member = Boolean(await tx.classSubjectTeacher.findFirst({ where: { classId, teacherId: p.userId }, select: { id: true } }));
+        if (!member) {
+          const children = await tx.parentChild.findMany({ where: { parentId: p.userId }, select: { studentId: true } });
+          if (children.length) {
+            member = Boolean(
+              await tx.enrollment.findFirst({
+                where: { classId, studentId: { in: children.map((c) => c.studentId) } },
+                select: { id: true },
+              }),
+            );
+          }
+        }
+        if (!member) throw new NotFoundException("Class not found"); // 404 not 403
+      }
+
+      const [subjects, supervisor] = await Promise.all([
+        tx.classSubjectTeacher.findMany({
+          where: { classId },
+          include: { subject: { select: { name: true } }, teacher: { select: { name: true } } },
+          orderBy: { subject: { name: "asc" } },
+        }),
+        cls.supervisorId
+          ? tx.user.findFirst({ where: { id: cls.supervisorId }, select: { name: true } })
+          : Promise.resolve(null),
+      ]);
+      return {
+        id: cls.id,
+        name: cls.name,
+        supervisorName: supervisor?.name ?? null,
+        subjects: subjects.map((s) => ({ subjectName: s.subject.name, teacherName: s.teacher.name })),
+      };
+    });
+  }
+
+  /** Promotion eligibility signal: per-student average published score (%) and
+   *  attendance (%) for a class. A SIGNAL for a human decision — never a verdict
+   *  (Golden Rule #8). Staff-only (roster-wide). */
+  async getClassEligibility(p: Principal, classId: string) {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const cls = await tx.class.findFirst({ where: { id: classId }, select: { id: true } });
+      if (!cls) throw new NotFoundException("Class not found");
+      if (!this.isRosterWide(p)) throw new NotFoundException("Class not found");
+
+      const enrolled = await tx.enrollment.findMany({
+        where: { classId, status: "ACTIVE" },
+        include: { student: { select: { id: true, name: true } } },
+      });
+      const studentIds = enrolled.map((e: { studentId: string }) => e.studentId);
+      if (studentIds.length === 0) return [];
+
+      // Published grades for this class's assessments, per student.
+      const grades = await tx.grade.findMany({
+        where: { status: "PUBLISHED", submission: { assessment: { classId }, studentId: { in: studentIds } } },
+        select: { score: true, maxScore: true, submission: { select: { studentId: true } } },
+      });
+      const gradeAgg = new Map<string, { sum: number; n: number }>();
+      for (const g of grades as Array<{ score: number; maxScore: number; submission: { studentId: string } }>) {
+        if (!g.maxScore) continue;
+        const cur = gradeAgg.get(g.submission.studentId) ?? { sum: 0, n: 0 };
+        cur.sum += (g.score / g.maxScore) * 100;
+        cur.n += 1;
+        gradeAgg.set(g.submission.studentId, cur);
+      }
+
+      // Attendance for this class's sessions, per student.
+      const records = await tx.attendanceRecord.findMany({
+        where: { studentId: { in: studentIds }, session: { classId } },
+        select: { status: true, studentId: true },
+      });
+      const attAgg = new Map<string, { present: number; total: number }>();
+      for (const r of records as Array<{ status: string; studentId: string }>) {
+        const cur = attAgg.get(r.studentId) ?? { present: 0, total: 0 };
+        cur.total += 1;
+        if (r.status !== "ABSENT") cur.present += 1; // PRESENT/LATE/EXCUSED count as attended
+        attAgg.set(r.studentId, cur);
+      }
+
+      return enrolled
+        .map((e: { student: { id: string; name: string } }) => {
+          const g = gradeAgg.get(e.student.id);
+          const a = attAgg.get(e.student.id);
+          return {
+            studentId: e.student.id,
+            name: e.student.name,
+            averageScore: g && g.n ? Math.round((g.sum / g.n) * 10) / 10 : null,
+            attendancePercent: a && a.total ? Math.round((a.present / a.total) * 1000) / 10 : null,
+          };
+        })
+        .sort((x, y) => x.name.localeCompare(y.name));
     });
   }
 

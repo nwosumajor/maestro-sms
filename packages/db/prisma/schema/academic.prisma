@@ -1,0 +1,47 @@
+// =============================================================================
+// Academic calendar — sessions + terms
+// =============================================================================
+// Makes the school year first-class so "third term final examination" (the
+// trigger for promotion) is a real entity, repeatable year-on-year. One session
+// (e.g. "2025/2026") has ordered terms (sequence 1..3). Exactly one session and
+// one term may be marked current per school (enforced in the service). Tenant-
+// scoped (non-null schoolId, RLS). PromotionBatch.termId references a term.
+// =============================================================================
+
+model AcademicSession {
+  id        String   @id @default(uuid()) @db.Uuid
+  schoolId  String   @db.Uuid
+  name      String
+  isCurrent Boolean  @default(false)
+  startDate DateTime? @db.Date
+  endDate   DateTime? @db.Date
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+  terms  Term[]
+
+  @@index([schoolId])
+  @@map("academic_session")
+}
+
+model Term {
+  id        String   @id @default(uuid()) @db.Uuid
+  schoolId  String   @db.Uuid
+  sessionId String   @db.Uuid
+  name      String
+  /// Ordering within the session (1 = first term, 3 = third term).
+  sequence  Int
+  isCurrent Boolean  @default(false)
+  startDate DateTime? @db.Date
+  endDate   DateTime? @db.Date
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school  School          @relation(fields: [schoolId], references: [id])
+  session AcademicSession @relation(fields: [sessionId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, sessionId])
+  @@map("term")
+}

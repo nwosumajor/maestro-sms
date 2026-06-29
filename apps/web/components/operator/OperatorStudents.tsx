@@ -35,6 +35,7 @@ export function OperatorStudents({ schoolId }: { schoolId: string }) {
             <div key={s.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3 py-1.5">
               <p className="truncate text-sm">
                 {s.name} <span className="text-muted-foreground">· {s.email}</span>
+                <span className="ml-2 font-mono text-[10px] text-muted-foreground">{s.uniqueId}</span>
                 {s.admissionNumber && <span className="ml-2 font-mono text-xs text-muted-foreground">#{s.admissionNumber}</span>}
               </p>
               <div className="flex flex-wrap gap-1">

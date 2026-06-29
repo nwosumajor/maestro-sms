@@ -1,6 +1,6 @@
 "use client";
 
-import type { ClassDto, PromotionBatchDto, Serialized } from "@sms/types";
+import type { ClassDto, ClassEligibilityDto, PromotionBatchDto, Serialized } from "@sms/types";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 
 type Cls = Serialized<ClassDto>;
 type Batch = Serialized<PromotionBatchDto>;
+type Eligibility = Serialized<ClassEligibilityDto>;
 
 export function PromotionManager({
   classes,
@@ -25,7 +26,15 @@ export function PromotionManager({
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
   const [sourceClassId, setSourceClassId] = React.useState(classes[0]?.id ?? "");
+  const [eligibility, setEligibility] = React.useState<Eligibility[] | null>(null);
   const sel = "h-9 rounded-md border border-input bg-background px-3 text-sm";
+
+  const loadEligibility = async () => {
+    setEligibility(null);
+    const res = await fetch(`/api/sms/classes/${sourceClassId}/eligibility`);
+    if (res.ok) setEligibility((await res.json()) as Eligibility[]);
+    else setMsg(`Could not load eligibility (${res.status}).`);
+  };
 
   const source = classes.find((c) => c.id === sourceClassId);
   const target = source?.nextClassId ? classes.find((c) => c.id === source.nextClassId) : null;
@@ -72,7 +81,25 @@ export function PromotionManager({
             → {target ? target.name : source?.nextClassId ? "(next class)" : "graduation"}
           </span>
           <Button type="submit" size="sm" disabled={busy || !sourceClassId}>Stage promotion</Button>
+          <Button type="button" size="sm" variant="ghost" onClick={loadEligibility}>Eligibility signal</Button>
         </form>
+
+        {eligibility && (
+          <div className="space-y-1 rounded-md border border-border p-3">
+            <p className="text-xs text-muted-foreground">
+              Read-only signal — averages + attendance for the source class. Promotion stays a human decision.
+            </p>
+            {eligibility.length === 0 && <p className="text-sm text-muted-foreground">No active students.</p>}
+            {eligibility.map((s) => (
+              <div key={s.studentId} className="flex items-center justify-between text-sm">
+                <span>{s.name}</span>
+                <span className="text-muted-foreground">
+                  avg {s.averageScore ?? "—"}% · attendance {s.attendancePercent ?? "—"}%
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
 
         {msg && <p className="rounded-md bg-muted px-3 py-2 text-sm">{msg}</p>}
 

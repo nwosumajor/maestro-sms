@@ -22,5 +22,7 @@ export const config = {
     "/calendar/:path*",
     "/hr/:path*",
     "/operator/:path*",
+    "/directory/:path*",
+    "/announcements/:path*",
   ],
 };

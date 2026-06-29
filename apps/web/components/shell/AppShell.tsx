@@ -18,6 +18,8 @@ import {
   CalendarIcon,
   BriefcaseIcon,
   Building2Icon,
+  SearchIcon,
+  MegaphoneIcon,
   Gamepad2Icon,
   WalletIcon,
   type LucideIcon,
@@ -52,6 +54,8 @@ type NavKey =
   | "leave"
   | "games"
   | "operator"
+  | "directory"
+  | "announcements"
   | "account";
 
 // `module` ties a nav item to a subscription module: when the school's plan
@@ -68,7 +72,9 @@ const NAV: {
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboardIcon, href: "/dashboard" },
   { key: "analytics", label: "Analytics", icon: BarChart3Icon, href: "/analytics", module: MODULES.ANALYTICS },
   { key: "operator", label: "Operator", icon: Building2Icon, href: "/operator", perm: "platform.operate" },
+  { key: "directory", label: "Directory", icon: SearchIcon, href: "/directory", perm: "directory.search" },
   { key: "admin", label: "Admin", icon: SettingsIcon, href: "/admin", perm: "fee.manage" },
+  { key: "announcements", label: "Announcements", icon: MegaphoneIcon, href: "/announcements", perm: "announcement.read" },
   { key: "notifications", label: "Notifications", icon: BellIcon, href: "/notifications", perm: "notification.read" },
   { key: "messages", label: "Messages", icon: MessageSquareIcon, href: "/messages", perm: "message.read", module: MODULES.MESSAGING },
   { key: "calendar", label: "Calendar", icon: CalendarIcon, href: "/calendar", perm: "event.read", module: MODULES.CALENDAR },

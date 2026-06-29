@@ -45,7 +45,7 @@ export function ClassSubjectsAdmin({
     teacherId: teachers[0]?.id ?? "",
   });
   const [sup, setSup] = React.useState({ classId: classes[0]?.id ?? "", supervisorId: staff[0]?.id ?? "" });
-  const [prog, setProg] = React.useState({ classId: classes[0]?.id ?? "", level: "", nextClassId: "" });
+  const [prog, setProg] = React.useState({ classId: classes[0]?.id ?? "", level: "", nextClassId: "", capacity: "" });
 
   return (
     <Card>
@@ -111,20 +111,22 @@ export function ClassSubjectsAdmin({
             await send("PUT", `/classes/${prog.classId}`, {
               level: prog.level === "" ? null : Number(prog.level),
               nextClassId: prog.nextClassId || null,
+              capacity: prog.capacity === "" ? null : Number(prog.capacity),
             }, "Progression updated.");
           }}
           className="flex flex-wrap items-end gap-2 border-t border-border pt-4"
         >
-          <Label className="w-full">Class progression (promotion target)</Label>
+          <Label className="w-full">Class progression &amp; capacity</Label>
           <select aria-label="Class" value={prog.classId} onChange={(e) => setProg({ ...prog, classId: e.target.value })} className={sel}>
             {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
-          <Input aria-label="Level" type="number" value={prog.level} onChange={(e) => setProg({ ...prog, level: e.target.value })} placeholder="Level" className="w-24" />
+          <Input aria-label="Level" type="number" value={prog.level} onChange={(e) => setProg({ ...prog, level: e.target.value })} placeholder="Level" className="w-20" />
           <select aria-label="Next class" value={prog.nextClassId} onChange={(e) => setProg({ ...prog, nextClassId: e.target.value })} className={sel}>
             <option value="">— final class (graduates) —</option>
             {classes.filter((c) => c.id !== prog.classId).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
-          <Button type="submit" size="sm" variant="outline">Save progression</Button>
+          <Input aria-label="Capacity" type="number" value={prog.capacity} onChange={(e) => setProg({ ...prog, capacity: e.target.value })} placeholder="Capacity" className="w-24" />
+          <Button type="submit" size="sm" variant="outline">Save</Button>
         </form>
 
         {msg && <p className="text-sm text-muted-foreground">{msg}</p>}

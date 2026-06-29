@@ -101,6 +101,8 @@ apply_rls packages/db/prisma/rls/30_onboarding_request_rls.sql    onboarding_req
 apply_rls packages/db/prisma/rls/31_subjects_rls.sql              class_subject_teacher_delete
 apply_rls packages/db/prisma/rls/32_student_import_rls.sql        student_import_batch_update
 apply_rls packages/db/prisma/rls/33_promotion_rls.sql             promotion_batch_update
+apply_rls packages/db/prisma/rls/34_academic_rls.sql              term_delete
+apply_rls packages/db/prisma/rls/35_announcements_rls.sql         announcement_delete
 
 # Seed on first provision (compose: SEED_ON_START=true; cloud migrate task: always).
 if [ "${SEED_ON_START}" = "true" ] || [ "$MODE" = "migrate" ]; then

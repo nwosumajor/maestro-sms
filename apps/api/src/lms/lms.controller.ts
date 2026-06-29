@@ -1,7 +1,7 @@
-import { Body, Controller, Get, Param, Post, Put } from "@nestjs/common";
+import { Body, Controller, Get, Header, Param, Post, Put } from "@nestjs/common";
 import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
-import type { ClassDto, ClassSubjectDto, IdNameDto, PromotionBatchDto, SubjectDto, UserWithEmailDto } from "@sms/types";
+import type { AcademicSessionDto, ClassDto, ClassEligibilityDto, ClassInfoDto, ClassSubjectDto, IdNameDto, PromotionBatchDto, SubjectDto, UserWithEmailDto } from "@sms/types";
 import { z } from "zod";
 import { LMS_PERMISSIONS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -10,6 +10,7 @@ import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { LmsService } from "./lms.service";
 import { PromotionService } from "./promotion.service";
+import { AcademicService } from "./academic.service";
 
 const createClassSchema = z.object({
   name: z.string().min(1),
@@ -23,7 +24,18 @@ const updateClassSchema = z.object({
   level: z.number().int().min(0).max(50).nullish(),
   nextClassId: z.string().uuid().nullish(),
   supervisorId: z.string().uuid().nullish(),
+  capacity: z.number().int().min(0).max(10000).nullish(),
 });
+const enrollStatusSchema = z.object({
+  status: z.enum(["ACTIVE", "TRANSFERRED", "WITHDRAWN"]),
+  reason: z.string().max(500).optional(),
+});
+const sessionSchema = z.object({
+  name: z.string().min(1).max(60),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
+});
+const termSchema = z.object({ name: z.string().min(1).max(60), sequence: z.number().int().min(1).max(6) });
 const teacherSchema = z.object({ teacherId: z.string().uuid() });
 const studentSchema = z.object({ studentId: z.string().uuid() });
 const guardianSchema = z.object({ parentId: z.string().uuid(), studentId: z.string().uuid() });
@@ -42,6 +54,7 @@ export class LmsController {
   constructor(
     private readonly lms: LmsService,
     private readonly promotion: PromotionService,
+    private readonly academic: AcademicService,
   ) {}
 
   @Post("classes")
@@ -153,6 +166,83 @@ export class LmsController {
   @RequirePermission(LMS_PERMISSIONS.ENROLLMENT_READ)
   roster(@CurrentPrincipal() p: Principal, @Param("classId") classId: string) {
     return this.lms.getClassRoster(p, classId);
+  }
+
+  /** Member-facing class info (subjects/teachers/supervisor) for parents/students. */
+  @Get("classes/:classId/info")
+  @RequirePermission(LMS_PERMISSIONS.CLASS_READ)
+  classInfo(@CurrentPrincipal() p: Principal, @Param("classId") classId: string): Promise<ClassInfoDto> {
+    return this.lms.getClassInfo(p, classId);
+  }
+
+  /** Promotion eligibility SIGNAL (avg score + attendance %) — staff only. */
+  @Get("classes/:classId/eligibility")
+  @RequirePermission(LMS_PERMISSIONS.ENROLLMENT_READ)
+  eligibility(@CurrentPrincipal() p: Principal, @Param("classId") classId: string): Promise<ClassEligibilityDto[]> {
+    return this.lms.getClassEligibility(p, classId);
+  }
+
+  /** CSV export of a class roster (staff). */
+  @Get("classes/:classId/roster.csv")
+  @RequirePermission(LMS_PERMISSIONS.ENROLLMENT_READ)
+  @Header("Content-Type", "text/csv")
+  @Header("Content-Disposition", 'attachment; filename="class-roster.csv"')
+  async rosterCsv(@CurrentPrincipal() p: Principal, @Param("classId") classId: string): Promise<string> {
+    const roster = await this.lms.getClassRoster(p, classId);
+    const rows = (roster.students as Array<{ name: string; email: string }>).map(
+      (s, i) => `${i + 1},"${s.name.replace(/"/g, '""')}",${s.email}`,
+    );
+    return `#,name,email\n${rows.join("\n")}\n`;
+  }
+
+  /** Transfer / withdraw / reactivate a student's enrollment (lifecycle). */
+  @Put("classes/:classId/enrollments/:studentId/status")
+  @RequirePermission(LMS_PERMISSIONS.ENROLLMENT_WRITE)
+  setEnrollmentStatus(
+    @CurrentPrincipal() p: Principal,
+    @Param("classId") classId: string,
+    @Param("studentId") studentId: string,
+    @Body(new ZodValidationPipe(enrollStatusSchema)) body: z.infer<typeof enrollStatusSchema>,
+  ) {
+    return this.lms.setEnrollmentStatus(p, classId, studentId, body.status, body.reason);
+  }
+
+  // --- academic calendar (sessions + terms) ----------------------------------
+  @Get("academic/sessions")
+  @RequirePermission(LMS_PERMISSIONS.CLASS_READ)
+  sessions(@CurrentPrincipal() p: Principal): Promise<AcademicSessionDto[]> {
+    return this.academic.listSessions(p);
+  }
+
+  @Post("academic/sessions")
+  @RequirePermission(LMS_PERMISSIONS.ACADEMIC_MANAGE)
+  createSession(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(sessionSchema)) body: z.infer<typeof sessionSchema>,
+  ) {
+    return this.academic.createSession(p, body);
+  }
+
+  @Post("academic/sessions/:id/terms")
+  @RequirePermission(LMS_PERMISSIONS.ACADEMIC_MANAGE)
+  addTerm(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(termSchema)) body: z.infer<typeof termSchema>,
+  ) {
+    return this.academic.addTerm(p, id, body);
+  }
+
+  @Put("academic/sessions/:id/current")
+  @RequirePermission(LMS_PERMISSIONS.ACADEMIC_MANAGE)
+  setCurrentSession(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.academic.setCurrentSession(p, id);
+  }
+
+  @Put("academic/terms/:id/current")
+  @RequirePermission(LMS_PERMISSIONS.ACADEMIC_MANAGE)
+  setCurrentTerm(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.academic.setCurrentTerm(p, id);
   }
 
   // --- end-of-session promotion (maker-checker) ------------------------------

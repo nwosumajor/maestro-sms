@@ -142,11 +142,11 @@ export class OperatorService {
       if (!school) throw new NotFoundException("School not found");
       const enrollments = await tx.enrollment.findMany({
         where: { status: "ACTIVE" },
-        include: { student: { select: { id: true, name: true, email: true } }, class: { select: { name: true } } },
+        include: { student: { select: { id: true, uniqueId: true, name: true, email: true } }, class: { select: { name: true } } },
       });
       // Group by student → their active class names.
-      const byStudent = new Map<string, { id: string; name: string; email: string; classes: string[] }>();
-      for (const e of enrollments as Array<{ student: { id: string; name: string; email: string }; class: { name: string } }>) {
+      const byStudent = new Map<string, { id: string; uniqueId: string; name: string; email: string; classes: string[] }>();
+      for (const e of enrollments as Array<{ student: { id: string; uniqueId: string; name: string; email: string }; class: { name: string } }>) {
         const cur = byStudent.get(e.student.id) ?? { ...e.student, classes: [] };
         cur.classes.push(e.class.name);
         byStudent.set(e.student.id, cur);

@@ -134,6 +134,15 @@ export class StudentImportService {
 
       const rows = (batch.rows as StudentImportRow[] | null) ?? [];
       const passwordHash = await bcrypt.hash("password123", 10); // temp; reset on first login
+      // Existing admission numbers in this tenant + ones seen earlier in the batch:
+      // a duplicate admission number is skipped (it must be unique per school).
+      const existingProfiles = await tx.studentProfile.findMany({
+        where: { admissionNumber: { not: null } },
+        select: { admissionNumber: true },
+      });
+      const usedAdmNo = new Set(existingProfiles.map((pr) => pr.admissionNumber).filter(Boolean) as string[]);
+      // Per-target-class capacity headroom, computed lazily.
+      const headroom = new Map<string, number | null>(); // classId -> remaining (null = unlimited)
       let created = 0;
       let skipped = 0;
       const errors: string[] = [];
@@ -143,6 +152,26 @@ export class StudentImportService {
           if (existing) {
             skipped++;
             continue;
+          }
+          if (row.admissionNumber && usedAdmNo.has(row.admissionNumber)) {
+            skipped++; // duplicate admission number
+            continue;
+          }
+          // Capacity guard for an enrolled row.
+          if (row.classId) {
+            if (!headroom.has(row.classId)) {
+              const cls = await tx.class.findFirst({ where: { id: row.classId }, select: { capacity: true } });
+              if (cls?.capacity == null) headroom.set(row.classId, null);
+              else {
+                const active = await tx.enrollment.count({ where: { classId: row.classId, status: "ACTIVE" } });
+                headroom.set(row.classId, cls.capacity - active);
+              }
+            }
+            const left = headroom.get(row.classId);
+            if (left != null && left <= 0) {
+              skipped++; // class full
+              continue;
+            }
           }
           const u = await tx.user.create({
             data: { schoolId: p.schoolId, email: row.email, name: row.name, passwordHash },
@@ -161,7 +190,10 @@ export class StudentImportService {
           });
           if (row.classId) {
             await tx.enrollment.create({ data: { schoolId: p.schoolId, classId: row.classId, studentId: u.id } });
+            const left = headroom.get(row.classId);
+            if (left != null) headroom.set(row.classId, left - 1);
           }
+          if (row.admissionNumber) usedAdmNo.add(row.admissionNumber);
           created++;
         } catch (err) {
           errors.push(`${row.email}: ${String(err).slice(0, 80)}`);

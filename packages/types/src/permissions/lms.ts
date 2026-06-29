@@ -24,6 +24,8 @@ export const LMS_PERMISSIONS = {
   CLASS_PROMOTE: "class.promote",
   /** Approve a promotion batch (checker — a DIFFERENT person). school_admin. */
   CLASS_PROMOTE_APPROVE: "class.promote.approve",
+  /** Manage the academic calendar (sessions + terms). principal / school_admin. */
+  ACADEMIC_MANAGE: "academic.manage",
   /** Read learning content (published; authors also see their own drafts). */
   CONTENT_READ: "lms.content.read",
   /** Create/edit/submit learning content. teacher (own class), school_admin. */

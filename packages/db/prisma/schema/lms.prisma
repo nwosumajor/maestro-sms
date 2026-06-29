@@ -25,6 +25,9 @@ model Class {
   /// A staff member who supervises this class (form teacher). Gains roster READ
   /// access to the class even if not a subject teacher. Optional.
   supervisorId String? @db.Uuid
+  /// Max ACTIVE enrollments; enrollment/import/promotion refuse to exceed it. Null
+  /// = unlimited.
+  capacity     Int?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -67,6 +70,9 @@ model PromotionBatch {
   /// Student user ids included in this promotion (snapshot at stage time).
   studentIds    Json
   status        PromotionStatus @default(PENDING)
+  /// The academic term this promotion runs at the end of (e.g. third term). Scalar
+  /// ref to term(id); the DB FK is added in the migration. Optional.
+  termId        String?         @db.Uuid
   initiatedById String          @db.Uuid
   reviewedById  String?         @db.Uuid
   reviewNote    String?
@@ -146,7 +152,10 @@ model Enrollment {
   schoolId   String   @db.Uuid
   classId    String   @db.Uuid
   studentId  String   @db.Uuid
+  /// ACTIVE | PROMOTED | GRADUATED | TRANSFERRED | WITHDRAWN.
   status     String   @default("ACTIVE")
+  /// Reason captured on a transfer/withdrawal (lifecycle audit context).
+  statusReason String?
   enrolledAt DateTime @default(now())
 
   school  School @relation(fields: [schoolId], references: [id])

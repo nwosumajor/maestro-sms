@@ -31,8 +31,8 @@ function makeService(opts: { batch?: Row | null; existingEmails?: string[] }) {
       create: userCreate,
     },
     userRole: { create: userRoleCreate },
-    studentProfile: { create: profileCreate },
-    enrollment: { create: enrollCreate },
+    studentProfile: { create: profileCreate, findMany: jest.fn().mockResolvedValue([]) },
+    enrollment: { create: enrollCreate, count: jest.fn().mockResolvedValue(0) },
     role: { findFirst: jest.fn().mockResolvedValue({ id: "student-role" }) },
     studentImportBatch: {
       create: jest.fn((a: { data: Row }) => Promise.resolve({ id: "b1", ...a.data })),

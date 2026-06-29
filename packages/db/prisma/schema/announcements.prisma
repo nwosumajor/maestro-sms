@@ -1,0 +1,32 @@
+// =============================================================================
+// Announcements — school-wide public notices
+// =============================================================================
+// A principal / school_admin posts a notice to their school. Audience scopes who
+// reads it (ALL, STUDENTS, or STAFF). Unlike a per-recipient notification, ONE row
+// is read by many — students/parents query their school's ALL+STUDENTS notices on
+// the announcements page. Tenant-scoped (non-null schoolId, RLS). createdById is
+// an audit-style scalar (not an enforced relation).
+// =============================================================================
+
+enum AnnouncementAudience {
+  ALL
+  STUDENTS
+  STAFF
+}
+
+model Announcement {
+  id          String               @id @default(uuid()) @db.Uuid
+  schoolId    String               @db.Uuid
+  title       String
+  body        String
+  audience    AnnouncementAudience @default(ALL)
+  createdById String               @db.Uuid
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, createdAt])
+  @@map("announcement")
+}

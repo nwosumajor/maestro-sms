@@ -18,6 +18,7 @@ export interface TenantDto {
 /** A single user as seen by the super_admin cross-tenant directory. */
 export interface OperatorUserDto {
   id: string;
+  uniqueId: string;
   name: string;
   email: string;
   /** Role names the user holds in this school. */
@@ -35,6 +36,7 @@ export interface OperatorUserDto {
 /** An enrolled student as seen by the super_admin cross-tenant student view. */
 export interface OperatorStudentDto {
   id: string;
+  uniqueId: string;
   name: string;
   email: string;
   admissionNumber: string | null;
