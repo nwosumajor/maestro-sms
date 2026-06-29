@@ -18,6 +18,8 @@ export interface LoginResult {
   permissions: string[];
   /** The school's subscription-enabled modules — drives the web nav. */
   modules: string[];
+  /** super_admin mandated MFA but the user hasn't enrolled — web forces /account. */
+  mfaEnrollRequired: boolean;
 }
 
 // A valid bcrypt hash of a random string — compared against when the user is not
@@ -62,7 +64,13 @@ export class AuthService {
       async (tx: TenantTx) => {
         const sec = await tx.user.findUnique({
           where: { id: user.id },
-          select: { failedLoginCount: true, lockedUntil: true, mfaEnabled: true, mfaSecret: true },
+          select: {
+            failedLoginCount: true,
+            lockedUntil: true,
+            mfaEnabled: true,
+            mfaSecret: true,
+            mfaRequired: true,
+          },
         });
 
         if (sec?.lockedUntil && sec.lockedUntil > new Date()) {
@@ -86,6 +94,12 @@ export class AuthService {
             return { status: "MFA_REQUIRED" as const };
           }
         }
+
+        // Platform-owner mandate: the account must enrol MFA. We do NOT block the
+        // password login (the user needs a session to reach the MFA setup page —
+        // blocking would lock them out permanently). Instead we flag the claim;
+        // the web forces the user to /account until mfaEnabled becomes true.
+        const mfaEnrollRequired = sec?.mfaRequired === true && !sec?.mfaEnabled;
 
         // Success: clear the lockout counters and resolve the claims.
         await tx.user.update({
@@ -114,6 +128,7 @@ export class AuthService {
             name: user.name,
             roles,
             permissions,
+            mfaEnrollRequired,
           },
         };
       },

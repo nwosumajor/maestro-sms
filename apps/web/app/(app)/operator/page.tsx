@@ -1,4 +1,4 @@
-import type { TenantDto, Serialized } from "@sms/types";
+import type { TenantDto, OnboardingRequestDto, Serialized } from "@sms/types";
 import { hasPermission } from "@/lib/permissions";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
@@ -9,6 +9,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { shortDate } from "@/lib/format";
 import { SubscriptionManager } from "@/components/operator/SubscriptionManager";
 import { Provisioning } from "@/components/operator/Provisioning";
+import { OperatorUsers } from "@/components/operator/OperatorUsers";
+import { OnboardingRequests } from "@/components/operator/OnboardingRequests";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +20,11 @@ export default async function OperatorPage() {
   const session = await auth();
   const user = session!.user;
   if (!hasPermission(user.permissions, "platform.operate")) redirect("/dashboard");
-  const tenants = (await apiGet<Tenant[]>("/operator/tenants")) ?? [];
+  const [tenants, onboarding] = await Promise.all([
+    apiGet<Tenant[]>("/operator/tenants"),
+    apiGet<Serialized<OnboardingRequestDto>[]>("/operator/onboarding-requests"),
+  ]);
+  const tenantList = tenants ?? [];
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="operator" permissions={user.permissions}>
@@ -31,10 +37,12 @@ export default async function OperatorPage() {
           </p>
         </div>
 
-        <Provisioning tenants={tenants.map((t) => ({ id: t.id, name: t.name }))} />
+        <Provisioning tenants={tenantList.map((t) => ({ id: t.id, name: t.name }))} />
+
+        <OnboardingRequests requests={onboarding ?? []} />
 
         <div className="space-y-3">
-          {tenants.map((t) => (
+          {tenantList.map((t) => (
             <Card key={t.id}>
               <CardHeader className="flex-row items-center justify-between space-y-0">
                 <div>
@@ -54,6 +62,7 @@ export default async function OperatorPage() {
               </CardHeader>
               <CardContent>
                 <SubscriptionManager schoolId={t.id} plan={t.plan} />
+                <OperatorUsers schoolId={t.id} />
               </CardContent>
             </Card>
           ))}

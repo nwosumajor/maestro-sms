@@ -22,8 +22,9 @@ export default async function AdminAdmissionsPage() {
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Admissions</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Public applications, quarantined from student data until you accept.
-              The public form lives at <code>/apply</code>.
+              Parent enrolment applications, quarantined from student data until accepted. Each is reviewed by
+              School admin → HR → Principal (a different person per stage); schedule the entrance exam and the
+              applicant is emailed on acceptance. The public form lives at <code>/enroll</code>.
             </p>
           </div>
           <Link href="/admin" className="text-sm text-muted-foreground hover:underline">← Admin</Link>

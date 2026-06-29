@@ -7,10 +7,11 @@ import { MfaSetup } from "@/components/security/MfaSetup";
 
 export const dynamic = "force-dynamic";
 
-export default async function AccountPage() {
+export default async function AccountPage({ searchParams }: { searchParams: { enroll2fa?: string } }) {
   const session = await auth();
   const user = session!.user;
   const mfa = await apiGet<{ enabled: boolean }>("/security/mfa/status");
+  const mustEnroll = user.mfaEnrollRequired || searchParams.enroll2fa === "1";
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="account" permissions={user.permissions}>
@@ -19,6 +20,15 @@ export default async function AccountPage() {
           <h1 className="text-2xl font-semibold tracking-tight">Account &amp; security</h1>
           <p className="mt-1 text-sm text-muted-foreground">{user.name} · {user.email}</p>
         </div>
+
+        {mustEnroll && !mfa?.enabled && (
+          <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm">
+            <p className="font-medium text-destructive">Two-factor authentication is required for your account.</p>
+            <p className="mt-1 text-muted-foreground">
+              Your administrator has mandated 2FA. Set it up below to regain access to the rest of the app.
+            </p>
+          </div>
+        )}
 
         <Card>
           <CardHeader>

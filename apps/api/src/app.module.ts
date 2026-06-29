@@ -24,6 +24,7 @@ import { HrModule } from "./hr/hr.module";
 import { AdminModule } from "./admin/admin.module";
 import { OperatorModule } from "./operator/operator.module";
 import { AdmissionsModule } from "./admissions/admissions.module";
+import { PublicModule } from "./public/public.module";
 import { GameModule } from "./game/game.module";
 import { GameSocketModule } from "./game-socket/game-socket.module";
 import { HealthController } from "./health.controller";
@@ -66,6 +67,7 @@ import { HealthController } from "./health.controller";
     AdminModule,
     OperatorModule,
     AdmissionsModule,
+    PublicModule,
     GameModule,
     GameSocketModule,
   ],

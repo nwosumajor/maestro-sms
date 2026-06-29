@@ -14,3 +14,20 @@ export interface TenantDto {
   /** Billing status (ACTIVE | PAST_DUE | CANCELED). */
   subscriptionStatus: string;
 }
+
+/** A single user as seen by the super_admin cross-tenant directory. */
+export interface OperatorUserDto {
+  id: string;
+  name: string;
+  email: string;
+  /** Role names the user holds in this school. */
+  roles: string[];
+  /** Account status (ACTIVE | DISABLED). DISABLED blocks login. */
+  status: string;
+  /** Whether the user has confirmed/enabled TOTP MFA. */
+  mfaEnabled: boolean;
+  /** Whether the platform owner mandates MFA enrolment for this user. */
+  mfaRequired: boolean;
+  /** Lockout deadline from failed logins, if currently locked. */
+  lockedUntil: Date | null;
+}

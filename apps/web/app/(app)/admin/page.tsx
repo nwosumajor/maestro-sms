@@ -51,6 +51,7 @@ export default async function AdminPage() {
     { label: "Access elevation", href: "/admin/security", perm: "security.elevation.request", desc: "Just-in-time privileges" },
     { label: "Recertification", href: "/admin/recertification", perm: "security.audit.read", desc: "Roles, assignments, anomalies" },
     { label: "Erasure requests", href: "/admin/privacy", perm: "privacy.erasure.review", desc: "NDPR right-to-erasure review" },
+    { label: "Create profiles", href: "/admin/users", perm: "rbac.manage", desc: "Add staff, teachers, parents, students" },
     { label: "Roles & access", href: "/admin/roles", perm: "rbac.manage", desc: "Assign roles to users" },
     { label: "Bulk import students", href: "/admin/import", perm: "class.write", desc: "Create accounts from a roster" },
     { label: "Finance reports", href: "/fees/reports", perm: "fee.manage", desc: "Receivables aging + collection" },

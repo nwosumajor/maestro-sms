@@ -202,6 +202,10 @@ model User {
   /// TOTP MFA: base32 secret (null until enrolled) + whether it's confirmed/on.
   mfaSecret    String?
   mfaEnabled   Boolean  @default(false)
+  /// Platform-owner mandate: when true, login is blocked until the user enrols
+  /// MFA (mfaEnabled). Set by super_admin per-user or per-role from the operator
+  /// console. Distinct from mfaEnabled (the user's own enrolment state).
+  mfaRequired  Boolean  @default(false)
   /// Brute-force protection: consecutive failed logins + a lockout deadline.
   failedLoginCount Int      @default(0)
   lockedUntil      DateTime?

@@ -16,11 +16,13 @@ export function Provisioning({ tenants }: { tenants: Tenant[] }) {
   const [busy, setBusy] = React.useState<string | null>(null);
   const [result, setResult] = React.useState<string | null>(null);
 
-  // Provision a school
+  // Provision a school + its founding admin tier (school_admin + principal).
   const [name, setName] = React.useState("");
   const [slug, setSlug] = React.useState("");
   const [aName, setAName] = React.useState("");
   const [aEmail, setAEmail] = React.useState("");
+  const [pName, setPName] = React.useState("");
+  const [pEmail, setPEmail] = React.useState("");
 
   // Add an admin
   const [schoolId, setSchoolId] = React.useState(tenants[0]?.id ?? "");
@@ -33,14 +35,16 @@ export function Provisioning({ tenants }: { tenants: Tenant[] }) {
     if (!name || !slug || !aName || !aEmail) return;
     setBusy("provision");
     setResult(null);
-    const res = await postWithStepUp("operator/tenants", {
-      name, slug, admin: { name: aName, email: aEmail, role: "school_admin" },
-    });
+    const admins = [{ name: aName, email: aEmail, role: "school_admin" }];
+    if (pName && pEmail) admins.push({ name: pName, email: pEmail, role: "principal" });
+    const res = await postWithStepUp("operator/tenants", { name, slug, admins });
     setBusy(null);
     if (res.ok) {
-      const d = (await res.json()) as { admin: { email: string; tempPassword: string } };
-      setResult(`School created. Admin ${d.admin.email} — temporary password: ${d.admin.tempPassword}`);
-      setName(""); setSlug(""); setAName(""); setAEmail("");
+      const d = (await res.json()) as { admins: { email: string; role: string; tempPassword: string }[] };
+      setResult(
+        `School created. ${d.admins.map((a) => `${a.role} ${a.email} — temp password: ${a.tempPassword}`).join(" · ")}`,
+      );
+      setName(""); setSlug(""); setAName(""); setAEmail(""); setPName(""); setPEmail("");
       router.refresh();
     } else setResult(`Failed (${res.status}).`);
   };
@@ -66,15 +70,26 @@ export function Provisioning({ tenants }: { tenants: Tenant[] }) {
     <Card>
       <CardHeader>
         <CardTitle className="text-base">Onboard a school</CardTitle>
-        <CardDescription>Self-serve: create a tenant + its first admin, or add admins to an existing school. Step-up re-auth required.</CardDescription>
+        <CardDescription>
+          Create a tenant + its founding admin tier (a school_admin and, recommended, a principal). They then
+          staff the rest of the school themselves. Or add admins to an existing school. Step-up re-auth required.
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
-        <form onSubmit={provision} className="flex flex-wrap items-end gap-2">
-          <div className="space-y-1.5"><Label htmlFor="pv-name">School name</Label><Input id="pv-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="St. Mary's" /></div>
-          <div className="space-y-1.5"><Label htmlFor="pv-slug">Slug</Label><Input id="pv-slug" value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="st-marys" className="w-32" /></div>
-          <div className="space-y-1.5"><Label htmlFor="pv-aname">Admin name</Label><Input id="pv-aname" value={aName} onChange={(e) => setAName(e.target.value)} /></div>
-          <div className="space-y-1.5"><Label htmlFor="pv-aemail">Admin email</Label><Input id="pv-aemail" type="email" value={aEmail} onChange={(e) => setAEmail(e.target.value)} /></div>
-          <Button type="submit" disabled={busy === "provision"}>Create school</Button>
+        <form onSubmit={provision} className="space-y-3">
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="space-y-1.5"><Label htmlFor="pv-name">School name</Label><Input id="pv-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="St. Mary's" /></div>
+            <div className="space-y-1.5"><Label htmlFor="pv-slug">Slug</Label><Input id="pv-slug" value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="st-marys" className="w-32" /></div>
+          </div>
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="space-y-1.5"><Label htmlFor="pv-aname">School admin name</Label><Input id="pv-aname" value={aName} onChange={(e) => setAName(e.target.value)} /></div>
+            <div className="space-y-1.5"><Label htmlFor="pv-aemail">School admin email</Label><Input id="pv-aemail" type="email" value={aEmail} onChange={(e) => setAEmail(e.target.value)} /></div>
+          </div>
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="space-y-1.5"><Label htmlFor="pv-pname">Principal name <span className="font-normal text-muted-foreground">(optional)</span></Label><Input id="pv-pname" value={pName} onChange={(e) => setPName(e.target.value)} /></div>
+            <div className="space-y-1.5"><Label htmlFor="pv-pemail">Principal email</Label><Input id="pv-pemail" type="email" value={pEmail} onChange={(e) => setPEmail(e.target.value)} /></div>
+            <Button type="submit" disabled={busy === "provision"}>Create school</Button>
+          </div>
         </form>
 
         {tenants.length > 0 && (

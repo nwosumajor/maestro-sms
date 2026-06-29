@@ -23,6 +23,11 @@ export interface ImportRow {
   classId?: string | null;
 }
 
+// The platform/operator tier — NEVER mintable by a school-level admin. A
+// school_admin/principal creating users must not be able to escalate a profile to
+// cross-tenant super_admin. (All other roles are single-school-scoped by design.)
+const NON_ASSIGNABLE_ROLES = new Set(["super_admin"]);
+
 @Injectable()
 export class AdminService {
   constructor(
@@ -38,7 +43,60 @@ export class AdminService {
     return this.db.runAsTenant(this.ctx(p), (tx) => tx.role.findMany({ select: { name: true }, orderBy: { name: "asc" } }));
   }
 
+  /** List this school's users with their roles (staff picker / directory). */
+  async listUsers(p: Principal) {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const users = await tx.user.findMany({
+        orderBy: { name: "asc" },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          status: true,
+          roles: { select: { role: { select: { name: true } } } },
+        },
+      });
+      return users.map((u) => ({
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        status: u.status,
+        roles: u.roles.map((r) => r.role.name),
+      }));
+    });
+  }
+
+  /**
+   * Create a single user profile within the CALLER's own school and assign one
+   * role. RLS scopes every write to p.schoolId, so a school_admin can only ever
+   * create users in their own tenant; the super_admin guard prevents minting a
+   * cross-tenant operator. Returns a one-time temporary password.
+   */
+  async createUser(p: Principal, input: { name: string; email: string; role: string; password?: string }) {
+    const roleName = input.role;
+    if (NON_ASSIGNABLE_ROLES.has(roleName)) {
+      throw new BadRequestException("That role cannot be assigned");
+    }
+    const tempPassword = input.password ?? Math.random().toString(36).slice(2, 12);
+    const passwordHash = await bcrypt.hash(tempPassword, 10);
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const role = await tx.role.findFirst({ where: { name: roleName }, select: { id: true } });
+      if (!role) throw new NotFoundException("Role not found");
+      const existing = await tx.user.findFirst({ where: { email: input.email }, select: { id: true } });
+      if (existing) throw new BadRequestException("That email is already in use");
+      const user = await tx.user.create({
+        data: { schoolId: p.schoolId, email: input.email, name: input.name, passwordHash },
+      });
+      await tx.userRole.create({ data: { schoolId: p.schoolId, userId: user.id, roleId: role.id } });
+      await this.log(tx, p, "admin.user.create", user.id, { email: input.email, role: roleName });
+      return { id: user.id, email: input.email, role: roleName, tempPassword };
+    });
+  }
+
   async assignRole(p: Principal, userId: string, roleName: string) {
+    if (NON_ASSIGNABLE_ROLES.has(roleName)) {
+      throw new BadRequestException("That role cannot be assigned");
+    }
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const role = await tx.role.findFirst({ where: { name: roleName }, select: { id: true } });
       if (!role) throw new NotFoundException("Role not found");

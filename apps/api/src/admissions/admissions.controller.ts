@@ -11,6 +11,20 @@ import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { AdmissionsService } from "./admissions.service";
 
+const detailsSchema = z.object({
+  parentName: z.string().min(1).max(200),
+  parentEmail: z.string().email(),
+  parentPhone: z.string().max(40).nullish(),
+  parentAddress: z.string().max(400).nullish(),
+  relationship: z.string().max(60).nullish(),
+  childName: z.string().min(1).max(200),
+  childDob: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
+  childGender: z.string().max(20).nullish(),
+  desiredClass: z.string().max(80).nullish(),
+  priorSchool: z.string().max(200).nullish(),
+  notes: z.string().max(2000).nullish(),
+});
+
 const submitSchema = z.object({
   schoolSlug: z.string().min(1).max(80),
   applicantName: z.string().min(1).max(200),
@@ -18,11 +32,20 @@ const submitSchema = z.object({
   applicantPhone: z.string().max(40).nullish(),
   childName: z.string().min(1).max(200),
   childDob: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
+  desiredClass: z.string().max(80).nullish(),
   notes: z.string().max(2000).nullish(),
+  details: detailsSchema.nullish(),
 });
-const statusSchema = z.object({
-  status: z.enum(["NEW", "REVIEWING", "ACCEPTED", "REJECTED"]),
+
+const reviewSchema = z.object({
+  action: z.enum(["APPROVE", "REJECT"]),
   note: z.string().max(1000).optional(),
+});
+
+const examSchema = z.object({
+  examDate: z.string().datetime().nullish(),
+  examNote: z.string().max(1000).nullish(),
+  desiredClass: z.string().max(80).nullish(),
 });
 
 @RequireModule(MODULES.ADMISSIONS)
@@ -43,13 +66,31 @@ export class AdmissionsController {
     return this.admissions.list(p);
   }
 
-  @Post("admissions/:id/status")
+  @Get("admissions/:id")
   @RequirePermission(ADMISSION_PERMISSIONS.ADMISSION_REVIEW)
-  setStatus(
+  getOne(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<AdmissionApplicationDto> {
+    return this.admissions.get(p, id);
+  }
+
+  /** Decide the current maker-checker stage (Admin → HR → Principal). */
+  @Post("admissions/:id/review")
+  @RequirePermission(ADMISSION_PERMISSIONS.ADMISSION_REVIEW)
+  review(
     @CurrentPrincipal() p: Principal,
     @Param("id") id: string,
-    @Body(new ZodValidationPipe(statusSchema)) body: { status: "NEW" | "REVIEWING" | "ACCEPTED" | "REJECTED"; note?: string },
+    @Body(new ZodValidationPipe(reviewSchema)) body: z.infer<typeof reviewSchema>,
   ) {
-    return this.admissions.updateStatus(p, id, body.status, body.note);
+    return this.admissions.review(p, id, body.action, body.note);
+  }
+
+  /** Schedule / update the entrance exam (communicated to the applicant on acceptance). */
+  @Post("admissions/:id/exam")
+  @RequirePermission(ADMISSION_PERMISSIONS.ADMISSION_REVIEW)
+  setExam(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(examSchema)) body: z.infer<typeof examSchema>,
+  ) {
+    return this.admissions.setExam(p, id, body);
   }
 }

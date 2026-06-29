@@ -29,6 +29,23 @@ model AdmissionApplication {
   reviewedById   String?         @db.Uuid
   reviewNote     String?
 
+  /// Comprehensive parent-enrolment form (AdmissionDetails in @sms/types).
+  details      Json?
+  /// Desired class/grade for the child (also surfaced from details).
+  desiredClass String?
+
+  /// Maker-checker chain (ordered [{key,label,permission}], ADMISSION_REVIEW_CHAIN).
+  stages       Json @default("[]")
+  /// Pointer into `stages` for the NEXT decision; advances on each stage APPROVE.
+  currentStage Int  @default(0)
+  /// Recorded stage decisions ([{stageKey,approverId,decision,at}]). Drives
+  /// separation of duties — a user already here cannot decide another stage.
+  approvals    Json @default("[]")
+
+  /// Entrance-exam scheduling, communicated to the applicant on acceptance.
+  examDate DateTime?
+  examNote String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

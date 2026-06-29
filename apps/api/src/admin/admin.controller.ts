@@ -8,6 +8,12 @@ import type { Principal } from "../integrity/integrity.foundation";
 import { AdminService } from "./admin.service";
 
 const roleSchema = z.object({ roleName: z.string().min(1).max(40) });
+const createUserSchema = z.object({
+  name: z.string().min(1).max(200),
+  email: z.string().email(),
+  role: z.string().min(1).max(40),
+  password: z.string().min(8).max(200).optional(),
+});
 const importSchema = z.object({
   rows: z
     .array(z.object({ name: z.string().min(1).max(200), email: z.string().email(), classId: z.string().uuid().nullish() }))
@@ -23,6 +29,23 @@ export class AdminController {
   @RequirePermission(ADMIN_PERMISSIONS.RBAC_MANAGE)
   roles(@CurrentPrincipal() p: Principal) {
     return this.admin.listRoles(p);
+  }
+
+  /** List this school's users (directory / staff picker). */
+  @Get("users")
+  @RequirePermission(ADMIN_PERMISSIONS.RBAC_MANAGE)
+  users(@CurrentPrincipal() p: Principal) {
+    return this.admin.listUsers(p);
+  }
+
+  /** Create a profile (any non-super_admin role) within the caller's own school. */
+  @Post("users")
+  @RequirePermission(ADMIN_PERMISSIONS.RBAC_MANAGE)
+  createUser(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(createUserSchema)) body: z.infer<typeof createUserSchema>,
+  ) {
+    return this.admin.createUser(p, body);
   }
 
   @Post("users/:userId/roles")

@@ -11,6 +11,8 @@ declare module "next-auth" {
       permissions: string[];
       /** Subscription-enabled modules — drives nav visibility. */
       modules: string[];
+      /** super_admin mandated MFA but the user hasn't enrolled — gate to /account. */
+      mfaEnrollRequired: boolean;
     } & DefaultSession["user"];
   }
 }
@@ -23,5 +25,6 @@ declare module "next-auth/jwt" {
     roles?: string[];
     permissions?: string[];
     modules?: string[];
+    mfaEnrollRequired?: boolean;
   }
 }

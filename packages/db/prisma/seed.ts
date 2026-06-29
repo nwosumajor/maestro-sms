@@ -207,10 +207,13 @@ const ROLE_PERMS: Record<string, string[]> = {
   ],
   // HR Manager: owns leave/salary/payroll + is the HR (stage-2) approver of the
   // staff-request chain. Salary maker-checker still needs TWO distinct managers.
-  hr_manager: ["hr.self", 
+  hr_manager: ["hr.self",
     "workflow.create", "workflow.read", "workflow.review", "workflow.review.hr",
     "hr.read", "hr.write", "hr.salary.request", "hr.salary.approve", "hr.leave.manage", "hr.payroll.run",
     "hr.appraisal.manage", "hr.disciplinary.manage", "hr.recruit.manage",
+    // Coarse gate for the admissions review surface; the HR stage of the
+    // maker-checker still requires the granular workflow.review.hr above.
+    "admission.review",
     "notification.read", "notification.send", "security.elevation.request",
     "message.read", "message.send", "event.read",
   ],

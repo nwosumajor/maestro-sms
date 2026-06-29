@@ -1,0 +1,37 @@
+// =============================================================================
+// OnboardingRequest — PUBLIC, PRE-TENANT school-onboarding intake (GLOBAL)
+// =============================================================================
+// A prospective principal asks (from the public website) to put their school on
+// the platform. This row PREDATES any tenant, so it has NO schoolId and is GLOBAL
+// (RLS-exempt, like School/Role). A super_admin reviews it from the operator
+// console and, on approval, provisions the real school via OperatorProvisioning.
+// It holds only the requester's own contact details — never any student data.
+// Grants/RLS in prisma/rls/30_onboarding_request_rls.sql (applied separately).
+// =============================================================================
+
+enum OnboardingRequestStatus {
+  NEW
+  REVIEWING
+  APPROVED
+  REJECTED
+}
+
+model OnboardingRequest {
+  id           String                  @id @default(uuid()) @db.Uuid
+  schoolName   String
+  contactName  String
+  contactEmail String
+  contactPhone String?
+  // Prospective slug the requester would like (validated/uniqueness checked only
+  // at provisioning time — this is just a request).
+  desiredSlug  String?
+  notes        String?
+  status       OnboardingRequestStatus @default(NEW)
+  reviewedById String?                 @db.Uuid
+  reviewNote   String?
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+
+  @@index([status])
+  @@map("onboarding_request")
+}

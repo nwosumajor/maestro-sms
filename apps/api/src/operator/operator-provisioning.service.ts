@@ -82,10 +82,21 @@ export class OperatorProvisioningService implements OnModuleInit, OnModuleDestro
     return crypto.randomBytes(9).toString("base64url");
   }
 
-  /** Create a school + its subscription + a first admin user. Returns one-time creds. */
+  /**
+   * Create a school + its subscription + its FOUNDING admin tier. Onboarding seeds
+   * at least a school_admin AND (recommended) a principal; those two then staff the
+   * rest of the school themselves (POST /admin/users). Returns one-time creds per
+   * admin. Accepts a single `admin` (legacy) or an `admins[]`.
+   */
   async provisionSchool(
     p: Principal,
-    input: { name: string; slug: string; plan?: string; admin: AdminInput },
+    input: {
+      name: string;
+      slug: string;
+      plan?: string;
+      admin?: AdminInput;
+      admins?: AdminInput[];
+    },
   ) {
     const db = this.client();
     const slug = input.slug.trim().toLowerCase();
@@ -93,40 +104,61 @@ export class OperatorProvisioningService implements OnModuleInit, OnModuleDestro
       throw new BadRequestException("slug must be 2–40 chars, [a-z0-9-]");
     }
     const plan = input.plan && isPlan(input.plan) ? input.plan : DEFAULT_PLAN;
-    const role = input.admin.role ?? "school_admin";
-    if (!ADMIN_ROLES.has(role)) throw new BadRequestException("admin role not allowed");
 
+    // Normalise to a list; default each admin's role to school_admin.
+    const rawAdmins = input.admins ?? (input.admin ? [input.admin] : []);
+    if (rawAdmins.length === 0) throw new BadRequestException("at least one admin is required");
+    const admins = rawAdmins.map((a) => ({ ...a, role: a.role ?? "school_admin" }));
+    for (const a of admins) {
+      if (!ADMIN_ROLES.has(a.role)) throw new BadRequestException(`admin role ${a.role} not allowed`);
+    }
+    // A school must have at least one school_admin to own day-to-day administration.
+    if (!admins.some((a) => a.role === "school_admin")) {
+      throw new BadRequestException("at least one admin must be a school_admin");
+    }
+    // No duplicate emails within the batch, and none already in use globally.
+    const emails = admins.map((a) => a.email.toLowerCase());
+    if (new Set(emails).size !== emails.length) {
+      throw new BadRequestException("duplicate admin email in the request");
+    }
     if (await db.school.findFirst({ where: { slug } })) {
       throw new ConflictException("A school with that slug already exists");
     }
-    if (await db.user.findFirst({ where: { email: input.admin.email } })) {
-      throw new ConflictException("That admin email is already in use");
+    if (await db.user.findFirst({ where: { email: { in: admins.map((a) => a.email) } } })) {
+      throw new ConflictException("One of those admin emails is already in use");
     }
-    const roleRow = await db.role.findFirst({ where: { name: role } });
-    if (!roleRow) throw new BadRequestException(`role ${role} is not seeded`);
 
-    const tempPassword = input.admin.password ?? this.genPassword();
-    const passwordHash = await bcrypt.hash(tempPassword, 10);
+    // Resolve each role row up front (global registry; same for all schools).
+    const prepared: Array<AdminInput & { role: string; roleId: string; tempPassword: string; passwordHash: string }> = [];
+    for (const a of admins) {
+      const roleRow = await db.role.findFirst({ where: { name: a.role } });
+      if (!roleRow) throw new BadRequestException(`role ${a.role} is not seeded`);
+      const tempPassword = a.password ?? this.genPassword();
+      prepared.push({ ...a, role: a.role, roleId: roleRow.id, tempPassword, passwordHash: await bcrypt.hash(tempPassword, 10) });
+    }
 
     const result = await db.$transaction(async (tx) => {
       const school = await tx.school.create({ data: { name: input.name, slug } });
       await tx.schoolSubscription.create({ data: { schoolId: school.id, plan, status: "ACTIVE" } });
-      const admin = await tx.user.create({
-        data: { schoolId: school.id, email: input.admin.email, name: input.admin.name, passwordHash },
-      });
-      await tx.userRole.create({ data: { schoolId: school.id, userId: admin.id, roleId: roleRow.id } });
-      return { school, admin };
+      const created: Array<{ id: string; email: string; role: string; tempPassword: string }> = [];
+      for (const a of prepared) {
+        const u = await tx.user.create({
+          data: { schoolId: school.id, email: a.email, name: a.name, passwordHash: a.passwordHash },
+        });
+        await tx.userRole.create({ data: { schoolId: school.id, userId: u.id, roleId: a.roleId } });
+        created.push({ id: u.id, email: a.email, role: a.role, tempPassword: a.tempPassword });
+      }
+      return { school, created };
     });
 
     await this.auditInOperatorTenant(p, "operator.school.provision", "school", result.school.id, {
       slug,
       plan,
-      adminEmail: input.admin.email,
-      role,
+      admins: result.created.map((a) => ({ email: a.email, role: a.role })),
     });
     return {
       school: { id: result.school.id, name: result.school.name, slug: result.school.slug, plan },
-      admin: { id: result.admin.id, email: input.admin.email, role, tempPassword },
+      admins: result.created,
     };
   }
 
@@ -160,6 +192,31 @@ export class OperatorProvisioningService implements OnModuleInit, OnModuleDestro
       role,
     });
     return { id: admin.id, email: input.email, role, tempPassword };
+  }
+
+  // --- public onboarding-request review (global table; privileged client) -----
+  /** List prospective-school onboarding requests (super_admin review queue). */
+  async listOnboardingRequests(_p: Principal) {
+    const db = this.client();
+    return db.onboardingRequest.findMany({ orderBy: { createdAt: "desc" }, take: 200 });
+  }
+
+  /** Mark an onboarding request REVIEWING / APPROVED / REJECTED (audited). */
+  async setOnboardingRequestStatus(
+    p: Principal,
+    id: string,
+    status: "NEW" | "REVIEWING" | "APPROVED" | "REJECTED",
+    note?: string,
+  ) {
+    const db = this.client();
+    const existing = await db.onboardingRequest.findFirst({ where: { id }, select: { id: true } });
+    if (!existing) throw new NotFoundException("Onboarding request not found");
+    const updated = await db.onboardingRequest.update({
+      where: { id },
+      data: { status, reviewedById: p.userId, reviewNote: note ?? null },
+    });
+    await this.auditInOperatorTenant(p, "operator.onboarding.review", "onboarding_request", id, { status });
+    return updated;
   }
 
   /** Audit lands in the OPERATOR's own tenant (the actor FK is the operator). */

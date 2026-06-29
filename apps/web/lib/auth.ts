@@ -20,6 +20,7 @@ interface LoginResult {
   roles: string[];
   permissions: string[];
   modules: string[];
+  mfaEnrollRequired?: boolean;
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -56,14 +57,23 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           roles: u.roles,
           permissions: u.permissions,
           modules: u.modules ?? [],
+          mfaEnrollRequired: u.mfaEnrollRequired ?? false,
         };
       },
     }),
   ],
   callbacks: {
     // Used by middleware on matched (protected) routes: redirect to /login if
-    // there's no session.
-    authorized: ({ auth }) => Boolean(auth?.user),
+    // there's no session. Also enforces the super_admin MFA mandate — a user
+    // flagged mfaEnrollRequired is held on /account until they enrol 2FA.
+    authorized: ({ auth, request }) => {
+      if (!auth?.user) return false;
+      const onAccount = request.nextUrl.pathname.startsWith("/account");
+      if (auth.user.mfaEnrollRequired && !onAccount) {
+        return Response.redirect(new URL("/account?enroll2fa=1", request.nextUrl));
+      }
+      return true;
+    },
     jwt: ({ token, user }) => {
       if (user) {
         const u = user as unknown as {
@@ -73,6 +83,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           roles: string[];
           permissions: string[];
           modules: string[];
+          mfaEnrollRequired: boolean;
         };
         token.userId = u.id;
         token.schoolId = u.schoolId;
@@ -80,6 +91,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.roles = u.roles;
         token.permissions = u.permissions;
         token.modules = u.modules;
+        token.mfaEnrollRequired = u.mfaEnrollRequired;
       }
       return token;
     },
@@ -90,6 +102,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       session.user.roles = (token.roles as string[]) ?? [];
       session.user.permissions = (token.permissions as string[]) ?? [];
       session.user.modules = (token.modules as string[]) ?? [];
+      session.user.mfaEnrollRequired = (token.mfaEnrollRequired as boolean) ?? false;
       return session;
     },
   },

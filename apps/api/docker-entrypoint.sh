@@ -97,6 +97,7 @@ apply_rls packages/db/prisma/rls/26_hr_lifecycle_rls.sql        training_record_
 apply_rls packages/db/prisma/rls/27_hr_appraisals_disciplinary_rls.sql disciplinary_entry_insert
 apply_rls packages/db/prisma/rls/28_hr_recruitment_rls.sql        applicant_update
 apply_rls packages/db/prisma/rls/29_school_branding_rls.sql       school_branding_update
+apply_rls packages/db/prisma/rls/30_onboarding_request_rls.sql    onboarding_request_all
 
 # Seed on first provision (compose: SEED_ON_START=true; cloud migrate task: always).
 if [ "${SEED_ON_START}" = "true" ] || [ "$MODE" = "migrate" ]; then
