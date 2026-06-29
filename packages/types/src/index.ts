@@ -42,6 +42,7 @@ export * from "./dto/operator";
 export * from "./dto/public";
 export * from "./dto/billing";
 export * from "./dto/admissions";
+export * from "./dto/student-import";
 export * from "./dto/analytics";
 export * from "./dto/calendar";
 export * from "./dto/game";

@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Post, Put } from "@nestjs/common";
-import type { OperatorUserDto, SubscriptionDto, TenantDto } from "@sms/types";
+import type { OperatorStudentDto, OperatorUserDto, SubscriptionDto, TenantDto } from "@sms/types";
 import { z } from "zod";
 import { OPERATOR_PERMISSIONS, PLANS, SUBSCRIPTION_STATUS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -133,6 +133,16 @@ export class OperatorController {
     @Body(new ZodValidationPipe(onboardingStatusSchema)) body: z.infer<typeof onboardingStatusSchema>,
   ) {
     return this.provisioning.setOnboardingRequestStatus(p, id, body.status, body.note);
+  }
+
+  /** Every enrolled student of a school (cross-tenant; audited). */
+  @Get("tenants/:schoolId/students")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  listSchoolStudents(
+    @CurrentPrincipal() p: Principal,
+    @Param("schoolId") schoolId: string,
+  ): Promise<OperatorStudentDto[]> {
+    return this.operator.listSchoolStudents(p, schoolId);
   }
 
   // --- cross-tenant user directory + governance (super_admin) ----------------

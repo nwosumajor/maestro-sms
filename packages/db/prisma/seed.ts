@@ -92,6 +92,10 @@ const PERMS = [
   "enrollment.read",
   "enrollment.write",
   "guardian.write",
+  "subject.manage",
+  "student.import",
+  "class.promote",
+  "class.promote.approve",
   // LMS learning content
   "lms.content.read",
   "lms.content.write",
@@ -129,7 +133,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     "student.profile.read", "student.profile.write", "student.contact.read",
     "student.contact.write", "student.medical.read", "student.medical.write",
     "attendance.read", "attendance.write",
-    "class.read", "class.write", "enrollment.read", "enrollment.write", "guardian.write",
+    "class.read", "class.write", "enrollment.read", "enrollment.write", "guardian.write", "subject.manage", "student.import", "class.promote",
     "grade.read", "grade.write",
     "workflow.create", "workflow.read", "workflow.review", "workflow.review.principal",
     "notification.read", "notification.send",
@@ -147,7 +151,7 @@ const ROLE_PERMS: Record<string, string[]> = {
   ],
   // School Administrator: SIS / enrollment / workflows — but NOT grade books, NOT veto.
   school_admin: [
-    "class.read", "class.write", "enrollment.read", "enrollment.write", "guardian.write",
+    "class.read", "class.write", "enrollment.read", "enrollment.write", "guardian.write", "subject.manage", "student.import", "class.promote",
     "assessment.read", "integrity.report.read", "integrity.exemption.read", "integrity.exemption.write",
     "integrity.retention.run",
     "student.profile.read", "student.profile.write", "student.contact.read",
@@ -161,6 +165,8 @@ const ROLE_PERMS: Record<string, string[]> = {
     "security.audit.read", "security.elevation.request", "security.elevation.approve",
     "privacy.erasure.review", "message.read", "message.send", "event.read", "event.write",
     "hr.read", "hr.self", "hr.write", "hr.salary.approve", "hr.appraisal.manage", "hr.disciplinary.manage", "hr.recruit.manage", "school.branding.manage", "rbac.manage", "admission.review",
+    // School admin approves end-of-session promotions (maker-checker checker).
+    "class.promote.approve",
     "game.league.create", "game.leaderboard.read",
     "game.race.open", "game.race.tournament", "game.match.moderate",
     "game.settings.manage",
@@ -203,7 +209,7 @@ const ROLE_PERMS: Record<string, string[]> = {
   // The accountant owns Fees/Billing.
   accountant: ["hr.self", "workflow.create", "workflow.read", "notification.read", "fee.read", "fee.manage", "document.read", "document.write", "security.elevation.request", "message.read", "message.send", "event.read", "billing.read",
   ],
-  hr_clerk: ["hr.self", "workflow.create", "workflow.read", "notification.read", "security.elevation.request", "hr.read", "hr.write", "message.read", "message.send", "event.read",
+  hr_clerk: ["hr.self", "workflow.create", "workflow.read", "notification.read", "security.elevation.request", "hr.read", "hr.write", "message.read", "message.send", "event.read", "student.import", "class.read", "enrollment.read",
   ],
   // HR Manager: owns leave/salary/payroll + is the HR (stage-2) approver of the
   // staff-request chain. Salary maker-checker still needs TWO distinct managers.
@@ -213,7 +219,9 @@ const ROLE_PERMS: Record<string, string[]> = {
     "hr.appraisal.manage", "hr.disciplinary.manage", "hr.recruit.manage",
     // Coarse gate for the admissions review surface; the HR stage of the
     // maker-checker still requires the granular workflow.review.hr above.
-    "admission.review",
+    "admission.review", "student.import",
+    // HR may view class lists + rosters (read-only) for onboarding/oversight.
+    "class.read", "enrollment.read",
     "notification.read", "notification.send", "security.elevation.request",
     "message.read", "message.send", "event.read",
   ],

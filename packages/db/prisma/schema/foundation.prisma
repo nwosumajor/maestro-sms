@@ -33,6 +33,9 @@ model School {
   classTeachers  ClassTeacher[]
   enrollments    Enrollment[]
   parentChildren ParentChild[]
+  subjects             Subject[]
+  classSubjectTeachers ClassSubjectTeacher[]
+  promotionBatches     PromotionBatch[]
 
   // Gradebook
   grades         Grade[]
@@ -54,6 +57,7 @@ model School {
   studentProfiles   StudentProfile[]
   emergencyContacts EmergencyContact[]
   medicalRecords    MedicalRecord[]
+  studentImportBatches StudentImportBatch[]
 
   // Attendance relations
   attendanceSessions AttendanceSession[]
@@ -233,6 +237,8 @@ model User {
   studentEnrollments Enrollment[]  @relation("StudentEnrollments")
   parentLinks       ParentChild[]  @relation("ParentLinks")
   childLinks        ParentChild[]  @relation("ChildLinks")
+  supervisedClasses Class[]               @relation("ClassSupervisor")
+  subjectTeaching   ClassSubjectTeacher[] @relation("SubjectTeaching")
 
   // LMS learning content
   authoredContent   LmsContent[]  @relation("ContentAuthor")

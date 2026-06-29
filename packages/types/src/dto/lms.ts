@@ -4,6 +4,40 @@ export interface ClassDto {
   id: string;
   name: string;
   subject: string | null;
+  level: number | null;
+  nextClassId: string | null;
+  supervisorId: string | null;
+}
+
+/** A subject in the school's catalog. */
+export interface SubjectDto {
+  id: string;
+  name: string;
+  code: string | null;
+}
+
+/** A class's subject offering with its assigned teacher. */
+export interface ClassSubjectDto {
+  id: string;
+  subjectId: string;
+  subjectName: string;
+  teacherId: string;
+  teacherName: string;
+}
+
+/** A staged end-of-session promotion batch (maker-checker). */
+export interface PromotionBatchDto {
+  id: string;
+  sourceClassId: string;
+  sourceClassName: string;
+  targetClassId: string | null;
+  targetClassName: string | null;
+  studentCount: number;
+  status: string;
+  initiatedById: string;
+  reviewedById: string | null;
+  reviewNote: string | null;
+  createdAt: Date;
 }
 
 /** Compact workflow row used on the dashboard. */

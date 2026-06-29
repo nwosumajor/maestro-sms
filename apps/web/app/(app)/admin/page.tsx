@@ -53,7 +53,7 @@ export default async function AdminPage() {
     { label: "Erasure requests", href: "/admin/privacy", perm: "privacy.erasure.review", desc: "NDPR right-to-erasure review" },
     { label: "Create profiles", href: "/admin/users", perm: "rbac.manage", desc: "Add staff, teachers, parents, students" },
     { label: "Roles & access", href: "/admin/roles", perm: "rbac.manage", desc: "Assign roles to users" },
-    { label: "Bulk import students", href: "/admin/import", perm: "class.write", desc: "Create accounts from a roster" },
+    { label: "Bulk student onboarding", href: "/admin/import", perm: "student.import", desc: "SIS roster upload (maker-checker)" },
     { label: "Finance reports", href: "/fees/reports", perm: "fee.manage", desc: "Receivables aging + collection" },
     { label: "Admissions", href: "/admin/admissions", perm: "admission.review", desc: "Review public applications" },
   ] satisfies { label: string; href: string; perm: Permission; desc: string }[]).filter(

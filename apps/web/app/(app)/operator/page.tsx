@@ -10,6 +10,7 @@ import { shortDate } from "@/lib/format";
 import { SubscriptionManager } from "@/components/operator/SubscriptionManager";
 import { Provisioning } from "@/components/operator/Provisioning";
 import { OperatorUsers } from "@/components/operator/OperatorUsers";
+import { OperatorStudents } from "@/components/operator/OperatorStudents";
 import { OnboardingRequests } from "@/components/operator/OnboardingRequests";
 
 export const dynamic = "force-dynamic";
@@ -63,6 +64,7 @@ export default async function OperatorPage() {
               <CardContent>
                 <SubscriptionManager schoolId={t.id} plan={t.plan} />
                 <OperatorUsers schoolId={t.id} />
+                <OperatorStudents schoolId={t.id} />
               </CardContent>
             </Card>
           ))}

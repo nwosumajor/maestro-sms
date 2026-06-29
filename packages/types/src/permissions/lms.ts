@@ -18,6 +18,12 @@ export const LMS_PERMISSIONS = {
   ENROLLMENT_WRITE: "enrollment.write",
   /** Link/unlink a guardian to a student. school_admin. */
   GUARDIAN_WRITE: "guardian.write",
+  /** Manage the subject catalog + class subject/teacher assignments. principal / school_admin. */
+  SUBJECT_MANAGE: "subject.manage",
+  /** Initiate an end-of-session promotion batch (maker). principal / school_admin. */
+  CLASS_PROMOTE: "class.promote",
+  /** Approve a promotion batch (checker — a DIFFERENT person). school_admin. */
+  CLASS_PROMOTE_APPROVE: "class.promote.approve",
   /** Read learning content (published; authors also see their own drafts). */
   CONTENT_READ: "lms.content.read",
   /** Create/edit/submit learning content. teacher (own class), school_admin. */

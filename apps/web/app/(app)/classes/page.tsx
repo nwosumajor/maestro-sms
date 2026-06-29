@@ -1,4 +1,4 @@
-import type { ClassDto } from "@sms/types";
+import type { ClassDto, PromotionBatchDto, SubjectDto, Serialized } from "@sms/types";
 import Link from "next/link";
 import { hasPermission } from "@/lib/permissions";
 import { auth } from "@/lib/auth";
@@ -14,6 +14,8 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
 import { ClassAdmin } from "@/components/lms/ClassAdmin";
+import { ClassSubjectsAdmin } from "@/components/lms/ClassSubjectsAdmin";
+import { PromotionManager } from "@/components/lms/PromotionManager";
 
 export const dynamic = "force-dynamic";
 
@@ -22,11 +24,16 @@ export default async function ClassesPage() {
   const session = await auth();
   const user = session!.user;
   const canWrite = hasPermission(user.permissions, "class.write");
+  const canManageSubjects = hasPermission(user.permissions, "subject.manage");
+  const canPromote = hasPermission(user.permissions, "class.promote");
+  const canApprovePromotion = hasPermission(user.permissions, "class.promote.approve");
   const canReview = hasPermission(user.permissions, "lms.content.approve");
-  const [classes, students, users] = await Promise.all([
+  const [classes, students, users, subjects, promotions] = await Promise.all([
     apiGet<ClassDto[]>("/classes/mine"),
     canWrite ? apiGet<{ id: string; name: string }[]>("/students") : Promise.resolve(null),
     canWrite ? apiGet<{ id: string; name: string; roles: string[] }[]>("/users") : Promise.resolve(null),
+    canManageSubjects ? apiGet<SubjectDto[]>("/subjects") : Promise.resolve(null),
+    canPromote ? apiGet<Serialized<PromotionBatchDto>[]>("/promotions") : Promise.resolve(null),
   ]);
 
   return (
@@ -50,6 +57,19 @@ export default async function ClassesPage() {
 
         {canWrite && classes && students && users && (
           <ClassAdmin classes={classes} students={students} users={users} />
+        )}
+
+        {canManageSubjects && classes && users && subjects && (
+          <ClassSubjectsAdmin classes={classes} subjects={subjects} users={users} />
+        )}
+
+        {canPromote && classes && promotions && (
+          <PromotionManager
+            classes={classes}
+            batches={promotions}
+            currentUserId={user.id}
+            canApprove={canApprovePromotion}
+          />
         )}
 
         {classes === null ? (
@@ -77,12 +97,20 @@ export default async function ClassesPage() {
                 </CardHeader>
                 <CardContent className="flex items-center justify-between gap-2">
                   <code className="text-xs text-muted-foreground">{c.id}</code>
-                  <Link
-                    href={`/classes/${c.id}/content`}
-                    className={buttonVariants({ size: "sm", variant: "outline" })}
-                  >
-                    Content
-                  </Link>
+                  <div className="flex gap-2">
+                    <Link
+                      href={`/classes/${c.id}/roster`}
+                      className={buttonVariants({ size: "sm", variant: "outline" })}
+                    >
+                      Roster
+                    </Link>
+                    <Link
+                      href={`/classes/${c.id}/content`}
+                      className={buttonVariants({ size: "sm", variant: "outline" })}
+                    >
+                      Content
+                    </Link>
+                  </div>
                 </CardContent>
               </Card>
             ))}

@@ -26,6 +26,10 @@ export const SIS_PERMISSIONS = {
   STUDENT_MEDICAL_READ: "student.medical.read",
   /** Create/edit a student's medical record. School staff only. */
   STUDENT_MEDICAL_WRITE: "student.medical.write",
+
+  /** Stage / approve a bulk SIS student import (maker-checker: a DIFFERENT person
+   *  approves). principal, school_admin, hr_manager, hr_clerk. */
+  STUDENT_IMPORT: "student.import",
 } as const;
 
 export type SisPermission = (typeof SIS_PERMISSIONS)[keyof typeof SIS_PERMISSIONS];

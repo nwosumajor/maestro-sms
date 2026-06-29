@@ -87,6 +87,10 @@ d("RLS cross-tenant isolation", () => {
   const threadParticipantA = randomUUID();
   const admissionA = randomUUID();
   const schoolBrandingA = randomUUID();
+  const subjectA = randomUUID();
+  const classSubjectA = randomUUID();
+  const importBatchA = randomUUID();
+  const promotionBatchA = randomUUID();
   // HR recruitment
   const jobReqA = randomUUID();
   const applicantA = randomUUID();
@@ -308,6 +312,25 @@ d("RLS cross-tenant isolation", () => {
       `INSERT INTO class_teacher (id,"schoolId","classId","teacherId") VALUES ($1,$2,$3,$4)`,
       [classTeacherA, A, classA, userA],
     );
+    // Subjects: a catalog subject + a class subject/teacher offering.
+    await a.query(
+      `INSERT INTO subject (id,"schoolId",name,"updatedAt") VALUES ($1,$2,'Mathematics',now())`,
+      [subjectA, A],
+    );
+    await a.query(
+      `INSERT INTO class_subject_teacher (id,"schoolId","classId","subjectId","teacherId") VALUES ($1,$2,$3,$4,$5)`,
+      [classSubjectA, A, classA, subjectA, userA],
+    );
+    // Bulk SIS import batch (maker-checker; uploaded by userA).
+    await a.query(
+      `INSERT INTO student_import_batch (id,"schoolId","uploadedById",rows,"updatedAt") VALUES ($1,$2,$3,'[]'::jsonb,now())`,
+      [importBatchA, A, userA],
+    );
+    // Promotion batch (maker-checker; source classA, no target = graduation).
+    await a.query(
+      `INSERT INTO promotion_batch (id,"schoolId","sourceClassId","studentIds","initiatedById","updatedAt") VALUES ($1,$2,$3,'[]'::jsonb,$4,now())`,
+      [promotionBatchA, A, classA, userA],
+    );
     await a.query(
       `INSERT INTO enrollment (id,"schoolId","classId","studentId") VALUES ($1,$2,$3,$4)`,
       [enrollmentA, A, classA, userA],
@@ -459,6 +482,14 @@ d("RLS cross-tenant isolation", () => {
       // Newly-covered tenant tables — child rows; safe to purge first (none are
       // parents of the tables listed below).
       "employee",
+      // SIS import batch: FK to school only (uploadedById is a scalar) — leaf.
+      "student_import_batch",
+      // promotion_batch references class (source/target) -> purge before class.
+      "promotion_batch",
+      // class_subject_teacher references class + subject + user -> purge first;
+      // subject is its parent (and FK-free of class), so it follows.
+      "class_subject_teacher",
+      "subject",
       "class_teacher",
       "enrollment",
       "parent_child",
@@ -614,6 +645,10 @@ d("RLS cross-tenant isolation", () => {
     ["job_requisition", jobReqA],
     ["applicant", applicantA],
     ["school_branding", schoolBrandingA],
+    ["subject", subjectA],
+    ["class_subject_teacher", classSubjectA],
+    ["student_import_batch", importBatchA],
+    ["promotion_batch", promotionBatchA],
   ];
 
   it.each(cases)("school B cannot SELECT school A's %s; school A can", async (table, id) => {

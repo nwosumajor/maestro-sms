@@ -110,3 +110,35 @@ model MedicalRecord {
   @@index([schoolId, profileId])
   @@map("medical_record")
 }
+
+enum ImportBatchStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// A staged bulk SIS student import. Maker-checker: the uploader stores PENDING
+/// rows (NOTHING is created yet); a DIFFERENT authorized person approves, which
+/// creates the student accounts + profiles in one tx. uploadedById/reviewedById
+/// are audit-style scalar ids (not enforced relations), like WorkflowAuditLog.
+/// No hard delete (the trail is retained). Tenant-scoped.
+model StudentImportBatch {
+  id           String            @id @default(uuid()) @db.Uuid
+  schoolId     String            @db.Uuid
+  status       ImportBatchStatus @default(PENDING)
+  uploadedById String            @db.Uuid
+  reviewedById String?           @db.Uuid
+  /// Parsed SIS rows awaiting approval (AdmissionImportRow[] in @sms/types).
+  rows    Json
+  /// Dry-run / result summary (counts of new vs duplicate, created, errors).
+  summary Json?
+  reviewNote String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, status])
+  @@map("student_import_batch")
+}

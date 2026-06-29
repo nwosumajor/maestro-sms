@@ -16,6 +16,15 @@ model Class {
   schoolId  String   @db.Uuid
   name      String
   subject   String?
+  /// Ordering within the school's progression (e.g. JSS1=1, JSS2=2). Drives the
+  /// "promote to the next class" flow together with nextClassId.
+  level     Int?
+  /// The class students promote INTO at end of session. Null = final/terminal
+  /// class (promotion graduates instead of moving). Self-relation within a school.
+  nextClassId String? @db.Uuid
+  /// A staff member who supervises this class (form teacher). Gains roster READ
+  /// access to the class even if not a subject teacher. Optional.
+  supervisorId String? @db.Uuid
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -25,9 +34,90 @@ model Class {
   assessments Assessment[]
   attendanceSessions AttendanceSession[]
   lmsContents LmsContent[]
+  subjectTeachers ClassSubjectTeacher[]
+
+  nextClass       Class?  @relation("ClassProgression", fields: [nextClassId], references: [id])
+  previousClasses Class[] @relation("ClassProgression")
+  supervisor      User?   @relation("ClassSupervisor", fields: [supervisorId], references: [id])
+  promotionsFrom  PromotionBatch[] @relation("PromotionSource")
+  promotionsTo    PromotionBatch[] @relation("PromotionTarget")
 
   @@index([schoolId])
+  @@index([schoolId, supervisorId])
   @@map("class")
+}
+
+enum PromotionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// A staged end-of-session promotion of a class's students into its next class.
+/// Maker-checker: an initiator stages the batch (nothing moves); school_admin
+/// approves, which moves each student's enrollment (source -> PROMOTED, a new
+/// ACTIVE enrollment in the target, or GRADUATED for a final class). initiated/
+/// reviewed ids are audit-style scalars. Tenant-scoped.
+model PromotionBatch {
+  id            String          @id @default(uuid()) @db.Uuid
+  schoolId      String          @db.Uuid
+  sourceClassId String          @db.Uuid
+  /// Null = final class: approving GRADUATES the students instead of moving them.
+  targetClassId String?         @db.Uuid
+  /// Student user ids included in this promotion (snapshot at stage time).
+  studentIds    Json
+  status        PromotionStatus @default(PENDING)
+  initiatedById String          @db.Uuid
+  reviewedById  String?         @db.Uuid
+  reviewNote    String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  school      School @relation(fields: [schoolId], references: [id])
+  sourceClass Class  @relation("PromotionSource", fields: [sourceClassId], references: [id])
+  targetClass Class? @relation("PromotionTarget", fields: [targetClassId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, status])
+  @@map("promotion_batch")
+}
+
+/// A subject in the school's catalog (e.g. "Mathematics"). Reusable across
+/// classes; offered to a class via ClassSubjectTeacher. Tenant-scoped.
+model Subject {
+  id        String   @id @default(uuid()) @db.Uuid
+  schoolId  String   @db.Uuid
+  name      String
+  code      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school        School                @relation(fields: [schoolId], references: [id])
+  classSubjects ClassSubjectTeacher[]
+
+  @@index([schoolId])
+  @@map("subject")
+}
+
+/// A class's offering of a subject, taught by one assigned teacher. One teacher
+/// per (class, subject). Tenant-scoped.
+model ClassSubjectTeacher {
+  id        String   @id @default(uuid()) @db.Uuid
+  schoolId  String   @db.Uuid
+  classId   String   @db.Uuid
+  subjectId String   @db.Uuid
+  teacherId String   @db.Uuid
+  createdAt DateTime @default(now())
+
+  school  School  @relation(fields: [schoolId], references: [id])
+  class   Class   @relation(fields: [classId], references: [id])
+  subject Subject @relation(fields: [subjectId], references: [id])
+  teacher User    @relation("SubjectTeaching", fields: [teacherId], references: [id])
+
+  @@unique([classId, subjectId])
+  @@index([schoolId])
+  @@index([schoolId, teacherId])
+  @@map("class_subject_teacher")
 }
 
 /// Teaching assignment: which teachers teach a class. Drives "teacher sees only

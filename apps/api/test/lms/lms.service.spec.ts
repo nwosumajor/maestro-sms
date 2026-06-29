@@ -39,6 +39,7 @@ function makeService(tables: FakeTables) {
       findMany: jest.fn().mockResolvedValue(tables.classTeacher ?? []),
       findFirst: jest.fn().mockResolvedValue(null),
     },
+    classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue(null) },
     enrollment: { findMany: enrollmentFindMany },
     parentChild: { findMany: jest.fn().mockResolvedValue(tables.parentChild ?? []) },
   } as unknown as TenantTx;

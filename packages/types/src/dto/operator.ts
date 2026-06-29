@@ -31,3 +31,13 @@ export interface OperatorUserDto {
   /** Lockout deadline from failed logins, if currently locked. */
   lockedUntil: Date | null;
 }
+
+/** An enrolled student as seen by the super_admin cross-tenant student view. */
+export interface OperatorStudentDto {
+  id: string;
+  name: string;
+  email: string;
+  admissionNumber: string | null;
+  /** Class names the student is actively enrolled in. */
+  classes: string[];
+}

@@ -133,6 +133,43 @@ export class OperatorService {
     return out;
   }
 
+  /** Every enrolled student of a given school (cross-tenant; the operator sets the
+   *  GUC to the target school, then RLS scopes the reads). Audited — student PII on
+   *  minors (Golden Rule #5). */
+  async listSchoolStudents(p: Principal, schoolId: string) {
+    const result = await this.db.runAsTenant({ schoolId, userId: p.userId }, async (tx) => {
+      const school = await tx.school.findFirst({ where: { id: schoolId }, select: { id: true } });
+      if (!school) throw new NotFoundException("School not found");
+      const enrollments = await tx.enrollment.findMany({
+        where: { status: "ACTIVE" },
+        include: { student: { select: { id: true, name: true, email: true } }, class: { select: { name: true } } },
+      });
+      // Group by student → their active class names.
+      const byStudent = new Map<string, { id: string; name: string; email: string; classes: string[] }>();
+      for (const e of enrollments as Array<{ student: { id: string; name: string; email: string }; class: { name: string } }>) {
+        const cur = byStudent.get(e.student.id) ?? { ...e.student, classes: [] };
+        cur.classes.push(e.class.name);
+        byStudent.set(e.student.id, cur);
+      }
+      const ids = [...byStudent.keys()];
+      const profiles = ids.length
+        ? await tx.studentProfile.findMany({ where: { studentId: { in: ids } }, select: { studentId: true, admissionNumber: true } })
+        : [];
+      const admNo = new Map(profiles.map((pr: { studentId: string; admissionNumber: string | null }) => [pr.studentId, pr.admissionNumber]));
+      return [...byStudent.values()]
+        .map((s) => ({ ...s, admissionNumber: admNo.get(s.id) ?? null }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    });
+    // Audit the cross-tenant PII view in the operator's own tenant.
+    await this.db.runAsTenant(this.ctx(p), (tx) =>
+      this.audit.record(
+        { actorId: p.userId, action: "operator.students.view", entity: "school", entityId: schoolId, schoolId: p.schoolId, metadata: { targetSchoolId: schoolId, count: result.length } },
+        tx,
+      ),
+    );
+    return result;
+  }
+
   /** Mint an audited impersonation token for a user in a (possibly other) tenant. */
   async impersonate(p: Principal, schoolId: string, userId: string) {
     const target = await this.db.runAsTenant({ schoolId, userId: p.userId }, async (tx) => {
