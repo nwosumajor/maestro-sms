@@ -26,7 +26,26 @@ import type { Principal, TenantContext } from "./integrity.foundation";
 import { IntegrityService } from "./integrity.service";
 
 const contentSchema = z.object({ content: z.string().max(200_000) });
-const fileSchema = z.object({ fileName: z.string().min(1).max(200), contentType: z.string().min(1).max(120) });
+
+// File answers are restricted to common document/image types and a size cap, so a
+// student can't stage an arbitrary/oversized blob as their "submission". (True byte
+// enforcement also lives at the storage policy for S3; this is the boundary check.)
+const ALLOWED_CONTENT_TYPES = [
+  "application/pdf",
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+  "text/plain",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+] as const;
+const MAX_FILE_BYTES = 25 * 1024 * 1024; // 25 MB
+const fileSchema = z.object({
+  fileName: z.string().min(1).max(200),
+  contentType: z.enum(ALLOWED_CONTENT_TYPES),
+  sizeBytes: z.number().int().positive().max(MAX_FILE_BYTES),
+});
 
 @RequireModule(MODULES.INTEGRITY)
 @Controller("assessments/:assessmentId/submissions/:submissionId")

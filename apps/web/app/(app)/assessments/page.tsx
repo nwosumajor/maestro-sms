@@ -8,6 +8,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { CreateAssessment } from "@/components/assessment/CreateAssessment";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +19,12 @@ export default async function AssessmentsPage() {
   const user = session!.user;
   if (!hasPermission(user.permissions, "assessment.read")) redirect("/dashboard");
   const canReview = hasPermission(user.permissions, "integrity.report.read");
-  const assessments = (await apiGet<Assessment[]>("/assessments")) ?? [];
+  const canWrite = hasPermission(user.permissions, "assessment.write");
+  const [assessmentsData, classes] = await Promise.all([
+    apiGet<Assessment[]>("/assessments"),
+    canWrite ? apiGet<{ id: string; name: string }[]>("/classes/mine") : Promise.resolve(null),
+  ]);
+  const assessments = assessmentsData ?? [];
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="assessments" permissions={user.permissions}>
@@ -31,6 +37,8 @@ export default async function AssessmentsPage() {
               : "Your assessments. Open one to work on it."}
           </p>
         </div>
+
+        {canWrite && <CreateAssessment classes={classes ?? []} />}
 
         {assessments.length === 0 ? (
           <Alert variant="info">
@@ -55,6 +63,7 @@ export default async function AssessmentsPage() {
                       <td className="px-4 py-2.5 font-medium">
                         {a.title}
                         {a.integrityEnabled && <Badge variant="outline" className="ml-2">integrity on</Badge>}
+                        {a.fileUploadEnabled && <Badge variant="outline" className="ml-2">file upload</Badge>}
                         {a.description && <p className="text-xs font-normal text-muted-foreground">{a.description}</p>}
                       </td>
                       <td className="px-4 py-2.5 text-muted-foreground">{a.className ?? "—"}</td>

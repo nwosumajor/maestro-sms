@@ -1,6 +1,7 @@
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
 import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
+import { RateLimitGuard } from "../common/rate-limit.guard";
 import type { AdmissionApplicationDto } from "@sms/types";
 import { z } from "zod";
 import { ADMISSION_PERMISSIONS } from "@sms/types";
@@ -53,8 +54,10 @@ const examSchema = z.object({
 export class AdmissionsController {
   constructor(private readonly admissions: AdmissionsService) {}
 
-  /** PUBLIC application intake. No session; rate-limit at the edge in production. */
+  /** PUBLIC application intake. No session; rate-limited in-process (backstop to
+   *  the edge WAF rule) since it is an unauthenticated write. */
   @Public()
+  @UseGuards(new RateLimitGuard(10, 60_000))
   @Post("public/admissions")
   submit(@Body(new ZodValidationPipe(submitSchema)) body: z.infer<typeof submitSchema>) {
     return this.admissions.submit(body);

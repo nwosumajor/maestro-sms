@@ -63,11 +63,17 @@ function makeService(fake: { tx: TenantTx }, consented = true) {
   const db = {
     runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(fake.tx),
   };
+  const storage = {
+    presignUpload: jest.fn().mockResolvedValue({ url: "u", expiresInSeconds: 60 }),
+    presignDownload: jest.fn().mockResolvedValue({ url: "d", expiresInSeconds: 60 }),
+    delete: jest.fn().mockResolvedValue(undefined),
+  };
   const service = new IntegrityService(
     db as never,
     audit as never,
     consent as never,
     queue as never,
+    storage as never,
     undefined,
   );
   return { service, audit, consent, queue };

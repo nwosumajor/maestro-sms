@@ -18,7 +18,7 @@ import { RENEWAL_REMINDER_DAYS, SUBSCRIPTION_GRACE_DAYS, SUBSCRIPTION_STATUS } f
 import { ModuleEntitlementService } from "../foundation/module-entitlement.service";
 import { NotificationService } from "../notifications/notification.service";
 import { BILLING_DATABASE } from "./billing.constants";
-import { BillingDatabaseService } from "./billing-database.service";
+import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 
 export type DunningTrigger = "SCHEDULED" | "MANUAL";
 
@@ -38,7 +38,7 @@ export class BillingDunningService {
   private readonly logger = new Logger("BillingDunning");
 
   constructor(
-    @Inject(BILLING_DATABASE) private readonly db: BillingDatabaseService,
+    @Inject(BILLING_DATABASE) private readonly db: PrivilegedDatabaseService,
     private readonly entitlements: ModuleEntitlementService,
     private readonly notifications: NotificationService,
   ) {}
@@ -90,7 +90,7 @@ export class BillingDunningService {
 
   /** Best-effort in-app notice to a school's principals/admins. Never throws. */
   private async notifyAdmins(
-    client: BillingDatabaseService["client"],
+    client: PrivilegedDatabaseService["client"],
     schoolId: string,
     title: string,
     body: string,

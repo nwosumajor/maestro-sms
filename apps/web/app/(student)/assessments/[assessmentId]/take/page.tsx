@@ -38,6 +38,8 @@ export default async function TakeAssessmentPage({
         timeRemainingLabel={result.data.timeRemainingLabel}
         initialContent={result.data.initialContent}
         integrity={result.data.integrity}
+        fileUpload={result.data.fileUpload}
+        alreadySubmitted={result.data.submitted}
         backHref="/assessments"
         backLabel="Back to assessments"
       />

@@ -10,7 +10,7 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import { NotificationService } from "../notifications/notification.service";
 import { HR_NOTIFY_ROLES, HR_REMINDER_DATABASE } from "./hr.constants";
-import { HrReminderDatabaseService } from "./hr-reminder-database.service";
+import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 
 export interface ReminderResult {
   reminded: number;
@@ -23,7 +23,7 @@ export class StaffReminderService {
   private readonly logger = new Logger("StaffReminder");
 
   constructor(
-    @Inject(HR_REMINDER_DATABASE) private readonly db: HrReminderDatabaseService,
+    @Inject(HR_REMINDER_DATABASE) private readonly db: PrivilegedDatabaseService,
     private readonly notifications: NotificationService,
   ) {}
 

@@ -78,8 +78,7 @@ export class AnnouncementsService {
 
   /** List the school's announcements visible to the caller (audience-filtered). */
   async list(p: Principal): Promise<AnnouncementDto[]> {
-    const studentSide = p.roles.some((r) => STUDENT_SIDE_ROLES.has(r)) && !this.isStaff(p);
-    const audiences = studentSide ? ["ALL", "STUDENTS"] : ["ALL", "STUDENTS", "STAFF"];
+    const audiences = this.audiencesFor(p);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const rows = (await tx.announcement.findMany({
         where: { audience: { in: audiences as ("ALL" | "STUDENTS" | "STAFF")[] } },
@@ -96,9 +95,13 @@ export class AnnouncementsService {
     });
   }
 
-  /** Staff = anyone holding a manage/teach/admin perm (not purely student-side). */
-  private isStaff(p: Principal): boolean {
-    return p.permissions.includes("announcement.manage") || p.roles.some((r) => !STUDENT_SIDE_ROLES.has(r));
+  /** Which audiences the caller may read. A caller is "student-side" iff they hold
+   *  ONLY student/parent roles (every() over an empty role set is true → student-
+   *  side, the least-privilege default); anyone with ANY staff role also sees
+   *  STAFF notices. Positive check — no double negation. */
+  private audiencesFor(p: Principal): ("ALL" | "STUDENTS" | "STAFF")[] {
+    const studentSideOnly = p.roles.every((r) => STUDENT_SIDE_ROLES.has(r));
+    return studentSideOnly ? ["ALL", "STUDENTS"] : ["ALL", "STUDENTS", "STAFF"];
   }
 
   private toDto(r: AnnouncementRow, authorName: string): AnnouncementDto {

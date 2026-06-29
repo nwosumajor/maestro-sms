@@ -26,10 +26,10 @@ function makeService(opts: { tenantRows?: unknown[]; privilegedRows?: unknown[] 
   const tx = { user: { findMany: tenantFindMany } } as unknown as TenantTx;
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
-  const service = new DirectorySearchService(db as never, audit as never);
-  // Inject a fake privileged client (normally built in onModuleInit from a URL).
-  (service as unknown as { _client: unknown })._client = { user: { findMany: privilegedFindMany } };
-  return { service, audit, tenantFindMany, privilegedFindMany };
+  // Fake shared privileged DB (normally built from a URL); null disables it.
+  const privileged = { client: { user: { findMany: privilegedFindMany } } };
+  const service = new DirectorySearchService(db as never, audit as never, privileged as never);
+  return { service, audit, tenantFindMany, privilegedFindMany, privileged };
 }
 
 const principal = (perms: string[]): Principal => ({ schoolId: "A", userId: "x", roles: [], permissions: perms });
@@ -57,8 +57,8 @@ describe("DirectorySearchService", () => {
   });
 
   it("super_admin search is disabled (503) when the privileged client is unconfigured", async () => {
-    const { service } = makeService({});
-    (service as unknown as { _client: unknown })._client = null;
+    const { service, privileged } = makeService({});
+    privileged.client = null as never;
     await expect(service.search(principal(["directory.search", "platform.operate"]), {})).rejects.toThrow(/not configured/i);
   });
 });

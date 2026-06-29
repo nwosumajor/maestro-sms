@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { shortDate } from "@/lib/format";
+import { SubmissionFileLink } from "@/components/assessment/SubmissionFileLink";
 
 export const dynamic = "force-dynamic";
 
@@ -59,9 +60,14 @@ export default async function AssessmentSubmissionsPage({ params }: { params: { 
                         {s.signalCount > 0 ? <Badge variant="destructive">{s.signalCount}</Badge> : <span className="text-muted-foreground">0</span>}
                       </td>
                       <td className="px-4 py-2.5 text-right">
-                        <Link href={`/assessments/${assessmentId}/submissions/${s.id}/integrity`} className="text-primary hover:underline">
-                          Integrity report →
-                        </Link>
+                        <div className="flex items-center justify-end gap-3">
+                          {s.hasFile && (
+                            <SubmissionFileLink assessmentId={assessmentId} submissionId={s.id} fileName={s.fileName} />
+                          )}
+                          <Link href={`/assessments/${assessmentId}/submissions/${s.id}/integrity`} className="text-primary hover:underline">
+                            Integrity report →
+                          </Link>
+                        </div>
                       </td>
                     </tr>
                   ))}

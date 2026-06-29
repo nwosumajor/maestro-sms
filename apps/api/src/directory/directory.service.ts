@@ -12,15 +12,8 @@
 // caller's tenant (student PII — Golden Rule #5).
 // =============================================================================
 
-import {
-  Inject,
-  Injectable,
-  Logger,
-  OnModuleDestroy,
-  OnModuleInit,
-  ServiceUnavailableException,
-} from "@nestjs/common";
-import { Prisma, PrismaClient } from "@sms/db";
+import { Inject, Injectable, ServiceUnavailableException } from "@nestjs/common";
+import { Prisma } from "@sms/db";
 import type { PersonSearchResultDto } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -29,6 +22,7 @@ import {
   type Principal,
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
+import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 
 export interface SearchFilters {
   q?: string;
@@ -44,23 +38,12 @@ interface UserDelegate {
 }
 
 @Injectable()
-export class DirectorySearchService implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = new Logger("DirectorySearch");
-  private _client: PrismaClient | null = null;
-
+export class DirectorySearchService {
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
+    private readonly privileged: PrivilegedDatabaseService,
   ) {}
-
-  onModuleInit(): void {
-    const url = process.env.DATABASE_MIGRATE_URL ?? process.env.DATABASE_RETENTION_URL;
-    if (url) this._client = new PrismaClient({ datasourceUrl: url, log: ["error"] });
-    else this.logger.warn("No privileged URL — cross-school directory search is DISABLED.");
-  }
-  async onModuleDestroy(): Promise<void> {
-    await this._client?.$disconnect();
-  }
 
   private isSuperAdmin(p: Principal): boolean {
     return p.permissions.includes("platform.operate");
@@ -87,8 +70,9 @@ export class DirectorySearchService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async searchAllSchools(filters: SearchFilters): Promise<PersonSearchResultDto[]> {
-    if (!this._client) throw new ServiceUnavailableException("Cross-school search is not configured");
-    return this.run(this._client.user as unknown as UserDelegate, filters, true);
+    const client = this.privileged.client;
+    if (!client) throw new ServiceUnavailableException("Cross-school search is not configured");
+    return this.run(client.user as unknown as UserDelegate, filters, true);
   }
 
   /** Shared query over a `user` delegate. `withSchoolFilter` enables the school-name filter. */

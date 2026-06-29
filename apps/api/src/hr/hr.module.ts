@@ -19,7 +19,7 @@ import { HrAnalyticsService } from "./analytics.service";
 import { RecruitmentController } from "./recruitment.controller";
 import { RecruitmentService } from "./recruitment.service";
 import { HR_REMINDER_DATABASE, HR_REMINDER_QUEUE } from "./hr.constants";
-import { HrReminderDatabaseService } from "./hr-reminder-database.service";
+import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import { StaffReminderService } from "./staff-reminder.service";
 import { StaffReminderScheduler } from "./staff-reminder.scheduler";
 import { StaffReminderProcessor } from "./staff-reminder.processor";
@@ -48,7 +48,7 @@ import { StaffReminderProcessor } from "./staff-reminder.processor";
     StaffReminderService,
     StaffReminderScheduler,
     StaffReminderProcessor,
-    { provide: HR_REMINDER_DATABASE, useClass: HrReminderDatabaseService },
+    { provide: HR_REMINDER_DATABASE, useExisting: PrivilegedDatabaseService },
   ],
   exports: [HrService, LeaveService, SalaryService, PayrollService, StaffLifecycleService, HrReviewsService],
 })

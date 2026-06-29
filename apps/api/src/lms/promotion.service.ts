@@ -129,55 +129,45 @@ export class PromotionService {
 
       const studentIds = (batch.studentIds as string[] | null) ?? [];
       const graduating = !batch.targetClassId;
+      const targetClassId = batch.targetClassId as string;
 
-      // Capacity guardrail: refuse before moving anyone if the target would overflow.
+      // Mark every source enrollment in ONE statement (history retained).
+      await tx.enrollment.updateMany({
+        where: { classId: batch.sourceClassId, studentId: { in: studentIds } },
+        data: { status: graduating ? "GRADUATED" : "PROMOTED" },
+      });
+
+      let moved = 0;
+      const graduated = graduating ? studentIds.length : 0;
       if (!graduating) {
-        const target = await tx.class.findFirst({
-          where: { id: batch.targetClassId as string },
-          select: { capacity: true },
-        });
+        // One query for the students already enrolled in the target (idempotency).
+        const already = new Set(
+          (
+            await tx.enrollment.findMany({
+              where: { classId: targetClassId, studentId: { in: studentIds } },
+              select: { studentId: true },
+            })
+          ).map((e: { studentId: string }) => e.studentId),
+        );
+        const incoming = studentIds.filter((s) => !already.has(s));
+
+        // Capacity guardrail: refuse (rolls back) before any new enrollment if the
+        // target would overflow.
+        const target = await tx.class.findFirst({ where: { id: targetClassId }, select: { capacity: true } });
         if (target?.capacity != null) {
-          const activeNow = await tx.enrollment.count({
-            where: { classId: batch.targetClassId as string, status: "ACTIVE" },
-          });
-          // Count only students not already enrolled in the target.
-          let incoming = 0;
-          for (const studentId of studentIds) {
-            const exists = await tx.enrollment.findFirst({
-              where: { classId: batch.targetClassId as string, studentId },
-              select: { id: true },
-            });
-            if (!exists) incoming++;
-          }
-          if (activeNow + incoming > target.capacity) {
+          const activeNow = await tx.enrollment.count({ where: { classId: targetClassId, status: "ACTIVE" } });
+          if (activeNow + incoming.length > target.capacity) {
             throw new ConflictException(`Target class is at capacity (${target.capacity})`);
           }
         }
-      }
 
-      let moved = 0;
-      let graduated = 0;
-      for (const studentId of studentIds) {
-        // Mark the source enrollment (history retained, not deleted).
-        await tx.enrollment.updateMany({
-          where: { classId: batch.sourceClassId, studentId },
-          data: { status: graduating ? "GRADUATED" : "PROMOTED" },
-        });
-        if (graduating) {
-          graduated++;
-          continue;
-        }
-        // Create the target enrollment (idempotent: skip if it already exists).
-        const exists = await tx.enrollment.findFirst({
-          where: { classId: batch.targetClassId as string, studentId },
-          select: { id: true },
-        });
-        if (!exists) {
-          await tx.enrollment.create({
-            data: { schoolId: p.schoolId, classId: batch.targetClassId as string, studentId, status: "ACTIVE" },
+        if (incoming.length > 0) {
+          await tx.enrollment.createMany({
+            data: incoming.map((studentId) => ({ schoolId: p.schoolId, classId: targetClassId, studentId, status: "ACTIVE" })),
+            skipDuplicates: true,
           });
         }
-        moved++;
+        moved = studentIds.length;
       }
       const updated = await tx.promotionBatch.update({
         where: { id },

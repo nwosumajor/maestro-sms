@@ -5,7 +5,7 @@ import { PaymentsModule } from "../payments/payments.module";
 import { BILLING_DATABASE, BILLING_DUNNING_QUEUE } from "./billing.constants";
 import { BillingController } from "./billing.controller";
 import { BillingService } from "./billing.service";
-import { BillingDatabaseService } from "./billing-database.service";
+import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import { BillingDunningService } from "./billing-dunning.service";
 import { BillingDunningScheduler } from "./billing-dunning.scheduler";
 import { BillingDunningProcessor } from "./billing-dunning.processor";
@@ -27,7 +27,7 @@ import { BillingDunningProcessor } from "./billing-dunning.processor";
     BillingDunningService,
     BillingDunningScheduler,
     BillingDunningProcessor,
-    { provide: BILLING_DATABASE, useClass: BillingDatabaseService },
+    { provide: BILLING_DATABASE, useExisting: PrivilegedDatabaseService },
   ],
   exports: [BillingService],
 })

@@ -10,6 +10,7 @@
 
 import { ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { decryptField } from "../foundation/field-crypto";
+import { STORAGE_PROVIDER, type StorageProvider } from "../documents/storage.provider";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -28,6 +29,7 @@ export class PrivacyService {
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
+    @Inject(STORAGE_PROVIDER) private readonly storage: StorageProvider,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -116,7 +118,7 @@ export class PrivacyService {
   }
 
   async reviewErasure(p: Principal, id: string, decision: "APPROVED" | "REJECTED", note?: string) {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    const { updated, fileKeys } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const req = await tx.erasureRequest.findFirst({ where: { id } });
       if (!req) throw new NotFoundException("Request not found");
       if (req.status !== "PENDING") throw new ForbiddenException("Request is already reviewed");
@@ -124,9 +126,40 @@ export class PrivacyService {
         where: { id },
         data: { status: decision, reviewedById: p.userId, reviewNote: note ?? null },
       });
-      await this.log(tx, p, `privacy.erasure.${decision.toLowerCase()}`, id, { studentId: req.studentId });
-      return updated;
+
+      // NDPR right-to-erasure: on APPROVAL, remove the subject's uploaded
+      // submission FILES — minors' PII that lives in object storage and is not
+      // covered by the integrity-telemetry retention sweep. We null the keys in-tx
+      // and delete the bytes after commit (best-effort). The academic submission
+      // ROW + grade are retained as the school's record; only the student-supplied
+      // file blob is erased, consistent with the governed-deletion model.
+      let fileKeys: string[] = [];
+      if (decision === "APPROVED") {
+        const withFiles = await tx.submission.findMany({
+          where: { studentId: req.studentId, fileKey: { not: null } },
+          select: { id: true, fileKey: true },
+        });
+        fileKeys = withFiles.map((s) => s.fileKey).filter((k): k is string => Boolean(k));
+        if (withFiles.length > 0) {
+          await tx.submission.updateMany({
+            where: { studentId: req.studentId, fileKey: { not: null } },
+            data: { fileKey: null, fileName: null, fileUploaded: false },
+          });
+        }
+      }
+
+      await this.log(tx, p, `privacy.erasure.${decision.toLowerCase()}`, id, {
+        studentId: req.studentId,
+        ...(decision === "APPROVED" ? { erasedSubmissionFiles: fileKeys.length } : {}),
+      });
+      return { updated, fileKeys };
     });
+
+    // Delete the bytes from storage after the tx commits (best-effort).
+    for (const key of fileKeys) {
+      await this.storage.delete(key).catch(() => undefined);
+    }
+    return updated;
   }
 
   // --- helpers ---------------------------------------------------------------

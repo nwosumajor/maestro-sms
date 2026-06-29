@@ -21,8 +21,8 @@ function makeService(opts: {
 }) {
   const state: { batch: Row | null } = { batch: opts.batch ?? null };
   const enrollUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
-  const enrollCreate = jest.fn().mockResolvedValue({ id: "en" });
-  const existingTarget = new Set(opts.existingTargetEnrollments ?? []);
+  const enrollCreateMany = jest.fn().mockResolvedValue({ count: 1 });
+  const existingTarget = opts.existingTargetEnrollments ?? [];
   const tx = {
     class: {
       findFirst: jest.fn((a: { where: { id: string } }) => {
@@ -35,12 +35,15 @@ function makeService(opts: {
       ),
     },
     enrollment: {
-      findMany: jest.fn().mockResolvedValue((opts.activeEnrollments ?? []).map((studentId) => ({ studentId }))),
-      findFirst: jest.fn((a: { where: { studentId: string } }) =>
-        Promise.resolve(existingTarget.has(a.where.studentId) ? { id: "exists" } : null),
+      // stage() queries ACTIVE source enrollments; approve() queries existing target.
+      findMany: jest.fn((a: { where?: { studentId?: unknown; status?: string } }) =>
+        a.where?.studentId
+          ? Promise.resolve(existingTarget.map((studentId) => ({ studentId })))
+          : Promise.resolve((opts.activeEnrollments ?? []).map((studentId) => ({ studentId }))),
       ),
+      count: jest.fn().mockResolvedValue(0),
       updateMany: enrollUpdateMany,
-      create: enrollCreate,
+      createMany: enrollCreateMany,
     },
     promotionBatch: {
       create: jest.fn((a: { data: Row }) => Promise.resolve({ id: "pb1", ...a.data })),
@@ -53,7 +56,7 @@ function makeService(opts: {
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
-  return { service: new PromotionService(db as never, audit as never), enrollUpdateMany, enrollCreate };
+  return { service: new PromotionService(db as never, audit as never), enrollUpdateMany, enrollCreateMany };
 }
 
 const p = (userId: string): Principal => ({ schoolId: "A", userId, roles: ["school_admin"], permissions: [] });
@@ -69,7 +72,7 @@ const batch = (over: Row = {}): Row => ({
 
 describe("PromotionService maker-checker", () => {
   it("stage defaults target to nextClassId and students to ACTIVE enrollments", async () => {
-    const { service, enrollCreate } = makeService({
+    const { service, enrollCreateMany } = makeService({
       source: { id: "c1", nextClassId: "c2" },
       target: { id: "c2" },
       activeEnrollments: ["s1", "s2", "s3"],
@@ -77,7 +80,7 @@ describe("PromotionService maker-checker", () => {
     const res = await service.stage(p("maker"), { sourceClassId: "c1" });
     expect(res.targetClassId).toBe("c2");
     expect(res.studentCount).toBe(3);
-    expect(enrollCreate).not.toHaveBeenCalled(); // nothing moved yet
+    expect(enrollCreateMany).not.toHaveBeenCalled(); // nothing moved yet
   });
 
   it("blocks the initiator from approving (SoD)", async () => {
@@ -86,25 +89,29 @@ describe("PromotionService maker-checker", () => {
   });
 
   it("a DIFFERENT approver moves enrollments (PROMOTED + new ACTIVE), idempotently", async () => {
-    const { service, enrollUpdateMany, enrollCreate } = makeService({
+    const { service, enrollUpdateMany, enrollCreateMany } = makeService({
       batch: batch({ studentIds: ["s1", "s2"] }),
       existingTargetEnrollments: ["s2"], // s2 already in target -> not recreated
     });
     const res = await service.approve(p("approver"), "pb1");
     expect(res.status).toBe("APPROVED");
-    expect(enrollUpdateMany).toHaveBeenCalledTimes(2); // both source enrollments marked
-    expect(enrollCreate).toHaveBeenCalledTimes(1); // only s1 gets a new target enrollment
+    expect(enrollUpdateMany).toHaveBeenCalledTimes(1); // one batched source update
+    // only s1 (s2 already enrolled) gets a new target enrollment, in one createMany.
+    expect(enrollCreateMany).toHaveBeenCalledTimes(1);
+    expect(enrollCreateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: [expect.objectContaining({ studentId: "s1", status: "ACTIVE" })] }),
+    );
   });
 
   it("graduates students when the source has no next class (null target)", async () => {
-    const { service, enrollUpdateMany, enrollCreate } = makeService({
+    const { service, enrollUpdateMany, enrollCreateMany } = makeService({
       batch: batch({ targetClassId: null, studentIds: ["s1"] }),
     });
     await service.approve(p("approver"), "pb1");
     expect(enrollUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: { status: "GRADUATED" } }),
     );
-    expect(enrollCreate).not.toHaveBeenCalled();
+    expect(enrollCreateMany).not.toHaveBeenCalled();
   });
 
   it("refuses to approve an already-decided batch", async () => {

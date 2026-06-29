@@ -1,6 +1,23 @@
-// Protect the authenticated app routes. The `authorized` callback in lib/auth.ts
-// returns false when there's no session, which redirects to /login (pages.signIn).
-export { auth as middleware } from "@/lib/auth";
+// Protect the authenticated app routes (the matcher below). Using the auth()
+// WRAPPER (not just `export { auth as middleware }`) so we can return an explicit
+// NextResponse — reliably honoured — for two redirects:
+//   1. no session            -> /login
+//   2. mfaEnrollRequired user -> /account (held there until they enrol 2FA)
+import { NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
+
+export const middleware = auth((req) => {
+  const { pathname } = req.nextUrl;
+  if (!req.auth?.user) {
+    const url = new URL("/login", req.nextUrl);
+    return NextResponse.redirect(url);
+  }
+  // super_admin mandated MFA but the user hasn't enrolled — hold them on /account.
+  if (req.auth.user.mfaEnrollRequired && !pathname.startsWith("/account")) {
+    return NextResponse.redirect(new URL("/account?enroll2fa=1", req.nextUrl));
+  }
+  return NextResponse.next();
+});
 
 export const config = {
   matcher: [

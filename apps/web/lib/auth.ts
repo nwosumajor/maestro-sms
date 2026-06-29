@@ -63,17 +63,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     }),
   ],
   callbacks: {
-    // Used by middleware on matched (protected) routes: redirect to /login if
-    // there's no session. Also enforces the super_admin MFA mandate — a user
-    // flagged mfaEnrollRequired is held on /account until they enrol 2FA.
-    authorized: ({ auth, request }) => {
-      if (!auth?.user) return false;
-      const onAccount = request.nextUrl.pathname.startsWith("/account");
-      if (auth.user.mfaEnrollRequired && !onAccount) {
-        return Response.redirect(new URL("/account?enroll2fa=1", request.nextUrl));
-      }
-      return true;
-    },
+    // Presence check only. The matched (protected) routes' actual redirects —
+    // including the super_admin MFA-enrolment mandate — are handled explicitly in
+    // middleware.ts via the auth() wrapper (a returned NextResponse is reliably
+    // honoured there, unlike a Response from this callback).
+    authorized: ({ auth }) => Boolean(auth?.user),
     jwt: ({ token, user }) => {
       if (user) {
         const u = user as unknown as {

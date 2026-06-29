@@ -17,16 +17,14 @@
 import {
   BadRequestException,
   ConflictException,
+  Inject,
   Injectable,
-  Logger,
   NotFoundException,
-  OnModuleDestroy,
-  OnModuleInit,
   ServiceUnavailableException,
 } from "@nestjs/common";
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
-import { PrismaClient } from "@sms/db";
+import type { PrismaClient } from "@sms/db";
 import { DEFAULT_PLAN, isPlan } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -35,7 +33,7 @@ import {
   type Principal,
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
-import { Inject } from "@nestjs/common";
+import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 
 // Roles a super_admin may seed into a school via provisioning (the admin tier).
 const ADMIN_ROLES = new Set(["school_admin", "principal", "head_admin", "hr_manager"]);
@@ -48,34 +46,17 @@ interface AdminInput {
 }
 
 @Injectable()
-export class OperatorProvisioningService implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = new Logger("OperatorProvisioning");
-  private _client: PrismaClient | null = null;
-
+export class OperatorProvisioningService {
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
+    private readonly privileged: PrivilegedDatabaseService,
   ) {}
 
-  onModuleInit(): void {
-    const url = process.env.DATABASE_MIGRATE_URL ?? process.env.DATABASE_RETENTION_URL;
-    if (!url) {
-      this.logger.warn(
-        "No DATABASE_MIGRATE_URL / DATABASE_RETENTION_URL set — school provisioning is DISABLED.",
-      );
-      return;
-    }
-    this._client = new PrismaClient({ datasourceUrl: url, log: ["error"] });
-  }
-  async onModuleDestroy(): Promise<void> {
-    await this._client?.$disconnect();
-  }
-
   private client(): PrismaClient {
-    if (!this._client) {
-      throw new ServiceUnavailableException("School provisioning is not configured");
-    }
-    return this._client;
+    const c = this.privileged.client;
+    if (!c) throw new ServiceUnavailableException("School provisioning is not configured");
+    return c;
   }
 
   private genPassword(): string {

@@ -9,8 +9,18 @@
 // =============================================================================
 
 import { Controller, ForbiddenException, Get, Header, Headers } from "@nestjs/common";
+import { timingSafeEqual } from "node:crypto";
 import { Public } from "../auth/public.decorator";
 import { MetricsService } from "./metrics.service";
+
+/** Constant-time string compare so the metrics token can't be brute-forced via
+ *  response timing (mirrors the Paystack webhook signature check). */
+function safeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return timingSafeEqual(ab, bb);
+}
 
 @Controller("metrics")
 export class MetricsController {
@@ -32,7 +42,7 @@ export class MetricsController {
     }
     const bearer = auth?.startsWith("Bearer ") ? auth.slice("Bearer ".length) : undefined;
     const presented = bearer ?? tokenHeader;
-    if (presented !== required) throw new ForbiddenException();
+    if (!presented || !safeEqual(presented, required)) throw new ForbiddenException();
     return this.metrics.render();
   }
 }

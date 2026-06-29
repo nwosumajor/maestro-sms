@@ -37,9 +37,9 @@ function makeService(over: {
   };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn({} as TenantTx) };
-  const service = new OperatorUserService(db as never, audit as never);
-  // Inject the fake privileged client (normally built in onModuleInit from a URL).
-  (service as unknown as { _client: unknown })._client = client;
+  // The shared privileged DB exposes the fake client (normally built from a URL).
+  const privileged = { client };
+  const service = new OperatorUserService(db as never, audit as never, privileged as never);
   return { service, client, userUpdate, updateMany, audit };
 }
 

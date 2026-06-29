@@ -21,6 +21,9 @@ export interface AssessmentTakeData {
   timeRemainingLabel: string;
   initialContent: string;
   integrity: IntegrityClientConfig;
+  /** Teacher-enabled file answer + the student's current file state. */
+  fileUpload: { enabled: boolean; fileName: string | null; uploaded: boolean };
+  submitted: boolean;
 }
 
 interface ApiResponse {
@@ -32,6 +35,10 @@ interface ApiResponse {
   integrityEnabled: boolean;
   consentGranted: boolean;
   exempt: boolean;
+  fileUploadEnabled: boolean;
+  fileName: string | null;
+  fileUploaded: boolean;
+  submitted: boolean;
   toggles: { pasteCapture: boolean; focusTracking: boolean; typingCadence: boolean };
 }
 
@@ -66,6 +73,8 @@ export async function fetchAssessmentForTaking(
         exempt: r.exempt,
         toggles: r.toggles,
       },
+      fileUpload: { enabled: r.fileUploadEnabled, fileName: r.fileName, uploaded: r.fileUploaded },
+      submitted: r.submitted,
     },
   };
 }

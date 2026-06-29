@@ -1,6 +1,7 @@
 import { Module, type MiddlewareConsumer, type NestModule } from "@nestjs/common";
 import { BullModule } from "@nestjs/bullmq";
 import { FoundationModule } from "./foundation/foundation.module";
+import { PrivilegedDatabaseModule } from "./common/privileged-database.module";
 import { ObservabilityModule } from "./observability/observability.module";
 import { MetricsMiddleware } from "./observability/metrics.middleware";
 import { IntegrityModule } from "./integrity/integrity.module";
@@ -48,6 +49,7 @@ import { HealthController } from "./health.controller";
     }),
     ObservabilityModule,
     FoundationModule,
+    PrivilegedDatabaseModule,
     IntegrityModule,
     LmsModule,
     GradebookModule,

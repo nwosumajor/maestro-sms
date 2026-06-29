@@ -15,6 +15,7 @@ import * as React from "react";
 import { ClockIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AssessmentAnswerField } from "@/components/assessment/AssessmentAnswerField";
+import { SubmissionFileUpload } from "@/components/assessment/SubmissionFileUpload";
 import type { IntegrityClientConfig } from "@/lib/integrity/hooks";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -24,6 +25,9 @@ export interface AssessmentTakerProps {
   timeRemainingLabel: string;
   initialContent: string;
   integrity: IntegrityClientConfig; // carries apiBaseUrl + ids + toggles + consent + exempt
+  /** Teacher-enabled file answer + the student's current file state. */
+  fileUpload?: { enabled: boolean; fileName: string | null; uploaded: boolean };
+  alreadySubmitted?: boolean;
   /** Optional contextual back link (e.g. to the class), from the Stitch V3 polish. */
   backHref?: string;
   backLabel?: string;
@@ -42,13 +46,15 @@ export function AssessmentTaker({
   timeRemainingLabel,
   initialContent,
   integrity,
+  fileUpload,
+  alreadySubmitted,
   backHref,
   backLabel,
 }: AssessmentTakerProps) {
   const [content, setContent] = React.useState(initialContent);
   const [save, setSave] = React.useState<SaveState>("idle");
   const [submitting, setSubmitting] = React.useState(false);
-  const [submitted, setSubmitted] = React.useState(false);
+  const [submitted, setSubmitted] = React.useState(Boolean(alreadySubmitted));
   const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const autosave = React.useCallback(
@@ -152,6 +158,18 @@ export function AssessmentTaker({
       <div className="-mt-2 text-right text-xs text-muted-foreground tabular-nums">
         Word count: {wordCount(content)}
       </div>
+
+      {/* Teacher-enabled file answer (upload a worked solution). */}
+      {fileUpload?.enabled && (
+        <SubmissionFileUpload
+          apiBaseUrl={integrity.apiBaseUrl}
+          assessmentId={integrity.assessmentId}
+          submissionId={integrity.submissionId}
+          initialFileName={fileUpload.fileName}
+          initialUploaded={fileUpload.uploaded}
+          disabled={submitting || submitted}
+        />
+      )}
 
       <div className="flex items-center justify-end gap-3">
         <Button

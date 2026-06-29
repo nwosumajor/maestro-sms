@@ -27,7 +27,7 @@ import { IntegrityReportService } from "./integrity-report.service";
 import { AssessmentTakeController } from "./assessment-take.controller";
 import { AssessmentListController } from "./assessment-list.controller";
 import { AssessmentListService } from "./assessment-list.service";
-import { RetentionDatabaseService } from "./retention/retention-database.service";
+import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import { IntegrityRetentionService } from "./retention/integrity-retention.service";
 import { IntegrityRetentionProcessor } from "./retention/integrity-retention.processor";
 import { IntegrityRetentionScheduler } from "./retention/integrity-retention.scheduler";
@@ -57,9 +57,9 @@ import { IntegrityRetentionController } from "./retention/integrity-retention.co
       provide: STORAGE_PROVIDER,
       useClass: process.env.STORAGE_PROVIDER === "s3" ? S3StorageProvider : StubStorageProvider,
     },
-    // --- Retention / NDPR purge (Golden Rule #5). Privileged DB is bound here;
-    //     the scheduler registers the daily repeatable sweep on boot. ---
-    { provide: RETENTION_DATABASE, useClass: RetentionDatabaseService },
+    // --- Retention / NDPR purge (Golden Rule #5). Uses the shared privileged DB
+    //     client (one pool per process); the scheduler registers the daily sweep. ---
+    { provide: RETENTION_DATABASE, useExisting: PrivilegedDatabaseService },
     IntegrityRetentionService,
     IntegrityRetentionProcessor,
     IntegrityRetentionScheduler,
