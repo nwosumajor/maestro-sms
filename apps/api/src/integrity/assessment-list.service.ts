@@ -67,6 +67,7 @@ export class AssessmentListService {
         createdById: a.createdById,
         mine: a.createdById === p.userId,
         integrityEnabled: a.integrityEnabled,
+        fileUploadEnabled: a.fileUploadEnabled,
         submissionCount: countByAssessment.get(a.id) ?? 0,
         mySubmissionStatus: myStatus.get(a.id) ?? null,
         createdAt: a.createdAt,
@@ -100,8 +101,115 @@ export class AssessmentListService {
         status: s.status,
         submittedAt: s.submittedAt,
         signalCount: signalCount.get(s.id) ?? 0,
+        hasFile: s.fileUploaded,
+        fileName: s.fileName,
       }));
     });
+  }
+
+  /** Create an assessment (teacher of the class / school-wide). */
+  async createAssessment(
+    p: Principal,
+    input: {
+      title: string;
+      description?: string | null;
+      classId?: string | null;
+      integrityEnabled?: boolean;
+      pasteBlocked?: boolean;
+      focusTracked?: boolean;
+      typingTracked?: boolean;
+      fileUploadEnabled?: boolean;
+    },
+  ): Promise<AssessmentSummaryDto> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      if (input.classId) await this.assertTeacherOfClass(tx, p, input.classId);
+      const a = await tx.assessment.create({
+        data: {
+          schoolId: p.schoolId,
+          title: input.title,
+          description: input.description ?? null,
+          classId: input.classId ?? null,
+          createdById: p.userId,
+          integrityEnabled: input.integrityEnabled ?? false,
+          pasteBlocked: input.pasteBlocked ?? false,
+          focusTracked: input.focusTracked ?? false,
+          typingTracked: input.typingTracked ?? false,
+          fileUploadEnabled: input.fileUploadEnabled ?? false,
+        },
+      });
+      await this.audit.record(
+        { actorId: p.userId, action: "integrity.assessment.create", entity: "assessment", entityId: a.id, schoolId: p.schoolId, metadata: { fileUploadEnabled: a.fileUploadEnabled } },
+        tx,
+      );
+      return this.summary(a, p);
+    });
+  }
+
+  /** Update an assessment's metadata + toggles (incl. fileUploadEnabled). */
+  async updateAssessment(
+    p: Principal,
+    id: string,
+    input: {
+      title?: string;
+      description?: string | null;
+      integrityEnabled?: boolean;
+      pasteBlocked?: boolean;
+      focusTracked?: boolean;
+      typingTracked?: boolean;
+      fileUploadEnabled?: boolean;
+    },
+  ): Promise<AssessmentSummaryDto> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const assessment = await tx.assessment.findFirst({ where: { id } });
+      if (!assessment) throw new NotFoundException("Assessment not found");
+      if (!(await this.canManage(tx, p, assessment))) throw new NotFoundException("Assessment not found");
+      const a = await tx.assessment.update({
+        where: { id },
+        data: {
+          title: input.title ?? undefined,
+          description: input.description === undefined ? undefined : input.description,
+          integrityEnabled: input.integrityEnabled ?? undefined,
+          pasteBlocked: input.pasteBlocked ?? undefined,
+          focusTracked: input.focusTracked ?? undefined,
+          typingTracked: input.typingTracked ?? undefined,
+          fileUploadEnabled: input.fileUploadEnabled ?? undefined,
+        },
+      });
+      await this.audit.record(
+        { actorId: p.userId, action: "integrity.assessment.update", entity: "assessment", entityId: id, schoolId: p.schoolId, metadata: { fileUploadEnabled: a.fileUploadEnabled } },
+        tx,
+      );
+      return this.summary(a, p);
+    });
+  }
+
+  private summary(
+    a: { id: string; title: string; description: string | null; classId: string | null; createdById: string; integrityEnabled: boolean; fileUploadEnabled: boolean; createdAt: Date },
+    p: Principal,
+  ): AssessmentSummaryDto {
+    return {
+      id: a.id,
+      title: a.title,
+      description: a.description,
+      classId: a.classId,
+      className: null,
+      createdById: a.createdById,
+      mine: a.createdById === p.userId,
+      integrityEnabled: a.integrityEnabled,
+      fileUploadEnabled: a.fileUploadEnabled,
+      submissionCount: 0,
+      mySubmissionStatus: null,
+      createdAt: a.createdAt,
+    };
+  }
+
+  /** A non-school-wide user must teach the class to attach an assessment to it. */
+  private async assertTeacherOfClass(tx: TenantTx, p: Principal, classId: string): Promise<void> {
+    const cls = await tx.class.findFirst({ where: { id: classId }, select: { id: true } });
+    if (!cls) throw new NotFoundException("Class not found");
+    if (this.schoolWide(p)) return;
+    const t = await tx.classTeacher.findFirst({ where: { classId, teacherId: p.userId }, select: { id: true } });
+    if (!t) throw new ForbiddenException("You do not teach that class");
   }
 
   private async canManage(tx: TenantTx, p: Principal, assessment: { createdById: string; classId: string | null }): Promise<boolean> {

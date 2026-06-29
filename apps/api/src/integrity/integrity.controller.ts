@@ -10,8 +10,9 @@
 // integration. We do not redefine the security primitives here.
 // =============================================================================
 
-import { Body, Controller, Param, Post, HttpCode } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, HttpCode } from "@nestjs/common";
 import { MODULES } from "@sms/types";
+import type { SubmissionFilePresignDto } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
 import { z } from "zod";
 import { clientSignalBatchSchema } from "@sms/types";
@@ -19,11 +20,13 @@ import { INTEGRITY_PERMISSIONS } from "@sms/types";
 // --- foundation primitives (do not reimplement) ---
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentTenant } from "../auth/current-tenant.decorator";
+import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
-import type { TenantContext } from "./integrity.foundation";
+import type { Principal, TenantContext } from "./integrity.foundation";
 import { IntegrityService } from "./integrity.service";
 
 const contentSchema = z.object({ content: z.string().max(200_000) });
+const fileSchema = z.object({ fileName: z.string().min(1).max(200), contentType: z.string().min(1).max(120) });
 
 @RequireModule(MODULES.INTEGRITY)
 @Controller("assessments/:assessmentId/submissions/:submissionId")
@@ -71,5 +74,38 @@ export class IntegrityController {
     @Body(new ZodValidationPipe(contentSchema)) body: { content: string },
   ): Promise<void> {
     await this.integrity.submit(ctx, submissionId, body.content);
+  }
+
+  // --- file-upload answer (only when the assessment enables it) --------------
+  /** Student requests an upload URL for their own file answer. */
+  @Post("file/presign")
+  @RequirePermission(INTEGRITY_PERMISSIONS.SUBMISSION_WRITE)
+  async presignFile(
+    @CurrentTenant() ctx: TenantContext,
+    @Param("submissionId") submissionId: string,
+    @Body(new ZodValidationPipe(fileSchema)) body: z.infer<typeof fileSchema>,
+  ): Promise<SubmissionFilePresignDto> {
+    return this.integrity.presignSubmissionFile(ctx, submissionId, body);
+  }
+
+  /** Student confirms their file finished uploading. */
+  @Post("file/confirm")
+  @HttpCode(204)
+  @RequirePermission(INTEGRITY_PERMISSIONS.SUBMISSION_WRITE)
+  async confirmFile(
+    @CurrentTenant() ctx: TenantContext,
+    @Param("submissionId") submissionId: string,
+  ): Promise<void> {
+    await this.integrity.confirmSubmissionFile(ctx, submissionId);
+  }
+
+  /** Download a submission's file: the owner student, or a reviewer (teacher/staff). */
+  @Get("file")
+  @RequirePermission(INTEGRITY_PERMISSIONS.SUBMISSION_READ)
+  async downloadFile(
+    @CurrentPrincipal() p: Principal,
+    @Param("submissionId") submissionId: string,
+  ): Promise<SubmissionFilePresignDto> {
+    return this.integrity.downloadSubmissionFile(p, submissionId);
   }
 }

@@ -92,6 +92,9 @@ model Assessment {
   /// Master switch: when false, NO signals are accepted or generated for this
   /// assessment regardless of the flags above.
   integrityEnabled Boolean @default(false)
+  /// When true, students may attach a FILE (e.g. a worked PDF) as their answer.
+  /// Teacher-controlled per assessment; default OFF (text-only).
+  fileUploadEnabled Boolean @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -124,6 +127,12 @@ model Submission {
   /// (not in S3) because detectors need to read it; large file attachments still
   /// go to S3/R2 per stack rules.
   content     String?
+  /// Optional FILE answer (when the assessment has fileUploadEnabled). Bytes live
+  /// in S3/R2 via the StorageProvider; only the key + original name + upload state
+  /// are stored here. One file per submission (re-upload replaces it).
+  fileKey      String?
+  fileName     String?
+  fileUploaded Boolean  @default(false)
   submittedAt DateTime?
 
   createdAt DateTime @default(now())

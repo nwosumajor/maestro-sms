@@ -17,6 +17,8 @@ import {
   RETENTION_DATABASE,
 } from "./integrity.constants";
 import { AUDIT_LOG_SERVICE, TENANT_DATABASE } from "./integrity.foundation";
+import { STORAGE_PROVIDER, StubStorageProvider } from "../documents/storage.provider";
+import { S3StorageProvider } from "../documents/s3-storage.provider";
 import { IntegrityController } from "./integrity.controller";
 import { IntegrityService } from "./integrity.service";
 import { IntegrityProcessor } from "./integrity.processor";
@@ -50,6 +52,11 @@ import { IntegrityRetentionController } from "./retention/integrity-retention.co
     IntegrityReportService,
     AssessmentListService,
     IntegrityProcessor,
+    // Submission file answers reuse the Document Vault's pluggable storage.
+    {
+      provide: STORAGE_PROVIDER,
+      useClass: process.env.STORAGE_PROVIDER === "s3" ? S3StorageProvider : StubStorageProvider,
+    },
     // --- Retention / NDPR purge (Golden Rule #5). Privileged DB is bound here;
     //     the scheduler registers the daily repeatable sweep on boot. ---
     { provide: RETENTION_DATABASE, useClass: RetentionDatabaseService },

@@ -10,6 +10,8 @@ export interface AssessmentSummaryDto {
   /** True when the caller created it (teacher view affordances). */
   mine: boolean;
   integrityEnabled: boolean;
+  /** When true, students may attach a file as their answer. Teacher-controlled. */
+  fileUploadEnabled: boolean;
   /** Teacher/staff view: number of submissions. */
   submissionCount: number;
   /** Student view: the caller's own submission status (null if not started / staff). */
@@ -25,4 +27,13 @@ export interface AssessmentSubmissionDto {
   submittedAt: Date | null;
   /** Count of integrity signals raised (drives the teacher's review priority). */
   signalCount: number;
+  /** True when the student attached a file answer (downloadable for review). */
+  hasFile: boolean;
+  fileName: string | null;
+}
+
+/** Presigned URL result for a submission file upload/download. */
+export interface SubmissionFilePresignDto {
+  url: string;
+  expiresInSeconds: number;
 }

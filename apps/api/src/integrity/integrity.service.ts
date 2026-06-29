@@ -49,6 +49,9 @@ import type {
   SubmissionContext,
 } from "./detectors";
 import { EMBEDDING_PROVIDER } from "./integrity.constants";
+import { STORAGE_PROVIDER, type StorageProvider } from "../documents/storage.provider";
+import { BadRequestException, ConflictException } from "@nestjs/common";
+import type { Principal } from "./integrity.foundation";
 
 @Injectable()
 export class IntegrityService {
@@ -57,6 +60,7 @@ export class IntegrityService {
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     @Inject(CONSENT_SERVICE) private readonly consent: ConsentService,
     @InjectQueue(INTEGRITY_QUEUE) private readonly queue: Queue<AnalyzeSubmissionJob>,
+    @Inject(STORAGE_PROVIDER) private readonly storage: StorageProvider,
     // Optional: prose similarity is skipped if no provider is bound.
     @Optional() @Inject(EMBEDDING_PROVIDER) private readonly embeddings?: EmbeddingProvider,
   ) {}
@@ -133,6 +137,11 @@ export class IntegrityService {
         integrityEnabled: assessment.integrityEnabled,
         consentGranted,
         exempt: Boolean(exemption),
+        // File-upload answer (when the teacher enabled it on this assessment).
+        fileUploadEnabled: assessment.fileUploadEnabled,
+        fileName: submission.fileName,
+        fileUploaded: submission.fileUploaded,
+        submitted: submission.status === "SUBMITTED",
         toggles: {
           pasteCapture: assessment.pasteBlocked,
           focusTracking: assessment.focusTracked,
@@ -140,6 +149,72 @@ export class IntegrityService {
         },
       };
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // File-upload answer (only when the assessment has fileUploadEnabled).
+  // ---------------------------------------------------------------------------
+  /** Presign a PUT for the student's own (not-yet-submitted) file answer. */
+  async presignSubmissionFile(
+    ctx: TenantContext,
+    submissionId: string,
+    input: { fileName: string; contentType: string },
+  ): Promise<{ url: string; expiresInSeconds: number }> {
+    const presign = await this.db.runAsTenant(ctx, async (tx) => {
+      const submission = await this.loadOwnSubmission(tx, ctx, submissionId);
+      if (submission.status === "SUBMITTED") throw new ConflictException("Submission already submitted");
+      const assessment = await tx.assessment.findFirst({ where: { id: submission.assessmentId }, select: { fileUploadEnabled: true } });
+      if (!assessment?.fileUploadEnabled) throw new BadRequestException("File upload is not enabled for this assignment");
+      const safe = (input.fileName ?? "answer").replace(/[^A-Za-z0-9._-]/g, "_");
+      const key = `submissions/${ctx.schoolId}/${submissionId}/${Date.now()}_${safe}`;
+      await tx.submission.update({ where: { id: submissionId }, data: { fileKey: key, fileName: input.fileName, fileUploaded: false } });
+      await this.audit.record(
+        { actorId: ctx.userId, action: "integrity.submission.file.presign", entity: "submission", entityId: submissionId, schoolId: ctx.schoolId, metadata: { fileName: input.fileName } },
+        tx,
+      );
+      return { key, contentType: input.contentType };
+    });
+    return this.storage.presignUpload({ key: presign.key, contentType: presign.contentType });
+  }
+
+  /** Mark the student's file as uploaded (after the PUT to storage succeeds). */
+  async confirmSubmissionFile(ctx: TenantContext, submissionId: string): Promise<void> {
+    await this.db.runAsTenant(ctx, async (tx) => {
+      const submission = await this.loadOwnSubmission(tx, ctx, submissionId);
+      if (!submission.fileKey) throw new BadRequestException("No upload was started");
+      await tx.submission.update({ where: { id: submissionId }, data: { fileUploaded: true } });
+      await this.audit.record(
+        { actorId: ctx.userId, action: "integrity.submission.file.confirm", entity: "submission", entityId: submissionId, schoolId: ctx.schoolId },
+        tx,
+      );
+    });
+  }
+
+  /** Presign a GET for a submission's file. Access: the OWNER student, or a
+   *  reviewer (teacher of the class / school-wide). 404 otherwise. Audited. */
+  async downloadSubmissionFile(p: Principal, submissionId: string): Promise<{ url: string; expiresInSeconds: number }> {
+    const file = await this.db.runAsTenant({ schoolId: p.schoolId, userId: p.userId }, async (tx) => {
+      const submission = await tx.submission.findFirst({ where: { id: submissionId } });
+      if (!submission || !submission.fileKey || !submission.fileUploaded) {
+        throw new NotFoundException("Submission file not found");
+      }
+      if (submission.studentId !== p.userId) {
+        // Not the owner → must be an authorised reviewer of this assessment.
+        const assessment = await tx.assessment.findFirst({ where: { id: submission.assessmentId }, select: { createdById: true, classId: true } });
+        const schoolWide = p.roles.some((r) => r === "school_admin" || r === "super_admin");
+        const teaches = assessment?.classId
+          ? await tx.classTeacher.findFirst({ where: { classId: assessment.classId, teacherId: p.userId }, select: { id: true } })
+          : null;
+        const isReviewer = schoolWide || assessment?.createdById === p.userId || Boolean(teaches);
+        if (!isReviewer) throw new NotFoundException("Submission file not found"); // 404, not 403
+      }
+      await this.audit.record(
+        { actorId: p.userId, action: "integrity.submission.file.download", entity: "submission", entityId: submissionId, schoolId: p.schoolId },
+        tx,
+      );
+      return { key: submission.fileKey, fileName: submission.fileName ?? "answer" };
+    });
+    return this.storage.presignDownload({ key: file.key, filename: file.fileName });
   }
 
   // ---------------------------------------------------------------------------
@@ -258,6 +333,13 @@ export class IntegrityService {
   async submit(ctx: TenantContext, submissionId: string, content: string): Promise<void> {
     await this.db.runAsTenant(ctx, async (tx) => {
       const submission = await this.loadOwnSubmission(tx, ctx, submissionId);
+      // A submission needs an answer: text, or (when enabled) an uploaded file.
+      if (!content.trim() && !submission.fileUploaded) {
+        const assessment = await tx.assessment.findFirst({ where: { id: submission.assessmentId }, select: { fileUploadEnabled: true } });
+        throw new BadRequestException(
+          assessment?.fileUploadEnabled ? "Enter your answer or upload a file before submitting" : "Enter your answer before submitting",
+        );
+      }
       await tx.submission.update({
         where: { id: submission.id },
         data: { content, status: "SUBMITTED", submittedAt: new Date() },
