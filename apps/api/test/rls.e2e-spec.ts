@@ -86,6 +86,7 @@ d("RLS cross-tenant isolation", () => {
   const telemetryA = randomUUID();
   const threadParticipantA = randomUUID();
   const admissionA = randomUUID();
+  const schoolBrandingA = randomUUID();
   // HR recruitment
   const jobReqA = randomUUID();
   const applicantA = randomUUID();
@@ -425,12 +426,17 @@ d("RLS cross-tenant isolation", () => {
       `INSERT INTO applicant (id,"schoolId","requisitionId",name,email,"createdById","updatedAt") VALUES ($1,$2,$3,'Jane','jane@x',$4,now())`,
       [applicantA, A, jobReqA, userA],
     );
+    await a.query(
+      `INSERT INTO school_branding (id,"schoolId","updatedAt") VALUES ($1,$2,now())`,
+      [schoolBrandingA, A],
+    );
   });
 
   afterAll(async () => {
     const a = adminPool;
     for (const t of [
       "audit_log",
+      "school_branding",
       // HR recruitment — applicant before requisition.
       "applicant",
       "job_requisition",
@@ -607,6 +613,7 @@ d("RLS cross-tenant isolation", () => {
     ["disciplinary_entry", disciplinaryEntryA],
     ["job_requisition", jobReqA],
     ["applicant", applicantA],
+    ["school_branding", schoolBrandingA],
   ];
 
   it.each(cases)("school B cannot SELECT school A's %s; school A can", async (table, id) => {

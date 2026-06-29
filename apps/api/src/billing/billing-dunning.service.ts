@@ -14,7 +14,7 @@
 // =============================================================================
 
 import { Inject, Injectable, Logger } from "@nestjs/common";
-import { RENEWAL_REMINDER_DAYS, SUBSCRIPTION_STATUS } from "@sms/types";
+import { RENEWAL_REMINDER_DAYS, SUBSCRIPTION_GRACE_DAYS, SUBSCRIPTION_STATUS } from "@sms/types";
 import { ModuleEntitlementService } from "../foundation/module-entitlement.service";
 import { NotificationService } from "../notifications/notification.service";
 import { BILLING_DATABASE } from "./billing.constants";
@@ -71,7 +71,7 @@ export class BillingDunningService {
           client,
           s.schoolId,
           "Subscription past due",
-          `Your ${s.plan} plan payment is overdue. Renew within ${RENEWAL_REMINDER_DAYS} days to avoid a downgrade to the BASIC plan.`,
+          `Your ${s.plan} plan payment is overdue. Renew within ${SUBSCRIPTION_GRACE_DAYS} days to avoid a downgrade to the BASIC plan.`,
         );
       } else if (s.currentPeriodEnd <= addDays(now, RENEWAL_REMINDER_DAYS)) {
         reminded++;

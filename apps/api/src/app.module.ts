@@ -13,6 +13,7 @@ import { NotificationModule } from "./notifications/notification.module";
 import { FeesModule } from "./fees/fees.module";
 import { BillingModule } from "./billing/billing.module";
 import { DocumentsModule } from "./documents/documents.module";
+import { BrandingModule } from "./branding/branding.module";
 import { TimetableModule } from "./timetable/timetable.module";
 import { SecurityModule } from "./security/security.module";
 import { AnalyticsModule } from "./analytics/analytics.module";
@@ -54,6 +55,7 @@ import { HealthController } from "./health.controller";
     FeesModule,
     BillingModule,
     DocumentsModule,
+    BrandingModule,
     TimetableModule,
     SecurityModule,
     AnalyticsModule,

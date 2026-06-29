@@ -1,4 +1,5 @@
 import * as React from "react";
+import { signOut } from "@/lib/auth";
 import {
   LayoutDashboardIcon,
   UsersIcon,
@@ -141,6 +142,21 @@ export async function AppShell({
           <div className="grid h-8 w-8 place-items-center rounded-full bg-secondary text-xs font-medium text-secondary-foreground">
             {userName.slice(0, 2).toUpperCase()}
           </div>
+          {/* Sign out — available to every authenticated user (no permission gate). */}
+          <form
+            action={async () => {
+              "use server";
+              await signOut({ redirectTo: "/login" });
+            }}
+          >
+            <button
+              type="submit"
+              aria-label="Sign out"
+              className="rounded-md border border-input px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              Sign out
+            </button>
+          </form>
         </div>
       </header>
 

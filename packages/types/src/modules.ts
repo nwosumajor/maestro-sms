@@ -161,8 +161,27 @@ export const PLAN_PRICING: Record<Plan, { perSeatMonthlyMinor: number }> = {
 
 /** Days a school keeps its paid plan after period end before the dunning downgrade. */
 export const SUBSCRIPTION_GRACE_DAYS = 7;
-/** Days before period end to send a renewal reminder. */
-export const RENEWAL_REMINDER_DAYS = 7;
+/** Days before period end to send a renewal reminder (2 weeks). */
+export const RENEWAL_REMINDER_DAYS = 14;
+
+/**
+ * Pure: is a school's subscription in good standing RIGHT NOW (full access)?
+ * True while ACTIVE, or PAST_DUE within the grace window. False once past-due
+ * beyond grace, or CANCELED past period end. Drives premium perks that lapse on
+ * expiry — e.g. the custom login-page logo is hidden when this is false.
+ */
+export function isSubscriptionInGoodStanding(
+  status: SubscriptionStatus,
+  currentPeriodEnd: Date | null,
+  graceDays: number = SUBSCRIPTION_GRACE_DAYS,
+  now: Date = new Date(),
+): boolean {
+  if (status === SUBSCRIPTION_STATUS.ACTIVE) return true;
+  if (!currentPeriodEnd) return false;
+  const grace = status === SUBSCRIPTION_STATUS.PAST_DUE ? graceDays : 0;
+  const cutoff = new Date(currentPeriodEnd.getTime() + grace * 24 * 60 * 60 * 1000);
+  return now <= cutoff;
+}
 
 /** Pure: price to run `plan` for `activeStudents` over one `cycle` (minor units). */
 export function computeSubscriptionPriceMinor(

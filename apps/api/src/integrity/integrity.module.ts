@@ -23,6 +23,8 @@ import { IntegrityProcessor } from "./integrity.processor";
 import { IntegrityReportController } from "./integrity-report.controller";
 import { IntegrityReportService } from "./integrity-report.service";
 import { AssessmentTakeController } from "./assessment-take.controller";
+import { AssessmentListController } from "./assessment-list.controller";
+import { AssessmentListService } from "./assessment-list.service";
 import { RetentionDatabaseService } from "./retention/retention-database.service";
 import { IntegrityRetentionService } from "./retention/integrity-retention.service";
 import { IntegrityRetentionProcessor } from "./retention/integrity-retention.processor";
@@ -40,11 +42,13 @@ import { IntegrityRetentionController } from "./retention/integrity-retention.co
     IntegrityController,
     IntegrityReportController,
     AssessmentTakeController,
+    AssessmentListController,
     IntegrityRetentionController,
   ],
   providers: [
     IntegrityService,
     IntegrityReportService,
+    AssessmentListService,
     IntegrityProcessor,
     // --- Retention / NDPR purge (Golden Rule #5). Privileged DB is bound here;
     //     the scheduler registers the daily repeatable sweep on boot. ---

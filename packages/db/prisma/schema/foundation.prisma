@@ -349,3 +349,19 @@ model IntegrityConsent {
   @@index([schoolId, studentId])
   @@map("integrity_consent")
 }
+
+/// TENANT-SCOPED per-school branding (login-page logo). schoolId is a scalar FK
+/// (no relation) like the game tables. Logo BYTES live in object storage; only
+/// the key is stored here. The public login page reads it (via the branding
+/// endpoint, which sets the tenant GUC after resolving the school by slug).
+model SchoolBranding {
+  id        String   @id @default(uuid()) @db.Uuid
+  schoolId  String   @unique @db.Uuid
+  /// Object-storage key for the uploaded logo (null = none).
+  logoKey   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([schoolId])
+  @@map("school_branding")
+}

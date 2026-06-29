@@ -51,3 +51,5 @@ export * from "./dto/game-settings";
 export * from "./dto/ultimate";
 export * from "./payroll";
 export * from "./elevation";
+export * from "./dto/assessment";
+export * from "./dto/branding";

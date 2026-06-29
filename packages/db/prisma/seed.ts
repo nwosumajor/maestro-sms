@@ -62,6 +62,7 @@ const PERMS = [
   "hr.appraisal.manage",
   "hr.disciplinary.manage",
   "hr.recruit.manage",
+  "school.branding.manage",
   // Admin / RBAC
   "rbac.manage",
   // Platform operator
@@ -137,7 +138,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     "timetable.read", "timetable.write",
     "security.audit.read", "security.elevation.request", "security.elevation.approve",
     "privacy.erasure.review", "message.read", "message.send", "event.read", "event.write",
-    "hr.read", "hr.self", "hr.write", "hr.salary.approve", "hr.appraisal.manage", "hr.disciplinary.manage", "hr.recruit.manage", "rbac.manage", "admission.review",
+    "hr.read", "hr.self", "hr.write", "hr.salary.approve", "hr.appraisal.manage", "hr.disciplinary.manage", "hr.recruit.manage", "school.branding.manage", "rbac.manage", "admission.review",
     "game.league.create", "game.leaderboard.read",
     "game.race.open", "game.race.tournament", "game.match.moderate",
     "game.ultimate.enroll",
@@ -159,7 +160,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     "timetable.read", "timetable.write",
     "security.audit.read", "security.elevation.request", "security.elevation.approve",
     "privacy.erasure.review", "message.read", "message.send", "event.read", "event.write",
-    "hr.read", "hr.self", "hr.write", "hr.salary.approve", "hr.appraisal.manage", "hr.disciplinary.manage", "hr.recruit.manage", "rbac.manage", "admission.review",
+    "hr.read", "hr.self", "hr.write", "hr.salary.approve", "hr.appraisal.manage", "hr.disciplinary.manage", "hr.recruit.manage", "school.branding.manage", "rbac.manage", "admission.review",
     "game.league.create", "game.leaderboard.read",
     "game.race.open", "game.race.tournament", "game.match.moderate",
     "game.settings.manage",
