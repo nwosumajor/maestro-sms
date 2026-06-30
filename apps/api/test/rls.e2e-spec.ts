@@ -94,6 +94,18 @@ d("RLS cross-tenant isolation", () => {
   const sessionA = randomUUID();
   const termA = randomUUID();
   const announcementA = randomUUID();
+  // Hostel
+  const hostelA = randomUUID();
+  const hostelRoomA = randomUUID();
+  const hostelAllocationA = randomUUID();
+  // Transport
+  const vehicleA = randomUUID();
+  const transportRouteA = randomUUID();
+  const routeStopA = randomUUID();
+  const transportAssignmentA = randomUUID();
+  // Library
+  const libraryBookA = randomUUID();
+  const bookLoanA = randomUUID();
   // HR recruitment
   const jobReqA = randomUUID();
   const applicantA = randomUUID();
@@ -348,6 +360,45 @@ d("RLS cross-tenant isolation", () => {
       `INSERT INTO announcement (id,"schoolId",title,body,"createdById","updatedAt") VALUES ($1,$2,'Hi','Body',$3,now())`,
       [announcementA, A, userA],
     );
+    // Hostel + room + allocation (student userA in school A).
+    await a.query(
+      `INSERT INTO hostel (id,"schoolId",name,type,"updatedAt") VALUES ($1,$2,'Hostel A','MIXED',now())`,
+      [hostelA, A],
+    );
+    await a.query(
+      `INSERT INTO hostel_room (id,"schoolId","hostelId","roomNumber",capacity,"rentMinor","updatedAt") VALUES ($1,$2,$3,'R1',2,50000,now())`,
+      [hostelRoomA, A, hostelA],
+    );
+    await a.query(
+      `INSERT INTO hostel_allocation (id,"schoolId","roomId","studentId") VALUES ($1,$2,$3,$4)`,
+      [hostelAllocationA, A, hostelRoomA, userA],
+    );
+    // Transport: vehicle + route + stop + assignment (student userA).
+    await a.query(
+      `INSERT INTO vehicle (id,"schoolId",name,capacity,"updatedAt") VALUES ($1,$2,'Bus 1',40,now())`,
+      [vehicleA, A],
+    );
+    await a.query(
+      `INSERT INTO transport_route (id,"schoolId",name,"vehicleId","fareMode","flatFareMinor","updatedAt") VALUES ($1,$2,'Route 1',$3,'FLAT',30000,now())`,
+      [transportRouteA, A, vehicleA],
+    );
+    await a.query(
+      `INSERT INTO route_stop (id,"schoolId","routeId",name,sequence,"fareMinor","updatedAt") VALUES ($1,$2,$3,'Stop 1',1,30000,now())`,
+      [routeStopA, A, transportRouteA],
+    );
+    await a.query(
+      `INSERT INTO transport_assignment (id,"schoolId","routeId","stopId","passengerId","passengerType","updatedAt") VALUES ($1,$2,$3,$4,$5,'STUDENT',now())`,
+      [transportAssignmentA, A, transportRouteA, routeStopA, userA],
+    );
+    // Library: book + loan (borrower userA).
+    await a.query(
+      `INSERT INTO library_book (id,"schoolId",title,barcode,"totalCopies","availableCopies","updatedAt") VALUES ($1,$2,'Book A','BC-A',3,2,now())`,
+      [libraryBookA, A],
+    );
+    await a.query(
+      `INSERT INTO book_loan (id,"schoolId","bookId","borrowerId","dueAt","updatedAt") VALUES ($1,$2,$3,$4,now() + interval '14 days',now())`,
+      [bookLoanA, A, libraryBookA, userA],
+    );
     await a.query(
       `INSERT INTO enrollment (id,"schoolId","classId","studentId") VALUES ($1,$2,$3,$4)`,
       [enrollmentA, A, classA, userA],
@@ -477,6 +528,18 @@ d("RLS cross-tenant isolation", () => {
     for (const t of [
       "audit_log",
       "school_branding",
+      // Hostel — allocation before room before hostel (FK order).
+      "hostel_allocation",
+      "hostel_room",
+      "hostel",
+      // Transport — assignment before stop/route, stop before route, route before vehicle.
+      "transport_assignment",
+      "route_stop",
+      "transport_route",
+      "vehicle",
+      // Library — loan before book.
+      "book_loan",
+      "library_book",
       // HR recruitment — applicant before requisition.
       "applicant",
       "job_requisition",
@@ -666,6 +729,15 @@ d("RLS cross-tenant isolation", () => {
     ["job_requisition", jobReqA],
     ["applicant", applicantA],
     ["school_branding", schoolBrandingA],
+    ["hostel", hostelA],
+    ["hostel_room", hostelRoomA],
+    ["hostel_allocation", hostelAllocationA],
+    ["vehicle", vehicleA],
+    ["transport_route", transportRouteA],
+    ["route_stop", routeStopA],
+    ["transport_assignment", transportAssignmentA],
+    ["library_book", libraryBookA],
+    ["book_loan", bookLoanA],
     ["subject", subjectA],
     ["class_subject_teacher", classSubjectA],
     ["student_import_batch", importBatchA],

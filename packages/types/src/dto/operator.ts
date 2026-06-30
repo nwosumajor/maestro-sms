@@ -33,6 +33,35 @@ export interface OperatorUserDto {
   lockedUntil: Date | null;
 }
 
+/** A recent platform-subscription payment for the operator revenue feed. */
+export interface PlatformRevenueEntryDto {
+  schoolName: string;
+  plan: string;
+  amountMinor: number;
+  status: string;
+  createdAt: Date;
+}
+
+/** Cross-tenant business metrics for the platform owner (super_admin). All figures
+ *  span EVERY customer school (the platform org itself is excluded). Money is in
+ *  integer minor units (NGN kobo). */
+export interface PlatformAnalyticsDto {
+  /** Customer schools (the platform org is never counted). */
+  schools: { total: number; active: number; disabled: number };
+  /** Customer-school counts keyed by purchased plan (BASIC|STANDARD|ENTERPRISE). */
+  schoolsByPlan: Record<string, number>;
+  /** Customer-school counts keyed by subscription status (ACTIVE|PAST_DUE|CANCELED). */
+  schoolsByStatus: Record<string, number>;
+  /** People across all customer schools. */
+  people: { students: number; staff: number };
+  /** Revenue from PAID platform-subscription payments (all time). */
+  revenue: { paidTotalMinor: number; payments: number; last30dMinor: number };
+  /** Onboarding intake pipeline (public requests) keyed by status. */
+  onboardingPipeline: Record<string, number>;
+  /** The most recent platform-subscription payments (newest first, capped). */
+  recentPayments: PlatformRevenueEntryDto[];
+}
+
 /** An enrolled student as seen by the super_admin cross-tenant student view. */
 export interface OperatorStudentDto {
   id: string;

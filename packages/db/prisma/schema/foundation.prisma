@@ -14,6 +14,12 @@ model School {
   name      String
   slug      String   @unique
   status    String   @default("ACTIVE")
+  /// TRUE only for the single platform-owner organization ("SMS Platform") that
+  /// hosts super_admin(s). It is NOT a customer tenant: excluded from the public
+  /// school directory, the operator tenant list, cross-school directory search and
+  /// platform billing. Lets the super_admin be a platform identity (not a member
+  /// of any customer school) while keeping user.schoolId non-null + RLS intact.
+  isPlatform Boolean @default(false)
   /// NDPR-aligned retention window (days) for integrity TELEMETRY on minors —
   /// integrity_signal / submission_draft / submission_telemetry. Read by the
   /// privileged retention job; rows older than this are purged. Per-school policy

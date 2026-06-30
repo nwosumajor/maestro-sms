@@ -1,6 +1,8 @@
 import type { ClassDto, WorkflowSummaryDto, Serialized } from "@sms/types";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
+import { hasPermission } from "@/lib/permissions";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import {
@@ -19,6 +21,9 @@ type WorkflowDto = Serialized<WorkflowSummaryDto>;
 export default async function DashboardPage() {
   const session = await auth();
   const user = session!.user;
+
+  // The platform owner has no tenant data — their home is the operator console.
+  if (hasPermission(user.permissions, "platform.operate")) redirect("/operator");
 
   // Fire the two scoped reads in parallel; either may be null if the role lacks
   // the permission (RBAC) — render 0 rather than failing the page.

@@ -115,6 +115,9 @@ export class DirectorySearchService {
     if (filters.role?.trim()) {
       and.push({ roles: { some: { role: { name: filters.role.trim() } } } });
     }
+    // Never surface platform-org members (the super_admin) in people search — they
+    // are not students/staff of any customer school.
+    and.push({ school: { isPlatform: false } });
     if (and.length) where.AND = and;
 
     const rows = (await users.findMany({

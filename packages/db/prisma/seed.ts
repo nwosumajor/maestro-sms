@@ -34,6 +34,19 @@ const PERMS = [
   "fee.read",
   "fee.manage",
   "fee.approve",
+  // Hostel Management
+  "hostel.read",
+  "hostel.manage",
+  // Transport Management
+  "transport.read",
+  "transport.manage",
+  // Library Management
+  "library.read",
+  "library.borrow",
+  "library.manage",
+  // Task System
+  "task.assign",
+  "task.participate",
   // Document Vault
   "document.read",
   "document.write",
@@ -143,6 +156,10 @@ const ROLE_PERMS: Record<string, string[]> = {
     "workflow.create", "workflow.read", "workflow.review", "workflow.review.principal",
     "notification.read", "notification.send",
     "fee.read", "fee.manage", "fee.approve",
+    "hostel.read", "hostel.manage",
+    "transport.read", "transport.manage",
+    "library.read", "library.borrow", "library.manage",
+    "task.assign", "task.participate",
     "document.read", "document.write",
     "timetable.read", "timetable.write",
     "security.audit.read", "security.elevation.request", "security.elevation.approve",
@@ -165,6 +182,10 @@ const ROLE_PERMS: Record<string, string[]> = {
     "workflow.create", "workflow.read", "workflow.review",
     "notification.read", "notification.send",
     "fee.read", "fee.manage", "fee.approve",
+    "hostel.read", "hostel.manage",
+    "transport.read", "transport.manage",
+    "library.read", "library.borrow", "library.manage",
+    "task.assign", "task.participate",
     "document.read", "document.write",
     "timetable.read", "timetable.write",
     "security.audit.read", "security.elevation.request", "security.elevation.approve",
@@ -179,7 +200,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     "lms.content.read", "lms.content.write", "lms.forum.post",
     "billing.read", "billing.manage",
   ],
-  teacher: ["hr.self", 
+  teacher: ["hr.self", "task.assign", "task.participate",
     "assessment.read", "assessment.write", "submission.read",
     "integrity.report.read", "integrity.exemption.read", "integrity.exemption.write",
     "student.profile.read", "student.contact.read",
@@ -201,6 +222,8 @@ const ROLE_PERMS: Record<string, string[]> = {
     "timetable.read", "message.read", "message.send", "event.read", "announcement.read",
     "game.play", "game.leaderboard.read",
     "lms.content.read", "lms.quiz.attempt", "lms.forum.post",
+    "library.read", "library.borrow",
+    "task.participate",
   ],
   parent: [
     "class.read", "grade.read",
@@ -218,7 +241,7 @@ const ROLE_PERMS: Record<string, string[]> = {
   ],
   // HR Manager: owns leave/salary/payroll + is the HR (stage-2) approver of the
   // staff-request chain. Salary maker-checker still needs TWO distinct managers.
-  hr_manager: ["hr.self",
+  hr_manager: ["hr.self", "task.assign", "task.participate",
     "workflow.create", "workflow.read", "workflow.review", "workflow.review.hr",
     "hr.read", "hr.write", "hr.salary.request", "hr.salary.approve", "hr.leave.manage", "hr.payroll.run",
     "hr.appraisal.manage", "hr.disciplinary.manage", "hr.recruit.manage",
@@ -231,14 +254,14 @@ const ROLE_PERMS: Record<string, string[]> = {
     "message.read", "message.send", "event.read", "announcement.read",
   ],
   // Head of teaching: stage-1 approver for teaching staff requests.
-  head_teacher: ["hr.self", 
+  head_teacher: ["hr.self", "task.assign", "task.participate",
     "class.read", "enrollment.read", "attendance.read", "grade.read",
     "workflow.create", "workflow.read", "workflow.review", "workflow.review.head",
     "notification.read", "notification.send", "security.elevation.request",
     "message.read", "message.send", "event.read", "announcement.read",
   ],
   // Head of administration: stage-1 approver for non-teaching staff requests.
-  head_admin: ["hr.self", 
+  head_admin: ["hr.self", "task.assign", "task.participate",
     "workflow.create", "workflow.read", "workflow.review", "workflow.review.head",
     "document.read", "notification.read", "notification.send", "security.elevation.request",
     "message.read", "message.send", "event.read", "announcement.read",
@@ -250,6 +273,16 @@ async function main() {
     where: { slug: "demo" },
     update: {},
     create: { name: "St. Andrews Academy", slug: "demo" },
+  });
+
+  // The platform-owner organization. NOT a customer tenant — it only hosts the
+  // super_admin (the platform owner who sells the SMS to schools). Excluded from
+  // the public directory, operator tenant list, directory search and billing. The
+  // super_admin is therefore a member of NO customer school.
+  const platformOrg = await prisma.school.upsert({
+    where: { slug: "sms-platform" },
+    update: { isPlatform: true },
+    create: { name: "SMS Platform", slug: "sms-platform", isPlatform: true },
   });
 
   for (const key of PERMS) {
@@ -289,11 +322,11 @@ async function main() {
     update: {},
     create: { schoolId: school.id, email: "parent@demo.school", name: "Demo Parent", passwordHash },
   });
-  const mkUser = (email: string, name: string) =>
+  const mkUser = (email: string, name: string, schoolId: string = school.id) =>
     prisma.user.upsert({
       where: { email },
       update: {},
-      create: { schoolId: school.id, email, name, passwordHash },
+      create: { schoolId, email, name, passwordHash },
     });
   const admin = await mkUser("admin@demo.school", "Demo Admin");
   const principal = await mkUser("principal@demo.school", "Demo Principal");
@@ -303,7 +336,8 @@ async function main() {
   const hrManager = await mkUser("hrmanager@demo.school", "Demo HR Manager");
   const headTeacher = await mkUser("headteacher@demo.school", "Demo Head Teacher");
   const headAdmin = await mkUser("headadmin@demo.school", "Demo Head of Admin");
-  const owner = await mkUser("owner@sms.platform", "Platform Owner");
+  // The platform owner lives in the platform org, NOT the demo customer school.
+  const owner = await mkUser("owner@sms.platform", "Platform Owner", platformOrg.id);
 
   const roleByName = async (name: string) =>
     (await prisma.role.findUniqueOrThrow({ where: { name } })).id;
@@ -321,10 +355,13 @@ async function main() {
     [headAdmin.id, await roleByName("head_admin")],
     [owner.id, await roleByName("super_admin")],
   ] as const) {
+    // The super_admin's role is scoped to the platform org, every other demo
+    // user's to the demo school.
+    const roleSchoolId = userId === owner.id ? platformOrg.id : school.id;
     await prisma.userRole.upsert({
       where: { userId_roleId: { userId, roleId } },
       update: {},
-      create: { schoolId: school.id, userId, roleId },
+      create: { schoolId: roleSchoolId, userId, roleId },
     });
   }
 

@@ -19,15 +19,19 @@ import type { DocumentPermission } from "./documents";
 import type { FeesPermission } from "./fees";
 import type { GamePermission } from "./game";
 import type { GradebookPermission } from "./gradebook";
+import type { HostelPermission } from "./hostel";
 import type { HrPermission } from "./hr";
 import type { IntegrityPermission } from "./integrity";
+import type { LibraryPermission } from "./library";
 import type { LmsPermission } from "./lms";
 import type { NotificationPermission } from "./notifications";
 import type { OperatorPermission } from "./operator";
 import type { PrivacyPermission } from "./privacy";
 import type { SecurityPermission } from "./security";
 import type { SisPermission } from "./sis";
+import type { TaskPermission } from "./task";
 import type { TimetablePermission } from "./timetable";
+import type { TransportPermission } from "./transport";
 import type { WorkflowPermission } from "./workflow";
 
 /** Every permission string the system knows about (union of all domains). */
@@ -42,13 +46,17 @@ export type Permission =
   | FeesPermission
   | GamePermission
   | GradebookPermission
+  | HostelPermission
   | HrPermission
   | IntegrityPermission
+  | LibraryPermission
   | LmsPermission
   | NotificationPermission
   | OperatorPermission
   | PrivacyPermission
   | SecurityPermission
   | SisPermission
+  | TaskPermission
   | TimetablePermission
+  | TransportPermission
   | WorkflowPermission;

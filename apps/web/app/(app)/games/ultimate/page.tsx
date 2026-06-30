@@ -17,7 +17,7 @@ export default async function UltimateListPage() {
   const comps = (await apiGet<Serialized<UltimateCompetitionDto>[]>("/ultimate/competitions")) ?? [];
 
   return (
-    <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="games" permissions={user.permissions}>
+    <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="ultimate" permissions={user.permissions}>
       <div className="space-y-6">
         <div>
           <Link href="/games" className="text-sm text-muted-foreground hover:text-foreground">

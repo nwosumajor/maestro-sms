@@ -1,0 +1,68 @@
+// =============================================================================
+// Hostel Management — tenant-scoped (school_id non-null + RLS). Boarding houses,
+// their rooms (with rent/fare + custom fields), and student room allocations.
+// Hostel fees are billed through the SHARED Fees tables (Invoice/InvoiceLineItem)
+// so they collect ALONGSIDE academic fees on one student invoice.
+// =============================================================================
+
+model Hostel {
+  id           String   @id @default(uuid()) @db.Uuid
+  schoolId     String   @db.Uuid
+  name         String
+  /// BOYS | GIRLS | MIXED
+  type         String   @default("MIXED")
+  /// Optional warden (a staff User) who maintains this hostel's details.
+  wardenId     String?  @db.Uuid
+  /// Arbitrary extra details (key→value) — the "custom fields" requirement.
+  customFields Json     @default("{}")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  rooms HostelRoom[]
+
+  @@index([schoolId])
+  @@map("hostel")
+}
+
+model HostelRoom {
+  id           String   @id @default(uuid()) @db.Uuid
+  schoolId     String   @db.Uuid
+  hostelId     String   @db.Uuid
+  roomNumber   String
+  /// e.g. SINGLE | DOUBLE | DORMITORY
+  roomType     String   @default("SHARED")
+  capacity     Int      @default(1)
+  /// Rent / fare for the room in MINOR units (kobo). Charged once per allocation
+  /// when hostel fees are scheduled.
+  rentMinor    Int      @default(0)
+  customFields Json     @default("{}")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  hostel      Hostel             @relation(fields: [hostelId], references: [id])
+  allocations HostelAllocation[]
+
+  @@unique([hostelId, roomNumber])
+  @@index([schoolId])
+  @@index([schoolId, hostelId])
+  @@map("hostel_room")
+}
+
+model HostelAllocation {
+  id          String    @id @default(uuid()) @db.Uuid
+  schoolId    String    @db.Uuid
+  roomId      String    @db.Uuid
+  studentId   String    @db.Uuid
+  /// ACTIVE | VACATED — vacating frees the bed (history retained, never deleted).
+  status      String    @default("ACTIVE")
+  allocatedAt DateTime  @default(now())
+  vacatedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  room HostelRoom @relation(fields: [roomId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, studentId])
+  @@index([roomId, status])
+  @@map("hostel_allocation")
+}

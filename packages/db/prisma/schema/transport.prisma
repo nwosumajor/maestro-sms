@@ -1,0 +1,91 @@
+// =============================================================================
+// Transport Management — tenant-scoped (school_id non-null + RLS). Vehicles,
+// routes + stops (academic-year-wise), and student/staff route assignments.
+// Transport fees bill through the SHARED Fees tables so they collect ALONGSIDE
+// academic fees. Custom fields (JSON) hold fuel/repair/licence/pollution etc.
+// =============================================================================
+
+model Vehicle {
+  id           String   @id @default(uuid()) @db.Uuid
+  schoolId     String   @db.Uuid
+  name         String
+  regNumber    String?
+  capacity     Int      @default(0)
+  /// Free-form: fuelExpense, repairInfo, licenceRenewal, pollutionCheck, driver…
+  customFields Json     @default("{}")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  routes TransportRoute[]
+
+  @@index([schoolId])
+  @@map("vehicle")
+}
+
+model TransportRoute {
+  id            String   @id @default(uuid()) @db.Uuid
+  schoolId      String   @db.Uuid
+  name          String
+  vehicleId     String?  @db.Uuid
+  /// Academic year this route belongs to (routes/stops are year-wise).
+  sessionId     String?  @db.Uuid
+  /// FLAT (one fare for the route) | STOP (per-stop fare).
+  fareMode      String   @default("FLAT")
+  flatFareMinor Int      @default(0)
+  /// ACTIVE | RETIRED — retiring eliminates a redundant route (history kept).
+  status        String   @default("ACTIVE")
+  customFields  Json     @default("{}")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  vehicle     Vehicle?              @relation(fields: [vehicleId], references: [id])
+  stops       RouteStop[]
+  assignments TransportAssignment[]
+
+  @@index([schoolId])
+  @@index([schoolId, status])
+  @@map("transport_route")
+}
+
+model RouteStop {
+  id         String   @id @default(uuid()) @db.Uuid
+  schoolId   String   @db.Uuid
+  routeId    String   @db.Uuid
+  name       String
+  sequence   Int      @default(0)
+  /// Stop-based fare in MINOR units (used when the route's fareMode = STOP).
+  fareMinor  Int      @default(0)
+  pickupTime String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  route       TransportRoute        @relation(fields: [routeId], references: [id])
+  assignments TransportAssignment[]
+
+  @@index([schoolId])
+  @@index([schoolId, routeId])
+  @@map("route_stop")
+}
+
+model TransportAssignment {
+  id            String   @id @default(uuid()) @db.Uuid
+  schoolId      String   @db.Uuid
+  routeId       String   @db.Uuid
+  stopId        String?  @db.Uuid
+  /// The assigned passenger (a student or staff User).
+  passengerId   String   @db.Uuid
+  /// STUDENT | STAFF
+  passengerType String   @default("STUDENT")
+  /// ACTIVE | CANCELLED — cancelling frees the seat (history retained).
+  status        String   @default("ACTIVE")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  route TransportRoute @relation(fields: [routeId], references: [id])
+  stop  RouteStop?     @relation(fields: [stopId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, passengerId])
+  @@index([routeId, status])
+  @@map("transport_assignment")
+}

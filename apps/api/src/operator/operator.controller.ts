@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Post, Put } from "@nestjs/common";
-import type { OperatorStudentDto, OperatorUserDto, SubscriptionDto, TenantDto } from "@sms/types";
+import type { OperatorStudentDto, OperatorUserDto, PlatformAnalyticsDto, SubscriptionDto, TenantDto } from "@sms/types";
 import { z } from "zod";
 import { OPERATOR_PERMISSIONS, PLANS, SUBSCRIPTION_STATUS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -10,6 +10,7 @@ import type { Principal } from "../integrity/integrity.foundation";
 import { OperatorService } from "./operator.service";
 import { OperatorProvisioningService } from "./operator-provisioning.service";
 import { OperatorUserService } from "./operator-user.service";
+import { PlatformAnalyticsService } from "./platform-analytics.service";
 
 const impSchema = z.object({ schoolId: z.string().uuid(), userId: z.string().uuid() });
 const adminSchema = z.object({
@@ -23,6 +24,15 @@ const provisionSchema = z
     name: z.string().min(1).max(160),
     slug: z.string().min(2).max(40),
     plan: z.enum([PLANS.BASIC, PLANS.STANDARD, PLANS.ENTERPRISE]).optional(),
+    // Extra modules beyond the chosen plan: `enabled` force-on add-ons (the "special
+    // modules" a school pays extra for); `disabled` force-off. Same shape as the
+    // subscription PUT, so onboarding and later edits share one override model.
+    overrides: z
+      .object({
+        enabled: z.array(z.string()).optional(),
+        disabled: z.array(z.string()).optional(),
+      })
+      .optional(),
     // Onboarding seeds the founding admin tier — typically a school_admin AND a
     // principal. `admin` (single) is accepted for back-compat.
     admin: adminSchema.optional(),
@@ -56,6 +66,7 @@ export class OperatorController {
     private readonly operator: OperatorService,
     private readonly provisioning: OperatorProvisioningService,
     private readonly users: OperatorUserService,
+    private readonly analyticsSvc: PlatformAnalyticsService,
   ) {}
 
   /** Self-serve onboard a NEW school + its first admin (step-up: creates creds). */
@@ -85,6 +96,15 @@ export class OperatorController {
   @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
   tenants(@CurrentPrincipal() p: Principal): Promise<TenantDto[]> {
     return this.operator.listTenants(p);
+  }
+
+  /** Platform-owner business dashboard: cross-tenant schools/revenue/plan metrics. */
+  @Get("analytics")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  async analytics(@CurrentPrincipal() p: Principal): Promise<PlatformAnalyticsDto> {
+    const result = await this.analyticsSvc.overview(p);
+    await this.analyticsSvc.auditView(p);
+    return result;
   }
 
   /** Impersonation requires a fresh step-up — the riskiest action in the system. */

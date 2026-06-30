@@ -1,4 +1,4 @@
-import type { TenantDto, OnboardingRequestDto, Serialized } from "@sms/types";
+import type { TenantDto, OnboardingRequestDto, PlatformAnalyticsDto, Serialized } from "@sms/types";
 import { hasPermission } from "@/lib/permissions";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { shortDate } from "@/lib/format";
 import { SubscriptionManager } from "@/components/operator/SubscriptionManager";
 import { Provisioning } from "@/components/operator/Provisioning";
+import { PlatformAnalytics } from "@/components/operator/PlatformAnalytics";
 import { OperatorUsers } from "@/components/operator/OperatorUsers";
 import { OperatorStudents } from "@/components/operator/OperatorStudents";
 import { OnboardingRequests } from "@/components/operator/OnboardingRequests";
@@ -21,9 +22,10 @@ export default async function OperatorPage() {
   const session = await auth();
   const user = session!.user;
   if (!hasPermission(user.permissions, "platform.operate")) redirect("/dashboard");
-  const [tenants, onboarding] = await Promise.all([
+  const [tenants, onboarding, analytics] = await Promise.all([
     apiGet<Tenant[]>("/operator/tenants"),
     apiGet<Serialized<OnboardingRequestDto>[]>("/operator/onboarding-requests"),
+    apiGet<Serialized<PlatformAnalyticsDto>>("/operator/analytics"),
   ]);
   const tenantList = tenants ?? [];
 
@@ -37,6 +39,8 @@ export default async function OperatorPage() {
             disabled modules vanish from their app and return 404 at the API. Impersonation is step-up gated and audited.
           </p>
         </div>
+
+        <PlatformAnalytics data={analytics ?? null} />
 
         <Provisioning tenants={tenantList.map((t) => ({ id: t.id, name: t.name }))} />
 

@@ -1,0 +1,63 @@
+// =============================================================================
+// Task System — tenant-scoped (school_id non-null + RLS). Managers/teachers assign
+// tasks to staff or students; assignees update status + upload a document; either
+// side posts follow-up comments. Relationship-scoped: a participant sees only the
+// tasks they created or are assigned to.
+// =============================================================================
+
+model Task {
+  id          String    @id @default(uuid()) @db.Uuid
+  schoolId    String    @db.Uuid
+  title       String
+  description String?
+  createdById String    @db.Uuid
+  /// OPEN | IN_PROGRESS | COMPLETED | CANCELLED (overall task state).
+  status      String    @default("OPEN")
+  dueAt       DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  assignments TaskAssignment[]
+  comments    TaskComment[]
+
+  @@index([schoolId])
+  @@index([schoolId, createdById])
+  @@map("task")
+}
+
+model TaskAssignment {
+  id             String   @id @default(uuid()) @db.Uuid
+  schoolId       String   @db.Uuid
+  taskId         String   @db.Uuid
+  assigneeId     String   @db.Uuid
+  /// ASSIGNED | IN_PROGRESS | SUBMITTED | DONE (this assignee's progress).
+  status         String   @default("ASSIGNED")
+  note           String?
+  /// Optional uploaded document (object-storage key + display name).
+  attachmentKey  String?
+  attachmentName String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  task Task @relation(fields: [taskId], references: [id])
+
+  @@unique([taskId, assigneeId])
+  @@index([schoolId])
+  @@index([schoolId, assigneeId])
+  @@map("task_assignment")
+}
+
+model TaskComment {
+  id        String   @id @default(uuid()) @db.Uuid
+  schoolId  String   @db.Uuid
+  taskId    String   @db.Uuid
+  authorId  String   @db.Uuid
+  body      String
+  createdAt DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id])
+
+  @@index([schoolId])
+  @@index([taskId])
+  @@map("task_comment")
+}

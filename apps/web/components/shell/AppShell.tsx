@@ -21,6 +21,10 @@ import {
   SearchIcon,
   MegaphoneIcon,
   Gamepad2Icon,
+  TrophyIcon,
+  BedIcon,
+  BusIcon,
+  LibraryIcon,
   WalletIcon,
   type LucideIcon,
 } from "lucide-react";
@@ -42,6 +46,9 @@ type NavKey =
   | "timetable"
   | "attendance"
   | "fees"
+  | "hostel"
+  | "transport"
+  | "library"
   | "billing"
   | "documents"
   | "assessments"
@@ -53,6 +60,7 @@ type NavKey =
   | "hr"
   | "leave"
   | "games"
+  | "ultimate"
   | "operator"
   | "directory"
   | "announcements"
@@ -83,6 +91,9 @@ const NAV: {
   { key: "timetable", label: "Timetable", icon: CalendarDaysIcon, href: "/timetable", perm: "timetable.read", module: MODULES.TIMETABLE },
   { key: "attendance", label: "Attendance", icon: CalendarCheckIcon, href: "/attendance", perm: "attendance.read", module: MODULES.ATTENDANCE },
   { key: "fees", label: "Fees", icon: CreditCardIcon, href: "/fees", perm: "fee.read", module: MODULES.FEES },
+  { key: "hostel", label: "Hostel", icon: BedIcon, href: "/hostel", perm: "hostel.read" },
+  { key: "transport", label: "Transport", icon: BusIcon, href: "/transport", perm: "transport.read" },
+  { key: "library", label: "Library", icon: LibraryIcon, href: "/library", perm: "library.read" },
   // Billing is the platform subscription itself — ALWAYS-ON (no module tag).
   { key: "billing", label: "Billing", icon: WalletIcon, href: "/billing", perm: "billing.read" },
   { key: "documents", label: "Documents", icon: FolderIcon, href: "/documents", perm: "document.read", module: MODULES.DOCUMENTS },
@@ -91,8 +102,25 @@ const NAV: {
   { key: "assessments", label: "Assessments", icon: BookOpenIcon, href: "/assessments", perm: "assessment.read", module: MODULES.INTEGRITY },
   { key: "workflows", label: "Approvals", icon: ClipboardCheckIcon, href: "/workflows", perm: "workflow.read", module: MODULES.WORKFLOW },
   { key: "games", label: "Games", icon: Gamepad2Icon, href: "/games", perm: "game.leaderboard.read", module: MODULES.GAMES },
+  // Cross-school "Ultimate" arena — a PLATFORM function: only the super_admin
+  // (game.ultimate.admin) creates/cancels it. Direct link so the platform owner
+  // reaches it without the tenant Games hub; hidden for everyone else (regular
+  // staff open Ultimate from the Games hub instead). No module tag — the
+  // super_admin-only permission is the gate.
+  { key: "ultimate", label: "Ultimate", icon: TrophyIcon, href: "/games/ultimate", perm: "game.ultimate.admin" },
   { key: "account", label: "Account", icon: UserIcon, href: "/account" },
 ];
+
+// The nav keys a platform owner (super_admin) sees — platform surfaces only, since
+// they belong to no customer school. Everything else is a tenant-operational page.
+const PLATFORM_OWNER_NAV = new Set<NavKey>([
+  "dashboard",
+  "operator",
+  "directory",
+  "ultimate",
+  "notifications",
+  "account",
+]);
 
 export interface AppShellProps {
   schoolName: string;
@@ -128,8 +156,13 @@ export async function AppShell({
   // the session (set at login); if absent (older session) we don't module-gate.
   const session = await auth();
   const modules = session?.user?.modules ?? null;
+  // The platform owner (super_admin) is not a member of any customer school, so the
+  // tenant-operational pages (Analytics, Games, …) are noise for them. Restrict
+  // their nav to the platform surfaces; the operator console is their home.
+  const isPlatformOwner = permissions.includes("platform.operate");
   const items = NAV.filter(
     (item) =>
+      (!isPlatformOwner || PLATFORM_OWNER_NAV.has(item.key)) &&
       (!item.perm || permissions.includes(item.perm)) &&
       (!item.module || !modules || modules.includes(item.module)),
   );

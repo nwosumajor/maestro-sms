@@ -34,7 +34,7 @@ export class PublicService {
   async listSchools(): Promise<PublicSchoolDto[]> {
     return this.db.runAsTenant({ schoolId: ZERO, userId: ZERO }, (tx) =>
       tx.school.findMany({
-        where: { status: "ACTIVE" },
+        where: { status: "ACTIVE", isPlatform: false },
         select: { id: true, name: true, slug: true },
         orderBy: { name: "asc" },
       }),

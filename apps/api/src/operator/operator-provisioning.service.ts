@@ -24,8 +24,8 @@ import {
 } from "@nestjs/common";
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
-import type { PrismaClient } from "@sms/db";
-import { DEFAULT_PLAN, isPlan } from "@sms/types";
+import { Prisma, type PrismaClient } from "@sms/db";
+import { DEFAULT_PLAN, isPlan, isModuleKey, type ModuleOverrides } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -75,6 +75,7 @@ export class OperatorProvisioningService {
       name: string;
       slug: string;
       plan?: string;
+      overrides?: { enabled?: string[]; disabled?: string[] };
       admin?: AdminInput;
       admins?: AdminInput[];
     },
@@ -85,6 +86,12 @@ export class OperatorProvisioningService {
       throw new BadRequestException("slug must be 2–40 chars, [a-z0-9-]");
     }
     const plan = input.plan && isPlan(input.plan) ? input.plan : DEFAULT_PLAN;
+    // Extra modules beyond the plan — same model the subscription PUT uses. Only
+    // real module keys survive (unknown strings dropped).
+    const overrides: ModuleOverrides = {
+      enabled: (input.overrides?.enabled ?? []).filter(isModuleKey),
+      disabled: (input.overrides?.disabled ?? []).filter(isModuleKey),
+    };
 
     // Normalise to a list; default each admin's role to school_admin.
     const rawAdmins = input.admins ?? (input.admin ? [input.admin] : []);
@@ -120,7 +127,9 @@ export class OperatorProvisioningService {
 
     const result = await db.$transaction(async (tx) => {
       const school = await tx.school.create({ data: { name: input.name, slug } });
-      await tx.schoolSubscription.create({ data: { schoolId: school.id, plan, status: "ACTIVE" } });
+      await tx.schoolSubscription.create({
+        data: { schoolId: school.id, plan, status: "ACTIVE", overrides: overrides as unknown as Prisma.InputJsonValue },
+      });
       const created: Array<{ id: string; email: string; role: string; tempPassword: string }> = [];
       for (const a of prepared) {
         const u = await tx.user.create({

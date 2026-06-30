@@ -101,7 +101,14 @@ export class OperatorService {
           data: { schoolId, plan, overrides: overrides as unknown as Prisma.InputJsonValue, ...(status !== undefined ? { status } : {}), ...(currentPeriodEnd !== undefined ? { currentPeriodEnd } : {}) },
         });
       }
-      await this.audit.record(
+    });
+    // Audit under the OPERATOR's own tenant (a separate tx), mirroring
+    // listSchoolStudents / impersonate. The write above runs with the GUC set to
+    // the TARGET school, so an audit_log row carrying the operator's own schoolId
+    // can't be written there (RLS WITH CHECK would reject it — schoolId ≠ GUC).
+    // The affected school is preserved in metadata.targetSchoolId.
+    await this.db.runAsTenant(this.ctx(p), (tx) =>
+      this.audit.record(
         {
           actorId: p.userId,
           action: "operator.subscription.set",
@@ -111,8 +118,8 @@ export class OperatorService {
           metadata: { targetSchoolId: schoolId, plan, overrides, status, currentPeriodEnd },
         },
         tx,
-      );
-    });
+      ),
+    );
     // Drop the cached entitlements so the new posture takes effect immediately.
     this.entitlements.invalidate(schoolId);
     const resolved = await this.entitlements.resolve(schoolId);
@@ -122,7 +129,8 @@ export class OperatorService {
   /** Every tenant + a user count each. School registry is global/RLS-exempt. */
   async listTenants(p: Principal) {
     const schools = await this.db.runAsTenant(this.ctx(p), (tx) =>
-      tx.school.findMany({ select: { id: true, name: true, slug: true, status: true, createdAt: true }, orderBy: { name: "asc" } }),
+      // Exclude the platform org itself — it's not a customer tenant.
+      tx.school.findMany({ where: { isPlatform: false }, select: { id: true, name: true, slug: true, status: true, createdAt: true }, orderBy: { name: "asc" } }),
     );
     const out = [];
     for (const s of schools as Array<{ id: string; name: string; slug: string; status: string; createdAt: Date }>) {

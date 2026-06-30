@@ -103,6 +103,10 @@ apply_rls packages/db/prisma/rls/32_student_import_rls.sql        student_import
 apply_rls packages/db/prisma/rls/33_promotion_rls.sql             promotion_batch_update
 apply_rls packages/db/prisma/rls/34_academic_rls.sql              term_delete
 apply_rls packages/db/prisma/rls/35_announcements_rls.sql         announcement_delete
+apply_rls packages/db/prisma/rls/36_hostel_rls.sql              hostel_allocation_delete
+apply_rls packages/db/prisma/rls/37_transport_rls.sql            transport_assignment_delete
+apply_rls packages/db/prisma/rls/38_library_rls.sql             book_loan_delete
+apply_rls packages/db/prisma/rls/39_task_rls.sql                task_comment_delete
 
 # Seed on first provision (compose: SEED_ON_START=true; cloud migrate task: always).
 if [ "${SEED_ON_START}" = "true" ] || [ "$MODE" = "migrate" ]; then

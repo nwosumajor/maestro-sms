@@ -1,0 +1,54 @@
+// =============================================================================
+// Library Management — tenant-scoped (school_id non-null + RLS). Book catalogue
+// (barcode-keyed) + loans (issue / renew / return with overdue fines). Students
+// search + self-issue from their dashboard; the librarian manages the catalogue,
+// runs issued/due reports, exports CSV, and records fine receipts.
+// =============================================================================
+
+model LibraryBook {
+  id             String   @id @default(uuid()) @db.Uuid
+  schoolId       String   @db.Uuid
+  title          String
+  author         String?
+  isbn           String?
+  /// Barcode label (scanned to issue/return). Unique within a school.
+  barcode        String
+  category       String?
+  totalCopies    Int      @default(1)
+  availableCopies Int     @default(1)
+  customFields   Json     @default("{}")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  loans BookLoan[]
+
+  @@unique([schoolId, barcode])
+  @@index([schoolId])
+  @@map("library_book")
+}
+
+model BookLoan {
+  id           String    @id @default(uuid()) @db.Uuid
+  schoolId     String    @db.Uuid
+  bookId       String    @db.Uuid
+  /// Borrower (a student or staff User).
+  borrowerId   String    @db.Uuid
+  /// ISSUED | RETURNED
+  status       String    @default("ISSUED")
+  issuedAt     DateTime  @default(now())
+  dueAt        DateTime
+  returnedAt   DateTime?
+  renewedCount Int       @default(0)
+  /// Overdue fine accrued on return, in MINOR units. finePaid records the receipt.
+  fineMinor    Int       @default(0)
+  finePaid     Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  book LibraryBook @relation(fields: [bookId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, borrowerId])
+  @@index([bookId, status])
+  @@map("book_loan")
+}

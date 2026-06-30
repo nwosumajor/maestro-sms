@@ -28,6 +28,9 @@ import { AdmissionsModule } from "./admissions/admissions.module";
 import { PublicModule } from "./public/public.module";
 import { DirectoryModule } from "./directory/directory.module";
 import { AnnouncementsModule } from "./announcements/announcements.module";
+import { HostelModule } from "./hostel/hostel.module";
+import { TransportModule } from "./transport/transport.module";
+import { LibraryModule } from "./library/library.module";
 import { GameModule } from "./game/game.module";
 import { GameSocketModule } from "./game-socket/game-socket.module";
 import { HealthController } from "./health.controller";
@@ -74,6 +77,9 @@ import { HealthController } from "./health.controller";
     PublicModule,
     DirectoryModule,
     AnnouncementsModule,
+    HostelModule,
+    TransportModule,
+    LibraryModule,
     GameModule,
     GameSocketModule,
   ],
