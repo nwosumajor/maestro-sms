@@ -1,0 +1,83 @@
+// =============================================================================
+// Discipline Room — tenant-scoped (school_id non-null + RLS). A user files a
+// complaint against a student or teacher; staff assign responsible resolvers
+// (employees/students), attach evidence (object-storage keys), discuss, and mark
+// actions/resolution. SECURITY (Golden Rule #8): this records human-reviewed
+// complaints + actions — it never auto-penalises anyone. Evidence on minors is
+// sensitive; all reads/writes audited.
+// =============================================================================
+
+model DisciplineComplaint {
+  id            String   @id @default(uuid()) @db.Uuid
+  schoolId      String   @db.Uuid
+  /// Free-text subject + details of the complaint.
+  subject       String
+  details       String?
+  /// Who filed it.
+  complainantId String   @db.Uuid
+  /// The subject of the complaint (a student or teacher User).
+  againstId     String   @db.Uuid
+  againstType   String   @default("STUDENT") // STUDENT | TEACHER
+  /// OPEN | IN_REVIEW | RESOLVED | DISMISSED.
+  status        String   @default("OPEN")
+  /// The action/resolution recorded by staff after review (human decision only).
+  resolution    String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  assignees DisciplineAssignee[]
+  evidence  DisciplineEvidence[]
+  entries   DisciplineEntry[]
+
+  @@index([schoolId])
+  @@index([schoolId, againstId])
+  @@map("discipline_complaint")
+}
+
+model DisciplineAssignee {
+  id          String   @id @default(uuid()) @db.Uuid
+  schoolId    String   @db.Uuid
+  complaintId String   @db.Uuid
+  /// A responsible person (employee or student) assigned to resolve the issue.
+  assigneeId  String   @db.Uuid
+  createdAt   DateTime @default(now())
+
+  complaint DisciplineComplaint @relation(fields: [complaintId], references: [id])
+
+  @@unique([complaintId, assigneeId])
+  @@index([schoolId])
+  @@map("discipline_assignee")
+}
+
+model DisciplineEvidence {
+  id          String   @id @default(uuid()) @db.Uuid
+  schoolId    String   @db.Uuid
+  complaintId String   @db.Uuid
+  uploadedById String  @db.Uuid
+  /// Object-storage key + display name (attachment / photo / document).
+  fileKey     String
+  fileName    String
+  createdAt   DateTime @default(now())
+
+  complaint DisciplineComplaint @relation(fields: [complaintId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, complaintId])
+  @@map("discipline_evidence")
+}
+
+model DisciplineEntry {
+  id          String   @id @default(uuid()) @db.Uuid
+  schoolId    String   @db.Uuid
+  complaintId String   @db.Uuid
+  authorId    String   @db.Uuid
+  /// Append-only discussion / action note.
+  body        String
+  createdAt   DateTime @default(now())
+
+  complaint DisciplineComplaint @relation(fields: [complaintId], references: [id])
+
+  @@index([schoolId])
+  @@index([complaintId])
+  @@map("discipline_entry")
+}

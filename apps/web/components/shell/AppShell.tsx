@@ -25,11 +25,20 @@ import {
   BedIcon,
   BusIcon,
   LibraryIcon,
+  ListTodoIcon,
+  BarChartHorizontalIcon,
+  MessagesSquareIcon,
+  ShieldAlertIcon,
+  AwardIcon,
+  ClipboardListIcon,
+  GraduationCapIcon,
+  FileBarChartIcon,
   WalletIcon,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { auth } from "@/lib/auth";
+import { apiGet } from "@/lib/api";
 import type { TenantTheme } from "@sms/tokens";
 import { MODULES, type ModuleKey, type Permission } from "@sms/types";
 
@@ -53,6 +62,14 @@ type NavKey =
   | "documents"
   | "assessments"
   | "workflows"
+  | "tasks"
+  | "polls"
+  | "discussion"
+  | "discipline"
+  | "certificates"
+  | "forms"
+  | "alumni"
+  | "reports"
   | "admin"
   | "analytics"
   | "messages"
@@ -89,11 +106,12 @@ const NAV: {
   { key: "students", label: "Students", icon: IdCardIcon, href: "/students", perm: "student.profile.read", module: MODULES.SIS },
   { key: "classes", label: "Classes", icon: UsersIcon, href: "/classes", perm: "class.read", module: MODULES.LMS },
   { key: "timetable", label: "Timetable", icon: CalendarDaysIcon, href: "/timetable", perm: "timetable.read", module: MODULES.TIMETABLE },
+  { key: "certificates", label: "Certificates", icon: AwardIcon, href: "/certificates", perm: "certificate.issue", module: MODULES.CERTIFICATE },
   { key: "attendance", label: "Attendance", icon: CalendarCheckIcon, href: "/attendance", perm: "attendance.read", module: MODULES.ATTENDANCE },
   { key: "fees", label: "Fees", icon: CreditCardIcon, href: "/fees", perm: "fee.read", module: MODULES.FEES },
-  { key: "hostel", label: "Hostel", icon: BedIcon, href: "/hostel", perm: "hostel.read" },
-  { key: "transport", label: "Transport", icon: BusIcon, href: "/transport", perm: "transport.read" },
-  { key: "library", label: "Library", icon: LibraryIcon, href: "/library", perm: "library.read" },
+  { key: "hostel", label: "Hostel", icon: BedIcon, href: "/hostel", perm: "hostel.read", module: MODULES.HOSTEL },
+  { key: "transport", label: "Transport", icon: BusIcon, href: "/transport", perm: "transport.read", module: MODULES.TRANSPORT },
+  { key: "library", label: "Library", icon: LibraryIcon, href: "/library", perm: "library.read", module: MODULES.LIBRARY },
   // Billing is the platform subscription itself — ALWAYS-ON (no module tag).
   { key: "billing", label: "Billing", icon: WalletIcon, href: "/billing", perm: "billing.read" },
   { key: "documents", label: "Documents", icon: FolderIcon, href: "/documents", perm: "document.read", module: MODULES.DOCUMENTS },
@@ -101,6 +119,13 @@ const NAV: {
   { key: "hr", label: "HR", icon: BriefcaseIcon, href: "/hr", perm: "hr.read", module: MODULES.HR },
   { key: "assessments", label: "Assessments", icon: BookOpenIcon, href: "/assessments", perm: "assessment.read", module: MODULES.INTEGRITY },
   { key: "workflows", label: "Approvals", icon: ClipboardCheckIcon, href: "/workflows", perm: "workflow.read", module: MODULES.WORKFLOW },
+  { key: "tasks", label: "Tasks", icon: ListTodoIcon, href: "/tasks", perm: "task.participate", module: MODULES.TASK },
+  { key: "polls", label: "Polls", icon: BarChartHorizontalIcon, href: "/polls", perm: "poll.vote", module: MODULES.POLL },
+  { key: "discussion", label: "Discussion", icon: MessagesSquareIcon, href: "/discussion", perm: "discussion.participate", module: MODULES.DISCUSSION },
+  { key: "discipline", label: "Discipline", icon: ShieldAlertIcon, href: "/discipline", perm: "discipline.file", module: MODULES.DISCIPLINE },
+  { key: "forms", label: "Forms", icon: ClipboardListIcon, href: "/forms", perm: "form.respond", module: MODULES.FORM },
+  { key: "alumni", label: "Alumni", icon: GraduationCapIcon, href: "/alumni", perm: "alumni.manage", module: MODULES.ALUMNI },
+  { key: "reports", label: "Reports", icon: FileBarChartIcon, href: "/reports", perm: "attendance.read" },
   { key: "games", label: "Games", icon: Gamepad2Icon, href: "/games", perm: "game.leaderboard.read", module: MODULES.GAMES },
   // Cross-school "Ultimate" arena — a PLATFORM function: only the super_admin
   // (game.ultimate.admin) creates/cancels it. Direct link so the platform owner
@@ -135,13 +160,15 @@ export interface AppShellProps {
   children: React.ReactNode;
 }
 
-function brandStyle(t?: TenantTheme): React.CSSProperties | undefined {
-  if (!t) return undefined;
-  return {
-    ["--brand-h" as string]: String(t.h),
-    ["--brand-s" as string]: `${t.s}%`,
-    ["--brand-l" as string]: `${t.l}%`,
-  };
+function brandStyle(t?: TenantTheme, fontFamily?: string | null): React.CSSProperties | undefined {
+  const style: React.CSSProperties = {};
+  if (t) {
+    (style as Record<string, string>)["--brand-h"] = String(t.h);
+    (style as Record<string, string>)["--brand-s"] = `${t.s}%`;
+    (style as Record<string, string>)["--brand-l"] = `${t.l}%`;
+  }
+  if (fontFamily) style.fontFamily = fontFamily;
+  return Object.keys(style).length ? style : undefined;
 }
 
 export async function AppShell({
@@ -166,8 +193,21 @@ export async function AppShell({
       (!item.perm || permissions.includes(item.perm)) &&
       (!item.module || !modules || modules.includes(item.module)),
   );
+  // Apply the school's saved theme (brand colour + font). Best-effort; falls back
+  // to the passed tenantTheme / platform defaults if the fetch returns nothing.
+  let theme = tenantTheme;
+  let fontFamily: string | null = null;
+  if (!isPlatformOwner) {
+    const branding = await apiGet<{ brandHue: number | null; brandSat: number | null; brandLight: number | null; fontFamily: string | null }>(
+      "/schools/branding",
+    ).catch(() => null);
+    if (branding?.brandHue != null && branding.brandSat != null && branding.brandLight != null) {
+      theme = { h: branding.brandHue, s: branding.brandSat, l: branding.brandLight };
+    }
+    fontFamily = branding?.fontFamily ?? null;
+  }
   return (
-    <div data-tenant style={brandStyle(tenantTheme)} className="min-h-screen bg-background">
+    <div data-tenant style={brandStyle(theme, fontFamily)} className="min-h-screen bg-background">
       {/* Top bar */}
       <header className="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-border bg-card px-4">
         <div className="flex items-center gap-2.5">

@@ -1,0 +1,62 @@
+// =============================================================================
+// Polling System — tenant-scoped (school_id non-null + RLS). Staff create a poll
+// with options for a selected audience (students/staff/all); members cast ONE
+// anonymous vote. PollVote stores voterId ONLY to enforce one-vote-per-member +
+// audit participation — it is NEVER joined to the chosen option in any read, and
+// results are returned as per-option TALLIES only. Identity is never revealed.
+// =============================================================================
+
+model Poll {
+  id          String   @id @default(uuid()) @db.Uuid
+  schoolId    String   @db.Uuid
+  question    String
+  /// ALL | STUDENTS | STAFF — who may vote (mirrors the announcement audiences).
+  audience    String   @default("ALL")
+  createdById String   @db.Uuid
+  /// OPEN | CLOSED — closing freezes voting; results visible to the creator/staff.
+  status      String   @default("OPEN")
+  closesAt    DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  options PollOption[]
+  votes   PollVote[]
+
+  @@index([schoolId])
+  @@map("poll")
+}
+
+model PollOption {
+  id        String   @id @default(uuid()) @db.Uuid
+  schoolId  String   @db.Uuid
+  pollId    String   @db.Uuid
+  label     String
+  sequence  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  poll  Poll       @relation(fields: [pollId], references: [id])
+  votes PollVote[]
+
+  @@index([schoolId])
+  @@index([schoolId, pollId])
+  @@map("poll_option")
+}
+
+model PollVote {
+  id        String   @id @default(uuid()) @db.Uuid
+  schoolId  String   @db.Uuid
+  pollId    String   @db.Uuid
+  optionId  String   @db.Uuid
+  /// SECURITY: present ONLY to enforce one-vote-per-member + audit participation.
+  /// It is NEVER returned alongside optionId in any read; results are tallies only.
+  voterId   String   @db.Uuid
+  createdAt DateTime @default(now())
+
+  poll   Poll       @relation(fields: [pollId], references: [id])
+  option PollOption @relation(fields: [optionId], references: [id])
+
+  @@unique([pollId, voterId])
+  @@index([schoolId])
+  @@index([optionId])
+  @@map("poll_vote")
+}

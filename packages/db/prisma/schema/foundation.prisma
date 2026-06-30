@@ -383,6 +383,12 @@ model SchoolBranding {
   schoolId  String   @unique @db.Uuid
   /// Object-storage key for the uploaded logo (null = none).
   logoKey   String?
+  /// Per-school theme: brand colour as HSL (hue 0–360, sat/light 0–100) + an
+  /// optional font-family stack. Null = inherit the platform default tokens.
+  brandHue   Int?
+  brandSat   Int?
+  brandLight Int?
+  fontFamily String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

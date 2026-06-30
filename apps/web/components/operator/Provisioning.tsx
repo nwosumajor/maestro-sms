@@ -11,7 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 
 type Tenant = { id: string; name: string };
 const ROLES = ["school_admin", "principal", "head_admin", "hr_manager"] as const;
-const PLAN_LIST: Plan[] = [PLANS.BASIC, PLANS.STANDARD, PLANS.ENTERPRISE];
+const PLAN_LIST: Plan[] = [PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE];
 
 /** Lowercase, hyphenated, [a-z0-9-] only — matches the API's slug rule. */
 function slugify(s: string): string {

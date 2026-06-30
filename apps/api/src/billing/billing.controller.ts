@@ -21,7 +21,7 @@ import type { Principal } from "../integrity/integrity.foundation";
 import { BillingService } from "./billing.service";
 
 const checkoutSchema = z.object({
-  plan: z.enum([PLANS.STANDARD, PLANS.ENTERPRISE]),
+  plan: z.enum([PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE]),
   billingCycle: z.enum([BILLING_CYCLES.MONTH, BILLING_CYCLES.TERM, BILLING_CYCLES.YEAR]),
 });
 

@@ -15,6 +15,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
@@ -29,9 +30,11 @@ import {
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
+import { generateTimetable, type Offering, type Slot } from "./auto-timetable";
 
 const STAFF_WIDE_ROLES = new Set(["school_admin", "principal", "board", "super_admin"]);
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+const WEEKDAYS: DayOfWeekValue[] = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"];
 
 export interface PeriodInput {
   name: string;
@@ -150,6 +153,82 @@ export class TimetableService {
         dayOfWeek: input.dayOfWeek,
       });
       return this.loadEntry(tx, entry.id);
+    });
+  }
+
+  // --- auto-generation (CSP greedy solver) ----------------------------------
+  /** Generate a conflict-free weekly grid from class-subject-teacher offerings.
+   *  Uses the pure solver (class + teacher no-double-booking) and persists the
+   *  placements as TimetableEntry rows. Existing entries are respected, not wiped
+   *  (unless `replace` is set, which clears the targeted classes first). Staff only. */
+  async generate(
+    p: Principal,
+    input: { classIds?: string[]; lessonsPerSubject?: number; days?: DayOfWeekValue[]; replace?: boolean },
+  ) {
+    if (!this.isStaffWide(p)) throw new ForbiddenException();
+    const lessonsPerSubject = Math.min(10, Math.max(1, input.lessonsPerSubject ?? 2));
+    const days = input.days?.length ? input.days : WEEKDAYS;
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const periods = await tx.period.findMany({ orderBy: { sequence: "asc" }, select: { id: true } });
+      if (periods.length === 0) throw new BadRequestException("Define at least one period first");
+      const slots: Slot[] = [];
+      for (const day of days) for (const period of periods) slots.push({ day, periodId: period.id });
+
+      // Offerings: class-subject-teacher rows (optionally a subset of classes).
+      const cstWhere = input.classIds?.length ? { classId: { in: input.classIds } } : {};
+      const cst = await tx.classSubjectTeacher.findMany({ where: cstWhere });
+      if (cst.length === 0) throw new BadRequestException("No class-subject-teacher offerings to schedule");
+      const subjectIds = [...new Set(cst.map((c: { subjectId: string }) => c.subjectId))];
+      const subjects = await tx.subject.findMany({ where: { id: { in: subjectIds } }, select: { id: true, name: true } });
+      const subjectName = new Map(subjects.map((s: { id: string; name: string }) => [s.id, s.name]));
+      const offerings: Offering[] = cst.map((c: { classId: string; subjectId: string; teacherId: string }) => ({
+        classId: c.classId,
+        subjectId: c.subjectId,
+        subject: subjectName.get(c.subjectId) ?? "Subject",
+        teacherId: c.teacherId,
+        lessonsPerWeek: lessonsPerSubject,
+      }));
+      const targetClassIds = [...new Set(offerings.map((o) => o.classId))];
+
+      // Optionally clear the targeted classes' existing entries first.
+      if (input.replace) {
+        await tx.timetableEntry.deleteMany({ where: { classId: { in: targetClassIds } } });
+      }
+
+      // Seed busy-sets from any entries we are KEEPING (other classes / not replaced).
+      const keep = await tx.timetableEntry.findMany({
+        where: input.replace ? { classId: { notIn: targetClassIds } } : {},
+        select: { classId: true, teacherId: true, dayOfWeek: true, periodId: true },
+      });
+      const classBusy: Record<string, Set<string>> = {};
+      const teacherBusy: Record<string, Set<string>> = {};
+      for (const e of keep as Array<{ classId: string; teacherId: string; dayOfWeek: string; periodId: string }>) {
+        const k = `${e.dayOfWeek}|${e.periodId}`;
+        (classBusy[k] ??= new Set()).add(e.classId);
+        (teacherBusy[k] ??= new Set()).add(e.teacherId);
+      }
+
+      const result = generateTimetable(offerings, slots, { classBusy, teacherBusy });
+      for (const lesson of result.placed) {
+        await tx.timetableEntry.create({
+          data: {
+            schoolId: p.schoolId,
+            classId: lesson.classId,
+            dayOfWeek: lesson.day as DayOfWeekValue,
+            periodId: lesson.periodId,
+            subject: lesson.subject,
+            teacherId: lesson.teacherId,
+            roomId: null,
+          },
+        });
+      }
+      await this.log(tx, p, "timetable.generate", "timetable", "auto", {
+        classes: targetClassIds.length,
+        placed: result.placed.length,
+        unplaced: result.unplaced.length,
+        replace: Boolean(input.replace),
+      });
+      return { placed: result.placed.length, unplaced: result.unplaced };
     });
   }
 

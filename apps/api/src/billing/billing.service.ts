@@ -45,8 +45,8 @@ import { PaystackService, type PaystackEvent } from "../payments/paystack.servic
 import { SYSTEM_ACTOR_ID } from "./billing.constants";
 import { BillingDunningService, type DunningResult } from "./billing-dunning.service";
 
-/** Tiers a school can actually buy (BASIC is the free delinquency floor). */
-const SELLABLE_TIERS: Plan[] = [PLANS.STANDARD, PLANS.ENTERPRISE];
+/** Tiers a school can actually buy (all four are paid; STANDARD is the floor). */
+const SELLABLE_TIERS: Plan[] = [PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE];
 const QUOTE_CYCLES: BillingCycle[] = [BILLING_CYCLES.MONTH, BILLING_CYCLES.TERM, BILLING_CYCLES.YEAR];
 
 function addMonths(from: Date, months: number): Date {
@@ -144,9 +144,8 @@ export class BillingService {
     if (!this.paystack.isConfigured()) {
       throw new ServiceUnavailableException("Online payments are not configured");
     }
-    if (!isPlan(input.plan)) throw new BadRequestException("plan must be BASIC, STANDARD or ENTERPRISE");
+    if (!isPlan(input.plan)) throw new BadRequestException("plan must be STANDARD, PREMIUM, ULTIMATE or ENTERPRISE");
     if (!isBillingCycle(input.billingCycle)) throw new BadRequestException("billingCycle must be MONTH, TERM or YEAR");
-    if (input.plan === PLANS.BASIC) throw new BadRequestException("BASIC is the free tier — no checkout needed");
     const plan: Plan = input.plan;
     const billingCycle: BillingCycle = input.billingCycle;
 

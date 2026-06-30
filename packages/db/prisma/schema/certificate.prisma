@@ -1,0 +1,26 @@
+// =============================================================================
+// Certificate / ID-card generator — tenant-scoped (school_id non-null + RLS). An
+// append-only LOG of issued certificates + ID cards. The PDF is generated on the
+// fly (pdfkit) from current student/school data; this row records that an issuance
+// happened (who, what type, for whom, when) for audit + reprint history.
+// =============================================================================
+
+model IssuedCertificate {
+  id         String   @id @default(uuid()) @db.Uuid
+  schoolId   String   @db.Uuid
+  /// ID_CARD | COMPLETION | PARTICIPATION | MERIT (free-form, validated in app).
+  type       String
+  /// The subject of the certificate (a student/staff User).
+  subjectId  String   @db.Uuid
+  /// Optional title/body overrides for COMPLETION-style certificates.
+  title      String?
+  body       String?
+  issuedById String   @db.Uuid
+  /// Stable human-facing serial for verification (printed on the document).
+  serial     String
+  createdAt  DateTime @default(now())
+
+  @@index([schoolId])
+  @@index([schoolId, subjectId])
+  @@map("issued_certificate")
+}

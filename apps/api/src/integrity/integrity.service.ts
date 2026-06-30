@@ -142,6 +142,14 @@ export class IntegrityService {
         fileName: submission.fileName,
         fileUploaded: submission.fileUploaded,
         submitted: submission.status === "SUBMITTED",
+        // Timed-exam fields (null/false for a normal assignment). The client shows
+        // a countdown to `deadline` once started; the server re-enforces it.
+        timed: assessment.timed,
+        durationMinutes: assessment.durationMinutes,
+        opensAt: assessment.opensAt,
+        closesAt: assessment.closesAt,
+        startedAt: submission.startedAt,
+        deadline: assessment.timed && submission.startedAt ? this.examDeadline(submission.startedAt, assessment.durationMinutes, assessment.closesAt) : null,
         toggles: {
           pasteCapture: assessment.pasteBlocked,
           focusTracking: assessment.focusTracked,
@@ -330,12 +338,57 @@ export class IntegrityService {
   // ---------------------------------------------------------------------------
   // 3. Submit: mark submitted, then enqueue detection.
   // ---------------------------------------------------------------------------
+  /** Start a TIMED exam: records startedAt (once) and returns the firm deadline so
+   *  the client can show a countdown. The server stays authoritative — `submit`
+   *  re-checks the same deadline. Untimed assessments don't need this. */
+  async startExam(ctx: TenantContext, submissionId: string): Promise<{ startedAt: Date; deadline: Date }> {
+    return this.db.runAsTenant(ctx, async (tx) => {
+      const submission = await this.loadOwnSubmission(tx, ctx, submissionId);
+      const a = await tx.assessment.findFirst({
+        where: { id: submission.assessmentId },
+        select: { timed: true, durationMinutes: true, opensAt: true, closesAt: true },
+      });
+      if (!a?.timed) throw new BadRequestException("This assessment is not a timed exam");
+      const now = new Date();
+      if (a.opensAt && now < a.opensAt) throw new BadRequestException("This exam has not opened yet");
+      if (a.closesAt && now > a.closesAt) throw new BadRequestException("This exam has closed");
+      // First start wins; re-starting returns the original deadline (no extension).
+      const startedAt = submission.startedAt ?? now;
+      if (!submission.startedAt) {
+        await tx.submission.update({ where: { id: submission.id }, data: { startedAt } });
+        await this.audit.record(
+          { actorId: ctx.userId, action: "integrity.exam.start", entity: "submission", entityId: submission.id, schoolId: ctx.schoolId },
+          tx,
+        );
+      }
+      return { startedAt, deadline: this.examDeadline(startedAt, a.durationMinutes, a.closesAt) };
+    });
+  }
+
+  /** The firm submit deadline: startedAt + duration, capped at the window close. */
+  private examDeadline(startedAt: Date, durationMinutes: number | null, closesAt: Date | null): Date {
+    const byDuration = durationMinutes ? new Date(startedAt.getTime() + durationMinutes * 60_000) : null;
+    const candidates = [byDuration, closesAt].filter((d): d is Date => d != null);
+    return candidates.length ? new Date(Math.min(...candidates.map((d) => d.getTime()))) : startedAt;
+  }
+
   async submit(ctx: TenantContext, submissionId: string, content: string): Promise<void> {
     await this.db.runAsTenant(ctx, async (tx) => {
       const submission = await this.loadOwnSubmission(tx, ctx, submissionId);
+      const assessment = await tx.assessment.findFirst({
+        where: { id: submission.assessmentId },
+        select: { fileUploadEnabled: true, timed: true, durationMinutes: true, opensAt: true, closesAt: true },
+      });
+      // TIMED exam: enforce the window + per-attempt deadline server-side.
+      if (assessment?.timed) {
+        const now = new Date();
+        if (assessment.opensAt && now < assessment.opensAt) throw new BadRequestException("This exam has not opened yet");
+        if (!submission.startedAt) throw new BadRequestException("Start the exam before submitting");
+        const deadline = this.examDeadline(submission.startedAt, assessment.durationMinutes, assessment.closesAt);
+        if (now > deadline) throw new BadRequestException("Time is up — the submission window for this exam has closed");
+      }
       // A submission needs an answer: text, or (when enabled) an uploaded file.
       if (!content.trim() && !submission.fileUploaded) {
-        const assessment = await tx.assessment.findFirst({ where: { id: submission.assessmentId }, select: { fileUploadEnabled: true } });
         throw new BadRequestException(
           assessment?.fileUploadEnabled ? "Enter your answer or upload a file before submitting" : "Enter your answer before submitting",
         );

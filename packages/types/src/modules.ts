@@ -31,6 +31,17 @@ export const MODULES = {
   HR: "hr",
   ADMISSIONS: "admissions",
   GAMES: "games",
+  // Expansion modules.
+  HOSTEL: "hostel",
+  TRANSPORT: "transport",
+  LIBRARY: "library",
+  TASK: "task",
+  POLL: "poll",
+  DISCUSSION: "discussion",
+  DISCIPLINE: "discipline",
+  CERTIFICATE: "certificate",
+  ALUMNI: "alumni",
+  FORM: "form",
 } as const;
 
 export type ModuleKey = (typeof MODULES)[keyof typeof MODULES];
@@ -52,33 +63,55 @@ export const MODULE_CATALOG: { key: ModuleKey; label: string; description: strin
   { key: MODULES.HR, label: "HR", description: "Staff employment records and salaries." },
   { key: MODULES.ADMISSIONS, label: "Admissions", description: "Public applications and staff review." },
   { key: MODULES.GAMES, label: "Dead & Wounded Games", description: "Competitive games platform." },
+  { key: MODULES.LIBRARY, label: "Library", description: "Barcode catalogue, loans, fines." },
+  { key: MODULES.TASK, label: "Tasks", description: "Assign tasks to staff and students." },
+  { key: MODULES.POLL, label: "Polls", description: "Anonymous opinion polls." },
+  { key: MODULES.DISCUSSION, label: "Discussion Hub", description: "Topic groups, posts, moderation." },
+  { key: MODULES.FORM, label: "Form Builder", description: "Surveys, feedback, review forms." },
+  { key: MODULES.CERTIFICATE, label: "Certificates & ID", description: "ID cards and certificate generator." },
+  { key: MODULES.HOSTEL, label: "Hostel", description: "Boarding houses, rooms, allocation, fees." },
+  { key: MODULES.TRANSPORT, label: "Transport", description: "Vehicles, routes, stops, transport fees." },
+  { key: MODULES.DISCIPLINE, label: "Discipline Room", description: "Complaints, evidence, resolution." },
+  { key: MODULES.ALUMNI, label: "Alumni", description: "Former-student records and broadcasts." },
 ];
 
 export const PLANS = {
-  BASIC: "BASIC",
   STANDARD: "STANDARD",
+  PREMIUM: "PREMIUM",
+  ULTIMATE: "ULTIMATE",
   ENTERPRISE: "ENTERPRISE",
 } as const;
 
 export type Plan = (typeof PLANS)[keyof typeof PLANS];
 
+// Ordered low -> high; each tier is CUMULATIVE (includes everything below it).
+const STANDARD_MODULES: ModuleKey[] = [
+  MODULES.LMS, MODULES.GRADEBOOK, MODULES.ATTENDANCE, MODULES.TIMETABLE, MODULES.MESSAGING, MODULES.CALENDAR,
+  MODULES.SIS, MODULES.LIBRARY,
+];
+const PREMIUM_ADDS: ModuleKey[] = [
+  MODULES.FEES, MODULES.DOCUMENTS, MODULES.WORKFLOW, MODULES.ANALYTICS, MODULES.INTEGRITY,
+  MODULES.TASK, MODULES.POLL, MODULES.DISCUSSION, MODULES.FORM, MODULES.CERTIFICATE,
+];
+const ULTIMATE_ADDS: ModuleKey[] = [
+  MODULES.ADMISSIONS, MODULES.HOSTEL, MODULES.TRANSPORT, MODULES.DISCIPLINE, MODULES.ALUMNI,
+];
+const ENTERPRISE_ADDS: ModuleKey[] = [MODULES.HR, MODULES.GAMES];
+
 /** The module bundle each named tier includes (before per-school overrides). */
 export const PLAN_MODULES: Record<Plan, ModuleKey[]> = {
-  // Core teaching essentials.
-  BASIC: [MODULES.LMS, MODULES.GRADEBOOK, MODULES.ATTENDANCE, MODULES.TIMETABLE, MODULES.MESSAGING, MODULES.CALENDAR],
-  // Full school operations.
-  STANDARD: [
-    MODULES.LMS, MODULES.GRADEBOOK, MODULES.ATTENDANCE, MODULES.TIMETABLE, MODULES.MESSAGING, MODULES.CALENDAR,
-    MODULES.SIS, MODULES.FEES, MODULES.DOCUMENTS, MODULES.WORKFLOW, MODULES.ANALYTICS, MODULES.INTEGRITY,
-    MODULES.ADMISSIONS,
-  ],
-  // Everything.
-  ENTERPRISE: [
-    MODULES.LMS, MODULES.GRADEBOOK, MODULES.ATTENDANCE, MODULES.TIMETABLE, MODULES.MESSAGING, MODULES.CALENDAR,
-    MODULES.SIS, MODULES.FEES, MODULES.DOCUMENTS, MODULES.WORKFLOW, MODULES.ANALYTICS, MODULES.INTEGRITY,
-    MODULES.ADMISSIONS, MODULES.HR, MODULES.GAMES,
-  ],
+  // Core teaching essentials for any school.
+  STANDARD: STANDARD_MODULES,
+  // Adds money handling, engagement, and quality tooling.
+  PREMIUM: [...STANDARD_MODULES, ...PREMIUM_ADDS],
+  // Adds facilities + student-lifecycle modules.
+  ULTIMATE: [...STANDARD_MODULES, ...PREMIUM_ADDS, ...ULTIMATE_ADDS],
+  // The complete enterprise suite (HR/payroll + games).
+  ENTERPRISE: [...STANDARD_MODULES, ...PREMIUM_ADDS, ...ULTIMATE_ADDS, ...ENTERPRISE_ADDS],
 };
+
+/** The lowest tier — the floor a delinquent school falls back to. */
+export const FALLBACK_PLAN: Plan = PLANS.STANDARD;
 
 /** Per-school deviations from the tier bundle (force-on / force-off). */
 export interface ModuleOverrides {
@@ -149,14 +182,14 @@ export function isSubscriptionStatus(value: string): value is SubscriptionStatus
 }
 
 /**
- * Per-seat (per active student) price each MONTH, in kobo, by tier. BASIC is the
- * free floor a delinquent school falls back to, so it is ₦0 — the entitlement
- * layer can ALWAYS downgrade to it without owing a charge.
+ * Per-seat (per active student) price each MONTH, in kobo, by tier. STANDARD is
+ * the entry tier (and the delinquency floor); higher tiers cost more per seat.
  */
 export const PLAN_PRICING: Record<Plan, { perSeatMonthlyMinor: number }> = {
-  BASIC: { perSeatMonthlyMinor: 0 },
   STANDARD: { perSeatMonthlyMinor: 20_000 }, // ₦200 / student / month
-  ENTERPRISE: { perSeatMonthlyMinor: 35_000 }, // ₦350 / student / month
+  PREMIUM: { perSeatMonthlyMinor: 35_000 }, // ₦350 / student / month
+  ULTIMATE: { perSeatMonthlyMinor: 50_000 }, // ₦500 / student / month
+  ENTERPRISE: { perSeatMonthlyMinor: 75_000 }, // ₦750 / student / month
 };
 
 /** Days a school keeps its paid plan after period end before the dunning downgrade. */
@@ -207,8 +240,8 @@ export function effectivePlan(
   now: Date = new Date(),
 ): Plan {
   if (status === SUBSCRIPTION_STATUS.ACTIVE) return plan;
-  if (!currentPeriodEnd) return PLANS.BASIC;
+  if (!currentPeriodEnd) return FALLBACK_PLAN;
   const grace = status === SUBSCRIPTION_STATUS.PAST_DUE ? graceDays : 0;
   const cutoff = new Date(currentPeriodEnd.getTime() + grace * 24 * 60 * 60 * 1000);
-  return now > cutoff ? PLANS.BASIC : plan;
+  return now > cutoff ? FALLBACK_PLAN : plan;
 }

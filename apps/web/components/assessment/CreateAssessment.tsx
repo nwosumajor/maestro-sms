@@ -10,7 +10,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 
 export function CreateAssessment({ classes }: { classes: { id: string; name: string }[] }) {
   const router = useRouter();
-  const [f, setF] = React.useState({ title: "", description: "", classId: "", fileUploadEnabled: false, integrityEnabled: false });
+  const blank = { title: "", description: "", classId: "", fileUploadEnabled: false, integrityEnabled: false, timed: false, durationMinutes: 60, closesAt: "" };
+  const [f, setF] = React.useState(blank);
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
 
@@ -28,11 +29,14 @@ export function CreateAssessment({ classes }: { classes: { id: string; name: str
         classId: f.classId || undefined,
         fileUploadEnabled: f.fileUploadEnabled,
         integrityEnabled: f.integrityEnabled,
+        timed: f.timed,
+        durationMinutes: f.timed ? f.durationMinutes : undefined,
+        closesAt: f.timed && f.closesAt ? new Date(f.closesAt).toISOString() : undefined,
       }),
     });
     setBusy(false);
     if (res.ok) {
-      setF({ title: "", description: "", classId: "", fileUploadEnabled: false, integrityEnabled: false });
+      setF(blank);
       router.refresh();
     } else setMsg(`Failed (${res.status}).`);
   };
@@ -79,9 +83,24 @@ export function CreateAssessment({ classes }: { classes: { id: string; name: str
               <input type="checkbox" checked={f.integrityEnabled} onChange={(e) => setF({ ...f, integrityEnabled: e.target.checked })} />
               Enable integrity monitoring
             </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={f.timed} onChange={(e) => setF({ ...f, timed: e.target.checked })} />
+              Timed exam
+            </label>
             <Button type="submit" size="sm" disabled={busy}>{busy ? "Creating…" : "Create assignment"}</Button>
             {msg && <span className="text-sm text-destructive">{msg}</span>}
           </div>
+          {f.timed && (
+            <div className="flex flex-wrap items-end gap-3 rounded-md border border-border p-3">
+              <label className="text-sm">Duration (min)
+                <input type="number" min={1} max={600} value={f.durationMinutes} onChange={(e) => setF({ ...f, durationMinutes: Number(e.target.value) })} className="ml-2 h-8 w-20 rounded-md border border-input bg-background px-2" />
+              </label>
+              <label className="text-sm">Closes at (optional)
+                <input type="datetime-local" value={f.closesAt} onChange={(e) => setF({ ...f, closesAt: e.target.value })} className="ml-2 h-8 rounded-md border border-input bg-background px-2" />
+              </label>
+              <span className="text-xs text-muted-foreground">Students get a countdown and auto-submit at the deadline.</span>
+            </div>
+          )}
         </form>
       </CardContent>
     </Card>

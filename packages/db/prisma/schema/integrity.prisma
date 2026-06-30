@@ -96,6 +96,16 @@ model Assessment {
   /// Teacher-controlled per assessment; default OFF (text-only).
   fileUploadEnabled Boolean @default(false)
 
+  // --- Timed-exam window (all nullable; null = untimed assignment, back-compat) ---
+  /// When set, this assessment is a TIMED exam. The student starts the attempt
+  /// (records Submission.startedAt) and must submit within durationMinutes AND
+  /// before closesAt — both enforced server-side. opensAt gates when a start is
+  /// allowed. The client shows a countdown; the server is authoritative.
+  timed           Boolean   @default(false)
+  durationMinutes Int?
+  opensAt         DateTime?
+  closesAt        DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -133,6 +143,9 @@ model Submission {
   fileKey      String?
   fileName     String?
   fileUploaded Boolean  @default(false)
+  /// For a TIMED exam: when the student began the attempt. The submit deadline is
+  /// startedAt + assessment.durationMinutes (and never past assessment.closesAt).
+  startedAt   DateTime?
   submittedAt DateTime?
 
   createdAt DateTime @default(now())

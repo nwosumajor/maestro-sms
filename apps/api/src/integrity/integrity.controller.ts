@@ -83,6 +83,16 @@ export class IntegrityController {
     await this.integrity.autosave(ctx, submissionId, body.content);
   }
 
+  /** Start a TIMED exam — records the attempt start + returns the firm deadline. */
+  @Post("start")
+  @RequirePermission(INTEGRITY_PERMISSIONS.SUBMISSION_WRITE)
+  async start(
+    @CurrentTenant() ctx: TenantContext,
+    @Param("submissionId") submissionId: string,
+  ): Promise<{ startedAt: Date; deadline: Date }> {
+    return this.integrity.startExam(ctx, submissionId);
+  }
+
   /** Final submit, then enqueue detection. */
   @Post("submit")
   @HttpCode(202)

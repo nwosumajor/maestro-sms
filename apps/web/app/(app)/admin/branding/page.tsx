@@ -12,7 +12,7 @@ export default async function BrandingPage() {
   const session = await auth();
   const user = session!.user;
   if (!hasPermission(user.permissions, "school.branding.manage")) redirect("/dashboard");
-  const branding = (await apiGet<Serialized<SchoolBrandingDto>>("/schools/branding")) ?? { slug: "", logoKey: null, logoUrl: null };
+  const branding = (await apiGet<Serialized<SchoolBrandingDto>>("/schools/branding")) ?? { slug: "", logoKey: null, logoUrl: null, brandHue: null, brandSat: null, brandLight: null, fontFamily: null };
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="admin" permissions={user.permissions}>

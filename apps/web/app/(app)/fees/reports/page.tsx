@@ -4,6 +4,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
+import { FeeReminderButton } from "@/components/fees/FeeReminderButton";
 import { AppShell } from "@/components/shell/AppShell";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { money } from "@/lib/format";
@@ -37,6 +38,14 @@ export default async function FinanceReportsPage() {
           </div>
           <Link href="/fees" className="text-sm text-muted-foreground hover:underline">← Fees</Link>
         </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Payment reminders</CardTitle>
+            <CardDescription>Notify guardians of students with outstanding balances (in-app + email/SMS).</CardDescription>
+          </CardHeader>
+          <CardContent><FeeReminderButton /></CardContent>
+        </Card>
 
         <div className="grid gap-4 sm:grid-cols-3">
           <Card><CardHeader><CardDescription>Invoiced</CardDescription><CardTitle className="text-2xl">{money(r.totals!.invoicedMinor)}</CardTitle></CardHeader></Card>

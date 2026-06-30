@@ -47,6 +47,22 @@ const PERMS = [
   // Task System
   "task.assign",
   "task.participate",
+  // Polling System
+  "poll.manage",
+  "poll.vote",
+  // Discussion Hub
+  "discussion.participate",
+  "discussion.moderate",
+  // Discipline Room
+  "discipline.file",
+  "discipline.manage",
+  // Certificate / ID generator
+  "certificate.issue",
+  // Alumni
+  "alumni.manage",
+  // Form builder
+  "form.manage",
+  "form.respond",
   // Document Vault
   "document.read",
   "document.write",
@@ -141,7 +157,7 @@ const ROLE_PERMS: Record<string, string[]> = {
   // is the cross-school Ultimate admin (+ leaderboard read to view it).
   super_admin: ["platform.operate", "billing.dunning.run", "security.audit.read", "directory.search", "game.ultimate.admin", "game.leaderboard.read"],
   // Board: read-only oversight + ultimate veto on workflows.
-  board: ["class.read", "grade.read", "integrity.report.read", "workflow.read", "workflow.veto", "notification.read", "fee.read", "document.read", "timetable.read", "message.read", "message.send", "event.read", "announcement.read", "billing.read",
+  board: ["poll.vote", "discussion.participate", "discipline.file", "form.respond", "class.read", "grade.read", "integrity.report.read", "workflow.read", "workflow.veto", "notification.read", "fee.read", "document.read", "timetable.read", "message.read", "message.send", "event.read", "announcement.read", "billing.read",
   ],
   // Principal: full operational view of their school (can grade, review workflows).
   principal: [
@@ -160,6 +176,8 @@ const ROLE_PERMS: Record<string, string[]> = {
     "transport.read", "transport.manage",
     "library.read", "library.borrow", "library.manage",
     "task.assign", "task.participate",
+    "poll.manage", "poll.vote",
+    "discussion.participate", "discussion.moderate", "discipline.file", "discipline.manage", "certificate.issue", "alumni.manage", "form.manage", "form.respond",
     "document.read", "document.write",
     "timetable.read", "timetable.write",
     "security.audit.read", "security.elevation.request", "security.elevation.approve",
@@ -186,6 +204,8 @@ const ROLE_PERMS: Record<string, string[]> = {
     "transport.read", "transport.manage",
     "library.read", "library.borrow", "library.manage",
     "task.assign", "task.participate",
+    "poll.manage", "poll.vote",
+    "discussion.participate", "discussion.moderate", "discipline.file", "discipline.manage", "certificate.issue", "alumni.manage", "form.manage", "form.respond",
     "document.read", "document.write",
     "timetable.read", "timetable.write",
     "security.audit.read", "security.elevation.request", "security.elevation.approve",
@@ -200,7 +220,8 @@ const ROLE_PERMS: Record<string, string[]> = {
     "lms.content.read", "lms.content.write", "lms.forum.post",
     "billing.read", "billing.manage",
   ],
-  teacher: ["hr.self", "task.assign", "task.participate",
+  teacher: ["hr.self", "task.assign", "task.participate", "poll.manage", "poll.vote",
+    "discussion.participate", "discussion.moderate", "discipline.file", "discipline.manage", "certificate.issue", "alumni.manage", "form.manage", "form.respond",
     "assessment.read", "assessment.write", "submission.read",
     "integrity.report.read", "integrity.exemption.read", "integrity.exemption.write",
     "student.profile.read", "student.contact.read",
@@ -223,9 +244,10 @@ const ROLE_PERMS: Record<string, string[]> = {
     "game.play", "game.leaderboard.read",
     "lms.content.read", "lms.quiz.attempt", "lms.forum.post",
     "library.read", "library.borrow",
-    "task.participate",
+    "task.participate", "poll.vote", "discussion.participate", "discipline.file", "form.respond",
   ],
   parent: [
+    "poll.vote",
     "class.read", "grade.read",
     "student.profile.read", "student.contact.read", "student.medical.read",
     "attendance.read",
@@ -235,13 +257,13 @@ const ROLE_PERMS: Record<string, string[]> = {
   ],
   // Non-teaching staff: narrow. Both can raise workflow requests (POs / leave).
   // The accountant owns Fees/Billing.
-  accountant: ["hr.self", "workflow.create", "workflow.read", "notification.read", "fee.read", "fee.manage", "document.read", "document.write", "security.elevation.request", "message.read", "message.send", "event.read", "announcement.read", "billing.read",
+  accountant: ["hr.self", "poll.vote", "discussion.participate", "discipline.file", "form.respond", "workflow.create", "workflow.read", "notification.read", "fee.read", "fee.manage", "document.read", "document.write", "security.elevation.request", "message.read", "message.send", "event.read", "announcement.read", "billing.read",
   ],
-  hr_clerk: ["hr.self", "workflow.create", "workflow.read", "notification.read", "security.elevation.request", "hr.read", "hr.write", "message.read", "message.send", "event.read", "announcement.read", "student.import", "class.read", "enrollment.read",
+  hr_clerk: ["hr.self", "poll.vote", "discussion.participate", "discipline.file", "form.respond", "workflow.create", "workflow.read", "notification.read", "security.elevation.request", "hr.read", "hr.write", "message.read", "message.send", "event.read", "announcement.read", "student.import", "class.read", "enrollment.read",
   ],
   // HR Manager: owns leave/salary/payroll + is the HR (stage-2) approver of the
   // staff-request chain. Salary maker-checker still needs TWO distinct managers.
-  hr_manager: ["hr.self", "task.assign", "task.participate",
+  hr_manager: ["hr.self", "task.assign", "task.participate", "poll.vote", "discussion.participate", "discipline.file", "form.respond",
     "workflow.create", "workflow.read", "workflow.review", "workflow.review.hr",
     "hr.read", "hr.write", "hr.salary.request", "hr.salary.approve", "hr.leave.manage", "hr.payroll.run",
     "hr.appraisal.manage", "hr.disciplinary.manage", "hr.recruit.manage",
@@ -254,14 +276,14 @@ const ROLE_PERMS: Record<string, string[]> = {
     "message.read", "message.send", "event.read", "announcement.read",
   ],
   // Head of teaching: stage-1 approver for teaching staff requests.
-  head_teacher: ["hr.self", "task.assign", "task.participate",
+  head_teacher: ["hr.self", "task.assign", "task.participate", "poll.vote", "discussion.participate", "discipline.file", "form.respond",
     "class.read", "enrollment.read", "attendance.read", "grade.read",
     "workflow.create", "workflow.read", "workflow.review", "workflow.review.head",
     "notification.read", "notification.send", "security.elevation.request",
     "message.read", "message.send", "event.read", "announcement.read",
   ],
   // Head of administration: stage-1 approver for non-teaching staff requests.
-  head_admin: ["hr.self", "task.assign", "task.participate",
+  head_admin: ["hr.self", "task.assign", "task.participate", "poll.vote", "discussion.participate", "discipline.file", "form.respond",
     "workflow.create", "workflow.read", "workflow.review", "workflow.review.head",
     "document.read", "notification.read", "notification.send", "security.elevation.request",
     "message.read", "message.send", "event.read", "announcement.read",

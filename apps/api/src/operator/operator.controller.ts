@@ -23,7 +23,7 @@ const provisionSchema = z
   .object({
     name: z.string().min(1).max(160),
     slug: z.string().min(2).max(40),
-    plan: z.enum([PLANS.BASIC, PLANS.STANDARD, PLANS.ENTERPRISE]).optional(),
+    plan: z.enum([PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE]).optional(),
     // Extra modules beyond the chosen plan: `enabled` force-on add-ons (the "special
     // modules" a school pays extra for); `disabled` force-off. Same shape as the
     // subscription PUT, so onboarding and later edits share one override model.
@@ -48,7 +48,7 @@ const onboardingStatusSchema = z.object({
   note: z.string().max(1000).optional(),
 });
 const subSchema = z.object({
-  plan: z.enum([PLANS.BASIC, PLANS.STANDARD, PLANS.ENTERPRISE]),
+  plan: z.enum([PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE]),
   overrides: z
     .object({
       enabled: z.array(z.string()).optional(),

@@ -28,6 +28,12 @@ const entrySchema = z.object({
   teacherId: z.string().uuid(),
   roomId: z.string().uuid().nullish(),
 });
+const generateSchema = z.object({
+  classIds: z.array(z.string().uuid()).optional(),
+  lessonsPerSubject: z.number().int().min(1).max(10).optional(),
+  days: z.array(z.enum(DAYS_OF_WEEK)).optional(),
+  replace: z.boolean().optional(),
+});
 const entryUpdateSchema = entrySchema.partial();
 
 @RequireModule(MODULES.TIMETABLE)
@@ -85,6 +91,16 @@ export class TimetableController {
     @Body(new ZodValidationPipe(roomUpdateSchema)) body: z.infer<typeof roomUpdateSchema>,
   ) {
     return this.timetable.updateRoom(p, id, body);
+  }
+
+  /** Auto-generate a conflict-free weekly grid from class-subject-teacher offerings. */
+  @Post("generate")
+  @RequirePermission(TIMETABLE_PERMISSIONS.TIMETABLE_WRITE)
+  generate(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(generateSchema)) body: z.infer<typeof generateSchema>,
+  ) {
+    return this.timetable.generate(p, body);
   }
 
   // --- entries (conflict-checked) ---

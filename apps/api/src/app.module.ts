@@ -31,6 +31,13 @@ import { AnnouncementsModule } from "./announcements/announcements.module";
 import { HostelModule } from "./hostel/hostel.module";
 import { TransportModule } from "./transport/transport.module";
 import { LibraryModule } from "./library/library.module";
+import { TaskModule } from "./task/task.module";
+import { PollModule } from "./poll/poll.module";
+import { DiscussionModule } from "./discussion/discussion.module";
+import { DisciplineModule } from "./discipline/discipline.module";
+import { CertificateModule } from "./certificate/certificate.module";
+import { AlumniModule } from "./alumni/alumni.module";
+import { FormModule } from "./form/form.module";
 import { GameModule } from "./game/game.module";
 import { GameSocketModule } from "./game-socket/game-socket.module";
 import { HealthController } from "./health.controller";
@@ -80,6 +87,13 @@ import { HealthController } from "./health.controller";
     HostelModule,
     TransportModule,
     LibraryModule,
+    TaskModule,
+    PollModule,
+    DiscussionModule,
+    DisciplineModule,
+    CertificateModule,
+    AlumniModule,
+    FormModule,
     GameModule,
     GameSocketModule,
   ],

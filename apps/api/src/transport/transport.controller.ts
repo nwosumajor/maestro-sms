@@ -1,5 +1,7 @@
+import { RequireModule } from "../auth/require-module.decorator";
 import { Body, Controller, Get, Param, Post, Put, Query } from "@nestjs/common";
 import { TRANSPORT_PERMISSIONS } from "@sms/types";
+import { MODULES } from "@sms/types";
 import type {
   RouteStopDto,
   TransportAssignmentDto,
@@ -50,6 +52,7 @@ const assignSchema = z.object({
 const changeSchema = z.object({ routeId: z.string().uuid(), stopId: z.string().uuid().nullish() });
 const feeSchema = z.object({ routeId: z.string().uuid().optional(), dueDate: z.string(), description: z.string().max(200).optional() });
 
+@RequireModule(MODULES.TRANSPORT)
 @Controller("transport")
 export class TransportController {
   constructor(private readonly transport: TransportService) {}

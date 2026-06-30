@@ -1,0 +1,58 @@
+// =============================================================================
+// Discussion Hub — tenant-scoped (school_id non-null + RLS). Topic groups for a
+// selected audience; members post messages and comment; an admin can delete an
+// unwanted post/comment. Relationship-scoped: a member sees groups for their
+// audience; non-staff can post but cannot moderate.
+// =============================================================================
+
+model DiscussionGroup {
+  id          String   @id @default(uuid()) @db.Uuid
+  schoolId    String   @db.Uuid
+  name        String
+  description String?
+  /// ALL | STUDENTS | STAFF — who may see + post (mirrors announcement audiences).
+  audience    String   @default("ALL")
+  createdById String   @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  posts DiscussionPost[]
+
+  @@index([schoolId])
+  @@map("discussion_group")
+}
+
+model DiscussionPost {
+  id        String   @id @default(uuid()) @db.Uuid
+  schoolId  String   @db.Uuid
+  groupId   String   @db.Uuid
+  authorId  String   @db.Uuid
+  body      String
+  /// Soft-delete: an admin can hide an unwanted post (audit-logged, not purged).
+  deleted   Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  group    DiscussionGroup     @relation(fields: [groupId], references: [id])
+  comments DiscussionComment[]
+
+  @@index([schoolId])
+  @@index([schoolId, groupId])
+  @@map("discussion_post")
+}
+
+model DiscussionComment {
+  id        String   @id @default(uuid()) @db.Uuid
+  schoolId  String   @db.Uuid
+  postId    String   @db.Uuid
+  authorId  String   @db.Uuid
+  body      String
+  deleted   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  post DiscussionPost @relation(fields: [postId], references: [id])
+
+  @@index([schoolId])
+  @@index([postId])
+  @@map("discussion_comment")
+}

@@ -119,6 +119,10 @@ export class AssessmentListService {
       focusTracked?: boolean;
       typingTracked?: boolean;
       fileUploadEnabled?: boolean;
+      timed?: boolean;
+      durationMinutes?: number | null;
+      opensAt?: string | null;
+      closesAt?: string | null;
     },
   ): Promise<AssessmentSummaryDto> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
@@ -135,6 +139,10 @@ export class AssessmentListService {
           focusTracked: input.focusTracked ?? false,
           typingTracked: input.typingTracked ?? false,
           fileUploadEnabled: input.fileUploadEnabled ?? false,
+          timed: input.timed ?? false,
+          durationMinutes: input.durationMinutes ?? null,
+          opensAt: input.opensAt ? new Date(input.opensAt) : null,
+          closesAt: input.closesAt ? new Date(input.closesAt) : null,
         },
       });
       await this.audit.record(

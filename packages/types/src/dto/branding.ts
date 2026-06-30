@@ -7,11 +7,16 @@ export interface PublicBrandingDto {
   logoUrl: string | null;
 }
 
-/** Admin view of the caller's school branding. */
+/** Admin view of the caller's school branding (logo + theme). */
 export interface SchoolBrandingDto {
   slug: string;
   logoKey: string | null;
   logoUrl: string | null;
+  /** Brand colour (HSL) + font; null = inherit the platform defaults. */
+  brandHue: number | null;
+  brandSat: number | null;
+  brandLight: number | null;
+  fontFamily: string | null;
 }
 
 /** Result of requesting a logo upload target (client PUTs bytes to uploadUrl). */

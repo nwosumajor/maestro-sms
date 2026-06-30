@@ -35,8 +35,14 @@ describe("computeSubscriptionPriceMinor", () => {
     expect(computeSubscriptionPriceMinor(PLANS.ENTERPRISE, -5, BILLING_CYCLES.MONTH)).toBe(monthly * 1);
   });
 
-  it("BASIC is the free floor (₦0 at any size)", () => {
-    expect(computeSubscriptionPriceMinor(PLANS.BASIC, 1000, BILLING_CYCLES.YEAR)).toBe(0);
+  it("higher tiers cost more per seat (STANDARD < PREMIUM < ULTIMATE < ENTERPRISE)", () => {
+    const std = PLAN_PRICING.STANDARD.perSeatMonthlyMinor;
+    const prem = PLAN_PRICING.PREMIUM.perSeatMonthlyMinor;
+    const ult = PLAN_PRICING.ULTIMATE.perSeatMonthlyMinor;
+    const ent = PLAN_PRICING.ENTERPRISE.perSeatMonthlyMinor;
+    expect(std).toBeLessThan(prem);
+    expect(prem).toBeLessThan(ult);
+    expect(ult).toBeLessThan(ent);
   });
 });
 
@@ -61,25 +67,25 @@ describe("effectivePlan", () => {
     );
   });
 
-  it("PAST_DUE drops to BASIC once the grace window elapses", () => {
+  it("PAST_DUE drops to the STANDARD floor once the grace window elapses", () => {
     expect(effectivePlan(PLANS.ENTERPRISE, SUBSCRIPTION_STATUS.PAST_DUE, longPast, SUBSCRIPTION_GRACE_DAYS, now)).toBe(
-      PLANS.BASIC,
+      PLANS.STANDARD,
     );
   });
 
   it("CANCELED keeps the plan only until period end (no grace)", () => {
-    expect(effectivePlan(PLANS.STANDARD, SUBSCRIPTION_STATUS.CANCELED, future, SUBSCRIPTION_GRACE_DAYS, now)).toBe(
-      PLANS.STANDARD,
+    expect(effectivePlan(PLANS.ULTIMATE, SUBSCRIPTION_STATUS.CANCELED, future, SUBSCRIPTION_GRACE_DAYS, now)).toBe(
+      PLANS.ULTIMATE,
     );
-    expect(effectivePlan(PLANS.STANDARD, SUBSCRIPTION_STATUS.CANCELED, justPast, SUBSCRIPTION_GRACE_DAYS, now)).toBe(
-      PLANS.BASIC,
+    expect(effectivePlan(PLANS.ULTIMATE, SUBSCRIPTION_STATUS.CANCELED, justPast, SUBSCRIPTION_GRACE_DAYS, now)).toBe(
+      PLANS.STANDARD,
     );
   });
 
   it("never enforces above the purchased plan", () => {
-    // A past-due BASIC school stays BASIC, not bumped up.
-    expect(effectivePlan(PLANS.BASIC, SUBSCRIPTION_STATUS.PAST_DUE, longPast, SUBSCRIPTION_GRACE_DAYS, now)).toBe(
-      PLANS.BASIC,
+    // A past-due STANDARD school stays STANDARD (the floor), not bumped up.
+    expect(effectivePlan(PLANS.STANDARD, SUBSCRIPTION_STATUS.PAST_DUE, longPast, SUBSCRIPTION_GRACE_DAYS, now)).toBe(
+      PLANS.STANDARD,
     );
   });
 });

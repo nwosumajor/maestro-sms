@@ -18,6 +18,11 @@ const createSchema = z.object({
   focusTracked: z.boolean().optional(),
   typingTracked: z.boolean().optional(),
   fileUploadEnabled: z.boolean().optional(),
+  // Timed-exam window (all optional; omit for an untimed assignment).
+  timed: z.boolean().optional(),
+  durationMinutes: z.number().int().min(1).max(600).nullish(),
+  opensAt: z.string().nullish(),
+  closesAt: z.string().nullish(),
 });
 const updateSchema = z.object({
   title: z.string().min(1).max(200).optional(),

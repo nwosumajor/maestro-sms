@@ -19,7 +19,7 @@ import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-const PLAN_LIST: Plan[] = [PLANS.BASIC, PLANS.STANDARD, PLANS.ENTERPRISE];
+const PLAN_LIST: Plan[] = [PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE];
 
 export function SubscriptionManager({ schoolId, plan: initialPlan }: { schoolId: string; plan: string }) {
   const [open, setOpen] = React.useState(false);

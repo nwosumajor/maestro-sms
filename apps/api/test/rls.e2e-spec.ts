@@ -106,6 +106,29 @@ d("RLS cross-tenant isolation", () => {
   // Library
   const libraryBookA = randomUUID();
   const bookLoanA = randomUUID();
+  // Task
+  const taskA = randomUUID();
+  const taskAssignmentA = randomUUID();
+  const taskCommentA = randomUUID();
+  // Poll
+  const pollA = randomUUID();
+  const pollOptionA = randomUUID();
+  const pollVoteA = randomUUID();
+  // Discussion
+  const discussionGroupA = randomUUID();
+  const discussionPostA = randomUUID();
+  const discussionCommentA = randomUUID();
+  // Discipline
+  const disciplineComplaintA = randomUUID();
+  const disciplineAssigneeA = randomUUID();
+  const disciplineEvidenceA = randomUUID();
+  const disciplineEntryA = randomUUID();
+  // Certificate
+  const issuedCertificateA = randomUUID();
+  // Alumni + Form
+  const alumnusA = randomUUID();
+  const formA = randomUUID();
+  const formResponseA = randomUUID();
   // HR recruitment
   const jobReqA = randomUUID();
   const applicantA = randomUUID();
@@ -399,6 +422,80 @@ d("RLS cross-tenant isolation", () => {
       `INSERT INTO book_loan (id,"schoolId","bookId","borrowerId","dueAt","updatedAt") VALUES ($1,$2,$3,$4,now() + interval '14 days',now())`,
       [bookLoanA, A, libraryBookA, userA],
     );
+    // Task: task + assignment + comment (creator + assignee userA).
+    await a.query(
+      `INSERT INTO task (id,"schoolId",title,"createdById","updatedAt") VALUES ($1,$2,'Task A',$3,now())`,
+      [taskA, A, userA],
+    );
+    await a.query(
+      `INSERT INTO task_assignment (id,"schoolId","taskId","assigneeId","updatedAt") VALUES ($1,$2,$3,$4,now())`,
+      [taskAssignmentA, A, taskA, userA],
+    );
+    await a.query(
+      `INSERT INTO task_comment (id,"schoolId","taskId","authorId",body) VALUES ($1,$2,$3,$4,'Hi')`,
+      [taskCommentA, A, taskA, userA],
+    );
+    // Poll: poll + option + vote (voter userA).
+    await a.query(
+      `INSERT INTO poll (id,"schoolId",question,"createdById","updatedAt") VALUES ($1,$2,'Q?',$3,now())`,
+      [pollA, A, userA],
+    );
+    await a.query(
+      `INSERT INTO poll_option (id,"schoolId","pollId",label) VALUES ($1,$2,$3,'Yes')`,
+      [pollOptionA, A, pollA],
+    );
+    await a.query(
+      `INSERT INTO poll_vote (id,"schoolId","pollId","optionId","voterId") VALUES ($1,$2,$3,$4,$5)`,
+      [pollVoteA, A, pollA, pollOptionA, userA],
+    );
+    // Discussion: group + post + comment (author userA).
+    await a.query(
+      `INSERT INTO discussion_group (id,"schoolId",name,"createdById","updatedAt") VALUES ($1,$2,'G',$3,now())`,
+      [discussionGroupA, A, userA],
+    );
+    await a.query(
+      `INSERT INTO discussion_post (id,"schoolId","groupId","authorId",body,"updatedAt") VALUES ($1,$2,$3,$4,'P',now())`,
+      [discussionPostA, A, discussionGroupA, userA],
+    );
+    await a.query(
+      `INSERT INTO discussion_comment (id,"schoolId","postId","authorId",body) VALUES ($1,$2,$3,$4,'C')`,
+      [discussionCommentA, A, discussionPostA, userA],
+    );
+    // Discipline: complaint + assignee + evidence + entry (complainant/against userA).
+    await a.query(
+      `INSERT INTO discipline_complaint (id,"schoolId",subject,"complainantId","againstId","updatedAt") VALUES ($1,$2,'S',$3,$4,now())`,
+      [disciplineComplaintA, A, userA, userA],
+    );
+    await a.query(
+      `INSERT INTO discipline_assignee (id,"schoolId","complaintId","assigneeId") VALUES ($1,$2,$3,$4)`,
+      [disciplineAssigneeA, A, disciplineComplaintA, userA],
+    );
+    await a.query(
+      `INSERT INTO discipline_evidence (id,"schoolId","complaintId","uploadedById","fileKey","fileName") VALUES ($1,$2,$3,$4,'k','f.png')`,
+      [disciplineEvidenceA, A, disciplineComplaintA, userA],
+    );
+    await a.query(
+      `INSERT INTO discipline_entry (id,"schoolId","complaintId","authorId",body) VALUES ($1,$2,$3,$4,'note')`,
+      [disciplineEntryA, A, disciplineComplaintA, userA],
+    );
+    // Certificate: issued ID card (subject + issuer userA).
+    await a.query(
+      `INSERT INTO issued_certificate (id,"schoolId",type,"subjectId","issuedById",serial) VALUES ($1,$2,'ID_CARD',$3,$4,'ID-X')`,
+      [issuedCertificateA, A, userA, userA],
+    );
+    // Alumni + Form (creator + respondent userA).
+    await a.query(
+      `INSERT INTO alumnus (id,"schoolId",name,"createdById","updatedAt") VALUES ($1,$2,'Old Boy',$3,now())`,
+      [alumnusA, A, userA],
+    );
+    await a.query(
+      `INSERT INTO form (id,"schoolId",title,"createdById","updatedAt") VALUES ($1,$2,'Survey',$3,now())`,
+      [formA, A, userA],
+    );
+    await a.query(
+      `INSERT INTO form_response (id,"schoolId","formId","respondentId") VALUES ($1,$2,$3,$4)`,
+      [formResponseA, A, formA, userA],
+    );
     await a.query(
       `INSERT INTO enrollment (id,"schoolId","classId","studentId") VALUES ($1,$2,$3,$4)`,
       [enrollmentA, A, classA, userA],
@@ -540,6 +637,29 @@ d("RLS cross-tenant isolation", () => {
       // Library — loan before book.
       "book_loan",
       "library_book",
+      // Task — comment + assignment before task.
+      "task_comment",
+      "task_assignment",
+      "task",
+      // Poll — vote + option before poll.
+      "poll_vote",
+      "poll_option",
+      "poll",
+      // Discussion — comment + post before group.
+      "discussion_comment",
+      "discussion_post",
+      "discussion_group",
+      // Discipline — children before complaint.
+      "discipline_entry",
+      "discipline_evidence",
+      "discipline_assignee",
+      "discipline_complaint",
+      // Certificate — append-only log (cleaned via admin pool).
+      "issued_certificate",
+      // Alumni + Form — response before form.
+      "alumnus",
+      "form_response",
+      "form",
       // HR recruitment — applicant before requisition.
       "applicant",
       "job_requisition",
@@ -738,6 +858,23 @@ d("RLS cross-tenant isolation", () => {
     ["transport_assignment", transportAssignmentA],
     ["library_book", libraryBookA],
     ["book_loan", bookLoanA],
+    ["task", taskA],
+    ["task_assignment", taskAssignmentA],
+    ["task_comment", taskCommentA],
+    ["poll", pollA],
+    ["poll_option", pollOptionA],
+    ["poll_vote", pollVoteA],
+    ["discussion_group", discussionGroupA],
+    ["discussion_post", discussionPostA],
+    ["discussion_comment", discussionCommentA],
+    ["discipline_complaint", disciplineComplaintA],
+    ["discipline_assignee", disciplineAssigneeA],
+    ["discipline_evidence", disciplineEvidenceA],
+    ["discipline_entry", disciplineEntryA],
+    ["issued_certificate", issuedCertificateA],
+    ["alumnus", alumnusA],
+    ["form", formA],
+    ["form_response", formResponseA],
     ["subject", subjectA],
     ["class_subject_teacher", classSubjectA],
     ["student_import_batch", importBatchA],

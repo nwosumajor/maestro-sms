@@ -1,0 +1,50 @@
+// =============================================================================
+// Form Builder — tenant-scoped (school_id non-null + RLS). Staff build a form with
+// a JSON field schema (feedback surveys, performance-review templates, …) for a
+// chosen audience; members submit ONE response. Responses store answers as JSON.
+// Optionally anonymous (the submitter's identity is recorded for one-per-member
+// enforcement but never returned when anonymous — mirrors the polling model).
+// =============================================================================
+
+model Form {
+  id          String   @id @default(uuid()) @db.Uuid
+  schoolId    String   @db.Uuid
+  title       String
+  description String?
+  /// Ordered field definitions: [{ key, label, type: text|textarea|number|select|rating, options?, required? }]
+  fields      Json     @default("[]")
+  /// ALL | STUDENTS | STAFF — who may respond (mirrors announcement audiences).
+  audience    String   @default("ALL")
+  /// When true, responses are not attributable in any read (identity recorded only
+  /// to enforce one-per-member).
+  anonymous   Boolean  @default(false)
+  /// OPEN | CLOSED.
+  status      String   @default("OPEN")
+  createdById String   @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  responses FormResponse[]
+
+  @@index([schoolId])
+  @@map("form")
+}
+
+model FormResponse {
+  id          String   @id @default(uuid()) @db.Uuid
+  schoolId    String   @db.Uuid
+  formId      String   @db.Uuid
+  /// SECURITY: enforces one response per member + audit. NEVER returned for an
+  /// anonymous form.
+  respondentId String  @db.Uuid
+  /// { [fieldKey]: value } answers.
+  answers     Json     @default("{}")
+  createdAt   DateTime @default(now())
+
+  form Form @relation(fields: [formId], references: [id])
+
+  @@unique([formId, respondentId])
+  @@index([schoolId])
+  @@index([schoolId, formId])
+  @@map("form_response")
+}

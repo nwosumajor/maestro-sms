@@ -179,6 +179,51 @@ export class FeesService {
     });
   }
 
+  /** Send payment reminders to guardians of students with OUTSTANDING invoices
+   *  (ISSUED / PARTIALLY_PAID). Optionally only overdue ones (dueDate < today).
+   *  Reuses the guardian-notify path (in-app + email/SMS via the channel provider).
+   *  Staff-triggered (fee.manage). Returns how many reminders were sent. */
+  async sendFeeReminders(p: Principal, opts: { overdueOnly?: boolean } = {}): Promise<{ reminded: number; invoices: number }> {
+    const today = new Date();
+    const targets = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const where: Record<string, unknown> = { status: { in: ["ISSUED", "PARTIALLY_PAID"] } };
+      if (opts.overdueOnly) where.dueDate = { lt: today };
+      const invoices = await tx.invoice.findMany({
+        where,
+        select: { id: true, studentId: true, reference: true, totalMinor: true, dueDate: true },
+        take: 2000,
+      });
+      // Sum paid per invoice to compute the outstanding balance.
+      const ids = invoices.map((i: { id: string }) => i.id);
+      const payments = ids.length
+        ? await tx.payment.findMany({ where: { invoiceId: { in: ids }, status: "POSTED" }, select: { invoiceId: true, amountMinor: true } })
+        : [];
+      const paidByInvoice = new Map<string, number>();
+      for (const pay of payments as Array<{ invoiceId: string; amountMinor: number }>) {
+        paidByInvoice.set(pay.invoiceId, (paidByInvoice.get(pay.invoiceId) ?? 0) + pay.amountMinor);
+      }
+      return invoices
+        .map((inv: { id: string; studentId: string; reference: string; totalMinor: number; dueDate: Date }) => ({
+          ...inv,
+          outstanding: inv.totalMinor - (paidByInvoice.get(inv.id) ?? 0),
+        }))
+        .filter((inv: { outstanding: number }) => inv.outstanding > 0);
+    });
+
+    let reminded = 0;
+    for (const inv of targets) {
+      const overdue = inv.dueDate < today;
+      await this.notifyGuardians(p, inv.studentId, {
+        type: "FEE_REMINDER",
+        title: overdue ? "Overdue fee reminder" : "Fee payment reminder",
+        body: `Invoice ${inv.reference} has an outstanding balance of ${(inv.outstanding / 100).toFixed(2)}${overdue ? ` (due ${inv.dueDate.toISOString().slice(0, 10)})` : ""}.`,
+        data: { invoiceId: inv.id, outstandingMinor: inv.outstanding },
+      });
+      reminded++;
+    }
+    return { reminded, invoices: targets.length };
+  }
+
   /** DRAFT -> ISSUED, then notify the student's guardians of the amount due. */
   async issueInvoice(p: Principal, id: string) {
     const invoice = await this.db.runAsTenant(this.ctx(p), async (tx) => {

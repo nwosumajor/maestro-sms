@@ -67,12 +67,12 @@ d("Subscription / module entitlements (RLS, plan tiers, overrides)", () => {
     expect(sub.modules).toContain(MODULES.GAMES);
   });
 
-  it("BASIC tier excludes higher-tier modules; cache reflects the change at once", async () => {
-    const sub = await svc.setSubscription(operator(), SA, { plan: "BASIC" });
-    expect(sub.plan).toBe("BASIC");
+  it("STANDARD tier excludes higher-tier modules; cache reflects the change at once", async () => {
+    const sub = await svc.setSubscription(operator(), SA, { plan: "STANDARD" });
+    expect(sub.plan).toBe("STANDARD");
     expect(sub.modules).toContain(MODULES.LMS);
-    expect(sub.modules).not.toContain(MODULES.FEES);
-    expect(sub.modules).not.toContain(MODULES.HR);
+    expect(sub.modules).not.toContain(MODULES.FEES); // FEES is PREMIUM+
+    expect(sub.modules).not.toContain(MODULES.HR); // HR is ENTERPRISE-only
     // The guard's path: isEnabled reads the (now invalidated → refreshed) cache.
     expect(await entitlements.isEnabled(SA, MODULES.LMS)).toBe(true);
     expect(await entitlements.isEnabled(SA, MODULES.FEES)).toBe(false);
@@ -80,10 +80,10 @@ d("Subscription / module entitlements (RLS, plan tiers, overrides)", () => {
 
   it("per-school overrides force a module on (add-on) and off (removed)", async () => {
     const sub = await svc.setSubscription(operator(), SA, {
-      plan: "STANDARD",
+      plan: "PREMIUM",
       overrides: { enabled: [MODULES.HR], disabled: [MODULES.FEES] },
     });
-    // STANDARD includes fees but we removed it; HR is not in STANDARD but added.
+    // PREMIUM includes fees but we removed it; HR is not in PREMIUM but added.
     expect(sub.modules).toContain(MODULES.HR);
     expect(sub.modules).not.toContain(MODULES.FEES);
     expect(sub.modules).toContain(MODULES.LMS); // still in the tier

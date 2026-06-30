@@ -80,7 +80,30 @@ export class BrandingService {
         { actorId: p.userId, action: "school.branding.logo.remove", entity: "school_branding", entityId: p.schoolId, schoolId: p.schoolId },
         tx,
       );
-      return { slug: school?.slug ?? "", logoKey: null, logoUrl: null };
+      const b = await tx.schoolBranding.findFirst({ where: { schoolId: p.schoolId } });
+      return this.dto(school?.slug ?? "", null, b);
+    });
+  }
+
+  /** Set the per-school theme (brand colour HSL + font). Null clears a field. */
+  async setTheme(
+    p: Principal,
+    input: { brandHue?: number | null; brandSat?: number | null; brandLight?: number | null; fontFamily?: string | null },
+  ): Promise<SchoolBrandingDto> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      await tx.schoolBranding.upsert({
+        where: { schoolId: p.schoolId },
+        update: { ...input },
+        create: { schoolId: p.schoolId, ...input },
+      });
+      await this.audit.record(
+        { actorId: p.userId, action: "school.branding.theme.set", entity: "school_branding", entityId: p.schoolId, schoolId: p.schoolId, metadata: { fields: Object.keys(input) } },
+        tx,
+      );
+      const school = await tx.school.findFirst({ where: { id: p.schoolId }, select: { slug: true } });
+      const b = await tx.schoolBranding.findFirst({ where: { schoolId: p.schoolId } });
+      const logoUrl = b?.logoKey ? (await this.storage.presignDownload({ key: b.logoKey })).url : null;
+      return this.dto(school?.slug ?? "", logoUrl, b);
     });
   }
 
@@ -89,8 +112,24 @@ export class BrandingService {
       const school = await tx.school.findFirst({ where: { id: p.schoolId }, select: { slug: true } });
       const b = await tx.schoolBranding.findFirst({ where: { schoolId: p.schoolId } });
       const logoUrl = b?.logoKey ? (await this.storage.presignDownload({ key: b.logoKey })).url : null;
-      return { slug: school?.slug ?? "", logoKey: b?.logoKey ?? null, logoUrl };
+      return this.dto(school?.slug ?? "", logoUrl, b);
     });
+  }
+
+  private dto(
+    slug: string,
+    logoUrl: string | null,
+    b: { logoKey?: string | null; brandHue?: number | null; brandSat?: number | null; brandLight?: number | null; fontFamily?: string | null } | null,
+  ): SchoolBrandingDto {
+    return {
+      slug,
+      logoKey: b?.logoKey ?? null,
+      logoUrl,
+      brandHue: b?.brandHue ?? null,
+      brandSat: b?.brandSat ?? null,
+      brandLight: b?.brandLight ?? null,
+      fontFamily: b?.fontFamily ?? null,
+    };
   }
 
   /** Public, pre-auth: a school's login branding by slug. Logo hidden if lapsed. */

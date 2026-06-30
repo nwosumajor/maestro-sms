@@ -81,6 +81,13 @@ export class FeesController {
     return this.gateway.handleWebhook(req.rawBody, signature);
   }
 
+  /** Send payment reminders to guardians of students with outstanding invoices. */
+  @Post("fees/reminders/run")
+  @RequirePermission(FEES_PERMISSIONS.FEE_MANAGE)
+  sendReminders(@CurrentPrincipal() p: Principal, @Query("overdueOnly") overdueOnly?: string) {
+    return this.fees.sendFeeReminders(p, { overdueOnly: overdueOnly === "true" });
+  }
+
   // --- fee catalog (manage) ---
   @Get("fees/items")
   @RequirePermission(FEES_PERMISSIONS.FEE_MANAGE)

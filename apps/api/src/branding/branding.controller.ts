@@ -10,6 +10,12 @@ import type { Principal } from "../integrity/integrity.foundation";
 import { BrandingService } from "./branding.service";
 
 const uploadSchema = z.object({ contentType: z.enum(["image/png", "image/jpeg", "image/svg+xml", "image/webp"]) });
+const themeSchema = z.object({
+  brandHue: z.number().int().min(0).max(360).nullish(),
+  brandSat: z.number().int().min(0).max(100).nullish(),
+  brandLight: z.number().int().min(0).max(100).nullish(),
+  fontFamily: z.string().max(200).nullish(),
+});
 
 // Always-on (no @RequireModule): branding is platform-level, not a subscription
 // module. The custom logo's VISIBILITY is gated by subscription standing in the
@@ -32,6 +38,16 @@ export class BrandingController {
   @RequirePermission(ADMIN_PERMISSIONS.SCHOOL_BRANDING_MANAGE)
   remove(@CurrentPrincipal() p: Principal): Promise<SchoolBrandingDto> {
     return this.branding.removeLogo(p);
+  }
+
+  /** Set the per-school theme (brand colour + font). */
+  @Post("schools/branding/theme")
+  @RequirePermission(ADMIN_PERMISSIONS.SCHOOL_BRANDING_MANAGE)
+  setTheme(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(themeSchema)) body: z.infer<typeof themeSchema>,
+  ): Promise<SchoolBrandingDto> {
+    return this.branding.setTheme(p, body);
   }
 
   @Get("schools/branding")
