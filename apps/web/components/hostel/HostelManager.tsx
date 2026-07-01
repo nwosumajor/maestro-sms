@@ -23,12 +23,17 @@ export function HostelManager({
   hostels,
   allocations,
   students,
+  staff = [],
   canManage,
+  canCreate = canManage,
 }: {
   hostels: Hostel[];
   allocations: Allocation[];
   students: Student[];
+  staff?: Student[];
   canManage: boolean;
+  /** Creating a hostel is admin-only; a warden manages their existing hostel. */
+  canCreate?: boolean;
 }) {
   const router = useRouter();
   const [msg, setMsg] = React.useState<string | null>(null);
@@ -37,6 +42,7 @@ export function HostelManager({
   // new hostel
   const [hName, setHName] = React.useState("");
   const [hType, setHType] = React.useState("MIXED");
+  const [hWarden, setHWarden] = React.useState("");
   // new room (per hostel)
   const [roomFor, setRoomFor] = React.useState("");
   const [rNum, setRNum] = React.useState("");
@@ -68,7 +74,7 @@ export function HostelManager({
     <div className="space-y-6">
       {msg && <p className="text-sm text-muted-foreground">{msg}</p>}
 
-      {canManage && (
+      {canCreate && (
         <Card>
           <CardHeader><CardTitle className="text-base">Create hostel</CardTitle></CardHeader>
           <CardContent className="flex flex-wrap items-end gap-2">
@@ -79,7 +85,14 @@ export function HostelManager({
                 <option>MIXED</option><option>BOYS</option><option>GIRLS</option>
               </select>
             </div>
-            <Button disabled={busy || !hName} onClick={() => run(() => postSms("hostels", { name: hName, type: hType }), "Hostel created.")}>Create</Button>
+            <div className="space-y-1.5">
+              <Label htmlFor="h-warden">Warden</Label>
+              <select id="h-warden" value={hWarden} onChange={(e) => setHWarden(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
+                <option value="">— none —</option>
+                {staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+            <Button disabled={busy || !hName} onClick={() => run(() => postSms("hostels", { name: hName, type: hType, wardenId: hWarden || null }), "Hostel created.")}>Create</Button>
           </CardContent>
         </Card>
       )}

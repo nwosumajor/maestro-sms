@@ -22,9 +22,9 @@ type Assignment = Serialized<TransportAssignmentDto>;
 type Person = { id: string; name: string };
 
 export function TransportManager({
-  vehicles, routes, assignments, students, canManage,
+  vehicles, routes, assignments, students, staff = [], canManage,
 }: {
-  vehicles: Vehicle[]; routes: Route[]; assignments: Assignment[]; students: Person[]; canManage: boolean;
+  vehicles: Vehicle[]; routes: Route[]; assignments: Assignment[]; students: Person[]; staff?: Person[]; canManage: boolean;
 }) {
   const router = useRouter();
   const [msg, setMsg] = React.useState<string | null>(null);
@@ -32,6 +32,7 @@ export function TransportManager({
 
   const [vName, setVName] = React.useState("");
   const [vCap, setVCap] = React.useState(40);
+  const [vDriver, setVDriver] = React.useState("");
   const [rName, setRName] = React.useState("");
   const [rVehicle, setRVehicle] = React.useState("");
   const [rMode, setRMode] = React.useState<"FLAT" | "STOP">("FLAT");
@@ -60,7 +61,14 @@ export function TransportManager({
           <CardContent className="flex flex-wrap items-end gap-2">
             <div className="space-y-1.5"><Label>Name</Label><Input value={vName} onChange={(e) => setVName(e.target.value)} placeholder="Bus 1" /></div>
             <div className="space-y-1.5"><Label>Capacity</Label><Input className="w-24" type="number" min={0} value={vCap} onChange={(e) => setVCap(Number(e.target.value))} /></div>
-            <Button disabled={busy || !vName} onClick={() => run(() => postSms("transport/vehicles", { name: vName, capacity: vCap }), "Vehicle added.")}>Add</Button>
+            <div className="space-y-1.5">
+              <Label>Driver</Label>
+              <select value={vDriver} onChange={(e) => setVDriver(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
+                <option value="">— none —</option>
+                {staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+            <Button disabled={busy || !vName} onClick={() => run(() => postSms("transport/vehicles", { name: vName, capacity: vCap, driverId: vDriver || null }), "Vehicle added.")}>Add</Button>
           </CardContent>
         </Card>
       )}

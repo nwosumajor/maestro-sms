@@ -27,14 +27,24 @@ export function ClassSubjectsAdmin({
   const staff = users; // any staff can supervise
   const sel = "h-9 rounded-md border border-input bg-background px-3 text-sm";
 
-  const send = async (method: "POST" | "PUT", path: string, body: unknown, ok: string) => {
+  const send = async (method: "POST" | "PUT" | "DELETE", path: string, body: unknown, ok: string) => {
     const res = await fetch(`/api/sms${path}`, {
       method,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
     });
-    setMsg(res.ok ? ok : `Failed (${res.status}).`);
-    if (res.ok) router.refresh();
+    if (res.ok) {
+      setMsg(ok);
+      router.refresh();
+    } else {
+      // Surface the API's message (e.g. why a class can't be deleted).
+      let detail = "";
+      try {
+        const j = (await res.json()) as { message?: string | string[] };
+        detail = Array.isArray(j.message) ? j.message.join(", ") : j.message ?? "";
+      } catch { /* ignore */ }
+      setMsg(detail || `Failed (${res.status}).`);
+    }
     return res.ok;
   };
 
@@ -46,6 +56,7 @@ export function ClassSubjectsAdmin({
   });
   const [sup, setSup] = React.useState({ classId: classes[0]?.id ?? "", supervisorId: staff[0]?.id ?? "" });
   const [prog, setProg] = React.useState({ classId: classes[0]?.id ?? "", level: "", nextClassId: "", capacity: "" });
+  const [manage, setManage] = React.useState({ classId: classes[0]?.id ?? "", newName: "" });
 
   return (
     <Card>
@@ -128,6 +139,55 @@ export function ClassSubjectsAdmin({
           <Input aria-label="Capacity" type="number" value={prog.capacity} onChange={(e) => setProg({ ...prog, capacity: e.target.value })} placeholder="Capacity" className="w-24" />
           <Button type="submit" size="sm" variant="outline">Save</Button>
         </form>
+
+        {/* Fix a mistake: rename a class, or delete a duplicate created in error */}
+        <div className="flex flex-wrap items-end gap-2 border-t border-border pt-4">
+          <Label className="w-full">Rename or remove a class</Label>
+          <select
+            aria-label="Class to fix"
+            value={manage.classId}
+            onChange={(e) => setManage({ ...manage, classId: e.target.value })}
+            className={sel}
+          >
+            {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <Input
+            aria-label="New class name"
+            value={manage.newName}
+            onChange={(e) => setManage({ ...manage, newName: e.target.value })}
+            placeholder="Correct class name"
+            className="w-48"
+          />
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={!manage.classId || !manage.newName.trim()}
+            onClick={async () => {
+              if (await send("PUT", `/classes/${manage.classId}`, { name: manage.newName.trim() }, "Class renamed."))
+                setManage({ ...manage, newName: "" });
+            }}
+          >
+            Rename
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="destructive"
+            disabled={!manage.classId}
+            onClick={async () => {
+              const c = classes.find((x) => x.id === manage.classId);
+              if (!confirm(`Delete the class "${c?.name ?? ""}"? This only works if it has no students, teachers, timetable or other data.`)) return;
+              await send("DELETE", `/classes/${manage.classId}`, undefined, "Class deleted.");
+            }}
+          >
+            Delete
+          </Button>
+          <p className="w-full text-xs text-muted-foreground">
+            Deleting is allowed only for an EMPTY class (e.g. a duplicate). If it already has students, timetable or
+            other data, rename it instead.
+          </p>
+        </div>
 
         {msg && <p className="text-sm text-muted-foreground">{msg}</p>}
       </CardContent>

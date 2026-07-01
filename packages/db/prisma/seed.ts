@@ -289,6 +289,16 @@ const ROLE_PERMS: Record<string, string[]> = {
     "document.read", "notification.read", "notification.send", "security.elevation.request",
     "message.read", "message.send", "event.read", "announcement.read",
   ],
+  // Hostel warden — manages ONLY the hostel(s) they are assigned to (scoped in the
+  // service by Hostel.wardenId). Basic staff comms + self-service.
+  warden: ["hr.self", "hostel.read", "hostel.manage", "notification.read",
+    "message.read", "message.send", "event.read", "announcement.read", "task.participate",
+  ],
+  // Transport driver — reads ONLY their own vehicle / route / passengers (scoped in
+  // the service by Vehicle.driverId). Read-only on transport; basic staff comms.
+  driver: ["hr.self", "transport.read", "notification.read",
+    "message.read", "message.send", "event.read", "announcement.read", "task.participate",
+  ],
 };
 
 async function main() {
@@ -359,6 +369,8 @@ async function main() {
   const hrManager = await mkUser("hrmanager@demo.school", "Demo HR Manager");
   const headTeacher = await mkUser("headteacher@demo.school", "Demo Head Teacher");
   const headAdmin = await mkUser("headadmin@demo.school", "Demo Head of Admin");
+  const warden = await mkUser("warden@demo.school", "Demo Hostel Warden");
+  const driver = await mkUser("driver@demo.school", "Demo Bus Driver");
   // The platform owner lives in the platform org, NOT the demo customer school.
   const owner = await mkUser("owner@sms.platform", "Platform Owner", platformOrg.id);
 
@@ -376,6 +388,8 @@ async function main() {
     [hrManager.id, await roleByName("hr_manager")],
     [headTeacher.id, await roleByName("head_teacher")],
     [headAdmin.id, await roleByName("head_admin")],
+    [warden.id, await roleByName("warden")],
+    [driver.id, await roleByName("driver")],
     [owner.id, await roleByName("super_admin")],
   ] as const) {
     // The super_admin's role is scoped to the platform org, every other demo

@@ -9,9 +9,9 @@
 // changes are audited too so finance can analyse them.
 // =============================================================================
 
-import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@sms/db";
-import type { HostelAllocationDto, HostelDto, HostelFeeRunDto, HostelRoomDto } from "@sms/types";
+import type { HostelAllocationDto, HostelDto, HostelFeeRunDto, HostelRoomDto, HostelSummaryDto } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -39,6 +39,22 @@ export class HostelService {
     return (v ?? {}) as Json;
   }
 
+  // --- warden relationship scoping -------------------------------------------
+  // school_admin / principal (and an impersonating super_admin) manage EVERY
+  // hostel; a warden is confined to the hostel(s) they are assigned to.
+  private wide(p: Principal): boolean {
+    return p.roles.some((r) => r === "school_admin" || r === "principal" || r === "super_admin");
+  }
+  /** A warden may only act on their own hostel (404-not-403 for anything else). */
+  private async assertHostelInScope(tx: TenantTx, p: Principal, hostelId: string): Promise<void> {
+    if (this.wide(p)) return;
+    const h = await tx.hostel.findFirst({ where: { id: hostelId }, select: { wardenId: true } });
+    if (!h || h.wardenId !== p.userId) throw new NotFoundException("Hostel not found");
+  }
+  private async hostelIdForRoom(tx: TenantTx, roomId: string): Promise<string | null> {
+    return (await tx.hostelRoom.findFirst({ where: { id: roomId }, select: { hostelId: true } }))?.hostelId ?? null;
+  }
+
   // --- hostels --------------------------------------------------------------
 
   async createHostel(
@@ -46,6 +62,7 @@ export class HostelService {
     input: { name: string; type: string; wardenId?: string | null; customFields?: Json },
   ): Promise<HostelDto> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      if (!this.wide(p)) throw new ForbiddenException("Only an administrator can create a hostel");
       if (input.wardenId) await this.assertUserInSchool(tx, input.wardenId);
       const h = await tx.hostel.create({
         data: {
@@ -69,6 +86,8 @@ export class HostelService {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const existing = await tx.hostel.findFirst({ where: { id } });
       if (!existing) throw new NotFoundException("Hostel not found");
+      await this.assertHostelInScope(tx, p, id);
+      if (input.wardenId !== undefined && !this.wide(p)) throw new ForbiddenException("Only an administrator can reassign the warden");
       if (input.wardenId) await this.assertUserInSchool(tx, input.wardenId);
       await tx.hostel.update({
         where: { id },
@@ -84,9 +103,25 @@ export class HostelService {
     });
   }
 
+  /** Occupancy analytics — warden-scoped to their hostels, else school-wide. */
+  async summary(p: Principal): Promise<HostelSummaryDto> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const hostels = await tx.hostel.findMany({ where: this.wide(p) ? {} : { wardenId: p.userId }, select: { id: true } });
+      const hostelIds = hostels.map((h) => h.id);
+      const rooms = hostelIds.length
+        ? await tx.hostelRoom.findMany({ where: { hostelId: { in: hostelIds } }, select: { id: true, capacity: true } })
+        : [];
+      const beds = rooms.reduce((n, r) => n + r.capacity, 0);
+      const occupied = rooms.length
+        ? await tx.hostelAllocation.count({ where: { roomId: { in: rooms.map((r) => r.id) }, status: "ACTIVE" } })
+        : 0;
+      return { hostels: hostels.length, rooms: rooms.length, beds, occupied, vacant: Math.max(0, beds - occupied), occupancyPct: beds ? Math.round((occupied / beds) * 100) : null };
+    });
+  }
+
   async listHostels(p: Principal): Promise<HostelDto[]> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const hostels = await tx.hostel.findMany({ orderBy: { name: "asc" } });
+      const hostels = await tx.hostel.findMany({ where: this.wide(p) ? {} : { wardenId: p.userId }, orderBy: { name: "asc" } });
       return Promise.all(hostels.map((h: { id: string }) => this.hostelDto(tx, h.id)));
     });
   }
@@ -103,6 +138,7 @@ export class HostelService {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const hostel = await tx.hostel.findFirst({ where: { id: hostelId }, select: { id: true } });
       if (!hostel) throw new NotFoundException("Hostel not found");
+      await this.assertHostelInScope(tx, p, hostelId);
       const dup = await tx.hostelRoom.findFirst({ where: { hostelId, roomNumber: input.roomNumber }, select: { id: true } });
       if (dup) throw new BadRequestException("A room with that number already exists in this hostel");
       const r = await tx.hostelRoom.create({
@@ -129,6 +165,7 @@ export class HostelService {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const room = await tx.hostelRoom.findFirst({ where: { id: roomId } });
       if (!room) throw new NotFoundException("Room not found");
+      await this.assertHostelInScope(tx, p, room.hostelId);
       if (input.capacity !== undefined && input.capacity < 1) throw new BadRequestException("capacity must be at least 1");
       if (input.rentMinor !== undefined && input.rentMinor < 0) throw new BadRequestException("rent cannot be negative");
       await tx.hostelRoom.update({
@@ -155,6 +192,7 @@ export class HostelService {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const room = await tx.hostelRoom.findFirst({ where: { id: roomId } });
       if (!room) throw new NotFoundException("Room not found");
+      await this.assertHostelInScope(tx, p, room.hostelId);
       await this.assertUserInSchool(tx, studentId);
       const occupied = await tx.hostelAllocation.count({ where: { roomId, status: "ACTIVE" } });
       if (occupied >= room.capacity) throw new BadRequestException("Room is at full capacity");
@@ -173,6 +211,8 @@ export class HostelService {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const a = await tx.hostelAllocation.findFirst({ where: { id: allocationId } });
       if (!a) throw new NotFoundException("Allocation not found");
+      const vhid = await this.hostelIdForRoom(tx, a.roomId);
+      if (vhid) await this.assertHostelInScope(tx, p, vhid);
       if (a.status !== "ACTIVE") throw new BadRequestException("Allocation is not active");
       await tx.hostelAllocation.update({ where: { id: allocationId }, data: { status: "VACATED", vacatedAt: new Date() } });
       await this.log(tx, p, "hostel.vacate", allocationId, { roomId: a.roomId, studentId: a.studentId });
@@ -182,10 +222,15 @@ export class HostelService {
 
   async listAllocations(p: Principal, hostelId?: string): Promise<HostelAllocationDto[]> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const rooms = hostelId
-        ? await tx.hostelRoom.findMany({ where: { hostelId }, select: { id: true } })
-        : null;
-      const where = rooms ? { roomId: { in: rooms.map((r: { id: string }) => r.id) }, status: "ACTIVE" } : { status: "ACTIVE" };
+      if (hostelId) await this.assertHostelInScope(tx, p, hostelId);
+      // A warden sees allocations only within their own hostels.
+      const roomWhere = hostelId
+        ? { hostelId }
+        : this.wide(p)
+          ? {}
+          : { hostel: { wardenId: p.userId } };
+      const rooms = await tx.hostelRoom.findMany({ where: roomWhere, select: { id: true } });
+      const where = { roomId: { in: rooms.map((r: { id: string }) => r.id) }, status: "ACTIVE" };
       const allocs = await tx.hostelAllocation.findMany({ where, orderBy: { allocatedAt: "desc" } });
       return Promise.all(allocs.map((a: { id: string }) => this.allocationDto(tx, a.id)));
     });
@@ -203,9 +248,14 @@ export class HostelService {
     const due = new Date(input.dueDate);
     if (Number.isNaN(due.getTime())) throw new BadRequestException("invalid dueDate");
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const rooms = input.hostelId
-        ? await tx.hostelRoom.findMany({ where: { hostelId: input.hostelId } })
-        : await tx.hostelRoom.findMany({});
+      if (input.hostelId) await this.assertHostelInScope(tx, p, input.hostelId);
+      // A warden can bill only their own hostels.
+      const feeRoomWhere = input.hostelId
+        ? { hostelId: input.hostelId }
+        : this.wide(p)
+          ? {}
+          : { hostel: { wardenId: p.userId } };
+      const rooms = await tx.hostelRoom.findMany({ where: feeRoomWhere });
       const rentByRoom = new Map<string, number>(rooms.map((r) => [r.id, r.rentMinor]));
       const roomIds = rooms.map((r) => r.id);
       if (roomIds.length === 0) return { invoicesCreated: 0, totalBilledMinor: 0, studentsBilled: 0 };

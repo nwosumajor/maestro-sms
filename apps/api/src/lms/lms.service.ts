@@ -110,6 +110,42 @@ export class LmsService {
     });
   }
 
+  /**
+   * Delete a class — allowed ONLY while it is EMPTY (a freshly-created duplicate).
+   * Refuses (409) if anything references it, so a class holding real records (roster,
+   * timetable, attendance, grades, progression) is never silently orphaned; the
+   * principal renames it or clears its data first. Audited.
+   */
+  async deleteClass(p: Principal, classId: string) {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const cls = await tx.class.findFirst({ where: { id: classId }, select: { id: true, name: true } });
+      if (!cls) throw new NotFoundException("Class not found");
+      const [enroll, teachers, subjects, assessments, attendance, content, timetable, games, nextRefs, promoSrc, promoTgt] =
+        await Promise.all([
+          tx.enrollment.count({ where: { classId } }),
+          tx.classTeacher.count({ where: { classId } }),
+          tx.classSubjectTeacher.count({ where: { classId } }),
+          tx.assessment.count({ where: { classId } }),
+          tx.attendanceSession.count({ where: { classId } }),
+          tx.lmsContent.count({ where: { classId } }),
+          tx.timetableEntry.count({ where: { classId } }),
+          tx.game.count({ where: { classId } }),
+          tx.class.count({ where: { nextClassId: classId } }),
+          tx.promotionBatch.count({ where: { sourceClassId: classId } }),
+          tx.promotionBatch.count({ where: { targetClassId: classId } }),
+        ]);
+      const refs = enroll + teachers + subjects + assessments + attendance + content + timetable + games + nextRefs + promoSrc + promoTgt;
+      if (refs > 0) {
+        throw new ConflictException(
+          "This class still has data (students, teachers, subjects, timetable, attendance, assessments, games, or it's referenced by a promotion/progression). Remove those or rename the class instead of deleting it.",
+        );
+      }
+      await tx.class.delete({ where: { id: classId } });
+      await this.log(tx, p, "lms.class.delete", "class", classId, { name: cls.name });
+      return { id: classId, deleted: true };
+    });
+  }
+
   // --- subject catalog + per-class offerings (subject.manage) ----------------
   async createSubject(p: Principal, input: { name: string; code?: string | null }) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {

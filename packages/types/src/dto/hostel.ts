@@ -48,3 +48,13 @@ export interface HostelFeeRunDto {
   totalBilledMinor: number;
   studentsBilled: number;
 }
+
+/** Occupancy analytics for the hostel module (warden-scoped or school-wide). */
+export interface HostelSummaryDto {
+  hostels: number;
+  rooms: number;
+  beds: number;      // total capacity across rooms
+  occupied: number;  // active allocations
+  vacant: number;
+  occupancyPct: number | null;
+}

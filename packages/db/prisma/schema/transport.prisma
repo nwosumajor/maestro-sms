@@ -11,7 +11,10 @@ model Vehicle {
   name         String
   regNumber    String?
   capacity     Int      @default(0)
-  /// Free-form: fuelExpense, repairInfo, licenceRenewal, pollutionCheck, driver…
+  /// The assigned driver (a staff User with the `driver` role). A driver sees ONLY
+  /// their own vehicle + its routes + passengers (scoped in the service). Optional.
+  driverId     String?  @db.Uuid
+  /// Free-form: fuelExpense, repairInfo, licenceRenewal, pollutionCheck…
   customFields Json     @default("{}")
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt

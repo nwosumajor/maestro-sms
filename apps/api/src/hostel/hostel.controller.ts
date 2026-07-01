@@ -1,7 +1,7 @@
 import { RequireModule } from "../auth/require-module.decorator";
 import { Body, Controller, Get, Param, Post, Put, Query } from "@nestjs/common";
 import { HOSTEL_PERMISSIONS, MODULES } from "@sms/types";
-import type { HostelAllocationDto, HostelDto, HostelFeeRunDto, HostelRoomDto } from "@sms/types";
+import type { HostelAllocationDto, HostelDto, HostelFeeRunDto, HostelRoomDto, HostelSummaryDto } from "@sms/types";
 import { z } from "zod";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -51,6 +51,13 @@ export class HostelController {
   @RequirePermission(HOSTEL_PERMISSIONS.HOSTEL_READ)
   list(@CurrentPrincipal() p: Principal): Promise<HostelDto[]> {
     return this.hostel.listHostels(p);
+  }
+
+  /** Occupancy analytics (warden-scoped or school-wide). */
+  @Get("summary")
+  @RequirePermission(HOSTEL_PERMISSIONS.HOSTEL_READ)
+  summary(@CurrentPrincipal() p: Principal): Promise<HostelSummaryDto> {
+    return this.hostel.summary(p);
   }
 
   @Post()

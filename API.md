@@ -98,6 +98,7 @@ All gated by 🔑 `platform.operate`.
 |---|---|---|---|
 | POST | `/classes` | 🔑 `class.write` | Create a class |
 | PUT | `/classes/:classId` | 🔑 `class.write` | Edit a class (level / next-class / supervisor) |
+| DELETE | `/classes/:classId` | 🔑 `class.write` | Delete a class — only while EMPTY (e.g. a duplicate created in error) |
 | POST | `/subjects` | 🔑 `subject.manage` | Create a subject in the school catalog |
 | GET | `/subjects` | 🔑 `class.read` | List subjects |
 | POST | `/classes/:classId/subjects` | 🔑 `class.read` | Assign a teacher to a class-subject |

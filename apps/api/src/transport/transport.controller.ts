@@ -6,6 +6,7 @@ import type {
   TransportAssignmentDto,
   TransportFeeRunDto,
   TransportRouteDto,
+  TransportSummaryDto,
   VehicleDto,
 } from "@sms/types";
 import { z } from "zod";
@@ -17,12 +18,14 @@ import { TransportService } from "./transport.service";
 
 const customFields = z.record(z.string()).optional();
 const vehicleSchema = z.object({
+  driverId: z.string().uuid().nullish(),
   name: z.string().min(1).max(160),
   regNumber: z.string().max(40).nullish(),
   capacity: z.number().int().min(0).max(200),
   customFields,
 });
 const vehicleUpdateSchema = z.object({
+  driverId: z.string().uuid().nullish(),
   name: z.string().min(1).max(160).optional(),
   regNumber: z.string().max(40).nullish(),
   capacity: z.number().int().min(0).max(200).optional(),
@@ -61,6 +64,13 @@ export class TransportController {
   @RequirePermission(TRANSPORT_PERMISSIONS.TRANSPORT_READ)
   vehicles(@CurrentPrincipal() p: Principal): Promise<VehicleDto[]> {
     return this.transport.listVehicles(p);
+  }
+
+  /** Fleet analytics (driver-scoped or school-wide). */
+  @Get("summary")
+  @RequirePermission(TRANSPORT_PERMISSIONS.TRANSPORT_READ)
+  summary(@CurrentPrincipal() p: Principal): Promise<TransportSummaryDto> {
+    return this.transport.summary(p);
   }
   @Post("vehicles")
   @RequirePermission(TRANSPORT_PERMISSIONS.TRANSPORT_MANAGE)

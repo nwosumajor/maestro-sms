@@ -16,6 +16,7 @@ import type {
   TransportAssignmentDto,
   TransportFeeRunDto,
   TransportRouteDto,
+  TransportSummaryDto,
   VehicleDto,
 } from "@sms/types";
 import {
@@ -47,21 +48,28 @@ export class TransportService {
   private cf(v: unknown): Json {
     return (v ?? {}) as Json;
   }
+  // school_admin / principal (and an impersonating super_admin) see the whole fleet;
+  // a driver sees ONLY their own vehicle + its routes + passengers.
+  private wide(p: Principal): boolean {
+    return p.roles.some((r) => r === "school_admin" || r === "principal" || r === "super_admin");
+  }
 
   // --- vehicles -------------------------------------------------------------
 
   async createVehicle(
     p: Principal,
-    input: { name: string; regNumber?: string | null; capacity: number; customFields?: Json },
+    input: { name: string; regNumber?: string | null; capacity: number; driverId?: string | null; customFields?: Json },
   ): Promise<VehicleDto> {
     if (input.capacity < 0) throw new BadRequestException("capacity cannot be negative");
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      if (input.driverId) await this.assertUserInSchool(tx, input.driverId);
       const v = await tx.vehicle.create({
         data: {
           schoolId: p.schoolId,
           name: input.name,
           regNumber: input.regNumber ?? null,
           capacity: input.capacity,
+          driverId: input.driverId ?? null,
           customFields: (input.customFields ?? {}) as Prisma.InputJsonValue,
         },
       });
@@ -73,17 +81,19 @@ export class TransportService {
   async updateVehicle(
     p: Principal,
     id: string,
-    input: { name?: string; regNumber?: string | null; capacity?: number; customFields?: Json },
+    input: { name?: string; regNumber?: string | null; capacity?: number; driverId?: string | null; customFields?: Json },
   ): Promise<VehicleDto> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const v = await tx.vehicle.findFirst({ where: { id } });
       if (!v) throw new NotFoundException("Vehicle not found");
+      if (input.driverId) await this.assertUserInSchool(tx, input.driverId);
       const updated = await tx.vehicle.update({
         where: { id },
         data: {
           ...(input.name !== undefined ? { name: input.name } : {}),
           ...(input.regNumber !== undefined ? { regNumber: input.regNumber } : {}),
           ...(input.capacity !== undefined ? { capacity: input.capacity } : {}),
+          ...(input.driverId !== undefined ? { driverId: input.driverId } : {}),
           ...(input.customFields !== undefined ? { customFields: input.customFields as Prisma.InputJsonValue } : {}),
         },
       });
@@ -94,7 +104,7 @@ export class TransportService {
 
   async listVehicles(p: Principal): Promise<VehicleDto[]> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const vs = await tx.vehicle.findMany({ orderBy: { name: "asc" } });
+      const vs = await tx.vehicle.findMany({ where: this.wide(p) ? {} : { driverId: p.userId }, orderBy: { name: "asc" } });
       return vs.map((v) => this.vehicleDto(v));
     });
   }
@@ -167,9 +177,22 @@ export class TransportService {
     });
   }
 
+  /** Fleet analytics — driver-scoped to their vehicle/route, else school-wide. */
+  async summary(p: Principal): Promise<TransportSummaryDto> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const vehicles = await tx.vehicle.findMany({ where: this.wide(p) ? {} : { driverId: p.userId }, select: { id: true, capacity: true } });
+      const seats = vehicles.reduce((n, v) => n + v.capacity, 0);
+      const routes = await tx.transportRoute.findMany({ where: this.wide(p) ? { status: "ACTIVE" } : { status: "ACTIVE", vehicle: { driverId: p.userId } }, select: { id: true } });
+      const routeIds = routes.map((r) => r.id);
+      const stops = routeIds.length ? await tx.routeStop.count({ where: { routeId: { in: routeIds } } }) : 0;
+      const passengers = await tx.transportAssignment.count({ where: this.wide(p) ? { status: "ACTIVE" } : { status: "ACTIVE", route: { vehicle: { driverId: p.userId } } } });
+      return { vehicles: vehicles.length, routes: routes.length, stops, passengers, seats, seatsUsed: passengers };
+    });
+  }
+
   async listRoutes(p: Principal): Promise<TransportRouteDto[]> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const routes = await tx.transportRoute.findMany({ orderBy: { name: "asc" } });
+      const routes = await tx.transportRoute.findMany({ where: this.wide(p) ? {} : { vehicle: { driverId: p.userId } }, orderBy: { name: "asc" } });
       return Promise.all(routes.map((r: { id: string }) => this.routeDto(tx, r.id)));
     });
   }
@@ -268,7 +291,8 @@ export class TransportService {
 
   async listAssignments(p: Principal, routeId?: string): Promise<TransportAssignmentDto[]> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const where = routeId ? { routeId, status: "ACTIVE" } : { status: "ACTIVE" };
+      const scope = this.wide(p) ? {} : { route: { vehicle: { driverId: p.userId } } };
+      const where = { ...(routeId ? { routeId } : {}), status: "ACTIVE", ...scope };
       const rows = await tx.transportAssignment.findMany({ where, orderBy: { createdAt: "desc" } });
       return Promise.all(rows.map((a: { id: string }) => this.assignmentDto(tx, a.id)));
     });
@@ -338,10 +362,15 @@ export class TransportService {
     return 0;
   }
 
+  private async assertUserInSchool(tx: TenantTx, userId: string): Promise<void> {
+    const u = await tx.user.findFirst({ where: { id: userId }, select: { id: true } });
+    if (!u) throw new NotFoundException("User not found in this school");
+  }
+
   private vehicleDto(v: {
-    id: string; name: string; regNumber: string | null; capacity: number; customFields: unknown; createdAt: Date;
+    id: string; name: string; regNumber: string | null; capacity: number; driverId?: string | null; customFields: unknown; createdAt: Date;
   }): VehicleDto {
-    return { id: v.id, name: v.name, regNumber: v.regNumber, capacity: v.capacity, customFields: this.cf(v.customFields), createdAt: v.createdAt };
+    return { id: v.id, name: v.name, regNumber: v.regNumber, capacity: v.capacity, driverId: v.driverId ?? null, customFields: this.cf(v.customFields), createdAt: v.createdAt };
   }
 
   private stopDto(s: {

@@ -5,6 +5,8 @@ export interface VehicleDto {
   name: string;
   regNumber: string | null;
   capacity: number;
+  /** The assigned driver (a staff User with the `driver` role), if any. */
+  driverId: string | null;
   customFields: Record<string, string>;
   createdAt: Date;
 }
@@ -54,4 +56,14 @@ export interface TransportFeeRunDto {
   invoicesCreated: number;
   totalBilledMinor: number;
   passengersBilled: number;
+}
+
+/** Fleet analytics for the transport module (driver-scoped or school-wide). */
+export interface TransportSummaryDto {
+  vehicles: number;
+  routes: number;     // ACTIVE routes
+  stops: number;
+  passengers: number; // ACTIVE assignments
+  seats: number;      // total vehicle capacity
+  seatsUsed: number;
 }

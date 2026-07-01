@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Header, Param, Post, Put } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Header, Param, Post, Put } from "@nestjs/common";
 import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
 import type { AcademicSessionDto, ClassDto, ClassEligibilityDto, ClassInfoDto, ClassSubjectDto, IdNameDto, PromotionBatchDto, SubjectDto, UserWithEmailDto } from "@sms/types";
@@ -75,6 +75,13 @@ export class LmsController {
     @Body(new ZodValidationPipe(updateClassSchema)) body: z.infer<typeof updateClassSchema>,
   ) {
     return this.lms.updateClass(p, classId, body);
+  }
+
+  /** Delete a class — only while it is EMPTY (e.g. a duplicate created in error). */
+  @Delete("classes/:classId")
+  @RequirePermission(LMS_PERMISSIONS.CLASS_WRITE)
+  deleteClass(@CurrentPrincipal() p: Principal, @Param("classId") classId: string) {
+    return this.lms.deleteClass(p, classId);
   }
 
   // --- subject catalog + per-class offerings --------------------------------
