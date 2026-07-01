@@ -9,6 +9,7 @@
 
 import { Inject, Injectable } from "@nestjs/common";
 import type { AnalyticsOverviewDto } from "@sms/types";
+import { ageBand, normalizeGender } from "@sms/types";
 import {
   TENANT_DATABASE,
   type Principal,
@@ -84,6 +85,49 @@ export class AnalyticsService {
           outstandingMinor: invoicedMinor - collectedMinor,
           invoices: billable.length,
         };
+      }
+
+      // --- grade distribution (PUBLISHED grades, by percentage band) ---
+      if (p.permissions.includes("grade.read")) {
+        const gradeWhere: Record<string, unknown> = { status: "PUBLISHED" };
+        if (!staff) {
+          gradeWhere.submission =
+            studentIds && studentIds.length ? { studentId: { in: studentIds } } : { studentId: "__none__" };
+        }
+        const grades = await tx.grade.findMany({ where: gradeWhere, select: { score: true, maxScore: true } });
+        const band = { A: 0, B: 0, C: 0, D: 0, F: 0 };
+        let sumPct = 0;
+        for (const g of grades) {
+          const pct = g.maxScore > 0 ? (g.score / g.maxScore) * 100 : 0;
+          sumPct += pct;
+          if (pct >= 70) band.A += 1;
+          else if (pct >= 60) band.B += 1;
+          else if (pct >= 50) band.C += 1;
+          else if (pct >= 45) band.D += 1;
+          else band.F += 1;
+        }
+        out.grades = {
+          ...band,
+          graded: grades.length,
+          averagePct: grades.length ? Math.round(sumPct / grades.length) : null,
+        };
+      }
+
+      // --- student-body demographics (staff, school-wide; needs profile read) ---
+      if (staff && p.permissions.includes("student.profile.read")) {
+        const profiles = await tx.studentProfile.findMany({ select: { gender: true, dateOfBirth: true, state: true } });
+        const gender: Record<string, number> = {};
+        const band: Record<string, number> = {};
+        const state: Record<string, number> = {};
+        for (const pr of profiles) {
+          const g = normalizeGender(pr.gender);
+          gender[g] = (gender[g] ?? 0) + 1;
+          const b = ageBand(pr.dateOfBirth);
+          band[b] = (band[b] ?? 0) + 1;
+          const st = (pr.state ?? "").trim() || "Unknown";
+          state[st] = (state[st] ?? 0) + 1;
+        }
+        out.demographics = { profiled: profiles.length, gender, ageBand: band, state };
       }
 
       // --- school operations (staff) ---

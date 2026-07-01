@@ -85,6 +85,21 @@ export class S3StorageProvider implements StorageProvider {
     return { url, expiresInSeconds: this.ttl };
   }
 
+  async upload({ key, body, contentType }: { key: string; body: Buffer; contentType: string }): Promise<void> {
+    await this.client.send(new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: body, ContentType: contentType }));
+    this.logger.log(`upload ${key} (${body.length} bytes)`);
+  }
+
+  async download(key: string): Promise<Buffer | null> {
+    try {
+      const res = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
+      const bytes = await res.Body?.transformToByteArray();
+      return bytes ? Buffer.from(bytes) : null;
+    } catch {
+      return null;
+    }
+  }
+
   async delete(key: string): Promise<void> {
     await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
     this.logger.log(`delete ${key}`);

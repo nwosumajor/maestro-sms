@@ -31,4 +31,4 @@ CREATE POLICY form_response_delete ON "form_response" FOR DELETE
   USING ("schoolId" = current_setting('app.current_school_id', true)::uuid);
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON "form"          TO major_user;
-GRANT SELECT, INSERT, UPDATE, DELETE ON "form_response" TO major_user;
+GRANT SELECT, INSERT                 ON "form_response" TO major_user;

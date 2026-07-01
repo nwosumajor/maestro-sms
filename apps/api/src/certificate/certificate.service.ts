@@ -18,6 +18,7 @@ import {
   type TenantContext,
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
+import { BrandingService } from "../branding/branding.service";
 
 const TYPES = ["ID_CARD", "COMPLETION", "PARTICIPATION", "MERIT"];
 
@@ -26,6 +27,7 @@ export class CertificateService {
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
+    private readonly branding: BrandingService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -70,7 +72,9 @@ export class CertificateService {
       };
     });
 
-    const buffer = input.type === "ID_CARD" ? await this.renderIdCard(data) : await this.renderCertificate(input, data);
+    // The school's uploaded logo (embedded into the document); null if unset.
+    const logo = await this.branding.getLogoBytes(p.schoolId).catch(() => null);
+    const buffer = input.type === "ID_CARD" ? await this.renderIdCard(data, logo) : await this.renderCertificate(input, data, logo);
     const filename = `${input.type.toLowerCase()}-${data.serial}.pdf`;
     return { buffer, filename };
   }
@@ -84,7 +88,17 @@ export class CertificateService {
 
   // --- PDF templates --------------------------------------------------------
 
-  private renderIdCard(d: { subjectName: string; uniqueId: string; schoolName: string; serial: string }): Promise<Buffer> {
+  /** Best-effort logo draw — a corrupt/unsupported image must never break the PDF. */
+  private drawLogo(doc: InstanceType<typeof PDFDocument>, logo: Buffer | null | undefined, x: number, y: number, size: number): void {
+    if (!logo) return;
+    try {
+      doc.image(logo, x, y, { fit: [size, size], align: "center", valign: "center" });
+    } catch {
+      /* ignore unsupported/corrupt image */
+    }
+  }
+
+  private renderIdCard(d: { subjectName: string; uniqueId: string; schoolName: string; serial: string }, logo?: Buffer | null): Promise<Buffer> {
     // Standard ID-card size (CR80, landscape) at 72 dpi-ish.
     return new Promise<Buffer>((resolve, reject) => {
       const doc = new PDFDocument({ size: [340, 215], margin: 16 });
@@ -93,7 +107,9 @@ export class CertificateService {
       doc.on("end", () => resolve(Buffer.concat(chunks)));
       doc.on("error", reject);
       doc.rect(0, 0, 340, 40).fill("#1d4ed8");
-      doc.fillColor("#ffffff").fontSize(14).text(d.schoolName, 16, 12);
+      // School logo, top-right of the header band.
+      this.drawLogo(doc, logo, 296, 6, 28);
+      doc.fillColor("#ffffff").fontSize(14).text(d.schoolName, 16, 12, { width: 270 });
       doc.fillColor("#111111");
       doc.fontSize(16).text(d.subjectName, 16, 70);
       doc.fontSize(11).fillColor("#444444").text("Student / Staff ID", 16, 94);
@@ -106,6 +122,7 @@ export class CertificateService {
   private renderCertificate(
     input: { type: string; title?: string; body?: string },
     d: { subjectName: string; schoolName: string; serial: string },
+    logo?: Buffer | null,
   ): Promise<Buffer> {
     return new Promise<Buffer>((resolve, reject) => {
       const doc = new PDFDocument({ size: "A4", layout: "landscape", margin: 50 });
@@ -115,6 +132,11 @@ export class CertificateService {
       doc.on("error", reject);
       const w = doc.page.width;
       doc.lineWidth(3).strokeColor("#1d4ed8").rect(25, 25, w - 50, doc.page.height - 50).stroke();
+      // School logo, centred above the school name.
+      if (logo) {
+        this.drawLogo(doc, logo, w / 2 - 30, 45, 60);
+        doc.moveDown(4);
+      }
       doc.fillColor("#1d4ed8").fontSize(28).text(d.schoolName, { align: "center" });
       doc.moveDown(0.5);
       doc.fillColor("#111111").fontSize(22).text(input.title ?? "Certificate of Completion", { align: "center" });

@@ -58,5 +58,5 @@ CREATE POLICY discipline_entry_delete ON "discipline_entry" FOR DELETE
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON "discipline_complaint" TO major_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON "discipline_assignee"  TO major_user;
-GRANT SELECT, INSERT, UPDATE, DELETE ON "discipline_evidence"  TO major_user;
-GRANT SELECT, INSERT, UPDATE, DELETE ON "discipline_entry"     TO major_user;
+GRANT SELECT, INSERT                 ON "discipline_evidence"  TO major_user;
+GRANT SELECT, INSERT                 ON "discipline_entry"     TO major_user;

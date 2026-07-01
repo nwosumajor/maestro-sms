@@ -1,7 +1,6 @@
 import { RequireModule } from "../auth/require-module.decorator";
 import { Body, Controller, Delete, Get, Param, Post } from "@nestjs/common";
-import { DISCUSSION_PERMISSIONS } from "@sms/types";
-import { MODULES } from "@sms/types";
+import { DISCUSSION_PERMISSIONS, MODULES } from "@sms/types";
 import type { DiscussionGroupDto, DiscussionPostDto } from "@sms/types";
 import { z } from "zod";
 import { RequirePermission } from "../auth/require-permission.decorator";

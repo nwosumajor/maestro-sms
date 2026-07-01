@@ -12,30 +12,40 @@ import type { Principal } from "../../src/integrity/integrity.foundation";
 const owner: Principal = { schoolId: "platform", userId: "owner", roles: ["super_admin"], permissions: ["platform.operate"] };
 
 function makeClient() {
+  const now = new Date();
   return {
     school: {
       findMany: jest.fn().mockResolvedValue([
-        { id: "s1", name: "Alpha", status: "ACTIVE" },
-        { id: "s2", name: "Beta", status: "DISABLED" },
+        { id: "s1", name: "Alpha", status: "ACTIVE", createdAt: now },
+        { id: "s2", name: "Beta", status: "DISABLED", createdAt: now },
       ]),
     },
     schoolSubscription: {
       findMany: jest.fn().mockResolvedValue([
-        { schoolId: "s1", plan: "STANDARD", status: "ACTIVE", currentPeriodEnd: null },
+        { schoolId: "s1", plan: "STANDARD", status: "ACTIVE", currentPeriodEnd: null, seats: 10, overrides: null },
         // s2 has no subscription row -> defaults to ACTIVE/ENTERPRISE.
       ]),
     },
     userRole: {
       findMany: jest.fn().mockResolvedValue([
-        { userId: "u1", role: { name: "student" } },
-        { userId: "u2", role: { name: "student" } },
-        { userId: "u3", role: { name: "teacher" } },
-        { userId: "u3", role: { name: "principal" } }, // same staff user, 2 roles -> counted once
+        { userId: "u1", schoolId: "s1", role: { name: "student" } },
+        { userId: "u2", schoolId: "s1", role: { name: "student" } },
+        { userId: "u3", schoolId: "s1", role: { name: "teacher" } },
+        { userId: "u3", schoolId: "s1", role: { name: "principal" } }, // same staff user, 2 roles -> counted once
+      ]),
+    },
+    user: {
+      findMany: jest.fn().mockResolvedValue([{ createdAt: now }, { createdAt: now }]),
+    },
+    studentProfile: {
+      findMany: jest.fn().mockResolvedValue([
+        { gender: "male", dateOfBirth: new Date("2015-01-01") },
+        { gender: "Female", dateOfBirth: new Date("2012-01-01") },
       ]),
     },
     platformSubscriptionPayment: {
       findMany: jest.fn().mockResolvedValue([
-        { schoolId: "s1", plan: "STANDARD", amountMinor: 500000, status: "PAID", createdAt: new Date() },
+        { schoolId: "s1", plan: "STANDARD", amountMinor: 500000, status: "PAID", createdAt: now },
         { schoolId: "s1", plan: "STANDARD", amountMinor: 300000, status: "PAID", createdAt: new Date("2020-01-01") },
       ]),
     },
@@ -71,6 +81,22 @@ describe("PlatformAnalyticsService", () => {
     expect(out.revenue.last30dMinor).toBe(500000); // only the recent one
     expect(out.onboardingPipeline).toEqual({ NEW: 2, APPROVED: 1 });
     expect(out.recentPayments[0].schoolName).toBe("Alpha");
+
+    // --- extended decision-grade metrics ---
+    // s1 STANDARD active, 10 seats × ₦200/seat/mo (20000 kobo) = 200000 MRR; s2 no-sub = not paying.
+    expect(out.mrr.totalMinor).toBe(200000);
+    expect(out.mrr.byPlan.STANDARD).toBe(200000);
+    expect(out.mrr.payingSchools).toBe(1);
+    expect(out.mrr.arpaMinor).toBe(200000);
+    // funnel: 3 requests total, 1 approved, 2 provisioned schools, 1 paying.
+    expect(out.funnel).toEqual({ requests: 3, approved: 1, provisioned: 2, paying: 1 });
+    expect(out.risk).toEqual({ pastDue: 0, canceled: 0, atRiskMrrMinor: 0 });
+    expect(out.growth).toHaveLength(6); // last 6 months
+    expect(out.topSchools[0].name).toBe("Alpha"); // 2 students > 0
+    expect(out.moduleAdoption.length).toBeGreaterThan(0);
+    // demographics: normalised gender across all profiles.
+    expect(out.demographics.profiled).toBe(2);
+    expect(out.demographics.gender).toEqual({ Male: 1, Female: 1 });
   });
 
   it("excludes the platform org from the school query", async () => {

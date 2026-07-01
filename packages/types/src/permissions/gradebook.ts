@@ -18,6 +18,9 @@ export type GradebookPermission =
 
 export const GRADEBOOK_ROLE_PERMISSIONS = {
   school_admin: [GRADEBOOK_PERMISSIONS.GRADE_READ, GRADEBOOK_PERMISSIONS.GRADE_WRITE],
+  // Leadership gets read-only visibility (school-wide grade analytics), not editing.
+  principal: [GRADEBOOK_PERMISSIONS.GRADE_READ],
+  board: [GRADEBOOK_PERMISSIONS.GRADE_READ],
   teacher: [GRADEBOOK_PERMISSIONS.GRADE_READ, GRADEBOOK_PERMISSIONS.GRADE_WRITE],
   student: [GRADEBOOK_PERMISSIONS.GRADE_READ],
   parent: [GRADEBOOK_PERMISSIONS.GRADE_READ],

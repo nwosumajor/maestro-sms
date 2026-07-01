@@ -34,6 +34,7 @@ import {
   GraduationCapIcon,
   FileBarChartIcon,
   WalletIcon,
+  ScrollTextIcon,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -79,6 +80,7 @@ type NavKey =
   | "games"
   | "ultimate"
   | "operator"
+  | "operatoraudit"
   | "directory"
   | "announcements"
   | "account";
@@ -97,6 +99,7 @@ const NAV: {
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboardIcon, href: "/dashboard" },
   { key: "analytics", label: "Analytics", icon: BarChart3Icon, href: "/analytics", module: MODULES.ANALYTICS },
   { key: "operator", label: "Operator", icon: Building2Icon, href: "/operator", perm: "platform.operate" },
+  { key: "operatoraudit", label: "Platform audit", icon: ScrollTextIcon, href: "/operator/audit", perm: "platform.operate" },
   { key: "directory", label: "Directory", icon: SearchIcon, href: "/directory", perm: "directory.search" },
   { key: "admin", label: "Admin", icon: SettingsIcon, href: "/admin", perm: "fee.manage" },
   { key: "announcements", label: "Announcements", icon: MegaphoneIcon, href: "/announcements", perm: "announcement.read" },
@@ -141,11 +144,37 @@ const NAV: {
 const PLATFORM_OWNER_NAV = new Set<NavKey>([
   "dashboard",
   "operator",
+  "operatoraudit",
   "directory",
   "ultimate",
   "notifications",
   "account",
 ]);
+
+// The 30+ modules are grouped into labelled sections — the "register sections"
+// device: a flat list of everything is overwhelming, so the rail reads like the
+// tabbed dividers of a school ledger. Order here is the order they render.
+const NAV_GROUPS: { key: string; label: string }[] = [
+  { key: "overview", label: "Overview" },
+  { key: "teaching", label: "Teaching & Learning" },
+  { key: "people", label: "People & Records" },
+  { key: "operations", label: "Operations" },
+  { key: "community", label: "Community" },
+  { key: "platform", label: "Platform & Settings" },
+];
+
+const NAV_GROUP: Record<NavKey, string> = {
+  dashboard: "overview", analytics: "overview", reports: "overview", announcements: "overview",
+  notifications: "overview", messages: "overview", calendar: "overview",
+  classes: "teaching", timetable: "teaching", assessments: "teaching", certificates: "teaching",
+  documents: "teaching", library: "teaching",
+  students: "people", attendance: "people", hr: "people", leave: "people", alumni: "people",
+  fees: "operations", billing: "operations", hostel: "operations", transport: "operations",
+  workflows: "operations", tasks: "operations",
+  discussion: "community", polls: "community", forms: "community", discipline: "community",
+  games: "community", ultimate: "community",
+  operator: "platform", operatoraudit: "platform", directory: "platform", admin: "platform", account: "platform",
+};
 
 export interface AppShellProps {
   schoolName: string;
@@ -209,17 +238,22 @@ export async function AppShell({
   return (
     <div data-tenant style={brandStyle(theme, fontFamily)} className="min-h-screen bg-background">
       {/* Top bar */}
-      <header className="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-border bg-card px-4">
+      <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-border/70 bg-card/80 px-4 backdrop-blur-md supports-[backdrop-filter]:bg-card/65">
         <div className="flex items-center gap-2.5">
-          <div className="grid h-7 w-7 place-items-center rounded-md bg-primary text-primary-foreground text-sm font-bold">
+          <div className="grid h-8 w-8 place-items-center rounded-lg bg-primary text-primary-foreground text-sm font-bold shadow-xs ring-1 ring-inset ring-white/10">
             {schoolName.slice(0, 1).toUpperCase()}
           </div>
-          <span className="text-sm font-semibold">{schoolName}</span>
+          <div className="leading-tight">
+            <span className="block text-sm font-semibold tracking-tight">{schoolName}</span>
+            <span className="eyebrow hidden text-[0.6rem] sm:block">School Console</span>
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-muted-foreground">{userName}</span>
-          <div className="grid h-8 w-8 place-items-center rounded-full bg-secondary text-xs font-medium text-secondary-foreground">
-            {userName.slice(0, 2).toUpperCase()}
+        <div className="flex items-center gap-2.5">
+          <div className="hidden items-center gap-2.5 rounded-full border border-border/70 bg-background/60 py-1 pl-2.5 pr-1 sm:flex">
+            <span className="text-sm font-medium text-foreground/80">{userName}</span>
+            <div className="grid h-7 w-7 place-items-center rounded-full bg-primary/12 text-[0.7rem] font-semibold text-primary">
+              {userName.slice(0, 2).toUpperCase()}
+            </div>
           </div>
           {/* Sign out — available to every authenticated user (no permission gate). */}
           <form
@@ -231,7 +265,7 @@ export async function AppShell({
             <button
               type="submit"
               aria-label="Sign out"
-              className="rounded-md border border-input px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+              className="rounded-lg border border-input bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
               Sign out
             </button>
@@ -240,39 +274,64 @@ export async function AppShell({
       </header>
 
       <div className="flex">
-        {/* Left nav */}
+        {/* Left nav — grouped "register sections" */}
         <nav
           aria-label="Primary"
-          className="sticky top-14 hidden h-[calc(100vh-3.5rem)] w-56 shrink-0 border-r border-border bg-card p-3 md:block"
+          className="sticky top-14 hidden h-[calc(100vh-3.5rem)] w-60 shrink-0 overflow-y-auto border-r border-border/70 bg-sidebar px-3 py-4 md:block"
         >
-          <ul className="space-y-1">
-            {items.map((item) => {
-              const Icon = item.icon;
-              const isActive = item.key === active;
+          <div className="space-y-5">
+            {NAV_GROUPS.map((group) => {
+              const groupItems = items.filter((it) => NAV_GROUP[it.key] === group.key);
+              if (groupItems.length === 0) return null;
               return (
-                <li key={item.key}>
-                  <a
-                    href={item.href}
-                    aria-current={isActive ? "page" : undefined}
-                    className={cn(
-                      "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                      isActive
-                        ? "bg-primary/10 text-primary"
-                        : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                    )}
-                  >
-                    <Icon className="h-4 w-4" aria-hidden />
-                    {item.label}
-                  </a>
-                </li>
+                <div key={group.key}>
+                  <p className="eyebrow px-3 pb-1.5">{group.label}</p>
+                  <ul className="space-y-0.5">
+                    {groupItems.map((item) => {
+                      const Icon = item.icon;
+                      const isActive = item.key === active;
+                      return (
+                        <li key={item.key}>
+                          <a
+                            href={item.href}
+                            aria-current={isActive ? "page" : undefined}
+                            className={cn(
+                              "group relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-all",
+                              isActive
+                                ? "bg-primary/10 font-semibold text-primary shadow-xs"
+                                : "font-medium text-muted-foreground hover:bg-accent hover:text-foreground",
+                            )}
+                          >
+                            {/* Active accent bar — the page tab in the register. */}
+                            <span
+                              aria-hidden
+                              className={cn(
+                                "absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-primary transition-opacity",
+                                isActive ? "opacity-100" : "opacity-0",
+                              )}
+                            />
+                            <Icon
+                              className={cn(
+                                "h-[1.05rem] w-[1.05rem] shrink-0 transition-colors",
+                                isActive ? "text-primary" : "text-muted-foreground/70 group-hover:text-foreground",
+                              )}
+                              aria-hidden
+                            />
+                            {item.label}
+                          </a>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
               );
             })}
-          </ul>
+          </div>
         </nav>
 
         {/* Content */}
-        <main className="min-w-0 flex-1">
-          <div className="mx-auto max-w-[960px] px-6 py-8">{children}</div>
+        <main className="min-w-0 flex-1 bg-brand-wash">
+          <div className="mx-auto max-w-[1024px] animate-fade-up px-5 py-8 sm:px-8">{children}</div>
         </main>
       </div>
     </div>

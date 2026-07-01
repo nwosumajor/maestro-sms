@@ -45,4 +45,4 @@ CREATE POLICY poll_vote_delete ON "poll_vote" FOR DELETE
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON "poll"        TO major_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON "poll_option" TO major_user;
-GRANT SELECT, INSERT, UPDATE, DELETE ON "poll_vote"   TO major_user;
+GRANT SELECT, INSERT                 ON "poll_vote"   TO major_user;

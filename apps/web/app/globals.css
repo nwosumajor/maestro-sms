@@ -20,36 +20,47 @@
 
 @layer base {
   :root {
-    /* --- brand (the per-tenant swap point) --- default: indigo --- */
-    --brand-h: 243;
-    --brand-s: 75%;
-    --brand-l: 58%;
+    /* --- brand (the per-tenant swap point) --- default: deep academic teal --- */
+    --brand-h: 184;
+    --brand-s: 68%;
+    --brand-l: 31%;
 
-    /* --- semantic surface + text (neutral slate ramp) --- */
-    --background: 0 0% 100%;
-    --foreground: 222 47% 11%;
+    /* --- semantic surface + text (cool-paper "register" ramp) ---
+       Canvas is a faint cool paper so pure-white cards LIFT off it; ink is a
+       refined cool-slate rather than pure black. */
+    --background: 200 24% 98%;
+    --foreground: 200 18% 14%;
 
     --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
+    --card-foreground: 200 18% 14%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
+    --popover-foreground: 200 18% 14%;
 
     --primary: var(--brand-h) var(--brand-s) var(--brand-l);
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 220 14% 96%;
-    --secondary-foreground: 222 47% 11%;
-    --muted: 220 14% 96%;
-    --muted-foreground: 220 9% 46%;
-    --accent: 220 14% 96%;
-    --accent-foreground: 222 47% 11%;
+    --secondary: 200 18% 95%;
+    --secondary-foreground: 200 18% 18%;
+    --muted: 200 18% 95.5%;
+    --muted-foreground: 200 10% 42%;
+    --accent: 200 22% 95%;
+    --accent-foreground: 200 18% 16%;
 
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 220 13% 91%;
-    --input: 220 13% 91%;
+    --border: 200 18% 90%;
+    --input: 200 18% 88%;
     --ring: var(--brand-h) var(--brand-s) var(--brand-l);
+
+    /* --- elevation: layered, low-opacity, cool-tinted shadows --- */
+    --shadow-color: 200 30% 30%;
+    --shadow-xs: 0 1px 2px hsl(var(--shadow-color) / 0.06);
+    --shadow-sm: 0 1px 2px hsl(var(--shadow-color) / 0.05), 0 2px 6px -1px hsl(var(--shadow-color) / 0.06);
+    --shadow-md: 0 2px 4px hsl(var(--shadow-color) / 0.05), 0 8px 20px -4px hsl(var(--shadow-color) / 0.10);
+    --shadow-lg: 0 4px 8px hsl(var(--shadow-color) / 0.06), 0 18px 40px -8px hsl(var(--shadow-color) / 0.16);
+    /* surface tints used by the shell chrome */
+    --sidebar: 200 26% 97%;
 
     /* --- integrity severity (PRIORITY, not guilt — GR#8) ---
        Deliberately NOT brand-tinted and NOT tenant-overridable so a "high"
@@ -70,30 +81,37 @@
   }
 
   .dark {
-    --background: 222 47% 7%;
-    --foreground: 210 20% 96%;
+    --background: 200 32% 7%;
+    --foreground: 200 16% 94%;
 
-    --card: 222 40% 10%;
-    --card-foreground: 210 20% 96%;
-    --popover: 222 40% 10%;
-    --popover-foreground: 210 20% 96%;
+    --card: 200 26% 10%;
+    --card-foreground: 200 16% 94%;
+    --popover: 200 26% 11%;
+    --popover-foreground: 200 16% 94%;
 
-    --primary: var(--brand-h) var(--brand-s) 66%;
-    --primary-foreground: 222 47% 9%;
+    --primary: var(--brand-h) calc(var(--brand-s) - 8%) 52%;
+    --primary-foreground: 200 40% 8%;
 
-    --secondary: 217 30% 17%;
-    --secondary-foreground: 210 20% 96%;
-    --muted: 217 30% 17%;
-    --muted-foreground: 220 14% 65%;
-    --accent: 217 30% 17%;
-    --accent-foreground: 210 20% 96%;
+    --secondary: 200 22% 16%;
+    --secondary-foreground: 200 16% 94%;
+    --muted: 200 22% 15%;
+    --muted-foreground: 200 12% 62%;
+    --accent: 200 24% 17%;
+    --accent-foreground: 200 16% 94%;
 
     --destructive: 0 63% 50%;
     --destructive-foreground: 210 20% 98%;
 
-    --border: 217 30% 20%;
-    --input: 217 30% 20%;
-    --ring: var(--brand-h) var(--brand-s) 66%;
+    --border: 200 20% 19%;
+    --input: 200 20% 22%;
+    --ring: var(--brand-h) var(--brand-s) 56%;
+
+    --shadow-color: 200 50% 2%;
+    --shadow-xs: 0 1px 2px hsl(var(--shadow-color) / 0.30);
+    --shadow-sm: 0 1px 2px hsl(var(--shadow-color) / 0.30), 0 2px 6px -1px hsl(var(--shadow-color) / 0.36);
+    --shadow-md: 0 2px 4px hsl(var(--shadow-color) / 0.36), 0 8px 20px -4px hsl(var(--shadow-color) / 0.48);
+    --shadow-lg: 0 4px 8px hsl(var(--shadow-color) / 0.40), 0 18px 40px -8px hsl(var(--shadow-color) / 0.60);
+    --sidebar: 200 28% 9%;
 
     --severity-info-bg: 220 24% 18%;
     --severity-info-fg: 220 20% 78%;
@@ -114,6 +132,61 @@
     font-family: var(--font-sans);
     font-feature-settings: "cv11", "ss01";
     text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Headings carry the personality: a touch tighter tracking + balanced wrap. */
+  h1, h2, h3 {
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+
+  /* One consistent, visible keyboard focus ring everywhere (a11y floor). */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background-color: hsl(var(--primary) / 0.16);
+  }
+
+  /* Quieter, on-brand scrollbars so dense data panes feel considered. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+  *::-webkit-scrollbar { width: 10px; height: 10px; }
+  *::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border));
+    border: 3px solid transparent;
+    border-radius: 9999px;
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-thumb:hover { background-color: hsl(var(--muted-foreground) / 0.5); }
+}
+
+@layer components {
+  /* Small-caps eyebrow label — the "register section" structural device. */
+  .eyebrow {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: hsl(var(--muted-foreground));
+  }
+  /* Tabular figures for money / counts / IDs — the ledger signature. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
 

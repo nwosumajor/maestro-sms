@@ -1,7 +1,6 @@
 import { RequireModule } from "../auth/require-module.decorator";
 import { Body, Controller, Get, Param, Post } from "@nestjs/common";
-import { DISCIPLINE_PERMISSIONS } from "@sms/types";
-import { MODULES } from "@sms/types";
+import { DISCIPLINE_PERMISSIONS, MODULES } from "@sms/types";
 import type { DisciplineComplaintDto, DisciplineEvidencePresignDto } from "@sms/types";
 import { z } from "zod";
 import { RequirePermission } from "../auth/require-permission.decorator";

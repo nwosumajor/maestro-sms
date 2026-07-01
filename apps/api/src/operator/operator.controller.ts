@@ -1,5 +1,13 @@
-import { Body, Controller, Get, Param, Post, Put } from "@nestjs/common";
-import type { OperatorStudentDto, OperatorUserDto, PlatformAnalyticsDto, SubscriptionDto, TenantDto } from "@sms/types";
+import { Body, Controller, Get, Param, Post, Put, Query, Res, StreamableFile } from "@nestjs/common";
+import type { Response } from "express";
+import type {
+  OperatorStudentDto,
+  OperatorUserDto,
+  PlatformAnalyticsDto,
+  PlatformAuditPageDto,
+  SubscriptionDto,
+  TenantDto,
+} from "@sms/types";
 import { z } from "zod";
 import { OPERATOR_PERMISSIONS, PLANS, SUBSCRIPTION_STATUS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -11,6 +19,22 @@ import { OperatorService } from "./operator.service";
 import { OperatorProvisioningService } from "./operator-provisioning.service";
 import { OperatorUserService } from "./operator-user.service";
 import { PlatformAnalyticsService } from "./platform-analytics.service";
+import { PlatformAuditService, type PlatformAuditFilter } from "./platform-audit.service";
+
+/** Parse audit query params into a typed filter (all optional). */
+function auditFilter(q: Record<string, string>): PlatformAuditFilter {
+  return {
+    schoolId: q.schoolId || undefined,
+    actorEmail: q.actorEmail || undefined,
+    role: q.role || undefined,
+    action: q.action || undefined,
+    entity: q.entity || undefined,
+    from: q.from || undefined,
+    to: q.to || undefined,
+    limit: q.limit ? Number(q.limit) : undefined,
+    cursor: q.cursor || undefined,
+  };
+}
 
 const impSchema = z.object({ schoolId: z.string().uuid(), userId: z.string().uuid() });
 const adminSchema = z.object({
@@ -67,6 +91,7 @@ export class OperatorController {
     private readonly provisioning: OperatorProvisioningService,
     private readonly users: OperatorUserService,
     private readonly analyticsSvc: PlatformAnalyticsService,
+    private readonly auditSvc: PlatformAuditService,
   ) {}
 
   /** Self-serve onboard a NEW school + its first admin (step-up: creates creds). */
@@ -105,6 +130,30 @@ export class OperatorController {
     const result = await this.analyticsSvc.overview(p);
     await this.analyticsSvc.auditView(p);
     return result;
+  }
+
+  /** Cross-tenant audit trail: every change/approval, attributed to actor
+   *  email + unique id + roles + school. For oversight and investigation. */
+  @Get("audit")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  audit(
+    @CurrentPrincipal() p: Principal,
+    @Query() q: Record<string, string>,
+  ): Promise<PlatformAuditPageDto> {
+    return this.auditSvc.list(p, auditFilter(q));
+  }
+
+  /** Downloadable CSV of the same audit query — an exportable report. */
+  @Get("audit/export.csv")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  async auditExport(
+    @CurrentPrincipal() p: Principal,
+    @Query() q: Record<string, string>,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const { csv, filename } = await this.auditSvc.exportCsv(p, auditFilter(q));
+    res.set({ "Content-Type": "text/csv", "Content-Disposition": `attachment; filename="${filename}"` });
+    return new StreamableFile(Buffer.from(csv, "utf8"));
   }
 
   /** Impersonation requires a fresh step-up — the riskiest action in the system. */

@@ -8,6 +8,9 @@
 // =============================================================================
 
 import { Injectable, Logger } from "@nestjs/common";
+import { promises as fs } from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
 /** Injection token for the storage backend (default: StubStorageProvider). */
 export const STORAGE_PROVIDER = Symbol("STORAGE_PROVIDER");
@@ -22,6 +25,11 @@ export interface StorageProvider {
   presignUpload(args: { key: string; contentType: string }): Promise<PresignResult>;
   /** A presigned GET URL the client downloads the file from. */
   presignDownload(args: { key: string; filename?: string }): Promise<PresignResult>;
+  /** Server-side upload of raw bytes (for small assets the API handles itself,
+   *  e.g. a school logo the server must later embed into a generated PDF). */
+  upload(args: { key: string; body: Buffer; contentType: string }): Promise<void>;
+  /** Server-side download of raw bytes (null if the object is absent). */
+  download(key: string): Promise<Buffer | null>;
   /** Remove the stored object (best-effort cleanup on document delete). */
   delete(key: string): Promise<void>;
 }
@@ -47,7 +55,32 @@ export class StubStorageProvider implements StorageProvider {
     return { url: `https://storage.local/${key}?op=get&sig=stub${name}`, expiresInSeconds: this.ttl };
   }
 
+  // The stub is filesystem-backed under a temp dir so server-side upload/download
+  // (e.g. embedding a school logo into a generated PDF) works end-to-end locally.
+  private readonly root = path.join(os.tmpdir(), "sms-storage");
+  private pathFor(key: string): string {
+    // Contain the key within root (no traversal), preserving its folder structure.
+    const safe = key.replace(/\.\./g, "").replace(/^\/+/, "");
+    return path.join(this.root, safe);
+  }
+
+  async upload({ key, body }: { key: string; body: Buffer; contentType: string }): Promise<void> {
+    const file = this.pathFor(key);
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(file, body);
+    this.logger.log(`[stub] upload ${key} (${body.length} bytes)`);
+  }
+
+  async download(key: string): Promise<Buffer | null> {
+    try {
+      return await fs.readFile(this.pathFor(key));
+    } catch {
+      return null;
+    }
+  }
+
   async delete(key: string): Promise<void> {
     this.logger.log(`[stub] delete ${key}`);
+    await fs.unlink(this.pathFor(key)).catch(() => undefined);
   }
 }

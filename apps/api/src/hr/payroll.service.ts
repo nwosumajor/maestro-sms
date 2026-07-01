@@ -152,7 +152,12 @@ export class PayrollService {
       return { run, slips, nameById, empByUser };
     });
     const dec = (v: string | null | undefined) => (v ? decryptField(v, p.schoolId) : "");
-    const esc = (s: string) => `"${String(s).replace(/"/g, '""')}"`;
+    // Quote + neutralise spreadsheet formula injection (OWASP CSV injection).
+    const esc = (s: string) => {
+      let v = String(s);
+      if (/^[=+\-@\t\r]/.test(v)) v = `'${v}`;
+      return `"${v.replace(/"/g, '""')}"`;
+    };
     const lines = ['"Employee","Bank","Account","Net (NGN)"'];
     for (const s of rows.slips) {
       const emp = rows.empByUser.get(s.userId);

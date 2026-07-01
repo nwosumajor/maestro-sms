@@ -19,6 +19,7 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
   ServiceUnavailableException,
 } from "@nestjs/common";
@@ -47,6 +48,8 @@ interface AdminInput {
 
 @Injectable()
 export class OperatorProvisioningService {
+  private readonly logger = new Logger("OperatorProvisioning");
+
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
@@ -209,7 +212,11 @@ export class OperatorProvisioningService {
     return updated;
   }
 
-  /** Audit lands in the OPERATOR's own tenant (the actor FK is the operator). */
+  /** Audit lands in the OPERATOR's own tenant (the actor FK is the operator).
+   *  Best-effort: the privileged write above is the source of truth and the action
+   *  is also captured by the observability request log, so a logging failure (e.g.
+   *  a stale session whose school no longer exists) must NOT 500 a write that has
+   *  already committed. */
   private async auditInOperatorTenant(
     p: Principal,
     action: string,
@@ -217,8 +224,12 @@ export class OperatorProvisioningService {
     entityId: string,
     metadata: Record<string, unknown>,
   ): Promise<void> {
-    await this.db.runAsTenant({ schoolId: p.schoolId, userId: p.userId }, (tx) =>
-      this.audit.record({ actorId: p.userId, action, entity, entityId, schoolId: p.schoolId, metadata }, tx),
-    );
+    try {
+      await this.db.runAsTenant({ schoolId: p.schoolId, userId: p.userId }, (tx) =>
+        this.audit.record({ actorId: p.userId, action, entity, entityId, schoolId: p.schoolId, metadata }, tx),
+      );
+    } catch (err) {
+      this.logger.warn(`operator audit '${action}' failed (non-fatal): ${String(err)}`);
+    }
   }
 }

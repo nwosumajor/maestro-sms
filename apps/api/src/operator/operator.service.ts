@@ -8,7 +8,7 @@
 // the same HS256 shape the web BFF issues, so the API accepts it as a Bearer.
 // =============================================================================
 
-import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import jwt from "jsonwebtoken";
 import { Prisma } from "@sms/db";
 import {
@@ -34,6 +34,8 @@ const IMPERSONATION_TTL = 900; // 15 min
 
 @Injectable()
 export class OperatorService {
+  private readonly logger = new Logger("Operator");
+
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
@@ -42,6 +44,18 @@ export class OperatorService {
 
   private ctx(p: Principal): TenantContext {
     return { schoolId: p.schoolId, userId: p.userId };
+  }
+
+  /** Audit a cross-tenant operator action under the operator's OWN tenant.
+   *  Best-effort: the privileged effect is already committed and the action is
+   *  captured by the observability request log, so a logging failure (e.g. a stale
+   *  session whose school no longer exists) must not 500 a completed operation. */
+  private async auditAsOperator(p: Principal, entry: Parameters<AuditLogService["record"]>[0]): Promise<void> {
+    try {
+      await this.db.runAsTenant(this.ctx(p), (tx) => this.audit.record(entry, tx));
+    } catch (err) {
+      this.logger.warn(`operator audit '${entry.action}' failed (non-fatal): ${String(err)}`);
+    }
   }
 
   // --- subscription / module entitlements (super_admin, platform.operate) ----
@@ -107,19 +121,14 @@ export class OperatorService {
     // the TARGET school, so an audit_log row carrying the operator's own schoolId
     // can't be written there (RLS WITH CHECK would reject it — schoolId ≠ GUC).
     // The affected school is preserved in metadata.targetSchoolId.
-    await this.db.runAsTenant(this.ctx(p), (tx) =>
-      this.audit.record(
-        {
-          actorId: p.userId,
-          action: "operator.subscription.set",
-          entity: "school_subscription",
-          entityId: schoolId,
-          schoolId: p.schoolId,
-          metadata: { targetSchoolId: schoolId, plan, overrides, status, currentPeriodEnd },
-        },
-        tx,
-      ),
-    );
+    await this.auditAsOperator(p, {
+      actorId: p.userId,
+      action: "operator.subscription.set",
+      entity: "school_subscription",
+      entityId: schoolId,
+      schoolId: p.schoolId,
+      metadata: { targetSchoolId: schoolId, plan, overrides, status, currentPeriodEnd },
+    });
     // Drop the cached entitlements so the new posture takes effect immediately.
     this.entitlements.invalidate(schoolId);
     const resolved = await this.entitlements.resolve(schoolId);
@@ -169,12 +178,7 @@ export class OperatorService {
         .sort((a, b) => a.name.localeCompare(b.name));
     });
     // Audit the cross-tenant PII view in the operator's own tenant.
-    await this.db.runAsTenant(this.ctx(p), (tx) =>
-      this.audit.record(
-        { actorId: p.userId, action: "operator.students.view", entity: "school", entityId: schoolId, schoolId: p.schoolId, metadata: { targetSchoolId: schoolId, count: result.length } },
-        tx,
-      ),
-    );
+    await this.auditAsOperator(p, { actorId: p.userId, action: "operator.students.view", entity: "school", entityId: schoolId, schoolId: p.schoolId, metadata: { targetSchoolId: schoolId, count: result.length } });
     return result;
   }
 
@@ -207,12 +211,7 @@ export class OperatorService {
     );
 
     // Audit in the OPERATOR's own tenant (actor FK is the operator).
-    await this.db.runAsTenant(this.ctx(p), (tx) =>
-      this.audit.record(
-        { actorId: p.userId, action: "operator.impersonate", entity: "user", entityId: userId, schoolId: p.schoolId, metadata: { targetSchoolId: schoolId, targetName: target.name } },
-        tx,
-      ),
-    );
+    await this.auditAsOperator(p, { actorId: p.userId, action: "operator.impersonate", entity: "user", entityId: userId, schoolId: p.schoolId, metadata: { targetSchoolId: schoolId, targetName: target.name } });
     return { token, expiresIn: IMPERSONATION_TTL, target: { userId, name: target.name, roles: target.roles } };
   }
 }

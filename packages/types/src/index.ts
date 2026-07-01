@@ -78,3 +78,4 @@ export * from "./payroll";
 export * from "./elevation";
 export * from "./dto/assessment";
 export * from "./dto/branding";
+export * from "./demographics";

@@ -14,7 +14,6 @@ import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { prisma } from "@sms/db";
 import {
   isSubscriptionInGoodStanding,
-  type BrandingUploadTargetDto,
   type PublicBrandingDto,
   type SchoolBrandingDto,
   type SubscriptionStatus,
@@ -46,22 +45,34 @@ export class BrandingService {
     return `schools/${schoolId}/branding/logo`;
   }
 
-  /** Principal requests an upload target; the logoKey is recorded immediately. */
-  async getUploadTarget(p: Principal, contentType: string): Promise<BrandingUploadTargetDto> {
+  /** Direct logo upload: the API stores the bytes itself (so it can later embed the
+   *  logo into generated certificates / report cards). Principal / school_admin only. */
+  async uploadLogo(p: Principal, body: Buffer, contentType: string): Promise<SchoolBrandingDto> {
     const key = this.key(p.schoolId);
-    const presign = await this.storage.presignUpload({ key, contentType });
-    await this.db.runAsTenant(this.ctx(p), async (tx) => {
-      await tx.schoolBranding.upsert({
+    await this.storage.upload({ key, body, contentType });
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const b = await tx.schoolBranding.upsert({
         where: { schoolId: p.schoolId },
         update: { logoKey: key },
         create: { schoolId: p.schoolId, logoKey: key },
       });
       await this.audit.record(
-        { actorId: p.userId, action: "school.branding.logo.set", entity: "school_branding", entityId: p.schoolId, schoolId: p.schoolId },
+        { actorId: p.userId, action: "school.branding.logo.set", entity: "school_branding", entityId: p.schoolId, schoolId: p.schoolId, metadata: { bytes: body.length } },
         tx,
       );
+      const school = await tx.school.findFirst({ where: { id: p.schoolId }, select: { slug: true } });
+      const logoUrl = (await this.storage.presignDownload({ key })).url;
+      return this.dto(school?.slug ?? "", logoUrl, b);
     });
-    return { uploadUrl: presign.url, key };
+  }
+
+  /** The school's logo bytes (for server-side PDF embedding), or null if unset. */
+  async getLogoBytes(schoolId: string): Promise<Buffer | null> {
+    const row = await this.db.runAsTenant({ schoolId, userId: "system" }, (tx) =>
+      tx.schoolBranding.findFirst({ where: { schoolId }, select: { logoKey: true } }),
+    );
+    if (!row?.logoKey) return null;
+    return this.storage.download(row.logoKey);
   }
 
   async removeLogo(p: Principal): Promise<SchoolBrandingDto> {

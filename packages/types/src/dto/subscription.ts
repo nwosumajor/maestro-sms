@@ -22,7 +22,7 @@ export interface SubscriptionDto {
   seats: number | null;
   /** Amount last charged (minor units). */
   priceMinor: number | null;
-  /** The tier actually ENFORCED now (BASIC when past-due beyond grace). */
+  /** The tier actually ENFORCED now (falls to STANDARD when past-due beyond grace). */
   effectivePlan: Plan;
 }
 

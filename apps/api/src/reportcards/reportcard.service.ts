@@ -19,6 +19,7 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 import { NotificationService } from "../notifications/notification.service";
+import { BrandingService } from "../branding/branding.service";
 
 const STAFF_WIDE = new Set(["school_admin", "principal", "super_admin"]);
 
@@ -28,6 +29,7 @@ export class ReportCardService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly notifications: NotificationService,
+    private readonly branding: BrandingService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -67,7 +69,8 @@ export class ReportCardService {
       };
     });
 
-    const buffer = await this.renderPdf(data);
+    const logo = await this.branding.getLogoBytes(p.schoolId).catch(() => null);
+    const buffer = await this.renderPdf(data, logo);
 
     // Best-effort: tell the guardians a report card is ready.
     try {
@@ -86,12 +89,15 @@ export class ReportCardService {
     return { buffer, filename: `report-card-${data.studentName.replace(/\s+/g, "-").toLowerCase()}.pdf` };
   }
 
-  private renderPdf(d: {
-    studentName: string;
-    schoolName: string;
-    grades: { title: string; score: number; maxScore: number }[];
-    att: Record<string, number>;
-  }): Promise<Buffer> {
+  private renderPdf(
+    d: {
+      studentName: string;
+      schoolName: string;
+      grades: { title: string; score: number; maxScore: number }[];
+      att: Record<string, number>;
+    },
+    logo?: Buffer | null,
+  ): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       const doc = new PDFDocument({ margin: 50, size: "A4" });
       const chunks: Buffer[] = [];
@@ -99,6 +105,15 @@ export class ReportCardService {
       doc.on("end", () => resolve(Buffer.concat(chunks)));
       doc.on("error", reject);
 
+      // School logo, centred above the heading (best-effort — never breaks the PDF).
+      if (logo) {
+        try {
+          doc.image(logo, doc.page.width / 2 - 26, 45, { fit: [52, 52], align: "center" });
+          doc.moveDown(3.5);
+        } catch {
+          /* ignore unsupported/corrupt image */
+        }
+      }
       doc.fontSize(22).text(d.schoolName || "Report Card", { align: "center" });
       doc.moveDown(0.3).fontSize(14).fillColor("#666").text("Student Report Card", { align: "center" });
       doc.fillColor("#000").moveDown(1);

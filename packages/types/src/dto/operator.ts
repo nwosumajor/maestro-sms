@@ -7,7 +7,7 @@ export interface TenantDto {
   status: string;
   createdAt: Date;
   users: number;
-  /** Subscription plan (BASIC | STANDARD | ENTERPRISE). */
+  /** Subscription plan (STANDARD | PREMIUM | ULTIMATE | ENTERPRISE). */
   plan: string;
   /** Count of subscription-enabled modules. */
   moduleCount: number;
@@ -48,7 +48,7 @@ export interface PlatformRevenueEntryDto {
 export interface PlatformAnalyticsDto {
   /** Customer schools (the platform org is never counted). */
   schools: { total: number; active: number; disabled: number };
-  /** Customer-school counts keyed by purchased plan (BASIC|STANDARD|ENTERPRISE). */
+  /** Customer-school counts keyed by effective plan (STANDARD|PREMIUM|ULTIMATE|ENTERPRISE). */
   schoolsByPlan: Record<string, number>;
   /** Customer-school counts keyed by subscription status (ACTIVE|PAST_DUE|CANCELED). */
   schoolsByStatus: Record<string, number>;
@@ -60,6 +60,48 @@ export interface PlatformAnalyticsDto {
   onboardingPipeline: Record<string, number>;
   /** The most recent platform-subscription payments (newest first, capped). */
   recentPayments: PlatformRevenueEntryDto[];
+
+  // --- decision-grade SaaS metrics (super_admin) ---
+  /** Monthly recurring revenue: normalised per-seat run-rate of ACTIVE subscriptions. */
+  mrr: { totalMinor: number; byPlan: Record<string, number>; arpaMinor: number; payingSchools: number };
+  /** Monthly trend (chronological, last ~6 months) for growth + revenue charts. */
+  growth: { month: string; schools: number; students: number; revenueMinor: number }[];
+  /** Acquisition funnel: public requests → approved → provisioned schools → paying. */
+  funnel: { requests: number; approved: number; provisioned: number; paying: number };
+  /** Churn / delinquency signals for retention decisions. */
+  risk: { pastDue: number; canceled: number; atRiskMrrMinor: number };
+  /** How widely each product module is switched on (informs product investment). */
+  moduleAdoption: { key: string; label: string; schools: number }[];
+  /** Largest customer schools by enrolment (with their plan + MRR contribution). */
+  topSchools: { name: string; students: number; plan: string; mrrMinor: number }[];
+  /** Portfolio averages. */
+  averages: { studentsPerSchool: number; modulesPerSchool: number };
+  /** Platform-wide student demographics from profiles (every customer school). */
+  demographics: { profiled: number; gender: Record<string, number>; ageBand: Record<string, number> };
+}
+
+/** A single cross-tenant audit entry for the super_admin platform audit console.
+ *  The actor is fully identified (email + unique id + roles) for investigation. */
+export interface PlatformAuditEntryDto {
+  id: string;
+  createdAt: Date;
+  schoolId: string;
+  schoolName: string;
+  actorId: string;
+  actorName: string;
+  actorEmail: string;
+  actorUniqueId: string;
+  actorRoles: string[];
+  action: string;
+  entity: string;
+  entityId: string | null;
+  metadata: Record<string, unknown> | null;
+}
+
+/** A page of audit entries + a keyset cursor for the next page (null = last page). */
+export interface PlatformAuditPageDto {
+  entries: PlatformAuditEntryDto[];
+  nextCursor: string | null;
 }
 
 /** An enrolled student as seen by the super_admin cross-tenant student view. */

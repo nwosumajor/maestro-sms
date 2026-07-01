@@ -194,6 +194,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     "class.read", "class.write", "enrollment.read", "enrollment.write", "guardian.write", "subject.manage", "student.import", "class.promote", "academic.manage",
     "assessment.read", "integrity.report.read", "integrity.exemption.read", "integrity.exemption.write",
     "integrity.retention.run",
+    "grade.read", "grade.write",
     "student.profile.read", "student.profile.write", "student.contact.read",
     "student.contact.write", "student.medical.read", "student.medical.write",
     "attendance.read", "attendance.write",

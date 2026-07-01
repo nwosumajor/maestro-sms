@@ -1,8 +1,7 @@
 import { RequireModule } from "../auth/require-module.decorator";
 import { Body, Controller, Get, Param, Post, Res, StreamableFile } from "@nestjs/common";
 import type { Response } from "express";
-import { CERTIFICATE_PERMISSIONS } from "@sms/types";
-import { MODULES } from "@sms/types";
+import { CERTIFICATE_PERMISSIONS, MODULES } from "@sms/types";
 import { z } from "zod";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";

@@ -75,6 +75,31 @@ const config: Config = {
         sans: "var(--font-sans)",
         mono: "var(--font-mono)",
       },
+      // Shell chrome surface (sidebar / topbar tint).
+      backgroundColor: {
+        sidebar: "hsl(var(--sidebar) / <alpha-value>)",
+      },
+      // Layered, cool-tinted elevation — cards lift off the paper canvas.
+      boxShadow: {
+        xs: "var(--shadow-xs)",
+        card: "var(--shadow-sm)",
+        elevated: "var(--shadow-md)",
+        pop: "var(--shadow-lg)",
+      },
+      // Subtle brand wash for hero / chrome accents.
+      backgroundImage: {
+        "brand-wash":
+          "radial-gradient(120% 120% at 100% 0%, hsl(var(--primary) / 0.06) 0%, transparent 55%)",
+      },
+      keyframes: {
+        "fade-up": {
+          from: { opacity: "0", transform: "translateY(6px)" },
+          to: { opacity: "1", transform: "translateY(0)" },
+        },
+      },
+      animation: {
+        "fade-up": "fade-up 0.4s cubic-bezier(0.22, 1, 0.36, 1) both",
+      },
     },
   },
   plugins: [require("tailwindcss-animate")],

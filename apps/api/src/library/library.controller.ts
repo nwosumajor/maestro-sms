@@ -1,8 +1,7 @@
 import { RequireModule } from "../auth/require-module.decorator";
 import { Body, Controller, Get, Param, Post, Put, Query, Res, StreamableFile } from "@nestjs/common";
 import type { Response } from "express";
-import { LIBRARY_PERMISSIONS } from "@sms/types";
-import { MODULES } from "@sms/types";
+import { LIBRARY_PERMISSIONS, MODULES } from "@sms/types";
 import type { BookLoanDto, FineReceiptDto, LibraryBookDto, LibraryReportDto } from "@sms/types";
 import { z } from "zod";
 import { RequirePermission } from "../auth/require-permission.decorator";

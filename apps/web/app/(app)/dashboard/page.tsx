@@ -1,6 +1,5 @@
-import type { ClassDto, WorkflowSummaryDto, Serialized } from "@sms/types";
+import type { ClassDto, WorkflowSummaryDto, PlatformAnalyticsDto, Serialized } from "@sms/types";
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { apiGet } from "@/lib/api";
@@ -13,6 +12,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { PlatformAnalytics } from "@/components/operator/PlatformAnalytics";
 
 export const dynamic = "force-dynamic";
 
@@ -22,8 +23,28 @@ export default async function DashboardPage() {
   const session = await auth();
   const user = session!.user;
 
-  // The platform owner has no tenant data — their home is the operator console.
-  if (hasPermission(user.permissions, "platform.operate")) redirect("/operator");
+  // The platform owner has no tenant data — their dashboard is a graphical,
+  // cross-tenant business overview (management lives on the Operator console).
+  if (hasPermission(user.permissions, "platform.operate")) {
+    const analytics = await apiGet<Serialized<PlatformAnalyticsDto>>("/operator/analytics");
+    return (
+      <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="dashboard" permissions={user.permissions}>
+        <div className="space-y-6">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight">Platform overview</h1>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Business health across every customer school. To provision schools, set plans, or manage
+                subscriptions, open the Operator console.
+              </p>
+            </div>
+            <Link href="/operator"><Button variant="outline">Operator console →</Button></Link>
+          </div>
+          <PlatformAnalytics data={analytics ?? null} />
+        </div>
+      </AppShell>
+    );
+  }
 
   // Fire the two scoped reads in parallel; either may be null if the role lacks
   // the permission (RBAC) — render 0 rather than failing the page.

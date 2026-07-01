@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import type { SchoolBrandingDto, BrandingUploadTargetDto, Serialized } from "@sms/types";
+import type { SchoolBrandingDto, Serialized } from "@sms/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,23 +35,25 @@ export function BrandingManager({ initial, slug }: { initial: Serialized<SchoolB
   const upload = async () => {
     const file = fileRef.current?.files?.[0];
     if (!file) { setMsg("Choose an image first."); return; }
+    if (file.type !== "image/png" && file.type !== "image/jpeg") { setMsg("Use a PNG or JPEG image."); return; }
+    if (file.size > 1_000_000) { setMsg("Image must be under 1 MB."); return; }
     setBusy(true); setMsg(null);
-    // 1) ask the API for a presigned upload target (records the logo key).
+    // Read the file as base64 and POST it — the API stores the bytes and embeds
+    // the logo into generated certificates + report cards.
+    const dataBase64 = await new Promise<string>((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result));
+      r.onerror = () => reject(r.error);
+      r.readAsDataURL(file);
+    }).catch(() => "");
+    if (!dataBase64) { setBusy(false); setMsg("Could not read the image."); return; }
     const res = await fetch("/api/sms/schools/branding/logo", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ contentType: file.type }),
+      body: JSON.stringify({ contentType: file.type, dataBase64 }),
     });
-    if (!res.ok) { setBusy(false); setMsg(`Failed (${res.status}). Allowed: PNG/JPEG/SVG/WebP.`); return; }
-    const { uploadUrl } = (await res.json()) as BrandingUploadTargetDto;
-    // 2) upload the bytes directly to storage.
-    try {
-      const put = await fetch(uploadUrl, { method: "PUT", headers: { "Content-Type": file.type }, body: file });
-      setMsg(put.ok ? "Logo uploaded." : "Logo recorded, but the storage upload failed (local stub has no real bucket).");
-    } catch {
-      setMsg("Logo recorded, but the storage upload failed (local stub has no real bucket).");
-    }
     setBusy(false);
+    setMsg(res.ok ? "Logo uploaded — it now appears on the login page, certificates and report cards." : `Failed (${res.status}). Use a PNG/JPEG under 1 MB.`);
     router.refresh();
   };
 
@@ -66,10 +68,10 @@ export function BrandingManager({ initial, slug }: { initial: Serialized<SchoolB
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Login-page logo</CardTitle>
+        <CardTitle className="text-base">School logo</CardTitle>
         <CardDescription>
-          Shown on your school&apos;s branded login page (<span className="font-mono">/login?school={slug}</span>).
-          Hidden automatically while the subscription is lapsed.
+          Appears on your branded login page (<span className="font-mono">/login?school={slug}</span>) and on generated
+          certificates, ID cards and report cards. PNG or JPEG, under 1 MB.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -80,7 +82,7 @@ export function BrandingManager({ initial, slug }: { initial: Serialized<SchoolB
           <p className="text-sm text-muted-foreground">No logo set.</p>
         )}
         <div className="flex flex-wrap items-center gap-2">
-          <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/svg+xml,image/webp" className="text-sm" />
+          <input ref={fileRef} type="file" accept="image/png,image/jpeg" className="text-sm" />
           <Button size="sm" disabled={busy} onClick={upload}>{busy ? "Uploading…" : "Upload"}</Button>
           {initial.logoKey && <Button size="sm" variant="outline" disabled={busy} onClick={remove}>Remove</Button>}
         </div>

@@ -242,7 +242,12 @@ export class LibraryService {
   /** Export the catalogue as CSV. Librarian. */
   async exportCsv(p: Principal): Promise<{ csv: string; filename: string }> {
     const books = await this.searchBooks(p, undefined);
-    const esc = (v: string | number | null) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    // Quote + neutralise spreadsheet formula injection (OWASP CSV injection).
+    const esc = (v: string | number | null) => {
+      let s = String(v ?? "");
+      if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+      return `"${s.replace(/"/g, '""')}"`;
+    };
     const header = "Title,Author,ISBN,Barcode,Category,TotalCopies,AvailableCopies";
     const rows = books.map((b) =>
       [b.title, b.author, b.isbn, b.barcode, b.category, b.totalCopies, b.availableCopies].map(esc).join(","),
