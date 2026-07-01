@@ -22,7 +22,9 @@ export function LoginForm() {
     const res = await signIn("credentials", { email, password, code, redirect: false });
     setBusy(false);
     if (res?.error) {
-      setError("Invalid email, password, or 2FA code.");
+      setError(
+        "Invalid email, password, or 2FA code. After 3 failed attempts the account is locked — a platform administrator must reactivate it.",
+      );
       return;
     }
     router.push("/dashboard");

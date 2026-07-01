@@ -1,4 +1,4 @@
-import { Inject, Injectable, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, UnauthorizedException } from "@nestjs/common";
 import bcrypt from "bcryptjs";
 import { prisma } from "@sms/db";
 import { verifyTotp } from "../auth/totp";
@@ -20,14 +20,27 @@ export interface LoginResult {
   modules: string[];
   /** super_admin mandated MFA but the user hasn't enrolled — web forces /account. */
   mfaEnrollRequired: boolean;
+  /** Password is older than the max age (or admin-reset) — web forces a change. */
+  passwordExpired: boolean;
 }
 
 // A valid bcrypt hash of a random string — compared against when the user is not
 // found, so login takes ~the same time either way (mitigates user enumeration).
 const DUMMY_HASH = "$2a$10$CwTycUXWue0Thq9StjUM0uJ8DkuErEr2Q9p0a8b8a8b8a8b8a8b8a";
 
-const MAX_FAILS = 5;
-const LOCK_MINUTES = 15;
+// Lock the account on the 3rd consecutive miss; the lock is PERMANENT (only a
+// super_admin can reactivate it — no auto-expiry).
+const MAX_FAILS = 3;
+// Every non-super_admin must reset their password within this many days.
+const PASSWORD_MAX_AGE_DAYS = 30;
+const PASSWORD_MAX_AGE_MS = PASSWORD_MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
+
+/** True when a non-super_admin's password is null-dated or older than the max age. */
+export function isPasswordExpired(passwordChangedAt: Date | null | undefined, isSuperAdmin: boolean): boolean {
+  if (isSuperAdmin) return false;
+  if (!passwordChangedAt) return true;
+  return Date.now() - passwordChangedAt.getTime() > PASSWORD_MAX_AGE_MS;
+}
 
 @Injectable()
 export class AuthService {
@@ -66,27 +79,33 @@ export class AuthService {
           where: { id: user.id },
           select: {
             failedLoginCount: true,
-            lockedUntil: true,
+            locked: true,
             mfaEnabled: true,
             mfaSecret: true,
             mfaRequired: true,
+            passwordChangedAt: true,
           },
         });
 
-        if (sec?.lockedUntil && sec.lockedUntil > new Date()) {
+        // Permanent lockout — only a super_admin can reactivate.
+        if (sec?.locked) {
           return { status: "LOCKED" as const };
         }
 
         const ok = await bcrypt.compare(password, user.password_hash);
         if (!ok) {
           const fails = (sec?.failedLoginCount ?? 0) + 1;
-          const lockedUntil =
-            fails >= MAX_FAILS ? new Date(Date.now() + LOCK_MINUTES * 60_000) : null;
+          const nowLocked = fails >= MAX_FAILS;
           await tx.user.update({
             where: { id: user.id },
-            data: { failedLoginCount: fails, lockedUntil },
+            data: {
+              failedLoginCount: fails,
+              locked: nowLocked,
+              // Record WHEN it locked (for the operator view); no auto-expiry.
+              lockedUntil: nowLocked ? new Date() : null,
+            },
           });
-          return { status: "BAD_PASSWORD" as const };
+          return nowLocked ? { status: "LOCKED" as const } : { status: "BAD_PASSWORD" as const };
         }
 
         if (sec?.mfaEnabled) {
@@ -101,10 +120,10 @@ export class AuthService {
         // the web forces the user to /account until mfaEnabled becomes true.
         const mfaEnrollRequired = sec?.mfaRequired === true && !sec?.mfaEnabled;
 
-        // Success: clear the lockout counters and resolve the claims.
+        // Success: clear the failure counters and resolve the claims.
         await tx.user.update({
           where: { id: user.id },
-          data: { failedLoginCount: 0, lockedUntil: null },
+          data: { failedLoginCount: 0, locked: false, lockedUntil: null },
         });
         const userRoles = await tx.userRole.findMany({
           where: { userId: user.id },
@@ -118,6 +137,8 @@ export class AuthService {
             ),
           ),
         ];
+        // super_admin is EXEMPT from the 30-day reset policy.
+        const passwordExpired = isPasswordExpired(sec?.passwordChangedAt, roles.includes("super_admin"));
         const school = await tx.school.findUnique({ where: { id: user.school_id } });
         return {
           status: "OK" as const,
@@ -129,13 +150,14 @@ export class AuthService {
             roles,
             permissions,
             mfaEnrollRequired,
+            passwordExpired,
           },
         };
       },
     );
 
     if (outcome.status === "LOCKED") {
-      throw new UnauthorizedException("Account locked — try again later");
+      throw new UnauthorizedException("ACCOUNT_LOCKED");
     }
     if (outcome.status === "BAD_PASSWORD") throw new UnauthorizedException("Invalid credentials");
     if (outcome.status === "MFA_REQUIRED") throw new UnauthorizedException("MFA_REQUIRED");
@@ -143,5 +165,31 @@ export class AuthService {
     // the web can hide modules the plan doesn't include.
     const modules = await this.modules.effectiveModules(outcome.result.schoolId);
     return { ...outcome.result, modules };
+  }
+
+  /**
+   * Change the caller's own password (self-service — used both voluntarily and to
+   * satisfy the forced 30-day reset). Verifies the current password, rejects reuse
+   * of the same password, and stamps passwordChangedAt so the reset clock restarts.
+   */
+  async changePassword(userId: string, schoolId: string, currentPassword: string, newPassword: string): Promise<void> {
+    if (!newPassword || newPassword.length < 8) {
+      throw new BadRequestException("New password must be at least 8 characters");
+    }
+    await this.db.runAsTenant({ schoolId, userId }, async (tx: TenantTx) => {
+      const u = await tx.user.findUnique({ where: { id: userId }, select: { passwordHash: true, locked: true } });
+      if (!u) throw new UnauthorizedException("Invalid credentials");
+      if (u.locked) throw new UnauthorizedException("ACCOUNT_LOCKED");
+      const ok = await bcrypt.compare(currentPassword, u.passwordHash);
+      if (!ok) throw new UnauthorizedException("Current password is incorrect");
+      if (await bcrypt.compare(newPassword, u.passwordHash)) {
+        throw new BadRequestException("New password must differ from the current one");
+      }
+      const passwordHash = await bcrypt.hash(newPassword, 10);
+      await tx.user.update({
+        where: { id: userId },
+        data: { passwordHash, passwordChangedAt: new Date(), failedLoginCount: 0 },
+      });
+    });
   }
 }

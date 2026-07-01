@@ -138,9 +138,7 @@ export function OperatorUsers({ schoolId }: { schoolId: string }) {
                   ))}
                   {u.mfaEnabled && <Badge variant="secondary">2FA on</Badge>}
                   {u.mfaRequired && <Badge variant="outline">2FA required</Badge>}
-                  {u.lockedUntil && new Date(u.lockedUntil) > new Date() && (
-                    <Badge variant="destructive">locked</Badge>
-                  )}
+                  {u.locked && <Badge variant="destructive">locked</Badge>}
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-1">
@@ -173,17 +171,19 @@ export function OperatorUsers({ schoolId }: { schoolId: string }) {
                     Reactivate
                   </Button>
                 )}
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-7"
-                  disabled={busy === `ul-${u.id}`}
-                  onClick={() =>
-                    act(`ul-${u.id}`, "POST", `operator/tenants/${schoolId}/users/${u.id}/unlock`)
-                  }
-                >
-                  Unlock
-                </Button>
+                {u.locked && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7"
+                    disabled={busy === `ul-${u.id}`}
+                    onClick={() =>
+                      act(`ul-${u.id}`, "POST", `operator/tenants/${schoolId}/users/${u.id}/unlock`)
+                    }
+                  >
+                    Reactivate (unlock)
+                  </Button>
+                )}
                 <Button
                   size="sm"
                   variant="ghost"

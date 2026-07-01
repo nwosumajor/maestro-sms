@@ -94,6 +94,7 @@ export class OperatorUserService {
         status: true,
         mfaEnabled: true,
         mfaRequired: true,
+        locked: true,
         lockedUntil: true,
         roles: { select: { role: { select: { name: true } } } },
       },
@@ -107,6 +108,7 @@ export class OperatorUserService {
       status: u.status,
       mfaEnabled: u.mfaEnabled,
       mfaRequired: u.mfaRequired,
+      locked: u.locked,
       lockedUntil: u.lockedUntil,
     }));
   }
@@ -123,7 +125,7 @@ export class OperatorUserService {
     await this.loadGovernable(schoolId, userId);
     await this.client().user.update({
       where: { id: userId },
-      data: { failedLoginCount: 0, lockedUntil: null },
+      data: { failedLoginCount: 0, locked: false, lockedUntil: null },
     });
     await this.auditInOperatorTenant(p, "operator.user.unlock", userId, { targetSchoolId: schoolId });
     return { id: userId, unlocked: true };
@@ -136,7 +138,9 @@ export class OperatorUserService {
     const passwordHash = await bcrypt.hash(tempPassword, 10);
     await this.client().user.update({
       where: { id: userId },
-      data: { passwordHash, failedLoginCount: 0, lockedUntil: null },
+      // Temp password: null passwordChangedAt forces a change on first login. Also
+      // clears any lockout so the user can actually use the temp credential.
+      data: { passwordHash, failedLoginCount: 0, locked: false, lockedUntil: null, passwordChangedAt: null },
     });
     await this.auditInOperatorTenant(p, "operator.user.password_reset", userId, {
       targetSchoolId: schoolId,

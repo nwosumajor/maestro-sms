@@ -21,6 +21,7 @@ interface LoginResult {
   permissions: string[];
   modules: string[];
   mfaEnrollRequired?: boolean;
+  passwordExpired?: boolean;
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -58,6 +59,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           permissions: u.permissions,
           modules: u.modules ?? [],
           mfaEnrollRequired: u.mfaEnrollRequired ?? false,
+          passwordExpired: u.passwordExpired ?? false,
         };
       },
     }),
@@ -78,6 +80,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           permissions: string[];
           modules: string[];
           mfaEnrollRequired: boolean;
+          passwordExpired: boolean;
         };
         token.userId = u.id;
         token.schoolId = u.schoolId;
@@ -86,6 +89,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.permissions = u.permissions;
         token.modules = u.modules;
         token.mfaEnrollRequired = u.mfaEnrollRequired;
+        token.passwordExpired = u.passwordExpired;
       }
       return token;
     },
@@ -97,6 +101,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       session.user.permissions = (token.permissions as string[]) ?? [];
       session.user.modules = (token.modules as string[]) ?? [];
       session.user.mfaEnrollRequired = (token.mfaEnrollRequired as boolean) ?? false;
+      session.user.passwordExpired = (token.passwordExpired as boolean) ?? false;
       return session;
     },
   },

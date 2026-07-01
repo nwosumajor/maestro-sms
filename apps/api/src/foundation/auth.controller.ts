@@ -1,6 +1,8 @@
 import { Body, Controller, HttpCode, Post } from "@nestjs/common";
 import { z } from "zod";
 import { Public } from "../auth/public.decorator";
+import { CurrentPrincipal } from "../auth/current-principal.decorator";
+import type { Principal } from "../integrity/integrity.foundation";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { AuthService } from "./auth.service";
 
@@ -8,6 +10,10 @@ const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
   mfaCode: z.string().optional(),
+});
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(8).max(200),
 });
 
 /**
@@ -27,5 +33,17 @@ export class AuthController {
     body: { email: string; password: string; mfaCode?: string },
   ) {
     return this.auth.login(body.email, body.password, body.mfaCode);
+  }
+
+  /** Change your own password (voluntary, or to satisfy the forced 30-day reset).
+   *  Authenticated — the session identifies the user; no permission needed. */
+  @Post("change-password")
+  @HttpCode(200)
+  async changePassword(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(changePasswordSchema)) body: z.infer<typeof changePasswordSchema>,
+  ) {
+    await this.auth.changePassword(p.userId, p.schoolId, body.currentPassword, body.newPassword);
+    return { ok: true };
   }
 }

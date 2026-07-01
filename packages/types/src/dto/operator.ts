@@ -29,7 +29,9 @@ export interface OperatorUserDto {
   mfaEnabled: boolean;
   /** Whether the platform owner mandates MFA enrolment for this user. */
   mfaRequired: boolean;
-  /** Lockout deadline from failed logins, if currently locked. */
+  /** True when the account is locked after 3 failed logins (super_admin reactivates). */
+  locked: boolean;
+  /** When the account was locked (record only; the lock is permanent until cleared). */
   lockedUntil: Date | null;
 }
 

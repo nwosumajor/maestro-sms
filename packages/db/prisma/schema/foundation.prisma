@@ -224,9 +224,16 @@ model User {
   /// MFA (mfaEnabled). Set by super_admin per-user or per-role from the operator
   /// console. Distinct from mfaEnabled (the user's own enrolment state).
   mfaRequired  Boolean  @default(false)
-  /// Brute-force protection: consecutive failed logins + a lockout deadline.
+  /// Brute-force protection: consecutive failed logins. On the 3rd miss the account
+  /// is LOCKED (permanent — cleared only by a super_admin). lockedUntil records when.
   failedLoginCount Int      @default(0)
   lockedUntil      DateTime?
+  /// True once locked out; only a super_admin (operator console) can reactivate.
+  locked       Boolean  @default(false)
+  /// When the password was last set. Non-super_admin accounts must reset every 30
+  /// days (enforced at login). Defaults to now() so new/existing accounts get a
+  /// fresh window; set to null by an admin password reset to force an immediate change.
+  passwordChangedAt DateTime? @default(now())
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

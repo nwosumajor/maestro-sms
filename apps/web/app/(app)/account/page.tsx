@@ -4,6 +4,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { MfaSetup } from "@/components/security/MfaSetup";
+import { ChangePasswordForm } from "@/components/auth/ChangePasswordForm";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +30,19 @@ export default async function AccountPage({ searchParams }: { searchParams: { en
             </p>
           </div>
         )}
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Password</CardTitle>
+            <CardDescription>
+              Change your password any time. Everyone must reset at least every 30 days; you&apos;ll be signed out
+              afterwards to sign back in with the new one.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="max-w-sm">
+            <ChangePasswordForm />
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader>

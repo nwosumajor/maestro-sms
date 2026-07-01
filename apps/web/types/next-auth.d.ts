@@ -13,6 +13,8 @@ declare module "next-auth" {
       modules: string[];
       /** super_admin mandated MFA but the user hasn't enrolled — gate to /account. */
       mfaEnrollRequired: boolean;
+      /** Password older than 30 days (non-super_admin) — gate to /account/password. */
+      passwordExpired: boolean;
     } & DefaultSession["user"];
   }
 }
@@ -26,5 +28,6 @@ declare module "next-auth/jwt" {
     permissions?: string[];
     modules?: string[];
     mfaEnrollRequired?: boolean;
+    passwordExpired?: boolean;
   }
 }
