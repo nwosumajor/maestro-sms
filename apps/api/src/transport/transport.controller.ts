@@ -1,5 +1,5 @@
 import { RequireModule } from "../auth/require-module.decorator";
-import { Body, Controller, Get, Param, Post, Put, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Put, Query } from "@nestjs/common";
 import { TRANSPORT_PERMISSIONS, MODULES } from "@sms/types";
 import type {
   RouteStopDto,
@@ -17,6 +17,7 @@ import type { Principal } from "../integrity/integrity.foundation";
 import { TransportService } from "./transport.service";
 
 const customFields = z.record(z.string()).optional();
+const routeRenameSchema = z.object({ name: z.string().min(1).max(120) });
 const vehicleSchema = z.object({
   driverId: z.string().uuid().nullish(),
   name: z.string().min(1).max(160),
@@ -94,6 +95,24 @@ export class TransportController {
   createRoute(@CurrentPrincipal() p: Principal, @Body(new ZodValidationPipe(routeSchema)) b: z.infer<typeof routeSchema>): Promise<TransportRouteDto> {
     return this.transport.createRoute(p, b);
   }
+  /** Delete a vehicle no route uses (admin-only; 409 with the reason otherwise). */
+  @Delete("vehicles/:id")
+  @RequirePermission(TRANSPORT_PERMISSIONS.TRANSPORT_MANAGE)
+  deleteVehicle(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.transport.deleteVehicle(p, id);
+  }
+
+  /** Rename a route (assignments, stops and fees follow the route id). */
+  @Put("routes/:id")
+  @RequirePermission(TRANSPORT_PERMISSIONS.TRANSPORT_MANAGE)
+  updateRoute(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(routeRenameSchema)) body: z.infer<typeof routeRenameSchema>,
+  ) {
+    return this.transport.updateRoute(p, id, body);
+  }
+
   @Post("routes/:id/retire")
   @RequirePermission(TRANSPORT_PERMISSIONS.TRANSPORT_MANAGE)
   retireRoute(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<TransportRouteDto> {
@@ -130,7 +149,7 @@ export class TransportController {
   // fees
   @Post("fees/schedule")
   @RequirePermission(TRANSPORT_PERMISSIONS.TRANSPORT_MANAGE)
-  scheduleFees(@CurrentPrincipal() p: Principal, @Body(new ZodValidationPipe(feeSchema)) b: z.infer<typeof feeSchema>): Promise<TransportFeeRunDto> {
+  scheduleFees(@CurrentPrincipal() p: Principal, @Body(new ZodValidationPipe(feeSchema)) b: z.infer<typeof feeSchema>): Promise<TransportFeeRunDto | { pendingApproval: true; requestId: string }> {
     return this.transport.scheduleFees(p, b);
   }
 }

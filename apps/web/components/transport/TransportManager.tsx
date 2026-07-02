@@ -8,7 +8,7 @@
 import type { VehicleDto, TransportRouteDto, TransportAssignmentDto, Serialized } from "@sms/types";
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { postSms } from "@/components/game/play-ui";
+import { postSms, sendSms } from "@/components/game/play-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -78,7 +78,23 @@ export function TransportManager({
           <CardHeader><CardTitle className="text-base">Vehicles</CardTitle></CardHeader>
           <CardContent>
             <div className="flex flex-wrap gap-2">
-              {vehicles.map((v) => <Badge key={v.id} variant="secondary" className="font-normal">{v.name} · {v.capacity} seats{v.regNumber ? ` · ${v.regNumber}` : ""}</Badge>)}
+              {vehicles.map((v) => (
+                <span key={v.id} className="inline-flex items-center gap-1">
+                  <Badge variant="secondary" className="font-normal">{v.name} · {v.capacity} seats{v.regNumber ? ` · ${v.regNumber}` : ""}</Badge>
+                  {canManage && (
+                    <>
+                      <Button variant="ghost" size="sm" className="h-6 px-1.5 text-xs" disabled={busy} onClick={() => {
+                        const name = prompt("New vehicle name?", v.name);
+                        if (name?.trim()) void run(() => sendSms("PUT", `transport/vehicles/${v.id}`, { name: name.trim() }), "Vehicle renamed.");
+                      }}>Rename</Button>
+                      <Button variant="ghost" size="sm" className="h-6 px-1.5 text-xs text-destructive" disabled={busy} onClick={() => {
+                        if (!confirm(`Delete "${v.name}"? Only possible if no route uses it.`)) return;
+                        void run(() => sendSms("DELETE", `transport/vehicles/${v.id}`), "Vehicle deleted.");
+                      }}>Delete</Button>
+                    </>
+                  )}
+                </span>
+              ))}
             </div>
           </CardContent>
         </Card>
@@ -129,6 +145,10 @@ export function TransportManager({
               {canManage && r.status === "ACTIVE" && (
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" disabled={busy} onClick={() => { const name = prompt("Stop name?"); if (name) run(() => postSms(`transport/routes/${r.id}/stops`, { name, sequence: r.stops.length + 1, fareMinor: r.fareMode === "STOP" ? Number(prompt("Stop fare (kobo)?") ?? 0) : 0 }), "Stop added."); }}>Add stop</Button>
+                  <Button variant="outline" size="sm" disabled={busy} onClick={() => {
+                    const name = prompt("New route name?", r.name);
+                    if (name?.trim()) void run(() => sendSms("PUT", `transport/routes/${r.id}`, { name: name.trim() }), "Route renamed.");
+                  }}>Rename</Button>
                   <Button variant="outline" size="sm" disabled={busy} onClick={() => run(() => postSms(`transport/routes/${r.id}/retire`, {}), "Route retired.")}>Retire route</Button>
                 </div>
               )}
@@ -174,7 +194,13 @@ export function TransportManager({
               </select>
             </div>
             <div className="space-y-1.5"><Label>Due date</Label><Input type="date" value={feeDue} onChange={(e) => setFeeDue(e.target.value)} /></div>
-            <Button disabled={busy || !feeDue} onClick={() => run(() => postSms("transport/fees/schedule", { routeId: feeRoute || undefined, dueDate: new Date(feeDue).toISOString() }), "Transport fees scheduled.")}>Schedule fees</Button>
+            <Button disabled={busy || !feeDue} onClick={async () => {
+              setMsg(null);
+              const res = await postSms<{ pendingApproval?: boolean }>("transport/fees/schedule", { routeId: feeRoute || undefined, dueDate: new Date(feeDue).toISOString() });
+              if (res.ok && res.data?.pendingApproval) setMsg("Submitted for approval — a school admin or principal must approve this fee run before any invoice is posted (maker-checker).");
+              else if (res.ok) { setMsg("Transport fees scheduled."); router.refresh(); }
+              else setMsg(res.error ?? `Failed (${res.status}).`);
+            }}>Schedule fees</Button>
           </CardContent>
         </Card>
       )}

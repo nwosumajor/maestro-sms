@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { WorkflowModule } from "../workflow/workflow.module";
 import { HostelController } from "./hostel.controller";
 import { HostelService } from "./hostel.service";
 
@@ -6,6 +7,7 @@ import { HostelService } from "./hostel.service";
 // AUDIT_LOG_SERVICE, auth guard). Hostel fees are written into the shared Fees
 // tables (Invoice/InvoiceLineItem) directly via the tenant tx — one DB, one RLS.
 @Module({
+  imports: [WorkflowModule],
   controllers: [HostelController],
   providers: [HostelService],
   exports: [HostelService],

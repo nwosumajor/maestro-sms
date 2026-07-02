@@ -9,7 +9,7 @@
 // changes are audited too so finance can analyse them.
 // =============================================================================
 
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@sms/db";
 import type { HostelAllocationDto, HostelDto, HostelFeeRunDto, HostelRoomDto, HostelSummaryDto } from "@sms/types";
 import {
@@ -21,6 +21,8 @@ import {
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
+import { WorkflowService } from "../workflow/workflow.service";
+import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 
 type Json = Record<string, string>;
 
@@ -29,7 +31,24 @@ export class HostelService {
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
-  ) {}
+    private readonly workflow: WorkflowService,
+    hooks: WorkflowHooksService,
+  ) {
+    // Maker-checker reactor: when an admin APPROVES a FEE_SCHEDULE request that a
+    // (head-)warden raised, post the fee run in the SAME tenant tx as the
+    // transition (atomic). The initiator is the recorded actor.
+    hooks.onFinalized(async (tx, req) => {
+      if (req.type !== "FEE_SCHEDULE" || req.state !== "APPROVED") return;
+      const pl = req.payload as { module?: string; hostelId?: string | null; dueDate?: string; description?: string | null; scopeWardenId?: string | null } | null;
+      if (pl?.module !== "hostel" || !pl.dueDate) return;
+      await this.postFeeRun(tx, req.schoolId, req.initiatorId, {
+        hostelId: pl.hostelId ?? undefined,
+        due: new Date(pl.dueDate),
+        description: pl.description ?? undefined,
+        scopeWardenId: pl.scopeWardenId ?? null,
+      });
+    });
+  }
 
   private ctx(p: Principal): TenantContext {
     return { schoolId: p.schoolId, userId: p.userId };
@@ -45,9 +64,15 @@ export class HostelService {
   private wide(p: Principal): boolean {
     return p.roles.some((r) => r === "school_admin" || r === "principal" || r === "super_admin");
   }
+  /** Module-wide scoping: admins AND the head warden see/manage EVERY hostel.
+   *  Structural acts (create/delete hostel, reassign warden) stay wide()-only,
+   *  and money (fee runs) is maker-checker for everyone below wide(). */
+  private moduleWide(p: Principal): boolean {
+    return this.wide(p) || p.roles.includes("head_warden");
+  }
   /** A warden may only act on their own hostel (404-not-403 for anything else). */
   private async assertHostelInScope(tx: TenantTx, p: Principal, hostelId: string): Promise<void> {
-    if (this.wide(p)) return;
+    if (this.moduleWide(p)) return;
     const h = await tx.hostel.findFirst({ where: { id: hostelId }, select: { wardenId: true } });
     if (!h || h.wardenId !== p.userId) throw new NotFoundException("Hostel not found");
   }
@@ -103,10 +128,48 @@ export class HostelService {
     });
   }
 
+  /** Delete an EMPTY hostel (duplicate/typo cleanup). Admin-only — a warden
+   *  manages their hostel but cannot remove it. 409 while rooms exist. */
+  async deleteHostel(p: Principal, id: string): Promise<{ ok: boolean }> {
+    if (!this.wide(p)) throw new ForbiddenException("Only an administrator can delete a hostel");
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const h = await tx.hostel.findFirst({ where: { id } });
+      if (!h) throw new NotFoundException("Hostel not found");
+      const rooms = await tx.hostelRoom.count({ where: { hostelId: id } });
+      if (rooms > 0) {
+        throw new ConflictException(
+          `"${h.name}" still has ${rooms} room${rooms === 1 ? "" : "s"} — delete its rooms first (each must have no allocation history)`,
+        );
+      }
+      await tx.hostel.delete({ where: { id } });
+      await this.log(tx, p, "hostel.delete", id, { name: h.name });
+      return { ok: true };
+    });
+  }
+
+  /** Delete a room with NO allocation history (409 otherwise — past allocations
+   *  are records the school keeps). Warden-scoped like the other room actions. */
+  async deleteRoom(p: Principal, roomId: string): Promise<{ ok: boolean }> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const room = await tx.hostelRoom.findFirst({ where: { id: roomId } });
+      if (!room) throw new NotFoundException("Room not found");
+      await this.assertHostelInScope(tx, p, room.hostelId);
+      const allocations = await tx.hostelAllocation.count({ where: { roomId } });
+      if (allocations > 0) {
+        throw new ConflictException(
+          `Room ${room.roomNumber} has ${allocations} allocation record${allocations === 1 ? "" : "s"} (including past ones) — rooms with allocation history can't be deleted; rename it instead`,
+        );
+      }
+      await tx.hostelRoom.delete({ where: { id: roomId } });
+      await this.log(tx, p, "hostel.room.delete", roomId, { roomNumber: room.roomNumber, hostelId: room.hostelId });
+      return { ok: true };
+    });
+  }
+
   /** Occupancy analytics — warden-scoped to their hostels, else school-wide. */
   async summary(p: Principal): Promise<HostelSummaryDto> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const hostels = await tx.hostel.findMany({ where: this.wide(p) ? {} : { wardenId: p.userId }, select: { id: true } });
+      const hostels = await tx.hostel.findMany({ where: this.moduleWide(p) ? {} : { wardenId: p.userId }, select: { id: true } });
       const hostelIds = hostels.map((h) => h.id);
       const rooms = hostelIds.length
         ? await tx.hostelRoom.findMany({ where: { hostelId: { in: hostelIds } }, select: { id: true, capacity: true } })
@@ -121,7 +184,7 @@ export class HostelService {
 
   async listHostels(p: Principal): Promise<HostelDto[]> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const hostels = await tx.hostel.findMany({ where: this.wide(p) ? {} : { wardenId: p.userId }, orderBy: { name: "asc" } });
+      const hostels = await tx.hostel.findMany({ where: this.moduleWide(p) ? {} : { wardenId: p.userId }, orderBy: { name: "asc" } });
       return Promise.all(hostels.map((h: { id: string }) => this.hostelDto(tx, h.id)));
     });
   }
@@ -232,7 +295,7 @@ export class HostelService {
       // A warden sees allocations only within their own hostels.
       const roomWhere = hostelId
         ? { hostelId }
-        : this.wide(p)
+        : this.moduleWide(p)
           ? {}
           : { hostel: { wardenId: p.userId } };
       const rooms = await tx.hostelRoom.findMany({ where: roomWhere, select: { id: true } });
@@ -250,17 +313,49 @@ export class HostelService {
   async scheduleFees(
     p: Principal,
     input: { hostelId?: string; dueDate: string; description?: string },
-  ): Promise<HostelFeeRunDto> {
+  ): Promise<HostelFeeRunDto | { pendingApproval: true; requestId: string }> {
     const due = new Date(input.dueDate);
     if (Number.isNaN(due.getTime())) throw new BadRequestException("invalid dueDate");
+    // MAKER-CHECKER: fee runs MOVE MONEY (they post rent onto student invoices),
+    // so a (head-)warden's run does NOT post directly — it becomes a FEE_SCHEDULE
+    // workflow request that a workflow.review holder (school_admin/principal — a
+    // DIFFERENT person, engine-enforced) must approve; the approved run posts
+    // in-tx via the finalized hook. Admins (wide) still post immediately.
+    if (!this.wide(p)) {
+      await this.db.runAsTenant(this.ctx(p), async (tx) => {
+        if (input.hostelId) await this.assertHostelInScope(tx, p, input.hostelId);
+      });
+      // Snapshot the initiator's billing scope so approval can't widen it.
+      const scopeWardenId = p.roles.includes("head_warden") ? null : p.userId;
+      const req = (await this.workflow.createRequest(p, {
+        type: "FEE_SCHEDULE",
+        title: `Hostel fee run (${input.hostelId ? "one hostel" : "all in scope"}) due ${input.dueDate.slice(0, 10)}`,
+        payload: { module: "hostel", hostelId: input.hostelId ?? null, dueDate: input.dueDate, description: input.description ?? null, scopeWardenId },
+      })) as { id: string };
+      await this.workflow.submit(p, req.id);
+      return { pendingApproval: true, requestId: req.id };
+    }
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       if (input.hostelId) await this.assertHostelInScope(tx, p, input.hostelId);
-      // A warden can bill only their own hostels.
+      return this.postFeeRun(tx, p.schoolId, p.userId, { hostelId: input.hostelId, due, description: input.description, scopeWardenId: null });
+    });
+  }
+
+  /** Post a hostel fee run (rent -> invoice line items). Runs either directly
+   *  (admin) or from the FEE_SCHEDULE approval hook, always inside a tenant tx. */
+  private async postFeeRun(
+    tx: TenantTx,
+    schoolId: string,
+    actorId: string,
+    input: { hostelId?: string; due: Date; description?: string; scopeWardenId: string | null },
+  ): Promise<HostelFeeRunDto> {
+    {
+      const due = input.due;
       const feeRoomWhere = input.hostelId
         ? { hostelId: input.hostelId }
-        : this.wide(p)
-          ? {}
-          : { hostel: { wardenId: p.userId } };
+        : input.scopeWardenId
+          ? { hostel: { wardenId: input.scopeWardenId } }
+          : {};
       const rooms = await tx.hostelRoom.findMany({ where: feeRoomWhere });
       const rentByRoom = new Map<string, number>(rooms.map((r) => [r.id, r.rentMinor]));
       const roomIds = rooms.map((r) => r.id);
@@ -279,9 +374,9 @@ export class HostelService {
         if (!invoice) {
           invoice = await tx.invoice.create({
             data: {
-              schoolId: p.schoolId,
+              schoolId,
               studentId: a.studentId,
-              createdById: p.userId,
+              createdById: actorId,
               reference: `HOSTEL-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
               status: "DRAFT",
               totalMinor: 0,
@@ -292,7 +387,7 @@ export class HostelService {
         }
         await tx.invoiceLineItem.create({
           data: {
-            schoolId: p.schoolId,
+            schoolId,
             invoiceId: invoice.id,
             description: input.description ?? "Hostel rent",
             amountMinor: rent,
@@ -303,13 +398,12 @@ export class HostelService {
         totalBilledMinor += rent;
         studentsBilled++;
       }
-      await this.log(tx, p, "hostel.fees.schedule", input.hostelId ?? "all", {
-        invoicesCreated,
-        totalBilledMinor,
-        studentsBilled,
-      });
+      await this.audit.record(
+        { actorId, action: "hostel.fees.schedule", entity: "hostel", entityId: input.hostelId ?? "all", schoolId, metadata: { invoicesCreated, totalBilledMinor, studentsBilled } },
+        tx,
+      );
       return { invoicesCreated, totalBilledMinor, studentsBilled };
-    });
+    }
   }
 
   // --- helpers --------------------------------------------------------------

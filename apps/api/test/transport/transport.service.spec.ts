@@ -42,7 +42,9 @@ function svc(tx: TenantTx) {
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const notifications = { enqueue: jest.fn().mockResolvedValue(undefined) };
-  return new TransportService(db as never, audit as never, notifications as never);
+  const workflow = { createRequest: jest.fn().mockResolvedValue({ id: "wf1" }), submit: jest.fn().mockResolvedValue({}) };
+  const hooks = { onFinalized: jest.fn() };
+  return new TransportService(db as never, audit as never, notifications as never, workflow as never, hooks as never);
 }
 
 describe("TransportService", () => {
@@ -65,7 +67,7 @@ describe("TransportService", () => {
 
   it("bills the FLAT route fare as an invoice line item", async () => {
     const { tx, calls } = makeTx({ assignments: [{ id: "a1", routeId: "r1", stopId: null, passengerId: "stu1", passengerType: "STUDENT" }] });
-    const run = await svc(tx).scheduleFees(staff, { dueDate: "2026-09-01" });
+    const run = (await svc(tx).scheduleFees(staff, { dueDate: "2026-09-01" })) as { invoicesCreated: number; totalBilledMinor: number; passengersBilled: number };
     expect(run.passengersBilled).toBe(1);
     expect(run.totalBilledMinor).toBe(30000); // flat fare
     expect(calls.lineCreate).toBe(1);

@@ -1,5 +1,5 @@
 import { RequireModule } from "../auth/require-module.decorator";
-import { Body, Controller, Get, Param, Post, Put, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Put, Query } from "@nestjs/common";
 import { HOSTEL_PERMISSIONS, MODULES } from "@sms/types";
 import type { HostelAllocationDto, HostelDto, HostelFeeRunDto, HostelRoomDto, HostelSummaryDto } from "@sms/types";
 import { z } from "zod";
@@ -79,6 +79,20 @@ export class HostelController {
     return this.hostel.updateHostel(p, id, body);
   }
 
+  /** Delete an EMPTY hostel (admin-only; 409 with the reason while rooms exist). */
+  @Delete(":id")
+  @RequirePermission(HOSTEL_PERMISSIONS.HOSTEL_MANAGE)
+  deleteHostel(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.hostel.deleteHostel(p, id);
+  }
+
+  /** Delete a room with no allocation history (409 with the reason otherwise). */
+  @Delete("rooms/:roomId")
+  @RequirePermission(HOSTEL_PERMISSIONS.HOSTEL_MANAGE)
+  deleteRoom(@CurrentPrincipal() p: Principal, @Param("roomId") roomId: string) {
+    return this.hostel.deleteRoom(p, roomId);
+  }
+
   @Post(":id/rooms")
   @RequirePermission(HOSTEL_PERMISSIONS.HOSTEL_MANAGE)
   createRoom(
@@ -129,7 +143,7 @@ export class HostelController {
   scheduleFees(
     @CurrentPrincipal() p: Principal,
     @Body(new ZodValidationPipe(feeSchema)) body: z.infer<typeof feeSchema>,
-  ): Promise<HostelFeeRunDto> {
+  ): Promise<HostelFeeRunDto | { pendingApproval: true; requestId: string }> {
     return this.hostel.scheduleFees(p, body);
   }
 }

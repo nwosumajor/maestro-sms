@@ -7,7 +7,7 @@
 import type { LibraryBookDto, BookLoanDto, Serialized } from "@sms/types";
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { postSms } from "@/components/game/play-ui";
+import { postSms, sendSms } from "@/components/game/play-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -67,7 +67,21 @@ export function LibraryManager({
                   <td className="py-1 pr-3 font-mono text-xs">{b.barcode}</td>
                   <td className="py-1 pr-3"><Badge variant={b.availableCopies > 0 ? "secondary" : "outline"}>{b.availableCopies}/{b.totalCopies}</Badge></td>
                   <td className="py-1">
-                    <Button variant="outline" size="sm" disabled={busy || b.availableCopies < 1} onClick={() => run(() => postSms("library/loans/issue", { bookId: b.id }), "Issued to you.")}>Issue to me</Button>
+                    <div className="flex gap-1.5">
+                      <Button variant="outline" size="sm" disabled={busy || b.availableCopies < 1} onClick={() => run(() => postSms("library/loans/issue", { bookId: b.id }), "Issued to you.")}>Issue to me</Button>
+                      {canManage && (
+                        <>
+                          <Button variant="ghost" size="sm" disabled={busy} onClick={() => {
+                            const name = prompt("New title for this book?", b.title);
+                            if (name?.trim()) void run(() => sendSms("PUT", `library/books/${b.id}`, { title: name.trim() }), "Book renamed.");
+                          }}>Rename</Button>
+                          <Button variant="ghost" size="sm" className="text-destructive" disabled={busy} onClick={() => {
+                            if (!confirm(`Delete "${b.title}"? Only possible if it has never been loaned.`)) return;
+                            void run(() => sendSms("DELETE", `library/books/${b.id}`), "Book deleted.");
+                          }}>Delete</Button>
+                        </>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

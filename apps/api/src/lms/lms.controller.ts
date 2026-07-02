@@ -40,6 +40,10 @@ const teacherSchema = z.object({ teacherId: z.string().uuid() });
 const studentSchema = z.object({ studentId: z.string().uuid() });
 const guardianSchema = z.object({ parentId: z.string().uuid(), studentId: z.string().uuid() });
 const subjectSchema = z.object({ name: z.string().min(1).max(120), code: z.string().max(30).nullish() });
+const subjectUpdateSchema = z.object({
+  name: z.string().min(1).max(120).optional(),
+  code: z.string().max(30).nullish(),
+});
 const classSubjectSchema = z.object({ subjectId: z.string().uuid(), teacherId: z.string().uuid() });
 const promotionSchema = z.object({
   sourceClassId: z.string().uuid(),
@@ -100,6 +104,24 @@ export class LmsController {
     return this.lms.listSubjects(p);
   }
 
+  /** Rename / re-code a subject (fix a typo'd or duplicated catalog entry). */
+  @Put("subjects/:subjectId")
+  @RequirePermission(LMS_PERMISSIONS.SUBJECT_MANAGE)
+  updateSubject(
+    @CurrentPrincipal() p: Principal,
+    @Param("subjectId") subjectId: string,
+    @Body(new ZodValidationPipe(subjectUpdateSchema)) body: z.infer<typeof subjectUpdateSchema>,
+  ): Promise<SubjectDto> {
+    return this.lms.updateSubject(p, subjectId, body);
+  }
+
+  /** Delete an UNUSED subject (409 while any class still offers it). */
+  @Delete("subjects/:subjectId")
+  @RequirePermission(LMS_PERMISSIONS.SUBJECT_MANAGE)
+  deleteSubject(@CurrentPrincipal() p: Principal, @Param("subjectId") subjectId: string) {
+    return this.lms.deleteSubject(p, subjectId);
+  }
+
   @Post("classes/:classId/subjects")
   @RequirePermission(LMS_PERMISSIONS.SUBJECT_MANAGE)
   assignClassSubject(
@@ -108,6 +130,17 @@ export class LmsController {
     @Body(new ZodValidationPipe(classSubjectSchema)) body: z.infer<typeof classSubjectSchema>,
   ) {
     return this.lms.assignClassSubject(p, classId, body.subjectId, body.teacherId);
+  }
+
+  /** Remove a subject offering from a class (needed before a subject delete). */
+  @Delete("classes/:classId/subjects/:subjectId")
+  @RequirePermission(LMS_PERMISSIONS.SUBJECT_MANAGE)
+  removeClassSubject(
+    @CurrentPrincipal() p: Principal,
+    @Param("classId") classId: string,
+    @Param("subjectId") subjectId: string,
+  ) {
+    return this.lms.removeClassSubject(p, classId, subjectId);
   }
 
   @Get("classes/:classId/subjects")

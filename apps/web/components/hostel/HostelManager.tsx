@@ -7,7 +7,7 @@
 import type { HostelDto, HostelAllocationDto, Serialized } from "@sms/types";
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { postSms } from "@/components/game/play-ui";
+import { postSms, sendSms } from "@/components/game/play-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -103,6 +103,18 @@ export function HostelManager({
             <CardTitle className="text-base flex items-center gap-2">
               {h.name} <Badge variant="secondary">{h.type}</Badge>
               {h.wardenName && <span className="text-xs font-normal text-muted-foreground">Warden: {h.wardenName}</span>}
+              {canCreate && (
+                <span className="ml-auto flex gap-1">
+                  <Button variant="ghost" size="sm" disabled={busy} onClick={() => {
+                    const name = prompt("New hostel name?", h.name);
+                    if (name?.trim()) void run(() => sendSms("PUT", `hostels/${h.id}`, { name: name.trim() }), "Hostel renamed.");
+                  }}>Rename</Button>
+                  <Button variant="ghost" size="sm" className="text-destructive" disabled={busy} onClick={() => {
+                    if (!confirm(`Delete "${h.name}"? Only possible while it has no rooms.`)) return;
+                    void run(() => sendSms("DELETE", `hostels/${h.id}`), "Hostel deleted.");
+                  }}>Delete</Button>
+                </span>
+              )}
             </CardTitle>
             <CardDescription>
               {/* One-click availability */}
@@ -115,7 +127,7 @@ export function HostelManager({
                 <thead><tr className="border-b border-border text-left text-xs text-muted-foreground">
                   <th className="py-1 pr-3 font-medium">Room</th><th className="py-1 pr-3 font-medium">Type</th>
                   <th className="py-1 pr-3 font-medium">Rent</th><th className="py-1 pr-3 font-medium">Occupied</th>
-                  <th className="py-1 font-medium">Available</th>
+                  <th className="py-1 font-medium">Available</th>{canManage && <th className="py-1 font-medium"></th>}
                 </tr></thead>
                 <tbody>
                   {h.rooms.map((r) => (
@@ -123,6 +135,14 @@ export function HostelManager({
                       <td className="py-1 pr-3">{r.roomNumber}</td><td className="py-1 pr-3">{r.roomType}</td>
                       <td className="py-1 pr-3">{money(r.rentMinor)}</td><td className="py-1 pr-3">{r.occupied}/{r.capacity}</td>
                       <td className="py-1"><Badge variant={r.available > 0 ? "secondary" : "outline"}>{r.available}</Badge></td>
+                      {canManage && (
+                        <td className="py-1">
+                          <Button variant="ghost" size="sm" className="text-destructive" disabled={busy} onClick={() => {
+                            if (!confirm(`Delete room ${r.roomNumber}? Only possible if it has never had an allocation.`)) return;
+                            void run(() => sendSms("DELETE", `hostels/rooms/${r.id}`), "Room deleted.");
+                          }}>Delete</Button>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -177,7 +197,13 @@ export function HostelManager({
               </select>
             </div>
             <div className="space-y-1.5"><Label>Due date</Label><Input type="date" value={feeDue} onChange={(e) => setFeeDue(e.target.value)} /></div>
-            <Button disabled={busy || !feeDue} onClick={() => run(() => postSms("hostels/fees/schedule", { hostelId: feeHostel || undefined, dueDate: new Date(feeDue).toISOString() }), "Hostel fees scheduled.")}>Schedule fees</Button>
+            <Button disabled={busy || !feeDue} onClick={async () => {
+              setMsg(null);
+              const res = await postSms<{ pendingApproval?: boolean }>("hostels/fees/schedule", { hostelId: feeHostel || undefined, dueDate: new Date(feeDue).toISOString() });
+              if (res.ok && res.data?.pendingApproval) setMsg("Submitted for approval — a school admin or principal must approve this fee run before any invoice is posted (maker-checker).");
+              else if (res.ok) { setMsg("Hostel fees scheduled."); router.refresh(); }
+              else setMsg(res.error ?? `Failed (${res.status}).`);
+            }}>Schedule fees</Button>
           </CardContent>
         </Card>
       )}

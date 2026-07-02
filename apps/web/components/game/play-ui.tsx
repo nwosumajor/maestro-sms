@@ -14,6 +14,7 @@ import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { interpretApiError } from "@/lib/api-error";
 
 /** A guess/secret must be N DISTINCT digits 0–9 (mirrors the engine's rule). */
 export function digitsValid(value: string, n: number): boolean {
@@ -22,29 +23,42 @@ export function digitsValid(value: string, n: number): boolean {
   return new Set(value.split("")).size === n;
 }
 
-/** POST JSON to the BFF; returns { ok, status, data }. Never throws on non-2xx. */
-export async function postSms<T = unknown>(
+/** Send JSON to the BFF with any method; returns { ok, status, data, error }.
+ *  Never throws on non-2xx. On failure, `error` ALWAYS carries the server's own
+ *  message combined with a plain-language interpretation of the status (via
+ *  interpretApiError) — so every consumer surfaces WHY, never a bare code. */
+export async function sendSms<T = unknown>(
+  method: "POST" | "PUT" | "PATCH" | "DELETE",
   path: string,
   body?: unknown,
 ): Promise<{ ok: boolean; status: number; data: T | null; error: string | null }> {
   const res = await fetch(`/api/sms/${path}`, {
-    method: "POST",
+    method,
     headers: body ? { "Content-Type": "application/json" } : {},
     body: body ? JSON.stringify(body) : undefined,
   });
   let data: T | null = null;
-  let error: string | null = null;
+  let serverMessage: string | null = null;
   const text = await res.text();
   if (text) {
     try {
       const parsed = JSON.parse(text) as T & { message?: string | string[] };
       if (res.ok) data = parsed;
-      else error = Array.isArray(parsed.message) ? parsed.message.join(", ") : parsed.message ?? null;
+      else serverMessage = Array.isArray(parsed.message) ? parsed.message.join(", ") : parsed.message ?? null;
     } catch {
-      if (!res.ok) error = text;
+      if (!res.ok) serverMessage = text;
     }
   }
+  const error = res.ok ? null : interpretApiError(res.status, serverMessage);
   return { ok: res.ok, status: res.status, data, error };
+}
+
+/** POST JSON to the BFF (the historical helper; delegates to sendSms). */
+export async function postSms<T = unknown>(
+  path: string,
+  body?: unknown,
+): Promise<{ ok: boolean; status: number; data: T | null; error: string | null }> {
+  return sendSms<T>("POST", path, body);
 }
 
 /**

@@ -113,7 +113,7 @@ const SECURITY = [
   {
     icon: KeyRoundIcon,
     title: "Least-privilege roles",
-    body: "Fourteen roles see only what their job needs, backed by MFA, step-up re-auth and just-in-time elevation.",
+    body: "Seventeen roles see only what their job needs, backed by MFA, step-up re-auth and just-in-time elevation.",
   },
   {
     icon: GraduationCapIcon,
@@ -325,7 +325,7 @@ function StatBand() {
   const stats: [string, string][] = [
     ["25", "modules"],
     ["4", "plans, per-seat"],
-    ["14", "built-in roles"],
+    ["17", "built-in roles"],
     ["50+", "schools per deployment"],
   ];
   return (

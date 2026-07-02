@@ -27,10 +27,19 @@ export class HrAnalyticsService {
     const year = new Date().getUTCFullYear();
     const soon = new Date(Date.now() + 30 * 86_400_000);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const employees = await tx.employee.findMany({ select: { status: true, department: true, employmentType: true } });
+      const employees = await tx.employee.findMany({ select: { userId: true, status: true, department: true, employmentType: true } });
       const active = employees.filter((e) => e.status === "ACTIVE").length;
       const byDept = countBy(employees.map((e) => e.department ?? "Unassigned"));
       const byType = countBy(employees.map((e) => e.employmentType));
+      // Staff ACCOUNTS (any non-student/non-parent role) vs employment RECORDS:
+      // an account created via "create profile" has no employee row until HR
+      // completes it — surface that gap instead of silently under-counting.
+      const staffUsers = await tx.user.findMany({
+        where: { roles: { some: { role: { name: { notIn: ["student", "parent"] } } } } },
+        select: { id: true },
+      });
+      const recorded = new Set(employees.map((e) => e.userId));
+      const unrecorded = staffUsers.filter((u) => !recorded.has(u.id)).length;
 
       const [pendingRequests, approvedThisYear, balances] = await Promise.all([
         tx.leaveRequest.count({ where: { status: "PENDING" } }),
@@ -53,7 +62,7 @@ export class HrAnalyticsService {
       ]);
 
       return {
-        headcount: { active, total: employees.length },
+        headcount: { active, total: employees.length, staffAccounts: staffUsers.length, unrecorded },
         byDepartment: byDept,
         byEmploymentType: byType.map((t) => ({ type: t.department, count: t.count })),
         leave: { pendingRequests, approvedThisYear, daysTakenThisYear },

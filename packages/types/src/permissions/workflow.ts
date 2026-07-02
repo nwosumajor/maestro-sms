@@ -107,6 +107,7 @@ export const WORKFLOW_TYPES = [
   "PURCHASE_ORDER",
   "DISCIPLINARY",
   "LMS_CONTENT_PUBLISH",
+  "FEE_SCHEDULE",
 ] as const;
 export type WorkflowType = (typeof WORKFLOW_TYPES)[number];
 
@@ -150,6 +151,11 @@ export const WORKFLOW_TYPE_META: Record<WorkflowType, WorkflowTypeMeta> = {
   PURCHASE_ORDER: { label: "Purchase order", selfService: false, initiatePermission: "fee.manage" },
   DISCIPLINARY: { label: "Disciplinary", selfService: false, initiatePermission: "rbac.manage" },
   LMS_CONTENT_PUBLISH: { label: "Content publish", selfService: false, systemOnly: true },
+  // Maker-checker on facilities MONEY: hostel/transport fee runs initiated by a
+  // (head-)warden or head driver are created by the fee endpoints as a request
+  // and post ONLY after a workflow.review holder (school_admin/principal — a
+  // different person, engine-enforced) approves. Admins still post directly.
+  FEE_SCHEDULE: { label: "Fee schedule", selfService: false, systemOnly: true },
 };
 
 /** Pure: may a user with these permissions initiate this type via the API? */

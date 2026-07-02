@@ -8,7 +8,7 @@
 // only act on their OWN loans. Overdue fines accrue per day on return. Audited.
 // =============================================================================
 
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import {ConflictException, BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException} from "@nestjs/common";
 import { Prisma } from "@sms/db";
 import type { BookLoanDto, FineReceiptDto, LibraryBookDto, LibraryReportDto } from "@sms/types";
 import {
@@ -120,6 +120,24 @@ export class LibraryService {
         : {};
       const books = await tx.libraryBook.findMany({ where, orderBy: { title: "asc" }, take: 200 });
       return books.map((b) => this.bookDto(b));
+    });
+  }
+
+  /** Delete a book that has NO lending history (duplicate/typo cleanup). A book
+   *  with any loan rows (even returned) is a ledger the school keeps — 409. */
+  async deleteBook(p: Principal, id: string): Promise<{ ok: boolean }> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const b = await tx.libraryBook.findFirst({ where: { id } });
+      if (!b) throw new NotFoundException("Book not found");
+      const loans = await tx.bookLoan.count({ where: { bookId: id } });
+      if (loans > 0) {
+        throw new ConflictException(
+          `"${b.title}" has ${loans} loan record${loans === 1 ? "" : "s"} (including returned ones) — books with lending history can't be deleted; edit the title instead`,
+        );
+      }
+      await tx.libraryBook.delete({ where: { id } });
+      await this.log(tx, p, "library.book.delete", id, { title: b.title, barcode: b.barcode });
+      return { ok: true };
     });
   }
 

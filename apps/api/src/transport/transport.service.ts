@@ -9,7 +9,7 @@
 // All mutations audited.
 // =============================================================================
 
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { ConflictException, BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@sms/db";
 import type {
   RouteStopDto,
@@ -28,6 +28,8 @@ import {
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
+import { WorkflowService } from "../workflow/workflow.service";
+import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 import { NotificationService } from "../notifications/notification.service";
 
 type Json = Record<string, string>;
@@ -40,7 +42,22 @@ export class TransportService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly notifications: NotificationService,
-  ) {}
+    private readonly workflow: WorkflowService,
+    hooks: WorkflowHooksService,
+  ) {
+    // Maker-checker reactor: an APPROVED FEE_SCHEDULE request raised by the head
+    // driver posts the fare run in the SAME tenant tx as the approval (atomic).
+    hooks.onFinalized(async (tx, req) => {
+      if (req.type !== "FEE_SCHEDULE" || req.state !== "APPROVED") return;
+      const pl = req.payload as { module?: string; routeId?: string | null; dueDate?: string; description?: string | null } | null;
+      if (pl?.module !== "transport" || !pl.dueDate) return;
+      await this.postFeeRun(tx, req.schoolId, req.initiatorId, {
+        routeId: pl.routeId ?? undefined,
+        due: new Date(pl.dueDate),
+        description: pl.description ?? undefined,
+      });
+    });
+  }
 
   private ctx(p: Principal): TenantContext {
     return { schoolId: p.schoolId, userId: p.userId };
@@ -52,6 +69,12 @@ export class TransportService {
   // a driver sees ONLY their own vehicle + its routes + passengers.
   private wide(p: Principal): boolean {
     return p.roles.some((r) => r === "school_admin" || r === "principal" || r === "super_admin");
+  }
+  /** Module-wide scoping: admins AND the head driver see/manage the whole fleet.
+   *  Structural acts (delete vehicle) stay wide()-only; fee runs are
+   *  maker-checker for everyone below wide(). */
+  private moduleWide(p: Principal): boolean {
+    return this.wide(p) || p.roles.includes("head_driver");
   }
 
   // --- vehicles -------------------------------------------------------------
@@ -104,8 +127,37 @@ export class TransportService {
 
   async listVehicles(p: Principal): Promise<VehicleDto[]> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const vs = await tx.vehicle.findMany({ where: this.wide(p) ? {} : { driverId: p.userId }, orderBy: { name: "asc" } });
+      const vs = await tx.vehicle.findMany({ where: this.moduleWide(p) ? {} : { driverId: p.userId }, orderBy: { name: "asc" } });
       return vs.map((v) => this.vehicleDto(v));
+    });
+  }
+
+  /** Delete a vehicle no route uses (duplicate/typo cleanup; 409 otherwise). */
+  async deleteVehicle(p: Principal, id: string): Promise<{ ok: boolean }> {
+    if (!this.wide(p)) throw new ForbiddenException("Only an administrator can delete a vehicle");
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const v = await tx.vehicle.findFirst({ where: { id } });
+      if (!v) throw new NotFoundException("Vehicle not found");
+      const routes = await tx.transportRoute.count({ where: { vehicleId: id } });
+      if (routes > 0) {
+        throw new ConflictException(
+          `"${v.name}" is attached to ${routes} route${routes === 1 ? "" : "s"} (including retired ones) — reassign or retire-and-detach those routes first, or rename the vehicle instead`,
+        );
+      }
+      await tx.vehicle.delete({ where: { id } });
+      await this.log(tx, p, "transport.vehicle.delete", id, { name: v.name });
+      return { ok: true };
+    });
+  }
+
+  /** Rename a route (typo/duplicate fix; assignments and stops follow the id). */
+  async updateRoute(p: Principal, id: string, input: { name: string }): Promise<TransportRouteDto> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const r = await tx.transportRoute.findFirst({ where: { id } });
+      if (!r) throw new NotFoundException("Route not found");
+      await tx.transportRoute.update({ where: { id }, data: { name: input.name } });
+      await this.log(tx, p, "transport.route.update", id, { from: r.name, to: input.name });
+      return this.routeDto(tx, id);
     });
   }
 
@@ -180,7 +232,7 @@ export class TransportService {
   /** Fleet analytics — driver-scoped to their vehicle/route, else school-wide. */
   async summary(p: Principal): Promise<TransportSummaryDto> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const vehicles = await tx.vehicle.findMany({ where: this.wide(p) ? {} : { driverId: p.userId }, select: { id: true, capacity: true } });
+      const vehicles = await tx.vehicle.findMany({ where: this.moduleWide(p) ? {} : { driverId: p.userId }, select: { id: true, capacity: true } });
       const seats = vehicles.reduce((n, v) => n + v.capacity, 0);
       const routes = await tx.transportRoute.findMany({ where: this.wide(p) ? { status: "ACTIVE" } : { status: "ACTIVE", vehicle: { driverId: p.userId } }, select: { id: true } });
       const routeIds = routes.map((r) => r.id);
@@ -192,7 +244,7 @@ export class TransportService {
 
   async listRoutes(p: Principal): Promise<TransportRouteDto[]> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const routes = await tx.transportRoute.findMany({ where: this.wide(p) ? {} : { vehicle: { driverId: p.userId } }, orderBy: { name: "asc" } });
+      const routes = await tx.transportRoute.findMany({ where: this.moduleWide(p) ? {} : { vehicle: { driverId: p.userId } }, orderBy: { name: "asc" } });
       return Promise.all(routes.map((r: { id: string }) => this.routeDto(tx, r.id)));
     });
   }
@@ -291,7 +343,7 @@ export class TransportService {
 
   async listAssignments(p: Principal, routeId?: string): Promise<TransportAssignmentDto[]> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const scope = this.wide(p) ? {} : { route: { vehicle: { driverId: p.userId } } };
+      const scope = this.moduleWide(p) ? {} : { route: { vehicle: { driverId: p.userId } } };
       const where = { ...(routeId ? { routeId } : {}), status: "ACTIVE", ...scope };
       const rows = await tx.transportAssignment.findMany({ where, orderBy: { createdAt: "desc" } });
       return Promise.all(rows.map((a: { id: string }) => this.assignmentDto(tx, a.id)));
@@ -303,10 +355,36 @@ export class TransportService {
   async scheduleFees(
     p: Principal,
     input: { routeId?: string; dueDate: string; description?: string },
-  ): Promise<TransportFeeRunDto> {
+  ): Promise<TransportFeeRunDto | { pendingApproval: true; requestId: string }> {
     const due = new Date(input.dueDate);
     if (Number.isNaN(due.getTime())) throw new BadRequestException("invalid dueDate");
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    // MAKER-CHECKER: fare runs post onto student invoices (money), so a head
+    // driver's run becomes a FEE_SCHEDULE workflow request approved by a
+    // DIFFERENT workflow.review holder; the hook posts it on approval.
+    if (!this.wide(p)) {
+      const req = (await this.workflow.createRequest(p, {
+        type: "FEE_SCHEDULE",
+        title: `Transport fee run (${input.routeId ? "one route" : "all routes"}) due ${input.dueDate.slice(0, 10)}`,
+        payload: { module: "transport", routeId: input.routeId ?? null, dueDate: input.dueDate, description: input.description ?? null },
+      })) as { id: string };
+      await this.workflow.submit(p, req.id);
+      return { pendingApproval: true, requestId: req.id };
+    }
+    return this.db.runAsTenant(this.ctx(p), (tx) =>
+      this.postFeeRun(tx, p.schoolId, p.userId, { routeId: input.routeId, due, description: input.description }),
+    );
+  }
+
+  /** Post a transport fee run (fares -> invoice line items); direct (admin) or
+   *  from the FEE_SCHEDULE approval hook — always inside a tenant tx. */
+  private async postFeeRun(
+    tx: TenantTx,
+    schoolId: string,
+    actorId: string,
+    input: { routeId?: string; due: Date; description?: string },
+  ): Promise<TransportFeeRunDto> {
+    {
+      const due = input.due;
       const where = input.routeId ? { routeId: input.routeId, status: "ACTIVE" } : { status: "ACTIVE" };
       const assignments = await tx.transportAssignment.findMany({ where });
       let invoicesCreated = 0;
@@ -320,9 +398,9 @@ export class TransportService {
         if (!invoice) {
           invoice = await tx.invoice.create({
             data: {
-              schoolId: p.schoolId,
+              schoolId,
               studentId: a.passengerId,
-              createdById: p.userId,
+              createdById: actorId,
               reference: `TRANSPORT-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
               status: "DRAFT",
               totalMinor: 0,
@@ -332,15 +410,18 @@ export class TransportService {
           invoicesCreated++;
         }
         await tx.invoiceLineItem.create({
-          data: { schoolId: p.schoolId, invoiceId: invoice.id, description: input.description ?? "Transport fare", amountMinor: fare, quantity: 1 },
+          data: { schoolId, invoiceId: invoice.id, description: input.description ?? "Transport fare", amountMinor: fare, quantity: 1 },
         });
         await tx.invoice.update({ where: { id: invoice.id }, data: { totalMinor: { increment: fare } } });
         totalBilledMinor += fare;
         passengersBilled++;
       }
-      await this.log(tx, p, "transport.fees.schedule", input.routeId ?? "all", { invoicesCreated, totalBilledMinor, passengersBilled });
+      await this.audit.record(
+        { actorId, action: "transport.fees.schedule", entity: "transport", entityId: input.routeId ?? "all", schoolId, metadata: { invoicesCreated, totalBilledMinor, passengersBilled } },
+        tx,
+      );
       return { invoicesCreated, totalBilledMinor, passengersBilled };
-    });
+    }
   }
 
   // --- helpers --------------------------------------------------------------

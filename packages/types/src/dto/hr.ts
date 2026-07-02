@@ -134,7 +134,15 @@ export interface LeaveRequestDto {
 }
 
 export interface HrAnalyticsDto {
-  headcount: { active: number; total: number };
+  headcount: {
+    active: number;
+    /** Employment RECORDS on the HR register. */
+    total: number;
+    /** Staff USER ACCOUNTS (any non-student/non-parent role) — may exceed `total`. */
+    staffAccounts: number;
+    /** Staff accounts with NO employment record yet (need HR completion). */
+    unrecorded: number;
+  };
   byDepartment: { department: string; count: number }[];
   byEmploymentType: { type: string; count: number }[];
   leave: { pendingRequests: number; approvedThisYear: number; daysTakenThisYear: number };

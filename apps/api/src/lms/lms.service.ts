@@ -22,10 +22,12 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 
-const SCHOOL_WIDE_ROLES = new Set(["school_admin", "super_admin"]);
-// Staff who may view ANY class roster / the full class list in their tenant
-// (req: principal, school admin and HR can view all students in a specific class).
-// Broader than SCHOOL_WIDE_ROLES, which also governs the student picker.
+// Staff whose duties span the whole school: they may view ANY class roster, the
+// full class list, AND the school-wide student directory (req: principal, school
+// admin and HR view all students). One set for all whole-school READS — the
+// student picker previously used a narrower {school_admin, super_admin} set,
+// which left a PRINCIPAL's /students page empty (they fell to the
+// relationship path: classes-they-teach + their-children = none).
 const ROSTER_WIDE_ROLES = new Set([
   "school_admin",
   "super_admin",
@@ -43,9 +45,6 @@ export class LmsService {
 
   private ctx(p: Principal): TenantContext {
     return { schoolId: p.schoolId, userId: p.userId };
-  }
-  private isSchoolWide(p: Principal): boolean {
-    return p.roles.some((r) => SCHOOL_WIDE_ROLES.has(r));
   }
   private isRosterWide(p: Principal): boolean {
     return p.roles.some((r) => ROSTER_WIDE_ROLES.has(r));
@@ -149,6 +148,13 @@ export class LmsService {
   // --- subject catalog + per-class offerings (subject.manage) ----------------
   async createSubject(p: Principal, input: { name: string; code?: string | null }) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      // Duplicate guard: subject names are a catalog — one "Mathematics" per
+      // school (case-insensitive), or the class-offering pickers fill with twins.
+      const dup = await tx.subject.findFirst({
+        where: { name: { equals: input.name, mode: "insensitive" } },
+        select: { id: true },
+      });
+      if (dup) throw new ConflictException("A subject with that name already exists");
       const subj = await tx.subject.create({
         data: { schoolId: p.schoolId, name: input.name, code: input.code ?? null },
       });
@@ -161,6 +167,53 @@ export class LmsService {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const rows = await tx.subject.findMany({ orderBy: { name: "asc" } });
       return rows.map((s) => ({ id: s.id, name: s.name, code: s.code }));
+    });
+  }
+
+  /** Rename / re-code a subject (the fix-a-typo path; offerings keep pointing
+   *  at the same subject id, so nothing else moves). */
+  async updateSubject(p: Principal, subjectId: string, input: { name?: string; code?: string | null }) {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const subj = await tx.subject.findFirst({ where: { id: subjectId } });
+      if (!subj) throw new NotFoundException("Subject not found");
+      if (input.name) {
+        const dup = await tx.subject.findFirst({
+          where: { name: { equals: input.name, mode: "insensitive" }, id: { not: subjectId } },
+          select: { id: true },
+        });
+        if (dup) throw new ConflictException("A subject with that name already exists");
+      }
+      const updated = await tx.subject.update({
+        where: { id: subjectId },
+        data: {
+          ...(input.name ? { name: input.name } : {}),
+          ...(input.code !== undefined ? { code: input.code } : {}),
+        },
+      });
+      await this.log(tx, p, "lms.subject.update", "subject", subjectId, {
+        from: subj.name,
+        to: updated.name,
+      });
+      return { id: updated.id, name: updated.name, code: updated.code };
+    });
+  }
+
+  /** Delete an UNUSED subject (duplicate cleanup). Refuses (409) while any class
+   *  still offers it — reassign/remove those offerings first, so a slip of the
+   *  finger can never orphan class-subject-teacher rows. */
+  async deleteSubject(p: Principal, subjectId: string) {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const subj = await tx.subject.findFirst({ where: { id: subjectId } });
+      if (!subj) throw new NotFoundException("Subject not found");
+      const offerings = await tx.classSubjectTeacher.count({ where: { subjectId } });
+      if (offerings > 0) {
+        throw new ConflictException(
+          `"${subj.name}" is offered in ${offerings} class${offerings === 1 ? "" : "es"} — remove or reassign those offerings first`,
+        );
+      }
+      await tx.subject.delete({ where: { id: subjectId } });
+      await this.log(tx, p, "lms.subject.delete", "subject", subjectId, { name: subj.name });
+      return { ok: true };
     });
   }
 
@@ -179,6 +232,18 @@ export class LmsService {
       });
       await this.log(tx, p, "lms.class.subject.assign", "class", classId, { subjectId, teacherId });
       return row;
+    });
+  }
+
+  /** Remove a subject offering from a class (the counterpart to assign — without
+   *  it, a subject that was ever offered could never be deleted). */
+  async removeClassSubject(p: Principal, classId: string, subjectId: string) {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      await this.requireClass(tx, classId);
+      const removed = await tx.classSubjectTeacher.deleteMany({ where: { classId, subjectId } });
+      if (removed.count === 0) throw new NotFoundException("That class does not offer this subject");
+      await this.log(tx, p, "lms.class.subject.remove", "class", classId, { subjectId });
+      return { ok: true };
     });
   }
 
@@ -308,14 +373,15 @@ export class LmsService {
    *  Powers the student pickers in the SIS, attendance, and fees UIs. */
   async listStudents(p: Principal) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      if (this.isSchoolWide(p)) {
-        // School-wide staff see EVERY student in the tenant — by ROLE, not by
-        // enrollment. Deriving from enrollments hid freshly created (not yet
-        // enrolled) students from /students, so admission paperwork (SIS
-        // profile/contacts/medical) couldn't be completed before class
-        // placement. Role-based also matches the billing seat-count definition
-        // (ONE meaning of "student" platform-wide) and is a single relation-
-        // filtered query instead of a two-step ID-set round trip.
+      if (this.isRosterWide(p)) {
+        // Whole-school staff (ROSTER_WIDE_ROLES: admin/principal/HR) see EVERY
+        // student in the tenant — by ROLE, not by enrollment. Deriving from
+        // enrollments hid freshly created (not yet enrolled) students from
+        // /students, so admission paperwork (SIS profile/contacts/medical)
+        // couldn't be completed before class placement. Role-based also matches
+        // the billing seat-count definition (ONE meaning of "student"
+        // platform-wide) and is a single relation-filtered query instead of a
+        // two-step ID-set round trip.
         return tx.user.findMany({
           where: { roles: { some: { role: { name: "student" } } } },
           select: { id: true, name: true },

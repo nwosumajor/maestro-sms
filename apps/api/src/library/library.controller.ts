@@ -1,5 +1,5 @@
 import { RequireModule } from "../auth/require-module.decorator";
-import { Body, Controller, Get, Param, Post, Put, Query, Res, StreamableFile } from "@nestjs/common";
+import { Delete, Body, Controller, Get, Param, Post, Put, Query, Res, StreamableFile } from "@nestjs/common";
 import type { Response } from "express";
 import { LIBRARY_PERMISSIONS, MODULES } from "@sms/types";
 import type { BookLoanDto, FineReceiptDto, LibraryBookDto, LibraryReportDto } from "@sms/types";
@@ -49,6 +49,13 @@ export class LibraryController {
   @RequirePermission(LIBRARY_PERMISSIONS.LIBRARY_MANAGE)
   updateBook(@CurrentPrincipal() p: Principal, @Param("id") id: string, @Body(new ZodValidationPipe(bookUpdateSchema)) b: z.infer<typeof bookUpdateSchema>): Promise<LibraryBookDto> {
     return this.library.updateBook(p, id, b);
+  }
+
+  /** Delete a book with no lending history (409 with the reason otherwise). */
+  @Delete("books/:id")
+  @RequirePermission(LIBRARY_PERMISSIONS.LIBRARY_MANAGE)
+  deleteBook(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.library.deleteBook(p, id);
   }
 
   // CSV export (librarian)

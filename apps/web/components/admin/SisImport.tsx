@@ -42,6 +42,21 @@ export function SisImport({ batches, currentUserId }: { batches: Batch[]; curren
     URL.revokeObjectURL(url);
   };
 
+  /** Load the filled-in template FILE straight into the CSV box (client-side
+   *  read — the data still goes through the same staged, maker-checker path). */
+  const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setCsv(String(reader.result ?? ""));
+      setMsg(`Loaded ${file.name} — review below, then press "Stage import".`);
+    };
+    reader.onerror = () => setMsg("Could not read that file.");
+    reader.readAsText(file);
+    e.target.value = ""; // allow re-selecting the same file
+  };
+
   const stage = async (e: React.FormEvent) => {
     e.preventDefault();
     const parsed = parseCsv(csv);
@@ -89,12 +104,22 @@ export function SisImport({ batches, currentUserId }: { batches: Batch[]; curren
         <CardHeader>
           <CardTitle className="text-base">Stage a bulk SIS upload</CardTitle>
           <CardDescription>
-            Download the template, fill it in, paste the CSV (with the header row) below, and stage it. Nothing
-            is created until a <strong>different</strong> admin approves the batch (maker-checker).
+            Download the template, fill it in, then <strong>upload the file</strong> (or paste the CSV) and
+            stage it. Nothing is created until a <strong>different</strong> admin approves the batch
+            (maker-checker).
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <Button type="button" size="sm" variant="outline" onClick={downloadTemplate}>Download CSV template</Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" size="sm" variant="outline" onClick={downloadTemplate}>Download CSV template</Button>
+            <Label
+              htmlFor="sis-file"
+              className="inline-flex h-8 cursor-pointer items-center rounded-md border border-input bg-card px-3 text-xs font-medium hover:bg-accent"
+            >
+              Upload filled template (.csv)
+            </Label>
+            <input id="sis-file" type="file" accept=".csv,text/csv" className="sr-only" onChange={onFile} />
+          </div>
           <form onSubmit={stage} className="space-y-3">
             <div className="space-y-1.5">
               <Label htmlFor="sis-csv">CSV (header row required)</Label>

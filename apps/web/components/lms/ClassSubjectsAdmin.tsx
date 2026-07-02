@@ -1,6 +1,7 @@
 "use client";
 
 import type { ClassDto, SubjectDto, UserSummaryDto, Serialized } from "@sms/types";
+import { interpretApiError } from "@/lib/api-error";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -43,7 +44,7 @@ export function ClassSubjectsAdmin({
         const j = (await res.json()) as { message?: string | string[] };
         detail = Array.isArray(j.message) ? j.message.join(", ") : j.message ?? "";
       } catch { /* ignore */ }
-      setMsg(detail || `Failed (${res.status}).`);
+      setMsg(interpretApiError(res.status, detail || null));
     }
     return res.ok;
   };
@@ -57,6 +58,7 @@ export function ClassSubjectsAdmin({
   const [sup, setSup] = React.useState({ classId: classes[0]?.id ?? "", supervisorId: staff[0]?.id ?? "" });
   const [prog, setProg] = React.useState({ classId: classes[0]?.id ?? "", level: "", nextClassId: "", capacity: "" });
   const [manage, setManage] = React.useState({ classId: classes[0]?.id ?? "", newName: "" });
+  const [subjFix, setSubjFix] = React.useState({ subjectId: subjects[0]?.id ?? "", newName: "" });
 
   return (
     <Card>
@@ -98,6 +100,17 @@ export function ClassSubjectsAdmin({
             {teachers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
           <Button type="submit" size="sm" variant="outline" disabled={!cs.subjectId || !cs.teacherId}>Assign</Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            disabled={!cs.classId || !cs.subjectId}
+            onClick={async () => {
+              await send("DELETE", `/classes/${cs.classId}/subjects/${cs.subjectId}`, undefined, "Offering removed.");
+            }}
+          >
+            Remove offering
+          </Button>
         </form>
 
         {/* Class supervisor */}
@@ -186,6 +199,55 @@ export function ClassSubjectsAdmin({
           <p className="w-full text-xs text-muted-foreground">
             Deleting is allowed only for an EMPTY class (e.g. a duplicate). If it already has students, timetable or
             other data, rename it instead.
+          </p>
+        </div>
+
+        {/* Rename / delete a SUBJECT (duplicate cleanup) */}
+        <div className="flex flex-wrap items-end gap-2 border-t border-border pt-4">
+          <Label className="w-full">Rename or remove a subject</Label>
+          <select
+            aria-label="Subject to fix"
+            value={subjFix.subjectId}
+            onChange={(e) => setSubjFix({ ...subjFix, subjectId: e.target.value })}
+            className={sel}
+          >
+            {subjects.map((s) => <option key={s.id} value={s.id}>{s.name}{s.code ? ` (${s.code})` : ""}</option>)}
+          </select>
+          <Input
+            aria-label="New subject name"
+            value={subjFix.newName}
+            onChange={(e) => setSubjFix({ ...subjFix, newName: e.target.value })}
+            placeholder="Correct subject name"
+            className="w-48"
+          />
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={!subjFix.subjectId || !subjFix.newName.trim()}
+            onClick={async () => {
+              if (await send("PUT", `/subjects/${subjFix.subjectId}`, { name: subjFix.newName.trim() }, "Subject renamed."))
+                setSubjFix({ ...subjFix, newName: "" });
+            }}
+          >
+            Rename
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="destructive"
+            disabled={!subjFix.subjectId}
+            onClick={async () => {
+              const s = subjects.find((x) => x.id === subjFix.subjectId);
+              if (!confirm(`Delete the subject "${s?.name ?? ""}"? This only works if no class offers it.`)) return;
+              await send("DELETE", `/subjects/${subjFix.subjectId}`, undefined, "Subject deleted.");
+            }}
+          >
+            Delete
+          </Button>
+          <p className="w-full text-xs text-muted-foreground">
+            Deleting is allowed only for a subject no class offers (e.g. a duplicate). If classes already offer it,
+            rename it instead — offerings follow the subject automatically.
           </p>
         </div>
 

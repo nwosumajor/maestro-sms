@@ -53,7 +53,33 @@ export default async function HrPage() {
           </div>
         </div>
 
-        {canWrite && users && <EmployeeForm users={users} />}
+        {/* Staff ACCOUNTS with no employment record yet — the bridge between
+            "create profile" (account + role) and HR (employment record). Without
+            this, freshly created staff are invisible here until someone knows to
+            use the form below. Staff = holds any non-student/non-parent role. */}
+        {canWrite && users && (() => {
+          const recorded = new Set((employees ?? []).map((e) => e.userId));
+          const awaiting = users.filter(
+            (u) => !recorded.has(u.id) && u.roles.some((r) => r !== "student" && r !== "parent"),
+          );
+          if (awaiting.length === 0) return null;
+          return (
+            <Alert variant="info">
+              <AlertTitle>
+                {awaiting.length} staff account{awaiting.length === 1 ? "" : "s"} awaiting an employment record
+              </AlertTitle>
+              <AlertDescription>
+                {awaiting.map((u) => u.name).join(", ")} — created as accounts but not yet on the HR
+                register. Complete each one with the form below (pick the person, then job title, start
+                date and salary).
+              </AlertDescription>
+            </Alert>
+          );
+        })()}
+
+        {canWrite && users && (
+          <EmployeeForm users={users.filter((u) => u.roles.some((r) => r !== "student" && r !== "parent"))} />
+        )}
 
         {employees === null || employees.length === 0 ? (
           <Alert variant="info"><AlertTitle>No records</AlertTitle><AlertDescription>No employee records yet.</AlertDescription></Alert>

@@ -294,10 +294,24 @@ const ROLE_PERMS: Record<string, string[]> = {
   warden: ["hr.self", "hostel.read", "hostel.manage", "notification.read",
     "message.read", "message.send", "event.read", "announcement.read", "task.participate",
   ],
+  // Head warden — supervises EVERY hostel (module-wide scoping in HostelService);
+  // fee runs they schedule are maker-checker (FEE_SCHEDULE workflow -> admin approves).
+  head_warden: ["hr.self", "hostel.read", "hostel.manage", "workflow.create", "workflow.read",
+    "notification.read", "message.read", "message.send", "event.read", "announcement.read", "task.participate",
+  ],
   // Transport driver — reads ONLY their own vehicle / route / passengers (scoped in
   // the service by Vehicle.driverId). Read-only on transport; basic staff comms.
   driver: ["hr.self", "transport.read", "notification.read",
     "message.read", "message.send", "event.read", "announcement.read", "task.participate",
+  ],
+  // Head driver — manages the WHOLE fleet (vehicles/routes/assignments; module-wide
+  // scoping in TransportService); fee runs are maker-checker like the head warden's.
+  head_driver: ["hr.self", "transport.read", "transport.manage", "workflow.create", "workflow.read",
+    "notification.read", "message.read", "message.send", "event.read", "announcement.read", "task.participate",
+  ],
+  // Librarian — owns the library module (catalogue, loans, fines, exports).
+  librarian: ["hr.self", "library.read", "library.borrow", "library.manage", "workflow.create", "workflow.read",
+    "notification.read", "message.read", "message.send", "event.read", "announcement.read", "task.participate",
   ],
 };
 
@@ -380,6 +394,9 @@ async function main() {
   const headAdmin = await mkUser("headadmin@demo.school", "Demo Head of Admin");
   const warden = await mkUser("warden@demo.school", "Demo Hostel Warden");
   const driver = await mkUser("driver@demo.school", "Demo Bus Driver");
+  const headWarden = await mkUser("headwarden@demo.school", "Demo Head Warden");
+  const headDriver = await mkUser("headdriver@demo.school", "Demo Head Driver");
+  const librarian = await mkUser("librarian@demo.school", "Demo Librarian");
   // The platform owner lives in the platform org, NOT the demo customer school.
   const owner = await mkUser("owner@sms.platform", "Platform Owner", platformOrg.id);
 
@@ -399,6 +416,9 @@ async function main() {
     [headAdmin.id, await roleByName("head_admin")],
     [warden.id, await roleByName("warden")],
     [driver.id, await roleByName("driver")],
+    [headWarden.id, await roleByName("head_warden")],
+    [headDriver.id, await roleByName("head_driver")],
+    [librarian.id, await roleByName("librarian")],
     [owner.id, await roleByName("super_admin")],
   ] as const) {
     // The super_admin's role is scoped to the platform org, every other demo

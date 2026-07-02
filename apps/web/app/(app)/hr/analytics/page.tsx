@@ -10,11 +10,14 @@ import { money } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-function Stat({ label, value }: { label: string; value: string | number }) {
+function Stat({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
     <Card>
       <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">{label}</CardTitle></CardHeader>
-      <CardContent><p className="text-2xl font-semibold">{value}</p></CardContent>
+      <CardContent>
+        <p className="text-2xl font-semibold">{value}</p>
+        {sub && <p className="mt-0.5 text-xs text-muted-foreground">{sub}</p>}
+      </CardContent>
     </Card>
   );
 }
@@ -38,6 +41,11 @@ export default async function HrAnalyticsPage() {
           <>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <Stat label="Active staff" value={`${a.headcount.active} / ${a.headcount.total}`} />
+              <Stat
+                label="Staff accounts"
+                value={a.headcount.staffAccounts}
+                sub={a.headcount.unrecorded > 0 ? `${a.headcount.unrecorded} awaiting employment record` : undefined}
+              />
               <Stat label="Pending leave" value={a.leave.pendingRequests} />
               <Stat label="Leave days taken (YTD)" value={a.leave.daysTakenThisYear} />
               <Stat label="Docs expiring ≤30d" value={a.documents.expiringSoon} />

@@ -43,7 +43,9 @@ function makeTx(over: Partial<Record<string, unknown>> = {}) {
 function svc(tx: TenantTx) {
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
-  return new HostelService(db as never, audit as never);
+  const workflow = { createRequest: jest.fn().mockResolvedValue({ id: "wf1" }), submit: jest.fn().mockResolvedValue({}) };
+  const hooks = { onFinalized: jest.fn() };
+  return new HostelService(db as never, audit as never, workflow as never, hooks as never);
 }
 
 describe("HostelService", () => {
@@ -66,7 +68,9 @@ describe("HostelService", () => {
 
   it("scheduling fees opens an invoice + line item for an allocated student", async () => {
     const { tx, calls } = makeTx({ allocs: [{ id: "a1", roomId: "r1", studentId: "stu1" }], draftInvoice: null });
-    const run = await svc(tx).scheduleFees(staff, { dueDate: "2026-09-01" });
+    // `staff` is an admin (wide) -> posts DIRECTLY; non-admins go through the
+    // FEE_SCHEDULE maker-checker instead (covered by the pendingApproval case).
+    const run = (await svc(tx).scheduleFees(staff, { dueDate: "2026-09-01" })) as { studentsBilled: number; totalBilledMinor: number };
     expect(run.studentsBilled).toBe(1);
     expect(run.totalBilledMinor).toBe(50000);
     expect(calls.invoiceCreate).toBe(1);
