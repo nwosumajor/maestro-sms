@@ -41,7 +41,7 @@ import { cn } from "@/lib/utils";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import type { TenantTheme } from "@sms/tokens";
-import { MODULES, type ModuleKey, type Permission } from "@sms/types";
+import { MODULES, type ModuleKey, type Permission, type Serialized, type SubscriptionDto } from "@sms/types";
 
 // App shell: persistent left nav + top bar. The brand mark + active-nav color
 // come from --primary, so a tenant theme swap re-skins the whole shell with no
@@ -235,6 +235,21 @@ export async function AppShell({
     }
     fontFamily = branding?.fontFamily ?? null;
   }
+
+  // Renewal/past-due banner — the trial and dunning state exist in billing, but a
+  // school that never opens /billing would first notice as "modules vanished".
+  // Surface it to billing.read holders (principal/school_admin) shell-wide; the
+  // API call is cheap (cached entitlement resolution, no payments/quotes).
+  let renewal: { kind: "PAST_DUE" | "ENDING" | "EXPIRED"; plan: string; daysLeft: number } | null = null;
+  if (!isPlatformOwner && permissions.includes("billing.read")) {
+    const sub = await apiGet<Serialized<SubscriptionDto>>("/billing/status").catch(() => null);
+    if (sub?.currentPeriodEnd) {
+      const daysLeft = Math.ceil((new Date(sub.currentPeriodEnd).getTime() - Date.now()) / 86_400_000);
+      if (sub.status === "PAST_DUE") renewal = { kind: "PAST_DUE", plan: sub.plan, daysLeft };
+      else if (sub.status === "ACTIVE" && daysLeft <= 0) renewal = { kind: "EXPIRED", plan: sub.plan, daysLeft };
+      else if (sub.status === "ACTIVE" && daysLeft <= 14) renewal = { kind: "ENDING", plan: sub.plan, daysLeft };
+    }
+  }
   return (
     <div data-tenant style={brandStyle(theme, fontFamily)} className="min-h-screen bg-background">
       {/* Top bar */}
@@ -244,7 +259,7 @@ export async function AppShell({
             {schoolName.slice(0, 1).toUpperCase()}
           </div>
           <div className="leading-tight">
-            <span className="block text-sm font-semibold tracking-tight">{schoolName}</span>
+            <span className="block font-display text-[0.95rem] font-semibold tracking-tight">{schoolName}</span>
             <span className="eyebrow hidden text-[0.6rem] sm:block">School Console</span>
           </div>
         </div>
@@ -272,6 +287,26 @@ export async function AppShell({
           </form>
         </div>
       </header>
+
+      {/* Renewal / past-due banner — the conversion nudge for billing.read staff. */}
+      {renewal && (
+        <a
+          href="/billing"
+          className={cn(
+            "block px-4 py-2 text-center text-sm font-medium transition-colors",
+            renewal.kind === "ENDING"
+              ? "bg-severity-low-bg text-severity-low-fg hover:brightness-[0.98]"
+              : "bg-severity-high-bg text-severity-high-fg hover:brightness-[0.98]",
+          )}
+        >
+          {renewal.kind === "PAST_DUE" &&
+            `Payment overdue — your ${renewal.plan} plan drops to the Standard floor after the grace period. Renew now →`}
+          {renewal.kind === "EXPIRED" &&
+            `Your ${renewal.plan} plan period has ended — renew now to keep all modules →`}
+          {renewal.kind === "ENDING" &&
+            `Your ${renewal.plan} plan ends in ${renewal.daysLeft} day${renewal.daysLeft === 1 ? "" : "s"} — renew to keep all modules →`}
+        </a>
+      )}
 
       <div className="flex">
         {/* Left nav — grouped "register sections" */}
@@ -302,12 +337,13 @@ export async function AppShell({
                                 : "font-medium text-muted-foreground hover:bg-accent hover:text-foreground",
                             )}
                           >
-                            {/* Active accent bar — the page tab in the register. */}
+                            {/* Active accent — the exercise book's red MARGIN RULE.
+                                Decorative signature (not destructive semantics). */}
                             <span
                               aria-hidden
                               className={cn(
-                                "absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-primary transition-opacity",
-                                isActive ? "opacity-100" : "opacity-0",
+                                "absolute left-0 top-1/2 h-5 w-[2.5px] -translate-y-1/2 rounded-r-full bg-rule transition-opacity",
+                                isActive ? "opacity-90" : "opacity-0",
                               )}
                             />
                             <Icon

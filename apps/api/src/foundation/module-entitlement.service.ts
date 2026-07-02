@@ -44,7 +44,7 @@ const INVALIDATE_CHANNEL = "entitlement:invalidate";
 interface Resolved {
   /** The PURCHASED tier (never downgraded by delinquency). */
   plan: Plan;
-  /** The tier ENFORCED right now (BASIC when past-due beyond grace). */
+  /** The tier ENFORCED right now (the STANDARD floor when past-due beyond grace). */
   effectivePlan: Plan;
   overrides: ModuleOverrides;
   /** Effective enabled modules, resolved against `effectivePlan`. */

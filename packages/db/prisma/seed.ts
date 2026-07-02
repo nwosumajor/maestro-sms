@@ -308,6 +308,15 @@ async function main() {
     create: { name: "St. Andrews Academy", slug: "demo" },
   });
 
+  // Explicit subscription so the demo does NOT rely on the entitlement default
+  // (which is now fail-closed to the entry tier) — the demo runs the full suite.
+  // Idempotent: won't overwrite a plan already set for this school.
+  await prisma.schoolSubscription.upsert({
+    where: { schoolId: school.id },
+    update: {},
+    create: { schoolId: school.id, plan: "ENTERPRISE", status: "ACTIVE" },
+  });
+
   // The platform-owner organization. NOT a customer tenant — it only hosts the
   // super_admin (the platform owner who sells the SMS to schools). Excluded from
   // the public directory, operator tenant list, directory search and billing. The

@@ -12,6 +12,13 @@ import {
   ArrowRightIcon,
   CheckIcon,
 } from "lucide-react";
+import {
+  PLANS as PLAN_KEYS,
+  PLAN_MODULES,
+  PLAN_PRICING,
+  type Plan,
+  type PlanPriceDto,
+} from "@sms/types";
 import { Button } from "@/components/ui/button";
 import { OnboardForm } from "@/components/public/OnboardForm";
 
@@ -106,7 +113,7 @@ const SECURITY = [
   {
     icon: KeyRoundIcon,
     title: "Least-privilege roles",
-    body: "Eleven roles see only what their job needs, backed by MFA, step-up re-auth and just-in-time elevation.",
+    body: "Fourteen roles see only what their job needs, backed by MFA, step-up re-auth and just-in-time elevation.",
   },
   {
     icon: GraduationCapIcon,
@@ -148,12 +155,36 @@ const AUDIENCES = [
   },
 ];
 
-const PLANS = [
-  { name: "Standard", price: 200, modules: 8, tagline: "Core teaching essentials", highlight: false },
-  { name: "Premium", price: 350, modules: 18, tagline: "Operations, money & engagement", highlight: true },
-  { name: "Ultimate", price: 500, modules: 23, tagline: "Facilities & full student lifecycle", highlight: false },
-  { name: "Enterprise", price: 750, modules: 25, tagline: "Everything, including HR & payroll", highlight: false },
-];
+// Copy is local; PRICES + module counts are DERIVED — fetched from the same
+// operator-overridable effective pricing checkout charges (fallback: the
+// platform constants), so this page can never drift from the real bill.
+const PLAN_META: Record<Plan, { tagline: string; highlight: boolean }> = {
+  STANDARD: { tagline: "Core teaching essentials", highlight: false },
+  PREMIUM: { tagline: "Operations, money & engagement", highlight: true },
+  ULTIMATE: { tagline: "Facilities & full student lifecycle", highlight: false },
+  ENTERPRISE: { tagline: "Everything, including HR & payroll", highlight: false },
+};
+
+const API_BASE = process.env.API_BASE_URL ?? "http://localhost:3001";
+
+async function effectivePlans() {
+  let rows: PlanPriceDto[] | null = null;
+  try {
+    const res = await fetch(`${API_BASE}/public/plan-pricing`, { next: { revalidate: 300 } });
+    if (res.ok) rows = (await res.json()) as PlanPriceDto[];
+  } catch {
+    // API unreachable (e.g. static build) -> platform default pricing below.
+  }
+  return (Object.values(PLAN_KEYS) as Plan[]).map((plan) => {
+    const row = rows?.find((r) => r.plan === plan);
+    return {
+      name: plan.charAt(0) + plan.slice(1).toLowerCase(),
+      price: Math.round((row?.perSeatMonthlyMinor ?? PLAN_PRICING[plan].perSeatMonthlyMinor) / 100),
+      modules: row?.modulesIncluded ?? PLAN_MODULES[plan].length,
+      ...PLAN_META[plan],
+    };
+  });
+}
 
 const STEPS = [
   ["Request onboarding", "Tell us about your school using the form below. It takes about two minutes."],
@@ -200,8 +231,9 @@ function Hero() {
       <div aria-hidden className="pointer-events-none absolute -right-40 -top-40 h-[28rem] w-[28rem] rounded-full bg-primary/10 blur-3xl" />
       <div className="relative mx-auto grid max-w-6xl items-center gap-12 px-5 py-16 sm:px-8 lg:grid-cols-[1.05fr_1fr] lg:py-24">
         <div className="animate-fade-up">
+          <span aria-hidden className="mb-3 block h-px w-12 bg-rule/70" />
           <p className="eyebrow">Multi-tenant school operating system</p>
-          <h1 className="mt-4 text-4xl font-semibold leading-[1.05] tracking-tight sm:text-5xl lg:text-[3.4rem]">
+          <h1 className="mt-4 text-4xl font-semibold leading-[1.08] tracking-tight sm:text-5xl lg:text-[3.4rem]">
             Run your entire school from one secure register.
           </h1>
           <p className="mt-5 max-w-xl text-lg leading-relaxed text-muted-foreground">
@@ -209,9 +241,12 @@ function Hero() {
             whole school. Built multi-tenant, with student-data privacy and least-privilege access at its core.
           </p>
           <div className="mt-8 flex flex-wrap items-center gap-3">
-            <a href="#onboard"><Button size="lg">Onboard your school</Button></a>
+            <a href="#onboard"><Button size="lg">Start your 30-day free trial</Button></a>
             <a href="#modules"><Button size="lg" variant="outline">Explore the 25 modules</Button></a>
           </div>
+          <p className="mt-3 text-xs text-muted-foreground">
+            Full plan from day one · no card required · billed per active student after the trial
+          </p>
           <ul className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs font-medium text-muted-foreground">
             {["Tenant-isolated", "NDPR-aligned", "Audit-logged", "Role-based access"].map((t) => (
               <li key={t} className="flex items-center gap-1.5">
@@ -290,7 +325,7 @@ function StatBand() {
   const stats: [string, string][] = [
     ["25", "modules"],
     ["4", "plans, per-seat"],
-    ["11", "built-in roles"],
+    ["14", "built-in roles"],
     ["50+", "schools per deployment"],
   ];
   return (
@@ -313,7 +348,7 @@ function Security() {
       <div className="mx-auto max-w-6xl px-5 py-20 sm:px-8">
         <div className="max-w-2xl">
           <p className="eyebrow">Trust &amp; safety</p>
-          <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
+          <h2 className="mt-3 font-display text-3xl font-semibold tracking-tight sm:text-4xl">
             Built for the data you&apos;re trusted with.
           </h2>
           <p className="mt-4 text-base leading-relaxed text-muted-foreground">
@@ -346,7 +381,7 @@ function Modules() {
       <div className="mx-auto max-w-6xl px-5 py-20 sm:px-8">
         <div className="max-w-2xl">
           <p className="eyebrow">Everything your school runs on</p>
-          <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
+          <h2 className="mt-3 font-display text-3xl font-semibold tracking-tight sm:text-4xl">
             Twenty-five modules, organised like a well-kept register.
           </h2>
           <p className="mt-4 text-base leading-relaxed text-muted-foreground">
@@ -415,22 +450,27 @@ function Audiences() {
   );
 }
 
-function Plans() {
+async function Plans() {
+  const plans = await effectivePlans();
   return (
     <section id="plans" className="scroll-mt-20 border-b border-border/60 bg-card">
       <div className="mx-auto max-w-6xl px-5 py-20 sm:px-8">
         <div className="max-w-2xl">
           <p className="eyebrow">Simple, per-student pricing</p>
-          <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
+          <h2 className="mt-3 font-display text-3xl font-semibold tracking-tight sm:text-4xl">
             Pay for the students you have, on the plan that fits.
           </h2>
           <p className="mt-4 text-base leading-relaxed text-muted-foreground">
             Billed per active student, per month. Move up a tier the moment you need more — your school keeps
             everything it already had.
           </p>
+          <p className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-primary/25 bg-primary/5 px-3 py-1 text-xs font-medium text-primary">
+            <CheckIcon className="h-3.5 w-3.5" aria-hidden />
+            Every school starts with a 30-day free trial — no card required
+          </p>
         </div>
         <div className="mt-12 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {PLANS.map((p) => (
+          {plans.map((p) => (
             <div
               key={p.name}
               className={
@@ -449,7 +489,7 @@ function Plans() {
               <p className="mt-1 text-xs text-muted-foreground">{p.tagline}</p>
               <p className="mt-5 flex items-baseline gap-1">
                 <span className="text-xs text-muted-foreground">₦</span>
-                <span className="tnum text-3xl font-semibold tracking-tight">{p.price}</span>
+                <span className="tnum font-display text-3xl font-semibold tracking-tight">{p.price}</span>
                 <span className="text-xs text-muted-foreground">/student/mo</span>
               </p>
               <p className="tnum mt-4 text-sm text-muted-foreground">
@@ -457,7 +497,7 @@ function Plans() {
               </p>
               <a href="#onboard" className="mt-6">
                 <Button variant={p.highlight ? "default" : "outline"} className="w-full">
-                  Get started
+                  Start free trial
                 </Button>
               </a>
             </div>
@@ -477,7 +517,7 @@ function Steps() {
     <section className="border-b border-border/60">
       <div className="mx-auto max-w-6xl px-5 py-20 sm:px-8">
         <p className="eyebrow">How onboarding works</p>
-        <h2 className="mt-3 max-w-2xl text-3xl font-semibold tracking-tight sm:text-4xl">
+        <h2 className="mt-3 max-w-2xl font-display text-3xl font-semibold tracking-tight sm:text-4xl">
           From request to running your school — in three steps.
         </h2>
         <ol className="mt-12 grid gap-8 md:grid-cols-3">
@@ -503,7 +543,7 @@ function Onboard() {
       <div className="relative mx-auto grid max-w-6xl items-center gap-12 px-5 py-20 sm:px-8 lg:grid-cols-2">
         <div>
           <p className="eyebrow text-primary-foreground/70">Onboard your school</p>
-          <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
+          <h2 className="mt-3 font-display text-3xl font-semibold tracking-tight sm:text-4xl">
             Bring your school online in days, not terms.
           </h2>
           <p className="mt-4 max-w-md text-sm leading-relaxed text-primary-foreground/80">
@@ -537,7 +577,7 @@ function ParentBand() {
       <div className="mx-auto flex max-w-6xl flex-col items-start justify-between gap-5 px-5 py-12 sm:px-8 md:flex-row md:items-center">
         <div>
           <p className="eyebrow text-primary">For parents</p>
-          <h2 className="mt-2 text-xl font-semibold tracking-tight sm:text-2xl">
+          <h2 className="mt-2 font-display text-xl font-semibold tracking-tight sm:text-2xl">
             Looking for a school for your child?
           </h2>
           <p className="mt-1.5 text-sm text-muted-foreground">

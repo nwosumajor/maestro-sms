@@ -5,7 +5,7 @@
 // subscription it either (a) sends a renewal reminder when the period end is
 // near, or (b) flips an ACTIVE subscription whose period has ELAPSED to PAST_DUE.
 // It NEVER deletes data and NEVER touches the purchased `plan` — the downgrade to
-// BASIC is enforced downstream by ModuleEntitlementService (effective plan) after
+// The STANDARD floor is enforced downstream by ModuleEntitlementService (effective plan) after
 // the grace window, so a payment restores access automatically.
 //
 // The sweep has no HTTP actor, so it audits via the Logger + the status column
@@ -71,7 +71,7 @@ export class BillingDunningService {
           client,
           s.schoolId,
           "Subscription past due",
-          `Your ${s.plan} plan payment is overdue. Renew within ${SUBSCRIPTION_GRACE_DAYS} days to avoid a downgrade to the BASIC plan.`,
+          `Your ${s.plan} plan payment is overdue. Renew within ${SUBSCRIPTION_GRACE_DAYS} days to avoid a downgrade to the Standard plan.`,
         );
       } else if (s.currentPeriodEnd <= addDays(now, RENEWAL_REMINDER_DAYS)) {
         reminded++;

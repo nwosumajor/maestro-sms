@@ -23,6 +23,7 @@ import { ModuleEntitlementService } from "../../src/foundation/module-entitlemen
 import { PrismaTenantService } from "../../src/foundation/prisma-tenant.service";
 import { AuditLogService } from "../../src/foundation/audit-log.service";
 import { PaystackService, type PaystackEvent } from "../../src/payments/paystack.service";
+import { PlanPricingService } from "../../src/billing/plan-pricing.service";
 import type { NotificationService } from "../../src/notifications/notification.service";
 import type { Principal } from "../../src/integrity/integrity.foundation";
 
@@ -73,6 +74,11 @@ d("BillingService integration (per-seat checkout, webhook, dunning, RLS)", () =>
       entitlements,
       notifications,
     );
+    const planPricing = new PlanPricingService(
+      tenant,
+      new AuditLogService() as never,
+      { client: privileged } as never,
+    );
     billing = new BillingService(
       tenant,
       new AuditLogService() as never,
@@ -80,6 +86,7 @@ d("BillingService integration (per-seat checkout, webhook, dunning, RLS)", () =>
       notifications,
       new PaystackService(),
       dunning,
+      planPricing,
     );
   });
 

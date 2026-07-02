@@ -46,6 +46,8 @@ export default async function LoginPage({ searchParams }: { searchParams: { scho
           aria-hidden
           className="pointer-events-none absolute -right-24 -top-24 h-96 w-96 rounded-full bg-white/10 blur-3xl"
         />
+        {/* The red margin rule over the squared paper — the exercise-book page, literal. */}
+        <div aria-hidden className="pointer-events-none absolute inset-y-0 left-8 w-px bg-rule/80" />
         <div className="relative flex items-center gap-3">
           {branding?.logoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element -- remote tenant logo, not a build asset

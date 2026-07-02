@@ -54,3 +54,19 @@ export interface CheckoutInitResultDto {
   authorizationUrl: string;
   reference: string;
 }
+
+/** One tier's effective per-seat monthly price (operator console + public page). */
+export interface PlanPriceDto {
+  plan: Plan;
+  /** Effective per-seat monthly price, kobo. */
+  perSeatMonthlyMinor: number;
+  /** True when this is the platform default (no operator override row). */
+  isDefault: boolean;
+  /** How many modules the tier bundles (for the public pricing cards). */
+  modulesIncluded: number;
+}
+
+/** super_admin pricing update: one entry per tier to override. */
+export interface PlanPriceUpdateDto {
+  prices: { plan: Plan; perSeatMonthlyMinor: number }[];
+}

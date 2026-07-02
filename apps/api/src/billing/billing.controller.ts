@@ -36,6 +36,14 @@ export class BillingController {
     return this.billing.getOverview(p);
   }
 
+  /** Light subscription posture for the AppShell renewal banner (cheap: one
+   *  cached entitlement resolution, no payments/quotes). */
+  @Get("status")
+  @RequirePermission(BILLING_PERMISSIONS.BILLING_READ)
+  status(@CurrentPrincipal() p: Principal) {
+    return this.billing.getStatus(p);
+  }
+
   /** Start a hosted Paystack checkout for a tier. Step-up re-auth required. */
   @Post("checkout/init")
   @RequirePermission(BILLING_PERMISSIONS.BILLING_MANAGE)

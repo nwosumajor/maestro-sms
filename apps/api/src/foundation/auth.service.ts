@@ -29,8 +29,15 @@ export interface LoginResult {
 const DUMMY_HASH = "$2a$10$CwTycUXWue0Thq9StjUM0uJ8DkuErEr2Q9p0a8b8a8b8a8b8a8b8a";
 
 // Lock the account on the 3rd consecutive miss; the lock is PERMANENT (only a
-// super_admin can reactivate it — no auto-expiry).
+// super_admin can reactivate it — no auto-expiry)…
 const MAX_FAILS = 3;
+// …EXCEPT for super_admin accounts, whose lock AUTO-EXPIRES. // SECURITY: a
+// permanent lock on the platform owner lets an attacker who merely knows the
+// operator's email lock out the ONLY account able to unlock anyone — a
+// platform-wide administrative DoS recoverable only by DB surgery. A 15-minute
+// window still blunts brute force (3 guesses per 15 min, behind the login rate
+// limit) without an unrecoverable failure mode.
+const SUPER_ADMIN_LOCK_MS = 15 * 60 * 1000;
 // Every non-super_admin must reset their password within this many days.
 const PASSWORD_MAX_AGE_DAYS = 30;
 const PASSWORD_MAX_AGE_MS = PASSWORD_MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
@@ -80,6 +87,7 @@ export class AuthService {
           select: {
             failedLoginCount: true,
             locked: true,
+            lockedUntil: true,
             mfaEnabled: true,
             mfaSecret: true,
             mfaRequired: true,
@@ -87,9 +95,23 @@ export class AuthService {
           },
         });
 
-        // Permanent lockout — only a super_admin can reactivate.
+        // Permanent lockout — only a super_admin can reactivate. For a
+        // super_admin ACCOUNT the lock instead auto-expires after
+        // SUPER_ADMIN_LOCK_MS (see the constant for why), then login proceeds.
         if (sec?.locked) {
-          return { status: "LOCKED" as const };
+          const isSuperAdmin = await tx.userRole.findFirst({
+            where: { userId: user.id, role: { name: "super_admin" } },
+            select: { id: true },
+          });
+          const lockExpired =
+            isSuperAdmin &&
+            sec.lockedUntil != null &&
+            Date.now() - sec.lockedUntil.getTime() > SUPER_ADMIN_LOCK_MS;
+          if (!lockExpired) return { status: "LOCKED" as const };
+          await tx.user.update({
+            where: { id: user.id },
+            data: { failedLoginCount: 0, locked: false, lockedUntil: null },
+          });
         }
 
         const ok = await bcrypt.compare(password, user.password_hash);

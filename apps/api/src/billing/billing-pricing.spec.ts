@@ -4,7 +4,7 @@
 // Pins the two pure functions the whole revenue layer rests on:
 //   - computeSubscriptionPriceMinor: per-seat × cycle months, seat clamp
 //   - effectivePlan: status-driven downgrade that NEVER mutates the purchased
-//     plan (BASIC only while past-due beyond grace / canceled past period end)
+//     plan (the STANDARD floor while past-due beyond grace / canceled past period end)
 // =============================================================================
 
 import {

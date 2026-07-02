@@ -1,4 +1,4 @@
-import type { TenantDto, OnboardingRequestDto, Serialized } from "@sms/types";
+import type { TenantDto, OnboardingRequestDto, PlanPriceDto, Serialized } from "@sms/types";
 import Link from "next/link";
 import { hasPermission } from "@/lib/permissions";
 import { redirect } from "next/navigation";
@@ -14,6 +14,7 @@ import { Provisioning } from "@/components/operator/Provisioning";
 import { OperatorUsers } from "@/components/operator/OperatorUsers";
 import { OperatorStudents } from "@/components/operator/OperatorStudents";
 import { OnboardingRequests } from "@/components/operator/OnboardingRequests";
+import { PricingManager } from "@/components/operator/PricingManager";
 
 export const dynamic = "force-dynamic";
 
@@ -23,9 +24,10 @@ export default async function OperatorPage() {
   const session = await auth();
   const user = session!.user;
   if (!hasPermission(user.permissions, "platform.operate")) redirect("/dashboard");
-  const [tenants, onboarding] = await Promise.all([
+  const [tenants, onboarding, pricing] = await Promise.all([
     apiGet<Tenant[]>("/operator/tenants"),
     apiGet<Serialized<OnboardingRequestDto>[]>("/operator/onboarding-requests"),
+    apiGet<PlanPriceDto[]>("/operator/pricing"),
   ]);
   const tenantList = tenants ?? [];
 
@@ -44,6 +46,8 @@ export default async function OperatorPage() {
         </div>
 
         <Provisioning tenants={tenantList.map((t) => ({ id: t.id, name: t.name }))} />
+
+        {pricing && <PricingManager initial={pricing} />}
 
         <OnboardingRequests requests={onboarding ?? []} />
 

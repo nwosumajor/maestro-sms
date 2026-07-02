@@ -22,6 +22,7 @@ import {
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
 import { BillingService } from "../billing/billing.service";
+import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
 import { PaystackService, type PaystackEvent } from "../payments/paystack.service";
 
 @Injectable()
@@ -84,9 +85,18 @@ export class PaymentGatewayService {
     if (!invoiceId || !schoolId) return { ok: true };
 
     // System-context write (no user): the actor is the invoice's creator.
-    await this.db.runAsTenant({ schoolId, userId: "00000000-0000-0000-0000-000000000000" }, async (tx) => {
+    await this.db.runAsTenant({ schoolId, userId: SYSTEM_ACTOR_ID }, async (tx) => {
       const inv = await tx.invoice.findFirst({ where: { id: invoiceId } });
       if (!inv) return;
+      // IDEMPOTENCY: Paystack RETRIES a webhook on any non-2xx / timeout (and can
+      // double-deliver). Without this guard each retry would insert ANOTHER POSTED
+      // payment for the same gateway reference and double-credit the invoice. The
+      // gateway reference is unique per charge, so it's the dedup key.
+      const already = await tx.payment.findFirst({
+        where: { invoiceId, reference: event.data.reference },
+        select: { id: true },
+      });
+      if (already) return;
       await tx.payment.create({
         data: {
           schoolId,

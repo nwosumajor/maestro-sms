@@ -1,9 +1,10 @@
 import { Body, Controller, Get, Post, UseGuards } from "@nestjs/common";
-import type { PublicSchoolDto } from "@sms/types";
+import type { PlanPriceDto, PublicSchoolDto } from "@sms/types";
 import { z } from "zod";
 import { Public } from "../auth/public.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { RateLimitGuard } from "../common/rate-limit.guard";
+import { PlanPricingService } from "../billing/plan-pricing.service";
 import { PublicService } from "./public.service";
 
 const onboardingSchema = z.object({
@@ -18,13 +19,25 @@ const onboardingSchema = z.object({
 // Entirely public (pre-auth) website surface. Rate-limit at the edge in prod.
 @Controller("public")
 export class PublicController {
-  constructor(private readonly publicSvc: PublicService) {}
+  constructor(
+    private readonly publicSvc: PublicService,
+    private readonly pricing: PlanPricingService,
+  ) {}
 
   /** PUBLIC: the directory of onboarded schools (parents browse + apply). */
   @Public()
   @Get("schools")
   schools(): Promise<PublicSchoolDto[]> {
     return this.publicSvc.listSchools();
+  }
+
+  /** PUBLIC: effective plan-tier pricing for the landing page — the SAME
+   *  operator-overridable prices checkout charges, so the marketing page can
+   *  never drift from the real bill. No tenant data; service-side cached. */
+  @Public()
+  @Get("plan-pricing")
+  planPricing(): Promise<PlanPriceDto[]> {
+    return this.pricing.list();
   }
 
   /** PUBLIC: a prospective principal requests to onboard their school. Rate-limited

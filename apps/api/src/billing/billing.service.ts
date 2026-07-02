@@ -44,6 +44,7 @@ import { NotificationService } from "../notifications/notification.service";
 import { PaystackService, type PaystackEvent } from "../payments/paystack.service";
 import { SYSTEM_ACTOR_ID } from "./billing.constants";
 import { BillingDunningService, type DunningResult } from "./billing-dunning.service";
+import { PlanPricingService } from "./plan-pricing.service";
 
 /** Tiers a school can actually buy (all four are paid; STANDARD is the floor). */
 const SELLABLE_TIERS: Plan[] = [PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE];
@@ -64,6 +65,7 @@ export class BillingService {
     private readonly notifications: NotificationService,
     private readonly paystack: PaystackService,
     private readonly dunning: BillingDunningService,
+    private readonly planPricing: PlanPricingService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -108,6 +110,14 @@ export class BillingService {
     };
   }
 
+  /** Light subscription posture only — the AppShell renewal/past-due banner.
+   *  (No payments/quotes: this is fetched on every page render for billing.read
+   *  holders, so it must stay cheap — one cached entitlement resolution.) */
+  async getStatus(p: Principal) {
+    const resolved = await this.entitlements.resolve(p.schoolId);
+    return this.entitlements.dtoFrom(p.schoolId, resolved);
+  }
+
   /** Current subscription + live per-tier quotes + payment history. */
   async getOverview(p: Principal): Promise<BillingOverviewDto> {
     const resolved = await this.entitlements.resolve(p.schoolId);
@@ -123,12 +133,14 @@ export class BillingService {
     });
 
     const billableSeats = Math.max(1, activeStudents);
+    // Quote with the operator-effective pricing so the screen matches checkout.
+    const pricing = await this.planPricing.effective();
     const quotes = SELLABLE_TIERS.flatMap((plan) =>
       QUOTE_CYCLES.map((cycle) => ({
         plan,
         billingCycle: cycle,
         seats: billableSeats,
-        priceMinor: computeSubscriptionPriceMinor(plan, billableSeats, cycle),
+        priceMinor: computeSubscriptionPriceMinor(plan, billableSeats, cycle, pricing),
       })),
     );
 
@@ -149,11 +161,13 @@ export class BillingService {
     const plan: Plan = input.plan;
     const billingCycle: BillingCycle = input.billingCycle;
 
+    // Charge with the same operator-effective pricing the overview quoted.
+    const pricing = await this.planPricing.effective();
     const { email, amountMinor, seats, reference, paymentId } = await this.db.runAsTenant(
       this.ctx(p),
       async (tx) => {
         const seats = await this.activeStudents(tx);
-        const amountMinor = computeSubscriptionPriceMinor(plan, seats, billingCycle);
+        const amountMinor = computeSubscriptionPriceMinor(plan, seats, billingCycle, pricing);
         if (amountMinor <= 0) throw new BadRequestException("Nothing to charge for this plan");
         const reference = `SUB-${p.schoolId.slice(0, 8)}-${Date.now()}`;
         const user = await tx.user.findFirst({ where: { id: p.userId }, select: { email: true } });

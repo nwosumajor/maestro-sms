@@ -72,7 +72,7 @@ export default async function BillingPage() {
                   <Alert variant="info">
                     <AlertTitle>Payment overdue</AlertTitle>
                     <AlertDescription>
-                      Renew to restore your full plan. After the grace period the school is limited to the BASIC plan
+                      Renew to restore your full plan. After the grace period the school is limited to the Standard plan
                       until payment is received.
                     </AlertDescription>
                   </Alert>

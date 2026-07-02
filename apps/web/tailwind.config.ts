@@ -65,6 +65,8 @@ const config: Config = {
           "high-bg": "hsl(var(--severity-high-bg) / <alpha-value>)",
           "high-fg": "hsl(var(--severity-high-fg) / <alpha-value>)",
         },
+        // The exercise-book margin rule — decorative signature line only.
+        rule: "hsl(var(--rule) / <alpha-value>)",
       },
       borderRadius: {
         lg: "var(--radius)",
@@ -73,6 +75,7 @@ const config: Config = {
       },
       fontFamily: {
         sans: "var(--font-sans)",
+        display: "var(--font-display)",
         mono: "var(--font-mono)",
       },
       // Shell chrome surface (sidebar / topbar tint).

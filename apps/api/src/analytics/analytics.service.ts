@@ -46,10 +46,18 @@ export class AnalyticsService {
           if (!studentIds || studentIds.length === 0) where.studentId = "__none__";
           else where.studentId = { in: studentIds };
         }
-        const recs = await tx.attendanceRecord.findMany({ where, select: { status: true } });
+        // groupBy: the DB counts per status — don't ship every row just to count.
+        const grouped = await tx.attendanceRecord.groupBy({
+          by: ["status"],
+          where: where as never, // reason: dynamic where narrowed above; groupBy's generic rejects the loose Record type
+          _count: { _all: true },
+        });
         const by = { PRESENT: 0, ABSENT: 0, LATE: 0, EXCUSED: 0 };
-        for (const r of recs) if (r.status in by) by[r.status as keyof typeof by] += 1;
-        const total = recs.length;
+        let total = 0;
+        for (const g of grouped) {
+          if (g.status in by) by[g.status as keyof typeof by] = g._count._all;
+          total += g._count._all;
+        }
         out.attendance = {
           ...by,
           total,
@@ -133,18 +141,17 @@ export class AnalyticsService {
       // --- school operations (staff) ---
       if (staff) {
         const counts: Record<string, number> = {};
-        const enr = await tx.enrollment.findMany({ select: { studentId: true }, distinct: ["studentId"] });
+        // COUNT in the database — never findMany().length (ships whole ID sets).
+        // students needs COUNT(DISTINCT) which Prisma count() can't express, so
+        // groupBy on studentId and count the groups (still no row payloads).
+        const enr = await tx.enrollment.groupBy({ by: ["studentId"] });
         counts.students = enr.length;
-        counts.classes = (await tx.class.findMany({ select: { id: true } })).length;
+        counts.classes = await tx.class.count();
         if (p.permissions.includes("workflow.read")) {
-          counts.pendingApprovals = (
-            await tx.workflowRequest.findMany({ where: { state: "PENDING_REVIEW" }, select: { id: true } })
-          ).length;
+          counts.pendingApprovals = await tx.workflowRequest.count({ where: { state: "PENDING_REVIEW" } });
         }
         if (p.permissions.includes("integrity.report.read")) {
-          counts.integritySignals = (
-            await tx.integritySignal.findMany({ where: { createdAt: { gte: since } }, select: { id: true } })
-          ).length;
+          counts.integritySignals = await tx.integritySignal.count({ where: { createdAt: { gte: since } } });
         }
         out.operations = counts;
       }

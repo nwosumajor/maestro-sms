@@ -1,9 +1,10 @@
-import { Body, Controller, HttpCode, Post } from "@nestjs/common";
+import { Body, Controller, HttpCode, Post, UseGuards } from "@nestjs/common";
 import { z } from "zod";
 import { Public } from "../auth/public.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import type { Principal } from "../integrity/integrity.foundation";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
+import { RateLimitGuard } from "../common/rate-limit.guard";
 import { AuthService } from "./auth.service";
 
 const loginSchema = z.object({
@@ -25,7 +26,12 @@ const changePasswordSchema = z.object({
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
+  // SECURITY: unauthenticated + writes lockout state, so it MUST be throttled —
+  // otherwise the 3-strike permanent lock is a mass account-lockout DoS (spray 3
+  // wrong passwords per known email, unthrottled). Per-IP in-process backstop;
+  // the edge WAF rate rule remains the primary control (same posture as /apply).
   @Public()
+  @UseGuards(new RateLimitGuard(10, 60_000))
   @Post("login")
   @HttpCode(200)
   login(

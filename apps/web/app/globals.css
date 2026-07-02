@@ -74,9 +74,20 @@
     --severity-high-bg: 0 86% 95%;
     --severity-high-fg: 0 70% 35%;
 
-    /* --- type + radius --- */
-    --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-    --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
+    /* --- the margin rule (exercise-book red) ---
+       Decorative signature ONLY: active-nav indicator, login margin line, KPI
+       tick. A dusty pink-red kept deliberately away from --destructive (never
+       on buttons or alerts) and NOT tenant-overridable — it is the platform's
+       handwriting, like the squared-paper grid. */
+    --rule: 356 62% 55%;
+
+    /* --- type + radius ---
+       The font variables (--font-sans / --font-display / --font-mono) are bound
+       EXCLUSIVELY by next/font in layout.tsx (Inter / Spectral / JetBrains Mono,
+       each with size-adjusted fallbacks). Do NOT redeclare them here: a :root
+       declaration later in the bundle outranks next/font's html-class one at
+       equal specificity, silently swapping the loaded webfonts for local/system
+       fallbacks. */
     --radius: 0.625rem;
   }
 
@@ -121,6 +132,8 @@
     --severity-medium-fg: 32 95% 75%;
     --severity-high-bg: 0 55% 20%;
     --severity-high-fg: 0 90% 84%;
+
+    --rule: 356 70% 64%;
   }
 
   * {
@@ -139,6 +152,14 @@
   h1, h2, h3 {
     letter-spacing: -0.02em;
     text-wrap: balance;
+  }
+  /* Page titles speak in the register serif — one base rule restyles every
+     screen's h1 (utility classes on the element still control size/weight;
+     Spectral's 600 replaces Inter's 600 at the same metrics). h2/h3 stay Inter
+     for dense in-card UI; public pages opt h2 in with `font-display`. */
+  h1 {
+    font-family: var(--font-display);
+    letter-spacing: -0.015em;
   }
 
   /* One consistent, visible keyboard focus ring everywhere (a11y floor). */

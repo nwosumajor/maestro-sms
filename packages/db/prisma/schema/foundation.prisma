@@ -139,11 +139,11 @@ model School {
 /// The platform (super_admin) sets this; the ModuleGuard reads it to gate routes
 /// and the web nav hides disabled modules. RLS scopes a school to its OWN row;
 /// super_admin writes via a per-school GUC (like the rest of the operator console).
-/// A school with no row defaults to ENTERPRISE (everything on) — see DEFAULT_PLAN.
+/// A school with NO row falls back to DEFAULT_PLAN (the STANDARD floor — fail-closed).
 model SchoolSubscription {
   id        String   @id @default(uuid()) @db.Uuid
   schoolId  String   @unique @db.Uuid
-  /// BASIC | STANDARD | ENTERPRISE (validated in app against @sms/types PLANS).
+  /// STANDARD | PREMIUM | ULTIMATE | ENTERPRISE (validated against @sms/types PLANS).
   /// This is the PURCHASED tier; delinquency NEVER overwrites it — the effective
   /// plan is computed (effectivePlan) from `status` + `currentPeriodEnd` instead.
   plan      String   @default("ENTERPRISE")
@@ -167,6 +167,22 @@ model SchoolSubscription {
   school School @relation(fields: [schoolId], references: [id])
 
   @@map("school_subscription")
+}
+
+/// GLOBAL (RLS-EXEMPT, like `school`/`role`): operator-set per-tier pricing.
+/// One optional row per plan tier overrides the platform default in
+/// @sms/types PLAN_PRICING; absent rows fall back to the constant. Read by every
+/// tenant (quotes/checkout/public pricing page) — carries NO tenant data.
+/// Writes go ONLY through the PRIVILEGED client (operator PUT, step-up, audited);
+/// the least-privilege app role has SELECT only (see rls/46_plan_pricing_rls.sql).
+model PlanPrice {
+  /// STANDARD | PREMIUM | ULTIMATE | ENTERPRISE (validated against @sms/types PLANS).
+  plan               String   @id
+  /// Per-seat (active student) monthly price, minor units (NGN kobo).
+  perSeatMonthlyMinor Int
+  updatedAt          DateTime @updatedAt
+
+  @@map("plan_price")
 }
 
 /// Append-only ledger of a school's PLATFORM subscription payments (school ->

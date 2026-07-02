@@ -20,6 +20,7 @@ import { OperatorProvisioningService } from "./operator-provisioning.service";
 import { OperatorUserService } from "./operator-user.service";
 import { PlatformAnalyticsService } from "./platform-analytics.service";
 import { PlatformAuditService, type PlatformAuditFilter } from "./platform-audit.service";
+import { PlanPricingService } from "../billing/plan-pricing.service";
 
 /** Parse audit query params into a typed filter (all optional). */
 function auditFilter(q: Record<string, string>): PlatformAuditFilter {
@@ -83,6 +84,17 @@ const subSchema = z.object({
   status: z.enum([SUBSCRIPTION_STATUS.ACTIVE, SUBSCRIPTION_STATUS.PAST_DUE, SUBSCRIPTION_STATUS.CANCELED]).optional(),
   currentPeriodEnd: z.string().datetime().nullable().optional(),
 });
+const pricingSchema = z.object({
+  prices: z
+    .array(
+      z.object({
+        plan: z.enum([PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE]),
+        perSeatMonthlyMinor: z.number().int().positive(),
+      }),
+    )
+    .min(1)
+    .max(4),
+});
 
 @Controller("operator")
 export class OperatorController {
@@ -92,6 +104,7 @@ export class OperatorController {
     private readonly users: OperatorUserService,
     private readonly analyticsSvc: PlatformAnalyticsService,
     private readonly auditSvc: PlatformAuditService,
+    private readonly pricing: PlanPricingService,
   ) {}
 
   /** Self-serve onboard a NEW school + its first admin (step-up: creates creds). */
@@ -185,6 +198,25 @@ export class OperatorController {
     @Body(new ZodValidationPipe(subSchema)) body: z.infer<typeof subSchema>,
   ): Promise<SubscriptionDto> {
     return this.operator.setSubscription(p, schoolId, body);
+  }
+
+  // --- platform-wide plan-tier pricing (super_admin) ------------------------
+  /** Effective per-tier pricing (defaults + operator overrides). */
+  @Get("pricing")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  getPricing() {
+    return this.pricing.list();
+  }
+
+  /** Set per-tier prices. Step-up: platform-wide money configuration. Audited. */
+  @Put("pricing")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  @RequireStepUp()
+  setPricing(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(pricingSchema)) body: z.infer<typeof pricingSchema>,
+  ) {
+    return this.pricing.update(p, body);
   }
 
   // --- public onboarding-request review (super_admin) ------------------------

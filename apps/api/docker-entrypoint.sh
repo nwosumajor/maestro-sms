@@ -113,6 +113,7 @@ apply_rls packages/db/prisma/rls/42_discipline_rls.sql          discipline_entry
 apply_rls packages/db/prisma/rls/43_certificate_rls.sql         issued_certificate_insert
 apply_rls packages/db/prisma/rls/44_alumni_rls.sql             alumnus_delete
 apply_rls packages/db/prisma/rls/45_form_rls.sql               form_response_delete
+apply_rls packages/db/prisma/rls/46_plan_pricing_rls.sql       plan_price_select
 
 # Seed on first provision (compose: SEED_ON_START=true; cloud migrate task: always).
 if [ "${SEED_ON_START}" = "true" ] || [ "$MODE" = "migrate" ]; then

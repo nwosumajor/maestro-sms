@@ -26,7 +26,7 @@ import {
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import { Prisma, type PrismaClient } from "@sms/db";
-import { DEFAULT_PLAN, isPlan, isModuleKey, type ModuleOverrides } from "@sms/types";
+import { DEFAULT_PLAN, SUBSCRIPTION_TRIAL_DAYS, isPlan, isModuleKey, type ModuleOverrides } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -130,8 +130,15 @@ export class OperatorProvisioningService {
 
     const result = await db.$transaction(async (tx) => {
       const school = await tx.school.create({ data: { name: input.name, slug } });
+      // Provision on a TRIAL: ACTIVE now, but with a period end so the dunning
+      // sweep will flip an unpaid school to PAST_DUE when the trial elapses
+      // (then effectivePlan drops to the floor after grace). Without this the
+      // subscription had a null currentPeriodEnd, which dunning skips entirely —
+      // so the school would run its full plan free forever. super_admin can
+      // extend/override the period via the operator subscription PUT.
+      const trialEnd = new Date(Date.now() + SUBSCRIPTION_TRIAL_DAYS * 24 * 60 * 60 * 1000);
       await tx.schoolSubscription.create({
-        data: { schoolId: school.id, plan, status: "ACTIVE", overrides: overrides as unknown as Prisma.InputJsonValue },
+        data: { schoolId: school.id, plan, status: "ACTIVE", currentPeriodEnd: trialEnd, overrides: overrides as unknown as Prisma.InputJsonValue },
       });
       const created: Array<{ id: string; email: string; role: string; tempPassword: string }> = [];
       for (const a of prepared) {

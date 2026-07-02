@@ -80,7 +80,7 @@ export class OperatorService {
       currentPeriodEnd?: string | Date | null;
     },
   ): Promise<SubscriptionDto> {
-    if (!isPlan(input.plan)) throw new BadRequestException("plan must be BASIC, STANDARD or ENTERPRISE");
+    if (!isPlan(input.plan)) throw new BadRequestException("plan must be one of STANDARD, PREMIUM, ULTIMATE, ENTERPRISE");
     const plan: Plan = input.plan;
     const enabled = (input.overrides?.enabled ?? []).filter(isModuleKey);
     const disabled = (input.overrides?.disabled ?? []).filter(isModuleKey);

@@ -120,11 +120,16 @@ export interface ModuleOverrides {
 }
 
 /**
- * A school with no subscription row defaults to ENTERPRISE (everything on), so
- * the entitlement layer is purely opt-in to RESTRICT — it never silently breaks
- * an existing tenant that predates a subscription record.
+ * FAIL-CLOSED default for a school with NO subscription row: the entry tier
+ * (`FALLBACK_PLAN` = core teaching), NOT the full suite. A data gap therefore
+ * under-provisions (core modules only) instead of silently giving away every
+ * premium add-on. Every school MUST get an explicit row — onboarding creates one
+ * and the seed creates one for the demo — so this only bites truly row-less
+ * tenants. NOTE: deploying this against an existing DB requires backfilling a
+ * subscription row for any live school that lacks one, or those tenants drop to
+ * the entry tier on next request.
  */
-export const DEFAULT_PLAN: Plan = PLANS.ENTERPRISE;
+export const DEFAULT_PLAN: Plan = FALLBACK_PLAN;
 
 /** Effective enabled modules = the tier bundle, plus `enabled`, minus `disabled`. */
 export function resolveModules(plan: Plan, overrides?: ModuleOverrides | null): ModuleKey[] {
@@ -149,7 +154,7 @@ export function isPlan(value: string): value is Plan {
 // Schools self-serve a tier (per-seat × active students × cycle), paid via the
 // existing Paystack path. Money is integer MINOR units (kobo), NGN — same as
 // Fees. Delinquency is STATUS-DRIVEN: the purchased `plan` is NEVER overwritten;
-// `effectivePlan` drops to BASIC while past-due-beyond-grace, so a payment
+// `effectivePlan` drops to the STANDARD floor while past-due-beyond-grace, so a payment
 // instantly restores the paid tier without re-resolving overrides.
 
 export const BILLING_CYCLES = {
@@ -181,11 +186,19 @@ export function isSubscriptionStatus(value: string): value is SubscriptionStatus
   return (Object.values(SUBSCRIPTION_STATUS) as string[]).includes(value);
 }
 
+/** Per-seat monthly pricing by tier (kobo). */
+export type PlanPricing = Record<Plan, { perSeatMonthlyMinor: number }>;
+
 /**
- * Per-seat (per active student) price each MONTH, in kobo, by tier. STANDARD is
- * the entry tier (and the delinquency floor); higher tiers cost more per seat.
+ * DEFAULT per-seat (per active student) price each MONTH, in kobo, by tier.
+ * STANDARD is the entry tier (and the delinquency floor); higher tiers cost more
+ * per seat. These are the FALLBACK values — the super_admin can override any
+ * tier's price via the operator console (stored in the global `plan_price`
+ * table); `PlanPricingService.effective()` merges those rows over this constant,
+ * and everything that quotes or charges (billing overview, checkout, the public
+ * landing page) reads the merged result.
  */
-export const PLAN_PRICING: Record<Plan, { perSeatMonthlyMinor: number }> = {
+export const PLAN_PRICING: PlanPricing = {
   STANDARD: { perSeatMonthlyMinor: 20_000 }, // ₦200 / student / month
   PREMIUM: { perSeatMonthlyMinor: 35_000 }, // ₦350 / student / month
   ULTIMATE: { perSeatMonthlyMinor: 50_000 }, // ₦500 / student / month
@@ -196,6 +209,14 @@ export const PLAN_PRICING: Record<Plan, { perSeatMonthlyMinor: number }> = {
 export const SUBSCRIPTION_GRACE_DAYS = 7;
 /** Days before period end to send a renewal reminder (2 weeks). */
 export const RENEWAL_REMINDER_DAYS = 14;
+/**
+ * Free-trial length for a newly provisioned school before its first renewal is
+ * due. Onboarding stamps currentPeriodEnd = now + this, so the dunning sweep
+ * eventually flips an unpaid school to PAST_DUE (then `effectivePlan` → the
+ * floor after grace) — giving the billing funnel an actual forcing function
+ * instead of running the full plan free forever.
+ */
+export const SUBSCRIPTION_TRIAL_DAYS = 30;
 
 /**
  * Pure: is a school's subscription in good standing RIGHT NOW (full access)?
@@ -216,20 +237,23 @@ export function isSubscriptionInGoodStanding(
   return now <= cutoff;
 }
 
-/** Pure: price to run `plan` for `activeStudents` over one `cycle` (minor units). */
+/** Pure: price to run `plan` for `activeStudents` over one `cycle` (minor units).
+ *  `pricing` defaults to the platform constants; pass the operator-resolved
+ *  effective pricing so overridden tier prices flow into quotes and charges. */
 export function computeSubscriptionPriceMinor(
   plan: Plan,
   activeStudents: number,
   cycle: BillingCycle,
+  pricing: PlanPricing = PLAN_PRICING,
 ): number {
   const seats = Math.max(1, Math.floor(activeStudents));
-  return PLAN_PRICING[plan].perSeatMonthlyMinor * seats * CYCLE_MONTHS[cycle];
+  return pricing[plan].perSeatMonthlyMinor * seats * CYCLE_MONTHS[cycle];
 }
 
 /**
  * Pure: the plan a school is ENTITLED to right now. An ACTIVE school gets its
  * purchased `plan`. A PAST_DUE school keeps it through a grace window past the
- * period end, then falls back to BASIC. A CANCELED school keeps it only until
+ * period end, then falls back to the STANDARD floor. A CANCELED school keeps it only until
  * the period end. The stored `plan` is never mutated — paying restores it.
  */
 export function effectivePlan(
