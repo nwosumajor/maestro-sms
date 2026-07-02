@@ -304,37 +304,45 @@ export class LmsService {
   }
 
   /** The students the caller may see (id + name): self / their children / the
-   *  students in classes they teach / all enrolled (school-wide). Powers the
-   *  student pickers in the SIS, attendance, and fees UIs. */
+   *  students in classes they teach / ALL students by role (school-wide staff).
+   *  Powers the student pickers in the SIS, attendance, and fees UIs. */
   async listStudents(p: Principal) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const ids = new Set<string>();
       if (this.isSchoolWide(p)) {
+        // School-wide staff see EVERY student in the tenant — by ROLE, not by
+        // enrollment. Deriving from enrollments hid freshly created (not yet
+        // enrolled) students from /students, so admission paperwork (SIS
+        // profile/contacts/medical) couldn't be completed before class
+        // placement. Role-based also matches the billing seat-count definition
+        // (ONE meaning of "student" platform-wide) and is a single relation-
+        // filtered query instead of a two-step ID-set round trip.
+        return tx.user.findMany({
+          where: { roles: { some: { role: { name: "student" } } } },
+          select: { id: true, name: true },
+          orderBy: { name: "asc" },
+        });
+      }
+      // Relationship-scoped callers (teacher/parent/student): membership joins
+      // narrow the rows, exactly as before.
+      const ids = new Set<string>();
+      if (p.roles.includes("student")) ids.add(p.userId);
+      const taught = await tx.classTeacher.findMany({
+        where: { teacherId: p.userId },
+        select: { classId: true },
+      });
+      if (taught.length > 0) {
         const enr = await tx.enrollment.findMany({
+          where: { classId: { in: taught.map((t: { classId: string }) => t.classId) } },
           select: { studentId: true },
           distinct: ["studentId"],
         });
         enr.forEach((e: { studentId: string }) => ids.add(e.studentId));
-      } else {
-        if (p.roles.includes("student")) ids.add(p.userId);
-        const taught = await tx.classTeacher.findMany({
-          where: { teacherId: p.userId },
-          select: { classId: true },
-        });
-        if (taught.length > 0) {
-          const enr = await tx.enrollment.findMany({
-            where: { classId: { in: taught.map((t: { classId: string }) => t.classId) } },
-            select: { studentId: true },
-            distinct: ["studentId"],
-          });
-          enr.forEach((e: { studentId: string }) => ids.add(e.studentId));
-        }
-        const children = await tx.parentChild.findMany({
-          where: { parentId: p.userId },
-          select: { studentId: true },
-        });
-        children.forEach((c: { studentId: string }) => ids.add(c.studentId));
       }
+      const children = await tx.parentChild.findMany({
+        where: { parentId: p.userId },
+        select: { studentId: true },
+      });
+      children.forEach((c: { studentId: string }) => ids.add(c.studentId));
       if (ids.size === 0) return [];
       return tx.user.findMany({
         where: { id: { in: [...ids] } },

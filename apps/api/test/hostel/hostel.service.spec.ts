@@ -34,6 +34,8 @@ function makeTx(over: Partial<Record<string, unknown>> = {}) {
     },
     invoiceLineItem: { create: jest.fn(() => { calls.lineCreate++; return Promise.resolve({}); }) },
     user: { findFirst: jest.fn().mockResolvedValue({ id: "stu1", name: "Stu" }) },
+    // Row-lock the room for allocation concurrency (no-op in the mock).
+    $executeRaw: jest.fn().mockResolvedValue(0),
   } as unknown as TenantTx;
   return { tx, calls };
 }

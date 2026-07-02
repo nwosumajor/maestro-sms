@@ -8,6 +8,10 @@ import type { Principal, TenantContext, TenantTx } from "../../src/integrity/int
 
 function makeService(request: Record<string, unknown> | null) {
   const update = jest.fn().mockResolvedValue({});
+  // Optimistic-concurrency guard: the transition writes via updateMany and
+  // requires count>0 (the row was still in the read state). Model a successful
+  // guarded write.
+  const updateMany = jest.fn().mockResolvedValue({ count: 1 });
   const auditCreate = jest.fn().mockResolvedValue({});
   const tx = {
     workflowRequest: {
@@ -17,6 +21,7 @@ function makeService(request: Record<string, unknown> | null) {
       ),
       findMany: jest.fn().mockResolvedValue([]),
       update,
+      updateMany,
     },
     workflowAuditLog: {
       create: auditCreate,
@@ -25,7 +30,7 @@ function makeService(request: Record<string, unknown> | null) {
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const hooks = { onFinalized: jest.fn(), runFinalized: jest.fn().mockResolvedValue(undefined) };
-  return { service: new WorkflowService(db as never, hooks as never), update, auditCreate, hooks };
+  return { service: new WorkflowService(db as never, hooks as never), update, updateMany, auditCreate, hooks };
 }
 
 const p = (permissions: string[], userId = "me"): Principal => ({
@@ -50,10 +55,10 @@ describe("WorkflowService state machine", () => {
   });
 
   it("initiator submits: DRAFT -> PENDING_REVIEW", async () => {
-    const { service, update } = makeService({ id: "w1", state: "DRAFT", initiatorId: "me" });
+    const { service, updateMany } = makeService({ id: "w1", state: "DRAFT", initiatorId: "me" });
     const r = (await service.submit(p(["workflow.create"], "me"), "w1")) as { state: string };
     expect(r.state).toBe("PENDING_REVIEW");
-    expect(update).toHaveBeenCalledWith(
+    expect(updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ state: "PENDING_REVIEW" }) }),
     );
   });
@@ -143,14 +148,14 @@ describe("WorkflowService multi-stage chain (head -> HR -> principal)", () => {
   });
 
   it("stage-1 (HEAD) approve advances the pointer and stays PENDING_REVIEW (not finalized)", async () => {
-    const { service, update, hooks } = makeService(staged());
+    const { service, updateMany, hooks } = makeService(staged());
     const r = (await service.review(p(["workflow.review", "workflow.review.head"], "head1"), "w1", "APPROVE")) as {
       state: string;
       currentStage: number;
     };
     expect(r.state).toBe("PENDING_REVIEW");
     expect(r.currentStage).toBe(1);
-    expect(update).toHaveBeenCalledWith(
+    expect(updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ state: "PENDING_REVIEW", currentStage: 1 }) }),
     );
     expect(hooks.runFinalized).not.toHaveBeenCalled(); // not terminal yet

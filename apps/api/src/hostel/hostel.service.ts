@@ -194,6 +194,12 @@ export class HostelService {
       if (!room) throw new NotFoundException("Room not found");
       await this.assertHostelInScope(tx, p, room.hostelId);
       await this.assertUserInSchool(tx, studentId);
+      // Serialize concurrent allocations to THIS room by locking its row for the
+      // rest of the transaction, so the capacity count-then-insert is atomic —
+      // two racers can't both read `occupied < capacity` for the last bed and
+      // both insert, overflowing the room. (RLS still applies; the row is this
+      // tenant's by the scope assertion above.)
+      await tx.$executeRaw`SELECT id FROM "hostel_room" WHERE id = ${roomId}::uuid FOR UPDATE`;
       const occupied = await tx.hostelAllocation.count({ where: { roomId, status: "ACTIVE" } });
       if (occupied >= room.capacity) throw new BadRequestException("Room is at full capacity");
       // A student may hold only one ACTIVE bed at a time.

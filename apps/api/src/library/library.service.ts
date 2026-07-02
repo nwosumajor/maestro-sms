@@ -134,14 +134,21 @@ export class LibraryService {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const book = await tx.libraryBook.findFirst({ where: { id: input.bookId } });
       if (!book) throw new NotFoundException("Book not found");
-      if (book.availableCopies < 1) throw new BadRequestException("No copies available");
       const borrower = await tx.user.findFirst({ where: { id: borrowerId }, select: { id: true } });
       if (!borrower) throw new NotFoundException("Borrower not found in this school");
+      // Atomically CLAIM a copy: the availability guard and the decrement are ONE
+      // statement, so two concurrent issues can't both pass a stale
+      // `availableCopies >= 1` read and drive the count negative. Claim first,
+      // then record the loan; if nothing was claimed, no copy was free.
+      const claimed = await tx.libraryBook.updateMany({
+        where: { id: input.bookId, availableCopies: { gte: 1 } },
+        data: { availableCopies: { decrement: 1 } },
+      });
+      if (claimed.count === 0) throw new BadRequestException("No copies available");
       const dueAt = new Date(Date.now() + LOAN_DAYS * DAY_MS);
       const loan = await tx.bookLoan.create({
         data: { schoolId: p.schoolId, bookId: input.bookId, borrowerId, status: "ISSUED", dueAt },
       });
-      await tx.libraryBook.update({ where: { id: input.bookId }, data: { availableCopies: { decrement: 1 } } });
       await this.log(tx, p, "library.issue", loan.id, { bookId: input.bookId, borrowerId });
       return this.loanDto(tx, loan.id);
     });

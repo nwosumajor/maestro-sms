@@ -239,14 +239,23 @@ export class WorkflowService {
         nextApprovals = [];
       }
 
-      await tx.workflowRequest.update({
-        where: { id },
+      // OPTIMISTIC CONCURRENCY: only write if the row is STILL in the exact
+      // state/stage we read. A concurrent reviewer who advanced or finalized the
+      // request changes `state`/`currentStage`, so this matches 0 rows and we
+      // reject — preventing a lost approval or a double stage-advance (which
+      // would break the separation-of-duties guarantee). No version column
+      // needed: (state, currentStage) is the version for a staged workflow.
+      const written = await tx.workflowRequest.updateMany({
+        where: { id, state: req.state, currentStage: req.currentStage },
         data: {
           state: nextState,
           currentStage: nextStage,
           approvals: nextApprovals as unknown as Prisma.InputJsonValue,
         },
       });
+      if (written.count === 0) {
+        throw new ConflictException("This request was just updated by someone else — reload and try again.");
+      }
       await this.writeAudit(tx, {
         schoolId: p.schoolId,
         requestId: id,

@@ -152,11 +152,10 @@ export class CompetitionService {
           createdById: p.userId,
         },
       });
-      for (const userId of ids) {
-        await tx.standing.create({
-          data: { schoolId: p.schoolId, competitionId: comp.id, userId },
-        });
-      }
+      // One insert for all seed standings instead of a create-per-participant loop.
+      await tx.standing.createMany({
+        data: ids.map((userId) => ({ schoolId: p.schoolId, competitionId: comp.id, userId })),
+      });
       await this.log(tx, p, "competition.create", comp.id, {
         type: input.type,
         difficultyLength,
@@ -258,12 +257,15 @@ export class CompetitionService {
   async list(p: Principal): Promise<CompetitionDto[]> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const comps = await tx.competition.findMany({ orderBy: { createdAt: "desc" }, take: 100 });
-      const out: CompetitionDto[] = [];
-      for (const c of comps) {
-        const participantCount = await tx.standing.count({ where: { competitionId: c.id } });
-        out.push(this.toSummary(c, participantCount));
-      }
-      return out;
+      if (comps.length === 0) return [];
+      // One grouped count for all listed competitions instead of a count-per-row loop.
+      const counts = await tx.standing.groupBy({
+        by: ["competitionId"],
+        where: { competitionId: { in: comps.map((c) => c.id) } },
+        _count: { _all: true },
+      });
+      const countByComp = new Map(counts.map((c) => [c.competitionId, c._count._all]));
+      return comps.map((c) => this.toSummary(c, countByComp.get(c.id) ?? 0));
     });
   }
 
@@ -294,10 +296,20 @@ export class CompetitionService {
   // --- league standings ---------------------------------------------------
   private async recomputeLeague(tx: TenantTx, competitionId: string): Promise<void> {
     const games = await tx.game.findMany({ where: { competitionId } });
+    const finished = games.filter((g) => g.status === "FINISHED" && g.winnerPlayerId);
+    // One read for ALL finished matches' results instead of a query per game.
+    const allResults = finished.length
+      ? await tx.gameResult.findMany({ where: { gameId: { in: finished.map((g) => g.id) } } })
+      : [];
+    const resultsByGame = new Map<string, typeof allResults>();
+    for (const r of allResults) {
+      const arr = resultsByGame.get(r.gameId);
+      if (arr) arr.push(r);
+      else resultsByGame.set(r.gameId, [r]);
+    }
     const matches: MatchOutcome[] = [];
-    for (const g of games) {
-      if (g.status !== "FINISHED" || !g.winnerPlayerId) continue; // skip voided/unplayed
-      const results = await tx.gameResult.findMany({ where: { gameId: g.id } });
+    for (const g of finished) {
+      const results = resultsByGame.get(g.id) ?? [];
       if (results.length !== 2) continue;
       const [a, b] = results as [(typeof results)[number], (typeof results)[number]];
       const winnerId = results.find((r) => r.outcome === "WON")?.userId ?? a.userId;

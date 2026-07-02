@@ -14,17 +14,32 @@ const DAY = 24 * 60 * 60 * 1000;
 function makeTx(over: Record<string, unknown> = {}) {
   const calls = { loanCreate: 0, bookDec: 0, bookInc: 0 };
   const tx = {
-    libraryBook: {
-      findFirst: jest.fn().mockResolvedValue(over.book ?? { id: "b1", availableCopies: 2, totalCopies: 3, barcode: "BC1", title: "Book" }),
-      findFirstOrThrow: jest.fn().mockResolvedValue({ id: "b1", title: "Book", barcode: "BC1" }),
-      findMany: jest.fn().mockResolvedValue([{ totalCopies: 3, availableCopies: 2 }]),
-      create: jest.fn().mockResolvedValue({ id: "b1" }),
-      update: jest.fn((a: { data: { availableCopies?: { decrement?: number; increment?: number } } }) => {
-        if (a.data.availableCopies?.decrement) calls.bookDec++;
-        if (a.data.availableCopies?.increment) calls.bookInc++;
-        return Promise.resolve({});
-      }),
-    },
+    libraryBook: (() => {
+      const book = (over.book ?? { id: "b1", availableCopies: 2, totalCopies: 3, barcode: "BC1", title: "Book" }) as {
+        availableCopies: number;
+      };
+      return {
+        findFirst: jest.fn().mockResolvedValue(book),
+        findFirstOrThrow: jest.fn().mockResolvedValue({ id: "b1", title: "Book", barcode: "BC1" }),
+        findMany: jest.fn().mockResolvedValue([{ totalCopies: 3, availableCopies: 2 }]),
+        create: jest.fn().mockResolvedValue({ id: "b1" }),
+        // Atomic copy-claim: the real DB decrements only when availableCopies>=1.
+        // Model that here so the count reflects whether a copy was free.
+        updateMany: jest.fn((a: { where: { availableCopies?: { gte?: number } }; data: { availableCopies?: { decrement?: number } } }) => {
+          const needs = a.where.availableCopies?.gte ?? 0;
+          if (a.data.availableCopies?.decrement && book.availableCopies >= needs) {
+            calls.bookDec++;
+            return Promise.resolve({ count: 1 });
+          }
+          return Promise.resolve({ count: 0 });
+        }),
+        update: jest.fn((a: { data: { availableCopies?: { decrement?: number; increment?: number } } }) => {
+          if (a.data.availableCopies?.decrement) calls.bookDec++;
+          if (a.data.availableCopies?.increment) calls.bookInc++;
+          return Promise.resolve({});
+        }),
+      };
+    })(),
     bookLoan: {
       findFirst: jest.fn().mockResolvedValue(over.loan ?? null),
       findFirstOrThrow: jest.fn().mockResolvedValue(over.loanRow ?? { id: "l1", bookId: "b1", borrowerId: "stu1", status: "ISSUED", issuedAt: new Date(), dueAt: new Date(Date.now() + 14 * DAY), returnedAt: null, renewedCount: 0, fineMinor: 0, finePaid: false }),

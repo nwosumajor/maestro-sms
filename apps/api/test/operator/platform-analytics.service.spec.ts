@@ -23,7 +23,7 @@ function makeClient() {
     schoolSubscription: {
       findMany: jest.fn().mockResolvedValue([
         { schoolId: "s1", plan: "STANDARD", status: "ACTIVE", currentPeriodEnd: null, seats: 10, overrides: null },
-        // s2 has no subscription row -> defaults to ACTIVE/ENTERPRISE.
+        // s2 has no subscription row -> fail-closed to the STANDARD floor (DEFAULT_PLAN).
       ]),
     },
     userRole: {
@@ -72,8 +72,8 @@ describe("PlatformAnalyticsService", () => {
     const out = await service.overview(owner);
 
     expect(out.schools).toEqual({ total: 2, active: 1, disabled: 1 });
-    // s1 STANDARD (active) + s2 no-sub -> ENTERPRISE default.
-    expect(out.schoolsByPlan).toEqual({ STANDARD: 1, ENTERPRISE: 1 });
+    // s1 STANDARD (active) + s2 no-sub -> fail-closed STANDARD floor (DEFAULT_PLAN).
+    expect(out.schoolsByPlan).toEqual({ STANDARD: 2 });
     expect(out.schoolsByStatus.ACTIVE).toBe(2); // both effectively active
     expect(out.people).toEqual({ students: 2, staff: 1 }); // u3 counted once
     expect(out.revenue.paidTotalMinor).toBe(800000);

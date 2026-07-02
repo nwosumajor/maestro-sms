@@ -13,6 +13,8 @@ import { NotificationService } from "../notifications/notification.service";
 
 const STAFF = new Set(["school_admin", "principal", "super_admin"]);
 const STAFF_OR_TEACHER = new Set(["teacher", "school_admin", "principal", "accountant", "hr_clerk", "board"]);
+/** Safety cap on messages returned for a single thread (most-recent-first). */
+const MESSAGE_PAGE = 500;
 
 @Injectable()
 export class MessagingService {
@@ -66,10 +68,16 @@ export class MessagingService {
   async getThread(p: Principal, threadId: string) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.assertParticipant(tx, p, threadId);
-      const [thread, messages] = await Promise.all([
+      // Bound the read: return the most-recent MESSAGE_PAGE messages (fetched
+      // newest-first, then restored to chronological order) so a pathologically
+      // long thread can't load its entire history into one response. Normal
+      // school threads are far under the cap; if a thread ever exceeds it, this
+      // is the seam to add an older-messages "load more" cursor.
+      const [thread, recent] = await Promise.all([
         tx.messageThread.findFirst({ where: { id: threadId } }),
-        tx.message.findMany({ where: { threadId }, orderBy: { createdAt: "asc" } }),
+        tx.message.findMany({ where: { threadId }, orderBy: { createdAt: "desc" }, take: MESSAGE_PAGE }),
       ]);
+      const messages = recent.reverse();
       // assertParticipant guarantees the thread exists; satisfy the type.
       if (!thread) throw new NotFoundException("Thread not found");
       await tx.threadParticipant.updateMany({
