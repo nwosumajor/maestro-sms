@@ -18,6 +18,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
+import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import { Prisma } from "@sms/db";
 import type {
@@ -121,7 +122,8 @@ export class StudentImportService {
 
   /** Approve a PENDING batch (SoD: a DIFFERENT person), creating the students. */
   async approve(p: Principal, id: string) {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    // PHASE 1 (read tx): validate the batch + SoD, load the rows.
+    const rows = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const batch = (await tx.studentImportBatch.findFirst({ where: { id } })) as BatchRow | null;
       if (!batch) throw new NotFoundException("Import batch not found");
       if (batch.status !== "PENDING") throw new ConflictException("Batch already decided");
@@ -129,11 +131,33 @@ export class StudentImportService {
       if (batch.uploadedById === p.userId) {
         throw new ForbiddenException("A different person must approve the import you uploaded");
       }
+      return (batch.rows as StudentImportRow[] | null) ?? [];
+    });
+
+    // PHASE 2 (outside any tx — bcrypt is slow): a UNIQUE random temporary
+    // password per row. // SECURITY: the old flow gave every imported student
+    // the same well-known default, so any student could open any classmate's
+    // portal until they all rotated. Now each account gets its own secret,
+    // returned ONCE to the approver (never stored in plaintext), and
+    // passwordChangedAt=null forces the student to set their own on first login.
+    const prepared = await Promise.all(
+      rows.map(async (row) => {
+        const tempPassword = crypto.randomBytes(9).toString("base64url");
+        return { row, tempPassword, passwordHash: await bcrypt.hash(tempPassword, 10) };
+      }),
+    );
+    const credentials: { name: string; email: string; tempPassword: string }[] = [];
+
+    // PHASE 3 (write tx): CLAIM the batch (guarded flip — a concurrent approver
+    // matches 0 rows), then create accounts with the precomputed hashes.
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const claimed = await tx.studentImportBatch.updateMany({
+        where: { id, status: "PENDING" },
+        data: { reviewedById: p.userId },
+      });
+      if (claimed.count === 0) throw new ConflictException("Batch already decided");
       const studentRole = await tx.role.findFirst({ where: { name: "student" }, select: { id: true } });
       if (!studentRole) throw new NotFoundException("student role missing");
-
-      const rows = (batch.rows as StudentImportRow[] | null) ?? [];
-      const passwordHash = await bcrypt.hash("password123", 10); // temp; reset on first login
       // Existing admission numbers in this tenant + ones seen earlier in the batch:
       // a duplicate admission number is skipped (it must be unique per school).
       const existingProfiles = await tx.studentProfile.findMany({
@@ -146,7 +170,7 @@ export class StudentImportService {
       let created = 0;
       let skipped = 0;
       const errors: string[] = [];
-      for (const row of rows) {
+      for (const { row, tempPassword, passwordHash } of prepared) {
         try {
           const existing = await tx.user.findFirst({ where: { email: row.email }, select: { id: true } });
           if (existing) {
@@ -174,8 +198,11 @@ export class StudentImportService {
             }
           }
           const u = await tx.user.create({
-            data: { schoolId: p.schoolId, email: row.email, name: row.name, passwordHash },
+            // passwordChangedAt: null => the login flow treats the password as
+            // expired, forcing the student to set their own at first sign-in.
+            data: { schoolId: p.schoolId, email: row.email, name: row.name, passwordHash, passwordChangedAt: null },
           });
+          credentials.push({ name: row.name, email: row.email, tempPassword });
           await tx.userRole.create({ data: { schoolId: p.schoolId, userId: u.id, roleId: studentRole.id } });
           await tx.studentProfile.create({
             data: {
@@ -200,7 +227,7 @@ export class StudentImportService {
         }
       }
       const summary: StudentImportSummary = {
-        total: rows.length,
+        total: prepared.length,
         newCount: created,
         duplicateCount: skipped,
         created,
@@ -212,7 +239,8 @@ export class StudentImportService {
         data: { status: "APPROVED", reviewedById: p.userId, summary: summary as unknown as Prisma.InputJsonValue },
       });
       await this.log(tx, p, "student.import.approve", id, { created, skipped, errors: errors.length });
-      return this.toDto(updated as unknown as BatchRow);
+      // credentials ride ONLY on this response (shown once; never persisted).
+      return { ...this.toDto(updated as unknown as BatchRow), credentials };
     });
   }
 

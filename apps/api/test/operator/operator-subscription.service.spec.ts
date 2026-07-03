@@ -38,7 +38,7 @@ function makeService() {
     resolve: jest.fn().mockResolvedValue({}),
     dtoFrom: jest.fn().mockReturnValue({ schoolId: TARGET_SCHOOL, plan: "STANDARD" }),
   };
-  const service = new OperatorService(db as never, audit as never, entitlements as never);
+  const service = new OperatorService(db as never, audit as never, entitlements as never, { client: null } as never);
   return { service, db, audit, entitlements, txSchools };
 }
 

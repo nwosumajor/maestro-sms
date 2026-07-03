@@ -6,10 +6,11 @@ import type {
   PlatformAnalyticsDto,
   PlatformAuditPageDto,
   SubscriptionDto,
-  TenantDto,
+  TenantNameDto,
+  TenantPageDto,
 } from "@sms/types";
 import { z } from "zod";
-import { OPERATOR_PERMISSIONS, PLANS, SUBSCRIPTION_STATUS } from "@sms/types";
+import { OPERATOR_PERMISSIONS, PLANS, SUBSCRIPTION_STATUS, isPlan, isSubscriptionStatus } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { RequireStepUp } from "../auth/require-stepup.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -132,8 +133,28 @@ export class OperatorController {
 
   @Get("tenants")
   @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
-  tenants(@CurrentPrincipal() p: Principal): Promise<TenantDto[]> {
-    return this.operator.listTenants(p);
+  tenants(
+    @CurrentPrincipal() p: Principal,
+    @Query("q") q?: string,
+    @Query("plan") plan?: string,
+    @Query("billing") billing?: string,
+    @Query("page") page?: string,
+    @Query("pageSize") pageSize?: string,
+  ): Promise<TenantPageDto> {
+    return this.operator.listTenants(p, {
+      q: q?.trim() || undefined,
+      plan: plan && isPlan(plan) ? plan : undefined,
+      billing: billing && isSubscriptionStatus(billing) ? billing : undefined,
+      page: page ? Number(page) : undefined,
+      pageSize: pageSize ? Number(pageSize) : undefined,
+    });
+  }
+
+  /** Lightweight id+name list for pickers (add-admin etc.). */
+  @Get("tenant-names")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  tenantNames(@CurrentPrincipal() p: Principal): Promise<TenantNameDto[]> {
+    return this.operator.listTenantNames(p);
   }
 
   /** Platform-owner business dashboard: cross-tenant schools/revenue/plan metrics. */

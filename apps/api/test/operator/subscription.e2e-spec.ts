@@ -46,7 +46,7 @@ d("Subscription / module entitlements (RLS, plan tiers, overrides)", () => {
     );
     const tenant = new PrismaTenantService() as never;
     entitlements = new ModuleEntitlementService(tenant);
-    svc = new OperatorService(tenant, new AuditLogService() as never, entitlements);
+    svc = new OperatorService(tenant, new AuditLogService() as never, entitlements, { client: null } as never);
   });
 
   afterAll(async () => {

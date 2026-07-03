@@ -15,6 +15,22 @@ export interface TenantDto {
   subscriptionStatus: string;
 }
 
+/** Paged tenant registry (the operator console at 500+ schools needs search /
+ *  filter / pagination — both for the UI and because each listed tenant costs
+ *  per-school enrichment queries). */
+export interface TenantPageDto {
+  tenants: TenantDto[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+/** Lightweight id+name list for pickers (e.g. add-admin-to-school). */
+export interface TenantNameDto {
+  id: string;
+  name: string;
+}
+
 /** A single user as seen by the super_admin cross-tenant directory. */
 export interface OperatorUserDto {
   id: string;

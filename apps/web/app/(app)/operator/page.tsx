@@ -1,4 +1,4 @@
-import type { TenantDto, OnboardingRequestDto, PlanPriceDto, Serialized } from "@sms/types";
+import type { TenantPageDto, TenantNameDto, OnboardingRequestDto, PlanPriceDto, Serialized } from "@sms/types";
 import Link from "next/link";
 import { hasPermission } from "@/lib/permissions";
 import { redirect } from "next/navigation";
@@ -15,21 +15,36 @@ import { OperatorUsers } from "@/components/operator/OperatorUsers";
 import { OperatorStudents } from "@/components/operator/OperatorStudents";
 import { OnboardingRequests } from "@/components/operator/OnboardingRequests";
 import { PricingManager } from "@/components/operator/PricingManager";
+import { TenantFilterBar } from "@/components/operator/TenantFilterBar";
 
 export const dynamic = "force-dynamic";
 
-type Tenant = Serialized<TenantDto>;
+type TenantPage = Serialized<TenantPageDto>;
 
-export default async function OperatorPage() {
+export default async function OperatorPage({
+  searchParams,
+}: {
+  searchParams: { q?: string; plan?: string; billing?: string; page?: string };
+}) {
   const session = await auth();
   const user = session!.user;
   if (!hasPermission(user.permissions, "platform.operate")) redirect("/dashboard");
-  const [tenants, onboarding, pricing] = await Promise.all([
-    apiGet<Tenant[]>("/operator/tenants"),
+  const q = searchParams.q ?? "";
+  const plan = searchParams.plan ?? "";
+  const billing = searchParams.billing ?? "";
+  const pageNum = Math.max(1, Number(searchParams.page) || 1);
+  const query = new URLSearchParams();
+  if (q) query.set("q", q);
+  if (plan) query.set("plan", plan);
+  if (billing) query.set("billing", billing);
+  query.set("page", String(pageNum));
+  const [tenantPage, names, onboarding, pricing] = await Promise.all([
+    apiGet<TenantPage>(`/operator/tenants?${query.toString()}`),
+    apiGet<TenantNameDto[]>("/operator/tenant-names"),
     apiGet<Serialized<OnboardingRequestDto>[]>("/operator/onboarding-requests"),
     apiGet<PlanPriceDto[]>("/operator/pricing"),
   ]);
-  const tenantList = tenants ?? [];
+  const tenantList = tenantPage?.tenants ?? [];
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="operator" permissions={user.permissions}>
@@ -45,13 +60,27 @@ export default async function OperatorPage() {
           <Link href="/dashboard"><Button variant="outline">Platform analytics →</Button></Link>
         </div>
 
-        <Provisioning tenants={tenantList.map((t) => ({ id: t.id, name: t.name }))} />
+        <Provisioning tenants={names ?? []} />
 
         {pricing && <PricingManager initial={pricing} />}
 
         <OnboardingRequests requests={onboarding ?? []} />
 
+        <TenantFilterBar
+          q={q}
+          plan={plan}
+          billing={billing}
+          page={tenantPage?.page ?? pageNum}
+          pageSize={tenantPage?.pageSize ?? 10}
+          total={tenantPage?.total ?? tenantList.length}
+        />
+
         <div className="space-y-3">
+          {tenantList.length === 0 && (
+            <p className="rounded-md border border-border bg-card px-4 py-6 text-center text-sm text-muted-foreground">
+              No schools match this search/filter.
+            </p>
+          )}
           {tenantList.map((t) => (
             <Card key={t.id}>
               <CardHeader className="flex-row items-center justify-between space-y-0">

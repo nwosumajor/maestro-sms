@@ -8,7 +8,7 @@
 // the same HS256 shape the web BFF issues, so the API accepts it as a Bearer.
 // =============================================================================
 
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import jwt from "jsonwebtoken";
 import { Prisma } from "@sms/db";
 import {
@@ -28,6 +28,7 @@ import {
   type TenantContext,
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
+import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import { ModuleEntitlementService } from "../foundation/module-entitlement.service";
 
 const IMPERSONATION_TTL = 900; // 15 min
@@ -40,6 +41,7 @@ export class OperatorService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly entitlements: ModuleEntitlementService,
+    private readonly privileged: PrivilegedDatabaseService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -136,18 +138,67 @@ export class OperatorService {
   }
 
   /** Every tenant + a user count each. School registry is global/RLS-exempt. */
-  async listTenants(p: Principal) {
-    const schools = await this.db.runAsTenant(this.ctx(p), (tx) =>
-      // Exclude the platform org itself — it's not a customer tenant.
-      tx.school.findMany({ where: { isPlatform: false }, select: { id: true, name: true, slug: true, status: true, createdAt: true }, orderBy: { name: "asc" } }),
-    );
+  async listTenants(
+    p: Principal,
+    f: { q?: string; plan?: string; billing?: string; page?: number; pageSize?: number } = {},
+  ) {
+    // Server-side search/filter/PAGINATION: at 500+ schools the old
+    // list-everything shape was unusable AND ran 2 enrichment queries per
+    // school per view. The where pushes q/plan/billing into SQL; enrichment
+    // (user count + entitlement resolve) now costs pageSize, not fleet-size.
+    const page = Math.max(1, Math.floor(f.page ?? 1));
+    const pageSize = Math.min(Math.max(Math.floor(f.pageSize ?? 10), 1), 50);
+    const sub: Record<string, string> = {};
+    if (f.plan) sub.plan = f.plan;
+    if (f.billing) sub.status = f.billing;
+    const where = {
+      isPlatform: false,
+      ...(f.q
+        ? {
+            OR: [
+              { name: { contains: f.q, mode: "insensitive" as const } },
+              { slug: { contains: f.q, mode: "insensitive" as const } },
+            ],
+          }
+        : {}),
+      ...(Object.keys(sub).length ? { subscription: { is: sub } } : {}),
+    };
+    // The subscription relation is TENANT-scoped: under the operator's own GUC,
+    // RLS hides every other school's subscription row, so an app-role relation
+    // filter silently matches nothing. Cross-tenant registry queries therefore
+    // run on the PRIVILEGED client (like the analytics/audit consoles); without
+    // it, the plain list still works but plan/billing filters 503.
+    const client = this.privileged.client;
+    if (Object.keys(sub).length > 0 && !client) {
+      throw new ServiceUnavailableException("Plan/billing filters require the privileged database configuration");
+    }
+    const query = {
+      where,
+      select: { id: true, name: true, slug: true, status: true, createdAt: true },
+      orderBy: { name: "asc" as const },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    };
+    const { schools, total } = client
+      ? { total: await client.school.count({ where }), schools: await client.school.findMany(query) }
+      : await this.db.runAsTenant(this.ctx(p), async (tx) => ({
+          total: await tx.school.count({ where }),
+          schools: await tx.school.findMany(query),
+        }));
     const out = [];
     for (const s of schools as Array<{ id: string; name: string; slug: string; status: string; createdAt: Date }>) {
       const users = await this.db.runAsTenant({ schoolId: s.id, userId: p.userId }, (tx) => tx.user.count());
       const ent = await this.entitlements.resolve(s.id);
       out.push({ ...s, users, plan: ent.plan, moduleCount: ent.modules.length, subscriptionStatus: ent.status });
     }
-    return out;
+    return { tenants: out, total, page, pageSize };
+  }
+
+  /** Lightweight id+name list for pickers (single query; no per-school work). */
+  async listTenantNames(p: Principal) {
+    return this.db.runAsTenant(this.ctx(p), (tx) =>
+      tx.school.findMany({ where: { isPlatform: false }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    );
   }
 
   /** Every enrolled student of a given school (cross-tenant; the operator sets the
@@ -157,25 +208,37 @@ export class OperatorService {
     const result = await this.db.runAsTenant({ schoolId, userId: p.userId }, async (tx) => {
       const school = await tx.school.findFirst({ where: { id: schoolId }, select: { id: true } });
       if (!school) throw new NotFoundException("School not found");
-      const enrollments = await tx.enrollment.findMany({
-        where: { status: "ACTIVE" },
-        include: { student: { select: { id: true, uniqueId: true, name: true, email: true } }, class: { select: { name: true } } },
+      // By ROLE, not by enrollment — enrollment-derived listing hid every
+      // not-yet-enrolled student from the operator (while the school's own
+      // /students page, already role-based, showed them). One platform-wide
+      // definition of "student"; active-class names are attached where present.
+      const students = await tx.user.findMany({
+        where: { roles: { some: { role: { name: "student" } } } },
+        select: { id: true, uniqueId: true, name: true, email: true },
+        orderBy: { name: "asc" },
       });
-      // Group by student → their active class names.
-      const byStudent = new Map<string, { id: string; uniqueId: string; name: string; email: string; classes: string[] }>();
-      for (const e of enrollments as Array<{ student: { id: string; uniqueId: string; name: string; email: string }; class: { name: string } }>) {
-        const cur = byStudent.get(e.student.id) ?? { ...e.student, classes: [] };
-        cur.classes.push(e.class.name);
-        byStudent.set(e.student.id, cur);
+      const ids = students.map((st) => st.id);
+      const enrollments = ids.length
+        ? await tx.enrollment.findMany({
+            where: { status: "ACTIVE", studentId: { in: ids } },
+            include: { class: { select: { name: true } } },
+          })
+        : [];
+      const classesBy = new Map<string, string[]>();
+      for (const e of enrollments as Array<{ studentId: string; class: { name: string } }>) {
+        const arr = classesBy.get(e.studentId);
+        if (arr) arr.push(e.class.name);
+        else classesBy.set(e.studentId, [e.class.name]);
       }
-      const ids = [...byStudent.keys()];
       const profiles = ids.length
         ? await tx.studentProfile.findMany({ where: { studentId: { in: ids } }, select: { studentId: true, admissionNumber: true } })
         : [];
       const admNo = new Map(profiles.map((pr: { studentId: string; admissionNumber: string | null }) => [pr.studentId, pr.admissionNumber]));
-      return [...byStudent.values()]
-        .map((s) => ({ ...s, admissionNumber: admNo.get(s.id) ?? null }))
-        .sort((a, b) => a.name.localeCompare(b.name));
+      return students.map((st) => ({
+        ...st,
+        classes: classesBy.get(st.id) ?? [],
+        admissionNumber: admNo.get(st.id) ?? null,
+      }));
     });
     // Audit the cross-tenant PII view in the operator's own tenant.
     await this.auditAsOperator(p, { actorId: p.userId, action: "operator.students.view", entity: "school", entityId: schoolId, schoolId: p.schoolId, metadata: { targetSchoolId: schoolId, count: result.length } });

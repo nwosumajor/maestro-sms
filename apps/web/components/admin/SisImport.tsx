@@ -31,6 +31,8 @@ export function SisImport({ batches, currentUserId }: { batches: Batch[]; curren
   const [csv, setCsv] = React.useState(`${COLS.join(",")}\nAda Lovelace,ada@example.com,ADM-001,2012-05-01,F,08000000000,12 Main St,`);
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
+  // One-time credentials from the LAST approval — shown once, never persisted.
+  const [creds, setCreds] = React.useState<{ name: string; email: string; tempPassword: string }[] | null>(null);
 
   const downloadTemplate = async () => {
     const res = await fetch("/api/sms/admin/students/import/template");
@@ -91,12 +93,30 @@ export function SisImport({ batches, currentUserId }: { batches: Batch[]; curren
     setBusy(false);
     if (res.ok) {
       const b = (await res.json()) as Batch;
-      setMsg(action === "approve" ? `Approved — created ${b.summary?.created ?? 0}, skipped ${b.summary?.skipped ?? 0}.` : "Batch rejected.");
+      if (action === "approve") {
+        setCreds(b.credentials ?? null);
+        setMsg(`Approved — created ${b.summary?.created ?? 0}, skipped ${b.summary?.skipped ?? 0}.`);
+      } else setMsg("Batch rejected.");
       router.refresh();
     } else setMsg(res.status === 403 ? "A different admin (not the uploader) must approve." : `Failed (${res.status}).`);
   };
 
   const pending = batches.filter((b) => b.status === "PENDING");
+
+  /** Download the one-time credential slips as CSV (quoted; formula-guarded). */
+  const downloadCreds = () => {
+    if (!creds) return;
+    const cell = (v: string) => {
+      let t = v;
+      if (/^[=+\-@\t\r]/.test(t)) t = `'${t}`; // formula-injection guard
+      return `"${t.replace(/"/g, '""')}"`;
+    };
+    const csvText = ["name,email,temporaryPassword", ...creds.map((c) => [c.name, c.email, c.tempPassword].map(cell).join(","))].join("\n");
+    const url = URL.createObjectURL(new Blob([csvText], { type: "text/csv" }));
+    const a = document.createElement("a");
+    a.href = url; a.download = "student-login-slips.csv"; a.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="space-y-4">
@@ -131,7 +151,41 @@ export function SisImport({ batches, currentUserId }: { batches: Batch[]; curren
         </CardContent>
       </Card>
 
-      <Card>
+            {creds && creds.length > 0 && (
+        <Card className="border-primary/40">
+          <CardHeader>
+            <CardTitle className="text-base">Student sign-in slips — save these NOW</CardTitle>
+            <CardDescription>
+              Each new student got a unique temporary password, shown ONLY this once (it is never stored in
+              readable form). Download the slips and hand them out; every student must set their own password
+              at first sign-in.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <div className="flex gap-2">
+              <Button size="sm" onClick={downloadCreds}>Download login slips (CSV)</Button>
+              <Button size="sm" variant="ghost" onClick={() => setCreds(null)}>Dismiss</Button>
+            </div>
+            <div className="max-h-48 overflow-y-auto rounded-md border border-border">
+              <table className="w-full text-xs">
+                <thead><tr className="border-b border-border text-left text-muted-foreground">
+                  <th className="px-2 py-1 font-medium">Name</th><th className="px-2 py-1 font-medium">Email</th><th className="px-2 py-1 font-medium">Temporary password</th>
+                </tr></thead>
+                <tbody>
+                  {creds.map((c) => (
+                    <tr key={c.email} className="border-b border-border/50 last:border-0">
+                      <td className="px-2 py-1">{c.name}</td><td className="px-2 py-1">{c.email}</td>
+                      <td className="px-2 py-1 font-mono">{c.tempPassword}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+<Card>
         <CardHeader>
           <CardTitle className="text-base">Import batches ({pending.length} pending)</CardTitle>
           <CardDescription>Review staged batches. You can&apos;t approve a batch you uploaded yourself.</CardDescription>

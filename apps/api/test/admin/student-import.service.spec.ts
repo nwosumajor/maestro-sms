@@ -38,6 +38,10 @@ function makeService(opts: { batch?: Row | null; existingEmails?: string[] }) {
       create: jest.fn((a: { data: Row }) => Promise.resolve({ id: "b1", ...a.data })),
       findFirst: jest.fn(() => Promise.resolve(state.batch)),
       update: batchUpdate,
+      // Approve CLAIMS the batch with a guarded flip; model success while PENDING.
+      updateMany: jest.fn(() =>
+        Promise.resolve({ count: (state.batch as { status?: string } | null)?.status === "PENDING" ? 1 : 0 }),
+      ),
     },
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };

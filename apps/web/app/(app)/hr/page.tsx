@@ -10,6 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { money, shortDate, titleCase } from "@/lib/format";
 import { EmployeeForm } from "@/components/hr/EmployeeForm";
+import { EmployeeRow } from "@/components/hr/EmployeeRow";
 import { SalaryChanges } from "@/components/hr/SalaryChanges";
 import { LeaveAdmin } from "@/components/hr/LeaveAdmin";
 
@@ -95,18 +96,12 @@ export default async function HrPage() {
                     <th className="px-4 py-2.5 font-medium">Start</th>
                     <th className="px-4 py-2.5 font-medium">Salary</th>
                     <th className="px-4 py-2.5 font-medium">Status</th>
+                    {canWrite && <th className="px-4 py-2.5 font-medium"></th>}
                   </tr>
                 </thead>
                 <tbody>
                   {employees.map((e) => (
-                    <tr key={e.id} className="border-b border-border last:border-0">
-                      <td className="px-4 py-2.5 font-medium"><Link href={`/hr/staff/${e.userId}`} className="hover:underline">{e.user?.name ?? "—"}</Link></td>
-                      <td className="px-4 py-2.5">{e.jobTitle}{e.department ? ` · ${e.department}` : ""}</td>
-                      <td className="px-4 py-2.5 text-muted-foreground">{titleCase(e.employmentType)}</td>
-                      <td className="px-4 py-2.5 text-muted-foreground">{shortDate(e.startDate)}</td>
-                      <td className="px-4 py-2.5">{e.salaryMinor != null ? money(e.salaryMinor) : "—"}</td>
-                      <td className="px-4 py-2.5"><Badge variant={e.status === "ACTIVE" ? "secondary" : "outline"}>{titleCase(e.status)}</Badge></td>
-                    </tr>
+                    <EmployeeRow key={e.id} e={e} canWrite={canWrite} />
                   ))}
                 </tbody>
               </table>
