@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { readApiError } from "@/lib/api-error";
 
 type Person = { id: string; name: string };
 
@@ -28,7 +29,7 @@ export function CertificateIssuer({ people }: { people: Person[] }) {
       body: JSON.stringify({ type, subjectId, title: title || undefined, body: body || undefined }),
     });
     setBusy(false);
-    if (!res.ok) { setMsg(`Failed (${res.status}).`); return; }
+    if (!res.ok) { setMsg(await readApiError(res)); return; }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");

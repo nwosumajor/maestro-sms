@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { readApiError } from "@/lib/api-error";
 
 type User = Serialized<UserSummaryDto>;
 
@@ -30,7 +31,7 @@ export function SendAnnouncement({ users }: { users: User[] }) {
     });
     setBusy(false);
     if (res.ok) { setTitle(""); setBody(""); setMsg("Sent."); router.refresh(); }
-    else setMsg(res.status === 403 ? "You can't send to that recipient." : `Failed (${res.status}).`);
+    else setMsg(res.status === 403 ? "You can't send to that recipient." : await readApiError(res));
   };
 
   return (

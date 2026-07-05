@@ -18,6 +18,7 @@ import {
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { readApiError } from "@/lib/api-error";
 
 const PLAN_LIST: Plan[] = [PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE];
 
@@ -68,7 +69,7 @@ export function SubscriptionManager({ schoolId, plan: initialPlan }: { schoolId:
       body: JSON.stringify({ plan, overrides: { enabled, disabled } }),
     });
     setBusy(false);
-    setMsg(res.ok ? "Saved." : `Failed (${res.status}).`);
+    setMsg(res.ok ? "Saved." : await readApiError(res));
   };
 
   if (!open) {

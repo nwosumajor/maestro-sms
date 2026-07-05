@@ -5,9 +5,27 @@ export async function postWithStepUp(path: string, body: unknown): Promise<Respo
   return sendWithStepUp("POST", path, body);
 }
 
+const MAX_PASSWORD_ATTEMPTS = 3;
+
+/** Build a synthetic JSON Response so callers can read `.ok`/`.status`/`.json()`
+ *  uniformly, whether the outcome came from the API or from the step-up flow
+ *  itself (a cancel or a repeatedly-wrong password). */
+function jsonResponse(message: string, status: number): Response {
+  return new Response(JSON.stringify({ message, statusCode: status }), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 /**
- * Like postWithStepUp but for any HTTP method (PUT/POST/PATCH/DELETE). On a 403
- * it prompts for the password, mints a step-up token, and retries with x-stepup.
+ * Like postWithStepUp but for any HTTP method (PUT/POST/PATCH/DELETE).
+ *
+ * On a 403 it distinguishes a genuine step-up CHALLENGE (`STEPUP_REQUIRED`) from
+ * a plain permission denial: only the former prompts for a password, and it
+ * RE-PROMPTS on a wrong password instead of dead-ending on the raw code. A cancel
+ * or exhausted attempts returns a clear, human-readable message (not the API's
+ * internal `STEPUP_REQUIRED`), so every step-up-gated screen surfaces the real
+ * reason it stopped.
  */
 export async function sendWithStepUp(
   method: "POST" | "PUT" | "PATCH" | "DELETE",
@@ -17,10 +35,26 @@ export async function sendWithStepUp(
   const payload = body === undefined ? undefined : JSON.stringify(body);
   const headers: Record<string, string> = {};
   if (payload !== undefined) headers["Content-Type"] = "application/json";
-  let res = await fetch(`/api/sms/${path}`, { method, headers, body: payload });
-  if (res.status === 403) {
-    const pw = window.prompt("Confirm your password to continue:");
-    if (!pw) return res;
+
+  const res = await fetch(`/api/sms/${path}`, { method, headers, body: payload });
+  if (res.status !== 403) return res;
+
+  // A 403 is either "you need to re-auth" or "you can't do this at all". Only the
+  // former is fixable with a password, so read the body and branch. (Reading it
+  // consumes the stream, so a non-step-up 403 is reconstructed for the caller.)
+  const firstText = await res.text();
+  if (!firstText.includes("STEPUP_REQUIRED")) {
+    return new Response(firstText, { status: 403, headers: { "Content-Type": "application/json" } });
+  }
+
+  for (let attempt = 0; attempt < MAX_PASSWORD_ATTEMPTS; attempt++) {
+    const pw = window.prompt(
+      attempt === 0
+        ? "Confirm your password to continue:"
+        : "Password incorrect. Confirm your password to continue:",
+    );
+    if (!pw) return jsonResponse("Cancelled — your password is required to continue.", 403);
+
     const su = await fetch("/api/sms/security/stepup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -28,12 +62,11 @@ export async function sendWithStepUp(
     });
     if (su.ok) {
       const { token } = (await su.json()) as { token: string };
-      res = await fetch(`/api/sms/${path}`, {
-        method,
-        headers: { ...headers, "x-stepup": token },
-        body: payload,
-      });
+      return fetch(`/api/sms/${path}`, { method, headers: { ...headers, "x-stepup": token }, body: payload });
     }
+    // 401 = wrong password → re-prompt. Anything else (rate-limit, outage) is not
+    // retriable, so surface it immediately.
+    if (su.status !== 401) return new Response(await su.text(), { status: su.status });
   }
-  return res;
+  return jsonResponse("Re-authentication failed after several attempts. Please try again.", 403);
 }

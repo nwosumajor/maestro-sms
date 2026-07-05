@@ -5,6 +5,8 @@ import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { money } from "@/lib/format";
+import { postWithStepUp } from "@/lib/stepup";
+import { readApiError } from "@/lib/api-error";
 
 type Quote = Serialized<BillingQuoteDto>;
 
@@ -40,32 +42,9 @@ export function BillingCheckout({
     e.preventDefault();
     setBusy(true);
     setMsg(null);
-    const body = JSON.stringify({ plan, billingCycle: cycle });
-    let res = await fetch("/api/sms/billing/checkout/init", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body,
-    });
-    // Checkout requires a fresh step-up re-auth: on 403, confirm password, mint a
-    // step-up token, and retry once with it.
-    if (res.status === 403) {
-      const pw = window.prompt("Confirm your password to start the payment:");
-      if (pw) {
-        const su = await fetch("/api/sms/security/stepup", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ password: pw }),
-        });
-        if (su.ok) {
-          const { token } = (await su.json()) as { token: string };
-          res = await fetch("/api/sms/billing/checkout/init", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "x-stepup": token },
-            body,
-          });
-        }
-      }
-    }
+    // Checkout is step-up gated: the shared sender handles the password re-auth
+    // (prompt + retry on a wrong password) transparently.
+    const res = await postWithStepUp("billing/checkout/init", { plan, billingCycle: cycle });
     if (res.ok) {
       const { authorizationUrl } = (await res.json()) as { authorizationUrl: string };
       window.location.href = authorizationUrl;
@@ -75,9 +54,7 @@ export function BillingCheckout({
     setMsg(
       res.status === 503
         ? "Online payments are not configured yet. Contact the platform operator."
-        : res.status === 403
-          ? "Step-up confirmation required."
-          : `Checkout failed (${res.status}).`,
+        : await readApiError(res),
     );
   }
 

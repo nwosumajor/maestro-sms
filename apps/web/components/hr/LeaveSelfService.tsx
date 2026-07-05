@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { readApiError } from "@/lib/api-error";
 
 type Type = Serialized<LeaveTypeDto>;
 type Balance = Serialized<LeaveBalanceDto>;
@@ -64,7 +65,7 @@ export function LeaveSelfService({
       setMsg("Submitted — routed to your head, then HR, then the principal.");
       router.refresh();
     } else {
-      setMsg(`Failed (${res.status}).`);
+      setMsg(await readApiError(res));
     }
   };
 

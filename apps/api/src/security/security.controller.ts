@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
-import type { AuditLogRowDto, PrivilegeGrantDto, RecertificationDto, SecurityAnomaliesDto } from "@sms/types";
+import type { AuditLogPageDto, PrivilegeGrantDto, RecertificationDto, SecurityAnomaliesDto } from "@sms/types";
 import { z } from "zod";
 import { SECURITY_PERMISSIONS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -33,7 +33,8 @@ export class SecurityController {
     @Query("from") from?: string,
     @Query("to") to?: string,
     @Query("limit") limit?: string,
-  ): Promise<AuditLogRowDto[]> {
+    @Query("cursor") cursor?: string,
+  ): Promise<AuditLogPageDto> {
     return this.security.listAudit(p, {
       actorId,
       action,
@@ -41,6 +42,7 @@ export class SecurityController {
       from,
       to,
       limit: limit ? Number(limit) : undefined,
+      cursor,
     });
   }
 

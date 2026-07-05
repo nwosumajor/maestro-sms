@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { readApiError } from "@/lib/api-error";
 
 type User = Serialized<UserSummaryDto>;
 
@@ -34,7 +35,7 @@ export function EmployeeForm({ users }: { users: User[] }) {
     });
     setBusy(false);
     if (res.ok) { setJobTitle(""); setDepartment(""); setSalaryMajor(""); setMsg("Saved."); router.refresh(); }
-    else setMsg(`Failed (${res.status}).`);
+    else setMsg(await readApiError(res));
   };
 
   return (

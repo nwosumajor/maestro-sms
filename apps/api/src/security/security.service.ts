@@ -10,7 +10,7 @@
 
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException, UnauthorizedException } from "@nestjs/common";
 import bcrypt from "bcryptjs";
-import { SECURITY_PERMISSIONS, isElevatable } from "@sms/types";
+import { SECURITY_PERMISSIONS, isElevatable, type AuditLogPageDto } from "@sms/types";
 import { generateSecret, otpauthUri, verifyTotp } from "../auth/totp";
 import { signStepUp } from "../auth/stepup";
 import {
@@ -32,6 +32,8 @@ export interface AuditFilter {
   from?: string;
   to?: string;
   limit?: number;
+  /** Keyset cursor: the id of the last row of the previous page. */
+  cursor?: string;
 }
 export interface ElevationRequestInput {
   permission: string;
@@ -51,8 +53,8 @@ export class SecurityService {
     return { schoolId: p.schoolId, userId: p.userId };
   }
 
-  // --- audit viewer ----------------------------------------------------------
-  async listAudit(p: Principal, f: AuditFilter) {
+  // --- audit viewer (keyset-paginated) ---------------------------------------
+  async listAudit(p: Principal, f: AuditFilter): Promise<AuditLogPageDto> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const where: Record<string, unknown> = {};
       if (f.actorId) where.actorId = f.actorId;
@@ -64,10 +66,13 @@ export class SecurityService {
           ...(f.to ? { lte: new Date(f.to) } : {}),
         };
       }
+      const pageSize = Math.min(Math.max(f.limit ?? 50, 1), 200);
       const rows = await tx.auditLog.findMany({
         where,
-        orderBy: { createdAt: "desc" },
-        take: Math.min(f.limit ?? 100, 500),
+        // Stable keyset order (createdAt can tie; id breaks ties deterministically).
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: pageSize,
+        ...(f.cursor ? { cursor: { id: f.cursor }, skip: 1 } : {}),
       });
       const actorIds = [...new Set(rows.map((r: { actorId: string }) => r.actorId))];
       const users = await tx.user.findMany({
@@ -75,7 +80,17 @@ export class SecurityService {
         select: { id: true, name: true },
       });
       const name = new Map(users.map((u: { id: string; name: string }) => [u.id, u.name]));
-      return rows.map((r) => ({ ...r, actorName: name.get(r.actorId) ?? "system" }));
+      const entries = rows.map((r) => ({
+        id: r.id,
+        action: r.action,
+        entity: r.entity,
+        entityId: r.entityId,
+        actorName: name.get(r.actorId) ?? "system",
+        createdAt: r.createdAt,
+      }));
+      // A full page implies there may be more — hand back the last id as the cursor.
+      const nextCursor = entries.length === pageSize ? entries[entries.length - 1].id : null;
+      return { entries, nextCursor };
     });
   }
 

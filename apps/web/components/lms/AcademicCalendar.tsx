@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { readApiError } from "@/lib/api-error";
 
 type Session = Serialized<AcademicSessionDto>;
 
@@ -22,7 +23,7 @@ export function AcademicCalendar({ sessions }: { sessions: Session[] }) {
       headers: body ? { "Content-Type": "application/json" } : {},
       body: body ? JSON.stringify(body) : undefined,
     });
-    setMsg(res.ok ? (ok ?? "Saved.") : `Failed (${res.status}).`);
+    setMsg(res.ok ? (ok ?? "Saved.") : await readApiError(res));
     if (res.ok) router.refresh();
   };
 

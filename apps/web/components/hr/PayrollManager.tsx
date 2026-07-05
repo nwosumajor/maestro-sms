@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { money } from "@/lib/format";
+import { readApiError } from "@/lib/api-error";
 
 type Run = Serialized<PayrollRunDto>;
 
@@ -32,7 +33,7 @@ export function PayrollManager({ runs, canRun }: { runs: Run[]; canRun: boolean 
     });
     setBusy(null);
     if (res.ok) router.refresh();
-    else setMsg(res.status === 409 ? "A run already exists for that period." : `Failed (${res.status}).`);
+    else setMsg(res.status === 409 ? "A run already exists for that period." : await readApiError(res));
   };
 
   return (

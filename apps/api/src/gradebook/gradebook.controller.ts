@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Query, Res, StreamableFile } from "@nestjs/common";
+import type { Response } from "express";
 import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
 import { z } from "zod";
-import { GRADEBOOK_PERMISSIONS } from "@sms/types";
+import { GRADEBOOK_PERMISSIONS, gradeComponentMax, type GradeComponentKey } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
@@ -21,18 +22,21 @@ const gradeSchema = z.object({
 
 const uuid = z.string().uuid();
 const rosterQuerySchema = z.object({ classId: uuid, subjectId: uuid, termId: uuid });
-const scoreField = z.number().min(0).max(100).nullish();
+// Each component is a raw mark bounded by ITS OWN maximum (the service re-validates
+// as defense in depth). Maxima come from the single GRADE_COMPONENTS source.
+const markField = (key: GradeComponentKey) => z.number().min(0).max(gradeComponentMax(key)).nullish();
 const upsertResultSchema = z.object({
   termId: uuid,
   classId: uuid,
   subjectId: uuid,
   studentId: uuid,
-  exam: scoreField,
-  midterm: scoreField,
-  assignment: scoreField,
-  classNote: scoreField,
+  exam: markField("exam"),
+  midterm: markField("midterm"),
+  assignment: markField("assignment"),
+  classNote: markField("classNote"),
 });
 const publishSchema = z.object({ classId: uuid, subjectId: uuid, termId: uuid });
+const broadsheetQuerySchema = z.object({ classId: uuid, termId: uuid });
 const selectionSubmitSchema = z.object({
   termId: uuid,
   subjectIds: z.array(uuid).min(1).max(30),
@@ -118,6 +122,19 @@ export class GradebookController {
     return this.termResults.publishResults(p, body);
   }
 
+  /** Class broadsheet: the whole-class score sheet for a term (every student ×
+   *  every subject). For the class SUPERVISOR / teachers / school-wide — the
+   *  service 404s anyone else. Coarse gate is grade.read. */
+  @Get("term-results/broadsheet")
+  @RequirePermission(GRADEBOOK_PERMISSIONS.GRADE_READ)
+  broadsheet(
+    @CurrentPrincipal() p: Principal,
+    @Query(new ZodValidationPipe(broadsheetQuerySchema))
+    q: { classId: string; termId: string },
+  ) {
+    return this.termResults.getClassBroadsheet(p, q);
+  }
+
   // --- per-term subject selection (student pick -> supervisor -> admin) -----
 
   /** Student: the current term, the subjects fixed on my class, my selection. */
@@ -169,5 +186,28 @@ export class GradebookController {
     @Param("sessionId") sessionId: string,
   ) {
     return this.termResults.getStudentSessionReport(p, { studentId, sessionId });
+  }
+
+  /** Download ONE term's scoresheet as a PDF. Same scoping as the report read
+   *  (student→self, parent→children PUBLISHED-only, staff-of-class all). */
+  @Get("term-results/report/:studentId/:sessionId/:termId/pdf")
+  @RequirePermission(GRADEBOOK_PERMISSIONS.GRADE_READ)
+  async termScoresheetPdf(
+    @CurrentPrincipal() p: Principal,
+    @Param("studentId") studentId: string,
+    @Param("sessionId") sessionId: string,
+    @Param("termId") termId: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const { buffer, filename } = await this.termResults.generateTermScoresheetPdf(p, {
+      studentId,
+      sessionId,
+      termId,
+    });
+    res.set({
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `attachment; filename="${filename}"`,
+    });
+    return new StreamableFile(buffer);
   }
 }

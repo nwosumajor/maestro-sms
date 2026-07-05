@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { readApiError } from "@/lib/api-error";
 
 type Announcement = Serialized<AnnouncementDto>;
 
@@ -38,7 +39,7 @@ export function AnnouncementsBoard({
     if (res.ok) {
       setF({ title: "", body: "", audience: "ALL" });
       router.refresh();
-    } else setMsg(`Failed (${res.status}).`);
+    } else setMsg(await readApiError(res));
   };
 
   const remove = async (id: string) => {

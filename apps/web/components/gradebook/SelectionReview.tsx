@@ -36,7 +36,7 @@ export function SelectionReview({ userId, canApproveFinal }: { userId: string; c
     setBusy(s.id); setMsg(null);
     const res = await sendSms("POST", `subject-selections/${s.id}/review`, { action, note });
     setBusy(null);
-    if (res.ok) load(); else setMsg(res.error ?? `Failed (${res.status}).`);
+    if (res.ok) load(); else setMsg(res.error ?? "Request failed.");
   };
 
   const pending = rows.filter((s) => s.status === "PENDING_SUPERVISOR" || s.status === "PENDING_ADMIN");

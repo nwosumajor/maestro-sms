@@ -1,28 +1,31 @@
 // =============================================================================
 // Term-weighted subject grading — the pure scoring policy + response DTOs.
 // =============================================================================
-// A student's grade in ONE subject for ONE term is composed of four components,
-// each entered as a percentage 0–100 and combined by FIXED weights:
+// A student's grade in ONE subject for ONE term is composed of four components.
+// Each is a RAW MARK the teacher awards out of that component's maximum, and the
+// maxima are chosen so the four add up to exactly 100 for the term:
 //
-//     exam 60%  +  midterm test 20%  +  assignment 10%  +  class note 10%
+//     exam /60  +  midterm test /20  +  assignment /10  +  class note /10  = /100
 //
-// The weights are named constants here (never hard-coded at a call site) so the
-// policy lives in exactly one place and the total is provably 100. All scoring
-// is pure and server-authoritative — the API recomputes the total, clients only
+// So the term total is simply the SUM of the four marks (never a re-weighting of
+// percentages): a student who scores full marks everywhere gets 60+20+10+10 =
+// 100. The maxima live here as named constants (never hard-coded at a call site)
+// so the policy is in one place and the total is provably 100. All scoring is
+// pure and server-authoritative — the API recomputes the total, clients only
 // display it. // SECURITY (Golden Rule #8): a grade is only ever a manual
 // teacher decision; nothing auto-derives it from telemetry.
 // =============================================================================
 
 export const GRADE_COMPONENTS = [
-  { key: "exam", label: "Exam", weight: 60 },
-  { key: "midterm", label: "Midterm test", weight: 20 },
-  { key: "assignment", label: "Assignment", weight: 10 },
-  { key: "classNote", label: "Class note", weight: 10 },
+  { key: "exam", label: "Exam", max: 60 },
+  { key: "midterm", label: "Midterm test", max: 20 },
+  { key: "assignment", label: "Assignment", max: 10 },
+  { key: "classNote", label: "Class note", max: 10 },
 ] as const;
 
 export type GradeComponentKey = (typeof GRADE_COMPONENTS)[number]["key"];
 
-/** The four component scores. `null` = not yet entered by the teacher. */
+/** The four component marks. `null` = not yet entered by the teacher. */
 export interface TermGradeComponents {
   exam: number | null;
   midterm: number | null;
@@ -31,7 +34,8 @@ export interface TermGradeComponents {
 }
 
 export interface TermGradeResult {
-  /** Weighted total 0–100. Components not yet entered count as 0. */
+  /** Term total 0–100 = the sum of the four component marks. Components not yet
+   *  entered count as 0. */
   total: number;
   /** True once every component has been entered. */
   complete: boolean;
@@ -39,11 +43,17 @@ export interface TermGradeResult {
   grade: string;
 }
 
-/** The component weights sum to exactly 100 (asserted at module load so a bad
- *  edit to GRADE_COMPONENTS fails loudly rather than silently mis-weighting). */
-export const GRADE_TOTAL_WEIGHT = GRADE_COMPONENTS.reduce((s, c) => s + c.weight, 0);
-if (GRADE_TOTAL_WEIGHT !== 100) {
-  throw new Error(`GRADE_COMPONENTS weights must sum to 100, got ${GRADE_TOTAL_WEIGHT}`);
+/** The component maxima sum to exactly 100 (asserted at module load so a bad
+ *  edit to GRADE_COMPONENTS fails loudly rather than silently mis-scaling). */
+export const GRADE_TOTAL_MAX = GRADE_COMPONENTS.reduce((s, c) => s + c.max, 0);
+if (GRADE_TOTAL_MAX !== 100) {
+  throw new Error(`GRADE_COMPONENTS maxima must sum to 100, got ${GRADE_TOTAL_MAX}`);
+}
+
+/** The max mark for one component (used to validate teacher input at the API
+ *  boundary and to bound the input in the UI). */
+export function gradeComponentMax(key: GradeComponentKey): number {
+  return GRADE_COMPONENTS.find((c) => c.key === key)?.max ?? 0;
 }
 
 /** Letter bands, highest threshold first. Total >= min → that grade. */
@@ -56,9 +66,10 @@ export const GRADE_BANDS = [
   { min: 0, grade: "F" },
 ] as const;
 
-function clampPct(v: number | null | undefined): number {
+/** A component mark clamped into [0, max]; null/blank counts as 0. */
+function clampMark(v: number | null | undefined, max: number): number {
   if (v === null || v === undefined || Number.isNaN(v)) return 0;
-  return Math.max(0, Math.min(100, v));
+  return Math.max(0, Math.min(max, v));
 }
 
 function round2(v: number): number {
@@ -73,9 +84,11 @@ export function gradeLetter(total: number): string {
 }
 
 /**
- * Pure weighted total for a single subject in a single term. Missing components
- * are treated as 0 so a running total is always meaningful; `complete` flags
- * whether the teacher has entered all four (i.e. whether the total is final).
+ * Pure term total for one subject: the SUM of the four component marks, each
+ * bounded by its own maximum (exam 60 / midterm 20 / assignment 10 / note 10),
+ * so the total is out of 100. Missing components count as 0 so a running total
+ * is always meaningful; `complete` flags whether the teacher has entered all
+ * four (i.e. whether the total is final).
  */
 export function computeTermSubjectGrade(c: TermGradeComponents): TermGradeResult {
   const complete = GRADE_COMPONENTS.every((comp) => {
@@ -83,10 +96,7 @@ export function computeTermSubjectGrade(c: TermGradeComponents): TermGradeResult
     return v !== null && v !== undefined;
   });
   const total = round2(
-    GRADE_COMPONENTS.reduce(
-      (sum, comp) => sum + clampPct(c[comp.key]) * (comp.weight / 100),
-      0,
-    ),
+    GRADE_COMPONENTS.reduce((sum, comp) => sum + clampMark(c[comp.key], comp.max), 0),
   );
   return { total, complete, grade: gradeLetter(total) };
 }
@@ -202,6 +212,9 @@ export interface GradingRosterStudentDto {
   studentName: string;
   admissionNumber: string | null;
   result: SubjectResultDto | null;
+  /** 1-based rank in THIS subject by total (ties share a position; null until
+   *  the student has a total). */
+  position: number | null;
 }
 
 /** The subject-teacher grading view: every student offering ONE subject in ONE
@@ -217,6 +230,18 @@ export interface GradingRosterDto {
   students: GradingRosterStudentDto[];
 }
 
+/** One subject's cumulative line across the whole session: its total in each
+ *  term (aligned to StudentSessionReportDto.terms order — null where not graded
+ *  yet) plus the average of the terms that DO have a total. The last entry of
+ *  `termTotals` is the final/third-term grade; `average` is the cumulative
+ *  session grade for the subject. */
+export interface SubjectSessionSummaryDto {
+  subjectId: string;
+  subjectName: string;
+  termTotals: (number | null)[];
+  average: number | null;
+}
+
 /** A whole session (first/second/third term) for one student. */
 export interface StudentSessionReportDto {
   sessionId: string;
@@ -225,5 +250,48 @@ export interface StudentSessionReportDto {
   studentName: string;
   className: string | null;
   terms: StudentTermReportDto[];
+  /** Per-subject cumulative summary across the session's terms (the two final
+   *  categories: each subject's last-term total and its three-term average). */
+  summary: SubjectSessionSummaryDto[];
+  /** Overall session average = the mean of the per-term averages. */
   sessionAverage: number | null;
+}
+
+// ---------------------------------------------------------------------------
+// Class broadsheet — the class supervisor's whole-class score sheet for a term:
+// every student down the side, every subject across the top, each cell the
+// subject total + grade, plus each student's average across subjects.
+// ---------------------------------------------------------------------------
+
+/** One subject cell for one student in the broadsheet (null total = not graded). */
+export interface BroadsheetCellDto {
+  subjectId: string;
+  total: number | null;
+  grade: string | null;
+  /** DRAFT | PENDING_APPROVAL | PUBLISHED | "" (no row yet). */
+  status: string;
+}
+
+/** One student's row across every subject, with their term average + position. */
+export interface BroadsheetRowDto {
+  studentId: string;
+  studentName: string;
+  admissionNumber: string | null;
+  /** Aligned to ClassBroadsheetDto.subjects order. */
+  cells: BroadsheetCellDto[];
+  /** Average across the subjects that have a total (this term). */
+  average: number | null;
+  /** 1-based rank within the class by `average` (ties share a position). */
+  position: number | null;
+}
+
+/** The supervisor/teacher view: one class, one term, all subjects × all students. */
+export interface ClassBroadsheetDto {
+  classId: string;
+  className: string;
+  sessionId: string;
+  termId: string;
+  termName: string;
+  subjects: { id: string; name: string }[];
+  rows: BroadsheetRowDto[];
 }

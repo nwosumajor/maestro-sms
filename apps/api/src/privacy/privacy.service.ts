@@ -40,53 +40,70 @@ export class PrivacyService {
   async exportStudent(p: Principal, studentId: string) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.assertCanAccess(tx, p, studentId);
-      const student = await tx.user.findFirst({
-        where: { id: studentId },
-        select: { id: true, name: true, email: true, createdAt: true },
+      const bundle = await this.collectStudentBundle(tx, studentId, {
+        schoolId: p.schoolId,
+        includeMedical: p.permissions.includes("student.medical.read"),
       });
-      if (!student) throw new NotFoundException("Student not found");
-
-      const profile = await tx.studentProfile.findFirst({ where: { studentId } });
-      const contacts = profile
-        ? await tx.emergencyContact.findMany({ where: { profileId: profile.id } })
-        : [];
-      let medical: Record<string, unknown> | null = null;
-      if (profile && p.permissions.includes("student.medical.read")) {
-        const m = await tx.medicalRecord.findFirst({ where: { profileId: profile.id } });
-        if (m) {
-          const dec: Record<string, unknown> = { ...m };
-          for (const f of MEDICAL_FIELDS) {
-            if (typeof dec[f] === "string") dec[f] = decryptField(dec[f] as string, p.schoolId);
-          }
-          medical = dec;
-        }
-      }
-      const [enrollments, attendance, invoices, documents, notifications] = await Promise.all([
-        tx.enrollment.findMany({ where: { studentId } }),
-        tx.attendanceRecord.findMany({ where: { studentId }, orderBy: { createdAt: "desc" } }),
-        tx.invoice.findMany({ where: { studentId }, include: { lineItems: true, payments: true } }),
-        tx.document.findMany({
-          where: { studentId },
-          select: { id: true, type: true, title: true, status: true, createdAt: true },
-        }),
-        tx.notification.findMany({ where: { recipientId: studentId }, orderBy: { createdAt: "desc" }, take: 100 }),
-      ]);
-
       await this.log(tx, p, "privacy.export", studentId);
-      return {
-        exportedAt: new Date().toISOString(),
-        exportedBy: p.userId,
-        student,
-        profile,
-        emergencyContacts: contacts,
-        medical: medical ?? "(not included — insufficient permission)",
-        enrollments,
-        attendance,
-        invoices,
-        documents,
-        notifications,
-      };
+      return { exportedAt: new Date().toISOString(), exportedBy: p.userId, ...bundle };
     });
+  }
+
+  /**
+   * Gather ONE student's cross-module personal data into a bundle, on an existing
+   * tenant transaction. Reused by the tenant-scoped NDPR export AND the super_admin
+   * cross-tenant bulk export (which runs under the TARGET school's context). The
+   * caller owns the audit log. Medical is decrypted with the passed `schoolId`'s
+   * per-tenant key and only when `includeMedical` (so it's opt-in, never leaked).
+   */
+  async collectStudentBundle(
+    tx: TenantTx,
+    studentId: string,
+    opts: { schoolId: string; includeMedical: boolean },
+  ) {
+    const student = await tx.user.findFirst({
+      where: { id: studentId },
+      select: { id: true, name: true, email: true, createdAt: true },
+    });
+    if (!student) throw new NotFoundException("Student not found");
+
+    const profile = await tx.studentProfile.findFirst({ where: { studentId } });
+    const contacts = profile
+      ? await tx.emergencyContact.findMany({ where: { profileId: profile.id } })
+      : [];
+    let medical: Record<string, unknown> | null = null;
+    if (profile && opts.includeMedical) {
+      const m = await tx.medicalRecord.findFirst({ where: { profileId: profile.id } });
+      if (m) {
+        const dec: Record<string, unknown> = { ...m };
+        for (const f of MEDICAL_FIELDS) {
+          if (typeof dec[f] === "string") dec[f] = decryptField(dec[f] as string, opts.schoolId);
+        }
+        medical = dec;
+      }
+    }
+    const [enrollments, attendance, invoices, documents, notifications] = await Promise.all([
+      tx.enrollment.findMany({ where: { studentId } }),
+      tx.attendanceRecord.findMany({ where: { studentId }, orderBy: { createdAt: "desc" } }),
+      tx.invoice.findMany({ where: { studentId }, include: { lineItems: true, payments: true } }),
+      tx.document.findMany({
+        where: { studentId },
+        select: { id: true, type: true, title: true, status: true, createdAt: true },
+      }),
+      tx.notification.findMany({ where: { recipientId: studentId }, orderBy: { createdAt: "desc" }, take: 100 }),
+    ]);
+
+    return {
+      student,
+      profile,
+      emergencyContacts: contacts,
+      medical: medical ?? "(not included)",
+      enrollments,
+      attendance,
+      invoices,
+      documents,
+      notifications,
+    };
   }
 
   // --- erasure requests ------------------------------------------------------

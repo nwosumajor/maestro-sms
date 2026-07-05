@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { readApiError } from "@/lib/api-error";
 
 type Named = Serialized<IdNameDto>;
 type User = Serialized<UserSummaryDto>;
@@ -30,7 +31,7 @@ export function ClassAdmin({
     const res = await fetch(`/api/sms${path}`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
-    setMsg(res.ok ? ok : `Failed (${res.status}).`);
+    setMsg(res.ok ? ok : await readApiError(res));
     if (res.ok) router.refresh();
     return res.ok;
   };

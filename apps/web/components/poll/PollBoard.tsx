@@ -28,7 +28,7 @@ export function PollBoard({ polls, canManage }: { polls: Poll[]; canManage: bool
     setBusy(true); setMsg(null);
     const res = await fn();
     setBusy(false);
-    if (res.ok) { setMsg(ok); router.refresh(); } else setMsg(res.error ?? `Failed (${res.status}).`);
+    if (res.ok) { setMsg(ok); router.refresh(); } else setMsg(res.error ?? "Request failed.");
   };
 
   const pct = (votes: number, total: number) => (total > 0 ? Math.round((votes / total) * 100) : 0);

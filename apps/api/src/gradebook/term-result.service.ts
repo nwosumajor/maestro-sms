@@ -24,15 +24,21 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
+import PDFDocument from "pdfkit";
 import {
   computeTermSubjectGrade,
   averageOf,
+  gradeComponentMax,
+  GRADE_COMPONENTS,
   GRADE_PUBLISH_CHAIN,
+  type GradeComponentKey,
   type GradingRosterDto,
   type SubjectResultDto,
   type StudentSessionReportDto,
   type StudentTermReportDto,
+  type SubjectSessionSummaryDto,
   type TermSubjectRowDto,
+  type ClassBroadsheetDto,
 } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -144,11 +150,18 @@ export class TermResultService {
     return !!offering;
   }
 
-  /** Recompute total/grade from components and validate ranges (0..100). */
+  /** Recompute total/grade from components; validate each mark against ITS OWN
+   *  maximum (exam ≤ 60, midterm ≤ 20, assignment ≤ 10, class note ≤ 10) so a
+   *  teacher can't award more than a component is worth. */
   private applyComponents(c: ComponentInput) {
-    for (const [k, v] of Object.entries(c)) {
-      if (v !== null && v !== undefined && (v < 0 || v > 100)) {
-        throw new BadRequestException(`${k} must be between 0 and 100`);
+    const label: Record<GradeComponentKey, string> =
+      Object.fromEntries(GRADE_COMPONENTS.map((g) => [g.key, g.label])) as Record<GradeComponentKey, string>;
+    for (const key of GRADE_COMPONENTS.map((g) => g.key)) {
+      const v = c[key];
+      if (v === null || v === undefined) continue;
+      const max = gradeComponentMax(key);
+      if (v < 0 || v > max) {
+        throw new BadRequestException(`${label[key]} must be between 0 and ${max}`);
       }
     }
     const components = {
@@ -165,6 +178,27 @@ export class TermResultService {
       total: anyEntered ? total : null,
       grade: anyEntered ? grade : null,
     };
+  }
+
+  /** Recompute the total/grade from a row's four components at READ time, so a
+   *  report is correct even if the denormalised `total` column was written under
+   *  an older scoring rule (or left stale). Returns null total when nothing is
+   *  entered yet. */
+  private recomputeTotal(row: {
+    exam: number | null;
+    midterm: number | null;
+    assignment: number | null;
+    classNote: number | null;
+  }): { total: number | null; grade: string | null } {
+    const anyEntered = [row.exam, row.midterm, row.assignment, row.classNote].some((v) => v !== null);
+    if (!anyEntered) return { total: null, grade: null };
+    const { total, grade } = computeTermSubjectGrade({
+      exam: row.exam,
+      midterm: row.midterm,
+      assignment: row.assignment,
+      classNote: row.classNote,
+    });
+    return { total, grade };
   }
 
   private toResultDto(
@@ -188,6 +222,7 @@ export class TermResultService {
     subjectName: string,
     studentName: string,
   ): SubjectResultDto {
+    const { total, grade } = this.recomputeTotal(row);
     return {
       id: row.id,
       sessionId: row.sessionId,
@@ -201,8 +236,8 @@ export class TermResultService {
       midterm: row.midterm,
       assignment: row.assignment,
       classNote: row.classNote,
-      total: row.total,
-      grade: row.grade,
+      total,
+      grade,
       status: row.status,
       gradedById: row.gradedById,
       gradedAt: row.gradedAt,
@@ -264,8 +299,27 @@ export class TermResultService {
           result: resultByStudent.has(sid)
             ? this.toResultDto(resultByStudent.get(sid)!, subject.name, nameById.get(sid) ?? "Unknown")
             : null,
+          position: null as number | null,
         }))
         .sort((a, b) => a.studentName.localeCompare(b.studentName));
+
+      // Rank within THIS subject by total (highest first); ties share a position
+      // (standard competition ranking). Ungraded students stay unranked (null).
+      const ranked = roster
+        .filter((r) => r.result?.total != null)
+        .sort((a, b) => (b.result!.total as number) - (a.result!.total as number));
+      let position = 0;
+      let seen = 0;
+      let prev: number | null = null;
+      for (const r of ranked) {
+        seen += 1;
+        const total = r.result!.total as number;
+        if (prev === null || total !== prev) {
+          position = seen;
+          prev = total;
+        }
+        r.position = position;
+      }
 
       return {
         classId,
@@ -516,16 +570,19 @@ export class TermResultService {
       const termReports: StudentTermReportDto[] = terms.map((t) => {
         const rows: TermSubjectRowDto[] = results
           .filter((r) => r.termId === t.id)
-          .map((r) => ({
-            subjectId: r.subjectId,
-            subjectName: subjectName.get(r.subjectId) ?? "Unknown",
-            exam: r.exam,
-            midterm: r.midterm,
-            assignment: r.assignment,
-            classNote: r.classNote,
-            total: r.total,
-            grade: r.grade,
-          }))
+          .map((r) => {
+            const { total, grade } = this.recomputeTotal(r);
+            return {
+              subjectId: r.subjectId,
+              subjectName: subjectName.get(r.subjectId) ?? "Unknown",
+              exam: r.exam,
+              midterm: r.midterm,
+              assignment: r.assignment,
+              classNote: r.classNote,
+              total,
+              grade,
+            };
+          })
           .sort((a, b) => a.subjectName.localeCompare(b.subjectName));
         const totals = rows.map((r) => r.total).filter((v): v is number => v !== null);
         return {
@@ -540,6 +597,26 @@ export class TermResultService {
         .map((t) => t.average)
         .filter((v): v is number => v !== null);
 
+      // Per-subject cumulative summary across the session: each subject's total
+      // in every term (in term order) + the average of the terms it was graded.
+      // The last term's total is the "third-term-only" grade; `average` is the
+      // three-term cumulative grade — the two final categories on the report.
+      const summarySubjectIds = [...new Set(results.map((r) => r.subjectId))].sort(
+        (a, b) => (subjectName.get(a) ?? "").localeCompare(subjectName.get(b) ?? ""),
+      );
+      const summary: SubjectSessionSummaryDto[] = summarySubjectIds.map((sid) => {
+        const termTotals = termReports.map(
+          (tr) => tr.subjects.find((s) => s.subjectId === sid)?.total ?? null,
+        );
+        const present = termTotals.filter((v): v is number => v !== null);
+        return {
+          subjectId: sid,
+          subjectName: subjectName.get(sid) ?? "Unknown",
+          termTotals,
+          average: averageOf(present),
+        };
+      });
+
       return {
         sessionId,
         sessionName: session.name,
@@ -547,7 +624,213 @@ export class TermResultService {
         studentName: student.name,
         className,
         terms: termReports,
+        summary,
         sessionAverage: averageOf(termAverages),
+      };
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Term scoresheet PDF — a student's/parent's downloadable result slip
+  // ---------------------------------------------------------------------------
+  /** Render ONE term of a student's report as a PDF. Reuses the fully-scoped
+   *  session report (student→self / parent→children see PUBLISHED only; staff of
+   *  the class see all), so the PDF can never leak a grade the caller couldn't
+   *  already read on screen. Generating one is audit-logged. */
+  async generateTermScoresheetPdf(
+    p: Principal,
+    args: { studentId: string; sessionId: string; termId: string },
+  ): Promise<{ buffer: Buffer; filename: string }> {
+    const report = await this.getStudentSessionReport(p, {
+      studentId: args.studentId,
+      sessionId: args.sessionId,
+    });
+    const term = report.terms.find((t) => t.termId === args.termId);
+    if (!term) throw new NotFoundException("Term not found");
+
+    await this.db.runAsTenant(this.ctx(p), (tx) =>
+      this.audit.record(
+        {
+          actorId: p.userId,
+          action: "gradebook.scoresheet.download",
+          entity: "user",
+          entityId: args.studentId,
+          schoolId: p.schoolId,
+          metadata: { sessionId: args.sessionId, termId: args.termId },
+        },
+        tx,
+      ),
+    );
+
+    const buffer = await this.renderTermScoresheetPdf(report, term);
+    const slug = (s: string) => s.replace(/\s+/g, "-").replace(/[^a-z0-9-]/gi, "").toLowerCase();
+    return { buffer, filename: `scoresheet-${slug(report.studentName)}-${slug(term.termName)}.pdf` };
+  }
+
+  private renderTermScoresheetPdf(
+    report: StudentSessionReportDto,
+    term: StudentTermReportDto,
+  ): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+      const doc = new PDFDocument({ margin: 50, size: "A4" });
+      const chunks: Buffer[] = [];
+      doc.on("data", (c: Buffer) => chunks.push(c));
+      doc.on("end", () => resolve(Buffer.concat(chunks)));
+      doc.on("error", reject);
+
+      doc.fontSize(20).text(report.sessionName || "Report", { align: "center" });
+      doc.moveDown(0.2).fontSize(13).fillColor("#666").text(`${term.termName} — Score Sheet`, { align: "center" });
+      doc.fillColor("#000").moveDown(1);
+      doc.fontSize(11).text(`Student: ${report.studentName}`);
+      if (report.className) doc.text(`Class: ${report.className}`);
+      doc.text(`Generated: ${new Date().toLocaleString()}`);
+      doc.moveDown(0.8);
+
+      // Column layout: subject + the four components + total + grade.
+      const startX = 50;
+      const colX = [startX, 210, 265, 330, 395, 450, 510];
+      const headers = ["Subject", "Exam/60", "Mid/20", "Assn/10", "Note/10", "Total", "Grade"];
+      const drawRow = (cells: string[], opts: { bold?: boolean } = {}) => {
+        const y = doc.y;
+        doc.fontSize(10).font(opts.bold ? "Helvetica-Bold" : "Helvetica");
+        cells.forEach((c, i) => doc.text(c, colX[i], y, { width: (colX[i + 1] ?? 545) - colX[i] - 4, lineBreak: false }));
+        doc.moveDown(0.6);
+      };
+      drawRow(headers, { bold: true });
+      doc.moveTo(startX, doc.y).lineTo(545, doc.y).strokeColor("#ccc").stroke();
+      doc.moveDown(0.3);
+
+      const fmt = (n: number | null): string => (n === null || n === undefined ? "—" : String(n));
+      if (term.subjects.length === 0) {
+        doc.fontSize(10).fillColor("#888").text("No published results for this term yet.", startX).fillColor("#000");
+      } else {
+        for (const s of term.subjects) {
+          drawRow([s.subjectName, fmt(s.exam), fmt(s.midterm), fmt(s.assignment), fmt(s.classNote), fmt(s.total), s.grade ?? "—"]);
+        }
+      }
+      doc.moveDown(0.5);
+      doc.fontSize(11).font("Helvetica-Bold").text(`Term average: ${term.average ?? "—"}`, startX);
+      // The cumulative session line for this subject set, if present.
+      if (report.sessionAverage !== null) {
+        doc.font("Helvetica").fillColor("#666").text(`Cumulative session average (all terms so far): ${report.sessionAverage}`, startX);
+        doc.fillColor("#000");
+      }
+      doc.font("Helvetica").fontSize(8).fillColor("#999").moveDown(1)
+        .text("Weighting: Exam 60 · Midterm 20 · Assignment 10 · Class note 10 = 100 per term.", startX);
+
+      doc.end();
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Class broadsheet — the supervisor's whole-class score sheet for one term
+  // ---------------------------------------------------------------------------
+  /** Whether the caller may view a whole class's broadsheet: the class's named
+   *  supervisor, any teacher of the class (form teacher or a subject teacher),
+   *  or a school-wide role. Anyone else gets 404 (never reveal existence). */
+  private async canViewClass(tx: TenantTx, p: Principal, classId: string): Promise<boolean> {
+    if (this.isSchoolWide(p)) return true;
+    const klass = await tx.class.findFirst({ where: { id: classId }, select: { supervisorId: true } });
+    if (klass?.supervisorId === p.userId) return true;
+    const teaches = await tx.classTeacher.findFirst({
+      where: { classId, teacherId: p.userId },
+      select: { id: true },
+    });
+    if (teaches) return true;
+    const teachesSubject = await tx.classSubjectTeacher.findFirst({
+      where: { classId, teacherId: p.userId },
+      select: { id: true },
+    });
+    return !!teachesSubject;
+  }
+
+  /** Every student in `classId` down the side, every subject offered on the class
+   *  across the top, each cell the recomputed subject total + grade for `termId`,
+   *  plus each student's average across subjects and their class position. This
+   *  is the working sheet for staff-of-class, so it shows ALL statuses (DRAFT
+   *  included) — it is NOT the family view. Caller must supervise/teach the class
+   *  (else 404). */
+  async getClassBroadsheet(
+    p: Principal,
+    args: { classId: string; termId: string },
+  ): Promise<ClassBroadsheetDto> {
+    const { classId, termId } = args;
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const [klass, term] = await Promise.all([
+        tx.class.findFirst({ where: { id: classId }, select: { id: true, name: true } }),
+        tx.term.findFirst({ where: { id: termId }, select: { id: true, name: true, sessionId: true } }),
+      ]);
+      if (!klass || !term) throw new NotFoundException("Not found");
+      if (!(await this.canViewClass(tx, p, classId))) throw new NotFoundException("Not found");
+
+      // Columns: the subjects offered on this class. Rows: its ACTIVE students.
+      const offerings = await tx.classSubjectTeacher.findMany({
+        where: { classId },
+        select: { subjectId: true },
+      });
+      const subjectIds = [...new Set(offerings.map((o) => o.subjectId))];
+      const [subjectRows, enrollments, results] = await Promise.all([
+        tx.subject.findMany({ where: { id: { in: subjectIds } }, select: { id: true, name: true } }),
+        tx.enrollment.findMany({ where: { classId, status: "ACTIVE" }, select: { studentId: true } }),
+        tx.subjectResult.findMany({ where: { classId, termId } }),
+      ]);
+      const subjects = subjectRows.sort((a, b) => a.name.localeCompare(b.name));
+      const orderedSubjectIds = subjects.map((s) => s.id);
+      const studentIds = [...new Set(enrollments.map((e) => e.studentId))];
+      const [students, profiles] = await Promise.all([
+        tx.user.findMany({ where: { id: { in: studentIds } }, select: { id: true, name: true } }),
+        tx.studentProfile.findMany({
+          where: { studentId: { in: studentIds } },
+          select: { studentId: true, admissionNumber: true },
+        }),
+      ]);
+      const nameById = new Map(students.map((s) => [s.id, s.name]));
+      const admById = new Map(profiles.map((pr) => [pr.studentId, pr.admissionNumber]));
+      const cellByKey = new Map(results.map((r) => [`${r.studentId}:${r.subjectId}`, r]));
+
+      const rows = studentIds
+        .map((sid) => {
+          const cells = orderedSubjectIds.map((subId) => {
+            const r = cellByKey.get(`${sid}:${subId}`);
+            const { total, grade } = r ? this.recomputeTotal(r) : { total: null, grade: null };
+            return { subjectId: subId, total, grade, status: r?.status ?? "" };
+          });
+          const totals = cells.map((c) => c.total).filter((v): v is number => v !== null);
+          return {
+            studentId: sid,
+            studentName: nameById.get(sid) ?? "Unknown",
+            admissionNumber: admById.get(sid) ?? null,
+            cells,
+            average: averageOf(totals),
+            position: null as number | null,
+          };
+        })
+        .sort((a, b) => a.studentName.localeCompare(b.studentName));
+
+      // Rank by average (highest first); ties share a position (competition rank).
+      const ranked = [...rows]
+        .filter((r) => r.average !== null)
+        .sort((a, b) => (b.average as number) - (a.average as number));
+      let position = 0;
+      let seen = 0;
+      let prev: number | null = null;
+      for (const r of ranked) {
+        seen += 1;
+        if (prev === null || r.average !== prev) {
+          position = seen;
+          prev = r.average;
+        }
+        r.position = position;
+      }
+
+      return {
+        classId,
+        className: klass.name,
+        sessionId: term.sessionId,
+        termId,
+        termName: term.name,
+        subjects: subjects.map((s) => ({ id: s.id, name: s.name })),
+        rows,
       };
     });
   }

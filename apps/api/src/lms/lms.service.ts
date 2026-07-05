@@ -347,6 +347,20 @@ export class LmsService {
         select: { classId: true },
       });
       taught.forEach((t: { classId: string }) => classIds.add(t.classId));
+      // A subject teacher who isn't the form teacher still "has" the class.
+      const subjectTaught = await tx.classSubjectTeacher.findMany({
+        where: { teacherId: p.userId },
+        select: { classId: true },
+      });
+      subjectTaught.forEach((t: { classId: string }) => classIds.add(t.classId));
+      // The class's named supervisor (form teacher) — so a supervisor sees the
+      // class they oversee even when they teach none of its subjects (needed for
+      // the class broadsheet / score sheet).
+      const supervised = await tx.class.findMany({
+        where: { supervisorId: p.userId },
+        select: { id: true },
+      });
+      supervised.forEach((c: { id: string }) => classIds.add(c.id));
       const enrolled = await tx.enrollment.findMany({
         where: { studentId: p.userId },
         select: { classId: true },

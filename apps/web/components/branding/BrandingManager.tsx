@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { readApiError } from "@/lib/api-error";
 
 const FONTS = ['"Inter", system-ui, sans-serif', '"Georgia", serif', '"Poppins", sans-serif', '"Roboto Slab", serif', '"system-ui", sans-serif'];
 
@@ -28,7 +29,7 @@ export function BrandingManager({ initial, slug }: { initial: Serialized<SchoolB
       body: JSON.stringify({ brandHue: hue, brandSat: sat, brandLight: light, fontFamily: font }),
     });
     setBusy(false);
-    setMsg(res.ok ? "Theme saved." : `Failed (${res.status}).`);
+    setMsg(res.ok ? "Theme saved." : await readApiError(res));
     router.refresh();
   };
 
@@ -61,7 +62,7 @@ export function BrandingManager({ initial, slug }: { initial: Serialized<SchoolB
     setBusy(true); setMsg(null);
     const res = await fetch("/api/sms/schools/branding/logo", { method: "DELETE" });
     setBusy(false);
-    setMsg(res.ok ? "Logo removed." : `Failed (${res.status}).`);
+    setMsg(res.ok ? "Logo removed." : await readApiError(res));
     router.refresh();
   };
 

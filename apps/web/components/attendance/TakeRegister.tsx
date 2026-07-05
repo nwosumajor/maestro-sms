@@ -5,6 +5,7 @@ import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { readApiError } from "@/lib/api-error";
 
 const STATUSES = ["PRESENT", "ABSENT", "LATE", "EXCUSED"] as const;
 type Status = (typeof STATUSES)[number];
@@ -44,7 +45,7 @@ export function TakeRegister({ classes }: { classes: { id: string; name: string 
       body: JSON.stringify({ date, records }),
     });
     setBusy(false);
-    setMsg(res.ok ? "Register saved. Guardians of absent/late students were notified." : `Failed (${res.status}).`);
+    setMsg(res.ok ? "Register saved. Guardians of absent/late students were notified." : await readApiError(res));
   };
 
   return (

@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { postSms } from "./play-ui";
+import { readApiError } from "@/lib/api-error";
 
 type Person = Serialized<IdNameDto>;
 
@@ -83,7 +84,7 @@ export function ConsentForm({ students }: { students: Person[] }) {
             body: JSON.stringify({ studentId, granted }),
           });
           setBusy(false);
-          setMsg(res.ok ? "Consent updated." : `Failed (${res.status}).`);
+          setMsg(res.ok ? "Consent updated." : await readApiError(res));
         }}
       >
         {busy ? "…" : "Save consent"}

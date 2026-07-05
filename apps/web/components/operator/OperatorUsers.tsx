@@ -3,6 +3,7 @@
 import * as React from "react";
 import type { OperatorUserDto, Serialized } from "@sms/types";
 import { sendWithStepUp } from "@/lib/stepup";
+import { readApiError } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
@@ -54,7 +55,7 @@ export function OperatorUsers({ schoolId }: { schoolId: string }) {
       if (onResult) onResult(await res.json().catch(() => ({})));
       await load();
     } else {
-      setNote(`Action failed (${res.status}).`);
+      setNote(await readApiError(res));
     }
   };
 

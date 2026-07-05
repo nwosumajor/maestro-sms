@@ -19,6 +19,7 @@ import type { Principal } from "../integrity/integrity.foundation";
 import { OperatorService } from "./operator.service";
 import { OperatorProvisioningService } from "./operator-provisioning.service";
 import { OperatorUserService } from "./operator-user.service";
+import { OperatorExportService } from "./operator-export.service";
 import { PlatformAnalyticsService } from "./platform-analytics.service";
 import { PlatformAuditService, type PlatformAuditFilter } from "./platform-audit.service";
 import { PlanPricingService } from "../billing/plan-pricing.service";
@@ -39,6 +40,11 @@ function auditFilter(q: Record<string, string>): PlatformAuditFilter {
 }
 
 const impSchema = z.object({ schoolId: z.string().uuid(), userId: z.string().uuid() });
+// NDPR bulk export: specific students (or all when omitted); medical is opt-in.
+const exportSchema = z.object({
+  studentIds: z.array(z.string().uuid()).max(1000).optional(),
+  includeMedical: z.boolean().optional(),
+});
 const adminSchema = z.object({
   name: z.string().min(1).max(120),
   email: z.string().email(),
@@ -103,6 +109,7 @@ export class OperatorController {
     private readonly operator: OperatorService,
     private readonly provisioning: OperatorProvisioningService,
     private readonly users: OperatorUserService,
+    private readonly exporter: OperatorExportService,
     private readonly analyticsSvc: PlatformAnalyticsService,
     private readonly auditSvc: PlatformAuditService,
     private readonly pricing: PlanPricingService,
@@ -265,6 +272,20 @@ export class OperatorController {
     @Param("schoolId") schoolId: string,
   ): Promise<OperatorStudentDto[]> {
     return this.operator.listSchoolStudents(p, schoolId);
+  }
+
+  /** NDPR bulk export of a school's student data (records requested by the school,
+   *  e.g. years later). Runs under the target school's RLS context; medical is
+   *  opt-in. super_admin only, step-up, audited. */
+  @Post("tenants/:schoolId/students/export")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  @RequireStepUp()
+  exportStudents(
+    @CurrentPrincipal() p: Principal,
+    @Param("schoolId") schoolId: string,
+    @Body(new ZodValidationPipe(exportSchema)) body: z.infer<typeof exportSchema>,
+  ) {
+    return this.exporter.exportStudents(p, schoolId, body);
   }
 
   // --- cross-tenant user directory + governance (super_admin) ----------------

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { money } from "@/lib/format";
+import { readApiError } from "@/lib/api-error";
 
 const METHODS = ["CASH", "BANK_TRANSFER", "CARD", "MOBILE_MONEY", "OTHER"] as const;
 
@@ -43,7 +44,7 @@ export function RecordPaymentForm({
     });
     setBusy(false);
     if (!res.ok) {
-      setError(res.status === 400 ? "Amount exceeds the allowed limit." : `Failed (${res.status}).`);
+      setError(res.status === 400 ? "Amount exceeds the allowed limit." : await readApiError(res));
       return;
     }
     const pay = (await res.json()) as { status?: string };

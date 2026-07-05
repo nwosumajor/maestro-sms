@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { readApiError } from "@/lib/api-error";
 
 const DAYS = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"] as const;
 type Named = Serialized<IdNameDto>;
@@ -87,7 +88,7 @@ export function TimetableAdmin({
     });
     if (res.ok) { setEntry((s) => ({ ...s, subject: "" })); setMsg("Lesson added."); router.refresh(); }
     else if (res.status === 409) setMsg("Conflict: that class, teacher, or room is already booked in this slot.");
-    else setMsg(`Failed (${res.status}).`);
+    else setMsg(await readApiError(res));
   };
 
   const selCls = "h-9 rounded-md border border-input bg-background px-3 text-sm";
@@ -106,6 +107,15 @@ export function TimetableAdmin({
           <div className="space-y-1.5"><Label htmlFor="pp-end">End</Label><Input id="pp-end" type="time" value={per.endTime} onChange={(e) => setPer({ ...per, endTime: e.target.value })} className="w-32" required /></div>
           <Button type="submit" variant="outline" size="sm">Add period</Button>
         </form>
+
+        {periods.length > 0 && (
+          <div className="space-y-1.5 border-t border-border pt-3">
+            <p className="text-xs font-medium text-muted-foreground">Existing periods — edit name, time or order, then Save</p>
+            {[...periods].sort((a, b) => a.sequence - b.sequence).map((pd) => (
+              <PeriodEditRow key={pd.id} period={pd} onSaved={() => router.refresh()} />
+            ))}
+          </div>
+        )}
 
         <form onSubmit={addRoom} className="flex flex-wrap items-end gap-2">
           <div className="w-full">
@@ -162,5 +172,46 @@ export function TimetableAdmin({
         {msg && <p className="text-sm text-muted-foreground">{msg}</p>}
       </CardContent>
     </Card>
+  );
+}
+
+/** One editable period row (name / sequence / start / end) → PATCH periods/:id. */
+function PeriodEditRow({ period, onSaved }: { period: Period; onSaved: () => void }) {
+  const [name, setName] = React.useState(period.name);
+  const [sequence, setSequence] = React.useState(String(period.sequence));
+  const [startTime, setStartTime] = React.useState(period.startTime);
+  const [endTime, setEndTime] = React.useState(period.endTime);
+  const [busy, setBusy] = React.useState(false);
+  const [note, setNote] = React.useState<string | null>(null);
+
+  const dirty =
+    name !== period.name ||
+    Number(sequence) !== period.sequence ||
+    startTime !== period.startTime ||
+    endTime !== period.endTime;
+
+  const save = async () => {
+    setBusy(true); setNote(null);
+    const res = await fetch(`/api/sms/timetable/periods/${period.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: name.trim(), sequence: Number(sequence), startTime, endTime }),
+    });
+    setBusy(false);
+    if (res.ok) { setNote("Saved ✓"); onSaved(); }
+    else setNote(await readApiError(res));
+  };
+
+  return (
+    <div className="flex flex-wrap items-end gap-2">
+      <div className="space-y-1"><Label className="text-xs">Period</Label><Input value={name} onChange={(e) => setName(e.target.value)} className="w-24" /></div>
+      <div className="space-y-1"><Label className="text-xs">Seq</Label><Input type="number" min={1} value={sequence} onChange={(e) => setSequence(e.target.value)} className="w-16" /></div>
+      <div className="space-y-1"><Label className="text-xs">Start</Label><Input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} className="w-32" /></div>
+      <div className="space-y-1"><Label className="text-xs">End</Label><Input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} className="w-32" /></div>
+      <Button type="button" variant="outline" size="sm" disabled={busy || !dirty || !name.trim()} onClick={save}>
+        {busy ? "Saving…" : "Save"}
+      </Button>
+      {note && <span className="text-xs text-muted-foreground">{note}</span>}
+    </div>
   );
 }

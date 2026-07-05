@@ -30,6 +30,7 @@ const roomSchema = z.object({
   customFields,
 });
 const roomUpdateSchema = z.object({
+  roomNumber: z.string().min(1).max(40).optional(),
   roomType: z.string().min(1).max(40).optional(),
   capacity: z.number().int().min(1).max(100).optional(),
   rentMinor: z.number().int().min(0).optional(),

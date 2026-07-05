@@ -31,3 +31,24 @@ export function interpretApiError(status: number, serverMessage?: string | null)
   if (detail) return `${detail} — ${why}`;
   return why;
 }
+
+/**
+ * Read a failed Response and turn it into one actionable sentence — the shared
+ * reader for mutation helpers that hand back a raw `Response` (e.g. the step-up
+ * senders). Pulls the server's own `message` (string or string[]) and routes it
+ * through interpretApiError, so no caller re-implements body parsing or leaks a
+ * bare "Failed (403)".
+ */
+export async function readApiError(res: Response): Promise<string> {
+  let serverMessage: string | null = null;
+  const text = await res.text().catch(() => "");
+  if (text) {
+    try {
+      const parsed = JSON.parse(text) as { message?: string | string[] };
+      serverMessage = Array.isArray(parsed.message) ? parsed.message.join(", ") : parsed.message ?? null;
+    } catch {
+      serverMessage = text;
+    }
+  }
+  return interpretApiError(res.status, serverMessage);
+}

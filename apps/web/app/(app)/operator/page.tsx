@@ -13,6 +13,7 @@ import { SubscriptionManager } from "@/components/operator/SubscriptionManager";
 import { Provisioning } from "@/components/operator/Provisioning";
 import { OperatorUsers } from "@/components/operator/OperatorUsers";
 import { OperatorStudents } from "@/components/operator/OperatorStudents";
+import { StudentDataExport } from "@/components/operator/StudentDataExport";
 import { OnboardingRequests } from "@/components/operator/OnboardingRequests";
 import { PricingManager } from "@/components/operator/PricingManager";
 import { TenantFilterBar } from "@/components/operator/TenantFilterBar";
@@ -103,6 +104,7 @@ export default async function OperatorPage({
                 <SubscriptionManager schoolId={t.id} plan={t.plan} />
                 <OperatorUsers schoolId={t.id} />
                 <OperatorStudents schoolId={t.id} />
+                <StudentDataExport schoolId={t.id} schoolName={t.name} />
               </CardContent>
             </Card>
           ))}

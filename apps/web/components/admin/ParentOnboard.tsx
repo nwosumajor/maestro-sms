@@ -78,7 +78,7 @@ export function ParentOnboard({ batches, students, currentUserId }: { batches: B
         : `${r.name} already had an account — linked ${r.linkedStudentIds.length} child(ren).`);
       setSingle({ name: "", email: "", phone: "", relationship: "" }); setPicked(new Set());
       router.refresh();
-    } else setMsg(res.error ?? `Failed (${res.status}).`);
+    } else setMsg(res.error ?? "Request failed.");
   };
 
   // --- bulk ---
@@ -125,7 +125,7 @@ export function ParentOnboard({ batches, students, currentUserId }: { batches: B
         setMsg(`Approved — created ${b.summary?.created ?? 0}, reused ${b.summary?.reused ?? 0}, linked ${b.summary?.linked ?? 0}${b.summary?.unmatchedStudents ? `, ${b.summary.unmatchedStudents} child ref(s) unmatched` : ""}.`);
       } else setMsg("Batch rejected.");
       router.refresh();
-    } else setMsg(res.status === 403 ? "A different admin (not the uploader) must approve." : res.error ?? `Failed (${res.status}).`);
+    } else setMsg(res.status === 403 ? "A different admin (not the uploader) must approve." : res.error ?? "Request failed.");
   };
 
   const pending = batches.filter((b) => b.status === "PENDING");

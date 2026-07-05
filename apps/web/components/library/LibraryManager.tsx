@@ -36,7 +36,7 @@ export function LibraryManager({
     setBusy(true); setMsg(null);
     const res = await fn();
     setBusy(false);
-    if (res.ok) { setMsg(ok); router.refresh(); } else setMsg(res.error ?? `Failed (${res.status}).`);
+    if (res.ok) { setMsg(ok); router.refresh(); } else setMsg(res.error ?? "Request failed.");
   };
 
   const shown = q.trim()

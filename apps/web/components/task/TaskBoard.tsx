@@ -37,7 +37,7 @@ export function TaskBoard({
     setBusy(true); setMsg(null);
     const res = await fn();
     setBusy(false);
-    if (res.ok) { setMsg(ok); router.refresh(); } else setMsg(res.error ?? `Failed (${res.status}).`);
+    if (res.ok) { setMsg(ok); router.refresh(); } else setMsg(res.error ?? "Request failed.");
   };
 
   const togglePick = (id: string) => setPicked((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });

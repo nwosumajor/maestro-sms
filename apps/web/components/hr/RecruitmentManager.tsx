@@ -4,6 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import type { ApplicantDto, JobRequisitionDto, Serialized } from "@sms/types";
 import { postWithStepUp } from "@/lib/stepup";
+import { readApiError } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -46,7 +47,7 @@ export function RecruitmentManager({ requisitions, applicants }: { requisitions:
       const d = (await res.json()) as { email: string; tempPassword: string };
       setMsg(`Hired ${d.email} — temporary password: ${d.tempPassword}`);
       router.refresh();
-    } else setMsg(`Convert failed (${res.status}).`);
+    } else setMsg(await readApiError(res));
   };
 
   const applicantsByReq = (reqId: string) => applicants.filter((a) => a.requisitionId === reqId);

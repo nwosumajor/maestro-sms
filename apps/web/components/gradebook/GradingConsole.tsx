@@ -8,7 +8,7 @@
 // visible to students and parents.
 
 import type { GradingRosterDto, IdNameDto, AcademicSessionDto, Serialized } from "@sms/types";
-import { GRADE_COMPONENTS, computeTermSubjectGrade } from "@sms/types";
+import { GRADE_COMPONENTS, GRADE_TOTAL_MAX, gradeComponentMax, computeTermSubjectGrade } from "@sms/types";
 import * as React from "react";
 import { sendSms } from "@/components/game/play-ui";
 import { Button } from "@/components/ui/button";
@@ -112,7 +112,8 @@ export function GradingConsole({ classes, sessions }: { classes: Named[]; sessio
       <CardHeader>
         <CardTitle className="text-base">Grade a subject</CardTitle>
         <CardDescription>
-          Weighting: {GRADE_COMPONENTS.map((c) => `${c.label} ${c.weight}%`).join(" · ")}. Totals compute automatically.
+          Enter each score out of its maximum — {GRADE_COMPONENTS.map((c) => `${c.label} /${c.max}`).join(" · ")}. The four
+          add up to the term total /{GRADE_TOTAL_MAX}, computed automatically.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -144,9 +145,10 @@ export function GradingConsole({ classes, sessions }: { classes: Named[]; sessio
                   <tr className="border-b border-border text-left text-muted-foreground">
                     <th className="px-3 py-2.5 font-medium">Student</th>
                     {GRADE_COMPONENTS.map((c) => (
-                      <th key={c.key} className="px-2 py-2.5 font-medium">{c.label}<span className="text-muted-foreground/60"> /{c.weight}</span></th>
+                      <th key={c.key} className="px-2 py-2.5 font-medium">{c.label}<span className="text-muted-foreground/60"> /{c.max}</span></th>
                     ))}
                     <th className="px-3 py-2.5 font-medium">Total</th>
+                    <th className="px-3 py-2.5 font-medium">Position</th>
                     <th className="px-3 py-2.5 font-medium">Status</th>
                     <th className="px-3 py-2.5"></th>
                   </tr>
@@ -163,7 +165,7 @@ export function GradingConsole({ classes, sessions }: { classes: Named[]; sessio
                         </td>
                         {(["exam", "midterm", "assignment", "classNote"] as const).map((k) => (
                           <td key={k} className="px-2 py-2">
-                            <Input type="number" min={0} max={100} value={d[k]} className="h-8 w-16 text-xs"
+                            <Input type="number" min={0} max={gradeComponentMax(k)} value={d[k]} className="h-8 w-16 text-xs"
                               onChange={(e) => setField(s.studentId, k, e.target.value)} />
                           </td>
                         ))}
@@ -171,6 +173,7 @@ export function GradingConsole({ classes, sessions }: { classes: Named[]; sessio
                           {pv.total === null ? "—" : `${pv.total} (${pv.grade})`}
                           {!pv.complete && pv.total !== null && <span className="ml-1 text-xs text-muted-foreground">partial</span>}
                         </td>
+                        <td className="px-3 py-2 font-medium">{s.position ?? "—"}</td>
                         <td className="px-3 py-2 text-xs">
                           <span className={s.result?.status === "PUBLISHED" ? "text-primary" : s.result?.status === "PENDING_APPROVAL" ? "text-amber-600 dark:text-amber-500" : "text-muted-foreground"}>
                             {s.result?.status === "PENDING_APPROVAL" ? "AWAITING APPROVAL" : s.result?.status ?? "—"}
@@ -183,7 +186,7 @@ export function GradingConsole({ classes, sessions }: { classes: Named[]; sessio
                     );
                   })}
                   {roster.students.length === 0 && (
-                    <tr><td colSpan={GRADE_COMPONENTS.length + 4} className="px-3 py-4 text-muted-foreground">No students enrolled in this class.</td></tr>
+                    <tr><td colSpan={GRADE_COMPONENTS.length + 5} className="px-3 py-4 text-muted-foreground">No students enrolled in this class.</td></tr>
                   )}
                 </tbody>
               </table>

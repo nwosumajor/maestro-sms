@@ -14,6 +14,8 @@ import type { Principal, TenantContext, TenantTx } from "../../src/integrity/int
 
 interface FakeTables {
   classTeacher?: { classId: string }[];
+  classSubjectTeacher?: { classId: string }[];
+  supervised?: { classId: string }[];
   enrollment?: { classId: string }[];
   enrollmentForChildren?: { classId: string }[];
   parentChild?: { studentId: string }[];
@@ -22,8 +24,10 @@ interface FakeTables {
 
 function makeService(tables: FakeTables) {
   const allClasses = tables.classRows ?? [];
-  const classFindMany = jest.fn(({ where }: { where?: { id?: { in: string[] } } } = {}) => {
+  const classFindMany = jest.fn(({ where }: { where?: { id?: { in: string[] }; supervisorId?: string } } = {}) => {
     if (where?.id?.in) return Promise.resolve(allClasses.filter((c) => where.id!.in.includes(c.id)));
+    // The supervised-classes lookup selects by supervisorId, id only.
+    if (where?.supervisorId) return Promise.resolve((tables.supervised ?? []).map((s) => ({ id: s.classId })));
     return Promise.resolve(allClasses); // school-wide
   });
   const enrollmentFindMany = jest.fn(({ where }: { where?: { studentId?: unknown } }) => {
@@ -39,7 +43,10 @@ function makeService(tables: FakeTables) {
       findMany: jest.fn().mockResolvedValue(tables.classTeacher ?? []),
       findFirst: jest.fn().mockResolvedValue(null),
     },
-    classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue(null) },
+    classSubjectTeacher: {
+      findFirst: jest.fn().mockResolvedValue(null),
+      findMany: jest.fn().mockResolvedValue(tables.classSubjectTeacher ?? []),
+    },
     enrollment: { findMany: enrollmentFindMany },
     parentChild: { findMany: jest.fn().mockResolvedValue(tables.parentChild ?? []) },
   } as unknown as TenantTx;

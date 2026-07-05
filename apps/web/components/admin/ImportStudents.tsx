@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { readApiError } from "@/lib/api-error";
 
 export function ImportStudents({ classes }: { classes: { id: string; name: string }[] }) {
   const router = useRouter();
@@ -29,7 +30,7 @@ export function ImportStudents({ classes }: { classes: { id: string; name: strin
       const r = (await res.json()) as { created: number; skipped: number; errors: string[] };
       setMsg(`Imported ${r.created}, skipped ${r.skipped}${r.errors.length ? `, ${r.errors.length} errors` : ""}.`);
       router.refresh();
-    } else setMsg(`Failed (${res.status}).`);
+    } else setMsg(await readApiError(res));
   };
 
   return (

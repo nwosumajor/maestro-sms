@@ -5,6 +5,7 @@ import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { GradingConsole } from "@/components/gradebook/GradingConsole";
+import { ClassBroadsheet } from "@/components/gradebook/ClassBroadsheet";
 import { ReportCard } from "@/components/gradebook/ReportCard";
 import { SubjectPicker } from "@/components/gradebook/SubjectPicker";
 import { SelectionReview } from "@/components/gradebook/SelectionReview";
@@ -21,6 +22,11 @@ export default async function GradebookPage() {
   const canGrade = hasPermission(user.permissions, "grade.write");
   const canPickSubjects = hasPermission(user.permissions, "subject.select");
   const canApproveSelections = hasPermission(user.permissions, "subject.selection.approve");
+  // The whole-class score sheet is staff-facing (class supervisor / teachers /
+  // leadership). Students and parents read their own report card instead; the
+  // server also 404s a staff member who picks a class they don't supervise/teach.
+  const isStaff = !user.roles.includes("student") && !user.roles.includes("parent");
+  const canViewBroadsheet = hasPermission(user.permissions, "grade.read") && isStaff;
   // Any staff member might be a class supervisor (that's a relationship, not a
   // role), so staff always get the review panel — it renders nothing when the
   // server-scoped list is empty.
@@ -30,7 +36,8 @@ export default async function GradebookPage() {
   const currentSession = sessions.find((s) => s.isCurrent) ?? sessions[0];
 
   // Teachers/admins grade; students & parents read their own / children's cards.
-  const classes = canGrade ? ((await apiGet<Named[]>("/classes/mine")) ?? []) : [];
+  // The class list also feeds the supervisor/teacher broadsheet.
+  const classes = canGrade || canViewBroadsheet ? ((await apiGet<Named[]>("/classes/mine")) ?? []) : [];
 
   let reports: Report[] = [];
   if (!canGrade && currentSession) {
@@ -60,13 +67,18 @@ export default async function GradebookPage() {
         {canPickSubjects && <SubjectPicker />}
         {showReviewPanel && <SelectionReview userId={user.id} canApproveFinal={canApproveSelections} />}
 
-        {canGrade ? (
-          <GradingConsole classes={classes} sessions={sessions} />
-        ) : reports.length > 0 ? (
+        {canGrade && <GradingConsole classes={classes} sessions={sessions} />}
+        {canViewBroadsheet && <ClassBroadsheet classes={classes} sessions={sessions} />}
+
+        {/* Student / parent report cards (their own / children's). */}
+        {!canGrade && reports.length > 0 && (
           <div className="space-y-6">
             {reports.map((r) => <ReportCard key={r.studentId} report={r} />)}
           </div>
-        ) : (
+        )}
+        {/* Empty state only for a pure family viewer — staff have the grading /
+            broadsheet panels above and shouldn't see a "no results" notice. */}
+        {!canGrade && !canViewBroadsheet && reports.length === 0 && (
           <Alert variant="info">
             <AlertTitle>No results yet</AlertTitle>
             <AlertDescription>

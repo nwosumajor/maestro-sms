@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { readApiError } from "@/lib/api-error";
 
 type Cls = Serialized<ClassDto>;
 type Batch = Serialized<PromotionBatchDto>;
@@ -50,7 +51,7 @@ export function PromotionManager({
       const b = (await res.json()) as Batch;
       setMsg(`Staged promotion of ${b.studentCount} students from ${b.sourceClassName} → ${b.targetClassName ?? "graduation"}. Awaiting school-admin approval.`);
       router.refresh();
-    } else setMsg(res.status === 400 ? "Nothing to promote (no active students or no target)." : `Failed (${res.status}).`);
+    } else setMsg(res.status === 400 ? "Nothing to promote (no active students or no target)." : await readApiError(res));
   };
 
   const decide = async (id: string, action: "approve" | "reject") => {
@@ -58,7 +59,7 @@ export function PromotionManager({
     const res = await fetch(`/api/sms/promotions/${id}/${action}`, { method: "POST" });
     setBusy(false);
     if (res.ok) { setMsg(action === "approve" ? "Promotion approved — enrollments moved." : "Promotion rejected."); router.refresh(); }
-    else setMsg(res.status === 403 ? "A different person (not the initiator) must approve." : `Failed (${res.status}).`);
+    else setMsg(res.status === 403 ? "A different person (not the initiator) must approve." : await readApiError(res));
   };
 
   const pending = batches.filter((b) => b.status === "PENDING");

@@ -4,6 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { MODULE_CATALOG, PLANS, PLAN_MODULES, resolveModules, type ModuleKey, type Plan } from "@sms/types";
 import { postWithStepUp } from "@/lib/stepup";
+import { readApiError } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,21 +18,17 @@ const PLAN_LIST: Plan[] = [PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.
 function slugify(s: string): string {
   return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
 }
-/** Surface the API's actual error message (e.g. the slug rule) instead of a code. */
-async function errMessage(res: Response): Promise<string> {
-  try {
-    const body = (await res.json()) as { message?: string | string[] };
-    const m = Array.isArray(body.message) ? body.message.join(", ") : body.message;
-    return m ? `${m}` : `Failed (${res.status}).`;
-  } catch {
-    return `Failed (${res.status}).`;
-  }
-}
+type CreatedAdmin = { email: string; role: string; tempPassword: string };
+type ProvisionResult = { school: string; plan: string; admins: CreatedAdmin[] };
 
 export function Provisioning({ tenants }: { tenants: Tenant[] }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState<string | null>(null);
   const [result, setResult] = React.useState<string | null>(null);
+  // Credentials are shown ONCE. Keep them in structured state (not a transient
+  // string) so they render in a persistent, copyable panel until dismissed.
+  const [credentials, setCredentials] = React.useState<ProvisionResult | null>(null);
+  const [copied, setCopied] = React.useState(false);
 
   // Provision a school + its founding admin tier (school_admin + principal).
   const [name, setName] = React.useState("");
@@ -69,13 +66,24 @@ export function Provisioning({ tenants }: { tenants: Tenant[] }) {
 
   const provision = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name || !slug || !aName || !aEmail) return;
+    // Tell the operator exactly what's missing instead of silently doing nothing.
+    const missing: string[] = [];
+    if (!name.trim()) missing.push("school name");
+    if (!slug.trim()) missing.push("slug");
+    if (!aName.trim()) missing.push("school admin name");
+    if (!aEmail.trim()) missing.push("school admin email");
+    if (pName.trim() && !pEmail.trim()) missing.push("principal email");
+    if (pEmail.trim() && !pName.trim()) missing.push("principal name");
+    if (missing.length > 0) {
+      setResult(`Please fill in: ${missing.join(", ")}.`);
+      return;
+    }
     setBusy("provision");
     setResult(null);
-    const admins = [{ name: aName, email: aEmail, role: "school_admin" }];
-    if (pName && pEmail) admins.push({ name: pName, email: pEmail, role: "principal" });
+    const admins = [{ name: aName.trim(), email: aEmail.trim(), role: "school_admin" }];
+    if (pName.trim() && pEmail.trim()) admins.push({ name: pName.trim(), email: pEmail.trim(), role: "principal" });
     const res = await postWithStepUp("operator/tenants", {
-      name,
+      name: name.trim(),
       slug,
       plan,
       overrides: { enabled: [...extras], disabled: [] },
@@ -83,31 +91,54 @@ export function Provisioning({ tenants }: { tenants: Tenant[] }) {
     });
     setBusy(null);
     if (res.ok) {
-      const d = (await res.json()) as { admins: { email: string; role: string; tempPassword: string }[] };
-      setResult(
-        `School created on the ${plan} plan. ${d.admins.map((a) => `${a.role} ${a.email} — temp password: ${a.tempPassword}`).join(" · ")}`,
-      );
+      const d = (await res.json()) as { school: { name: string }; admins: CreatedAdmin[] };
+      setCredentials({ school: d.school.name, plan, admins: d.admins });
+      setCopied(false);
+      setResult(null);
       setName(""); setSlug(""); setSlugTouched(false); setAName(""); setAEmail(""); setPName(""); setPEmail("");
       setPlan(PLANS.ENTERPRISE); setExtras(new Set());
       router.refresh();
-    } else setResult(await errMessage(res));
+    } else setResult(await readApiError(res));
+  };
+
+  const copyCredentials = async (c: ProvisionResult) => {
+    const text = [
+      `School: ${c.school} (${c.plan} plan)`,
+      ...c.admins.map((a) => `${a.role}: ${a.email} / ${a.tempPassword}`),
+    ].join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
   };
 
   const addAdmin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!schoolId || !bName || !bEmail) return;
+    const missing: string[] = [];
+    if (!schoolId) missing.push("school");
+    if (!bName.trim()) missing.push("name");
+    if (!bEmail.trim()) missing.push("email");
+    if (missing.length > 0) {
+      setResult(`Please fill in: ${missing.join(", ")}.`);
+      return;
+    }
     setBusy("admin");
     setResult(null);
     const res = await postWithStepUp(`operator/tenants/${schoolId}/admins`, {
-      name: bName, email: bEmail, role: bRole,
+      name: bName.trim(), email: bEmail.trim(), role: bRole,
     });
     setBusy(null);
     if (res.ok) {
-      const d = (await res.json()) as { email: string; tempPassword: string };
-      setResult(`Admin ${d.email} added — temporary password: ${d.tempPassword}`);
+      const d = (await res.json()) as CreatedAdmin;
+      const schoolName = tenants.find((t) => t.id === schoolId)?.name ?? "the school";
+      setCredentials({ school: schoolName, plan: "existing", admins: [d] });
+      setCopied(false);
+      setResult(null);
       setBName(""); setBEmail("");
       router.refresh();
-    } else setResult(await errMessage(res));
+    } else setResult(await readApiError(res));
   };
 
   return (
@@ -206,7 +237,49 @@ export function Provisioning({ tenants }: { tenants: Tenant[] }) {
           </form>
         )}
 
-        {result && <p className="rounded-md bg-muted px-3 py-2 text-sm font-mono">{result}</p>}
+        {result && (
+          <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {result}
+          </p>
+        )}
+
+        {credentials && (
+          <div className="space-y-2 rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-3">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-semibold">
+                {credentials.plan === "existing"
+                  ? `Admin added to ${credentials.school}`
+                  : `${credentials.school} created on the ${credentials.plan} plan`}
+              </p>
+              <button
+                type="button"
+                onClick={() => void copyCredentials(credentials)}
+                className="rounded-md border border-border bg-background px-2 py-1 text-xs font-medium hover:bg-muted"
+              >
+                {copied ? "Copied ✓" : "Copy all"}
+              </button>
+            </div>
+            <p className="text-xs font-medium text-amber-700 dark:text-amber-400">
+              ⚠ These temporary passwords are shown only once. Copy and share them securely now.
+            </p>
+            <ul className="space-y-1">
+              {credentials.admins.map((a) => (
+                <li key={a.email} className="rounded bg-background/70 px-2 py-1 font-mono text-xs">
+                  <span className="text-muted-foreground">{a.role}</span> {a.email}
+                  {" · "}
+                  <span className="font-semibold">{a.tempPassword}</span>
+                </li>
+              ))}
+            </ul>
+            <button
+              type="button"
+              onClick={() => setCredentials(null)}
+              className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

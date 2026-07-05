@@ -9,6 +9,7 @@ import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { readApiError } from "@/lib/api-error";
 
 type Settings = Serialized<GameSettingsDto>;
 
@@ -28,7 +29,7 @@ export function GameSettingsForm({ initial }: { initial: Settings }) {
       body: JSON.stringify(s),
     });
     setBusy(false);
-    setMsg(res.ok ? "Settings saved." : `Failed (${res.status}).`);
+    setMsg(res.ok ? "Settings saved." : await readApiError(res));
   };
 
   return (

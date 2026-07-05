@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { dateTime, titleCase } from "@/lib/format";
+import { readApiError } from "@/lib/api-error";
 
 export type Application = Serialized<AdmissionApplicationDto>;
 
@@ -33,7 +34,7 @@ export function AdmissionsReview({ apps }: { apps: Application[] }) {
     });
     setBusy(null);
     if (res.ok) router.refresh();
-    else setNote(res.status === 403 ? "You are not the approver for the current stage." : `Failed (${res.status}).`);
+    else setNote(res.status === 403 ? "You are not the approver for the current stage." : await readApiError(res));
   };
 
   const schedule = async (id: string, examDate: string, examNote: string) => {
@@ -47,7 +48,7 @@ export function AdmissionsReview({ apps }: { apps: Application[] }) {
     });
     setBusy(null);
     if (res.ok) router.refresh();
-    else setNote(`Failed to schedule (${res.status}).`);
+    else setNote(await readApiError(res));
   };
 
   return (

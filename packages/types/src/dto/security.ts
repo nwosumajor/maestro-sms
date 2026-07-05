@@ -31,3 +31,10 @@ export interface AuditLogRowDto {
   actorName: string;
   createdAt: Date;
 }
+
+/** A page of audit rows + an opaque keyset cursor for the next page (null when
+ *  the last page has been reached). */
+export interface AuditLogPageDto {
+  entries: AuditLogRowDto[];
+  nextCursor: string | null;
+}

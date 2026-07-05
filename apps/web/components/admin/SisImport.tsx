@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { readApiError } from "@/lib/api-error";
 
 type Batch = Serialized<StudentImportBatchDto>;
 
@@ -84,7 +85,7 @@ export function SisImport({ batches, currentUserId }: { batches: Batch[]; curren
       const b = (await res.json()) as Batch;
       setMsg(`Staged ${b.summary?.total ?? rows.length} rows (${b.summary?.newCount ?? "?"} new, ${b.summary?.duplicateCount ?? "?"} duplicate). Awaiting approval by a different admin.`);
       router.refresh();
-    } else setMsg(`Failed to stage (${res.status}).`);
+    } else setMsg(await readApiError(res));
   };
 
   const decide = async (id: string, action: "approve" | "reject") => {
@@ -98,7 +99,7 @@ export function SisImport({ batches, currentUserId }: { batches: Batch[]; curren
         setMsg(`Approved — created ${b.summary?.created ?? 0}, skipped ${b.summary?.skipped ?? 0}.`);
       } else setMsg("Batch rejected.");
       router.refresh();
-    } else setMsg(res.status === 403 ? "A different admin (not the uploader) must approve." : `Failed (${res.status}).`);
+    } else setMsg(res.status === 403 ? "A different admin (not the uploader) must approve." : await readApiError(res));
   };
 
   const pending = batches.filter((b) => b.status === "PENDING");

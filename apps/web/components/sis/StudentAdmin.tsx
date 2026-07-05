@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { sendWithStepUp } from "@/lib/stepup";
+import { readApiError } from "@/lib/api-error";
 
 type Profile = Serialized<Partial<StudentProfileDto>>;
 type Contact = Serialized<ContactDto>;
@@ -67,7 +69,7 @@ export function StudentAdmin({
     e.preventDefault(); setPfBusy(true); setMsg(null);
     const body = Object.fromEntries(Object.entries(pf).map(([k, v]) => [k, v === "" ? null : v]));
     const res = await send(`/students/${studentId}/profile`, "PUT", body);
-    setPfBusy(false); setMsg(res.ok ? "Profile saved." : `Profile failed (${res.status}).`);
+    setPfBusy(false); setMsg(res.ok ? "Profile saved." : await readApiError(res));
     if (res.ok) router.refresh();
   };
 
@@ -101,28 +103,11 @@ export function StudentAdmin({
   const saveMedical = async (e: React.FormEvent) => {
     e.preventDefault(); setMdBusy(true); setMsg(null);
     const body = Object.fromEntries(Object.entries(md).map(([k, v]) => [k, v === "" ? null : v]));
-    const path = `/students/${studentId}/medical`;
-    let res = await send(path, "PUT", body);
-    // Medical edits require a fresh step-up re-auth: on 403, confirm password,
-    // mint a step-up token, and retry once with it.
-    if (res.status === 403) {
-      const pw = window.prompt("This is sensitive. Confirm your password to continue:");
-      if (pw) {
-        const su = await fetch("/api/sms/security/stepup", {
-          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: pw }),
-        });
-        if (su.ok) {
-          const { token } = (await su.json()) as { token: string };
-          res = await fetch(`/api/sms${path}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json", "x-stepup": token },
-            body: JSON.stringify(body),
-          });
-        }
-      }
-    }
+    // Medical edits are step-up gated: the shared sender handles the password
+    // re-auth (prompt + retry on a wrong password) transparently.
+    const res = await sendWithStepUp("PUT", `students/${studentId}/medical`, body);
     setMdBusy(false);
-    setMsg(res.ok ? "Medical record saved." : res.status === 403 ? "Step-up required." : `Medical failed (${res.status}).`);
+    setMsg(res.ok ? "Medical record saved." : await readApiError(res));
     if (res.ok) router.refresh();
   };
 

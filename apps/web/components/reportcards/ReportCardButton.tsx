@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Button } from "@/components/ui/button";
+import { readApiError } from "@/lib/api-error";
 
 export function ReportCardButton({ studentId }: { studentId: string }) {
   const [busy, setBusy] = React.useState(false);
@@ -11,7 +12,7 @@ export function ReportCardButton({ studentId }: { studentId: string }) {
     setBusy(true); setMsg(null);
     const res = await fetch(`/api/sms/reportcards/${studentId}/generate`, { method: "POST" });
     setBusy(false);
-    if (!res.ok) { setMsg(`Failed (${res.status}).`); return; }
+    if (!res.ok) { setMsg(await readApiError(res)); return; }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");

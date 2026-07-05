@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { readApiError } from "@/lib/api-error";
 
 type Type = Serialized<LeaveTypeDto>;
 type Request = Serialized<LeaveRequestDto>;
@@ -35,7 +36,7 @@ export function LeaveAdmin({ types, requests, coverage }: { types: Type[]; reque
     });
     setBusy(false);
     if (res.ok) { setName(""); setDays(""); router.refresh(); }
-    else setMsg(`Failed (${res.status}).`);
+    else setMsg(await readApiError(res));
   };
 
   return (

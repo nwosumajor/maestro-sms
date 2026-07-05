@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { postWithStepUp } from "@/lib/stepup";
+import { readApiError } from "@/lib/api-error";
 
 export function MfaSetup({ enabled }: { enabled: boolean }) {
   const router = useRouter();
@@ -37,19 +39,11 @@ export function MfaSetup({ enabled }: { enabled: boolean }) {
   const disable = async () => {
     const c = prompt("Enter a current 2FA code to disable:");
     if (!c) return;
-    // Disabling MFA requires a fresh step-up re-auth.
-    const pw = prompt("Confirm your password (step-up):");
-    if (!pw) return;
-    const su = await fetch("/api/sms/security/stepup", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: pw }),
-    });
-    if (!su.ok) { setMsg("Re-authentication failed."); return; }
-    const { token } = (await su.json()) as { token: string };
-    const res = await fetch("/api/sms/security/mfa/disable", {
-      method: "POST", headers: { "Content-Type": "application/json", "x-stepup": token }, body: JSON.stringify({ code: c }),
-    });
+    // Disabling MFA is step-up gated: the shared sender prompts for the password
+    // re-auth (and retries on a wrong one) before retrying the disable with it.
+    const res = await postWithStepUp("security/mfa/disable", { code: c });
     if (res.ok) { setMsg("Two-factor disabled."); router.refresh(); }
-    else setMsg(`Failed (${res.status}).`);
+    else setMsg(await readApiError(res));
   };
 
   if (enabled) {

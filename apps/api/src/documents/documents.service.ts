@@ -12,7 +12,7 @@
 // Downloads of a student's document are audit-logged. Not-visible -> 404.
 // =============================================================================
 
-import { ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import type { DocumentTypeValue } from "@sms/types";
 import {
@@ -124,6 +124,53 @@ export class DocumentsService {
       await this.notifyGuardians(p, doc.studentId, doc.title);
     }
     return doc;
+  }
+
+  /** Store the actual file bytes through the API (works with the local stub AND
+   *  S3/R2 via the same StorageProvider) and flip the doc to UPLOADED. This is
+   *  the API-mediated alternative to a direct presigned PUT — right for the small
+   *  PDFs/receipts the Vault holds, and the only path that works in local dev. */
+  async uploadBytes(p: Principal, id: string, body: Buffer, contentType?: string) {
+    if (body.length === 0) throw new BadRequestException("empty file");
+    const existing = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const doc = await tx.document.findFirst({ where: { id } });
+      if (!doc) throw new NotFoundException("Document not found");
+      if (doc.studentId) await this.assertCanAccessStudent(tx, p, doc.studentId);
+      else if (!this.isStaffWide(p)) throw new NotFoundException("Document not found");
+      return doc;
+    });
+    await this.storage.upload({
+      key: existing.storageKey,
+      body,
+      contentType: contentType || existing.contentType,
+    });
+    const updated = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const u = await tx.document.update({
+        where: { id },
+        data: { status: "UPLOADED", sizeBytes: body.length },
+      });
+      await this.log(tx, p, "document.upload", "document", id, { bytes: body.length });
+      return u;
+    });
+    if (updated.studentId && NOTIFYING_TYPES.has(updated.type as DocumentTypeValue)) {
+      await this.notifyGuardians(p, updated.studentId, updated.title);
+    }
+    return updated;
+  }
+
+  /** Stream a document's bytes through the API (access-checked + audited). Works
+   *  with the stub (filesystem) and S3/R2 (GetObject) — the browser needs no
+   *  bucket credentials. */
+  async streamFile(p: Principal, id: string): Promise<{ buffer: Buffer; filename: string; contentType: string }> {
+    const doc = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const d = await this.requireVisible(tx, p, id);
+      if (d.status !== "UPLOADED") throw new NotFoundException("Document not available");
+      await this.log(tx, p, "document.download", "document", id, { studentId: d.studentId });
+      return d;
+    });
+    const bytes = await this.storage.download(doc.storageKey);
+    if (!bytes) throw new NotFoundException("File not found in storage");
+    return { buffer: bytes, filename: doc.title, contentType: doc.contentType };
   }
 
   // --- reads -----------------------------------------------------------------

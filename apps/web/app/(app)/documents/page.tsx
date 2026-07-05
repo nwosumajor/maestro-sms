@@ -73,6 +73,7 @@ export default async function DocumentsPage() {
                       <td className="px-4 py-2.5 text-right">
                         <DocumentActions
                           id={d.id}
+                          title={d.title}
                           canDownload={d.status === "UPLOADED"}
                           canDelete={canWrite}
                         />

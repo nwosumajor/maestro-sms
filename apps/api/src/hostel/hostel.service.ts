@@ -223,7 +223,7 @@ export class HostelService {
   async updateRoom(
     p: Principal,
     roomId: string,
-    input: { roomType?: string; capacity?: number; rentMinor?: number; customFields?: Json },
+    input: { roomNumber?: string; roomType?: string; capacity?: number; rentMinor?: number; customFields?: Json },
   ): Promise<HostelRoomDto> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const room = await tx.hostelRoom.findFirst({ where: { id: roomId } });
@@ -231,9 +231,25 @@ export class HostelService {
       await this.assertHostelInScope(tx, p, room.hostelId);
       if (input.capacity !== undefined && input.capacity < 1) throw new BadRequestException("capacity must be at least 1");
       if (input.rentMinor !== undefined && input.rentMinor < 0) throw new BadRequestException("rent cannot be negative");
+      // A room number must stay unique within its hostel.
+      if (input.roomNumber !== undefined && input.roomNumber !== room.roomNumber) {
+        const clash = await tx.hostelRoom.findFirst({
+          where: { hostelId: room.hostelId, roomNumber: input.roomNumber, id: { not: roomId } },
+          select: { id: true },
+        });
+        if (clash) throw new ConflictException(`Room ${input.roomNumber} already exists in this hostel`);
+      }
+      // Shrinking capacity below the current occupancy would strand allocations.
+      if (input.capacity !== undefined) {
+        const occupied = await tx.hostelAllocation.count({ where: { roomId, status: "ACTIVE" } });
+        if (input.capacity < occupied) {
+          throw new ConflictException(`Capacity can't be below the ${occupied} student(s) currently allocated`);
+        }
+      }
       await tx.hostelRoom.update({
         where: { id: roomId },
         data: {
+          ...(input.roomNumber !== undefined ? { roomNumber: input.roomNumber } : {}),
           ...(input.roomType !== undefined ? { roomType: input.roomType } : {}),
           ...(input.capacity !== undefined ? { capacity: input.capacity } : {}),
           ...(input.rentMinor !== undefined ? { rentMinor: input.rentMinor } : {}),

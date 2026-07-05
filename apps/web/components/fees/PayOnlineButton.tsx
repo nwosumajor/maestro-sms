@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Button } from "@/components/ui/button";
+import { readApiError } from "@/lib/api-error";
 
 export function PayOnlineButton({ invoiceId }: { invoiceId: string }) {
   const [busy, setBusy] = React.useState(false);
@@ -16,7 +17,7 @@ export function PayOnlineButton({ invoiceId }: { invoiceId: string }) {
       window.location.href = data.authorizationUrl;
       return;
     }
-    setMsg(res.status === 503 ? "Online payments are not configured for this school." : `Failed (${res.status}).`);
+    setMsg(res.status === 503 ? "Online payments are not configured for this school." : await readApiError(res));
   };
 
   return (

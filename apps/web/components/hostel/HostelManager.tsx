@@ -54,6 +54,7 @@ export function HostelManager({
   // schedule fees
   const [feeHostel, setFeeHostel] = React.useState("");
   const [feeDue, setFeeDue] = React.useState("");
+  const [feeMsg, setFeeMsg] = React.useState<{ ok: boolean; text: string } | null>(null);
 
   const run = async (fn: () => Promise<{ ok: boolean; status: number; error: string | null }>, ok: string) => {
     setBusy(true);
@@ -64,7 +65,7 @@ export function HostelManager({
       setMsg(ok);
       router.refresh();
     } else {
-      setMsg(res.error ?? `Failed (${res.status}).`);
+      setMsg(res.error ?? "Request failed.");
     }
   };
 
@@ -137,10 +138,25 @@ export function HostelManager({
                       <td className="py-1"><Badge variant={r.available > 0 ? "secondary" : "outline"}>{r.available}</Badge></td>
                       {canManage && (
                         <td className="py-1">
-                          <Button variant="ghost" size="sm" className="text-destructive" disabled={busy} onClick={() => {
-                            if (!confirm(`Delete room ${r.roomNumber}? Only possible if it has never had an allocation.`)) return;
-                            void run(() => sendSms("DELETE", `hostels/rooms/${r.id}`), "Room deleted.");
-                          }}>Delete</Button>
+                          <div className="flex gap-1">
+                            <Button variant="ghost" size="sm" disabled={busy} onClick={() => {
+                              const roomNumber = prompt("Room number", r.roomNumber);
+                              if (roomNumber === null || !roomNumber.trim()) return;
+                              const capacity = prompt("Capacity (beds)", String(r.capacity));
+                              if (capacity === null) return;
+                              const rent = prompt("Rent (kobo)", String(r.rentMinor));
+                              if (rent === null) return;
+                              void run(() => sendSms("PUT", `hostels/rooms/${r.id}`, {
+                                roomNumber: roomNumber.trim(),
+                                capacity: Number(capacity),
+                                rentMinor: Number(rent),
+                              }), "Room updated.");
+                            }}>Edit</Button>
+                            <Button variant="ghost" size="sm" className="text-destructive" disabled={busy} onClick={() => {
+                              if (!confirm(`Delete room ${r.roomNumber}? Only possible if it has never had an allocation.`)) return;
+                              void run(() => sendSms("DELETE", `hostels/rooms/${r.id}`), "Room deleted.");
+                            }}>Delete</Button>
+                          </div>
                         </td>
                       )}
                     </tr>
@@ -198,12 +214,30 @@ export function HostelManager({
             </div>
             <div className="space-y-1.5"><Label>Due date</Label><Input type="date" value={feeDue} onChange={(e) => setFeeDue(e.target.value)} /></div>
             <Button disabled={busy || !feeDue} onClick={async () => {
-              setMsg(null);
-              const res = await postSms<{ pendingApproval?: boolean }>("hostels/fees/schedule", { hostelId: feeHostel || undefined, dueDate: new Date(feeDue).toISOString() });
-              if (res.ok && res.data?.pendingApproval) setMsg("Submitted for approval — a school admin or principal must approve this fee run before any invoice is posted (maker-checker).");
-              else if (res.ok) { setMsg("Hostel fees scheduled."); router.refresh(); }
-              else setMsg(res.error ?? `Failed (${res.status}).`);
-            }}>Schedule fees</Button>
+              setBusy(true); setFeeMsg(null);
+              const res = await postSms<{ pendingApproval?: boolean; invoicesCreated?: number; studentsBilled?: number; totalBilledMinor?: number }>(
+                "hostels/fees/schedule",
+                { hostelId: feeHostel || undefined, dueDate: new Date(feeDue).toISOString() },
+              );
+              setBusy(false);
+              if (res.ok && res.data?.pendingApproval) {
+                setFeeMsg({ ok: true, text: "Submitted for approval — a school admin or principal must approve this fee run before any invoice is posted (maker-checker). Track it under Approvals." });
+              } else if (res.ok) {
+                const d = res.data;
+                const invoices = d?.invoicesCreated ?? 0;
+                if (invoices === 0) {
+                  setFeeMsg({ ok: true, text: "Fee run complete — but no invoices were raised (no active allocations in the selected scope, or rent is ₦0)." });
+                } else {
+                  setFeeMsg({ ok: true, text: `Done ✓ — raised ${invoices} invoice line item(s) totalling ${money(d?.totalBilledMinor ?? 0)} across ${d?.studentsBilled ?? 0} student(s). They now show on the students' invoices.` });
+                }
+                router.refresh();
+              } else {
+                setFeeMsg({ ok: false, text: res.error ?? "Request failed." });
+              }
+            }}>{busy ? "Scheduling…" : "Schedule fees"}</Button>
+            {feeMsg && (
+              <p className={`w-full text-sm ${feeMsg.ok ? "text-foreground" : "text-destructive"}`}>{feeMsg.text}</p>
+            )}
           </CardContent>
         </Card>
       )}

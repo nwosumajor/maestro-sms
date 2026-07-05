@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { dateTime, titleCase } from "@/lib/format";
+import { readApiError } from "@/lib/api-error";
 
 export type Grant = Serialized<PrivilegeGrantDto>;
 
@@ -46,13 +47,13 @@ export function ElevationPanel({
     });
     setBusy(false);
     if (res.ok) { setPermission(""); setReason(""); setMsg(breakGlass ? "Break-glass granted (flagged)." : "Requested — awaiting approval."); router.refresh(); }
-    else setMsg(`Failed (${res.status}).`);
+    else setMsg(await readApiError(res));
   };
 
   const act = async (id: string, action: "approve" | "revoke") => {
     const res = await fetch(`/api/sms/security/elevation/${id}/${action}`, { method: "POST" });
     if (res.ok) router.refresh();
-    else setMsg(res.status === 403 ? "You can't approve your own request." : `Failed (${res.status}).`);
+    else setMsg(res.status === 403 ? "You can't approve your own request." : await readApiError(res));
   };
 
   return (

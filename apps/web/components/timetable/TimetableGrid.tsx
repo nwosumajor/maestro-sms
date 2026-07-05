@@ -92,7 +92,7 @@ export function TimetableGrid({
       : await sendSms("POST", "timetable/entries", { classId, dayOfWeek: day, periodId, ...body });
     setBusy(false);
     if (res.ok) { setEditing(null); router.refresh(); }
-    else setMsg(res.error ?? `Failed (${res.status}).`);
+    else setMsg(res.error ?? "Request failed.");
   };
 
   const del = async (e: Entry) => {
@@ -101,7 +101,7 @@ export function TimetableGrid({
     const res = await sendSms("DELETE", `timetable/entries/${e.id}`);
     setBusy(false);
     if (res.ok) { setEditing(null); router.refresh(); }
-    else setMsg(res.error ?? `Failed (${res.status}).`);
+    else setMsg(res.error ?? "Request failed.");
   };
 
   const editorProps = { form, setForm, teachers, rooms, busy, onCancel: () => setEditing(null) };

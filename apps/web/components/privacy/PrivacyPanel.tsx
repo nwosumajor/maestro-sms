@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { readApiError } from "@/lib/api-error";
 
 export function PrivacyPanel({ studentId }: { studentId: string }) {
   const [busy, setBusy] = React.useState(false);
@@ -37,7 +38,7 @@ export function PrivacyPanel({ studentId }: { studentId: string }) {
     });
     setBusy(false);
     if (res.ok) { setReason(""); setMsg("Erasure request submitted for review."); }
-    else setMsg(`Failed (${res.status}).`);
+    else setMsg(await readApiError(res));
   };
 
   return (

@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { readApiError } from "@/lib/api-error";
 
 type Profile = Serialized<SelfProfileDto>;
 
@@ -45,7 +46,7 @@ export function MyProfile({ profile }: { profile: Profile | null }) {
       }),
     });
     setBusy(false);
-    if (res.ok) { setMsg("Saved."); router.refresh(); } else setMsg(`Failed (${res.status}).`);
+    if (res.ok) { setMsg("Saved."); router.refresh(); } else setMsg(await readApiError(res));
   };
 
   const erasePersonal = async () => {
@@ -57,7 +58,7 @@ export function MyProfile({ profile }: { profile: Profile | null }) {
     if (res.ok) {
       setPhone(""); setAddress(""); setNextOfKin(""); setNextOfKinPhone(""); setBankName(""); setBankAccount("");
       setMsg("Personal details erased."); router.refresh();
-    } else setMsg(`Failed (${res.status}).`);
+    } else setMsg(await readApiError(res));
   };
 
   return (

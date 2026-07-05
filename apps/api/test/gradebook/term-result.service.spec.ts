@@ -104,9 +104,9 @@ describe("TermResultService — grading", () => {
     });
     const res = await service.upsertResult(p(), {
       termId: "t1", classId: "c1", subjectId: "sub1", studentId: "stu1",
-      exam: 50, midterm: 80, assignment: 100, classNote: 100,
+      exam: 45, midterm: 12, assignment: 5, classNote: 4,
     });
-    // 50*.6 + 80*.2 + 100*.1 + 100*.1 = 66 — computed server-side.
+    // Raw marks summed (each out of its max): 45 + 12 + 5 + 4 = 66 — computed server-side.
     expect(res.total).toBe(66);
     expect(res.grade).toBe("B");
     expect(upsert).toHaveBeenCalled();
@@ -143,7 +143,7 @@ describe("TermResultService — grading", () => {
     ).rejects.toThrow(/not enrolled/i);
   });
 
-  it("component scores outside 0..100 are rejected", async () => {
+  it("a component mark above its own maximum is rejected (exam max 60)", async () => {
     const { service } = makeService({
       ...baseGrade,
       classSubjectTeacher: { id: "cst1" },
@@ -154,7 +154,21 @@ describe("TermResultService — grading", () => {
       service.upsertResult(p(), {
         termId: "t1", classId: "c1", subjectId: "sub1", studentId: "stu1", exam: 120,
       }),
-    ).rejects.toThrow(/between 0 and 100/i);
+    ).rejects.toThrow(/between 0 and 60/i);
+  });
+
+  it("a component mark above a SMALLER maximum is rejected (midterm max 20)", async () => {
+    const { service } = makeService({
+      ...baseGrade,
+      classSubjectTeacher: { id: "cst1" },
+      enrollment: { id: "e1" },
+      student: { id: "stu1", name: "Ada" },
+    });
+    await expect(
+      service.upsertResult(p(), {
+        termId: "t1", classId: "c1", subjectId: "sub1", studentId: "stu1", midterm: 25,
+      }),
+    ).rejects.toThrow(/between 0 and 20/i);
   });
 
   it("editing is blocked while the batch awaits head-teacher/principal approval", async () => {
@@ -167,7 +181,7 @@ describe("TermResultService — grading", () => {
     });
     await expect(
       service.upsertResult(p(), {
-        termId: "t1", classId: "c1", subjectId: "sub1", studentId: "stu1", exam: 90,
+        termId: "t1", classId: "c1", subjectId: "sub1", studentId: "stu1", exam: 55,
       }),
     ).rejects.toThrow(/awaiting head-teacher\/principal approval/i);
   });
@@ -213,7 +227,7 @@ describe("TermResultService — grading", () => {
       existingResult: { status: "PUBLISHED" },
     });
     await service.upsertResult(p(), {
-      termId: "t1", classId: "c1", subjectId: "sub1", studentId: "stu1", exam: 90,
+      termId: "t1", classId: "c1", subjectId: "sub1", studentId: "stu1", exam: 55,
     });
     const call = upsert.mock.calls[0][0] as { update: Record<string, unknown> };
     expect(call.update.status).toBe("DRAFT");

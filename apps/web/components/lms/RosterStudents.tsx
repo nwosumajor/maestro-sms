@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { readApiError } from "@/lib/api-error";
 
 type Student = { id: string; name: string; email: string };
 
@@ -30,7 +31,7 @@ export function RosterStudents({
     });
     setBusy(null);
     if (res.ok) router.refresh();
-    else setMsg(`Failed (${res.status}).`);
+    else setMsg(await readApiError(res));
   };
 
   return (

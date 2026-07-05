@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { money } from "@/lib/format";
+import { readApiError } from "@/lib/api-error";
 
 type Student = Serialized<IdNameDto>;
 type FeeItem = Serialized<FeeItemDto>;
@@ -50,7 +51,7 @@ export function FeesAdmin({ students, items }: { students: Student[]; items: Fee
       }),
     });
     setInvBusy(false);
-    if (!res.ok) { setInvMsg(`Failed (${res.status}).`); return; }
+    if (!res.ok) { setInvMsg(await readApiError(res)); return; }
     setInvMsg("Invoice created as DRAFT. Open it to issue.");
     setLines([{ description: "", amountMajor: "", quantity: 1 }]);
     router.refresh();

@@ -48,7 +48,7 @@ export function EmployeeRow({ e, canWrite }: { e: Employee; canWrite: boolean })
     if (res.ok) {
       setEditing(false);
       router.refresh();
-    } else setMsg(res.error ?? `Failed (${res.status}).`);
+    } else setMsg(res.error ?? "Request failed.");
   };
 
   const sel = "h-8 rounded-md border border-input bg-background px-2 text-sm";

@@ -4,6 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import type { EmployeeDto, SalaryChangeDto, Serialized } from "@sms/types";
 import { postWithStepUp } from "@/lib/stepup";
+import { readApiError } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -51,7 +52,7 @@ export function SalaryChanges({
     });
     setBusy(null);
     if (res.ok) { setSalaryMajor(""); setReason(""); setMsg("Requested — needs a different HR approver."); router.refresh(); }
-    else setMsg(`Failed (${res.status}).`);
+    else setMsg(await readApiError(res));
   };
 
   const decide = async (id: string, approve: boolean) => {
@@ -60,7 +61,7 @@ export function SalaryChanges({
     const res = await postWithStepUp(`hr/salary/changes/${id}/decide`, { approve });
     setBusy(null);
     if (res.ok) router.refresh();
-    else setMsg(res.status === 403 ? "A salary change must be approved by someone other than the requester." : `Failed (${res.status}).`);
+    else setMsg(res.status === 403 ? "A salary change must be approved by someone other than the requester." : await readApiError(res));
   };
 
   return (

@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { readApiError } from "@/lib/api-error";
 
 export function CreateAssessment({ classes }: { classes: { id: string; name: string }[] }) {
   const router = useRouter();
@@ -38,7 +39,7 @@ export function CreateAssessment({ classes }: { classes: { id: string; name: str
     if (res.ok) {
       setF(blank);
       router.refresh();
-    } else setMsg(`Failed (${res.status}).`);
+    } else setMsg(await readApiError(res));
   };
 
   return (

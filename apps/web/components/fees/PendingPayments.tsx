@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { money, titleCase } from "@/lib/format";
+import { readApiError } from "@/lib/api-error";
 
 export type PendingPayment = Serialized<PendingPaymentDto>;
 
@@ -20,7 +21,7 @@ export function PendingPayments({ payments }: { payments: PendingPayment[] }) {
     const res = await fetch(`/api/sms/payments/${id}/${action}`, { method: "POST" });
     setBusy(null);
     if (res.ok) router.refresh();
-    else setMsg(res.status === 403 ? "You can't approve a payment you recorded." : `Failed (${res.status}).`);
+    else setMsg(res.status === 403 ? "You can't approve a payment you recorded." : await readApiError(res));
   };
 
   if (payments.length === 0) return null;

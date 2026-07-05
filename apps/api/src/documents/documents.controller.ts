@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Post, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Query, Res, StreamableFile } from "@nestjs/common";
+import type { Response } from "express";
 import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
 import type { DocumentRowDto } from "@sms/types";
@@ -18,6 +19,13 @@ const createSchema = z.object({
   sizeBytes: z.number().int().min(0).optional(),
 });
 const confirmSchema = z.object({ sizeBytes: z.number().int().min(0).optional() });
+// Direct byte upload through the API (base64, like the school-logo upload). ~14MB
+// base64 cap keeps a stray huge file from exhausting memory; report cards/receipts
+// are far smaller.
+const uploadBytesSchema = z.object({
+  dataBase64: z.string().min(1).max(14_000_000),
+  contentType: z.string().min(1).max(120).optional(),
+});
 
 @RequireModule(MODULES.DOCUMENTS)
 @Controller("documents")
@@ -43,6 +51,35 @@ export class DocumentsController {
     @Body(new ZodValidationPipe(confirmSchema)) body: z.infer<typeof confirmSchema>,
   ) {
     return this.documents.confirmUpload(p, id, body.sizeBytes);
+  }
+
+  /** Upload the file bytes through the API (base64) and mark the doc UPLOADED. */
+  @Post(":id/upload-bytes")
+  @RequirePermission(DOCUMENT_PERMISSIONS.DOCUMENT_WRITE)
+  uploadBytes(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(uploadBytesSchema)) body: z.infer<typeof uploadBytesSchema>,
+  ) {
+    const raw = body.dataBase64.replace(/^data:[^;]+;base64,/, "");
+    const buffer = Buffer.from(raw, "base64");
+    return this.documents.uploadBytes(p, id, buffer, body.contentType);
+  }
+
+  /** Stream the file bytes back through the API (access-checked + audited). */
+  @Get(":id/file")
+  @RequirePermission(DOCUMENT_PERMISSIONS.DOCUMENT_READ)
+  async file(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const { buffer, filename, contentType } = await this.documents.streamFile(p, id);
+    res.set({
+      "Content-Type": contentType || "application/octet-stream",
+      "Content-Disposition": `attachment; filename="${filename.replace(/"/g, "")}"`,
+    });
+    return new StreamableFile(buffer);
   }
 
   @Get()

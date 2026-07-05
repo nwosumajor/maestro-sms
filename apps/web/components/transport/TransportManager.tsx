@@ -46,7 +46,7 @@ export function TransportManager({
     setBusy(true); setMsg(null);
     const res = await fn();
     setBusy(false);
-    if (res.ok) { setMsg(ok); router.refresh(); } else setMsg(res.error ?? `Failed (${res.status}).`);
+    if (res.ok) { setMsg(ok); router.refresh(); } else setMsg(res.error ?? "Request failed.");
   };
 
   const activeRoutes = routes.filter((r) => r.status === "ACTIVE");
@@ -199,7 +199,7 @@ export function TransportManager({
               const res = await postSms<{ pendingApproval?: boolean }>("transport/fees/schedule", { routeId: feeRoute || undefined, dueDate: new Date(feeDue).toISOString() });
               if (res.ok && res.data?.pendingApproval) setMsg("Submitted for approval — a school admin or principal must approve this fee run before any invoice is posted (maker-checker).");
               else if (res.ok) { setMsg("Transport fees scheduled."); router.refresh(); }
-              else setMsg(res.error ?? `Failed (${res.status}).`);
+              else setMsg(res.error ?? "Request failed.");
             }}>Schedule fees</Button>
           </CardContent>
         </Card>

@@ -81,12 +81,14 @@ describe("SecurityService elevation", () => {
     await expect(service.approveElevation(principal("u-2"), "g-1")).rejects.toThrow(/not pending/i);
   });
 
-  it("audit viewer resolves actor names", async () => {
+  it("audit viewer resolves actor names and paginates (keyset)", async () => {
     const { service, tx } = makeService();
     (tx.auditLog as unknown as { findMany: jest.Mock }).findMany = jest.fn().mockResolvedValue([
-      { id: "a-1", actorId: "u-1", action: "fee.invoice.create", entity: "invoice", createdAt: new Date() },
+      { id: "a-1", actorId: "u-1", action: "fee.invoice.create", entity: "invoice", entityId: "inv-1", createdAt: new Date() },
     ]);
-    const rows = (await service.listAudit(principal("admin", ["security.audit.read"]), {})) as { actorName: string }[];
-    expect(rows[0].actorName).toBe("Alice");
+    const page = await service.listAudit(principal("admin", ["security.audit.read"]), {});
+    expect(page.entries[0].actorName).toBe("Alice");
+    // One row returned, well under the default page size ⇒ no further page.
+    expect(page.nextCursor).toBeNull();
   });
 });
