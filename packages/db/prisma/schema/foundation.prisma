@@ -47,7 +47,9 @@ model School {
   announcements        Announcement[]
 
   // Gradebook
-  grades         Grade[]
+  grades            Grade[]
+  subjectResults    SubjectResult[]
+  subjectSelections SubjectSelection[]
 
   // Approval workflow
   workflowRequests  WorkflowRequest[]
@@ -67,6 +69,7 @@ model School {
   emergencyContacts EmergencyContact[]
   medicalRecords    MedicalRecord[]
   studentImportBatches StudentImportBatch[]
+  parentImportBatches  ParentImportBatch[]
 
   // Attendance relations
   attendanceSessions AttendanceSession[]

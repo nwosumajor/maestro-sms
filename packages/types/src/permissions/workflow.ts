@@ -42,12 +42,31 @@ export interface WorkflowStage {
   label: string;
   /** Granular permission the stage's approver must hold. */
   permission: WorkflowPermission;
+  /** When set, ONLY this named user may act at this stage (initiator-routed
+   *  chains). The permission gate still applies on top. */
+  approverId?: string;
+  /** Display name of the named approver (denormalised for the UI/audit). */
+  approverName?: string;
 }
+
+/** Initiator-routed chains: the initiator may pick 2 or 3 named senior staff
+ *  (holders of workflow.review) as the approval route. System chains
+ *  (GRADE_PUBLISH, FEE_SCHEDULE, …) are FIXED and can never be re-routed. */
+export const CUSTOM_CHAIN_MIN_STAGES = 2;
+export const CUSTOM_CHAIN_MAX_STAGES = 3;
 
 /** Staff leave / special-request chain: head → HR manager → principal (final). */
 export const STAFF_REQUEST_CHAIN: WorkflowStage[] = [
   { key: "HEAD", label: "Head of teaching / administration", permission: WORKFLOW_PERMISSIONS.REVIEW_HEAD },
   { key: "HR", label: "HR manager", permission: WORKFLOW_PERMISSIONS.REVIEW_HR },
+  { key: "PRINCIPAL", label: "Principal (final)", permission: WORKFLOW_PERMISSIONS.REVIEW_PRINCIPAL },
+];
+
+/** Grade-publish chain: a subject teacher's term grades go live to families only
+ *  after the head teacher AND then the principal approve (each a different
+ *  person from the initiator — separation of duties, engine-enforced). */
+export const GRADE_PUBLISH_CHAIN: WorkflowStage[] = [
+  { key: "HEAD", label: "Head teacher", permission: WORKFLOW_PERMISSIONS.REVIEW_HEAD },
   { key: "PRINCIPAL", label: "Principal (final)", permission: WORKFLOW_PERMISSIONS.REVIEW_PRINCIPAL },
 ];
 
@@ -108,6 +127,7 @@ export const WORKFLOW_TYPES = [
   "DISCIPLINARY",
   "LMS_CONTENT_PUBLISH",
   "FEE_SCHEDULE",
+  "GRADE_PUBLISH",
 ] as const;
 export type WorkflowType = (typeof WORKFLOW_TYPES)[number];
 
@@ -156,6 +176,10 @@ export const WORKFLOW_TYPE_META: Record<WorkflowType, WorkflowTypeMeta> = {
   // and post ONLY after a workflow.review holder (school_admin/principal — a
   // different person, engine-enforced) approves. Admins still post directly.
   FEE_SCHEDULE: { label: "Fee schedule", selfService: false, systemOnly: true },
+  // Maker-checker on report-card grades: a teacher's "publish" raises this
+  // request (created by TermResultService, never the public endpoint) and the
+  // grades reach families ONLY after head teacher + principal approve.
+  GRADE_PUBLISH: { label: "Grade publish", selfService: false, systemOnly: true },
 };
 
 /** Pure: may a user with these permissions initiate this type via the API? */

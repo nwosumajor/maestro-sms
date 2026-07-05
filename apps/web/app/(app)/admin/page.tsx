@@ -54,6 +54,7 @@ export default async function AdminPage() {
     { label: "Create profiles", href: "/admin/users", perm: "rbac.manage", desc: "Add staff, teachers, parents, students" },
     { label: "Roles & access", href: "/admin/roles", perm: "rbac.manage", desc: "Assign roles to users" },
     { label: "Bulk student onboarding", href: "/admin/import", perm: "student.import", desc: "SIS roster upload (maker-checker)" },
+    { label: "Parent onboarding", href: "/admin/parents", perm: "parent.import", desc: "Create guardian logins + link children" },
     { label: "Finance reports", href: "/fees/reports", perm: "fee.manage", desc: "Receivables aging + collection" },
     { label: "Admissions", href: "/admin/admissions", perm: "admission.review", desc: "Review public applications" },
   ] satisfies { label: string; href: string; perm: Permission; desc: string }[]).filter(

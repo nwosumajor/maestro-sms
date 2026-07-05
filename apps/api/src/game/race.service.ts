@@ -393,6 +393,11 @@ export class RaceService {
     playerId: string,
     userId: string,
   ): Promise<void> {
+    // Serialize finish recording: race mode is PARALLEL guessing by design, so
+    // two racers cracking in the same instant is expected load. The row lock
+    // makes rank = count+1 atomic — no duplicate podium ranks, and the
+    // first-3-decided end condition fires exactly once.
+    await tx.$executeRaw`SELECT id FROM "game" WHERE id = ${race.id}::uuid FOR UPDATE`;
     const finishersSoFar = await tx.gameResult.count({ where: { gameId: race.id } });
     const rank = finishersSoFar + 1;
     const guessCount = await tx.guess.count({ where: { gameId: race.id, guesserId: playerId } });

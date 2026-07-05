@@ -52,6 +52,7 @@ type NavKey =
   | "dashboard"
   | "notifications"
   | "students"
+  | "family"
   | "classes"
   | "timetable"
   | "attendance"
@@ -62,6 +63,7 @@ type NavKey =
   | "billing"
   | "documents"
   | "assessments"
+  | "gradebook"
   | "workflows"
   | "tasks"
   | "polls"
@@ -107,6 +109,7 @@ const NAV: {
   { key: "messages", label: "Messages", icon: MessageSquareIcon, href: "/messages", perm: "message.read", module: MODULES.MESSAGING },
   { key: "calendar", label: "Calendar", icon: CalendarIcon, href: "/calendar", perm: "event.read", module: MODULES.CALENDAR },
   { key: "students", label: "Students", icon: IdCardIcon, href: "/students", perm: "student.profile.read", module: MODULES.SIS },
+  { key: "family", label: "My children", icon: UsersIcon, href: "/family", perm: "family.read", module: MODULES.SIS },
   { key: "classes", label: "Classes", icon: UsersIcon, href: "/classes", perm: "class.read", module: MODULES.LMS },
   { key: "timetable", label: "Timetable", icon: CalendarDaysIcon, href: "/timetable", perm: "timetable.read", module: MODULES.TIMETABLE },
   { key: "certificates", label: "Certificates", icon: AwardIcon, href: "/certificates", perm: "certificate.issue", module: MODULES.CERTIFICATE },
@@ -121,6 +124,7 @@ const NAV: {
   { key: "leave", label: "Leave", icon: CalendarCheckIcon, href: "/leave", perm: "hr.self", module: MODULES.HR },
   { key: "hr", label: "HR", icon: BriefcaseIcon, href: "/hr", perm: "hr.read", module: MODULES.HR },
   { key: "assessments", label: "Assessments", icon: BookOpenIcon, href: "/assessments", perm: "assessment.read", module: MODULES.INTEGRITY },
+  { key: "gradebook", label: "Grades", icon: GraduationCapIcon, href: "/gradebook", perm: "grade.read", module: MODULES.GRADEBOOK },
   { key: "workflows", label: "Approvals", icon: ClipboardCheckIcon, href: "/workflows", perm: "workflow.read", module: MODULES.WORKFLOW },
   { key: "tasks", label: "Tasks", icon: ListTodoIcon, href: "/tasks", perm: "task.participate", module: MODULES.TASK },
   { key: "polls", label: "Polls", icon: BarChartHorizontalIcon, href: "/polls", perm: "poll.vote", module: MODULES.POLL },
@@ -166,9 +170,9 @@ const NAV_GROUPS: { key: string; label: string }[] = [
 const NAV_GROUP: Record<NavKey, string> = {
   dashboard: "overview", analytics: "overview", reports: "overview", announcements: "overview",
   notifications: "overview", messages: "overview", calendar: "overview",
-  classes: "teaching", timetable: "teaching", assessments: "teaching", certificates: "teaching",
-  documents: "teaching", library: "teaching",
-  students: "people", attendance: "people", hr: "people", leave: "people", alumni: "people",
+  classes: "teaching", timetable: "teaching", assessments: "teaching", gradebook: "teaching",
+  certificates: "teaching", documents: "teaching", library: "teaching",
+  students: "people", family: "people", attendance: "people", hr: "people", leave: "people", alumni: "people",
   fees: "operations", billing: "operations", hostel: "operations", transport: "operations",
   workflows: "operations", tasks: "operations",
   discussion: "community", polls: "community", forms: "community", discipline: "community",

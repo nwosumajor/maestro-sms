@@ -13,5 +13,10 @@ export interface TimetableEntryDto {
   dayOfWeek: string;
   periodId: string;
   subject: string;
+  /** Teacher assigned to the lesson (id + resolved display name). */
+  teacherId: string;
+  teacherName: string;
+  /** Physical room the lesson occupies (nullable — a lesson need not have one). */
+  roomId: string | null;
   room: { name: string } | null;
 }

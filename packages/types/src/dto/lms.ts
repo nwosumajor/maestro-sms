@@ -78,3 +78,13 @@ export interface WorkflowInboxItemDto {
   /** Label of the stage currently awaiting approval (null when not staged/terminal). */
   stageLabel: string | null;
 }
+
+/** A senior staff member the initiator can route an approval stage to
+ *  (a holder of workflow.review — principal / school_admin / head_teacher /
+ *  head_admin / hr_manager). */
+export interface WorkflowApproverOptionDto {
+  id: string;
+  name: string;
+  /** Their role names, for display in the picker. */
+  roles: string[];
+}

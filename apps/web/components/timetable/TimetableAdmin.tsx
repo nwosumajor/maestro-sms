@@ -108,7 +108,14 @@ export function TimetableAdmin({
         </form>
 
         <form onSubmit={addRoom} className="flex flex-wrap items-end gap-2">
-          <div className="space-y-1.5"><Label htmlFor="rm-name">Room</Label><Input id="rm-name" value={room.name} onChange={(e) => setRoom({ ...room, name: e.target.value })} placeholder="Room A" required /></div>
+          <div className="w-full">
+            <p className="text-xs text-muted-foreground">
+              A <strong>room</strong> is a physical teaching space (classroom, lab, hall). Assigning one to a
+              lesson stops the same room being double-booked in a slot — it&apos;s optional; leave it as &ldquo;No
+              room&rdquo; if you don&apos;t track rooms.
+            </p>
+          </div>
+          <div className="space-y-1.5"><Label htmlFor="rm-name">Room</Label><Input id="rm-name" value={room.name} onChange={(e) => setRoom({ ...room, name: e.target.value })} placeholder="Room A / Physics Lab" required /></div>
           <div className="space-y-1.5"><Label htmlFor="rm-cap">Capacity</Label><Input id="rm-cap" type="number" min={1} value={room.capacity} onChange={(e) => setRoom({ ...room, capacity: e.target.value })} className="w-24" /></div>
           <Button type="submit" variant="outline" size="sm">Add room</Button>
         </form>

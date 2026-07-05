@@ -59,12 +59,15 @@ d("Subscription / module entitlements (RLS, plan tiers, overrides)", () => {
     await prisma.$disconnect();
   });
 
-  it("defaults to ENTERPRISE (all modules) when no row exists", async () => {
+  it("defaults to the STANDARD floor (fail-closed) when no row exists", async () => {
+    // A data gap must under-provision to core teaching, never give away the
+    // full suite (DEFAULT_PLAN flipped fail-closed in the July 2026 sweep).
     const sub = await svc.getSubscription(operator(), SA);
-    expect(sub.plan).toBe("ENTERPRISE");
-    expect(sub.modules).toContain(MODULES.FEES);
-    expect(sub.modules).toContain(MODULES.HR);
-    expect(sub.modules).toContain(MODULES.GAMES);
+    expect(sub.plan).toBe("STANDARD");
+    expect(sub.modules).toContain(MODULES.LMS);
+    expect(sub.modules).toContain(MODULES.GRADEBOOK);
+    expect(sub.modules).not.toContain(MODULES.HR);
+    expect(sub.modules).not.toContain(MODULES.GAMES);
   });
 
   it("STANDARD tier excludes higher-tier modules; cache reflects the change at once", async () => {

@@ -24,10 +24,14 @@ import {
 } from "@nestjs/common";
 import { Prisma } from "@sms/db";
 import {
+  CUSTOM_CHAIN_MAX_STAGES,
+  CUSTOM_CHAIN_MIN_STAGES,
   STAGED_WORKFLOW_TYPES,
   STAFF_REQUEST_CHAIN,
+  WORKFLOW_PERMISSIONS,
   WORKFLOW_TRANSITIONS,
   type WorkflowAction,
+  type WorkflowApproverOptionDto,
   type WorkflowInboxItemDto,
   type WorkflowStage,
   type WorkflowState,
@@ -77,12 +81,28 @@ export class WorkflowService {
 
   async createRequest(
     p: Principal,
-    input: { type: WorkflowType; title: string; payload: unknown; stages?: WorkflowStage[] },
+    input: {
+      type: WorkflowType;
+      title: string;
+      payload: unknown;
+      stages?: WorkflowStage[];
+      /** Initiator-routed chain: 2–3 named senior staff (workflow.review
+       *  holders). Ignored when a system caller supplies `stages` — fixed
+       *  system chains (GRADE_PUBLISH, FEE_SCHEDULE) can never be re-routed. */
+      approverIds?: string[];
+    },
   ) {
-    // Staged types route through the standard chain unless a custom one is given.
-    const stages =
-      input.stages ?? (STAGED_WORKFLOW_TYPES.has(input.type) ? STAFF_REQUEST_CHAIN : []);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      // Precedence: explicit system chain > initiator-routed chain > the
+      // standard chain for staged types > single-stage.
+      let stages: WorkflowStage[];
+      if (input.stages) {
+        stages = input.stages;
+      } else if (input.approverIds && input.approverIds.length > 0) {
+        stages = await this.buildCustomChain(tx, p, input.approverIds);
+      } else {
+        stages = STAGED_WORKFLOW_TYPES.has(input.type) ? STAFF_REQUEST_CHAIN : [];
+      }
       const req = await tx.workflowRequest.create({
         data: {
           schoolId: p.schoolId,
@@ -106,6 +126,97 @@ export class WorkflowService {
         comments: "created",
       });
       return req;
+    });
+  }
+
+  /** Build an initiator-routed chain from named senior staff. Each pick must be
+   *  a DIFFERENT in-tenant holder of workflow.review, and never the initiator
+   *  (separation of duties starts at routing time). */
+  private async buildCustomChain(
+    tx: TenantTx,
+    p: Principal,
+    approverIds: string[],
+  ): Promise<WorkflowStage[]> {
+    if (
+      approverIds.length < CUSTOM_CHAIN_MIN_STAGES ||
+      approverIds.length > CUSTOM_CHAIN_MAX_STAGES
+    ) {
+      throw new BadRequestException(
+        `Pick ${CUSTOM_CHAIN_MIN_STAGES} or ${CUSTOM_CHAIN_MAX_STAGES} approvers for a routed request`,
+      );
+    }
+    if (new Set(approverIds).size !== approverIds.length) {
+      throw new BadRequestException("Each approval stage must be a different person");
+    }
+    if (approverIds.includes(p.userId)) {
+      throw new BadRequestException("You cannot route an approval stage to yourself");
+    }
+    // Every pick must be reviewer-capable (role carrying workflow.review) —
+    // RLS scopes the lookup to the caller's school, so a cross-tenant id
+    // simply doesn't resolve (404-equivalent: rejected as not eligible).
+    const eligible = await tx.user.findMany({
+      where: {
+        id: { in: approverIds },
+        roles: {
+          some: {
+            role: {
+              permissions: {
+                some: { permission: { key: WORKFLOW_PERMISSIONS.REVIEW } },
+              },
+            },
+          },
+        },
+      },
+      select: { id: true, name: true },
+    });
+    const byId = new Map(eligible.map((u) => [u.id, u.name]));
+    const missing = approverIds.filter((id) => !byId.has(id));
+    if (missing.length > 0) {
+      throw new BadRequestException(
+        "Every approver must be a senior staff member with review rights",
+      );
+    }
+    // Order is the initiator's chosen route; the stage gate is the NAMED person
+    // (permission stays the coarse review gate they already hold).
+    return approverIds.map((id, i) => ({
+      key: `ROUTE_${i + 1}`,
+      label: byId.get(id)!,
+      permission: WORKFLOW_PERMISSIONS.REVIEW,
+      approverId: id,
+      approverName: byId.get(id)!,
+    }));
+  }
+
+  /** Senior staff the caller may route approval stages to: in-tenant holders of
+   *  workflow.review (principal, school_admin, head_teacher, head_admin,
+   *  hr_manager), excluding the caller themselves. */
+  async listEligibleApprovers(p: Principal): Promise<WorkflowApproverOptionDto[]> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const users = await tx.user.findMany({
+        where: {
+          id: { not: p.userId },
+          roles: {
+            some: {
+              role: {
+                permissions: {
+                  some: { permission: { key: WORKFLOW_PERMISSIONS.REVIEW } },
+                },
+              },
+            },
+          },
+        },
+        select: {
+          id: true,
+          name: true,
+          roles: { select: { role: { select: { name: true } } } },
+        },
+        orderBy: { name: "asc" },
+      });
+      return users.map((u) => ({
+        id: u.id,
+        name: u.name,
+        roles: u.roles.map((r) => r.role.name),
+      }));
     });
   }
 
@@ -200,6 +311,21 @@ export class WorkflowService {
       let nextStage = req.currentStage;
       let nextApprovals = approvals;
       let stageNote: string | undefined;
+
+      // A ROUTED stage names its approver: only that person may act on it —
+      // including REQUEST_REVISION, so a bystander reviewer can't bounce a
+      // request that was routed past them.
+      if (
+        isStaged &&
+        (action === "APPROVE" || action === "REJECT" || action === "REQUEST_REVISION")
+      ) {
+        const named = stages[req.currentStage]?.approverId;
+        if (named && named !== p.userId) {
+          throw new ForbiddenException(
+            `This stage is routed to ${stages[req.currentStage]?.approverName ?? "a designated approver"}`,
+          );
+        }
+      }
 
       if (isStaged && (action === "APPROVE" || action === "REJECT")) {
         const stage = stages[req.currentStage];

@@ -4,14 +4,12 @@ import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
-import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
 import { TimetableAdmin } from "@/components/timetable/TimetableAdmin";
+import { TimetableGrid } from "@/components/timetable/TimetableGrid";
 
 export const dynamic = "force-dynamic";
-
-const DAYS = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"] as const;
 
 type Period = Serialized<PeriodDto>;
 type ClassRow = Serialized<IdNameDto>;
@@ -34,9 +32,20 @@ export default async function TimetablePage({
 
   const list = classes ?? [];
   const selectedId = searchParams.classId ?? list[0]?.id;
-  const entries = selectedId ? await apiGet<Entry[]>(`/timetable/classes/${selectedId}`) : [];
-  const cell = (periodId: string, day: string) =>
-    (entries ?? []).find((e) => e.periodId === periodId && e.dayOfWeek === day);
+  // Entries for the grid, plus (for staff) the class's teacher options so an
+  // inline edit can reassign the teacher: roster teachers merged with the
+  // class's subject-offering teachers (same set the create form allows).
+  const [entries, roster, offerings] = await Promise.all([
+    selectedId ? apiGet<Entry[]>(`/timetable/classes/${selectedId}`) : Promise.resolve([]),
+    canWrite && selectedId ? apiGet<{ teachers: IdNameDto[] }>(`/classes/${selectedId}`) : Promise.resolve(null),
+    canWrite && selectedId ? apiGet<{ teacherId: string; teacherName: string }[]>(`/classes/${selectedId}/subjects`) : Promise.resolve(null),
+  ]);
+  const teacherOptions = (() => {
+    const merged = new Map<string, IdNameDto>();
+    (roster?.teachers ?? []).forEach((t) => merged.set(t.id, t));
+    (offerings ?? []).forEach((o) => merged.set(o.teacherId, { id: o.teacherId, name: o.teacherName }));
+    return [...merged.values()];
+  })();
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="timetable" permissions={user.permissions}>
@@ -44,8 +53,14 @@ export default async function TimetablePage({
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Timetable</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            The weekly lesson grid. Conflicts (a teacher, room, or class booked
-            twice in one slot) are prevented when entries are created.
+            The weekly lesson grid.{" "}
+            {canWrite
+              ? "Click a + to add a lesson, or hover a lesson to Edit or Delete it. "
+              : ""}
+            A <strong>room</strong> is the physical space a lesson occupies (a
+            classroom, lab or hall); assigning one lets the system prevent
+            double-booking — the same teacher, class, <em>or room</em> can never
+            be scheduled twice in one slot (a clash is refused with the reason).
           </p>
         </div>
 
@@ -77,52 +92,14 @@ export default async function TimetablePage({
               ))}
             </div>
 
-            <Card>
-              <CardContent className="overflow-x-auto p-0">
-                <table className="w-full border-collapse text-sm">
-                  <thead>
-                    <tr className="border-b border-border text-left text-muted-foreground">
-                      <th className="px-3 py-2.5 font-medium">Period</th>
-                      {DAYS.map((d) => (
-                        <th key={d} className="px-3 py-2.5 font-medium capitalize">{d.toLowerCase()}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(periods ?? []).map((p) => (
-                      <tr key={p.id} className="border-b border-border last:border-0">
-                        <td className="whitespace-nowrap px-3 py-2.5 align-top">
-                          <div className="font-medium">{p.name}</div>
-                          <div className="text-xs text-muted-foreground">{p.startTime}–{p.endTime}</div>
-                        </td>
-                        {DAYS.map((d) => {
-                          const e = cell(p.id, d);
-                          return (
-                            <td key={d} className="px-3 py-2.5 align-top">
-                              {e ? (
-                                <div className="rounded-md bg-primary/[0.06] px-2 py-1.5">
-                                  <div className="font-medium">{e.subject}</div>
-                                  {e.room && <div className="text-xs text-muted-foreground">{e.room.name}</div>}
-                                </div>
-                              ) : (
-                                <span className="text-muted-foreground/40">·</span>
-                              )}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
-                    {(periods ?? []).length === 0 && (
-                      <tr>
-                        <td colSpan={DAYS.length + 1} className="px-3 py-4 text-muted-foreground">
-                          No periods defined yet.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </CardContent>
-            </Card>
+            <TimetableGrid
+              classId={selectedId}
+              entries={entries ?? []}
+              periods={periods ?? []}
+              rooms={rooms ?? []}
+              teachers={teacherOptions}
+              canWrite={canWrite}
+            />
           </>
         )}
       </div>

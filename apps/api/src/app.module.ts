@@ -7,6 +7,7 @@ import { MetricsMiddleware } from "./observability/metrics.middleware";
 import { IntegrityModule } from "./integrity/integrity.module";
 import { LmsModule } from "./lms/lms.module";
 import { GradebookModule } from "./gradebook/gradebook.module";
+import { ParentModule } from "./parent/parent.module";
 import { WorkflowModule } from "./workflow/workflow.module";
 import { SisModule } from "./sis/sis.module";
 import { AttendanceModule } from "./attendance/attendance.module";
@@ -63,6 +64,7 @@ import { HealthController } from "./health.controller";
     IntegrityModule,
     LmsModule,
     GradebookModule,
+    ParentModule,
     WorkflowModule,
     SisModule,
     NotificationModule,

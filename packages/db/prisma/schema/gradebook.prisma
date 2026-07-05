@@ -31,3 +31,95 @@ model Grade {
   @@index([schoolId, submissionId])
   @@map("grade")
 }
+
+// =============================================================================
+// SubjectResult — a student's TERM-WEIGHTED grade in ONE subject for ONE term.
+// =============================================================================
+// This is the session/term report-card grade (distinct from the submission-tied
+// `Grade` above). Each row holds the four raw component scores (each 0–100); the
+// weighted total is recomputed server-side from `@sms/types` GRADE_COMPONENTS
+// (exam 60 / midterm 20 / assignment 10 / class note 10) and denormalised into
+// `total`/`grade` for cheap reads. // SECURITY (Golden Rule #8): only a manual
+// teacher decision ever writes this — never auto-derived from telemetry.
+//
+// Tenant-scoped (non-null schoolId + RLS). classId/subjectId/studentId/sessionId/
+// termId/gradedById are scalar uuid columns (relationship scoping lives in the
+// service: only the class-subject's assigned teacher may grade; student/parent
+// read PUBLISHED rows only). One row per (session, term, subject, student).
+// No hard-delete (grades are academic records) — corrections are UPDATEs.
+// =============================================================================
+model SubjectResult {
+  id         String   @id @default(uuid()) @db.Uuid
+  schoolId   String   @db.Uuid
+  sessionId  String   @db.Uuid
+  termId     String   @db.Uuid
+  classId    String   @db.Uuid
+  subjectId  String   @db.Uuid
+  studentId  String   @db.Uuid
+  /// Component scores, each a percentage 0–100. Null = not yet entered.
+  exam       Float?
+  midterm    Float?
+  assignment Float?
+  classNote  Float?
+  /// Denormalised weighted total 0–100 (recomputed on every write) + letter.
+  total      Float?
+  grade      String?
+  /// DRAFT (teacher-only) | PENDING_APPROVAL (submitted, awaiting the
+  /// head-teacher→principal GRADE_PUBLISH workflow) | PUBLISHED (visible to
+  /// student/parent). Publishing is maker-checker — never a direct flip.
+  status     String   @default("DRAFT")
+  /// FK -> User(id) of the teacher who last graded it.
+  gradedById String?  @db.Uuid
+  gradedAt   DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@unique([sessionId, termId, subjectId, studentId])
+  @@index([schoolId])
+  @@index([schoolId, classId, subjectId, termId])
+  @@index([schoolId, studentId, sessionId])
+  @@map("subject_result")
+}
+
+// =============================================================================
+// SubjectSelection — a student's per-term choice of subjects, MAKER-CHECKER.
+// =============================================================================
+// The student picks from the subjects FIXED on their class by admin/principal
+// (ClassSubjectTeacher offerings). The selection then passes a 2-stage on-row
+// approval — the class's SPECIFIC supervisor (a named person, so this does not
+// ride the role-based workflow engine; mirrors the admissions/promotion batch
+// pattern) and then a school_admin/head_teacher holder of
+// subject.selection.approve (a DIFFERENT person — separation of duties).
+// Only an APPROVED selection feeds the grading roster. One row per student per
+// term; a REJECTED row is resubmittable in place. No hard-delete.
+// PENDING_SUPERVISOR -> PENDING_ADMIN -> APPROVED | REJECTED.
+// =============================================================================
+model SubjectSelection {
+  id         String   @id @default(uuid()) @db.Uuid
+  schoolId   String   @db.Uuid
+  sessionId  String   @db.Uuid
+  termId     String   @db.Uuid
+  classId    String   @db.Uuid
+  studentId  String   @db.Uuid
+  /// string[] of chosen Subject ids (each validated against the class's offerings).
+  subjectIds Json
+  status     String   @default("PENDING_SUPERVISOR")
+  /// Snapshot of Class.supervisorId at submission (null = stage skipped).
+  supervisorId        String? @db.Uuid
+  /// Who actually passed stage 1 (the supervisor) — for separation of duties.
+  supervisorActedById String? @db.Uuid
+  /// Who gave the final stage-2 approval/rejection.
+  reviewedById        String? @db.Uuid
+  reviewNote          String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@unique([termId, studentId])
+  @@index([schoolId])
+  @@index([schoolId, classId, termId, status])
+  @@index([schoolId, supervisorId, status])
+  @@map("subject_selection")
+}

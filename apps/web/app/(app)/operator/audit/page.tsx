@@ -1,4 +1,4 @@
-import type { TenantDto, PlatformAuditPageDto, Serialized } from "@sms/types";
+import type { TenantNameDto, PlatformAuditPageDto, Serialized } from "@sms/types";
 import Link from "next/link";
 import { hasPermission } from "@/lib/permissions";
 import { redirect } from "next/navigation";
@@ -14,8 +14,11 @@ export default async function OperatorAuditPage() {
   const session = await auth();
   const user = session!.user;
   if (!hasPermission(user.permissions, "platform.operate")) redirect("/dashboard");
+  // Lightweight id+name list for the filter dropdown. NOTE: /operator/tenants
+  // returns a PAGINATED object ({ tenants, total, … }), not an array — use the
+  // dedicated picker endpoint so this never regresses to `.map is not a function`.
   const [tenants, page] = await Promise.all([
-    apiGet<Serialized<TenantDto>[]>("/operator/tenants"),
+    apiGet<Serialized<TenantNameDto>[]>("/operator/tenant-names"),
     apiGet<Serialized<PlatformAuditPageDto>>("/operator/audit?limit=50"),
   ]);
   return (

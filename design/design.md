@@ -11,7 +11,7 @@ punitive or surveillance-y**. Generous white space, clear hierarchy, restrained
 color. Accessible by default (WCAG AA).
 
 ## Color tokens (HSL)
-Default brand: **Indigo** `hsl(243 75% 58%)` (the only per-tenant variable).
+Default brand: **deep academic teal** `hsl(184 68% 31%)` (`--brand-h/s/l` — the only per-tenant variable; see `apps/web/app/globals.css` for the live values). Canvas is cool paper `200 24% 98%`; ink is cool slate `200 18% 14%`.
 - background `0 0% 100%` / foreground `222 47% 11%`
 - card `0 0% 100%` / muted `220 14% 96%` / muted-foreground `220 9% 46%`
 - border `220 13% 91%`
@@ -27,7 +27,18 @@ Default brand: **Indigo** `hsl(243 75% 58%)` (the only per-tenant variable).
 Severity is a review **priority**, never an accusation. High = "look first".
 
 ## Type
-- Sans: **Inter**. Mono: **JetBrains Mono** (used for evidence values/metrics).
+- Display: **Spectral** (serif — page h1s, hero, KPI numerals; the "register"
+  voice; bound via next/font as `--font-display`). Sans: **Inter** (body/UI).
+  Mono: **JetBrains Mono** (evidence values/metrics).
+- NOTE: the `--font-*` variables are bound ONLY by next/font in `layout.tsx` —
+  never redeclare them in `:root` (a later declaration silently beats
+  next/font's class and disables the loaded webfonts).
+
+## Signature motif
+- Squared exercise-book grid (public hero/login) + the **red margin rule**
+  `--rule: 356 62% 55%` — a decorative accent only (active-nav indicator, login
+  margin line, KPI tick). NEVER on buttons/alerts; kept distinct from
+  `--destructive`, and NOT tenant-overridable.
 - Scale: xs .75 / sm .875 / base 1 / lg 1.125 / xl 1.25 / 2xl 1.5 / 3xl 1.875 rem.
 - Weights: 400 / 500 / 600 / 700. Headings 600.
 

@@ -36,6 +36,11 @@ export const LMS_PERMISSIONS = {
   QUIZ_ATTEMPT: "lms.quiz.attempt",
   /** Post a reply in a published forum thread. student + teaching staff. */
   FORUM_POST: "lms.forum.post",
+  /** Submit one's OWN per-term subject selection (self-scoped). student. */
+  SUBJECT_SELECT: "subject.select",
+  /** Final (stage-2) approval of a student's subject selection — after the
+   *  class supervisor's stage-1 pass. school_admin / head_teacher. */
+  SUBJECT_SELECTION_APPROVE: "subject.selection.approve",
 } as const;
 
 export type LmsPermission = (typeof LMS_PERMISSIONS)[keyof typeof LMS_PERMISSIONS];
@@ -66,6 +71,7 @@ export const LMS_ROLE_PERMISSIONS = {
     LMS_PERMISSIONS.CONTENT_READ,
     LMS_PERMISSIONS.QUIZ_ATTEMPT,
     LMS_PERMISSIONS.FORUM_POST,
+    LMS_PERMISSIONS.SUBJECT_SELECT,
   ],
   parent: [LMS_PERMISSIONS.CLASS_READ, LMS_PERMISSIONS.CONTENT_READ],
 } as const;

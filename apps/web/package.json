@@ -8,7 +8,8 @@
     "start": "next start -p 3000",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "test": "jest"
+    "test": "jest",
+    "smoke:routes": "node scripts/route-smoke.mjs"
   },
   "dependencies": {
     "@sms/tokens": "workspace:*",

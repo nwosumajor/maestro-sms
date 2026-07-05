@@ -90,9 +90,12 @@ d("RLS cross-tenant isolation", () => {
   const subjectA = randomUUID();
   const classSubjectA = randomUUID();
   const importBatchA = randomUUID();
+  const parentImportBatchA = randomUUID();
   const promotionBatchA = randomUUID();
   const sessionA = randomUUID();
   const termA = randomUUID();
+  const subjectResultA = randomUUID();
+  const subjectSelectionA = randomUUID();
   const announcementA = randomUUID();
   // Hostel
   const hostelA = randomUUID();
@@ -364,6 +367,11 @@ d("RLS cross-tenant isolation", () => {
       `INSERT INTO student_import_batch (id,"schoolId","uploadedById",rows,"updatedAt") VALUES ($1,$2,$3,'[]'::jsonb,now())`,
       [importBatchA, A, userA],
     );
+    // Bulk PARENT import batch (maker-checker; uploaded by userA).
+    await a.query(
+      `INSERT INTO parent_import_batch (id,"schoolId","uploadedById",rows,"updatedAt") VALUES ($1,$2,$3,'[]'::jsonb,now())`,
+      [parentImportBatchA, A, userA],
+    );
     // Promotion batch (maker-checker; source classA, no target = graduation).
     await a.query(
       `INSERT INTO promotion_batch (id,"schoolId","sourceClassId","studentIds","initiatedById","updatedAt") VALUES ($1,$2,$3,'[]'::jsonb,$4,now())`,
@@ -377,6 +385,18 @@ d("RLS cross-tenant isolation", () => {
     await a.query(
       `INSERT INTO term (id,"schoolId","sessionId",name,sequence,"updatedAt") VALUES ($1,$2,$3,'First Term',1,now())`,
       [termA, A, sessionA],
+    );
+    // Term-weighted subject result (student userA, subjectA, termA/sessionA).
+    await a.query(
+      `INSERT INTO subject_result (id,"schoolId","sessionId","termId","classId","subjectId","studentId",exam,total,grade,status,"updatedAt")
+       VALUES ($1,$2,$3,$4,$5,$6,$7,80,48,'D','DRAFT',now())`,
+      [subjectResultA, A, sessionA, termA, classA, subjectA, userA],
+    );
+    // Per-term subject selection (student userA picking subjectA).
+    await a.query(
+      `INSERT INTO subject_selection (id,"schoolId","sessionId","termId","classId","studentId","subjectIds","updatedAt")
+       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,now())`,
+      [subjectSelectionA, A, sessionA, termA, classA, userA, JSON.stringify([subjectA])],
     );
     // School announcement (created by userA).
     await a.query(
@@ -684,6 +704,7 @@ d("RLS cross-tenant isolation", () => {
       "employee",
       // SIS import batch + announcement: FK to school only (scalar author) — leaves.
       "student_import_batch",
+      "parent_import_batch",
       "announcement",
       // promotion_batch references class (source/target) AND term -> purge before
       // both; term references academic_session -> term before session.
@@ -738,6 +759,11 @@ d("RLS cross-tenant isolation", () => {
       "document",
       "workflow_audit_log",
       "grade",
+      // subject_result / subject_selection: only real FK is schoolId -> school
+      // (session/term/class/subject/student are scalar uuids), so they purge
+      // any time before school.
+      "subject_result",
+      "subject_selection",
       "workflow_request",
       "submission",
       "assessment",
@@ -785,6 +811,8 @@ d("RLS cross-tenant isolation", () => {
     ["assessment", assessmentA],
     ["submission", submissionA],
     ["grade", gradeA],
+    ["subject_result", subjectResultA],
+    ["subject_selection", subjectSelectionA],
     ["workflow_request", workflowReqA],
     ["student_profile", profileA],
     ["emergency_contact", contactA],
@@ -878,6 +906,7 @@ d("RLS cross-tenant isolation", () => {
     ["subject", subjectA],
     ["class_subject_teacher", classSubjectA],
     ["student_import_batch", importBatchA],
+    ["parent_import_batch", parentImportBatchA],
     ["promotion_batch", promotionBatchA],
     ["academic_session", sessionA],
     ["term", termA],

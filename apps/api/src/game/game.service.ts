@@ -129,10 +129,18 @@ export class GameService {
       if (players.some((pl) => pl.userId === p.userId)) {
         throw new ConflictException("You are already in this game");
       }
+      // CLAIM the second seat atomically: the LOBBY→SETUP flip is guarded, so of
+      // two concurrent joiners exactly ONE wins and the other 409s — a 2-player
+      // duel can never over-fill to 3 seats (the count above is only a friendly
+      // pre-check). A later failure in this tx rolls the flip back.
+      const claimed = await tx.game.updateMany({
+        where: { id: gameId, status: "LOBBY" },
+        data: { status: "SETUP" },
+      });
+      if (claimed.count === 0) throw new ConflictException("Game is not open to join");
       await tx.gamePlayer.create({
         data: { schoolId: p.schoolId, gameId, userId: p.userId },
       });
-      await tx.game.update({ where: { id: gameId }, data: { status: "SETUP" } });
       await this.log(tx, p, "game.join", "game", gameId);
       return this.buildGameView(tx, gameId, p.userId);
     });
@@ -186,6 +194,15 @@ export class GameService {
         throw new BadRequestException(`guess must be ${game.difficultyLength} distinct digits 0-9`);
       }
       const opponent = await this.opponent(tx, gameId, me.id);
+      // CLAIM the turn atomically BEFORE recording anything: the guarded swap
+      // matches only while it is still my turn, so a double-click / client retry
+      // can never record two guesses in one turn (guessCount is the league
+      // tiebreaker — silent inflation would corrupt fairness) or double-finish.
+      const turnClaimed = await tx.game.updateMany({
+        where: { id: gameId, status: "ACTIVE", currentTurnPlayerId: me.id },
+        data: { currentTurnPlayerId: opponent.id },
+      });
+      if (turnClaimed.count === 0) throw new ConflictException("It is not your turn");
       // opponent.secret is guaranteed set (game is ACTIVE). Score server-side.
       const result = score(value, opponent.secret as string);
 
@@ -212,12 +229,9 @@ export class GameService {
           await this.competitions.afterMatchFinished(tx, gameId);
           finishedCompetitionId = game.competitionId; // nudge the league only on resolve
         }
-      } else {
-        await tx.game.update({
-          where: { id: gameId },
-          data: { currentTurnPlayerId: opponent.id },
-        });
       }
+      // (no else: the turn already advanced in the atomic claim above; the win
+      // path's finish() overwrites turn/status to the terminal state anyway)
       return { dead: result.dead, wounded: result.wounded };
     });
     this.emitGameAndCompetition(gameId, finishedCompetitionId);

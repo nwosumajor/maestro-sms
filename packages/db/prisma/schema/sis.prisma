@@ -142,3 +142,27 @@ model StudentImportBatch {
   @@index([schoolId, status])
   @@map("student_import_batch")
 }
+
+/// A staged bulk PARENT import. Maker-checker: the uploader stores PENDING rows
+/// (ParentImportRow[] in @sms/types); a DIFFERENT person approves, creating each
+/// parent User + parent role (idempotent on email, generated one-time password)
+/// and the ParentChild links to their children (matched by admission number /
+/// email in-tenant). Tenant-scoped, RLS-enforced, no hard-delete.
+model ParentImportBatch {
+  id           String            @id @default(uuid()) @db.Uuid
+  schoolId     String            @db.Uuid
+  status       ImportBatchStatus @default(PENDING)
+  uploadedById String            @db.Uuid
+  reviewedById String?           @db.Uuid
+  rows       Json
+  summary    Json?
+  reviewNote String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, status])
+  @@map("parent_import_batch")
+}

@@ -73,7 +73,10 @@ conflicts with it, flag the conflict before proceeding.
   (read-only oversight + workflow veto), principal, school_admin, teacher,
   student, parent, accountant, hr_clerk, hr_manager (owns leave/salary/payroll +
   stage-2 approver), head_teacher / head_admin (stage-1 approvers for the staff-
-  request chain). All except super_admin are scoped to a single `school_id`.
+  request chain), warden (their own hostel), driver (read-only own vehicle),
+  head_warden (EVERY hostel), head_driver (whole fleet), librarian (library
+  module) — 17 roles total. All except super_admin are scoped to a single
+  `school_id`.
   Adding a role/permission is a seed change, not new code.
 - Permissions are fine-grained strings (e.g. `student.read`, `grade.write`,
   `workflow.review`, `integrity.report.read`) in `packages/types/src/permissions`.
@@ -87,12 +90,26 @@ conflicts with it, flag the conflict before proceeding.
 - A SECOND, orthogonal gate above RBAC: which product MODULES a school's
   subscription enables. super_admin-owned (schools can't self-upgrade). Source of
   truth in `@sms/types/modules.ts`: `MODULES` keys, `MODULE_CATALOG`, named tiers
-  `PLANS` (BASIC|STANDARD|ENTERPRISE) → `PLAN_MODULES` bundles, `ModuleOverrides`
+  `PLANS` (STANDARD|PREMIUM|ULTIMATE|ENTERPRISE) → `PLAN_MODULES` bundles, `ModuleOverrides`
   (per-school force-on/off), and the pure `resolveModules(plan, overrides)`.
 - Storage: `SchoolSubscription` (tenant-scoped, RLS `22_subscription_rls.sql`,
   migration `20260629000000_subscription`) — `plan` + `overrides` JSON, one row per
-  school. NO row ⇒ `DEFAULT_PLAN` = ENTERPRISE (everything on), so the layer only
-  ever RESTRICTS and never breaks a pre-existing tenant.
+  school. NO row ⇒ `DEFAULT_PLAN` = the **STANDARD floor (fail-closed)** — a data
+  gap under-provisions to core teaching, never gives away the full suite. Every
+  school gets an explicit row: onboarding stamps `currentPeriodEnd = now +
+  SUBSCRIPTION_TRIAL_DAYS(30)` so dunning eventually fires; the seed writes an
+  ENTERPRISE row for the demo. Backfill rows for row-less schools before
+  deploying the fail-closed default onto an existing DB. **Tier PRICING is
+  operator-set**: global RLS-exempt `plan_price` (migration `20260726000000`,
+  `rls/46` — app role SELECT-only; writes via the privileged client);
+  `PlanPricingService.effective()` merges rows over the `PLAN_PRICING` defaults
+  (60s cache) and feeds quotes, checkout, and PUBLIC `GET /public/plan-pricing`
+  (the landing page derives prices from it — marketing can't drift from the
+  bill). `GET/PUT /operator/pricing` (`platform.operate`; PUT step-up +
+  audited). An **AppShell renewal banner** (light `GET /billing/status`) nudges
+  `billing.read` staff at ≤14 days / expired / PAST_DUE. The parent-fees
+  Paystack webhook is **idempotent on the gateway reference** (a retried
+  charge.success can't double-credit an invoice).
 - Enforcement: controllers carry `@RequireModule(MODULES.X)` (class-level);
   `PermissionGuard` resolves the school's effective modules via
   `ModuleEntitlementService` (foundation, 30s cache; invalidation fans across ECS
@@ -192,8 +209,14 @@ is enforced BOTH at request time (`SecurityService.requestElevation`) and at use
 time (`PermissionGuard.hasActiveGrant`), so a teacher can't self-escalate to
 super_admin. `/admin/audit` + `/admin/security` UIs. Auth hardening is BUILT: **TOTP MFA** (hand-rolled
 RFC-6238 via node crypto — enroll/verify/disable + login challenge; `/account`
-setup UI + optional 2FA field on login), **account lockout** (5 failed logins →
-15-min lock, counters on the user row, committed even when the login throws), and
+setup UI + optional 2FA field on login), **account lockout** (3 failed logins →
+PERMANENT lock, super_admin-reactivated via the operator console; a super_admin's
+own lock AUTO-EXPIRES after 15 min so the platform owner can never be locked out
+by an attacker who merely knows their email; counters on the user row, committed
+even when the login throws), a **30-day forced password reset** (super_admin
+exempt; `passwordChangedAt=null` ⇒ change forced at next login), a **rate-limited
+login** (`RateLimitGuard` 10/min per IP on POST /auth/login — the in-process
+backstop to the edge WAF), and
 **step-up re-auth** (`POST /security/stepup` mints a 5-min token; `@RequireStepUp`
 + guard enforce it — applied to medical edits and MFA-disable; BFF forwards the
 `x-stepup` header). **Maker-checker on money** (large payments ≥ ₦50k and ALL
@@ -405,7 +428,9 @@ unit tests + an `observability.module` DI smoke test.
   the RLS-disabled `ultimate_participant` arena table (cross-tenant by design, no PII).
 - Demo logins (password `password123`): `teacher@` / `student@` / `parent@` /
   `admin@` / `principal@` / `board@` / `accountant@` / `hr@` (hr_clerk) /
-  `hrmanager@` / `headteacher@` / `headadmin@demo.school`.
+  `hrmanager@` / `headteacher@` / `headadmin@` / `warden@` / `driver@` /
+  `headwarden@` / `headdriver@` / `librarian@demo.school` (+ platform owner
+  `owner@sms.platform`).
 - Local stack: `cd infrastructure && cp .env.example .env && docker compose up
   --build` → app at http://localhost (nginx). Postgres/Redis are NOT host-exposed.
 
@@ -711,6 +736,54 @@ Binding points even from here:
 - Minors' privacy (Golden Rule #5): display names within a school; handles —
   never real names — across schools; cross-school play requires two-tier consent
   (school enrollment + a per-student guardian consent flag), audit-logged.
+
+## July 2026 review-and-hardening sweep — BUILT
+Three full application reviews (security / consistency / efficiency / revenue)
+plus user-driven fixes, all verified against the live stack:
+- **Concurrency guards**: workflow transitions write via optimistic `updateMany`
+  on `(id, state, currentStage)` (no lost approvals / double stage-advance);
+  hostel allocation row-locks the room (`SELECT … FOR UPDATE`) before the
+  capacity count; library issue atomically CLAIMS a copy (`updateMany
+  availableCopies >= 1` + decrement). Proven with live concurrent requests.
+- **Role-based "student" everywhere**: `listStudents` (staff path) and the
+  operator's cross-tenant student view list users holding the student ROLE
+  (ROSTER_WIDE_ROLES governs the school-wide list; enrollment-derived lists hid
+  every not-yet-enrolled student). Relationship-scoped paths unchanged. One
+  definition of "student" = the billing seat count.
+- **FEE_SCHEDULE maker-checker** (workflow type, systemOnly): hostel/transport
+  fee runs move money, so a (head-)warden / head-driver run creates an approval
+  request (initiator billing scope snapshotted into the payload); a
+  `workflow.review` holder (≠ initiator, engine-enforced) approves and a
+  WorkflowHooks reactor posts the run in the SAME tenant tx. Admins post direct.
+- **Rename/delete parity** with dependency guards (409 + a message saying what
+  blocks it): classes (empty-only), subjects (+ case-insensitive duplicate guard
+  on create; offering-removal endpoint), library books (no loan history),
+  hostels (no rooms) + rooms (no allocation history), vehicles (no routes) +
+  route rename. Ledger history is never deletable.
+- **Error interpretation**: `apps/web/lib/api-error.ts` + `sendSms(method, …)`
+  in `play-ui.tsx` — every mutation failure carries the server message PLUS a
+  plain-language status interpretation; all postSms consumers upgraded at once.
+- **Bulk SIS import credentials**: approval generates a UNIQUE random temp
+  password per student (hashed OUTSIDE the tx — bcrypt×N would blow the 5s
+  interactive-tx cap; guarded batch claim), returns them ONCE (`credentials` on
+  the approve response; login-slips CSV in the UI, formula-guarded), and sets
+  `passwordChangedAt=null` to force a first-login reset.
+- **HR account↔employment bridge**: /hr flags staff accounts awaiting an
+  employment record; `hr/analytics` headcount adds `staffAccounts`+`unrecorded`;
+  per-row inline Edit on the register (salary excluded — pay stays maker-checker).
+- **Operator console at scale**: `GET /operator/tenants` is server-side
+  searched/filtered/paginated (`q`/`plan`/`billing`/`page` → `TenantPageDto`);
+  the registry query runs on the PRIVILEGED client (the subscription relation is
+  tenant-scoped — an app-role relation filter under the operator's GUC silently
+  matches nothing). Enrichment costs pageSize, not fleet-size. Light
+  `GET /operator/tenant-names` feeds pickers.
+- **Frontend "Register" identity**: Spectral display serif via next/font (the
+  `--font-*` vars must be bound ONLY by next/font — a `:root` redeclaration
+  later in the bundle silently beats next/font's class and disables the
+  webfonts) + the `--rule` exercise-book margin-rule token (decorative only).
+- **Efficiency**: analytics counts via `groupBy`/`count()`; competition
+  standings `createMany` + batched result reads; messaging thread reads capped
+  at 500 most-recent.
 
 ## When generating code
 - Explain the multi-tenancy/security implication of each new table or endpoint.

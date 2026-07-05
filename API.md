@@ -1,6 +1,6 @@
 # API Reference — School Management System
 
-Complete HTTP endpoint reference for the NestJS API (`apps/api`). **354 endpoints across 56 controllers.**
+Complete HTTP endpoint reference for the NestJS API (`apps/api`). **371 endpoints across 56 controllers.**
 
 ## Conventions
 
@@ -26,12 +26,13 @@ Permission strings below are the fine-grained values (e.g. `grade.write`) checke
 
 | Method | Path | Gate | Purpose |
 |---|---|---|---|
-| POST | `/auth/login` | 🌐 | Verify credentials + MFA + account-lockout, return the signed session JWT + modules |
+| POST | `/auth/login` | 🌐 (rate-limited 10/min/IP) | Verify credentials + MFA + 3-strike lockout, return the signed session JWT + modules |
 | GET | `/health` | 🌐 | Liveness/readiness probe |
 | GET | `/metrics` | 🌐 (bearer/`x-metrics-token`) | Prometheus metrics scrape (process + HTTP + per-tenant counters) |
 | GET | `/public/schools` | 🌐 | Public list of onboarded schools (parent directory; excludes the platform org) |
 | POST | `/public/onboarding-requests` | 🌐 | A prospective school requests to join (homepage CTA) |
 | GET | `/public/schools/:slug/branding` | 🌐 | A school's login-page logo + theme by slug (hidden when subscription lapsed) |
+| GET | `/public/plan-pricing` | 🌐 | Effective per-tier pricing (operator overrides merged over defaults) — the landing page derives its prices from this |
 
 ---
 
@@ -62,7 +63,10 @@ All gated by 🔑 `platform.operate`.
 |---|---|---|---|
 | POST | `/operator/tenants` | ⬆️ | Provision a new school + its founding admin tier |
 | POST | `/operator/tenants/:schoolId/admins` | ⬆️ | Add an admin to an existing school |
-| GET | `/operator/tenants` | | Cross-tenant school registry (plan + module count) |
+| GET | `/operator/tenants` | | Cross-tenant school registry — server-side search/filter/pagination (`q`, `plan`, `billing`, `page`, `pageSize` → `TenantPageDto`) |
+| GET | `/operator/tenant-names` | | Lightweight id+name list for pickers (single query) |
+| GET | `/operator/pricing` | | Effective per-tier pricing + default/override flags |
+| PUT | `/operator/pricing` | ⬆️ | Set per-tier per-seat prices (platform-wide; feeds quotes, checkout and the public page; audited) |
 | GET | `/operator/analytics` | | Graphical platform business metrics (MRR, ARPA, growth, funnel, churn, module adoption, demographics) |
 | GET | `/operator/audit` | | Cross-tenant audit trail, actor-attributed (email + unique id + roles), cursor-paginated |
 | GET | `/operator/audit/export.csv` | | Downloadable CSV audit report (formula-injection safe) |
@@ -71,7 +75,7 @@ All gated by 🔑 `platform.operate`.
 | PUT | `/operator/tenants/:schoolId/subscription` | | Set plan + per-module overrides / comp status |
 | GET | `/operator/onboarding-requests` | | Review queue of public onboarding requests |
 | POST | `/operator/onboarding-requests/:id/status` | | Approve / reject / mark-reviewing a request |
-| GET | `/operator/tenants/:schoolId/students` | | Cross-tenant enrolled-student view |
+| GET | `/operator/tenants/:schoolId/students` | | Cross-tenant student view — by ROLE (not-yet-enrolled included), active class names attached; audited |
 | GET | `/operator/tenants/:schoolId/users` | | Cross-tenant user view |
 | PUT | `/operator/tenants/:schoolId/users/:userId/status` | ⬆️ | Enable/disable a user account |
 | POST | `/operator/tenants/:schoolId/users/:userId/unlock` | | Clear a failed-login lockout |
@@ -86,7 +90,8 @@ All gated by 🔑 `platform.operate`.
 
 | Method | Path | Gate | Purpose |
 |---|---|---|---|
-| GET | `/billing` | 🔑 `billing.read` | Current plan + per-seat pricing quote |
+| GET | `/billing` | 🔑 `billing.read` | Current plan + per-tier quotes (operator-effective pricing) + payment history |
+| GET | `/billing/status` | 🔑 `billing.read` | Light subscription posture (drives the AppShell renewal/past-due banner) |
 | POST | `/billing/checkout/init` | 🔑 `billing.read` ⬆️ | Start Paystack checkout for a chosen tier |
 | POST | `/billing/dunning/run` | 🔑 `billing.dunning.run` | Manual delinquency sweep (flips elapsed subs to PAST_DUE) |
 
@@ -99,10 +104,13 @@ All gated by 🔑 `platform.operate`.
 | POST | `/classes` | 🔑 `class.write` | Create a class |
 | PUT | `/classes/:classId` | 🔑 `class.write` | Edit a class (level / next-class / supervisor) |
 | DELETE | `/classes/:classId` | 🔑 `class.write` | Delete a class — only while EMPTY (e.g. a duplicate created in error) |
-| POST | `/subjects` | 🔑 `subject.manage` | Create a subject in the school catalog |
+| POST | `/subjects` | 🔑 `subject.manage` | Create a subject (409 on a case-insensitive duplicate name) |
 | GET | `/subjects` | 🔑 `class.read` | List subjects |
+| PUT | `/subjects/:subjectId` | 🔑 `subject.manage` | Rename / re-code a subject (offerings follow the id) |
+| DELETE | `/subjects/:subjectId` | 🔑 `subject.manage` | Delete an UNUSED subject (409 while any class offers it) |
 | POST | `/classes/:classId/subjects` | 🔑 `class.read` | Assign a teacher to a class-subject |
 | GET | `/classes/:classId/subjects` | 🔑 `class.read` | List a class's subject-teacher offerings |
+| DELETE | `/classes/:classId/subjects/:subjectId` | 🔑 `subject.manage` | Remove a subject offering from a class |
 | POST | `/classes/:classId/teachers` | 🔑 `enrollment.write` | Assign a teacher to a class |
 | POST | `/classes/:classId/enrollments` | 🔑 `enrollment.write` | Enroll students |
 | POST | `/guardians` | 🔑 `guardian.write` | Link a parent to a child |
@@ -294,32 +302,39 @@ All gated by 🔑 `platform.operate`.
 ### Hostel 📦 `hostel`
 | Method | Path | Gate | Purpose |
 |---|---|---|---|
-| GET · POST | `/hostels` | 🔑 `hostel.read` | List / create boarding houses |
-| PUT | `/hostels/:id` | 🔑 `hostel.manage` | Edit a hostel |
+| GET · POST | `/hostels` | 🔑 `hostel.read` | List / create boarding houses (create: admin-only; warden sees own, head_warden sees all) |
+| GET | `/hostels/summary` | 🔑 `hostel.read` | Occupancy analytics (warden-scoped or school-wide) |
+| PUT | `/hostels/:id` | 🔑 `hostel.manage` | Edit / rename a hostel (warden reassignment: admin-only) |
+| DELETE | `/hostels/:id` | 🔑 `hostel.manage` | Delete an EMPTY hostel (admin-only; 409 while rooms exist) |
 | POST | `/hostels/:id/rooms` · PUT `/hostels/rooms/:roomId` | 🔑 `hostel.manage` | Rooms |
-| GET · POST | `/hostels/allocations` | 🔑 `hostel.read`/`manage` | Room allocations |
+| DELETE | `/hostels/rooms/:roomId` | 🔑 `hostel.manage` | Delete a room with NO allocation history (409 otherwise) |
+| GET · POST | `/hostels/allocations` | 🔑 `hostel.read`/`manage` | Room allocations (capacity check is row-locked — no over-allocation under concurrency) |
 | POST | `/hostels/allocations/:id/vacate` | 🔑 `hostel.manage` | Vacate a room |
-| POST | `/hostels/fees/schedule` | 🔑 `hostel.manage` | Bill hostel rent as invoice line items |
+| POST | `/hostels/fees/schedule` | 🔑 `hostel.manage` | Bill hostel rent — admins post directly; a (head-)warden's run becomes a FEE_SCHEDULE approval request (maker-checker) |
 
 ### Transport 📦 `transport`
 | Method | Path | Gate | Purpose |
 |---|---|---|---|
-| GET · POST | `/transport/vehicles` | 🔑 `transport.read` | Vehicles |
-| PUT | `/transport/vehicles/:id` | 🔑 `transport.manage` | Edit a vehicle |
+| GET · POST | `/transport/vehicles` | 🔑 `transport.read` | Vehicles (driver sees own; head_driver sees the fleet) |
+| GET | `/transport/summary` | 🔑 `transport.read` | Fleet analytics (driver-scoped or school-wide) |
+| PUT | `/transport/vehicles/:id` | 🔑 `transport.manage` | Edit / rename a vehicle |
+| DELETE | `/transport/vehicles/:id` | 🔑 `transport.manage` | Delete a vehicle no route uses (admin-only; 409 otherwise) |
 | GET · POST | `/transport/routes` | 🔑 `transport.manage`/`read` | Routes |
+| PUT | `/transport/routes/:id` | 🔑 `transport.manage` | Rename a route (assignments/stops/fees follow the id) |
 | POST | `/transport/routes/:id/retire` · `/stops` | 🔑 `transport.manage` | Retire route / add stop |
 | GET · POST | `/transport/assignments` | 🔑 `transport.manage`/`read` | Passenger assignments |
 | POST | `/transport/assignments/:id/change-route` · `/cancel` | 🔑 `transport.manage` | Change route / cancel |
-| POST | `/transport/fees/schedule` | 🔑 `transport.manage` | Bill transport fees |
+| POST | `/transport/fees/schedule` | 🔑 `transport.manage` | Bill transport fees — admins post directly; the head driver's run becomes a FEE_SCHEDULE approval request (maker-checker) |
 
 ### Library 📦 `library`
 | Method | Path | Gate | Purpose |
 |---|---|---|---|
 | GET · POST | `/library/books` | 🔑 `library.read` | Catalogue search / add |
-| PUT | `/library/books/:id` | 🔑 `library.manage` | Edit a book |
+| PUT | `/library/books/:id` | 🔑 `library.manage` | Edit / rename a book |
+| DELETE | `/library/books/:id` | 🔑 `library.manage` | Delete a book with NO lending history (409 otherwise) |
 | GET | `/library/books/export.csv` | 🔑 `library.manage` | Catalogue CSV |
 | GET | `/library/loans` | 🔑 `library.read` | Loans |
-| POST | `/library/loans/issue` | 🔑 `library.read` | Issue a loan |
+| POST | `/library/loans/issue` | 🔑 `library.read` | Issue a loan (copy claim is atomic — no negative availability under concurrency) |
 | POST | `/library/loans/:id/renew` · `/return` · `/pay-fine` | 🔑 `library.borrow` | Loan actions |
 | GET | `/library/report` | 🔑 `library.manage` | Library report |
 
@@ -390,7 +405,7 @@ All gated by 🔑 `platform.operate`.
 | GET | `/admin/students/import/template` | 🔑 `student.import` | CSV import template |
 | POST | `/admin/students/import` | 🔑 `student.import` | Upload a PENDING import batch |
 | GET | `/admin/students/import` · `/:id` | 🔑 `student.import` | List / inspect batches |
-| POST | `/admin/students/import/:id/approve` · `/reject` | 🔑 `student.import` | Approve (create accounts, maker-checker) / reject |
+| POST | `/admin/students/import/:id/approve` · `/reject` | 🔑 `student.import` | Approve (approver ≠ uploader) — creates accounts with UNIQUE one-time temp passwords, returned ONCE as `credentials` (forced password change at first login) / reject |
 | GET | `/directory/search` | 🔑 `directory.search` | Cross-role people search |
 | POST | `/public/admissions` | 🌐 📦 `admissions` | Public admissions application |
 | GET | `/admissions` · `/admissions/:id` | 🔑 `admission.review` 📦 `admissions` | Application review queue |

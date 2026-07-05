@@ -35,8 +35,10 @@ pnpm --filter @sms/db rls                 # apply RLS policies (privileged role)
 ```bash
 pnpm dev          # turbo: web on :3000, api on :3001
 ```
-Sign in at http://localhost:3000 with a demo account (dev only):
-`teacher@demo.school` or `student@demo.school` (any password).
+Sign in at http://localhost:3000 with a demo account (dev only) — password
+`password123`: `teacher@` / `student@` / `parent@` / `admin@` / `principal@` /
+`hrmanager@` / `warden@` / `librarian@demo.school`, etc. (see CLAUDE.md for the
+full 17-role list; platform owner is `owner@sms.platform`).
 
 ## Test
 ```bash

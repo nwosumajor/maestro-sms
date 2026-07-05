@@ -30,6 +30,15 @@ export const SIS_PERMISSIONS = {
   /** Stage / approve a bulk SIS student import (maker-checker: a DIFFERENT person
    *  approves). principal, school_admin, hr_manager, hr_clerk. */
   STUDENT_IMPORT: "student.import",
+
+  /** The consolidated "my children" overview (grades / attendance / discipline /
+   *  tasks / fees for LINKED children only — ParentChild-scoped). parent. */
+  FAMILY_READ: "family.read",
+
+  /** Onboard PARENT/guardian accounts — single create or bulk upload (maker-
+   *  checker: a DIFFERENT person approves a bulk batch). Generated logins +
+   *  ParentChild links. principal, school_admin, hr_manager, hr_clerk. */
+  PARENT_IMPORT: "parent.import",
 } as const;
 
 export type SisPermission = (typeof SIS_PERMISSIONS)[keyof typeof SIS_PERMISSIONS];

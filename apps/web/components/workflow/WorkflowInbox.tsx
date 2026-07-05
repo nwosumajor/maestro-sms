@@ -10,6 +10,7 @@ import {
   SPECIAL_REQUEST_CATEGORIES,
   canInitiateWorkflowType,
   type SpecialRequestCategory,
+  type WorkflowApproverOptionDto,
   type WorkflowState,
   type WorkflowType,
   type WorkflowInboxItemDto,
@@ -62,6 +63,22 @@ export function WorkflowInbox({
   // rbac.manage, content-publish is system-only).
   const initiatableTypes = WORKFLOW_TYPES.filter((t) => canInitiateWorkflowType(t, permissions));
 
+  // Optional initiator routing: pick 2–3 named senior staff as the approval
+  // chain. Empty = the type's default route. The API re-validates everything
+  // (distinct, reviewer-capable, never the initiator).
+  const [approverOptions, setApproverOptions] = React.useState<Serialized<WorkflowApproverOptionDto>[]>([]);
+  const [route, setRoute] = React.useState<string[]>(["", "", ""]);
+  React.useEffect(() => {
+    if (!canCreate) return;
+    let live = true;
+    fetch("/api/sms/workflows/approvers")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((opts: Serialized<WorkflowApproverOptionDto>[]) => { if (live) setApproverOptions(opts); })
+      .catch(() => undefined);
+    return () => { live = false; };
+  }, [canCreate]);
+  const pickedRoute = route.filter(Boolean);
+
   // All mutating calls go through the same-origin BFF, which injects the Bearer.
   const call = async (path: string, body: unknown, key: string) => {
     setBusy(key);
@@ -91,10 +108,23 @@ export function WorkflowInbox({
     const finalTitle =
       title.trim() || (isSpecial ? `${category.replace(/_/g, " ").toLowerCase()} request` : "");
     if (!finalTitle) return;
+    if (pickedRoute.length === 1) {
+      setError("A routed approval needs at least 2 approvers (or leave routing empty for the default).");
+      return;
+    }
+    if (new Set(pickedRoute).size !== pickedRoute.length) {
+      setError("Each approval stage must be a different person.");
+      return;
+    }
     const payload = isSpecial ? { category, details: details.trim() } : {};
-    await call("workflows", { type, title: finalTitle, payload }, "create");
+    await call(
+      "workflows",
+      { type, title: finalTitle, payload, ...(pickedRoute.length >= 2 ? { approverIds: pickedRoute } : {}) },
+      "create",
+    );
     setTitle("");
     setDetails("");
+    setRoute(["", "", ""]);
   };
 
   // Which transitions are legal from this state, given the actor's permissions
@@ -206,6 +236,35 @@ export function WorkflowInbox({
                 {busy === "create" ? "Creating…" : "Create"}
               </Button>
             </form>
+
+            {approverOptions.length > 0 && (
+              <div className="mt-4 space-y-2 border-t border-border pt-4">
+                <Label>Route approvals to (optional)</Label>
+                <p className="text-xs text-muted-foreground">
+                  Pick 2 or 3 senior staff to approve in order — each stage must be a different
+                  person, and you can&apos;t pick yourself. Leave empty to use the standard route.
+                  The principal and school administrator can see every request either way.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {[0, 1, 2].map((i) => (
+                    <select
+                      key={i}
+                      aria-label={`Approval stage ${i + 1}`}
+                      value={route[i]}
+                      onChange={(e) => setRoute((r) => r.map((v, j) => (j === i ? e.target.value : v)))}
+                      className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                    >
+                      <option value="">{i < 2 ? `Stage ${i + 1}…` : "Stage 3 (optional)…"}</option>
+                      {approverOptions.map((o) => (
+                        <option key={o.id} value={o.id}>
+                          {o.name} ({o.roles.join(", ").replace(/_/g, " ")})
+                        </option>
+                      ))}
+                    </select>
+                  ))}
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

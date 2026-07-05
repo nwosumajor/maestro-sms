@@ -183,6 +183,10 @@ export class RingService {
     value: string,
   ): Promise<{ dead: number; wounded: number }> {
     return this.withEmit(p, ringId, async (tx) => {
+      // Serialize ALL turn mutations on this ring (guess vs guess, guess vs the
+      // timeout sweep, forfeit) — every validation below reads post-lock state,
+      // so stale-turn writes are impossible.
+      await tx.$executeRaw`SELECT id FROM "game" WHERE id = ${ringId}::uuid FOR UPDATE`;
       const ring = await this.requireRing(tx, ringId);
       const me = await this.requireParticipant(tx, ringId, p.userId);
       if (ring.status !== "ACTIVE") throw new ConflictException("Ring is not in play");
@@ -230,6 +234,10 @@ export class RingService {
    */
   async timeoutTurn(p: Principal, ringId: string): Promise<RingDto> {
     return this.withEmit(p, ringId, async (tx) => {
+      // Serialize ALL turn mutations on this ring (guess vs guess, guess vs the
+      // timeout sweep, forfeit) — every validation below reads post-lock state,
+      // so stale-turn writes are impossible.
+      await tx.$executeRaw`SELECT id FROM "game" WHERE id = ${ringId}::uuid FOR UPDATE`;
       const ring = await this.requireRing(tx, ringId);
       await this.requireParticipant(tx, ringId, p.userId);
       if (ring.status !== "ACTIVE") throw new ConflictException("Ring is not in play");
@@ -260,6 +268,10 @@ export class RingService {
   /** Voluntarily quit an active ring; the ring re-closes around you. */
   async forfeit(p: Principal, ringId: string): Promise<RingDto> {
     return this.withEmit(p, ringId, async (tx) => {
+      // Serialize ALL turn mutations on this ring (guess vs guess, guess vs the
+      // timeout sweep, forfeit) — every validation below reads post-lock state,
+      // so stale-turn writes are impossible.
+      await tx.$executeRaw`SELECT id FROM "game" WHERE id = ${ringId}::uuid FOR UPDATE`;
       const ring = await this.requireRing(tx, ringId);
       const me = await this.requireParticipant(tx, ringId, p.userId);
       if (ring.status !== "ACTIVE") throw new ConflictException("Ring is not in play");

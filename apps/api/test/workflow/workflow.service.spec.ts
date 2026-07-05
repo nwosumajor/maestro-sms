@@ -196,3 +196,115 @@ describe("WorkflowService multi-stage chain (head -> HR -> principal)", () => {
     ).rejects.toThrow(/already acted/i);
   });
 });
+
+describe("WorkflowService initiator-routed chains (named approvers)", () => {
+  // Harness with a user model so buildCustomChain / listEligibleApprovers work.
+  function makeRoutedService(request: Record<string, unknown> | null, eligibleUsers: { id: string; name: string }[]) {
+    const updateMany = jest.fn().mockResolvedValue({ count: 1 });
+    const tx = {
+      workflowRequest: {
+        findFirst: jest.fn().mockResolvedValue(request),
+        create: jest.fn(({ data }: { data: Record<string, unknown> }) => Promise.resolve({ id: "w1", ...data })),
+        findMany: jest.fn().mockResolvedValue([]),
+        updateMany,
+      },
+      workflowAuditLog: { create: jest.fn().mockResolvedValue({}), findMany: jest.fn().mockResolvedValue([]) },
+      user: { findMany: jest.fn().mockResolvedValue(eligibleUsers) },
+    } as unknown as TenantTx;
+    const db = { runAsTenant: <T,>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
+    const hooks = { onFinalized: jest.fn(), runFinalized: jest.fn().mockResolvedValue(undefined) };
+    return { service: new WorkflowService(db as never, hooks as never), updateMany };
+  }
+
+  const routedStages = [
+    { key: "ROUTE_1", label: "Head One", permission: "workflow.review", approverId: "senior1", approverName: "Head One" },
+    { key: "ROUTE_2", label: "Prin Two", permission: "workflow.review", approverId: "senior2", approverName: "Prin Two" },
+  ];
+  const routed = (over: Record<string, unknown> = {}) => ({
+    id: "w1",
+    type: "STAFF_REQUEST",
+    state: "PENDING_REVIEW",
+    initiatorId: "staff",
+    payload: {},
+    stages: routedStages,
+    currentStage: 0,
+    approvals: [],
+    ...over,
+  });
+
+  it("create with approverIds builds a named 2-stage chain in the picked order", async () => {
+    const { service } = makeRoutedService(null, [
+      { id: "senior1", name: "Head One" },
+      { id: "senior2", name: "Prin Two" },
+    ]);
+    const req = (await service.createRequest(p(["workflow.create"], "staff"), {
+      type: "STAFF_REQUEST",
+      title: "Routed",
+      payload: {},
+      approverIds: ["senior1", "senior2"],
+    })) as unknown as { stages: { key: string; approverId: string; approverName: string }[] };
+    expect(req.stages.map((s) => s.approverId)).toEqual(["senior1", "senior2"]);
+    expect(req.stages.map((s) => s.approverName)).toEqual(["Head One", "Prin Two"]);
+  });
+
+  it("routing to yourself is rejected", async () => {
+    const { service } = makeRoutedService(null, []);
+    await expect(
+      service.createRequest(p(["workflow.create"], "staff"), {
+        type: "STAFF_REQUEST", title: "x", payload: {}, approverIds: ["staff", "senior2"],
+      }),
+    ).rejects.toThrow(/yourself/i);
+  });
+
+  it("duplicate approvers are rejected", async () => {
+    const { service } = makeRoutedService(null, []);
+    await expect(
+      service.createRequest(p(["workflow.create"], "staff"), {
+        type: "STAFF_REQUEST", title: "x", payload: {}, approverIds: ["senior1", "senior1"],
+      }),
+    ).rejects.toThrow(/different person/i);
+  });
+
+  it("a pick who is not reviewer-capable is rejected", async () => {
+    // Only senior1 resolves as eligible; senior2 (a plain teacher) does not.
+    const { service } = makeRoutedService(null, [{ id: "senior1", name: "Head One" }]);
+    await expect(
+      service.createRequest(p(["workflow.create"], "staff"), {
+        type: "STAFF_REQUEST", title: "x", payload: {}, approverIds: ["senior1", "senior2"],
+      }),
+    ).rejects.toThrow(/senior staff member with review rights/i);
+  });
+
+  it("only the NAMED stage approver can act — another reviewer is refused", async () => {
+    const { service } = makeRoutedService(routed(), []);
+    await expect(
+      service.review(p(["workflow.review"], "some-other-reviewer"), "w1", "APPROVE"),
+    ).rejects.toThrow(/routed to Head One/i);
+  });
+
+  it("the named approver advances the chain to the next named stage", async () => {
+    const { service, updateMany } = makeRoutedService(routed(), []);
+    const r = (await service.review(p(["workflow.review"], "senior1"), "w1", "APPROVE")) as {
+      state: string; currentStage: number;
+    };
+    expect(r.state).toBe("PENDING_REVIEW");
+    expect(r.currentStage).toBe(1);
+    expect(updateMany).toHaveBeenCalled();
+  });
+
+  it("a bystander reviewer cannot REQUEST_REVISION on a routed stage either", async () => {
+    const { service } = makeRoutedService(routed(), []);
+    await expect(
+      service.review(p(["workflow.review"], "bystander"), "w1", "REQUEST_REVISION"),
+    ).rejects.toThrow(/routed to Head One/i);
+  });
+
+  it("the second named approver finalizes at their stage", async () => {
+    const { service } = makeRoutedService(
+      routed({ currentStage: 1, approvals: [{ stageKey: "ROUTE_1", approverId: "senior1", at: "t" }] }),
+      [],
+    );
+    const r = (await service.review(p(["workflow.review"], "senior2"), "w1", "APPROVE")) as { state: string };
+    expect(r.state).toBe("APPROVED");
+  });
+});

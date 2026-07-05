@@ -20,7 +20,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import type { DayOfWeekValue } from "@sms/types";
+import type { DayOfWeekValue, TimetableEntryDto } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -302,15 +302,32 @@ export class TimetableService {
     });
   }
 
-  /** A single class's weekly grid (scoped). */
-  async getClassTimetable(p: Principal, classId: string) {
+  /** A single class's weekly grid (scoped). Maps to the DTO — including the
+   *  teacherId/roomId the web needs to PREFILL an edit form, and the resolved
+   *  teacher name (teacherId is a scalar FK, so names are batch-resolved). */
+  async getClassTimetable(p: Principal, classId: string): Promise<TimetableEntryDto[]> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.assertCanViewClass(tx, p, classId);
-      return tx.timetableEntry.findMany({
+      const rows = await tx.timetableEntry.findMany({
         where: { classId },
-        include: { period: true, room: true },
+        include: { period: true, room: { select: { name: true } } },
         orderBy: [{ dayOfWeek: "asc" }, { period: { sequence: "asc" } }],
       });
+      const teacherIds = [...new Set(rows.map((e) => e.teacherId))];
+      const users = teacherIds.length
+        ? await tx.user.findMany({ where: { id: { in: teacherIds } }, select: { id: true, name: true } })
+        : [];
+      const nameById = new Map(users.map((u) => [u.id, u.name]));
+      return rows.map((e) => ({
+        id: e.id,
+        dayOfWeek: e.dayOfWeek,
+        periodId: e.periodId,
+        subject: e.subject,
+        teacherId: e.teacherId,
+        teacherName: nameById.get(e.teacherId) ?? "—",
+        roomId: e.roomId,
+        room: e.room ? { name: e.room.name } : null,
+      }));
     });
   }
 
