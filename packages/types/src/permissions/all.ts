@@ -33,6 +33,7 @@ import type { NotificationPermission } from "./notifications";
 import type { OperatorPermission } from "./operator";
 import type { PollPermission } from "./poll";
 import type { PrivacyPermission } from "./privacy";
+import type { ScholarshipPermission } from "./scholarship";
 import type { SecurityPermission } from "./security";
 import type { SisPermission } from "./sis";
 import type { TaskPermission } from "./task";
@@ -66,6 +67,7 @@ export type Permission =
   | OperatorPermission
   | PollPermission
   | PrivacyPermission
+  | ScholarshipPermission
   | SecurityPermission
   | SisPermission
   | TaskPermission

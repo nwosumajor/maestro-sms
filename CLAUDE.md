@@ -785,6 +785,32 @@ plus user-driven fixes, all verified against the live stack:
   standings `createMany` + batched result reads; messaging thread reads capped
   at 500 most-recent.
 
+## MODULE: Scholarship — platform-sponsored, cross-tenant — BUILT
+(`apps/api/src/scholarship`, web `/scholarships` + operator console; schema
+`scholarship.prisma`, migration `20260730000000_scholarship`, RLS
+`50_scholarship_rls.sql`.) A parent/teacher applies for a platform-owner-sponsored
+scholarship on behalf of a student in THEIR school. Two-halves posture (mirrors
+the Ultimate arena): (A) `ScholarshipProgram` is GLOBAL, platform-owned,
+RLS-EXEMPT (listed like `school`/`plan_price`; app role SELECT-only, writes via the
+PRIVILEGED client); (B) `ScholarshipApplication` is TENANT-scoped (non-null
+school_id + standard RLS, append-only decisions — no hard-delete). ALWAYS-ON (no
+`@RequireModule`) — it's a growth lever, open to every plan. Permissions:
+`scholarship.apply` (parent/teacher — relationship-scoped, 404-not-403),
+`scholarship.read` (leadership oversight), `scholarship.admin` (super_admin only —
+NON_ELEVATABLE). Flow: apply (DRAFT) → GUARDIAN CONSENT required (Golden Rule #5;
+only a `parentChild` guardian may consent) → submit snapshots verified SIGNALS
+(published grade avg / attendance / outstanding fees — signals for the reviewer,
+never a verdict, Golden Rule #8) → the platform owner reviews the cross-tenant
+queue (privileged client) → REVIEW/SHORTLIST/REJECT (no step-up) or AWARD
+(step-up). An AWARD disburses through the FEES ledger: a new
+`PaymentKind.SCHOLARSHIP` payment posted against the student's open invoice in
+their own school (capped at balance; invoice → PARTIALLY_PAID/PAID) — integer
+kobo, audited, `disbursementPaymentId` links back. Program CRUD + review + award
+all audited in the operator's own tenant. Verified: 8 scoping unit tests + the
+`scholarship_application` RLS cross-tenant case (coverage gate green) + live
+end-to-end (create→apply→consent-gate→submit→signals→cross-tenant review→award→
+₦-credit on the invoice) + web production build (67 routes) + route smoke.
+
 ## When generating code
 - Explain the multi-tenancy/security implication of each new table or endpoint.
 - After scaffolding, output RLS SQL and migrations SEPARATELY for review before

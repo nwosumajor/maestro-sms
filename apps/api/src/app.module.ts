@@ -25,6 +25,7 @@ import { ReportCardModule } from "./reportcards/reportcard.module";
 import { HrModule } from "./hr/hr.module";
 import { AdminModule } from "./admin/admin.module";
 import { OperatorModule } from "./operator/operator.module";
+import { ScholarshipModule } from "./scholarship/scholarship.module";
 import { AdmissionsModule } from "./admissions/admissions.module";
 import { PublicModule } from "./public/public.module";
 import { DirectoryModule } from "./directory/directory.module";
@@ -82,6 +83,7 @@ import { HealthController } from "./health.controller";
     HrModule,
     AdminModule,
     OperatorModule,
+    ScholarshipModule,
     AdmissionsModule,
     PublicModule,
     DirectoryModule,

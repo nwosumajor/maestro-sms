@@ -50,6 +50,7 @@ model School {
   grades            Grade[]
   subjectResults    SubjectResult[]
   subjectSelections SubjectSelection[]
+  scholarshipApplications ScholarshipApplication[]
 
   // Approval workflow
   workflowRequests  WorkflowRequest[]

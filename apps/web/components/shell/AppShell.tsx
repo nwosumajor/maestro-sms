@@ -62,6 +62,7 @@ type NavKey =
   | "library"
   | "billing"
   | "documents"
+  | "scholarships"
   | "assessments"
   | "gradebook"
   | "workflows"
@@ -96,6 +97,8 @@ const NAV: {
   icon: LucideIcon;
   href: string;
   perm?: Permission;
+  /** Visible if the caller holds ANY of these (for items spanning roles). */
+  anyPerm?: Permission[];
   module?: ModuleKey;
 }[] = [
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboardIcon, href: "/dashboard" },
@@ -121,6 +124,7 @@ const NAV: {
   // Billing is the platform subscription itself — ALWAYS-ON (no module tag).
   { key: "billing", label: "Billing", icon: WalletIcon, href: "/billing", perm: "billing.read" },
   { key: "documents", label: "Documents", icon: FolderIcon, href: "/documents", perm: "document.read", module: MODULES.DOCUMENTS },
+  { key: "scholarships", label: "Scholarships", icon: AwardIcon, href: "/scholarships", anyPerm: ["scholarship.apply", "scholarship.read"] },
   { key: "leave", label: "Leave", icon: CalendarCheckIcon, href: "/leave", perm: "hr.self", module: MODULES.HR },
   { key: "hr", label: "HR", icon: BriefcaseIcon, href: "/hr", perm: "hr.read", module: MODULES.HR },
   { key: "assessments", label: "Assessments", icon: BookOpenIcon, href: "/assessments", perm: "assessment.read", module: MODULES.INTEGRITY },
@@ -174,7 +178,7 @@ const NAV_GROUP: Record<NavKey, string> = {
   certificates: "teaching", documents: "teaching", library: "teaching",
   students: "people", family: "people", attendance: "people", hr: "people", leave: "people", alumni: "people",
   fees: "operations", billing: "operations", hostel: "operations", transport: "operations",
-  workflows: "operations", tasks: "operations",
+  workflows: "operations", tasks: "operations", scholarships: "operations",
   discussion: "community", polls: "community", forms: "community", discipline: "community",
   games: "community", ultimate: "community",
   operator: "platform", operatoraudit: "platform", directory: "platform", admin: "platform", account: "platform",
@@ -224,6 +228,7 @@ export async function AppShell({
     (item) =>
       (!isPlatformOwner || PLATFORM_OWNER_NAV.has(item.key)) &&
       (!item.perm || permissions.includes(item.perm)) &&
+      (!item.anyPerm || item.anyPerm.some((pp) => permissions.includes(pp))) &&
       (!item.module || !modules || modules.includes(item.module)),
   );
   // Apply the school's saved theme (brand colour + font). Best-effort; falls back

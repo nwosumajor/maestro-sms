@@ -14,6 +14,7 @@ import { Provisioning } from "@/components/operator/Provisioning";
 import { OperatorUsers } from "@/components/operator/OperatorUsers";
 import { OperatorStudents } from "@/components/operator/OperatorStudents";
 import { StudentDataExport } from "@/components/operator/StudentDataExport";
+import { ScholarshipAdmin } from "@/components/operator/ScholarshipAdmin";
 import { OnboardingRequests } from "@/components/operator/OnboardingRequests";
 import { PricingManager } from "@/components/operator/PricingManager";
 import { TenantFilterBar } from "@/components/operator/TenantFilterBar";
@@ -62,6 +63,8 @@ export default async function OperatorPage({
         </div>
 
         <Provisioning tenants={names ?? []} />
+
+        <ScholarshipAdmin />
 
         {pricing && <PricingManager initial={pricing} />}
 

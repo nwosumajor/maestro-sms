@@ -45,6 +45,10 @@ enum PaymentStatus {
 enum PaymentKind {
   PAYMENT
   REFUND
+  /// Platform-sponsored scholarship credit — posted when a ScholarshipApplication
+  /// is AWARDED. Positive; reduces the student's balance like a payment, but funded
+  /// by the platform owner (not the guardian).
+  SCHOLARSHIP
 }
 
 /// A reusable catalog fee (e.g. "Tuition — Term 1", "Bus Fee").

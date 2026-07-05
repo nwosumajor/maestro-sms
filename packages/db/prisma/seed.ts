@@ -152,6 +152,10 @@ const PERMS = [
   "workflow.review.head",
   "workflow.review.hr",
   "workflow.review.principal",
+  // Scholarship (platform-sponsored)
+  "scholarship.apply",
+  "scholarship.read",
+  "scholarship.admin",
 ];
 
 // Role -> permission matrix (CLAUDE.md RBAC + spec section 2).
@@ -159,9 +163,9 @@ const ROLE_PERMS: Record<string, string[]> = {
   // Platform owner: cross-tenant operator console + audited impersonation.
   // super_admin is the cross-tenant operator; the ONLY game permission it holds
   // is the cross-school Ultimate admin (+ leaderboard read to view it).
-  super_admin: ["platform.operate", "billing.dunning.run", "security.audit.read", "directory.search", "game.ultimate.admin", "game.leaderboard.read"],
+  super_admin: ["platform.operate", "billing.dunning.run", "security.audit.read", "directory.search", "game.ultimate.admin", "game.leaderboard.read", "scholarship.admin", "scholarship.read"],
   // Board: read-only oversight + ultimate veto on workflows.
-  board: ["poll.vote", "discussion.participate", "discipline.file", "form.respond", "class.read", "grade.read", "integrity.report.read", "workflow.read", "workflow.veto", "notification.read", "fee.read", "document.read", "timetable.read", "message.read", "message.send", "event.read", "announcement.read", "billing.read",
+  board: ["poll.vote", "discussion.participate", "discipline.file", "form.respond", "class.read", "grade.read", "integrity.report.read", "workflow.read", "workflow.veto", "notification.read", "fee.read", "document.read", "timetable.read", "message.read", "message.send", "event.read", "announcement.read", "billing.read", "scholarship.read",
   ],
   // Principal: full operational view of their school (can grade, review workflows).
   principal: [
@@ -192,6 +196,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     "game.ultimate.enroll",
     "lms.content.read", "lms.content.approve",
     "billing.read", "billing.manage",
+    "scholarship.read",
   ],
   // School Administrator: SIS / enrollment / workflows — but NOT grade books, NOT veto.
   school_admin: [
@@ -224,6 +229,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     "game.ultimate.enroll", "game.ultimate.consent",
     "lms.content.read", "lms.content.write", "lms.forum.post",
     "billing.read", "billing.manage",
+    "scholarship.read",
   ],
   teacher: ["hr.self", "task.assign", "task.participate", "poll.manage", "poll.vote",
     "discussion.participate", "discussion.moderate", "discipline.file", "discipline.manage", "certificate.issue", "alumni.manage", "form.manage", "form.respond",
@@ -239,6 +245,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     "security.elevation.request", "message.read", "message.send", "event.read", "announcement.read", "event.write",
     "game.play", "game.leaderboard.read", "game.race.open", "game.match.moderate",
     "lms.content.read", "lms.content.write", "lms.forum.post",
+    "scholarship.apply",
   ],
   student: [
     "assessment.read", "submission.read", "submission.write",
@@ -259,6 +266,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     "notification.read", "fee.read", "document.read",
     "timetable.read", "message.read", "message.send", "event.read", "announcement.read",
     "lms.content.read",
+    "scholarship.apply",
   ],
   // Non-teaching staff: narrow. Both can raise workflow requests (POs / leave).
   // The accountant owns Fees/Billing.

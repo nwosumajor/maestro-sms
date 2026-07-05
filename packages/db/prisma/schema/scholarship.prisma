@@ -1,0 +1,114 @@
+// =============================================================================
+// Scholarship — platform-owned, cross-tenant sponsorship
+// =============================================================================
+// Mirrors the Ultimate arena's two-halves split (spec: a global platform surface
+// + a tenant-scoped bridge), so a minor's data only crosses the tenant boundary
+// to the platform owner WITH guardian consent.
+//   (A) ScholarshipProgram — GLOBAL, platform-owned, RLS-EXEMPT (listed in the
+//       RLS file like `school`/`plan_price`). No school_id; super_admin CRUD via
+//       the privileged client; the app role has SELECT so every school sees OPEN
+//       programs.
+//   (B) ScholarshipApplication — TENANT-SCOPED (non-null school_id + standard
+//       RLS). A parent/teacher applies for a student in THEIR school; the
+//       platform owner reviews across tenants via the operator privileged path.
+//       Append-only decisions (no hard-delete). Guardian consent (scalar fields)
+//       is required before submission (Golden Rule #5).
+// An AWARDED application disburses through the Fees module (PaymentKind.SCHOLARSHIP)
+// so the money is integer-kobo, audited, and never hard-deleted like every other
+// financial record. // SECURITY (Golden Rule #8): the platform owner DECIDES;
+// the collected academic/attendance/fee `signals` inform review, never a verdict.
+// =============================================================================
+
+enum ScholarshipProgramStatus {
+  DRAFT
+  OPEN
+  CLOSED
+  ARCHIVED
+}
+
+enum ScholarshipAwardKind {
+  FEES_CREDIT
+  SUBSCRIPTION_CREDIT
+}
+
+enum ScholarshipSelectionBasis {
+  MERIT
+  NEED
+  BOTH
+}
+
+enum ScholarshipApplicationStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  SHORTLISTED
+  AWARDED
+  REJECTED
+}
+
+/// (A) GLOBAL program — platform-owned, RLS-EXEMPT.
+model ScholarshipProgram {
+  id             String                    @id @default(uuid()) @db.Uuid
+  title          String
+  description    String?
+  /// Total budget + per-award amount, integer minor units (kobo).
+  budgetMinor    Int                       @default(0)
+  awardMinor     Int
+  awardKind      ScholarshipAwardKind      @default(FEES_CREDIT)
+  selectionBasis ScholarshipSelectionBasis @default(BOTH)
+  /// Free-form / structured eligibility rules (JSONB) — displayed to applicants.
+  eligibility    Json?
+  opensAt        DateTime
+  closesAt       DateTime
+  status         ScholarshipProgramStatus  @default(DRAFT)
+  /// super_admin userId (scalar audit field; NO cross-tenant user relation).
+  createdById    String                    @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@map("scholarship_program")
+}
+
+/// (B) TENANT-SCOPED application — standard RLS on school_id.
+model ScholarshipApplication {
+  id            String                       @id @default(uuid()) @db.Uuid
+  schoolId      String                       @db.Uuid
+  /// Program applied to (DB FK to the global program; no Prisma relation — the
+  /// program is RLS-exempt/global and read via the privileged/SELECT path).
+  programId     String                       @db.Uuid
+  /// Student the application is FOR (DB FK to user; scalar).
+  studentId     String                       @db.Uuid
+  /// Who applied + their role at apply time (parent | teacher).
+  applicantId   String                       @db.Uuid
+  applicantRole String
+  /// Application answers (essay, need statement, …) — JSONB.
+  answers       Json?
+  /// Verified signals snapshot at submission (grades/attendance/fees) — for the
+  /// reviewer only; SIGNALS, never a verdict (Golden Rule #8). JSONB.
+  signals       Json?
+  status        ScholarshipApplicationStatus @default(DRAFT)
+  /// Guardian consent to disclose the minor's data to the platform (REQUIRED to
+  /// submit). Scalar audit fields — who consented + when.
+  consentById   String?                      @db.Uuid
+  consentAt     DateTime?
+  /// Review outcome (set by the platform owner): the award + who/why.
+  awardMinor    Int?
+  reviewedById  String?                      @db.Uuid
+  reviewNote    String?
+  /// The Fees Payment posted as the credit when AWARDED (disbursement link).
+  disbursementPaymentId String?              @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  /// One application per student per program.
+  @@unique([programId, studentId])
+  @@index([schoolId])
+  @@index([schoolId, status])
+  @@index([programId, status])
+  @@map("scholarship_application")
+}

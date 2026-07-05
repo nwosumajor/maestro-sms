@@ -20,6 +20,7 @@ export const NON_ELEVATABLE_PERMISSIONS: ReadonlySet<string> = new Set<string>([
   "fee.approve", // maker-checker on money
   "hr.salary.approve", // maker-checker on salary
   "game.ultimate.admin", // super_admin cross-school arena
+  "scholarship.admin", // super_admin cross-tenant program review + award
 ]);
 
 /** May this permission be granted via JIT elevation / break-glass? */

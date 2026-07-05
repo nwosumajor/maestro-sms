@@ -96,6 +96,7 @@ d("RLS cross-tenant isolation", () => {
   const termA = randomUUID();
   const subjectResultA = randomUUID();
   const subjectSelectionA = randomUUID();
+  const scholarshipApplicationA = randomUUID();
   const announcementA = randomUUID();
   // Hostel
   const hostelA = randomUUID();
@@ -402,6 +403,13 @@ d("RLS cross-tenant isolation", () => {
     await a.query(
       `INSERT INTO announcement (id,"schoolId",title,body,"createdById","updatedAt") VALUES ($1,$2,'Hi','Body',$3,now())`,
       [announcementA, A, userA],
+    );
+    // Scholarship application (student userA in school A; programId is a scalar
+    // uuid to the global program — no DB FK — so it purges any time before school).
+    await a.query(
+      `INSERT INTO scholarship_application (id,"schoolId","programId","studentId","applicantId","applicantRole",status,"updatedAt")
+       VALUES ($1,$2,$3,$4,$5,'parent','SUBMITTED',now())`,
+      [scholarshipApplicationA, A, randomUUID(), userA, userA],
     );
     // Hostel + room + allocation (student userA in school A).
     await a.query(
@@ -764,6 +772,7 @@ d("RLS cross-tenant isolation", () => {
       // any time before school.
       "subject_result",
       "subject_selection",
+      "scholarship_application",
       "workflow_request",
       "submission",
       "assessment",
@@ -813,6 +822,7 @@ d("RLS cross-tenant isolation", () => {
     ["grade", gradeA],
     ["subject_result", subjectResultA],
     ["subject_selection", subjectSelectionA],
+    ["scholarship_application", scholarshipApplicationA],
     ["workflow_request", workflowReqA],
     ["student_profile", profileA],
     ["emergency_contact", contactA],
