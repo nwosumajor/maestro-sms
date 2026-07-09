@@ -19,6 +19,8 @@ COPY packages/game-engine/package.json    packages/game-engine/package.json
 COPY packages/game-transport/package.json packages/game-transport/package.json
 COPY apps/api/package.json                apps/api/package.json
 COPY apps/web/package.json                apps/web/package.json
+# @sms/db's postinstall runs `prisma generate`, which needs the schema present.
+COPY packages/db/prisma                   packages/db/prisma
 RUN pnpm install --frozen-lockfile
 
 # ---- build: generate client, build packages + api ---------------------------

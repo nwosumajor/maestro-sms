@@ -16,6 +16,8 @@ COPY packages/tokens/package.json  packages/tokens/package.json
 COPY packages/db/package.json      packages/db/package.json
 COPY apps/api/package.json         apps/api/package.json
 COPY apps/web/package.json         apps/web/package.json
+# @sms/db's postinstall runs `prisma generate`, which needs the schema present.
+COPY packages/db/prisma            packages/db/prisma
 RUN pnpm install --frozen-lockfile
 
 # ---- build: workspace deps + next standalone --------------------------------
