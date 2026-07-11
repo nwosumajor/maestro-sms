@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="SMS">
+  <rect width="512" height="512" rx="96" fill="#0f172a"/>
+  <path d="M256 104 96 184l160 80 128-64v96h32v-112z" fill="#f8fafc"/>
+  <path d="M160 236v72c0 27 43 52 96 52s96-25 96-52v-72l-96 48z" fill="#38bdf8"/>
+</svg>

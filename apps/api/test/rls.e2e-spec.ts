@@ -68,6 +68,14 @@ d("RLS cross-tenant isolation", () => {
   const lmsContentA = randomUUID();
   const quizAttemptA = randomUUID();
   const forumPostA = randomUUID();
+  const lmsProgressA = randomUUID();
+  const lmsSubmissionA = randomUUID();
+  const lmsModuleA = randomUUID();
+  const lmsContentRevisionA = randomUUID();
+  const liveSessionA = randomUUID();
+  const liveAttendanceA = randomUUID();
+  const lmsAwardA = randomUUID();
+  const xapiStatementA = randomUUID();
   const subPaymentA = randomUUID();
   // HR + the remaining tenant tables — seeded so the coverage meta-test
   // ("every RLS-enabled table has a deny case") holds for the whole schema.
@@ -336,6 +344,38 @@ d("RLS cross-tenant isolation", () => {
     await a.query(
       `INSERT INTO forum_post (id,"schoolId","contentId","authorId",body) VALUES ($1,$2,$3,$4,'hi')`,
       [forumPostA, A, lmsContentA, userA],
+    );
+    await a.query(
+      `INSERT INTO lms_progress (id,"schoolId","contentId","studentId",status,"updatedAt") VALUES ($1,$2,$3,$4,'COMPLETED',now())`,
+      [lmsProgressA, A, lmsContentA, userA],
+    );
+    await a.query(
+      `INSERT INTO lms_submission (id,"schoolId","contentId","studentId",text,status,"updatedAt") VALUES ($1,$2,$3,$4,'my work','SUBMITTED',now())`,
+      [lmsSubmissionA, A, lmsContentA, userA],
+    );
+    await a.query(
+      `INSERT INTO lms_module (id,"schoolId","classId",title,"updatedAt") VALUES ($1,$2,$3,'Module 1',now())`,
+      [lmsModuleA, A, classA],
+    );
+    await a.query(
+      `INSERT INTO lms_content_revision (id,"schoolId","contentId",version,type,title,"authorId") VALUES ($1,$2,$3,1,'LESSON','v1',$4)`,
+      [lmsContentRevisionA, A, lmsContentA, userA],
+    );
+    await a.query(
+      `INSERT INTO lms_live_session (id,"schoolId","classId",title,provider,"joinUrl","startsAt","hostId","updatedAt") VALUES ($1,$2,$3,'Live','JITSI','https://meet.jit.si/x',now(),$4,now())`,
+      [liveSessionA, A, classA, userA],
+    );
+    await a.query(
+      `INSERT INTO lms_live_attendance (id,"schoolId","sessionId","studentId") VALUES ($1,$2,$3,$4)`,
+      [liveAttendanceA, A, liveSessionA, userA],
+    );
+    await a.query(
+      `INSERT INTO lms_award (id,"schoolId","classId","studentId",badge,"awardedById") VALUES ($1,$2,$3,$4,'QUIZ_MASTER',$5)`,
+      [lmsAwardA, A, classA, userA, userA],
+    );
+    await a.query(
+      `INSERT INTO xapi_statement (id,"schoolId","actorId",verb,"objectId","objectName","classId") VALUES ($1,$2,$3,'completed','content:x','Intro',$4)`,
+      [xapiStatementA, A, userA, classA],
     );
     // Platform billing: an append-only subscription payment for school A.
     await a.query(
@@ -736,9 +776,17 @@ d("RLS cross-tenant isolation", () => {
       "admission_application",
       // Platform billing payment references school/user — delete before them.
       "platform_subscription_payment",
-      // LMS content children (forum/quiz) before lms_content; lms_content before class/user.
+      // LMS content children (forum/quiz/progress) before lms_content; lms_content before class/user.
       "forum_post",
       "quiz_attempt",
+      "lms_progress",
+      "lms_submission",
+      "lms_module",
+      "lms_content_revision",
+      "lms_live_attendance",
+      "lms_live_session",
+      "lms_award",
+      "xapi_statement",
       "lms_content",
       // game children before game (FK), game before competition (game.competitionId
       // FK), standing before competition, competition before user/school.
@@ -853,6 +901,14 @@ d("RLS cross-tenant isolation", () => {
     ["lms_content", lmsContentA],
     ["quiz_attempt", quizAttemptA],
     ["forum_post", forumPostA],
+    ["lms_progress", lmsProgressA],
+    ["lms_submission", lmsSubmissionA],
+    ["lms_module", lmsModuleA],
+    ["lms_content_revision", lmsContentRevisionA],
+    ["lms_live_session", liveSessionA],
+    ["lms_live_attendance", liveAttendanceA],
+    ["lms_award", lmsAwardA],
+    ["xapi_statement", xapiStatementA],
     ["platform_subscription_payment", subPaymentA],
     ["employee", employeeA],
     ["class_teacher", classTeacherA],

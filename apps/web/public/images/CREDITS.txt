@@ -1,0 +1,17 @@
+Landing-page photography — Pexels (free to use, no attribution required).
+Sourced under the Pexels License (https://www.pexels.com/license/).
+
+Hero carousel (auto-sliding):
+  hero-1.jpg  — pexels.com/photo/6936139   (students in a classroom)
+  hero-2.jpg  — pexels.com/photo/207692    (university campus building)
+  hero-3.jpg  — pexels.com/photo/6936159   (pupil raising a hand in class)
+  hero-4.jpg  — pexels.com/photo/256490    (classical university hall)
+
+Audience cards / community band:
+  audience-leaders.jpg   — pexels.com/photo/8423062
+  audience-teachers.jpg  — pexels.com/photo/5905554
+  audience-parents.jpg   — pexels.com/photo/7880613
+  band-community.jpg     — pexels.com/photo/14909652
+
+Product showcase:
+  product-dashboard.jpg  — rendered from the app's own design tokens (not a stock photo).

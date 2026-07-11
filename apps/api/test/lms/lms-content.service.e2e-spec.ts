@@ -18,6 +18,7 @@ import { prisma } from "@sms/db";
 import { LmsContentService } from "../../src/lms/lms-content.service";
 import { WorkflowService } from "../../src/workflow/workflow.service";
 import { WorkflowHooksService } from "../../src/workflow/workflow-hooks.service";
+import { TermResultService } from "../../src/gradebook/term-result.service";
 import { StubStorageProvider } from "../../src/documents/storage.provider";
 import { PrismaTenantService } from "../../src/foundation/prisma-tenant.service";
 import { AuditLogService } from "../../src/foundation/audit-log.service";
@@ -80,12 +81,16 @@ d("LmsContentService integration (authoring, approval, quiz, forum, RLS)", () =>
     // Stub the notifier: publish alerts are best-effort and need a BullMQ queue
     // (Redis) we don't run here; the service swallows failures regardless.
     const notifier = { enqueue: async () => undefined } as never;
+    const hooks = new WorkflowHooksService();
+    const workflow = new WorkflowService(tenant, hooks);
+    const termResults = new TermResultService(tenant, new AuditLogService() as never, workflow, hooks);
     svc = new LmsContentService(
       tenant,
       new AuditLogService() as never,
-      new WorkflowService(tenant, new WorkflowHooksService()),
+      workflow,
       notifier,
       new StubStorageProvider(),
+      termResults,
     );
   });
 
@@ -107,7 +112,7 @@ d("LmsContentService integration (authoring, approval, quiz, forum, RLS)", () =>
       classId: CLS,
       type: "LESSON",
       title: "Intro",
-      body: { kind: "LESSON", html: "<p>hello</p>" },
+      body: { kind: "LESSON", blocks: [{ type: "paragraph", text: "hello" }] },
     });
     expect(c.status).toBe("DRAFT");
 
@@ -170,7 +175,7 @@ d("LmsContentService integration (authoring, approval, quiz, forum, RLS)", () =>
       classId: CLS,
       type: "LESSON",
       title: "Secret",
-      body: { kind: "LESSON", html: "x" },
+      body: { kind: "LESSON", blocks: [{ type: "paragraph", text: "x" }] },
     });
     await svc.submitForApproval(teacher(), c.id);
     await expect(svc.getContent(student(PRB, SB), c.id)).rejects.toThrow(/not found/i);

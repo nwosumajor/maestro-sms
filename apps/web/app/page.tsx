@@ -11,6 +11,34 @@ import {
   HeartPulseIcon,
   ArrowRightIcon,
   CheckIcon,
+  QuoteIcon,
+  StarIcon,
+  ClipboardListIcon,
+  ServerCogIcon,
+  RocketIcon,
+  // per-module icons for the "register" grid
+  CalendarClockIcon,
+  ScanFaceIcon,
+  LibraryIcon,
+  AwardIcon,
+  UserIcon,
+  CalendarCheckIcon,
+  BriefcaseIcon,
+  UserPlusIcon,
+  UsersRoundIcon,
+  ReceiptIcon,
+  FolderLockIcon,
+  BedDoubleIcon,
+  BusIcon,
+  WorkflowIcon,
+  CalendarDaysIcon,
+  MessageCircleIcon,
+  VoteIcon,
+  ListChecksIcon,
+  ListTodoIcon,
+  GavelIcon,
+  BarChart3Icon,
+  Gamepad2Icon,
 } from "lucide-react";
 import {
   PLANS as PLAN_KEYS,
@@ -21,6 +49,43 @@ import {
 } from "@sms/types";
 import { Button } from "@/components/ui/button";
 import { OnboardForm } from "@/components/public/OnboardForm";
+import { HeroCarousel } from "@/components/public/HeroCarousel";
+
+// Auto-sliding hero photos — polished, international education imagery.
+const HERO_IMAGES = [
+  { src: "/images/hero-1.jpg", alt: "A diverse group of pupils working together in a bright, modern classroom" },
+  { src: "/images/hero-2.jpg", alt: "A landmark university campus building under a clear sky" },
+  { src: "/images/hero-3.jpg", alt: "A pupil raising their hand to answer in class" },
+  { src: "/images/hero-4.jpg", alt: "A classical university hall on a green campus" },
+];
+
+// Sliding background for the onboarding CTA — celebratory, aspirational imagery.
+const ONBOARD_IMAGES = [
+  { src: "/images/onboard-1.jpg", alt: "" },
+  { src: "/images/onboard-2.jpg", alt: "" },
+  { src: "/images/onboard-3.jpg", alt: "" },
+];
+
+// "See it in action" carousel — multiple app surfaces (dashboard, LMS, analytics,
+// gradebook), rendered from the app's own design tokens at a shared 1800x1184.
+const PRODUCT_IMAGES = [
+  { src: "/images/product-dashboard.jpg", alt: "The term dashboard — attendance, fees, approvals and recent activity" },
+  { src: "/images/product-lms.jpg", alt: "The Student LMS — course lessons, a video lesson, quizzes and assignments" },
+  { src: "/images/product-analytics.jpg", alt: "School analytics — attendance trend, enrolment and fee-collection charts" },
+  { src: "/images/product-gradebook.jpg", alt: "The gradebook — a term scoresheet with component marks, grades and positions" },
+];
+
+// Auto-scrolling "life on the platform" strip — arch-framed portrait tiles.
+const MARQUEE_IMAGES = [
+  { src: "/images/marquee-1.jpg", alt: "A pupil exploring with a magnifying glass" },
+  { src: "/images/marquee-2.jpg", alt: "A student in a science lab wearing safety goggles" },
+  { src: "/images/marquee-3.jpg", alt: "Children smiling at their easels in an art class" },
+  { src: "/images/marquee-4.jpg", alt: "A pupil painting at an easel" },
+  { src: "/images/marquee-5.jpg", alt: "A student looking through a microscope" },
+  { src: "/images/marquee-6.jpg", alt: "Three students reading together" },
+  { src: "/images/marquee-7.jpg", alt: "Two students reading a book in the library" },
+  { src: "/images/marquee-8.jpg", alt: "Two pupils in uniform reading together" },
+];
 
 export const metadata = {
   title: "School Management System — run your whole school from one secure register",
@@ -41,60 +106,61 @@ const RULE_GRID: React.CSSProperties = {
   backgroundSize: "34px 34px",
 };
 
-const MODULE_GROUPS: { label: string; icon: typeof BookOpenIcon; items: [string, string][] }[] = [
+type ModuleItem = { name: string; desc: string; icon: typeof BookOpenIcon };
+const MODULE_GROUPS: { label: string; icon: typeof BookOpenIcon; items: ModuleItem[] }[] = [
   {
     label: "Teaching & Learning",
     icon: BookOpenIcon,
     items: [
-      ["Classes & LMS", "Course content, lessons, quizzes and forums per class."],
-      ["Gradebook", "Record results with a full, auditable grade history."],
-      ["Timetabling", "Periods, rooms and lessons with clash detection."],
-      ["Assessment integrity", "Cheating signals for teacher review — never an automatic verdict."],
-      ["Library", "Barcode catalogue, loans and fines."],
-      ["Certificates & ID", "Generate ID cards and certificates on demand."],
+      { name: "Classes & LMS", desc: "Course content, lessons, quizzes and forums per class.", icon: BookOpenIcon },
+      { name: "Gradebook", desc: "Record results with a full, auditable grade history.", icon: GraduationCapIcon },
+      { name: "Timetabling", desc: "Periods, rooms and lessons with clash detection.", icon: CalendarClockIcon },
+      { name: "Assessment integrity", desc: "Cheating signals for teacher review — never an automatic verdict.", icon: ScanFaceIcon },
+      { name: "Library", desc: "Barcode catalogue, loans and fines.", icon: LibraryIcon },
+      { name: "Certificates & ID", desc: "Generate ID cards and certificates on demand.", icon: AwardIcon },
     ],
   },
   {
     label: "People & Records",
     icon: UsersIcon,
     items: [
-      ["Student information", "Profiles, contacts and encrypted medical records."],
-      ["Attendance", "Daily registers; guardians notified on absence."],
-      ["HR & Payroll", "Staff records, leave, appraisals and Nigerian-PAYE payroll."],
-      ["Admissions", "Public applications through to staff review and offers."],
-      ["Alumni", "Keep former-student records and send broadcasts."],
+      { name: "Student information", desc: "Profiles, contacts and encrypted medical records.", icon: UserIcon },
+      { name: "Attendance", desc: "Daily registers; guardians notified on absence.", icon: CalendarCheckIcon },
+      { name: "HR & Payroll", desc: "Staff records, leave, appraisals and Nigerian-PAYE payroll.", icon: BriefcaseIcon },
+      { name: "Admissions", desc: "Public applications through to staff review and offers.", icon: UserPlusIcon },
+      { name: "Alumni", desc: "Keep former-student records and send broadcasts.", icon: UsersRoundIcon },
     ],
   },
   {
     label: "Money & Operations",
     icon: WalletIcon,
     items: [
-      ["Fees & Billing", "Invoices, online payments and receipts in exact kobo."],
-      ["Document vault", "Report cards and receipts, stored and shared securely."],
-      ["Hostel", "Boarding houses, rooms, allocations and rent."],
-      ["Transport", "Vehicles, routes, stops and transport fees."],
-      ["Approvals", "Multi-stage workflows with separation of duties."],
+      { name: "Fees & Billing", desc: "Invoices, online payments and receipts in exact kobo.", icon: ReceiptIcon },
+      { name: "Document vault", desc: "Report cards and receipts, stored and shared securely.", icon: FolderLockIcon },
+      { name: "Hostel", desc: "Boarding houses, rooms, allocations and rent.", icon: BedDoubleIcon },
+      { name: "Transport", desc: "Vehicles, routes, stops and transport fees.", icon: BusIcon },
+      { name: "Approvals", desc: "Multi-stage workflows with separation of duties.", icon: WorkflowIcon },
     ],
   },
   {
     label: "Community",
     icon: MessagesSquareIcon,
     items: [
-      ["Messaging", "Two-way threads between staff, parents and students."],
-      ["Calendar", "School events for the right audience."],
-      ["Discussion hub", "Moderated topic groups for your community."],
-      ["Polls", "Anonymous opinion polls."],
-      ["Form builder", "Surveys, feedback and review forms."],
-      ["Tasks", "Assign and track work for staff and students."],
+      { name: "Messaging", desc: "Two-way threads between staff, parents and students.", icon: MessagesSquareIcon },
+      { name: "Calendar", desc: "School events for the right audience.", icon: CalendarDaysIcon },
+      { name: "Discussion hub", desc: "Moderated topic groups for your community.", icon: MessageCircleIcon },
+      { name: "Polls", desc: "Anonymous opinion polls.", icon: VoteIcon },
+      { name: "Form builder", desc: "Surveys, feedback and review forms.", icon: ListChecksIcon },
+      { name: "Tasks", desc: "Assign and track work for staff and students.", icon: ListTodoIcon },
     ],
   },
   {
     label: "Wellbeing & Insight",
     icon: HeartPulseIcon,
     items: [
-      ["Discipline room", "Complaints, evidence and resolution — handled by people."],
-      ["Analytics", "Attendance, collection and operations at a glance."],
-      ["Games", "A competitive learning arena across classes and schools."],
+      { name: "Discipline room", desc: "Complaints, evidence and resolution — handled by people.", icon: GavelIcon },
+      { name: "Analytics", desc: "Attendance, collection and operations at a glance.", icon: BarChart3Icon },
+      { name: "Games", desc: "A competitive learning arena across classes and schools.", icon: Gamepad2Icon },
     ],
   },
 ];
@@ -126,6 +192,8 @@ const AUDIENCES = [
   {
     eyebrow: "For school leaders",
     title: "The whole school on one screen",
+    img: "/images/audience-leaders.jpg",
+    alt: "A smiling teacher standing at the whiteboard in a classroom",
     points: [
       "Attendance, fees, results and approvals in real time",
       "HR, payroll and leave with maker-checker controls",
@@ -136,6 +204,8 @@ const AUDIENCES = [
   {
     eyebrow: "For teachers",
     title: "Less paperwork, more teaching",
+    img: "/images/audience-teachers.jpg",
+    alt: "A teacher taking a lesson as a pupil raises their hand to answer",
     points: [
       "Take the register and grade in a few taps",
       "Message parents and share documents securely",
@@ -146,6 +216,8 @@ const AUDIENCES = [
   {
     eyebrow: "For parents",
     title: "Stay close to your child's day",
+    img: "/images/audience-parents.jpg",
+    alt: "A parent holding their child's hands, seated together outdoors",
     points: [
       "Follow attendance, results, fees and messages",
       "Pay fees online and download receipts",
@@ -186,11 +258,51 @@ async function effectivePlans() {
   });
 }
 
-const STEPS = [
-  ["Request onboarding", "Tell us about your school using the form below. It takes about two minutes."],
-  ["We provision your tenant", "Our team sets up your isolated school space with an administrator and a principal account."],
-  ["Your team goes live", "Add staff and students, switch on the modules you need, and start running your school."],
+const STEPS: { icon: typeof ClipboardListIcon; title: string; body: string }[] = [
+  {
+    icon: ClipboardListIcon,
+    title: "Request onboarding",
+    body: "Tell us about your school using the form below. It takes about two minutes.",
+  },
+  {
+    icon: ServerCogIcon,
+    title: "We provision your tenant",
+    body: "Our team sets up your isolated school space with an administrator and a principal account.",
+  },
+  {
+    icon: RocketIcon,
+    title: "Your team goes live",
+    body: "Add staff and students, switch on the modules you need, and start running your school.",
+  },
 ];
+
+// PLACEHOLDER social proof — replace with REAL, attributed quotes from partner
+// schools before launch. Kept intentionally generic (role + region, no invented
+// school names or people) so nothing fabricated ships as if it were a real
+// named endorsement. See the trust chips below for claims that are already true.
+const TESTIMONIALS: { quote: string; name: string; role: string }[] = [
+  {
+    quote:
+      "We ran a whole term on it and never touched our spreadsheets again. Attendance, fees and approvals are finally in one place — I can see the entire school before I've had my morning coffee.",
+    name: "Principal",
+    role: "Secondary school · Lagos",
+  },
+  {
+    quote:
+      "Onboarding took days, not a term. Per-student pricing let us start lean and switch on HR and payroll only when we were ready — no big upfront bet, no wasted modules.",
+    name: "School administrator",
+    role: "Group of schools · Abuja",
+  },
+  {
+    quote:
+      "I follow my daughter's attendance and results and pay her fees straight from my phone. Knowing her records are private and secure is exactly the reassurance a parent wants.",
+    name: "Parent",
+    role: "Primary school · Port Harcourt",
+  },
+];
+
+// TRUE product claims — safe to show as-is (these are enforced in the codebase).
+const TRUST_CHIPS = ["NDPR-aligned", "Audit-logged end to end", "Row-level tenant isolation", "MFA + step-up re-auth"];
 
 function NavBar() {
   return (
@@ -224,100 +336,74 @@ function NavBar() {
   );
 }
 
+// Full-bleed photographic hero: the auto-sliding carousel is the WIDE background,
+// with the headline + CTAs overlaid on a legibility gradient. Reads warm and human.
 function Hero() {
-  return (
-    <section className="relative overflow-hidden border-b border-border/60">
-      <div aria-hidden className="pointer-events-none absolute inset-0" style={RULE_GRID} />
-      <div aria-hidden className="pointer-events-none absolute -right-40 -top-40 h-[28rem] w-[28rem] rounded-full bg-primary/10 blur-3xl" />
-      <div className="relative mx-auto grid max-w-6xl items-center gap-12 px-5 py-16 sm:px-8 lg:grid-cols-[1.05fr_1fr] lg:py-24">
-        <div className="animate-fade-up">
-          <span aria-hidden className="mb-3 block h-px w-12 bg-rule/70" />
-          <p className="eyebrow">Multi-tenant school operating system</p>
-          <h1 className="mt-4 text-4xl font-semibold leading-[1.08] tracking-tight sm:text-5xl lg:text-[3.4rem]">
-            Run your entire school from one secure register.
-          </h1>
-          <p className="mt-5 max-w-xl text-lg leading-relaxed text-muted-foreground">
-            Admissions to alumni — classes, attendance, results, fees, HR, transport and approvals for your
-            whole school. Built multi-tenant, with student-data privacy and least-privilege access at its core.
-          </p>
-          <div className="mt-8 flex flex-wrap items-center gap-3">
-            <a href="#onboard"><Button size="lg">Start your 30-day free trial</Button></a>
-            <a href="#modules"><Button size="lg" variant="outline">Explore the 25 modules</Button></a>
-          </div>
-          <p className="mt-3 text-xs text-muted-foreground">
-            Full plan from day one · no card required · billed per active student after the trial
-          </p>
-          <ul className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs font-medium text-muted-foreground">
-            {["Tenant-isolated", "NDPR-aligned", "Audit-logged", "Role-based access"].map((t) => (
-              <li key={t} className="flex items-center gap-1.5">
-                <CheckIcon className="h-3.5 w-3.5 text-primary" aria-hidden />
-                {t}
-              </li>
-            ))}
-          </ul>
-        </div>
-        <ConsoleMock />
-      </div>
-    </section>
-  );
-}
-
-// An abstract, on-brand glimpse of the product (built from divs, not a screenshot).
-function ConsoleMock() {
   const stats: [string, string][] = [
     ["Attendance", "96.4%"],
     ["Fees collected", "₦4.2m"],
     ["Active students", "1,284"],
   ];
-  const bars = [40, 64, 52, 78, 70, 88, 60];
-  const groups: [string, number][] = [["Overview", 3], ["Teaching", 3], ["People", 2]];
   return (
-    <div className="animate-fade-up overflow-hidden rounded-2xl border border-border/70 bg-card shadow-pop">
-      <div className="flex items-center gap-2 border-b border-border/70 bg-sidebar px-4 py-3">
-        <span className="grid h-6 w-6 place-items-center rounded-md bg-primary text-[0.65rem] font-bold text-primary-foreground">G</span>
-        <span className="text-xs font-semibold">Greenwood High</span>
-        <span className="eyebrow ml-auto text-[0.55rem]">Term dashboard</span>
+    <section className="relative flex min-h-[34rem] items-center overflow-hidden border-b border-border/60 lg:min-h-[42rem]">
+      {/* wide sliding background */}
+      <div aria-hidden className="absolute inset-0">
+        <HeroCarousel images={HERO_IMAGES} className="h-full w-full" />
       </div>
-      <div className="grid grid-cols-[88px_1fr]">
-        <div className="space-y-3 border-r border-border/70 bg-sidebar/60 p-3">
-          {groups.map(([g, n]) => (
-            <div key={g}>
-              <p className="eyebrow text-[0.5rem]">{g}</p>
-              <div className="mt-1 space-y-1">
-                {Array.from({ length: n }).map((_, i) => (
-                  <div
-                    key={i}
-                    className={`h-1.5 rounded-full ${i === 0 && g === "Overview" ? "bg-primary/70" : "bg-muted-foreground/20"}`}
-                    style={{ width: `${70 - i * 12}%` }}
-                  />
-                ))}
-              </div>
+      {/* legibility overlays — left-heavy for the text, plus top/bottom darkening */}
+      <div aria-hidden className="absolute inset-0 bg-gradient-to-r from-black/85 via-black/55 to-black/20" />
+      <div aria-hidden className="absolute inset-0 bg-gradient-to-t from-black/45 via-transparent to-black/25" />
+
+      <div className="relative mx-auto w-full max-w-6xl px-5 py-20 sm:px-8 lg:py-28">
+        <div className="max-w-2xl animate-fade-up text-white">
+          <span aria-hidden className="mb-3 block h-px w-12 bg-white/50" />
+          <p className="eyebrow text-white/70">Multi-tenant school operating system</p>
+          <h1 className="mt-4 font-display text-4xl font-semibold leading-[1.08] tracking-tight drop-shadow-sm sm:text-5xl lg:text-[3.6rem]">
+            Run your entire school from one secure register.
+          </h1>
+          <p className="mt-5 max-w-xl text-lg leading-relaxed text-white/85">
+            Admissions to alumni — classes, attendance, results, fees, HR, transport and approvals for your
+            whole school. Built multi-tenant, with student-data privacy and least-privilege access at its core.
+          </p>
+          <div className="mt-8 flex flex-wrap items-center gap-3">
+            <a href="#onboard"><Button size="lg">Start your 30-day free trial</Button></a>
+            <a href="#modules">
+              <Button size="lg" variant="outline" className="border-white/40 bg-white/10 text-white hover:bg-white/20 hover:text-white">
+                Explore the 25 modules
+              </Button>
+            </a>
+          </div>
+          <p className="mt-3 text-xs text-white/70">
+            Full plan from day one · no card required · billed per active student after the trial
+          </p>
+          <ul className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs font-medium text-white/80">
+            {["Tenant-isolated", "NDPR-aligned", "Audit-logged", "Role-based access"].map((t) => (
+              <li key={t} className="flex items-center gap-1.5">
+                <CheckIcon className="h-3.5 w-3.5 text-white" aria-hidden />
+                {t}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+
+      {/* floating glass "live" stat card — keeps the real-product feel over the photo */}
+      <div className="absolute bottom-6 right-6 z-10 hidden w-64 rounded-xl border border-white/20 bg-white/10 p-3 shadow-elevated backdrop-blur-md lg:block">
+        <div className="flex items-center gap-2 text-white">
+          <span className="grid h-6 w-6 place-items-center rounded-md bg-primary text-[0.65rem] font-bold text-primary-foreground">G</span>
+          <span className="text-xs font-semibold">Greenwood High</span>
+          <span className="eyebrow ml-auto text-[0.55rem] text-white/70">Live</span>
+        </div>
+        <div className="mt-3 grid grid-cols-3 gap-2 text-white">
+          {stats.map(([label, value]) => (
+            <div key={label}>
+              <p className="eyebrow text-[0.45rem] leading-tight text-white/70">{label}</p>
+              <p className="tnum mt-0.5 text-sm font-semibold tracking-tight">{value}</p>
             </div>
           ))}
         </div>
-        <div className="space-y-4 p-4">
-          <div className="grid grid-cols-3 gap-2">
-            {stats.map(([label, value]) => (
-              <div key={label} className="rounded-lg border border-border/60 bg-background/60 p-2.5">
-                <p className="eyebrow text-[0.5rem]">{label}</p>
-                <p className="tnum mt-1 text-sm font-semibold tracking-tight">{value}</p>
-              </div>
-            ))}
-          </div>
-          <div className="rounded-lg border border-border/60 bg-background/60 p-3">
-            <div className="flex items-center justify-between">
-              <p className="eyebrow text-[0.5rem]">Fee collection · this term</p>
-              <span className="tnum text-[0.6rem] font-medium text-primary">+12%</span>
-            </div>
-            <div className="mt-3 flex h-20 items-end gap-1.5">
-              {bars.map((h, i) => (
-                <div key={i} className="flex-1 rounded-t bg-primary/80" style={{ height: `${h}%`, opacity: 0.45 + (h / 100) * 0.55 }} />
-              ))}
-            </div>
-          </div>
-        </div>
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -329,11 +415,12 @@ function StatBand() {
     ["50+", "schools per deployment"],
   ];
   return (
-    <section className="border-b border-border/60 bg-card">
-      <div className="mx-auto grid max-w-6xl grid-cols-2 px-5 sm:px-8 md:grid-cols-4">
+    <section className="relative overflow-hidden border-b border-border/60 bg-card">
+      <div aria-hidden className="pointer-events-none absolute inset-0 opacity-[0.5]" style={RULE_GRID} />
+      <div className="relative mx-auto grid max-w-6xl grid-cols-2 px-5 sm:px-8 md:grid-cols-4">
         {stats.map(([n, label]) => (
           <div key={label} className="px-2 py-8 text-center">
-            <p className="tnum text-3xl font-semibold tracking-tight text-primary sm:text-4xl">{n}</p>
+            <p className="tnum font-display text-3xl font-semibold tracking-tight text-primary sm:text-4xl">{n}</p>
             <p className="mt-1 text-sm text-muted-foreground">{label}</p>
           </div>
         ))}
@@ -342,16 +429,20 @@ function StatBand() {
   );
 }
 
+// Dark "vault" section — inverts the palette for rhythm and to underline the
+// security-serious tone. Bright brand-teal accents + a faint rule-grid texture.
 function Security() {
   return (
-    <section id="security" className="scroll-mt-20 border-b border-border/60">
-      <div className="mx-auto max-w-6xl px-5 py-20 sm:px-8">
+    <section id="security" className="relative scroll-mt-20 overflow-hidden border-b border-border/60 bg-neutral-950 text-white">
+      <div aria-hidden className="pointer-events-none absolute inset-0 opacity-[0.06]" style={RULE_GRID} />
+      <div aria-hidden className="pointer-events-none absolute -right-40 -top-32 h-[30rem] w-[30rem] rounded-full bg-[hsl(184_70%_45%)]/20 blur-3xl" />
+      <div className="relative mx-auto max-w-6xl px-5 py-24 sm:px-8">
         <div className="max-w-2xl">
-          <p className="eyebrow">Trust &amp; safety</p>
+          <p className="eyebrow text-[hsl(184_72%_60%)]">Trust &amp; safety</p>
           <h2 className="mt-3 font-display text-3xl font-semibold tracking-tight sm:text-4xl">
             Built for the data you&apos;re trusted with.
           </h2>
-          <p className="mt-4 text-base leading-relaxed text-muted-foreground">
+          <p className="mt-4 text-base leading-relaxed text-white/70">
             A school holds some of the most sensitive data there is — children&apos;s records. Security isn&apos;t a
             feature here; it&apos;s the foundation every module is built on.
           </p>
@@ -360,12 +451,12 @@ function Security() {
           {SECURITY.map((s) => {
             const Icon = s.icon;
             return (
-              <div key={s.title} className="rounded-xl border border-border/70 bg-card p-6 shadow-card transition-shadow hover:shadow-elevated">
-                <span className="grid h-10 w-10 place-items-center rounded-lg bg-primary/10 text-primary">
+              <div key={s.title} className="rounded-xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur-sm transition-colors hover:bg-white/[0.07]">
+                <span className="grid h-10 w-10 place-items-center rounded-lg bg-[hsl(184_72%_60%)]/15 text-[hsl(184_72%_60%)]">
                   <Icon className="h-5 w-5" aria-hidden />
                 </span>
                 <h3 className="mt-4 text-base font-semibold">{s.title}</h3>
-                <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{s.body}</p>
+                <p className="mt-1.5 text-sm leading-relaxed text-white/65">{s.body}</p>
               </div>
             );
           })}
@@ -376,9 +467,12 @@ function Security() {
 }
 
 function Modules() {
+  let n = 0; // running "register entry" number across all groups (01–25)
   return (
-    <section id="modules" className="scroll-mt-20 border-b border-border/60 bg-card">
-      <div className="mx-auto max-w-6xl px-5 py-20 sm:px-8">
+    <section id="modules" className="relative scroll-mt-20 overflow-hidden border-b border-border/60 bg-background">
+      {/* exercise-book rule-grid — the "register" motif */}
+      <div aria-hidden className="pointer-events-none absolute inset-0 opacity-[0.6]" style={RULE_GRID} />
+      <div className="relative mx-auto max-w-6xl px-5 py-24 sm:px-8">
         <div className="max-w-2xl">
           <p className="eyebrow">Everything your school runs on</p>
           <h2 className="mt-3 font-display text-3xl font-semibold tracking-tight sm:text-4xl">
@@ -389,27 +483,199 @@ function Modules() {
             relationship-scoped and audit-logged — the same standard, across the board.
           </p>
         </div>
-        <div className="mt-12 space-y-10">
+        <div className="mt-14 space-y-12">
           {MODULE_GROUPS.map((group) => {
-            const Icon = group.icon;
+            const GroupIcon = group.icon;
             return (
               <div key={group.label}>
-                <div className="flex items-center gap-2.5 border-b border-border pb-3">
-                  <Icon className="h-4 w-4 text-primary" aria-hidden />
-                  <h3 className="eyebrow text-foreground/80">{group.label}</h3>
-                  <span className="tnum ml-auto text-xs text-muted-foreground">{group.items.length}</span>
+                {/* ledger-style section divider */}
+                <div className="mb-5 flex items-center gap-3">
+                  <span className="grid h-9 w-9 place-items-center rounded-lg bg-primary/10 text-primary">
+                    <GroupIcon className="h-5 w-5" aria-hidden />
+                  </span>
+                  <h3 className="font-display text-lg font-semibold tracking-tight">{group.label}</h3>
+                  <span aria-hidden className="h-px flex-1 bg-border" />
+                  <span className="tnum shrink-0 rounded-full border border-border bg-card px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+                    {group.items.length} modules
+                  </span>
                 </div>
-                <div className="mt-5 grid gap-x-8 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">
-                  {group.items.map(([name, desc]) => (
-                    <div key={name}>
-                      <p className="text-sm font-semibold tracking-tight">{name}</p>
-                      <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{desc}</p>
-                    </div>
-                  ))}
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {group.items.map((m) => {
+                    n += 1;
+                    const Icon = m.icon;
+                    return (
+                      <div
+                        key={m.name}
+                        className="group relative flex flex-col rounded-xl border border-border/70 bg-card p-5 shadow-card transition-all duration-200 hover:-translate-y-1 hover:border-primary/40 hover:shadow-elevated"
+                      >
+                        <span className="tnum absolute right-4 top-4 text-[0.7rem] font-semibold text-muted-foreground/40 transition-colors group-hover:text-primary/70">
+                          {String(n).padStart(2, "0")}
+                        </span>
+                        <span className="grid h-10 w-10 place-items-center rounded-lg bg-primary/10 text-primary transition-colors duration-200 group-hover:bg-primary group-hover:text-primary-foreground">
+                          <Icon className="h-5 w-5" aria-hidden />
+                        </span>
+                        <p className="mt-4 text-sm font-semibold tracking-tight">{m.name}</p>
+                        <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{m.desc}</p>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             );
           })}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// "See it in action" — a sliding carousel of app surfaces (PRODUCT_IMAGES),
+// each rendered from the app's own design tokens. Swap any slide for a real
+// screenshot at the same 1800x1184 aspect.
+function ProductShowcase() {
+  const features: [string, string][] = [
+    ["Everything in real time", "Attendance, fees, results and approvals update live — no end-of-day reconciling."],
+    ["Role-aware by design", "Each of the 17 roles sees only what their job needs, backed by MFA and step-up."],
+    ["Modules you control", "Switch products on and off to match your budget; billing follows your active students."],
+  ];
+  const accent = "text-[hsl(184_72%_62%)]";
+  return (
+    <section
+      id="product"
+      className="relative scroll-mt-20 overflow-hidden border-b border-border/60 bg-neutral-950 text-white"
+    >
+      {/* DESKTOP: wide sliding product background + legibility overlay (text on solid
+          dark left, product bleeds in from the right). Hidden on mobile — no room to split. */}
+      <div aria-hidden className="absolute inset-0 hidden lg:block">
+        <HeroCarousel images={PRODUCT_IMAGES} intervalMs={5000} zoom={false} className="h-full w-full" />
+      </div>
+      <div aria-hidden className="absolute inset-0 hidden bg-gradient-to-r from-neutral-950 from-45% via-neutral-950/80 via-72% to-neutral-950/25 lg:block" />
+      <div aria-hidden className="absolute inset-0 hidden bg-gradient-to-t from-neutral-950/60 via-transparent to-neutral-950/35 lg:block" />
+
+      <div className="relative mx-auto flex w-full max-w-6xl flex-col gap-10 px-5 py-16 sm:px-8 lg:min-h-[46rem] lg:justify-center lg:py-28">
+        <div className="max-w-xl animate-fade-up">
+          <p className={`eyebrow ${accent}`}>See it in action</p>
+          <h2 className="mt-3 font-display text-3xl font-semibold tracking-tight drop-shadow-sm sm:text-4xl">
+            The whole school day on one screen.
+          </h2>
+          <p className="mt-4 text-base leading-relaxed text-white/80">
+            From the leadership dashboard to the student LMS, analytics and the gradebook — one tenant-isolated
+            system your whole team works in, instead of switching between tools.
+          </p>
+          <ul className="mt-7 space-y-4">
+            {features.map(([title, body]) => (
+              <li key={title} className="flex gap-3">
+                <CheckIcon className={`mt-0.5 h-5 w-5 shrink-0 ${accent}`} aria-hidden />
+                <div>
+                  <p className="text-sm font-semibold tracking-tight text-white">{title}</p>
+                  <p className="mt-0.5 text-sm leading-relaxed text-white/70">{body}</p>
+                </div>
+              </li>
+            ))}
+          </ul>
+          <a href="#onboard" className={`mt-8 inline-flex items-center gap-1.5 text-sm font-medium ${accent} hover:underline`}>
+            Start your free trial <ArrowRightIcon className="h-4 w-4" aria-hidden />
+          </a>
+          <div className="mt-8 flex flex-wrap gap-x-4 gap-y-1 text-xs font-medium text-white/70">
+            {["Leadership dashboard", "Student LMS", "Analytics", "Gradebook"].map((t) => (
+              <span key={t} className="flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-[hsl(184_72%_62%)]" />
+                {t}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {/* MOBILE/TABLET: framed carousel below the copy, so the product is clearly visible */}
+        <div className="lg:hidden">
+          <HeroCarousel
+            images={PRODUCT_IMAGES}
+            intervalMs={5000}
+            zoom={false}
+            className="aspect-[1800/1184] w-full rounded-xl border border-white/15 shadow-pop"
+          />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function Testimonials() {
+  return (
+    <section className="border-b border-border/60 bg-card">
+      <div className="mx-auto max-w-6xl px-5 py-20 sm:px-8">
+        <div className="max-w-2xl">
+          <p className="eyebrow">Trusted with what matters most</p>
+          <h2 className="mt-3 font-display text-3xl font-semibold tracking-tight sm:text-4xl">
+            Built for schools that take data seriously.
+          </h2>
+          <p className="mt-4 text-base leading-relaxed text-muted-foreground">
+            Leaders, teachers and parents rely on the same secure register every day — and every one of these
+            protections is already switched on, out of the box.
+          </p>
+          <ul className="mt-6 flex flex-wrap gap-2">
+            {TRUST_CHIPS.map((c) => (
+              <li key={c} className="inline-flex items-center gap-1.5 rounded-full border border-primary/25 bg-primary/5 px-3 py-1 text-xs font-medium text-primary">
+                <ShieldCheckIcon className="h-3.5 w-3.5" aria-hidden />
+                {c}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="mt-12 grid gap-4 md:grid-cols-3">
+          {TESTIMONIALS.map((t) => (
+            <figure key={t.quote} className="flex flex-col rounded-xl border border-border/70 bg-background p-6 shadow-card">
+              <QuoteIcon className="h-6 w-6 text-primary/40" aria-hidden />
+              <div className="mt-3 flex gap-0.5" aria-label="5 out of 5">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <StarIcon key={i} className="h-3.5 w-3.5 fill-primary text-primary" aria-hidden />
+                ))}
+              </div>
+              <blockquote className="mt-3 flex-1 text-sm leading-relaxed text-foreground/90">&ldquo;{t.quote}&rdquo;</blockquote>
+              <figcaption className="mt-5 border-t border-border/60 pt-4">
+                <p className="text-sm font-semibold tracking-tight">{t.name}</p>
+                <p className="text-xs text-muted-foreground">{t.role}</p>
+              </figcaption>
+            </figure>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// Auto-scrolling photo strip (pure CSS marquee; track duplicated for a seamless
+// loop). Arch-topped tiles + edge fades. Pauses on hover, still under reduced-motion.
+function PhotoMarquee() {
+  const tiles = [...MARQUEE_IMAGES, ...MARQUEE_IMAGES];
+  return (
+    <section className="overflow-hidden border-b border-border/60 bg-card py-16">
+      <div className="mx-auto max-w-6xl px-5 sm:px-8">
+        <p className="eyebrow text-center text-primary">Life across every classroom</p>
+        <h2 className="mx-auto mt-2 max-w-2xl text-center font-display text-2xl font-semibold tracking-tight sm:text-3xl">
+          One platform for the whole school day — lesson to lab to library.
+        </h2>
+      </div>
+      <div className="group relative mt-10 flex">
+        <div aria-hidden className="pointer-events-none absolute inset-y-0 left-0 z-10 w-16 bg-gradient-to-r from-card to-transparent sm:w-28" />
+        <div aria-hidden className="pointer-events-none absolute inset-y-0 right-0 z-10 w-16 bg-gradient-to-l from-card to-transparent sm:w-28" />
+        <div className="flex shrink-0 animate-marquee gap-4 pr-4 motion-reduce:animate-none group-hover:[animation-play-state:paused]">
+          {tiles.map((t, i) => (
+            <div
+              key={i}
+              className="relative h-60 w-44 shrink-0 overflow-hidden rounded-b-lg rounded-t-[3.5rem] border border-border/60 shadow-card"
+            >
+              <img
+                src={t.src}
+                alt={i < MARQUEE_IMAGES.length ? t.alt : ""}
+                aria-hidden={i >= MARQUEE_IMAGES.length || undefined}
+                width={480}
+                height={600}
+                loading="lazy"
+                className="h-full w-full object-cover"
+              />
+            </div>
+          ))}
         </div>
       </div>
     </section>
@@ -422,7 +688,20 @@ function Audiences() {
       <div className="mx-auto max-w-6xl px-5 py-20 sm:px-8">
         <div className="grid gap-5 lg:grid-cols-3">
           {AUDIENCES.map((a) => (
-            <div key={a.eyebrow} className="flex flex-col rounded-xl border border-border/70 bg-card p-7 shadow-card">
+            <div key={a.eyebrow} className="group flex flex-col overflow-hidden rounded-xl border border-border/70 bg-card shadow-card">
+              <div className="relative aspect-[3/2] w-full overflow-hidden">
+                <img
+                  src={a.img}
+                  alt={a.alt}
+                  width={900}
+                  height={600}
+                  loading="lazy"
+                  className="h-full w-full object-cover grayscale-[0.45] contrast-[1.03] transition-all duration-500 group-hover:grayscale-0"
+                />
+                {/* subtle brand duotone — unifies the imagery; reveals full colour on hover */}
+                <div aria-hidden className="pointer-events-none absolute inset-0 bg-primary/20 mix-blend-multiply transition-opacity duration-500 group-hover:opacity-0" />
+              </div>
+              <div className="flex flex-1 flex-col p-7">
               <p className="eyebrow text-primary">{a.eyebrow}</p>
               <h3 className="mt-2 text-xl font-semibold tracking-tight">{a.title}</h3>
               <ul className="mt-5 space-y-2.5 text-sm text-muted-foreground">
@@ -442,6 +721,7 @@ function Audiences() {
                   {a.cta.label} <ArrowRightIcon className="h-4 w-4" aria-hidden />
                 </Link>
               )}
+              </div>
             </div>
           ))}
         </div>
@@ -514,21 +794,33 @@ async function Plans() {
 
 function Steps() {
   return (
-    <section className="border-b border-border/60">
-      <div className="mx-auto max-w-6xl px-5 py-20 sm:px-8">
+    <section className="relative overflow-hidden border-b border-border/60">
+      <div aria-hidden className="pointer-events-none absolute inset-0 opacity-[0.5]" style={RULE_GRID} />
+      <div className="relative mx-auto max-w-6xl px-5 py-20 sm:px-8">
         <p className="eyebrow">How onboarding works</p>
         <h2 className="mt-3 max-w-2xl font-display text-3xl font-semibold tracking-tight sm:text-4xl">
           From request to running your school — in three steps.
         </h2>
         <ol className="mt-12 grid gap-8 md:grid-cols-3">
-          {STEPS.map(([title, body], i) => (
-            <li key={title}>
-              <span className="tnum text-sm font-semibold text-primary">0{i + 1}</span>
-              <div className="mt-2 h-px w-full bg-border" />
-              <h3 className="mt-4 text-base font-semibold">{title}</h3>
-              <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{body}</p>
-            </li>
-          ))}
+          {STEPS.map((s, i) => {
+            const Icon = s.icon;
+            return (
+              <li key={s.title} className="relative">
+                {/* connector line to the next step (desktop) */}
+                {i < STEPS.length - 1 && (
+                  <span aria-hidden className="absolute left-12 top-6 hidden h-px w-[calc(100%-2rem)] bg-border md:block" />
+                )}
+                <div className="flex items-center gap-3">
+                  <span className="relative z-10 grid h-12 w-12 shrink-0 place-items-center rounded-xl border border-border/70 bg-card text-primary shadow-xs">
+                    <Icon className="h-5 w-5" aria-hidden />
+                  </span>
+                  <span className="tnum text-sm font-semibold text-primary">0{i + 1}</span>
+                </div>
+                <h3 className="mt-4 text-base font-semibold">{s.title}</h3>
+                <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{s.body}</p>
+              </li>
+            );
+          })}
         </ol>
       </div>
     </section>
@@ -538,8 +830,13 @@ function Steps() {
 function Onboard() {
   return (
     <section id="onboard" className="relative scroll-mt-20 overflow-hidden border-b border-border/60 bg-primary text-primary-foreground">
+      {/* sliding photographic background */}
+      <div aria-hidden className="absolute inset-0">
+        <HeroCarousel images={ONBOARD_IMAGES} intervalMs={6000} showDots={false} zoom={false} className="h-full w-full" />
+      </div>
+      {/* green brand overlay keeps the section on-brand while the photos show through */}
+      <div aria-hidden className="absolute inset-0 bg-gradient-to-r from-primary/95 via-primary/90 to-primary/70" />
       <div aria-hidden className="pointer-events-none absolute inset-0 opacity-[0.12]" style={RULE_GRID} />
-      <div aria-hidden className="pointer-events-none absolute -left-32 bottom-0 h-96 w-96 rounded-full bg-white/10 blur-3xl" />
       <div className="relative mx-auto grid max-w-6xl items-center gap-12 px-5 py-20 sm:px-8 lg:grid-cols-2">
         <div>
           <p className="eyebrow text-primary-foreground/70">Onboard your school</p>
@@ -573,20 +870,30 @@ function Onboard() {
 
 function ParentBand() {
   return (
-    <section className="border-b border-border/60 bg-card">
-      <div className="mx-auto flex max-w-6xl flex-col items-start justify-between gap-5 px-5 py-12 sm:px-8 md:flex-row md:items-center">
+    <section className="relative overflow-hidden border-b border-border/60">
+      <img
+        src="/images/band-community.jpg"
+        alt=""
+        aria-hidden
+        width={2000}
+        height={1333}
+        loading="lazy"
+        className="absolute inset-0 h-full w-full object-cover object-center"
+      />
+      <div aria-hidden className="absolute inset-0 bg-gradient-to-r from-neutral-950/85 via-neutral-950/70 to-neutral-950/40" />
+      <div className="relative mx-auto flex max-w-6xl flex-col items-start justify-between gap-5 px-5 py-16 text-white sm:px-8 md:flex-row md:items-center">
         <div>
-          <p className="eyebrow text-primary">For parents</p>
+          <p className="eyebrow text-white/70">For parents</p>
           <h2 className="mt-2 font-display text-xl font-semibold tracking-tight sm:text-2xl">
             Looking for a school for your child?
           </h2>
-          <p className="mt-1.5 text-sm text-muted-foreground">
+          <p className="mt-1.5 max-w-md text-sm text-white/80">
             Browse onboarded schools and submit an application online — you&apos;ll be notified once it&apos;s reviewed.
           </p>
         </div>
         <div className="flex shrink-0 gap-3">
-          <Link href="/schools"><Button variant="outline">Browse schools</Button></Link>
-          <Link href="/apply"><Button>Apply now</Button></Link>
+          <Link href="/schools"><Button variant="outline" className="border-white/40 bg-white/10 text-white hover:bg-white/20">Browse schools</Button></Link>
+          <Link href="/apply"><Button className="bg-white text-neutral-900 hover:bg-white/90">Apply now</Button></Link>
         </div>
       </div>
     </section>
@@ -595,8 +902,9 @@ function ParentBand() {
 
 function Footer() {
   return (
-    <footer className="bg-background">
-      <div className="mx-auto flex max-w-6xl flex-col gap-6 px-5 py-12 sm:px-8 md:flex-row md:items-center md:justify-between">
+    <footer className="relative overflow-hidden bg-background">
+      <div aria-hidden className="pointer-events-none absolute inset-0 opacity-[0.5]" style={RULE_GRID} />
+      <div className="relative mx-auto flex max-w-6xl flex-col gap-6 px-5 py-12 sm:px-8 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-2.5">
           <span className="grid h-8 w-8 place-items-center rounded-lg bg-primary text-xs font-bold text-primary-foreground">S</span>
           <span className="text-sm font-semibold tracking-tight">School Management System</span>
@@ -609,7 +917,7 @@ function Footer() {
           <Link href="/login" className="hover:text-foreground">Sign in</Link>
         </nav>
       </div>
-      <div className="border-t border-border/60">
+      <div className="relative border-t border-border/60">
         <p className="mx-auto max-w-6xl px-5 py-5 text-xs text-muted-foreground sm:px-8">
           Multi-tenant, NDPR-aligned and audit-logged. Built with least-privilege access and student-data
           privacy at its core.
@@ -627,7 +935,10 @@ export default function Home() {
       <StatBand />
       <Security />
       <Modules />
+      <ProductShowcase />
       <Audiences />
+      <Testimonials />
+      <PhotoMarquee />
       <Plans />
       <Steps />
       <Onboard />

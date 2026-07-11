@@ -26,6 +26,13 @@ model LmsContent {
   authorId  String   @db.Uuid
   /// The linked approval WorkflowRequest id (plain uuid, cross-module decoupled).
   approvalRequestId String? @db.Uuid
+  /// Optional module/unit grouping (plain uuid; null = ungrouped / "General").
+  moduleId  String?  @db.Uuid
+  /// Gradebook tag (plain uuid; both null = not counted toward the report card).
+  /// A QUIZ/ASSIGNMENT tagged with a (subjectId, termId) can be pulled into the
+  /// SubjectResult "assignment" CA component by the subject teacher.
+  subjectId String?  @db.Uuid
+  termId    String?  @db.Uuid
   /// MATERIAL PDF: object-storage key + original filename + upload-confirmed flag.
   fileKey      String?
   fileName     String?
@@ -54,15 +61,21 @@ model QuizAttempt {
   answers   Json     @default("{}")
   score     Int
   total     Int
+  /// 1-based attempt number (multi-attempt quizzes).
+  attemptNo Int      @default(1)
+  /// GRADED | PENDING_MANUAL (has essay questions awaiting a teacher).
+  status    String   @default("GRADED")
+  /// Per-essay-question grades set by a teacher (questionId -> points).
+  essayGrades Json   @default("{}")
   createdAt DateTime @default(now())
 
   school  School     @relation(fields: [schoolId], references: [id])
   content LmsContent @relation(fields: [contentId], references: [id])
   student User       @relation("StudentQuizAttempts", fields: [studentId], references: [id])
 
-  @@unique([contentId, studentId])
   @@index([schoolId])
   @@index([schoolId, contentId])
+  @@index([contentId, studentId])
   @@map("quiz_attempt")
 }
 
@@ -83,4 +96,172 @@ model ForumPost {
   @@index([schoolId])
   @@index([schoolId, contentId])
   @@map("forum_post")
+}
+
+/// A student's completion of a content item (mark-as-complete / progress).
+/// Tenant-scoped (non-null schoolId + RLS). Plain UUIDs (cross-module decoupled,
+/// like approvalRequestId) so no back-relations churn on School/User/LmsContent.
+/// One row per (content, student); deletable so a student can un-mark.
+model LmsProgress {
+  id          String   @id @default(uuid()) @db.Uuid
+  schoolId    String   @db.Uuid
+  contentId   String   @db.Uuid
+  studentId   String   @db.Uuid
+  /// COMPLETED (room to grow: IN_PROGRESS with a watched fraction later).
+  status      String   @default("COMPLETED")
+  completedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([contentId, studentId])
+  @@index([schoolId])
+  @@index([schoolId, contentId])
+  @@map("lms_progress")
+}
+
+/// A module/unit that groups a class's content into an ordered learning path.
+/// Tenant-scoped (RLS). Plain UUIDs (LmsContent.moduleId references this, decoupled).
+model LmsModule {
+  id         String   @id @default(uuid()) @db.Uuid
+  schoolId   String   @db.Uuid
+  classId    String   @db.Uuid
+  title      String
+  orderIndex Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([schoolId])
+  @@index([schoolId, classId])
+  @@map("lms_module")
+}
+
+/// A student's submission to an ASSIGNMENT content item. Tenant-scoped (RLS).
+/// Plain UUIDs (cross-module decoupled). One row per (assignment, student); the
+/// student may re-submit until it's GRADED. Grade + feedback are set by staff.
+model LmsSubmission {
+  id          String   @id @default(uuid()) @db.Uuid
+  schoolId    String   @db.Uuid
+  contentId   String   @db.Uuid
+  studentId   String   @db.Uuid
+  text        String
+  /// SUBMITTED | GRADED
+  status      String   @default("SUBMITTED")
+  late        Boolean  @default(false)
+  grade       Int?
+  feedback    String?
+  gradedById  String?  @db.Uuid
+  gradedAt    DateTime?
+  submittedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([contentId, studentId])
+  @@index([schoolId])
+  @@index([schoolId, contentId])
+  @@map("lms_submission")
+}
+
+/// Append-only snapshot of an LmsContent item at a point in time — the version
+/// history behind edit/revert, and the source a clone copies from. Tenant-scoped
+/// (RLS, SELECT/INSERT only; never mutated or deleted). Plain UUIDs (decoupled).
+/// Staff-only: revisions carry the raw body incl. quiz answer keys, never shown
+/// to students.
+model LmsContentRevision {
+  id        String   @id @default(uuid()) @db.Uuid
+  schoolId  String   @db.Uuid
+  contentId String   @db.Uuid
+  version   Int
+  type      String
+  title     String
+  body      Json     @default("{}")
+  note      String?
+  authorId  String   @db.Uuid
+  createdAt DateTime @default(now())
+
+  @@index([schoolId])
+  @@index([schoolId, contentId])
+  @@map("lms_content_revision")
+}
+
+/// A scheduled live/virtual class session (Zoom / Meet / Jitsi link). Tenant-
+/// scoped (RLS). `joinUrl` is validated to https at the boundary. Relationship-
+/// scoped in the service: teacher-of-class hosts; enrolled students join.
+model LmsLiveSession {
+  id              String   @id @default(uuid()) @db.Uuid
+  schoolId        String   @db.Uuid
+  classId         String   @db.Uuid
+  title           String
+  /// ZOOM | MEET | JITSI | OTHER
+  provider        String
+  joinUrl         String
+  startsAt        DateTime
+  durationMinutes Int      @default(60)
+  /// SCHEDULED | LIVE | ENDED | CANCELLED
+  status          String   @default("SCHEDULED")
+  hostId          String   @db.Uuid
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([schoolId])
+  @@index([schoolId, classId])
+  @@map("lms_live_session")
+}
+
+/// A positive achievement badge a teacher awarded a student. Tenant-scoped
+/// (RLS). `badge` is a key from LMS_BADGES (@sms/types). A revoke deletes the
+/// row (recognition, not a legal record). Relationship-scoped in the service:
+/// teacher-of-class awards/revokes; student sees own; guardian sees children.
+model LmsAward {
+  id           String   @id @default(uuid()) @db.Uuid
+  schoolId     String   @db.Uuid
+  classId      String   @db.Uuid
+  studentId    String   @db.Uuid
+  badge        String
+  note         String?
+  awardedById  String   @db.Uuid
+  createdAt    DateTime @default(now())
+
+  @@index([schoolId])
+  @@index([schoolId, classId])
+  @@index([schoolId, studentId])
+  @@map("lms_award")
+}
+
+/// An xAPI (Tin Can) learning statement — the standards-based "learning record
+/// store" (LRS) row. Tenant-scoped (RLS), append-only + IMMUTABLE (xAPI
+/// statements are never modified, per spec). `actorId` is ALWAYS the
+/// authenticated user (never trusted from the request body). Emitted by the
+/// platform's own content (complete/quiz) and by external xAPI/SCORM activities.
+model XapiStatement {
+  id         String   @id @default(uuid()) @db.Uuid
+  schoolId   String   @db.Uuid
+  actorId    String   @db.Uuid
+  /// xAPI verb id (allow-listed): experienced|completed|passed|failed|attempted|answered|progressed
+  verb       String
+  /// The activity's IRI/id + human-readable name.
+  objectId   String
+  objectName String
+  /// Optional class scoping (null = personal activity).
+  classId    String?  @db.Uuid
+  /// xAPI result: { score, max, success, completion, duration } (jsonb).
+  result     Json     @default("{}")
+  storedAt   DateTime @default(now())
+
+  @@index([schoolId])
+  @@index([schoolId, classId])
+  @@index([schoolId, actorId])
+  @@map("xapi_statement")
+}
+
+/// A student's join record for a live session — append-only, one per student.
+/// Tenant-scoped (RLS). This is the "who attended" register for a live class.
+model LmsLiveAttendance {
+  id        String   @id @default(uuid()) @db.Uuid
+  schoolId  String   @db.Uuid
+  sessionId String   @db.Uuid
+  studentId String   @db.Uuid
+  joinedAt  DateTime @default(now())
+
+  @@unique([sessionId, studentId])
+  @@index([schoolId])
+  @@index([schoolId, sessionId])
+  @@map("lms_live_attendance")
 }

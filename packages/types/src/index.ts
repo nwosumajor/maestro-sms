@@ -5,6 +5,7 @@ export * from "./integrity-enums";
 export * from "./integrity-report";
 export * from "./modules";
 export * from "./grading";
+export * from "./lms-badges";
 export * from "./dto/subscription";
 export * from "./permissions/integrity";
 export * from "./permissions/lms";

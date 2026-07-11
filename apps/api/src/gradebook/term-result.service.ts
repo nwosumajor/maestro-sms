@@ -407,6 +407,83 @@ export class TermResultService {
     });
   }
 
+  /** Throw 404 unless `p` may grade this class-subject. Public wrapper over the
+   *  private scope check so the LMS "pull scores into the gradebook" flow gates
+   *  its read on the exact same rule as grading. */
+  async ensureCanGrade(p: Principal, classId: string, subjectId: string): Promise<void> {
+    await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      if (!(await this.canGradeClassSubject(tx, p, classId, subjectId))) {
+        throw new NotFoundException("Not found");
+      }
+    });
+  }
+
+  /** Set ONLY the "assignment" CA component on a student's SubjectResult,
+   *  MERGING it with the existing exam/midterm/class-note marks (so pulling an
+   *  LMS score never wipes marks a teacher already entered). Runs the full
+   *  grading guard set (scope, enrolment, subject-taker, maker-checker) and
+   *  leaves the row as DRAFT for the normal publish chain. Used by the LMS
+   *  "pull scores into the report card" flow. */
+  async applyAssignmentComponent(
+    p: Principal,
+    input: { classId: string; subjectId: string; termId: string; studentId: string; assignment: number },
+  ): Promise<SubjectResultDto> {
+    const { classId, subjectId, termId, studentId, assignment } = input;
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const term = await tx.term.findFirst({ where: { id: termId }, select: { id: true, sessionId: true } });
+      const subject = await tx.subject.findFirst({ where: { id: subjectId }, select: { id: true, name: true } });
+      if (!term || !subject) throw new NotFoundException("Not found");
+      if (!(await this.canGradeClassSubject(tx, p, classId, subjectId))) throw new NotFoundException("Not found");
+      const enrolled = await tx.enrollment.findFirst({
+        where: { classId, studentId, status: "ACTIVE" },
+        select: { id: true },
+      });
+      if (!enrolled) throw new NotFoundException("Student is not enrolled in this class");
+      const takers = await this.subjectTakers(tx, classId, termId, subjectId);
+      if (!takers.includes(studentId)) {
+        throw new NotFoundException("This student does not offer this subject for the term");
+      }
+      const student = await tx.user.findFirst({ where: { id: studentId }, select: { id: true, name: true } });
+      if (!student) throw new NotFoundException("Not found");
+
+      const existing = await tx.subjectResult.findFirst({
+        where: { sessionId: term.sessionId, termId, subjectId, studentId },
+        select: { status: true, exam: true, midterm: true, classNote: true },
+      });
+      if (existing?.status === "PENDING_APPROVAL") {
+        throw new ConflictException(
+          "These grades are awaiting head-teacher/principal approval and can't be edited until the review completes.",
+        );
+      }
+      const unpublished = existing?.status === "PUBLISHED";
+      // MERGE: keep the other three components; only the assignment slice changes.
+      const scored = this.applyComponents({
+        exam: existing?.exam ?? null,
+        midterm: existing?.midterm ?? null,
+        assignment,
+        classNote: existing?.classNote ?? null,
+      });
+      const data = { ...scored, gradedById: p.userId, gradedAt: new Date() };
+      const row = await tx.subjectResult.upsert({
+        where: { sessionId_termId_subjectId_studentId: { sessionId: term.sessionId, termId, subjectId, studentId } },
+        create: { schoolId: p.schoolId, sessionId: term.sessionId, termId, classId, subjectId, studentId, ...data },
+        update: { classId, ...data, ...(unpublished ? { status: "DRAFT" } : {}) },
+      });
+      await this.audit.record(
+        {
+          actorId: p.userId,
+          action: "gradebook.term.grade.lms_applied",
+          entity: "subject_result",
+          entityId: row.id,
+          schoolId: p.schoolId,
+          metadata: { termId, subjectId, studentId, assignment, total: row.total, status: row.status, unpublished },
+        },
+        tx,
+      );
+      return this.toResultDto(row, subject.name, student.name);
+    });
+  }
+
   // ---------------------------------------------------------------------------
   // Publish — MAKER-CHECKER. The teacher's "publish" does NOT go live: it claims
   // the batch (DRAFT → PENDING_APPROVAL) and raises a GRADE_PUBLISH workflow

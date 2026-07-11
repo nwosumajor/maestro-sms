@@ -99,9 +99,21 @@ const config: Config = {
           from: { opacity: "0", transform: "translateY(6px)" },
           to: { opacity: "1", transform: "translateY(0)" },
         },
+        // slow zoom for full-bleed hero/onboard photos (Ken Burns)
+        kenburns: {
+          from: { transform: "scale(1.02)" },
+          to: { transform: "scale(1.12)" },
+        },
+        // seamless horizontal scroll for the photo marquee (track is duplicated)
+        marquee: {
+          from: { transform: "translateX(0)" },
+          to: { transform: "translateX(-50%)" },
+        },
       },
       animation: {
         "fade-up": "fade-up 0.4s cubic-bezier(0.22, 1, 0.36, 1) both",
+        kenburns: "kenburns 20s ease-in-out infinite alternate",
+        marquee: "marquee 85s linear infinite",
       },
     },
   },

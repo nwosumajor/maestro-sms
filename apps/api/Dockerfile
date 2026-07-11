@@ -21,7 +21,9 @@ COPY apps/api/package.json                apps/api/package.json
 COPY apps/web/package.json                apps/web/package.json
 # @sms/db's postinstall runs `prisma generate`, which needs the schema present.
 COPY packages/db/prisma                   packages/db/prisma
-RUN pnpm install --frozen-lockfile
+# --dns-result-order=ipv4first: this build host has no IPv6 route, so let Node
+# (pnpm + prisma-engine download) resolve the registry over IPv4 (avoids ENETUNREACH).
+RUN NODE_OPTIONS=--dns-result-order=ipv4first pnpm install --frozen-lockfile
 
 # ---- build: generate client, build packages + api ---------------------------
 FROM deps AS build

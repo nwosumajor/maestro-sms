@@ -1,10 +1,16 @@
+import Link from "next/link";
 import type { LmsContentDto, Serialized } from "@sms/types";
 import { hasPermission } from "@/lib/permissions";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { buttonVariants } from "@/components/ui/button";
 import { ContentManager } from "@/components/lms/ContentManager";
+import { ClassProgress } from "@/components/lms/ClassProgress";
+import { LmsGradebook } from "@/components/lms/LmsGradebook";
+import { LiveSessions } from "@/components/lms/LiveSessions";
+import { Awards } from "@/components/lms/Awards";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +28,7 @@ export default async function ClassContentPage({ params }: { params: { id: strin
 
   const canAuthor = hasPermission(user.permissions, "lms.content.write");
   const canReview = hasPermission(user.permissions, "lms.content.approve");
+  const canGrade = hasPermission(user.permissions, "grade.write");
 
   return (
     <AppShell
@@ -31,13 +38,20 @@ export default async function ClassContentPage({ params }: { params: { id: strin
       permissions={user.permissions}
     >
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Learning content</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Materials, lessons, quizzes and forum threads for this class.
-            Publication is approval-gated through the principal — only published
-            content reaches enrolled students.
-          </p>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Learning content</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Materials, lessons, quizzes and forum threads for this class.
+              Publication is approval-gated through the principal — only published
+              content reaches enrolled students.
+            </p>
+          </div>
+          {canAuthor && (
+            <Link href={`/classes/${classId}/analytics`} className={buttonVariants({ size: "sm", variant: "outline" })}>
+              Analytics
+            </Link>
+          )}
         </div>
 
         {content === null ? (
@@ -48,12 +62,18 @@ export default async function ClassContentPage({ params }: { params: { id: strin
             </AlertDescription>
           </Alert>
         ) : (
-          <ContentManager
-            classId={classId}
-            initial={content}
-            canAuthor={canAuthor}
-            canReview={canReview}
-          />
+          <>
+            {canAuthor && <ClassProgress classId={classId} />}
+            <Awards classId={classId} canManage={canAuthor} />
+            <LiveSessions classId={classId} canManage={canAuthor} />
+            <ContentManager
+              classId={classId}
+              initial={content}
+              canAuthor={canAuthor}
+              canReview={canReview}
+            />
+            {canGrade && <LmsGradebook classId={classId} />}
+          </>
         )}
       </div>
     </AppShell>

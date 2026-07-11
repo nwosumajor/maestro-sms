@@ -118,6 +118,13 @@ apply_rls packages/db/prisma/rls/47_subject_result_rls.sql     subject_result_up
 apply_rls packages/db/prisma/rls/48_subject_selection_rls.sql  subject_selection_update
 apply_rls packages/db/prisma/rls/49_parent_import_rls.sql       parent_import_batch_update
 apply_rls packages/db/prisma/rls/50_scholarship_rls.sql         scholarship_application_update
+apply_rls packages/db/prisma/rls/51_lms_progress_rls.sql        lms_progress_delete
+apply_rls packages/db/prisma/rls/52_lms_submission_rls.sql      lms_submission_update
+apply_rls packages/db/prisma/rls/53_lms_module_rls.sql          lms_module_delete
+apply_rls packages/db/prisma/rls/54_lms_content_revision_rls.sql lms_content_revision_insert
+apply_rls packages/db/prisma/rls/55_lms_live_rls.sql              lms_live_attendance_insert
+apply_rls packages/db/prisma/rls/56_lms_award_rls.sql            lms_award_delete
+apply_rls packages/db/prisma/rls/57_xapi_statement_rls.sql       xapi_statement_insert
 
 # Seed on first provision (compose: SEED_ON_START=true; cloud migrate task: always).
 if [ "${SEED_ON_START}" = "true" ] || [ "$MODE" = "migrate" ]; then
