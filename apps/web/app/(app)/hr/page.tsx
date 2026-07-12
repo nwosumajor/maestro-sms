@@ -1,4 +1,4 @@
-import type { EmployeeDto, LeaveRequestDto, LeaveTypeDto, SalaryChangeDto, Serialized } from "@sms/types";
+import type { EmployeeDto, LeaveRequestDto, LeaveTypeDto, OrgNodeDto, SalaryChangeDto, Serialized } from "@sms/types";
 import Link from "next/link";
 import { hasPermission } from "@/lib/permissions";
 import { redirect } from "next/navigation";
@@ -10,6 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { money, shortDate, titleCase } from "@/lib/format";
 import { EmployeeForm } from "@/components/hr/EmployeeForm";
+import { OrgChart } from "@/components/hr/OrgChart";
 import { EmployeeRow } from "@/components/hr/EmployeeRow";
 import { SalaryChanges } from "@/components/hr/SalaryChanges";
 import { LeaveAdmin } from "@/components/hr/LeaveAdmin";
@@ -26,13 +27,14 @@ export default async function HrPage() {
   const canSalaryRequest = hasPermission(user.permissions, "hr.salary.request");
   const canSalaryApprove = hasPermission(user.permissions, "hr.salary.approve");
   const canLeaveManage = hasPermission(user.permissions, "hr.leave.manage");
-  const [employees, users, changes, leaveTypes, leaveRequests, coverage] = await Promise.all([
+  const [employees, users, changes, leaveTypes, leaveRequests, coverage, org] = await Promise.all([
     apiGet<Employee[]>("/hr/employees"),
     canWrite ? apiGet<{ id: string; name: string; roles: string[] }[]>("/users") : Promise.resolve(null),
     apiGet<Serialized<SalaryChangeDto>[]>("/hr/salary/changes"),
     canLeaveManage ? apiGet<Serialized<LeaveTypeDto>[]>("/hr/leave/types") : Promise.resolve(null),
     canLeaveManage ? apiGet<Serialized<LeaveRequestDto>[]>("/hr/leave/requests") : Promise.resolve(null),
     canLeaveManage ? apiGet<Serialized<LeaveRequestDto>[]>("/hr/leave/calendar") : Promise.resolve(null),
+    apiGet<Serialized<OrgNodeDto>[]>("/hr/org"),
   ]);
 
   return (
@@ -51,6 +53,7 @@ export default async function HrPage() {
               <Link href="/hr/recruitment" className="inline-flex h-9 items-center rounded-md border border-input px-3 text-sm font-medium hover:bg-accent">Recruitment</Link>
             )}
             <Link href="/hr/payroll" className="inline-flex h-9 items-center rounded-md border border-input px-3 text-sm font-medium hover:bg-accent">Payroll →</Link>
+            <Link href="/hr/attendance" className="inline-flex h-9 items-center rounded-md border border-input px-3 text-sm font-medium hover:bg-accent">Attendance →</Link>
           </div>
         </div>
 
@@ -79,7 +82,7 @@ export default async function HrPage() {
         })()}
 
         {canWrite && users && (
-          <EmployeeForm users={users.filter((u) => u.roles.some((r) => r !== "student" && r !== "parent"))} />
+          <EmployeeForm users={users.filter((u) => u.roles.some((r) => r !== "student" && r !== "parent"))} managers={org ?? []} />
         )}
 
         {employees === null || employees.length === 0 ? (
@@ -109,6 +112,7 @@ export default async function HrPage() {
           </Card>
         )}
 
+        <OrgChart nodes={org ?? []} />
         <SalaryChanges
           employees={employees ?? []}
           changes={changes ?? []}

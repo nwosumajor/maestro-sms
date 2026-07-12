@@ -22,6 +22,7 @@ import {
 } from "../integrity/integrity.foundation";
 
 const STAGES = ["APPLIED", "SCREENING", "INTERVIEW", "OFFER", "HIRED", "REJECTED"];
+const ZERO = "00000000-0000-0000-0000-000000000000"; // system actor for public intake
 
 @Injectable()
 export class RecruitmentService {
@@ -153,6 +154,67 @@ export class RecruitmentService {
         tx,
       );
       return { userId: user.id, email: a.email, tempPassword };
+    });
+  }
+
+  // --- PUBLIC careers surface (mirrors the /apply admissions pattern) --------
+  /** PUBLIC: a school's OPEN vacancies by slug. No auth, no PII — title/
+   *  department/description only. School resolved via the RLS-exempt registry. */
+  async publicOpenings(
+    slug: string,
+  ): Promise<{ school: string; jobs: { id: string; title: string; department: string | null; description: string | null; openings: number }[] }> {
+    const school = await this.db.runAsTenant<{ id: string; name: string } | null>(
+      { schoolId: ZERO, userId: ZERO },
+      (tx) => tx.school.findFirst({ where: { slug, status: "ACTIVE" }, select: { id: true, name: true } }),
+    );
+    if (!school) throw new NotFoundException("School not found");
+    const jobs = await this.db.runAsTenant({ schoolId: school.id, userId: ZERO }, (tx) =>
+      tx.jobRequisition.findMany({
+        where: { status: "OPEN" },
+        orderBy: { createdAt: "desc" },
+        select: { id: true, title: true, department: true, description: true, openings: true },
+      }),
+    );
+    return { school: school.name, jobs };
+  }
+
+  /** PUBLIC: apply to an OPEN vacancy. Quarantined intake exactly like the
+   *  admissions portal: the applicant lands in the school's ATS pipeline
+   *  (stage APPLIED) — never anywhere near staff or student data. One
+   *  application per (email, requisition). */
+  async publicApply(
+    slug: string,
+    input: { requisitionId: string; name: string; email: string; phone?: string; note?: string },
+  ): Promise<{ id: string; stage: string }> {
+    const school = await this.db.runAsTenant<{ id: string } | null>(
+      { schoolId: ZERO, userId: ZERO },
+      (tx) => tx.school.findFirst({ where: { slug, status: "ACTIVE" }, select: { id: true } }),
+    );
+    if (!school) throw new NotFoundException("School not found");
+    return this.db.runAsTenant({ schoolId: school.id, userId: ZERO }, async (tx) => {
+      // Under this school's GUC a foreign requisitionId simply isn't found (404).
+      const req = await tx.jobRequisition.findFirst({ where: { id: input.requisitionId }, select: { id: true, status: true } });
+      if (!req || req.status !== "OPEN") throw new NotFoundException("This vacancy is not open");
+      const email = input.email.trim().toLowerCase();
+      const dup = await tx.applicant.findFirst({ where: { requisitionId: req.id, email }, select: { id: true } });
+      if (dup) throw new ConflictException("You have already applied for this position");
+      const row = await tx.applicant.create({
+        data: {
+          schoolId: school.id,
+          requisitionId: req.id,
+          name: input.name.trim(),
+          email,
+          phone: (input.phone ?? "").trim() || null,
+          notes: (input.note ?? "").trim() || null,
+          stage: "APPLIED",
+          createdById: ZERO, // system actor: public intake
+        },
+        select: { id: true, stage: true },
+      });
+      // No audit entry: audit_log.actorId FKs to a real user, and this is an
+      // anonymous public intake (same as /public/admissions). The applicant row
+      // itself (createdById = ZERO) IS the record of the submission.
+      return row;
     });
   }
 

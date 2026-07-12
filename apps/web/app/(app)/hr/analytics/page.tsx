@@ -53,9 +53,37 @@ export default async function HrAnalyticsPage() {
               <Stat label="Training (planned/done)" value={`${a.training.planned} / ${a.training.completed}`} />
               <Stat label="Latest payroll net" value={a.payroll.latestPeriod ? money(a.payroll.totalNetMinor) : "—"} />
               <Stat label="Appraisals acknowledged" value={a.appraisals.acknowledged} />
+              <Stat label="Attrition (12m)" value={`${a.attrition.ratePercent}%`} sub={`${a.attrition.exitsLast12m} exit${a.attrition.exitsLast12m === 1 ? "" : "s"}`} />
+              <Stat label="On probation" value={a.lifecycle.onProbation} />
+              <Stat label="Contracts ending ≤60d" value={a.lifecycle.contractsEnding60d} />
+              <Stat label="Active loans" value={a.loans.active} sub={a.loans.active > 0 ? `${money(a.loans.outstandingMinor)} outstanding` : undefined} />
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
+              <Card>
+                <CardHeader><CardTitle className="text-base">Payroll trend (finalized runs)</CardTitle></CardHeader>
+                <CardContent className="space-y-1 text-sm">
+                  {a.payrollTrend.length === 0 ? <p className="text-muted-foreground">No finalized runs yet.</p> : a.payrollTrend.map((r, i) => (
+                    <div key={i} className="flex justify-between">
+                      <span>{r.period}{r.runType !== "MONTHLY" ? ` (${r.runType.toLowerCase()})` : ""}</span>
+                      <span className="text-muted-foreground">{money(r.totalNetMinor)}</span>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader><CardTitle className="text-base">Workforce shape</CardTitle></CardHeader>
+                <CardContent className="space-y-1 text-sm">
+                  <div className="flex justify-between"><span>Tenure &lt; 1y</span><span className="text-muted-foreground">{a.tenure.under1y}</span></div>
+                  <div className="flex justify-between"><span>1–3 years</span><span className="text-muted-foreground">{a.tenure.y1to3}</span></div>
+                  <div className="flex justify-between"><span>3–5 years</span><span className="text-muted-foreground">{a.tenure.y3to5}</span></div>
+                  <div className="flex justify-between"><span>5+ years</span><span className="text-muted-foreground">{a.tenure.over5y}</span></div>
+                  <div className="mt-2 border-t pt-2 text-xs text-muted-foreground">
+                    Attendance this month: {a.attendanceThisMonth.present} present · {a.attendanceThisMonth.late} late ·{" "}
+                    {a.attendanceThisMonth.absent} absent{a.attendanceThisMonth.flagged > 0 ? ` · ⚑ ${a.attendanceThisMonth.flagged} flagged` : ""}
+                  </div>
+                </CardContent>
+              </Card>
               <Card>
                 <CardHeader><CardTitle className="text-base">By department</CardTitle></CardHeader>
                 <CardContent className="space-y-1 text-sm">

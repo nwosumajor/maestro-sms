@@ -6,6 +6,7 @@
 // disciplinary, and appraisal status. No PII (salaries/bank details) is returned.
 // =============================================================================
 
+import { decryptField } from "../foundation/field-crypto";
 import { Inject, Injectable } from "@nestjs/common";
 import type { HrAnalyticsDto } from "@sms/types";
 import {
@@ -61,6 +62,46 @@ export class HrAnalyticsService {
         tx.appraisal.count({ where: { status: "ACKNOWLEDGED" } }),
       ]);
 
+      // --- v2: turnover, tenure, payroll trend, attendance, loans, lifecycle ---
+      const yearAgo = new Date(Date.now() - 365 * 86_400_000);
+      const in60d = new Date(Date.now() + 60 * 86_400_000);
+      const monthStart = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1));
+      const [exitsLast12m, fullEmployees, recentRuns, monthMarks, activeLoans, onProbation, contractsEnding60d] =
+        await Promise.all([
+          tx.staffExit.count({ where: { status: "APPROVED", decidedAt: { gte: yearAgo } } }),
+          tx.employee.findMany({ where: { status: "ACTIVE" }, select: { startDate: true } }),
+          tx.payrollRun.findMany({
+            where: { status: "FINALIZED" },
+            orderBy: [{ periodYear: "desc" }, { periodMonth: "desc" }],
+            take: 6,
+            select: { periodYear: true, periodMonth: true, runType: true, totalNetMinor: true },
+          }),
+          tx.staffAttendance.findMany({ where: { date: { gte: monthStart } }, select: { status: true, flagged: true } }),
+          tx.staffLoan.findMany({ where: { status: "ACTIVE" }, select: { balanceEnc: true } }),
+          tx.employee.count({ where: { status: "ACTIVE", confirmationStatus: "PROBATION" } }),
+          tx.employee.count({ where: { status: "ACTIVE", endDate: { not: null, lte: in60d } } }),
+        ]);
+      const now = Date.now();
+      const tenure = { under1y: 0, y1to3: 0, y3to5: 0, over5y: 0 };
+      for (const e of fullEmployees) {
+        const years = (now - e.startDate.getTime()) / (365.25 * 86_400_000);
+        if (years < 1) tenure.under1y++;
+        else if (years < 3) tenure.y1to3++;
+        else if (years < 5) tenure.y3to5++;
+        else tenure.over5y++;
+      }
+      const att = { present: 0, late: 0, absent: 0, flagged: 0 };
+      for (const m of monthMarks) {
+        if (m.status === "PRESENT") att.present++;
+        else if (m.status === "LATE") att.late++;
+        else if (m.status === "ABSENT") att.absent++;
+        if (m.flagged) att.flagged++;
+      }
+      const outstandingMinor = activeLoans.reduce(
+        (sum, l) => sum + Number(decryptField(l.balanceEnc, p.schoolId)),
+        0,
+      );
+
       return {
         headcount: { active, total: employees.length, staffAccounts: staffUsers.length, unrecorded },
         byDepartment: byDept,
@@ -75,6 +116,17 @@ export class HrAnalyticsService {
         training: { planned: trainingPlanned, completed: trainingCompleted },
         disciplinary: { openCases },
         appraisals: { draft: apprDraft, submitted: apprSubmitted, acknowledged: apprAck },
+        attrition: {
+          exitsLast12m,
+          ratePercent: active + exitsLast12m > 0 ? Math.round((exitsLast12m / (active + exitsLast12m)) * 100) : 0,
+        },
+        tenure,
+        payrollTrend: recentRuns
+          .reverse()
+          .map((r) => ({ period: `${r.periodMonth}/${r.periodYear}`, runType: r.runType, totalNetMinor: r.totalNetMinor })),
+        attendanceThisMonth: att,
+        loans: { active: activeLoans.length, outstandingMinor },
+        lifecycle: { onProbation, contractsEnding60d },
       };
     });
   }

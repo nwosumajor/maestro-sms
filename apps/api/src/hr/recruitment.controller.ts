@@ -1,8 +1,10 @@
-import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
 import { MODULES, HR_PERMISSIONS } from "@sms/types";
 import type { ApplicantDto, JobRequisitionDto } from "@sms/types";
 import { z } from "zod";
 import { RequireModule } from "../auth/require-module.decorator";
+import { Public } from "../auth/public.decorator";
+import { RateLimitGuard } from "../common/rate-limit.guard";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { RequireStepUp } from "../auth/require-stepup.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -25,6 +27,13 @@ const applicantSchema = z.object({
 });
 const stageSchema = z.object({ stage: z.enum(["APPLIED", "SCREENING", "INTERVIEW", "OFFER", "HIRED", "REJECTED"]) });
 const convertSchema = z.object({ jobTitle: z.string().max(120).optional(), password: z.string().min(8).max(200).optional() });
+const publicApplySchema = z.object({
+  requisitionId: z.string().uuid(),
+  name: z.string().min(1).max(160),
+  email: z.string().email().max(200),
+  phone: z.string().max(40).optional(),
+  note: z.string().max(2000).optional(),
+});
 
 @RequireModule(MODULES.HR)
 @Controller("hr/recruitment")
@@ -92,5 +101,29 @@ export class RecruitmentController {
     @Body(new ZodValidationPipe(convertSchema)) body: z.infer<typeof convertSchema>,
   ): Promise<{ userId: string; email: string; tempPassword: string }> {
     return this.recruit.convert(p, id, body);
+  }
+}
+
+// PUBLIC careers surface — its OWN controller so the routes live at /public/*
+// (outside the hr/recruitment prefix and its module gate). Quarantined intake,
+// same posture as /public/admissions: rate-limited write, no auth, no PII out.
+@Controller("public/careers")
+export class PublicCareersController {
+  constructor(private readonly recruit: RecruitmentService) {}
+
+  @Public()
+  @Get(":slug")
+  openings(@Param("slug") slug: string) {
+    return this.recruit.publicOpenings(slug);
+  }
+
+  @Public()
+  @UseGuards(new RateLimitGuard(10, 60_000))
+  @Post(":slug/apply")
+  apply(
+    @Param("slug") slug: string,
+    @Body(new ZodValidationPipe(publicApplySchema)) b: z.infer<typeof publicApplySchema>,
+  ) {
+    return this.recruit.publicApply(slug, b);
   }
 }

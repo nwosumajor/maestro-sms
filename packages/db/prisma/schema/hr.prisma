@@ -38,6 +38,25 @@ model Employee {
   bankNameEnc       String?
   bankAccountEnc    String?
 
+  /// Statutory identifiers for remittance schedules (PAYE TIN, pension RSA PIN)
+  /// — HR-maintained, field-ENCRYPTED at rest, exported on the remittance pack.
+  tinEnc            String?
+  rsaPinEnc         String?
+
+  /// Reporting line: the user id of this employee's LINE MANAGER (null = top
+  /// of the org / reports to the proprietor). Drives the org chart and future
+  /// route-to-manager approvals. Cycle-checked at the API boundary.
+  managerId         String?   @db.Uuid
+
+  /// Contract & confirmation lifecycle. New hires may start on PROBATION;
+  /// flipping to CONFIRMED goes through the employment_change_request
+  /// maker-checker, never a direct edit. endDate above doubles as the
+  /// fixed-term contract end; the reminder sweep nudges HR 30 days out.
+  confirmationStatus      String    @default("CONFIRMED")
+  probationEndsAt         DateTime? @db.Date
+  gradeLevel              String?
+  contractReminderSentAt  DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -146,6 +165,12 @@ model PayrollRun {
   schoolId        String    @db.Uuid
   periodYear      Int
   periodMonth     Int
+  /// MONTHLY (regular) | THIRTEENTH (one extra month of basic) | BONUS
+  /// (percent of basic). Non-MONTHLY runs pay BASE only: PAYE applies, but no
+  /// pension, no components, no loan recovery (approximation, documented).
+  runType         String    @default("MONTHLY")
+  /// BONUS runs: percent of basic salary paid (THIRTEENTH is always 100).
+  bonusPercent    Int?
   /// DRAFT | FINALIZED.
   status          String    @default("DRAFT")
   totalGrossMinor Int       @default(0)
@@ -156,7 +181,7 @@ model PayrollRun {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  @@unique([schoolId, periodYear, periodMonth])
+  @@unique([schoolId, periodYear, periodMonth, runType])
   @@index([schoolId])
   @@map("payroll_run")
 }
@@ -170,11 +195,83 @@ model Payslip {
   grossEnc       String?
   deductionsEnc  String?
   netEnc         String?
+  /// Full component breakdown (base/allowances/statutory/other deductions/loan
+  /// installments) as an ENCRYPTED JSON snapshot — the payslip renders from
+  /// THIS, never by recomputing (rules/components may change after the run).
+  breakdownEnc   String?
   createdAt      DateTime @default(now())
 
   @@unique([payrollRunId, userId])
   @@index([schoolId])
   @@map("payslip")
+}
+
+/// A recurring pay component on an employee: an ALLOWANCE (adds to gross) or a
+/// DEDUCTION (subtracts after statutory). Config, not ledger — payslips snapshot
+/// the applied breakdown, so editing/removing a component never rewrites history.
+/// Amounts in integer kobo. Tenant-scoped (RLS); gated hr.write.
+model PayComponent {
+  id          String   @id @default(uuid()) @db.Uuid
+  schoolId    String   @db.Uuid
+  /// The employee's user id (matches Employee.userId).
+  userId      String   @db.Uuid
+  /// ALLOWANCE | DEDUCTION
+  kind        String
+  name        String
+  amountMinor Int
+  active      Boolean  @default(true)
+  createdById String   @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([schoolId])
+  @@index([schoolId, userId])
+  @@map("pay_component")
+}
+
+/// A staff loan / salary advance. MAKER-CHECKER: staff self-request (hr.self) →
+/// a DIFFERENT person with hr.salary.approve decides (step-up). On approval the
+/// balance = principal; each FINALIZED payroll run recovers min(monthly, balance,
+/// available net) until SETTLED. Financial record — never hard-deleted (RLS: no
+/// DELETE). Amounts in integer kobo, encrypted like salaries.
+model StaffLoan {
+  id            String    @id @default(uuid()) @db.Uuid
+  schoolId      String    @db.Uuid
+  userId        String    @db.Uuid
+  purpose       String
+  principalEnc  String
+  monthlyEnc    String
+  balanceEnc    String
+  /// PENDING | ACTIVE | REJECTED | SETTLED
+  status        String    @default("PENDING")
+  requestedById String    @db.Uuid
+  decidedById   String?   @db.Uuid
+  decidedAt     DateTime?
+  comment       String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([schoolId])
+  @@index([schoolId, userId])
+  @@map("staff_loan")
+}
+
+/// One recovery against a loan — APPEND-ONLY ledger (RLS: no UPDATE/DELETE).
+/// unique(loanId, payrollRunId) makes payroll finalize idempotent; a NULL
+/// payrollRunId marks an EXIT-settlement recovery (outside any run).
+model LoanRepayment {
+  id           String   @id @default(uuid()) @db.Uuid
+  schoolId     String   @db.Uuid
+  loanId       String   @db.Uuid
+  payrollRunId String?  @db.Uuid
+  userId       String   @db.Uuid
+  amountEnc    String
+  createdAt    DateTime @default(now())
+
+  @@unique([loanId, payrollRunId])
+  @@index([schoolId])
+  @@index([schoolId, loanId])
+  @@map("loan_repayment")
 }
 
 // =============================================================================
@@ -367,4 +464,183 @@ model Applicant {
   @@index([schoolId])
   @@index([schoolId, requisitionId])
   @@map("applicant")
+}
+
+// =============================================================================
+// HR — staff attendance (anti-spoofing) + clock-in kiosk
+// =============================================================================
+
+/// One staff member's attendance mark for one day. UNIFIED across capture modes:
+/// ADMIN (a register marked by staff with hr.write — the trusted default),
+/// SELF_KIOSK (staff clock-in proven by the rotating gate-display code), and
+/// BIOMETRIC (future terminal ingestion). `flagged` marks anomaly SIGNALS
+/// (off-site IP, wrong-code attempts) for human review — never auto-punitive.
+/// Corrections are UPDATEs; no hard delete (it's a record).
+model StaffAttendance {
+  id         String    @id @default(uuid()) @db.Uuid
+  schoolId   String    @db.Uuid
+  userId     String    @db.Uuid
+  /// The attendance day (date only, UTC midnight).
+  date       DateTime  @db.Date
+  /// PRESENT | LATE | ABSENT
+  status     String
+  /// ADMIN | SELF_KIOSK | BIOMETRIC
+  source     String
+  markedById String    @db.Uuid
+  clockInAt  DateTime?
+  /// Evidence: requester IP as seen by the API (signal, not proof).
+  ip         String?
+  flagged    Boolean   @default(false)
+  note       String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@unique([userId, date])
+  @@index([schoolId])
+  @@index([schoolId, date])
+  @@map("staff_attendance")
+}
+
+/// Per-school clock-in kiosk config (one row per school). The TOTP secret that
+/// drives the rotating gate-display code is field-ENCRYPTED at rest; rotating it
+/// invalidates all outstanding codes instantly.
+model AttendanceKiosk {
+  id         String   @id @default(uuid()) @db.Uuid
+  schoolId   String   @db.Uuid
+  enabled    Boolean  @default(false)
+  secretEnc  String
+  /// Comma-separated public IPs/prefixes the school's network egresses from;
+  /// clock-ins from elsewhere are FLAGGED (signal), not blocked.
+  allowedIps String?
+  /// Clock-in window + lateness boundary, school-local "HH:MM".
+  windowStart String  @default("06:00")
+  windowEnd   String  @default("10:00")
+  lateAfter   String  @default("08:00")
+  updatedById String  @db.Uuid
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([schoolId])
+  @@map("attendance_kiosk")
+}
+
+/// A dated duty assignment (gate duty, night watch, weekend supervision) for
+/// staff the teaching timetable doesn't cover — wardens, drivers, security.
+/// A roster is a PLAN, not a record: unassigning deletes the row (audited).
+/// Times are school-local "HH:MM". Tenant-scoped (RLS); hr.write assigns,
+/// staff see their own duties, hr.read sees the whole roster.
+model DutyAssignment {
+  id           String   @id @default(uuid()) @db.Uuid
+  schoolId     String   @db.Uuid
+  userId       String   @db.Uuid
+  date         DateTime @db.Date
+  title        String
+  startTime    String
+  endTime      String
+  note         String?
+  assignedById String   @db.Uuid
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([schoolId])
+  @@index([schoolId, date])
+  @@index([schoolId, userId])
+  @@map("duty_assignment")
+}
+
+/// An employment lifecycle change — CONFIRMATION (probation ends), PROMOTION
+/// (title/grade), or RENEWAL (fixed-term contract extension). MAKER-CHECKER
+/// mirroring salary changes: requested (hr.write) then decided by a DIFFERENT
+/// person (hr.salary.approve). Each row IS the append-only employment history —
+/// no hard delete. A PROMOTION does NOT move salary: pay changes go through the
+/// salary maker-checker separately (separation of concerns AND of duties).
+model EmploymentChangeRequest {
+  id            String    @id @default(uuid()) @db.Uuid
+  schoolId      String    @db.Uuid
+  userId        String    @db.Uuid
+  /// CONFIRMATION | PROMOTION | RENEWAL
+  type          String
+  newJobTitle   String?
+  newGradeLevel String?
+  newEndDate    DateTime? @db.Date
+  reason        String?
+  /// PENDING | APPROVED | REJECTED
+  status        String    @default("PENDING")
+  requestedById String    @db.Uuid
+  decidedById   String?   @db.Uuid
+  decidedAt     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([schoolId])
+  @@index([schoolId, userId])
+  @@map("employment_change_request")
+}
+
+/// A staff exit (resignation / termination / retirement). MAKER-CHECKER money:
+/// initiated by hr.write with a SNAPSHOTTED settlement (encrypted: pro-rata
+/// final month + leave payout − loan recovery); decided by a DIFFERENT person
+/// with hr.salary.approve (step-up). Approval marks the employee EXITED, posts
+/// loan recovery to the repayment ledger, and opens the OFFBOARDING checklist.
+/// A record — no hard delete (RLS: no DELETE).
+model StaffExit {
+  id             String    @id @default(uuid()) @db.Uuid
+  schoolId       String    @db.Uuid
+  userId         String    @db.Uuid
+  /// RESIGNATION | TERMINATION | RETIREMENT
+  type           String
+  lastWorkingDay DateTime  @db.Date
+  reason         String?
+  /// Encrypted FinalSettlement JSON, computed at initiation.
+  settlementEnc  String
+  /// PENDING | APPROVED | REJECTED
+  status         String    @default("PENDING")
+  initiatedById  String    @db.Uuid
+  decidedById    String?   @db.Uuid
+  decidedAt      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([schoolId])
+  @@index([schoolId, userId])
+  @@map("staff_exit")
+}
+
+/// A registered biometric terminal (fingerprint/face clock at the gate). The
+/// device authenticates by HMAC-signing its event batches with `secretEnc`
+/// (shown ONCE at registration, encrypted at rest). PRIVACY: fingerprint/face
+/// templates NEVER enter this system — matching happens ON the device; we store
+/// only attendance EVENTS (who/when/which device). Deleting = decommissioning.
+model AttendanceDevice {
+  id         String    @id @default(uuid()) @db.Uuid
+  schoolId   String    @db.Uuid
+  name       String
+  /// The identifier the terminal sends with each batch (unique per school).
+  deviceId   String
+  secretEnc  String
+  enabled    Boolean   @default(true)
+  lastSeenAt DateTime?
+  createdById String   @db.Uuid
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@unique([schoolId, deviceId])
+  @@index([schoolId])
+  @@map("attendance_device")
+}
+
+/// Maps a terminal's own user code (the number staff enrol under on the device)
+/// to a staff user. School-wide (devices synced by the vendor share the space).
+model BiometricEnrollment {
+  id           String   @id @default(uuid()) @db.Uuid
+  schoolId     String   @db.Uuid
+  deviceUserId String
+  userId       String   @db.Uuid
+  createdById  String   @db.Uuid
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([schoolId, deviceUserId])
+  @@index([schoolId])
+  @@map("biometric_enrollment")
 }

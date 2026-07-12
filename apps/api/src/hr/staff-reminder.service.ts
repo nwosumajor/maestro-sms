@@ -70,6 +70,51 @@ export class StaffReminderService {
       }
     }
     this.logger.log(`Staff reminder sweep: scanned=${due.length} reminded=${due.length}`);
+    await this.sweepContracts(client);
     return { reminded: due.length, scanned: due.length };
+  }
+
+  /** Fixed-term contracts ending within 30 days: nudge each school's HR once
+   *  (contractReminderSentAt stamps idempotency; a RENEWAL approval re-arms it). */
+  private async sweepContracts(client: NonNullable<PrivilegedDatabaseService["client"]>): Promise<void> {
+    const cutoff = new Date(Date.now() + 30 * 86_400_000);
+    const ending = await client.employee.findMany({
+      where: { status: "ACTIVE", contractReminderSentAt: null, endDate: { not: null, lte: cutoff } },
+      select: { id: true, schoolId: true, userId: true, endDate: true },
+    });
+    if (ending.length === 0) return;
+    const bySchool = new Map<string, typeof ending>();
+    for (const e of ending) (bySchool.get(e.schoolId) ?? bySchool.set(e.schoolId, []).get(e.schoolId)!).push(e);
+    for (const [schoolId, emps] of bySchool) {
+      try {
+        const hr = await client.userRole.findMany({
+          where: { schoolId, role: { name: { in: HR_NOTIFY_ROLES } } },
+          select: { userId: true },
+          distinct: ["userId"],
+        });
+        const owners = await client.user.findMany({
+          where: { id: { in: emps.map((e) => e.userId) } },
+          select: { id: true, name: true },
+        });
+        const nameById = new Map(owners.map((u) => [u.id, u.name]));
+        for (const e of emps) {
+          for (const r of hr) {
+            await this.notifications.enqueue(
+              { schoolId, userId: r.userId },
+              {
+                recipientId: r.userId,
+                type: "GENERIC",
+                title: "Contract ending soon",
+                body: `${nameById.get(e.userId) ?? "A staff member"}'s contract ends on ${e.endDate ? new Date(e.endDate).toISOString().slice(0, 10) : "soon"} — renew or start offboarding.`,
+              },
+            );
+          }
+          await client.employee.update({ where: { id: e.id }, data: { contractReminderSentAt: new Date() } });
+        }
+      } catch (err) {
+        this.logger.warn(`contract reminder failed for school ${schoolId}: ${(err as Error).message}`);
+      }
+    }
+    this.logger.log(`Contract reminder sweep: reminded=${ending.length}`);
   }
 }

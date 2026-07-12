@@ -146,10 +146,11 @@ d("LmsContentService integration (authoring, approval, quiz, forum, RLS)", () =>
     const body = studentView.body as { kind: string; quiz: { questions: { answer: string }[] } };
     expect(body.quiz.questions.every((x) => x.answer === "")).toBe(true);
 
-    // Correct answers -> full marks; a second attempt is rejected.
+    // Correct answers -> full marks; a second attempt is rejected once the
+    // per-quiz attempt cap (default 1) is spent.
     const res = await svc.attemptQuiz(student(S1), q.id, { q1: "1", q2: "true" });
     expect(res).toMatchObject({ score: 2, total: 2 });
-    await expect(svc.attemptQuiz(student(S1), q.id, { q1: "1", q2: "true" })).rejects.toThrow(/already/i);
+    await expect(svc.attemptQuiz(student(S1), q.id, { q1: "1", q2: "true" })).rejects.toThrow(/no attempts left/i);
   });
 
   it("forum: enrolled student replies in a published thread", async () => {

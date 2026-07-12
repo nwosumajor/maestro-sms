@@ -76,6 +76,16 @@ d("RLS cross-tenant isolation", () => {
   const liveAttendanceA = randomUUID();
   const lmsAwardA = randomUUID();
   const xapiStatementA = randomUUID();
+  const payComponentA = randomUUID();
+  const staffAttendanceA = randomUUID();
+  const attendanceKioskA = randomUUID();
+  const dutyAssignmentA = randomUUID();
+  const employmentChangeA = randomUUID();
+  const staffExitA = randomUUID();
+  const attendanceDeviceA = randomUUID();
+  const biometricEnrollA = randomUUID();
+  const staffLoanA = randomUUID();
+  const loanRepaymentA = randomUUID();
   const subPaymentA = randomUUID();
   // HR + the remaining tenant tables — seeded so the coverage meta-test
   // ("every RLS-enabled table has a deny case") holds for the whole schema.
@@ -643,6 +653,46 @@ d("RLS cross-tenant isolation", () => {
       `INSERT INTO payslip (id,"schoolId","payrollRunId","userId") VALUES ($1,$2,$3,$4)`,
       [payslipA, A, payrollRunA, userA],
     );
+    await a.query(
+      `INSERT INTO pay_component (id,"schoolId","userId",kind,name,"amountMinor","createdById","updatedAt") VALUES ($1,$2,$3,'ALLOWANCE','Housing',1000,$3,now())`,
+      [payComponentA, A, userA],
+    );
+    await a.query(
+      `INSERT INTO staff_loan (id,"schoolId","userId",purpose,"principalEnc","monthlyEnc","balanceEnc","requestedById","updatedAt") VALUES ($1,$2,$3,'test','x','x','x',$3,now())`,
+      [staffLoanA, A, userA],
+    );
+    await a.query(
+      `INSERT INTO loan_repayment (id,"schoolId","loanId","payrollRunId","userId","amountEnc") VALUES ($1,$2,$3,$4,$5,'x')`,
+      [loanRepaymentA, A, staffLoanA, payrollRunA, userA],
+    );
+    await a.query(
+      `INSERT INTO staff_attendance (id,"schoolId","userId",date,status,source,"markedById","updatedAt") VALUES ($1,$2,$3,'2026-07-01','PRESENT','ADMIN',$3,now())`,
+      [staffAttendanceA, A, userA],
+    );
+    await a.query(
+      `INSERT INTO attendance_kiosk (id,"schoolId","secretEnc","updatedById","updatedAt") VALUES ($1,$2,'x',$3,now())`,
+      [attendanceKioskA, A, userA],
+    );
+    await a.query(
+      `INSERT INTO duty_assignment (id,"schoolId","userId",date,title,"startTime","endTime","assignedById","updatedAt") VALUES ($1,$2,$3,'2026-07-05','Night watch','22:00','06:00',$3,now())`,
+      [dutyAssignmentA, A, userA],
+    );
+    await a.query(
+      `INSERT INTO employment_change_request (id,"schoolId","userId",type,"requestedById","updatedAt") VALUES ($1,$2,$3,'CONFIRMATION',$3,now())`,
+      [employmentChangeA, A, userA],
+    );
+    await a.query(
+      `INSERT INTO staff_exit (id,"schoolId","userId",type,"lastWorkingDay","settlementEnc","initiatedById","updatedAt") VALUES ($1,$2,$3,'RESIGNATION','2026-08-31','x',$3,now())`,
+      [staffExitA, A, userA],
+    );
+    await a.query(
+      `INSERT INTO attendance_device (id,"schoolId",name,"deviceId","secretEnc","createdById","updatedAt") VALUES ($1,$2,'Gate','dev1','x',$3,now())`,
+      [attendanceDeviceA, A, userA],
+    );
+    await a.query(
+      `INSERT INTO biometric_enrollment (id,"schoolId","deviceUserId","userId","createdById","updatedAt") VALUES ($1,$2,'42',$3,$3,now())`,
+      [biometricEnrollA, A, userA],
+    );
     // HR staff lifecycle: a checklist (+ item), a document, a training record.
     await a.query(
       `INSERT INTO staff_checklist (id,"schoolId","userId",type,"createdById","updatedAt") VALUES ($1,$2,$3,'ONBOARDING',$3,now())`,
@@ -742,6 +792,16 @@ d("RLS cross-tenant isolation", () => {
       "training_record",
       // HR leave / salary / payroll — children first (payslip before payroll_run).
       "payslip",
+      "loan_repayment",
+      "staff_loan",
+      "pay_component",
+      "staff_attendance",
+      "attendance_kiosk",
+      "attendance_device",
+      "biometric_enrollment",
+      "duty_assignment",
+      "employment_change_request",
+      "staff_exit",
       "payroll_run",
       "salary_change_request",
       "leave_request",
@@ -933,6 +993,16 @@ d("RLS cross-tenant isolation", () => {
     ["salary_change_request", salaryChangeA],
     ["payroll_run", payrollRunA],
     ["payslip", payslipA],
+    ["pay_component", payComponentA],
+    ["staff_loan", staffLoanA],
+    ["loan_repayment", loanRepaymentA],
+    ["staff_attendance", staffAttendanceA],
+    ["attendance_kiosk", attendanceKioskA],
+    ["duty_assignment", dutyAssignmentA],
+    ["employment_change_request", employmentChangeA],
+    ["staff_exit", staffExitA],
+    ["attendance_device", attendanceDeviceA],
+    ["biometric_enrollment", biometricEnrollA],
     ["staff_checklist", staffChecklistA],
     ["staff_checklist_item", staffChecklistItemA],
     ["staff_document", staffDocumentA],

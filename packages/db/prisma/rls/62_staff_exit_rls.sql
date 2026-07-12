@@ -1,0 +1,22 @@
+-- =============================================================================
+-- RLS: staff_exit (tenant-scoped). SELECT/INSERT/UPDATE, NO DELETE — an exit
+-- with its settlement is a permanent employment record.
+-- Sentinel policy (docker-entrypoint idempotency key): staff_exit_update
+-- =============================================================================
+DO $$
+DECLARE t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['staff_exit'] LOOP
+    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+    EXECUTE format('ALTER TABLE %I FORCE  ROW LEVEL SECURITY', t);
+    EXECUTE format($f$CREATE POLICY %1$s_select ON %1$I FOR SELECT
+      USING ("schoolId" = current_setting('app.current_school_id', true)::uuid)$f$, t);
+    EXECUTE format($f$CREATE POLICY %1$s_insert ON %1$I FOR INSERT
+      WITH CHECK ("schoolId" = current_setting('app.current_school_id', true)::uuid)$f$, t);
+    EXECUTE format($f$CREATE POLICY %1$s_update ON %1$I FOR UPDATE
+      USING ("schoolId" = current_setting('app.current_school_id', true)::uuid)
+      WITH CHECK ("schoolId" = current_setting('app.current_school_id', true)::uuid)$f$, t);
+    EXECUTE format('GRANT  SELECT, INSERT, UPDATE ON %I TO major_user', t);
+    EXECUTE format('REVOKE DELETE, TRUNCATE       ON %I FROM major_user', t);
+  END LOOP;
+END $$;

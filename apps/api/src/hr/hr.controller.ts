@@ -18,6 +18,11 @@ const employeeSchema = z.object({
   endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
   salaryMinor: z.number().int().min(0).nullish(),
   status: z.string().max(40).optional(),
+  tin: z.string().max(40).nullish(),
+  rsaPin: z.string().max(40).nullish(),
+  gradeLevel: z.string().max(40).nullish(),
+  probationMonths: z.number().int().min(1).max(24).optional(),
+  managerId: z.string().uuid().nullish(),
 });
 
 const selfProfileSchema = z.object({
@@ -62,6 +67,12 @@ export class HrController {
   @RequirePermission(HR_PERMISSIONS.HR_SELF)
   erasePersonal(@CurrentPrincipal() p: Principal): Promise<{ erased: boolean }> {
     return this.hr.eraseMyPersonal(p);
+  }
+
+  @Get("org")
+  @RequirePermission(HR_PERMISSIONS.HR_READ)
+  org(@CurrentPrincipal() p: Principal) {
+    return this.hr.org(p);
   }
 
   @Get("employees")

@@ -190,7 +190,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     "timetable.read", "timetable.write",
     "security.audit.read", "security.elevation.request", "security.elevation.approve",
     "privacy.erasure.review", "message.read", "message.send", "event.read", "announcement.read", "event.write",
-    "hr.read", "hr.self", "hr.write", "hr.salary.approve", "hr.appraisal.manage", "hr.disciplinary.manage", "hr.recruit.manage", "school.branding.manage", "rbac.manage", "admission.review", "directory.search", "announcement.manage", "announcement.read",
+    "hr.read", "hr.self", "hr.write", "hr.salary.approve", "hr.payroll.run", "hr.appraisal.manage", "hr.disciplinary.manage", "hr.recruit.manage", "school.branding.manage", "rbac.manage", "admission.review", "directory.search", "announcement.manage", "announcement.read",
     "game.league.create", "game.leaderboard.read",
     "game.race.open", "game.race.tournament", "game.match.moderate",
     "game.ultimate.enroll",

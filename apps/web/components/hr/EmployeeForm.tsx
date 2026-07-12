@@ -11,7 +11,7 @@ import { readApiError } from "@/lib/api-error";
 
 type User = Serialized<UserSummaryDto>;
 
-export function EmployeeForm({ users }: { users: User[] }) {
+export function EmployeeForm({ users, managers = [] }: { users: User[]; managers?: { userId: string; name: string }[] }) {
   const router = useRouter();
   const [userId, setUserId] = React.useState(users[0]?.id ?? "");
   const [jobTitle, setJobTitle] = React.useState("");
@@ -19,6 +19,9 @@ export function EmployeeForm({ users }: { users: User[] }) {
   const [employmentType, setEmploymentType] = React.useState("FULL_TIME");
   const [startDate, setStartDate] = React.useState("");
   const [salaryMajor, setSalaryMajor] = React.useState("");
+  const [tin, setTin] = React.useState("");
+  const [rsaPin, setRsaPin] = React.useState("");
+  const [managerId, setManagerId] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
 
@@ -31,6 +34,9 @@ export function EmployeeForm({ users }: { users: User[] }) {
       body: JSON.stringify({
         jobTitle, department: department || null, employmentType, startDate,
         salaryMinor: salaryMajor ? Math.round(parseFloat(salaryMajor) * 100) : null,
+        tin: tin.trim() || null,
+        rsaPin: rsaPin.trim() || null,
+        managerId: managerId || null,
       }),
     });
     setBusy(false);
@@ -59,6 +65,15 @@ export function EmployeeForm({ users }: { users: User[] }) {
           </div>
           <div className="space-y-1.5"><Label htmlFor="hr-start">Start date</Label><Input id="hr-start" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} /></div>
           <div className="space-y-1.5"><Label htmlFor="hr-salary">Salary (₦)</Label><Input id="hr-salary" inputMode="decimal" value={salaryMajor} onChange={(e) => setSalaryMajor(e.target.value)} className="w-28" /></div>
+          <div className="space-y-1.5"><Label htmlFor="hr-tin">TIN</Label><Input id="hr-tin" value={tin} onChange={(e) => setTin(e.target.value)} className="w-32" placeholder="tax id" /></div>
+          <div className="space-y-1.5"><Label htmlFor="hr-rsa">RSA PIN</Label><Input id="hr-rsa" value={rsaPin} onChange={(e) => setRsaPin(e.target.value)} className="w-32" placeholder="pension" /></div>
+          <div className="space-y-1.5">
+            <Label htmlFor="hr-mgr">Reports to</Label>
+            <select id="hr-mgr" value={managerId} onChange={(e) => setManagerId(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
+              <option value="">— nobody (top) —</option>
+              {managers.map((m) => <option key={m.userId} value={m.userId}>{m.name}</option>)}
+            </select>
+          </div>
           <Button type="submit" disabled={busy}>Save</Button>
           {msg && <span className="text-sm text-muted-foreground">{msg}</span>}
         </form>

@@ -9,7 +9,27 @@ export interface EmployeeDto {
   startDate: Date;
   status: string;
   salaryMinor: number | null;
+  tin: string | null;
+  rsaPin: string | null;
+  /** PROBATION | CONFIRMED — flips only via the employment maker-checker. */
+  confirmationStatus: string;
+  probationEndsAt: Date | null;
+  gradeLevel: string | null;
+  /** Fixed-term contract end (null = open-ended). */
+  endDate: Date | null;
+  /** Line manager's user id (reporting line), or null. */
+  managerId: string | null;
   user: { name: string; email: string } | null;
+}
+
+/** One node of the org chart (the web nests by managerId). */
+export interface OrgNodeDto {
+  userId: string;
+  name: string;
+  jobTitle: string;
+  department: string | null;
+  gradeLevel: string | null;
+  managerId: string | null;
 }
 
 export interface ChecklistItemDto {
@@ -151,6 +171,13 @@ export interface HrAnalyticsDto {
   training: { planned: number; completed: number };
   disciplinary: { openCases: number };
   appraisals: { draft: number; submitted: number; acknowledged: number };
+  /** v2: turnover & workforce-shape signals (aggregates only, no PII). */
+  attrition: { exitsLast12m: number; ratePercent: number };
+  tenure: { under1y: number; y1to3: number; y3to5: number; over5y: number };
+  payrollTrend: { period: string; runType: string; totalNetMinor: number }[];
+  attendanceThisMonth: { present: number; late: number; absent: number; flagged: number };
+  loans: { active: number; outstandingMinor: number };
+  lifecycle: { onProbation: number; contractsEnding60d: number };
 }
 
 export interface JobRequisitionDto {
@@ -204,6 +231,9 @@ export interface PayrollRunDto {
   id: string;
   periodYear: number;
   periodMonth: number;
+  /** MONTHLY | THIRTEENTH | BONUS */
+  runType: string;
+  bonusPercent: number | null;
   status: string;
   totalGrossMinor: number;
   totalNetMinor: number;
@@ -211,4 +241,133 @@ export interface PayrollRunDto {
   createdAt: Date;
   finalizedAt: Date | null;
   payslips?: PayslipDto[];
+}
+
+/** A recurring allowance/deduction configured on an employee (integer kobo). */
+export interface PayComponentDto {
+  id: string;
+  userId: string;
+  kind: "ALLOWANCE" | "DEDUCTION";
+  name: string;
+  amountMinor: number;
+  active: boolean;
+  createdAt: Date;
+}
+
+/** A staff loan / salary advance (maker-checker; recovered through payroll). */
+export interface StaffLoanDto {
+  id: string;
+  userId: string;
+  userName: string | null;
+  purpose: string;
+  principalMinor: number;
+  monthlyMinor: number;
+  balanceMinor: number;
+  status: "PENDING" | "ACTIVE" | "REJECTED" | "SETTLED";
+  requestedById: string;
+  decidedById: string | null;
+  decidedAt: Date | null;
+  comment: string | null;
+  createdAt: Date;
+  /** Recovery history (present on detail reads). NULL run = exit settlement. */
+  repayments?: { payrollRunId: string | null; period: string; amountMinor: number; createdAt: Date }[];
+}
+
+/** One of MY payslips (staff self-service; FINALIZED runs only). */
+export interface MyPayslipDto {
+  runId: string;
+  periodYear: number;
+  periodMonth: number;
+  grossMinor: number | null;
+  netMinor: number | null;
+  finalizedAt: Date | null;
+}
+
+/** One staff member's attendance mark for a day. */
+export interface StaffAttendanceDto {
+  id: string;
+  userId: string;
+  userName: string | null;
+  date: Date;
+  status: "PRESENT" | "LATE" | "ABSENT";
+  source: "ADMIN" | "SELF_KIOSK" | "BIOMETRIC";
+  clockInAt: Date | null;
+  /** Anomaly SIGNAL (off-site IP etc.) for human review — never auto-punitive. */
+  flagged: boolean;
+  note: string | null;
+}
+
+/** The day's register: every active employee with their mark (or none yet). */
+export interface AttendanceRegisterDto {
+  date: string;
+  rows: { userId: string; userName: string; mark: StaffAttendanceDto | null }[];
+}
+
+/** Per-staff monthly roll-up. */
+export interface AttendanceSummaryDto {
+  year: number;
+  month: number;
+  rows: { userId: string; userName: string; present: number; late: number; absent: number; flagged: number }[];
+}
+
+/** Kiosk config as shown to HR (the TOTP secret NEVER leaves the server). */
+export interface KioskConfigDto {
+  enabled: boolean;
+  allowedIps: string | null;
+  windowStart: string;
+  windowEnd: string;
+  lateAfter: string;
+}
+
+/** The rotating gate-display code. */
+export interface KioskCodeDto {
+  code: string;
+  secondsRemaining: number;
+}
+
+/** A dated duty-roster assignment (gate duty, night watch, weekend supervision). */
+export interface DutyAssignmentDto {
+  id: string;
+  userId: string;
+  userName: string | null;
+  date: Date;
+  title: string;
+  startTime: string;
+  endTime: string;
+  note: string | null;
+  createdAt: Date;
+}
+
+/** An employment lifecycle change (confirmation / promotion / renewal) —
+ *  maker-checker; each row is the append-only employment history. */
+export interface EmploymentChangeDto {
+  id: string;
+  userId: string;
+  userName: string | null;
+  type: "CONFIRMATION" | "PROMOTION" | "RENEWAL";
+  newJobTitle: string | null;
+  newGradeLevel: string | null;
+  newEndDate: Date | null;
+  reason: string | null;
+  status: "PENDING" | "APPROVED" | "REJECTED";
+  requestedById: string;
+  decidedById: string | null;
+  decidedAt: Date | null;
+  createdAt: Date;
+}
+
+/** A staff exit with its decrypted settlement (maker-checker; permanent record). */
+export interface StaffExitDto {
+  id: string;
+  userId: string;
+  userName: string | null;
+  type: "RESIGNATION" | "TERMINATION" | "RETIREMENT";
+  lastWorkingDay: Date;
+  reason: string | null;
+  settlement: import("../payroll").FinalSettlement;
+  status: "PENDING" | "APPROVED" | "REJECTED";
+  initiatedById: string;
+  decidedById: string | null;
+  decidedAt: Date | null;
+  createdAt: Date;
 }

@@ -20,6 +20,8 @@ export function PayrollManager({ runs, canRun }: { runs: Run[]; canRun: boolean 
   const now = new Date();
   const [year, setYear] = React.useState(String(now.getUTCFullYear()));
   const [month, setMonth] = React.useState(String(now.getUTCMonth() + 1));
+  const [runType, setRunType] = React.useState("MONTHLY");
+  const [bonusPct, setBonusPct] = React.useState("50");
   const [busy, setBusy] = React.useState<string | null>(null);
   const [msg, setMsg] = React.useState<string | null>(null);
 
@@ -50,7 +52,32 @@ export function PayrollManager({ runs, canRun }: { runs: Run[]; canRun: boolean 
                   {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
                 </select>
               </div>
-              <Button disabled={busy === "create"} onClick={() => call("hr/payroll/runs", { periodYear: parseInt(year, 10), periodMonth: parseInt(month, 10) }, "create")}>
+              <div className="space-y-1.5">
+                <Label htmlFor="pr-type">Type</Label>
+                <select id="pr-type" value={runType} onChange={(e) => setRunType(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
+                  <option value="MONTHLY">Monthly</option>
+                  <option value="THIRTEENTH">13th month</option>
+                  <option value="BONUS">Bonus %</option>
+                </select>
+              </div>
+              {runType === "BONUS" && (
+                <div className="space-y-1.5"><Label htmlFor="pr-pct">Bonus %</Label><Input id="pr-pct" type="number" min="1" max="1000" value={bonusPct} onChange={(e) => setBonusPct(e.target.value)} className="w-24" /></div>
+              )}
+              <Button
+                disabled={busy === "create"}
+                onClick={() =>
+                  call(
+                    "hr/payroll/runs",
+                    {
+                      periodYear: parseInt(year, 10),
+                      periodMonth: parseInt(month, 10),
+                      runType,
+                      ...(runType === "BONUS" ? { bonusPercent: parseInt(bonusPct, 10) } : {}),
+                    },
+                    "create",
+                  )
+                }
+              >
                 Generate draft
               </Button>
               {msg && <span className="text-sm text-destructive">{msg}</span>}
@@ -72,7 +99,11 @@ export function PayrollManager({ runs, canRun }: { runs: Run[]; canRun: boolean 
               <tbody>
                 {runs.map((r) => (
                   <tr key={r.id} className="border-b border-border last:border-0">
-                    <td className="px-4 py-2.5">{MONTHS[r.periodMonth - 1]} {r.periodYear}</td>
+                    <td className="px-4 py-2.5">
+                      {MONTHS[r.periodMonth - 1]} {r.periodYear}
+                      {r.runType === "THIRTEENTH" && <Badge variant="outline" className="ml-2">13th</Badge>}
+                      {r.runType === "BONUS" && <Badge variant="outline" className="ml-2">bonus {r.bonusPercent}%</Badge>}
+                    </td>
                     <td className="px-4 py-2.5 text-muted-foreground">{r.payslipCount}</td>
                     <td className="px-4 py-2.5">{money(r.totalGrossMinor)}</td>
                     <td className="px-4 py-2.5">{money(r.totalNetMinor)}</td>
@@ -84,6 +115,13 @@ export function PayrollManager({ runs, canRun }: { runs: Run[]; canRun: boolean 
                         )}
                         {canRun && (
                           <a className="text-sm text-primary underline" href={`/api/sms/hr/payroll/runs/${r.id}/bank-export`}>Bank export</a>
+                        )}
+                        {canRun && r.status === "FINALIZED" && (
+                          <>
+                            <a className="text-sm text-primary underline" href={`/api/sms/hr/payroll/runs/${r.id}/remittance?type=paye`}>PAYE</a>
+                            <a className="text-sm text-primary underline" href={`/api/sms/hr/payroll/runs/${r.id}/remittance?type=pension`}>Pension</a>
+                            <a className="text-sm text-primary underline" href={`/api/sms/hr/payroll/runs/${r.id}/remittance?type=nhf`}>NHF</a>
+                          </>
                         )}
                       </span>
                     </td>

@@ -1,6 +1,6 @@
-import { Body, Controller, Get, Param, Post, Res, StreamableFile } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Query, Res, StreamableFile } from "@nestjs/common";
 import { MODULES, HR_PERMISSIONS } from "@sms/types";
-import type { PayrollRunDto } from "@sms/types";
+import type { MyPayslipDto, PayrollRunDto } from "@sms/types";
 import type { Response } from "express";
 import { z } from "zod";
 import { RequireModule } from "../auth/require-module.decorator";
@@ -13,7 +13,10 @@ import { PayrollService } from "./payroll.service";
 const runSchema = z.object({
   periodYear: z.number().int().min(2000).max(2100),
   periodMonth: z.number().int().min(1).max(12),
+  runType: z.enum(["MONTHLY", "THIRTEENTH", "BONUS"]).optional(),
+  bonusPercent: z.number().int().min(1).max(1000).optional(),
 });
+const remittanceSchema = z.object({ type: z.enum(["paye", "pension", "nhf"]) });
 
 @RequireModule(MODULES.HR)
 @Controller("hr/payroll")
@@ -26,7 +29,7 @@ export class PayrollController {
     @CurrentPrincipal() p: Principal,
     @Body(new ZodValidationPipe(runSchema)) body: z.infer<typeof runSchema>,
   ): Promise<PayrollRunDto> {
-    return this.payroll.createRun(p, body.periodYear, body.periodMonth);
+    return this.payroll.createRun(p, body.periodYear, body.periodMonth, body.runType ?? "MONTHLY", body.bonusPercent);
   }
 
   @Get("runs")
@@ -70,6 +73,40 @@ export class PayrollController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<StreamableFile> {
     const { buffer, filename } = await this.payroll.payslipPdf(p, id, userId);
+    res.set({ "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${filename}"` });
+    return new StreamableFile(buffer);
+  }
+
+  /** Statutory remittance schedule (CSV): ?type=paye|pension|nhf. */
+  @Get("runs/:id/remittance")
+  @RequirePermission(HR_PERMISSIONS.HR_PAYROLL_RUN)
+  async remittance(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Query(new ZodValidationPipe(remittanceSchema)) q: z.infer<typeof remittanceSchema>,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const { csv, filename } = await this.payroll.remittanceExport(p, id, q.type);
+    res.set({ "Content-Type": "text/csv", "Content-Disposition": `attachment; filename="${filename}"` });
+    return new StreamableFile(Buffer.from(csv, "utf8"));
+  }
+
+  // --- staff self-service: MY payslips (hr.self; FINALIZED runs only) --------
+  @Get("me/payslips")
+  @RequirePermission(HR_PERMISSIONS.HR_SELF)
+  myPayslips(@CurrentPrincipal() p: Principal): Promise<MyPayslipDto[]> {
+    return this.payroll.myPayslips(p);
+  }
+
+  @Get("me/payslips/:runId/pdf")
+  @RequirePermission(HR_PERMISSIONS.HR_SELF)
+  async myPayslipPdf(
+    @CurrentPrincipal() p: Principal,
+    @Param("runId") runId: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    // selfOnly: only the caller's own slip, only from a FINALIZED run.
+    const { buffer, filename } = await this.payroll.payslipPdf(p, runId, p.userId, { selfOnly: true });
     res.set({ "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${filename}"` });
     return new StreamableFile(buffer);
   }

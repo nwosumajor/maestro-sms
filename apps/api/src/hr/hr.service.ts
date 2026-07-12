@@ -1,7 +1,7 @@
 // =============================================================================
 // HrService — staff employment records (salary encrypted at rest)
 // =============================================================================
-import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { SelfProfileDto } from "@sms/types";
 import { decryptField, encryptField } from "../foundation/field-crypto";
 import {
@@ -21,6 +21,15 @@ export interface EmployeeInput {
   endDate?: string | null;
   salaryMinor?: number | null;
   status?: string;
+  /** Statutory identifiers (PAYE TIN / pension RSA PIN) — encrypted at rest. */
+  tin?: string | null;
+  rsaPin?: string | null;
+  gradeLevel?: string | null;
+  /** CREATE only: >0 starts the hire on PROBATION ending N months from start.
+   *  Confirmation later flips via the employment maker-checker, never an edit. */
+  probationMonths?: number;
+  /** Reporting line: line manager's user id (null clears). Cycle-checked. */
+  managerId?: string | null;
 }
 
 export interface SelfProfileInput {
@@ -79,6 +88,24 @@ export class HrService {
       const user = await tx.user.findFirst({ where: { id: userId }, select: { id: true } });
       if (!user) throw new NotFoundException("User not found");
       const existing = await tx.employee.findFirst({ where: { userId }, select: { id: true } });
+      // Reporting-line guard: manager must be a different, recorded employee and
+      // the chain above them must never loop back here (walk up, max 20 hops).
+      if (input.managerId) {
+        if (input.managerId === userId) throw new BadRequestException("An employee cannot be their own manager");
+        let cursor: string | null = input.managerId;
+        for (let hops = 0; cursor && hops < 20; hops++) {
+          const m: { managerId: string | null } | null = await tx.employee.findFirst({
+            where: { userId: cursor },
+            select: { managerId: true },
+          });
+          if (!m) {
+            if (hops === 0) throw new NotFoundException("The selected manager has no employment record");
+            break;
+          }
+          if (m.managerId === userId) throw new BadRequestException("That reporting line would create a cycle");
+          cursor = m.managerId;
+        }
+      }
       // Salary is set ONLY at create. Changing an existing employee's salary must
       // go through the maker-checker SalaryService (request → approve → history),
       // so upsert never silently moves pay. salaryMinor on an update is ignored.
@@ -93,11 +120,29 @@ export class HrService {
         startDate: new Date(input.startDate),
         endDate: input.endDate ? new Date(input.endDate) : null,
         status: input.status ?? "ACTIVE",
+        // Statutory identifiers: undefined = leave unchanged; ""/null = clear.
+        ...(input.tin !== undefined
+          ? { tinEnc: input.tin ? encryptField(input.tin.trim(), p.schoolId) : null }
+          : {}),
+        ...(input.rsaPin !== undefined
+          ? { rsaPinEnc: input.rsaPin ? encryptField(input.rsaPin.trim(), p.schoolId) : null }
+          : {}),
+        ...(input.gradeLevel !== undefined ? { gradeLevel: (input.gradeLevel ?? "").trim() || null } : {}),
+        ...(input.managerId !== undefined ? { managerId: input.managerId } : {}),
       };
+      const probation =
+        typeof input.probationMonths === "number" && input.probationMonths > 0
+          ? {
+              confirmationStatus: "PROBATION",
+              probationEndsAt: new Date(
+                new Date(input.startDate).setMonth(new Date(input.startDate).getMonth() + Math.min(24, Math.floor(input.probationMonths))),
+              ),
+            }
+          : {};
       const e = await tx.employee.upsert({
         where: { userId },
         update: common, // no salaryEnc — preserve it (changes go via approval)
-        create: { schoolId: p.schoolId, userId, ...common, salaryEnc: initialSalaryEnc },
+        create: { schoolId: p.schoolId, userId, ...common, ...probation, salaryEnc: initialSalaryEnc },
       });
       await this.audit.record(
         { actorId: p.userId, action: "hr.employee.upsert", entity: "employee", entityId: e.id, schoolId: p.schoolId, metadata: { userId, created: !existing } },
@@ -217,10 +262,44 @@ export class HrService {
     };
   }
 
-  /** Replace the encrypted salary with a decrypted numeric for the reader. */
-  private decorate<T extends { salaryEnc: string | null }>(e: T, schoolId: string) {
-    const { salaryEnc, ...rest } = e;
+  /** Flat org nodes (ACTIVE employees) — the web builds the tree. hr.read. */
+  async org(p: Principal): Promise<{ userId: string; name: string; jobTitle: string; department: string | null; gradeLevel: string | null; managerId: string | null }[]> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const employees = await tx.employee.findMany({
+        where: { status: "ACTIVE" },
+        select: { userId: true, jobTitle: true, department: true, gradeLevel: true, managerId: true },
+      });
+      const users = await tx.user.findMany({
+        where: { id: { in: employees.map((e) => e.userId) } },
+        select: { id: true, name: true },
+      });
+      const nameById = new Map(users.map((u) => [u.id, u.name]));
+      return employees
+        .map((e) => ({
+          userId: e.userId,
+          name: nameById.get(e.userId) ?? "Staff",
+          jobTitle: e.jobTitle,
+          department: e.department,
+          gradeLevel: e.gradeLevel,
+          managerId: e.managerId,
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    });
+  }
+
+  /** Replace the encrypted salary/statutory ids with decrypted values for the
+   *  (audited, hr.read-gated) reader. */
+  private decorate<T extends { salaryEnc: string | null; tinEnc?: string | null; rsaPinEnc?: string | null }>(
+    e: T,
+    schoolId: string,
+  ) {
+    const { salaryEnc, tinEnc, rsaPinEnc, ...rest } = e;
     const dec = salaryEnc ? decryptField(salaryEnc, schoolId) : null;
-    return { ...rest, salaryMinor: dec ? Number(dec) : null };
+    return {
+      ...rest,
+      salaryMinor: dec ? Number(dec) : null,
+      tin: tinEnc ? decryptField(tinEnc, schoolId) : null,
+      rsaPin: rsaPinEnc ? decryptField(rsaPinEnc, schoolId) : null,
+    };
   }
 }

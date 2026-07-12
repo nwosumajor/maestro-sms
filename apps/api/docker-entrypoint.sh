@@ -125,6 +125,12 @@ apply_rls packages/db/prisma/rls/54_lms_content_revision_rls.sql lms_content_rev
 apply_rls packages/db/prisma/rls/55_lms_live_rls.sql              lms_live_attendance_insert
 apply_rls packages/db/prisma/rls/56_lms_award_rls.sql            lms_award_delete
 apply_rls packages/db/prisma/rls/57_xapi_statement_rls.sql       xapi_statement_insert
+apply_rls packages/db/prisma/rls/58_hr_compensation_rls.sql      loan_repayment_insert
+apply_rls packages/db/prisma/rls/59_staff_attendance_rls.sql     attendance_kiosk_update
+apply_rls packages/db/prisma/rls/60_duty_roster_rls.sql          duty_assignment_delete
+apply_rls packages/db/prisma/rls/61_employment_lifecycle_rls.sql employment_change_request_update
+apply_rls packages/db/prisma/rls/62_staff_exit_rls.sql           staff_exit_update
+apply_rls packages/db/prisma/rls/63_biometric_rls.sql            biometric_enrollment_delete
 
 # Seed on first provision (compose: SEED_ON_START=true; cloud migrate task: always).
 if [ "${SEED_ON_START}" = "true" ] || [ "$MODE" = "migrate" ]; then

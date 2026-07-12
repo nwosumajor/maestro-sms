@@ -27,10 +27,16 @@ function makeService(over: {
       findMany: jest.fn().mockResolvedValue([]),
       create: jest.fn().mockResolvedValue({ id: "run1", periodYear: 2026, periodMonth: 1, status: "DRAFT", totalGrossMinor: 0, totalNetMinor: 0, createdAt: new Date(), finalizedAt: null }),
       update: runUpdate,
+      updateMany: jest.fn(() =>
+        Promise.resolve({ count: (over.run as { status?: string } | null | undefined)?.status === "DRAFT" ? 1 : 0 }),
+      ),
     },
     payslip: { create: payslipCreate, findMany: jest.fn().mockResolvedValue([]), count: jest.fn().mockResolvedValue(0) },
     employee: { findMany: jest.fn().mockResolvedValue(over.employees ?? []) },
     user: { findMany: jest.fn().mockResolvedValue([]) },
+    payComponent: { findMany: jest.fn().mockResolvedValue([]) },
+    staffLoan: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn().mockResolvedValue(null), update: jest.fn().mockResolvedValue({}) },
+    loanRepayment: { create: jest.fn().mockResolvedValue({}) },
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
@@ -73,8 +79,8 @@ describe("PayrollService", () => {
     await expect(own.service.finalizeRun(p("hr1"), "run1")).rejects.toThrow(/different person/i);
 
     const ok = makeService({ run: { id: "run1", status: "DRAFT", runById: "hr1", periodYear: 2026, periodMonth: 1, totalGrossMinor: 0, totalNetMinor: 0, createdAt: new Date(), finalizedAt: null } });
-    await ok.service.finalizeRun(p("hr2"), "run1");
-    expect(ok.runUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "FINALIZED", finalizedById: "hr2" }) }));
+    const finalized = await ok.service.finalizeRun(p("hr2"), "run1");
+    expect(finalized.id).toBe("run1"); // atomic DRAFT->FINALIZED flip succeeded (updateMany count=1)
   });
 
   it("finalizeRun refuses to re-finalize", async () => {
@@ -93,5 +99,121 @@ describe("computeMonthlyPayslip (PAYE + pension, pure)", () => {
   it("a high earner pays PAYE (> 0); a zero salary owes nothing", () => {
     expect(computeMonthlyPayslip(5_000_000_00).payeMinor).toBeGreaterThan(0);
     expect(computeMonthlyPayslip(0)).toMatchObject({ grossMinor: 0, payeMinor: 0, pensionMinor: 0, netMinor: 0 });
+  });
+});
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+import { computeBonusPayslip, computeFullPayslip, employerPensionMinor } from "@sms/types";
+
+describe("computeFullPayslip (allowances + deductions + loan recovery, pure)", () => {
+  it("gross = base + allowances; statutory computed on the full gross", () => {
+    const bare = computeFullPayslip({ baseMinor: 200_000_00 });
+    expect(bare.grossMinor).toBe(200_000_00);
+    expect(bare.netMinor).toBe(computeMonthlyPayslip(200_000_00).netMinor);
+
+    const withAllow = computeFullPayslip({
+      baseMinor: 150_000_00,
+      allowances: [
+        { name: "Housing", amountMinor: 30_000_00 },
+        { name: "Transport", amountMinor: 20_000_00 },
+      ],
+    });
+    expect(withAllow.grossMinor).toBe(200_000_00);
+    // Same gross → same statutory as the bare 200k case.
+    expect(withAllow.payeMinor).toBe(bare.payeMinor);
+    expect(withAllow.pensionMinor).toBe(bare.pensionMinor);
+  });
+
+  it("applies other deductions and loan installments after statutory", () => {
+    const r = computeFullPayslip({
+      baseMinor: 200_000_00,
+      otherDeductions: [{ name: "Co-op", amountMinor: 10_000_00 }],
+      loanInstallments: [{ loanId: "L1", installmentMinor: 15_000_00 }],
+    });
+    const statutory = computeMonthlyPayslip(200_000_00);
+    expect(r.deductionsMinor).toBe(statutory.deductionsMinor + 10_000_00 + 15_000_00);
+    expect(r.netMinor).toBe(r.grossMinor - r.deductionsMinor);
+    expect(r.loans).toEqual([{ loanId: "L1", installmentMinor: 15_000_00 }]);
+  });
+
+  it("CLAMPS loan recovery so net never goes below zero (partial recovery)", () => {
+    const r = computeFullPayslip({
+      baseMinor: 50_000_00,
+      otherDeductions: [{ name: "Co-op", amountMinor: 40_000_00 }],
+      loanInstallments: [{ loanId: "L1", installmentMinor: 100_000_00 }],
+    });
+    expect(r.netMinor).toBe(0); // loan took only what was available
+    expect(r.loans[0].installmentMinor).toBeLessThan(100_000_00);
+    expect(r.loans[0].installmentMinor).toBeGreaterThan(0);
+  });
+
+  it("drops zero/negative lines and handles multiple loans in order", () => {
+    const r = computeFullPayslip({
+      baseMinor: 300_000_00,
+      allowances: [{ name: "Empty", amountMinor: 0 }],
+      loanInstallments: [
+        { loanId: "A", installmentMinor: 5_000_00 },
+        { loanId: "B", installmentMinor: 5_000_00 },
+      ],
+    });
+    expect(r.allowances).toEqual([]);
+    expect(r.loans.map((l) => l.loanId)).toEqual(["A", "B"]);
+  });
+});
+
+describe("computeBonusPayslip (13th month / bonus, pure)", () => {
+  it("13th month = 100% of basic, PAYE applies, NO pension/components/loans", () => {
+    const r = computeBonusPayslip(20_000_000, 100);
+    expect(r.grossMinor).toBe(20_000_000);
+    expect(r.pensionMinor).toBe(0);
+    expect(r.allowances).toEqual([]);
+    expect(r.loans).toEqual([]);
+    expect(r.payeMinor).toBe(computeMonthlyPayslip(20_000_000).payeMinor);
+    expect(r.netMinor).toBe(r.grossMinor - r.payeMinor);
+  });
+  it("bonus percent scales the basic and clamps garbage", () => {
+    expect(computeBonusPayslip(20_000_000, 50).grossMinor).toBe(10_000_000);
+    expect(computeBonusPayslip(20_000_000, -5).grossMinor).toBe(0);
+    expect(computeBonusPayslip(20_000_000, 5000).grossMinor).toBe(200_000_000); // capped at 1000%
+  });
+});
+
+describe("employerPensionMinor (pure)", () => {
+  it("is 10% of gross, floored at 0", () => {
+    expect(employerPensionMinor(20_000_000)).toBe(2_000_000);
+    expect(employerPensionMinor(-5)).toBe(0);
+  });
+});
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+import { computeFinalSettlement } from "@sms/types";
+
+describe("computeFinalSettlement (exit, pure)", () => {
+  it("pro-rata + leave payout − loan recovery", () => {
+    // ₦300k basic, leaving 15 June (15/30 of the month), 6 leave days left, ₦50k loan.
+    const s = computeFinalSettlement({
+      baseMinor: 30_000_000,
+      lastWorkingDay: "2026-06-15",
+      leaveDaysRemaining: 6,
+      loanOutstandingMinor: 5_000_000,
+    });
+    expect(s.proRataMinor).toBe(15_000_000); // 15/30 × 300k
+    expect(s.leavePayoutMinor).toBe(6_000_000); // 6 × (300k/30)
+    expect(s.grossMinor).toBe(21_000_000);
+    expect(s.loanRecoveredMinor).toBe(5_000_000);
+    expect(s.loanUnrecoveredMinor).toBe(0);
+    expect(s.netMinor).toBe(16_000_000);
+  });
+  it("clamps loan recovery at the gross (net never negative; residue reported)", () => {
+    const s = computeFinalSettlement({
+      baseMinor: 10_000_000,
+      lastWorkingDay: "2026-02-28", // 28/28 of Feb
+      leaveDaysRemaining: 0,
+      loanOutstandingMinor: 99_000_000,
+    });
+    expect(s.grossMinor).toBe(10_000_000);
+    expect(s.loanRecoveredMinor).toBe(10_000_000);
+    expect(s.loanUnrecoveredMinor).toBe(89_000_000);
+    expect(s.netMinor).toBe(0);
   });
 });
