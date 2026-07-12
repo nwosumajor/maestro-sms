@@ -92,7 +92,7 @@ export class AdmissionsService {
     // School is RLS-exempt, so we can resolve the slug under a placeholder GUC.
     const school = await this.db.runAsTenant<{ id: string } | null>(
       { schoolId: ZERO, userId: ZERO },
-      (tx) => tx.school.findFirst({ where: { slug: input.schoolSlug, status: "ACTIVE" }, select: { id: true } }),
+      (tx) => tx.school.findFirst({ where: { slug: input.schoolSlug, status: "ACTIVE", isPlatform: false }, select: { id: true } }),
     );
     if (!school) throw new NotFoundException("School not found");
 

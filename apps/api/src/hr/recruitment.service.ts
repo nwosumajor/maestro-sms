@@ -165,7 +165,7 @@ export class RecruitmentService {
   ): Promise<{ school: string; jobs: { id: string; title: string; department: string | null; description: string | null; openings: number }[] }> {
     const school = await this.db.runAsTenant<{ id: string; name: string } | null>(
       { schoolId: ZERO, userId: ZERO },
-      (tx) => tx.school.findFirst({ where: { slug, status: "ACTIVE" }, select: { id: true, name: true } }),
+      (tx) => tx.school.findFirst({ where: { slug, status: "ACTIVE", isPlatform: false }, select: { id: true, name: true } }),
     );
     if (!school) throw new NotFoundException("School not found");
     const jobs = await this.db.runAsTenant({ schoolId: school.id, userId: ZERO }, (tx) =>
@@ -188,7 +188,7 @@ export class RecruitmentService {
   ): Promise<{ id: string; stage: string }> {
     const school = await this.db.runAsTenant<{ id: string } | null>(
       { schoolId: ZERO, userId: ZERO },
-      (tx) => tx.school.findFirst({ where: { slug, status: "ACTIVE" }, select: { id: true } }),
+      (tx) => tx.school.findFirst({ where: { slug, status: "ACTIVE", isPlatform: false }, select: { id: true } }),
     );
     if (!school) throw new NotFoundException("School not found");
     return this.db.runAsTenant({ schoolId: school.id, userId: ZERO }, async (tx) => {

@@ -319,6 +319,7 @@ function NavBar() {
           <a href="#security" className="transition-colors hover:text-foreground">Security</a>
           <a href="#plans" className="transition-colors hover:text-foreground">Plans</a>
           <Link href="/schools" className="transition-colors hover:text-foreground">For parents</Link>
+          <Link href="/careers" className="transition-colors hover:text-foreground">Careers</Link>
         </nav>
         <div className="flex items-center gap-2.5">
           <Link

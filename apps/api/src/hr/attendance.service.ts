@@ -380,7 +380,7 @@ export class StaffAttendanceService {
   ): Promise<{ accepted: number; alreadyMarked: number; unknown: number }> {
     const school = await this.db.runAsTenant<{ id: string } | null>(
       { schoolId: ZERO, userId: ZERO },
-      (tx) => tx.school.findFirst({ where: { slug, status: "ACTIVE" }, select: { id: true } }),
+      (tx) => tx.school.findFirst({ where: { slug, status: "ACTIVE", isPlatform: false }, select: { id: true } }),
     );
     if (!school) throw new NotFoundException("School not found");
     return this.db.runAsTenant({ schoolId: school.id, userId: ZERO }, async (tx) => {
