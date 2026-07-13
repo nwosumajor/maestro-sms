@@ -30,10 +30,14 @@ export default async function ClassesPage() {
   const canApprovePromotion = hasPermission(user.permissions, "class.promote.approve");
   const canManageAcademic = hasPermission(user.permissions, "academic.manage");
   const canReview = hasPermission(user.permissions, "lms.content.approve");
-  const [classes, students, users, subjects, promotions, sessions] = await Promise.all([
+  // Server-side kind filtering: staff for teacher/supervisor pickers, parents for
+  // guardian linking — students never pollute a staff picker (and the payload
+  // stays small in a large school).
+  const [classes, students, staff, parents, subjects, promotions, sessions] = await Promise.all([
     apiGet<ClassDto[]>("/classes/mine"),
     canWrite ? apiGet<{ id: string; name: string }[]>("/students") : Promise.resolve(null),
-    canWrite ? apiGet<{ id: string; name: string; roles: string[] }[]>("/users") : Promise.resolve(null),
+    canWrite ? apiGet<{ id: string; name: string; roles: string[] }[]>("/users?kind=staff") : Promise.resolve(null),
+    canWrite ? apiGet<{ id: string; name: string; roles: string[] }[]>("/users?kind=parent") : Promise.resolve(null),
     canManageSubjects ? apiGet<SubjectDto[]>("/subjects") : Promise.resolve(null),
     canPromote ? apiGet<Serialized<PromotionBatchDto>[]>("/promotions") : Promise.resolve(null),
     canManageAcademic ? apiGet<Serialized<AcademicSessionDto>[]>("/academic/sessions") : Promise.resolve(null),
@@ -58,12 +62,12 @@ export default async function ClassesPage() {
           )}
         </div>
 
-        {canWrite && classes && students && users && (
-          <ClassAdmin classes={classes} students={students} users={users} />
+        {canWrite && classes && students && staff && (
+          <ClassAdmin classes={classes} students={students} users={[...staff, ...(parents ?? [])]} />
         )}
 
-        {canManageSubjects && classes && users && subjects && (
-          <ClassSubjectsAdmin classes={classes} subjects={subjects} users={users} />
+        {canManageSubjects && classes && staff && subjects && (
+          <ClassSubjectsAdmin classes={classes} subjects={subjects} users={staff} />
         )}
 
         {canManageAcademic && sessions && <AcademicCalendar sessions={sessions} />}

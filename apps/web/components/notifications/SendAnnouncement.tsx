@@ -1,6 +1,6 @@
 "use client";
 
-import type { UserSummaryDto, Serialized } from "@sms/types";
+import { userCategory, type UserSummaryDto, type Serialized } from "@sms/types";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,20 @@ type User = Serialized<UserSummaryDto>;
 
 export function SendAnnouncement({ users }: { users: User[] }) {
   const router = useRouter();
-  const [recipientId, setRecipientId] = React.useState(users[0]?.id ?? "");
+  // Group the recipient list by category so staff, students and parents are
+  // never one undifferentiated directory.
+  const groups = React.useMemo(() => {
+    const g: Record<"Staff" | "Students" | "Parents", User[]> = { Staff: [], Students: [], Parents: [] };
+    for (const u of users) {
+      const c = userCategory(u.roles);
+      g[c === "staff" ? "Staff" : c === "student" ? "Students" : "Parents"].push(u);
+    }
+    for (const list of Object.values(g)) list.sort((a, b) => a.name.localeCompare(b.name));
+    return g;
+  }, [users]);
+  const [recipientId, setRecipientId] = React.useState(
+    (groups.Staff[0] ?? groups.Students[0] ?? groups.Parents[0])?.id ?? "",
+  );
   const [title, setTitle] = React.useState("");
   const [body, setBody] = React.useState("");
   const [busy, setBusy] = React.useState(false);
@@ -47,9 +60,15 @@ export function SendAnnouncement({ users }: { users: User[] }) {
               <Label htmlFor="an-to">To</Label>
               <select id="an-to" value={recipientId} onChange={(e) => setRecipientId(e.target.value)}
                 className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm sm:w-64">
-                {users.map((u) => (
-                  <option key={u.id} value={u.id}>{u.name}{u.roles.length ? ` (${u.roles.join(", ")})` : ""}</option>
-                ))}
+                {(Object.entries(groups) as ["Staff" | "Students" | "Parents", User[]][]).map(([label, list]) =>
+                  list.length === 0 ? null : (
+                    <optgroup key={label} label={`${label} (${list.length})`}>
+                      {list.map((u) => (
+                        <option key={u.id} value={u.id}>{u.name}{label === "Staff" && u.roles.length ? ` (${u.roles.join(", ")})` : ""}</option>
+                      ))}
+                    </optgroup>
+                  ),
+                )}
               </select>
             </div>
             <div className="flex-1 space-y-1.5">

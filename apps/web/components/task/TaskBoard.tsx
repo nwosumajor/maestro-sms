@@ -20,9 +20,9 @@ type Task = Serialized<TaskDto>;
 type Person = { id: string; name: string };
 
 export function TaskBoard({
-  tasks, people, canAssign,
+  tasks, staff, students, canAssign,
 }: {
-  tasks: Task[]; people: Person[]; canAssign: boolean;
+  tasks: Task[]; staff: Person[]; students: Person[]; canAssign: boolean;
 }) {
   const router = useRouter();
   const [msg, setMsg] = React.useState<string | null>(null);
@@ -32,6 +32,16 @@ export function TaskBoard({
   const [due, setDue] = React.useState("");
   const [picked, setPicked] = React.useState<Set<string>>(new Set());
   const [comment, setComment] = React.useState<Record<string, string>>({});
+  // Categorised assignee picker: choose Staff or Students first, then tick names
+  // from ONLY that category. Picks persist when switching categories, so one task
+  // can still target both groups.
+  const [category, setCategory] = React.useState<"STAFF" | "STUDENTS">("STAFF");
+  const shown = category === "STAFF" ? staff : students;
+  const names = React.useMemo(() => {
+    const m = new Map<string, string>();
+    for (const u of [...staff, ...students]) m.set(u.id, u.name);
+    return m;
+  }, [staff, students]);
 
   const run = async (fn: () => Promise<{ ok: boolean; status: number; error: string | null }>, ok: string) => {
     setBusy(true); setMsg(null);
@@ -57,13 +67,26 @@ export function TaskBoard({
             <div className="space-y-1.5"><Label>Description</Label><Textarea value={desc} onChange={(e) => setDesc(e.target.value)} rows={2} /></div>
             <div className="space-y-1.5">
               <Label>Assignees</Label>
-              <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-                {people.map((u) => (
+              <div className="flex gap-1.5">
+                {(["STAFF", "STUDENTS"] as const).map((c) => (
+                  <Button key={c} type="button" size="sm" variant={category === c ? "default" : "outline"} onClick={() => setCategory(c)}>
+                    {c === "STAFF" ? `Staff (${staff.length})` : `Students (${students.length})`}
+                  </Button>
+                ))}
+              </div>
+              <div className="flex max-h-48 flex-wrap gap-x-4 gap-y-1.5 overflow-y-auto rounded-md border border-border p-2">
+                {shown.length === 0 && <span className="text-sm text-muted-foreground">No {category === "STAFF" ? "staff" : "students"} found.</span>}
+                {shown.map((u) => (
                   <label key={u.id} className="flex items-center gap-1.5 text-sm">
                     <input type="checkbox" checked={picked.has(u.id)} onChange={() => togglePick(u.id)} />{u.name}
                   </label>
                 ))}
               </div>
+              {picked.size > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Assigning to: {[...picked].map((id) => names.get(id) ?? id).join(", ")}
+                </p>
+              )}
             </div>
             <Button disabled={busy || !title || picked.size === 0} onClick={() => run(() => postSms("tasks", { title, description: desc || undefined, dueAt: due ? new Date(due).toISOString() : undefined, assigneeIds: [...picked] }), "Task assigned.").then(() => { setTitle(""); setDesc(""); setDue(""); setPicked(new Set()); })}>Assign</Button>
           </CardContent>

@@ -1,5 +1,5 @@
-import { Body, Controller, Delete, Get, Header, Param, Post, Put } from "@nestjs/common";
-import { MODULES } from "@sms/types";
+import { Body, Controller, Delete, Get, Header, Param, Post, Put, Query } from "@nestjs/common";
+import { MODULES, USER_KINDS, type UserKind } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
 import type { AcademicSessionDto, ClassDto, ClassEligibilityDto, ClassInfoDto, ClassSubjectDto, IdNameDto, PromotionBatchDto, SubjectDto, UserWithEmailDto } from "@sms/types";
 import { z } from "zod";
@@ -195,11 +195,16 @@ export class LmsController {
     return this.lms.listStudents(p);
   }
 
-  /** Staff user directory (id + name + roles) for admin pickers. class.write-gated. */
+  /** Staff user directory (id + name + roles) for admin pickers. class.write-gated.
+   *  `?kind=staff|teacher|parent` narrows by role category so pickers never mix
+   *  students into a staff list (omit for the full directory, e.g. role admin). */
   @Get("users")
   @RequirePermission(LMS_PERMISSIONS.CLASS_WRITE)
-  users(@CurrentPrincipal() p: Principal): Promise<UserWithEmailDto[]> {
-    return this.lms.listUsers(p);
+  users(
+    @CurrentPrincipal() p: Principal,
+    @Query("kind", new ZodValidationPipe(z.enum(USER_KINDS).optional())) kind?: UserKind,
+  ): Promise<UserWithEmailDto[]> {
+    return this.lms.listUsers(p, kind);
   }
 
   @Get("classes/:classId")

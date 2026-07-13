@@ -41,7 +41,14 @@ import { cn } from "@/lib/utils";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import type { TenantTheme } from "@sms/tokens";
-import { MODULES, type ModuleKey, type Permission, type Serialized, type SubscriptionDto } from "@sms/types";
+import {
+  MODULES,
+  type MemberBrandingDto,
+  type ModuleKey,
+  type Permission,
+  type Serialized,
+  type SubscriptionDto,
+} from "@sms/types";
 
 // App shell: persistent left nav + top bar. The brand mark + active-nav color
 // come from --primary, so a tenant theme swap re-skins the whole shell with no
@@ -231,18 +238,20 @@ export async function AppShell({
       (!item.anyPerm || item.anyPerm.some((pp) => permissions.includes(pp))) &&
       (!item.module || !modules || modules.includes(item.module)),
   );
-  // Apply the school's saved theme (brand colour + font). Best-effort; falls back
-  // to the passed tenantTheme / platform defaults if the fetch returns nothing.
+  // Apply the school's saved branding (logo + brand colour + font). The member
+  // endpoint needs no manage permission, so theme + logo reach EVERY signed-in
+  // member of the school, not just admins. Best-effort; falls back to the passed
+  // tenantTheme / platform defaults if the fetch returns nothing.
   let theme = tenantTheme;
   let fontFamily: string | null = null;
+  let logoUrl: string | null = null;
   if (!isPlatformOwner) {
-    const branding = await apiGet<{ brandHue: number | null; brandSat: number | null; brandLight: number | null; fontFamily: string | null }>(
-      "/schools/branding",
-    ).catch(() => null);
+    const branding = await apiGet<Serialized<MemberBrandingDto>>("/schools/branding/me").catch(() => null);
     if (branding?.brandHue != null && branding.brandSat != null && branding.brandLight != null) {
       theme = { h: branding.brandHue, s: branding.brandSat, l: branding.brandLight };
     }
     fontFamily = branding?.fontFamily ?? null;
+    logoUrl = branding?.logoUrl ?? null;
   }
 
   // Renewal/past-due banner — the trial and dunning state exist in billing, but a
@@ -264,9 +273,18 @@ export async function AppShell({
       {/* Top bar */}
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-border/70 bg-card/80 px-4 backdrop-blur-md supports-[backdrop-filter]:bg-card/65">
         <div className="flex items-center gap-2.5">
-          <div className="grid h-8 w-8 place-items-center rounded-lg bg-primary text-primary-foreground text-sm font-bold shadow-xs ring-1 ring-inset ring-white/10">
-            {schoolName.slice(0, 1).toUpperCase()}
-          </div>
+          {logoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element -- tenant logo via presigned storage URL
+            <img
+              src={logoUrl}
+              alt={`${schoolName} logo`}
+              className="h-8 w-8 rounded-lg border border-border/60 bg-white object-contain"
+            />
+          ) : (
+            <div className="grid h-8 w-8 place-items-center rounded-lg bg-primary text-primary-foreground text-sm font-bold shadow-xs ring-1 ring-inset ring-white/10">
+              {schoolName.slice(0, 1).toUpperCase()}
+            </div>
+          )}
           <div className="leading-tight">
             <span className="block font-display text-[0.95rem] font-semibold tracking-tight">{schoolName}</span>
             <span className="eyebrow hidden text-[0.6rem] sm:block">School Console</span>

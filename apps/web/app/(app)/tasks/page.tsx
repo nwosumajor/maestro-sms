@@ -16,15 +16,16 @@ export default async function TasksPage() {
   if (!hasPermission(user.permissions, "task.participate")) redirect("/dashboard");
   const canAssign = hasPermission(user.permissions, "task.assign");
 
-  // Managers pick from staff + students; reuse the staff-gated /users and /students.
-  const [tasks, staff, students] = await Promise.all([
+  // Managers assign to staff OR students — two server-filtered lists, kept
+  // separate so the picker is categorised instead of one mixed directory.
+  const [tasks, staffList, studentList] = await Promise.all([
     apiGet<Serialized<TaskDto>[]>("/tasks"),
-    canAssign ? apiGet<{ id: string; name: string }[]>("/users") : Promise.resolve([]),
-    canAssign ? apiGet<{ id: string; name: string }[]>("/students") : Promise.resolve([]),
+    canAssign ? apiGet<Person[]>("/users?kind=staff") : Promise.resolve([]),
+    canAssign ? apiGet<Person[]>("/students") : Promise.resolve([]),
   ]);
-  const map = new Map<string, Person>();
-  for (const u of [...(staff ?? []), ...(students ?? [])]) map.set(u.id, { id: u.id, name: u.name });
-  const people = [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
+  const byName = (a: Person, b: Person) => a.name.localeCompare(b.name);
+  const staff = [...(staffList ?? [])].sort(byName);
+  const students = [...(studentList ?? [])].sort(byName);
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="tasks" permissions={user.permissions}>
@@ -37,7 +38,7 @@ export default async function TasksPage() {
               : "Your assigned tasks — update your status, attach work, and comment."}
           </p>
         </div>
-        <TaskBoard tasks={tasks ?? []} people={people} canAssign={canAssign} />
+        <TaskBoard tasks={tasks ?? []} staff={staff} students={students} canAssign={canAssign} />
       </div>
     </AppShell>
   );

@@ -12,13 +12,16 @@ export default async function CertificatesPage() {
   const user = session!.user;
   if (!hasPermission(user.permissions, "certificate.issue")) redirect("/dashboard");
 
-  const [staff, students] = await Promise.all([
-    apiGet<{ id: string; name: string }[]>("/users"),
-    apiGet<{ id: string; name: string }[]>("/students"),
+  // Categorised: the issuer picks Student or Staff first, then a name from ONLY
+  // that list — two server-filtered fetches, never one mixed directory.
+  type Person = { id: string; name: string };
+  const [staffList, studentList] = await Promise.all([
+    apiGet<Person[]>("/users?kind=staff"),
+    apiGet<Person[]>("/students"),
   ]);
-  const map = new Map<string, { id: string; name: string }>();
-  for (const u of [...(staff ?? []), ...(students ?? [])]) map.set(u.id, { id: u.id, name: u.name });
-  const people = [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
+  const byName = (a: Person, b: Person) => a.name.localeCompare(b.name);
+  const staff = [...(staffList ?? [])].sort(byName);
+  const students = [...(studentList ?? [])].sort(byName);
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="certificates" permissions={user.permissions}>
@@ -29,7 +32,7 @@ export default async function CertificatesPage() {
             Generate a printable ID card or an award/completion certificate. Each issuance is logged with a serial.
           </p>
         </div>
-        <CertificateIssuer people={people} />
+        <CertificateIssuer staff={staff} students={students} />
       </div>
     </AppShell>
   );

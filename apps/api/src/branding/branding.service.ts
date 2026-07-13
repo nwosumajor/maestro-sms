@@ -14,6 +14,7 @@ import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { prisma } from "@sms/db";
 import {
   isSubscriptionInGoodStanding,
+  type MemberBrandingDto,
   type PublicBrandingDto,
   type SchoolBrandingDto,
   type SubscriptionStatus,
@@ -140,6 +141,35 @@ export class BrandingService {
       brandSat: b?.brandSat ?? null,
       brandLight: b?.brandLight ?? null,
       fontFamily: b?.fontFamily ?? null,
+    };
+  }
+
+  /** Any authenticated member of the school: logo + theme for the signed-in shell.
+   *  Read-only, tenant-scoped by the caller's JWT (RLS backstops); no manage
+   *  permission needed. The custom logo stays a paid perk — hidden when the
+   *  subscription is out of good standing, exactly like the public login page. */
+  async getMemberBranding(p: Principal): Promise<MemberBrandingDto> {
+    const data = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const school = await tx.school.findFirst({ where: { id: p.schoolId }, select: { name: true } });
+      const b = await tx.schoolBranding.findFirst({ where: { schoolId: p.schoolId } });
+      const sub = await tx.schoolSubscription.findFirst({
+        where: { schoolId: p.schoolId },
+        select: { status: true, currentPeriodEnd: true },
+      });
+      // No subscription row ⇒ DEFAULT plan, treated as good standing.
+      const goodStanding = sub
+        ? isSubscriptionInGoodStanding(sub.status as SubscriptionStatus, sub.currentPeriodEnd)
+        : true;
+      return { schoolName: school?.name ?? "", branding: b, logoKey: goodStanding ? (b?.logoKey ?? null) : null };
+    });
+    const logoUrl = data.logoKey ? (await this.storage.presignDownload({ key: data.logoKey })).url : null;
+    return {
+      schoolName: data.schoolName,
+      logoUrl,
+      brandHue: data.branding?.brandHue ?? null,
+      brandSat: data.branding?.brandSat ?? null,
+      brandLight: data.branding?.brandLight ?? null,
+      fontFamily: data.branding?.fontFamily ?? null,
     };
   }
 

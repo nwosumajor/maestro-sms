@@ -12,9 +12,13 @@ import { readApiError } from "@/lib/api-error";
 
 type Person = { id: string; name: string };
 
-export function CertificateIssuer({ people }: { people: Person[] }) {
+export function CertificateIssuer({ staff, students }: { staff: Person[]; students: Person[] }) {
   const [type, setType] = React.useState("ID_CARD");
-  const [subjectId, setSubjectId] = React.useState(people[0]?.id ?? "");
+  // Categorised person picker: choose Student or Staff, then a name from ONLY
+  // that list (defaults to students — the overwhelmingly common case).
+  const [category, setCategory] = React.useState<"STUDENT" | "STAFF">("STUDENT");
+  const people = category === "STUDENT" ? students : staff;
+  const [subjectId, setSubjectId] = React.useState(students[0]?.id ?? "");
   const [title, setTitle] = React.useState("");
   const [body, setBody] = React.useState("");
   const [busy, setBusy] = React.useState(false);
@@ -53,6 +57,21 @@ export function CertificateIssuer({ people }: { people: Person[] }) {
               <option value="COMPLETION">Completion certificate</option>
               <option value="PARTICIPATION">Participation</option>
               <option value="MERIT">Merit award</option>
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>For</Label>
+            <select
+              value={category}
+              onChange={(e) => {
+                const c = e.target.value as "STUDENT" | "STAFF";
+                setCategory(c);
+                setSubjectId((c === "STUDENT" ? students : staff)[0]?.id ?? "");
+              }}
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+            >
+              <option value="STUDENT">Student</option>
+              <option value="STAFF">Staff</option>
             </select>
           </div>
           <div className="space-y-1.5">

@@ -29,7 +29,7 @@ export default async function HrPage() {
   const canLeaveManage = hasPermission(user.permissions, "hr.leave.manage");
   const [employees, users, changes, leaveTypes, leaveRequests, coverage, org] = await Promise.all([
     apiGet<Employee[]>("/hr/employees"),
-    canWrite ? apiGet<{ id: string; name: string; roles: string[] }[]>("/users") : Promise.resolve(null),
+    canWrite ? apiGet<{ id: string; name: string; roles: string[] }[]>("/users?kind=staff") : Promise.resolve(null),
     apiGet<Serialized<SalaryChangeDto>[]>("/hr/salary/changes"),
     canLeaveManage ? apiGet<Serialized<LeaveTypeDto>[]>("/hr/leave/types") : Promise.resolve(null),
     canLeaveManage ? apiGet<Serialized<LeaveRequestDto>[]>("/hr/leave/requests") : Promise.resolve(null),
@@ -60,12 +60,10 @@ export default async function HrPage() {
         {/* Staff ACCOUNTS with no employment record yet — the bridge between
             "create profile" (account + role) and HR (employment record). Without
             this, freshly created staff are invisible here until someone knows to
-            use the form below. Staff = holds any non-student/non-parent role. */}
+            use the form below. The list is already staff-only (?kind=staff). */}
         {canWrite && users && (() => {
           const recorded = new Set((employees ?? []).map((e) => e.userId));
-          const awaiting = users.filter(
-            (u) => !recorded.has(u.id) && u.roles.some((r) => r !== "student" && r !== "parent"),
-          );
+          const awaiting = users.filter((u) => !recorded.has(u.id));
           if (awaiting.length === 0) return null;
           return (
             <Alert variant="info">
@@ -82,7 +80,7 @@ export default async function HrPage() {
         })()}
 
         {canWrite && users && (
-          <EmployeeForm users={users.filter((u) => u.roles.some((r) => r !== "student" && r !== "parent"))} managers={org ?? []} />
+          <EmployeeForm users={users} managers={org ?? []} />
         )}
 
         {employees === null || employees.length === 0 ? (

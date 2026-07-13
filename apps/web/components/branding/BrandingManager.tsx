@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
+import { isValidLogoDimensions, LOGO_SHAPE_REQUIREMENT } from "@sms/types";
 import type { SchoolBrandingDto, Serialized } from "@sms/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,6 +39,16 @@ export function BrandingManager({ initial, slug }: { initial: Serialized<SchoolB
     if (!file) { setMsg("Choose an image first."); return; }
     if (file.type !== "image/png" && file.type !== "image/jpeg") { setMsg("Use a PNG or JPEG image."); return; }
     if (file.size > 1_000_000) { setMsg("Image must be under 1 MB."); return; }
+    // Friendly pre-check of the shape/size contract (the server re-validates
+    // from the actual bytes — this only saves a round-trip on a bad file).
+    const dims = await createImageBitmap(file)
+      .then((bmp) => { const d = { width: bmp.width, height: bmp.height }; bmp.close(); return d; })
+      .catch(() => null);
+    if (!dims) { setMsg("Could not read the image."); return; }
+    if (!isValidLogoDimensions(dims.width, dims.height)) {
+      setMsg(`Logo is ${dims.width}×${dims.height}px — it must be ${LOGO_SHAPE_REQUIREMENT}.`);
+      return;
+    }
     setBusy(true); setMsg(null);
     // Read the file as base64 and POST it — the API stores the bytes and embeds
     // the logo into generated certificates + report cards.
@@ -54,7 +65,7 @@ export function BrandingManager({ initial, slug }: { initial: Serialized<SchoolB
       body: JSON.stringify({ contentType: file.type, dataBase64 }),
     });
     setBusy(false);
-    setMsg(res.ok ? "Logo uploaded — it now appears on the login page, certificates and report cards." : `Failed (${res.status}). Use a PNG/JPEG under 1 MB.`);
+    setMsg(res.ok ? "Logo uploaded — it now appears across your school's portal, on the login page, certificates and report cards." : await readApiError(res));
     router.refresh();
   };
 
@@ -71,8 +82,9 @@ export function BrandingManager({ initial, slug }: { initial: Serialized<SchoolB
       <CardHeader>
         <CardTitle className="text-base">School logo</CardTitle>
         <CardDescription>
-          Appears on your branded login page (<span className="font-mono">/login?school={slug}</span>) and on generated
-          certificates, ID cards and report cards. PNG or JPEG, under 1 MB.
+          Appears in the portal header for everyone in your school, on your branded login page (
+          <span className="font-mono">/login?school={slug}</span>) and on generated certificates, ID cards and report
+          cards. PNG or JPEG, under 1 MB, {LOGO_SHAPE_REQUIREMENT}.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

@@ -12,6 +12,7 @@
 // =============================================================================
 
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { NON_STAFF_ROLE_NAMES, type UserKind } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -434,11 +435,23 @@ export class LmsService {
 
   /** A staff-facing tenant user directory (id + name + role names) for the admin
    *  pickers (assign teacher, link guardian, send notification). Tenant-scoped by
-   *  RLS; the endpoint is gated by class.write so only staff reach it. */
-  async listUsers(p: Principal) {
+   *  RLS; the endpoint is gated by class.write so only staff reach it.
+   *  `kind` narrows by role CATEGORY server-side so a staff/teacher picker never
+   *  mixes in students or parents: "staff" = any role except student/parent
+   *  (data-driven — a new seeded staff role is automatically included). */
+  async listUsers(p: Principal, kind?: UserKind) {
+    const roleFilter =
+      kind === "teacher"
+        ? { some: { role: { name: "teacher" } } }
+        : kind === "parent"
+          ? { some: { role: { name: "parent" } } }
+          : kind === "staff"
+            ? { some: { role: { name: { notIn: [...NON_STAFF_ROLE_NAMES] } } } }
+            : undefined;
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const [users, roles] = await Promise.all([
         tx.user.findMany({
+          where: roleFilter ? { roles: roleFilter } : undefined,
           select: { id: true, name: true, email: true, roles: { select: { roleId: true } } },
           orderBy: { name: "asc" },
         }),

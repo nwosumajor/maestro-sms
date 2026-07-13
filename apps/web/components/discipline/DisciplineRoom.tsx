@@ -23,14 +23,20 @@ const STATUS_VARIANT: Record<string, "secondary" | "outline" | "destructive"> = 
   OPEN: "secondary", IN_REVIEW: "secondary", RESOLVED: "outline", DISMISSED: "outline",
 };
 
-export function DisciplineRoom({ complaints, people, canManage }: { complaints: Complaint[]; people: Person[]; canManage: boolean }) {
+export function DisciplineRoom({
+  complaints, staff, teachers, students, canManage,
+}: {
+  complaints: Complaint[]; staff: Person[]; teachers: Person[]; students: Person[]; canManage: boolean;
+}) {
   const router = useRouter();
   const [msg, setMsg] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [subject, setSubject] = React.useState("");
   const [details, setDetails] = React.useState("");
-  const [against, setAgainst] = React.useState(people[0]?.id ?? "");
   const [againstType, setAgainstType] = React.useState("STUDENT");
+  // The "against" list follows the chosen type — students OR teachers, never mixed.
+  const againstList = againstType === "STUDENT" ? students : teachers;
+  const [against, setAgainst] = React.useState(students[0]?.id ?? "");
   const [note, setNote] = React.useState<Record<string, string>>({});
   const [assignee, setAssignee] = React.useState<Record<string, string>>({});
 
@@ -51,15 +57,23 @@ export function DisciplineRoom({ complaints, people, canManage }: { complaints: 
           <div className="flex flex-wrap items-end gap-2">
             <div className="space-y-1.5 flex-1 min-w-60"><Label>Subject</Label><Input value={subject} onChange={(e) => setSubject(e.target.value)} /></div>
             <div className="space-y-1.5">
-              <Label>Against</Label>
-              <select value={against} onChange={(e) => setAgainst(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
-                {people.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+              <Label>Type</Label>
+              <select
+                value={againstType}
+                onChange={(e) => {
+                  const t = e.target.value;
+                  setAgainstType(t);
+                  setAgainst((t === "STUDENT" ? students : teachers)[0]?.id ?? "");
+                }}
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="STUDENT">Student</option><option value="TEACHER">Teacher</option>
               </select>
             </div>
             <div className="space-y-1.5">
-              <Label>Type</Label>
-              <select value={againstType} onChange={(e) => setAgainstType(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
-                <option value="STUDENT">Student</option><option value="TEACHER">Teacher</option>
+              <Label>Against</Label>
+              <select value={against} onChange={(e) => setAgainst(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
+                {againstList.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
               </select>
             </div>
           </div>
@@ -88,9 +102,10 @@ export function DisciplineRoom({ complaints, people, canManage }: { complaints: 
                 <div className="flex flex-wrap items-end gap-2">
                   <div className="space-y-1.5">
                     <Label className="text-xs">Assign resolver</Label>
+                    {/* Resolvers are staff — students never appear here. */}
                     <select value={assignee[c.id] ?? ""} onChange={(e) => setAssignee((m) => ({ ...m, [c.id]: e.target.value }))} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
                       <option value="">Select…</option>
-                      {people.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                      {staff.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
                     </select>
                   </div>
                   <Button size="sm" variant="outline" disabled={busy || !assignee[c.id]} onClick={() => run(() => postSms(`discipline/complaints/${c.id}/assign`, { assigneeId: assignee[c.id] }), "Assigned.")}>Assign</Button>

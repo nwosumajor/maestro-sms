@@ -25,7 +25,9 @@ export function ClassSubjectsAdmin({
   const router = useRouter();
   const [msg, setMsg] = React.useState<string | null>(null);
   const teachers = users.filter((u) => u.roles.includes("teacher"));
-  const staff = users; // any staff can supervise
+  // The class supervisor is the FORM TEACHER — pick from teachers only, never
+  // the mixed school directory (students/parents must not appear here).
+  const staff = teachers;
   const sel = "h-9 rounded-md border border-input bg-background px-3 text-sm";
 
   const send = async (method: "POST" | "PUT" | "DELETE", path: string, body: unknown, ok: string) => {

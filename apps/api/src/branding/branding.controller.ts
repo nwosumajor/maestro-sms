@@ -1,6 +1,6 @@
 import { BadRequestException, Body, Controller, Delete, Get, Param, Post } from "@nestjs/common";
-import { ADMIN_PERMISSIONS } from "@sms/types";
-import type { PublicBrandingDto, SchoolBrandingDto } from "@sms/types";
+import { ADMIN_PERMISSIONS, isValidLogoDimensions, LOGO_SHAPE_REQUIREMENT } from "@sms/types";
+import type { MemberBrandingDto, PublicBrandingDto, SchoolBrandingDto } from "@sms/types";
 import { z } from "zod";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { Public } from "../auth/public.decorator";
@@ -8,6 +8,7 @@ import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { BrandingService } from "./branding.service";
+import { readImageDimensions } from "./image-dimensions";
 
 // Logo bytes uploaded directly (base64). PNG/JPEG only — these are what pdfkit can
 // embed into the generated certificates / report cards (and it excludes SVG XSS).
@@ -43,6 +44,15 @@ export class BrandingController {
     const buffer = Buffer.from(raw, "base64");
     if (buffer.length === 0) throw new BadRequestException("Empty or invalid image data");
     if (buffer.length > MAX_LOGO_BYTES) throw new BadRequestException("Logo exceeds the 1 MB limit");
+    // Shape/size contract: parse the actual bytes (never trust the declared
+    // contentType alone) and require a square-ish logo within the pixel bounds.
+    const dims = readImageDimensions(buffer, body.contentType);
+    if (!dims) throw new BadRequestException("Not a valid PNG/JPEG image");
+    if (!isValidLogoDimensions(dims.width, dims.height)) {
+      throw new BadRequestException(
+        `Logo is ${dims.width}×${dims.height}px — it must be ${LOGO_SHAPE_REQUIREMENT}`,
+      );
+    }
     return this.branding.uploadLogo(p, buffer, body.contentType);
   }
 
@@ -66,6 +76,14 @@ export class BrandingController {
   @RequirePermission(ADMIN_PERMISSIONS.SCHOOL_BRANDING_MANAGE)
   mine(@CurrentPrincipal() p: Principal): Promise<SchoolBrandingDto> {
     return this.branding.getMyBranding(p);
+  }
+
+  /** ANY authenticated member of the school (no @RequirePermission — the global
+   *  guard still authenticates): logo + theme for the signed-in AppShell. The
+   *  tenant comes solely from the verified JWT; read-only, RLS-backstopped. */
+  @Get("schools/branding/me")
+  memberBranding(@CurrentPrincipal() p: Principal): Promise<MemberBrandingDto> {
+    return this.branding.getMemberBranding(p);
   }
 
   /** PUBLIC, pre-auth: a school's login-page branding by slug. */
