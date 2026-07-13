@@ -12,6 +12,7 @@ import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import { Prisma } from "@sms/db";
 import type { ApplicantDto, JobRequisitionDto } from "@sms/types";
+import { STORAGE_PROVIDER, type StorageProvider } from "../documents/storage.provider";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -29,6 +30,7 @@ export class RecruitmentService {
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
+    @Inject(STORAGE_PROVIDER) private readonly storage: StorageProvider,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -185,12 +187,41 @@ export class RecruitmentService {
   async publicApply(
     slug: string,
     input: { requisitionId: string; name: string; email: string; phone?: string; note?: string },
+    cv?: { buffer: Buffer; originalname: string } | null,
   ): Promise<{ id: string; stage: string }> {
     const school = await this.db.runAsTenant<{ id: string } | null>(
       { schoolId: ZERO, userId: ZERO },
       (tx) => tx.school.findFirst({ where: { slug, status: "ACTIVE", isPlatform: false }, select: { id: true } }),
     );
     if (!school) throw new NotFoundException("School not found");
+    // CV upload happens BEFORE the tx (storage isn't transactional); on any
+    // application failure the object is deleted best-effort. PDF-only is
+    // enforced by MAGIC BYTES, not the client's content-type claim.
+    let cvKey: string | null = null;
+    let cvName: string | null = null;
+    if (cv) {
+      if (cv.buffer.subarray(0, 5).toString() !== "%PDF-") {
+        throw new BadRequestException("The CV must be a PDF file");
+      }
+      cvName = (cv.originalname || "cv.pdf").replace(/[^A-Za-z0-9._ -]/g, "_").slice(0, 120);
+      cvKey = `careers/${school.id}/${crypto.randomUUID()}.pdf`;
+      await this.storage.upload({ key: cvKey, body: cv.buffer, contentType: "application/pdf" });
+    }
+    try {
+      return await this.applyTx(school.id, input, cvKey, cvName);
+    } catch (e) {
+      if (cvKey) await this.storage.delete(cvKey).catch(() => undefined);
+      throw e;
+    }
+  }
+
+  private async applyTx(
+    schoolId: string,
+    input: { requisitionId: string; name: string; email: string; phone?: string; note?: string },
+    cvKey: string | null,
+    cvName: string | null,
+  ): Promise<{ id: string; stage: string }> {
+    const school = { id: schoolId };
     return this.db.runAsTenant({ schoolId: school.id, userId: ZERO }, async (tx) => {
       // Under this school's GUC a foreign requisitionId simply isn't found (404).
       const req = await tx.jobRequisition.findFirst({ where: { id: input.requisitionId }, select: { id: true, status: true } });
@@ -208,6 +239,8 @@ export class RecruitmentService {
           notes: (input.note ?? "").trim() || null,
           stage: "APPLIED",
           createdById: ZERO, // system actor: public intake
+          cvKey,
+          cvName,
         },
         select: { id: true, stage: true },
       });
@@ -216,6 +249,22 @@ export class RecruitmentService {
       // itself (createdById = ZERO) IS the record of the submission.
       return row;
     });
+  }
+
+  /** Download an applicant's CV (hr.recruit.manage; audited — it's PII). */
+  async downloadCv(p: Principal, applicantId: string): Promise<{ buffer: Buffer; filename: string }> {
+    const meta = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const a = await tx.applicant.findFirst({ where: { id: applicantId }, select: { id: true, cvKey: true, cvName: true } });
+      if (!a || !a.cvKey) throw new NotFoundException("No CV on this application");
+      await this.audit.record(
+        { actorId: p.userId, action: "hr.recruit.cv.download", entity: "applicant", entityId: a.id, schoolId: p.schoolId },
+        tx,
+      );
+      return { cvKey: a.cvKey, cvName: a.cvName ?? "cv.pdf" };
+    });
+    const buffer = await this.storage.download(meta.cvKey);
+    if (!buffer) throw new NotFoundException("CV file is no longer available");
+    return { buffer, filename: meta.cvName };
   }
 
   // --- decorators ------------------------------------------------------------
@@ -227,8 +276,8 @@ export class RecruitmentService {
   }
 
   private applicantDto(
-    a: { id: string; requisitionId: string; name: string; email: string; phone: string | null; stage: string; notes: string | null; convertedUserId: string | null; createdAt: Date },
+    a: { id: string; requisitionId: string; name: string; email: string; phone: string | null; stage: string; notes: string | null; convertedUserId: string | null; cvName?: string | null; createdAt: Date },
   ): ApplicantDto {
-    return { id: a.id, requisitionId: a.requisitionId, name: a.name, email: a.email, phone: a.phone, stage: a.stage, notes: a.notes, convertedUserId: a.convertedUserId, createdAt: a.createdAt };
+    return { id: a.id, requisitionId: a.requisitionId, name: a.name, email: a.email, phone: a.phone, stage: a.stage, notes: a.notes, convertedUserId: a.convertedUserId, cvName: a.cvName ?? null, createdAt: a.createdAt };
   }
 }

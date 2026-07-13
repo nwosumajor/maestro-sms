@@ -1,4 +1,19 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  Res,
+  StreamableFile,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
+} from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
+import type { Response } from "express";
 import { MODULES, HR_PERMISSIONS } from "@sms/types";
 import type { ApplicantDto, JobRequisitionDto } from "@sms/types";
 import { z } from "zod";
@@ -27,6 +42,16 @@ const applicantSchema = z.object({
 });
 const stageSchema = z.object({ stage: z.enum(["APPLIED", "SCREENING", "INTERVIEW", "OFFER", "HIRED", "REJECTED"]) });
 const convertSchema = z.object({ jobTitle: z.string().max(120).optional(), password: z.string().min(8).max(200).optional() });
+const MAX_CV_BYTES = 5 * 1024 * 1024; // 5 MB
+
+/** Multer file (typed inline — no @types/multer dependency). */
+interface UploadedCv {
+  buffer: Buffer;
+  originalname: string;
+  mimetype: string;
+  size: number;
+}
+
 const publicApplySchema = z.object({
   requisitionId: z.string().uuid(),
   name: z.string().min(1).max(160),
@@ -39,6 +64,19 @@ const publicApplySchema = z.object({
 @Controller("hr/recruitment")
 export class RecruitmentController {
   constructor(private readonly recruit: RecruitmentService) {}
+
+  /** Download an applicant's CV (PII — audited server-side). */
+  @Get("applicants/:id/cv")
+  @RequirePermission(HR_PERMISSIONS.HR_RECRUIT_MANAGE)
+  async cv(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const { buffer, filename } = await this.recruit.downloadCv(p, id);
+    res.set({ "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${filename}"` });
+    return new StreamableFile(buffer);
+  }
 
   @Post("requisitions")
   @RequirePermission(HR_PERMISSIONS.HR_RECRUIT_MANAGE)
@@ -120,10 +158,21 @@ export class PublicCareersController {
   @Public()
   @UseGuards(new RateLimitGuard(10, 60_000))
   @Post(":slug/apply")
+  // Optional CV: multipart field "cv", PDF only, hard 5 MB cap enforced by
+  // multer BEFORE the body reaches us (an oversized upload 413s early). JSON
+  // bodies (no file) pass straight through the interceptor untouched.
+  @UseInterceptors(
+    FileInterceptor("cv", {
+      limits: { fileSize: MAX_CV_BYTES, files: 1 },
+      fileFilter: (_req, file, cb) =>
+        file.mimetype === "application/pdf" ? cb(null, true) : cb(new BadRequestException("The CV must be a PDF file"), false),
+    }),
+  )
   apply(
     @Param("slug") slug: string,
     @Body(new ZodValidationPipe(publicApplySchema)) b: z.infer<typeof publicApplySchema>,
+    @UploadedFile() cv?: UploadedCv,
   ) {
-    return this.recruit.publicApply(slug, b);
+    return this.recruit.publicApply(slug, b, cv ?? null);
   }
 }

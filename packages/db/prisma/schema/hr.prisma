@@ -457,6 +457,10 @@ model Applicant {
   notes           String?
   /// Set when converted to a staff account.
   convertedUserId String?  @db.Uuid
+  /// Uploaded CV (PDF): object-storage key + original filename. Bytes live in
+  /// S3/R2 (or the local stub), never in Postgres.
+  cvKey           String?
+  cvName          String?
   createdById     String   @db.Uuid
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

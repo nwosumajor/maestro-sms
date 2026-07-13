@@ -78,7 +78,14 @@ export function RecruitmentManager({ requisitions, applicants }: { requisitions:
                 <tbody>
                   {applicantsByReq(r.id).map((a) => (
                     <tr key={a.id} className="border-b border-border last:border-0">
-                      <td className="py-2">{a.name} <span className="text-muted-foreground">{a.email}</span></td>
+                      <td className="py-2">
+                        {a.name} <span className="text-muted-foreground">{a.email}</span>
+                        {a.cvName && (
+                          <a className="ml-2 text-primary underline" href={`/api/sms/hr/recruitment/applicants/${a.id}/cv`} target="_blank" rel="noopener noreferrer">
+                            CV
+                          </a>
+                        )}
+                      </td>
                       <td className="py-2">
                         <select value={a.stage} disabled={!!a.convertedUserId} onChange={(e) => post(`hr/recruitment/applicants/${a.id}/stage`, { stage: e.target.value }, a.id)} className="h-8 rounded-md border border-input bg-background px-2 text-sm">
                           {STAGES.map((s) => <option key={s} value={s}>{s.toLowerCase()}</option>)}

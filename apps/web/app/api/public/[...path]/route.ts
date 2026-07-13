@@ -14,10 +14,12 @@ const API_BASE = process.env.API_BASE_URL ?? "http://localhost:3001";
 async function proxy(req: NextRequest, ctx: { params: { path: string[] } }) {
   const target = `${API_BASE}/public/${ctx.params.path.join("/")}${req.nextUrl.search}`;
   const headers: Record<string, string> = {};
-  let body: string | undefined;
+  let body: BodyInit | undefined;
   if (req.method !== "GET" && req.method !== "HEAD") {
-    headers["Content-Type"] = "application/json";
-    body = await req.text();
+    // Pass the ORIGINAL content type through (multipart uploads carry their
+    // boundary in it) and forward raw bytes, not re-encoded text.
+    headers["Content-Type"] = req.headers.get("content-type") ?? "application/json";
+    body = Buffer.from(await req.arrayBuffer());
   }
   const res = await fetch(target, { method: req.method, headers, body });
   return new NextResponse(await res.text(), {

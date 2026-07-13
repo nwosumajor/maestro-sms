@@ -23,26 +23,29 @@ export function CareersBoard({ slug, jobs }: { slug: string; jobs: Job[] }) {
   const [email, setEmail] = React.useState("");
   const [phone, setPhone] = React.useState("");
   const [note, setNote] = React.useState("");
+  const [cv, setCv] = React.useState<File | null>(null);
   const [msg, setMsg] = React.useState<string | null>(null);
   const [err, setErr] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
 
   async function submit() {
     if (!applyTo || !name.trim() || !email.trim()) return;
+    if (cv && cv.size > 5 * 1024 * 1024) {
+      setErr("The CV must be 5 MB or smaller.");
+      return;
+    }
     setBusy(true);
     setErr(null);
     setMsg(null);
-    const res = await fetch(`/api/public/careers/${slug}/apply`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        requisitionId: applyTo.id,
-        name: name.trim(),
-        email: email.trim(),
-        phone: phone.trim() || undefined,
-        note: note.trim() || undefined,
-      }),
-    });
+    // Multipart so the optional CV rides along; the API enforces PDF + 5 MB.
+    const form = new FormData();
+    form.set("requisitionId", applyTo.id);
+    form.set("name", name.trim());
+    form.set("email", email.trim());
+    if (phone.trim()) form.set("phone", phone.trim());
+    if (note.trim()) form.set("note", note.trim());
+    if (cv) form.set("cv", cv, cv.name);
+    const res = await fetch(`/api/public/careers/${slug}/apply`, { method: "POST", body: form });
     setBusy(false);
     if (res.ok) {
       setMsg(`Application received for “${applyTo.title}”. The school's HR team will be in touch.`);
@@ -51,6 +54,7 @@ export function CareersBoard({ slug, jobs }: { slug: string; jobs: Job[] }) {
       setEmail("");
       setPhone("");
       setNote("");
+      setCv(null);
     } else {
       const j = (await res.json().catch(() => null)) as { message?: string } | null;
       setErr(j?.message ?? `Something went wrong (${res.status}).`);
@@ -95,6 +99,19 @@ export function CareersBoard({ slug, jobs }: { slug: string; jobs: Job[] }) {
                 <div className="space-y-1">
                   <Label className="text-xs">Cover note (optional)</Label>
                   <Textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">CV (PDF, max 5 MB — optional)</Label>
+                  <Input
+                    type="file"
+                    accept="application/pdf"
+                    onChange={(e) => setCv(e.target.files?.[0] ?? null)}
+                  />
+                  {cv && (
+                    <p className="text-xs text-muted-foreground">
+                      {cv.name} · {(cv.size / 1024 / 1024).toFixed(1)} MB
+                    </p>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
                   <Button size="sm" onClick={submit} disabled={busy || !name.trim() || !email.trim()}>

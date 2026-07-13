@@ -28,7 +28,8 @@ function make(over: { applicant?: Record<string, unknown> | null; requisition?: 
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
-  return { service: new RecruitmentService(db as never, audit as never), userCreate, employeeCreate, applicantUpdate };
+  const storage = { upload: jest.fn(), download: jest.fn(), delete: jest.fn(), presignUpload: jest.fn(), presignDownload: jest.fn() };
+  return { service: new RecruitmentService(db as never, audit as never, storage as never), userCreate, employeeCreate, applicantUpdate };
 }
 
 const p = (userId = "hr1"): Principal => ({ schoolId: "A", userId, roles: [], permissions: [] });

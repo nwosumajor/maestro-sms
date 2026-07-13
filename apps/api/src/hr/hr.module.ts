@@ -22,6 +22,8 @@ import { ExitService } from "./exit.service";
 import { LetterController } from "./letter.controller";
 import { LetterService } from "./letter.service";
 import { BrandingModule } from "../branding/branding.module";
+import { STORAGE_PROVIDER, StubStorageProvider } from "../documents/storage.provider";
+import { S3StorageProvider } from "../documents/s3-storage.provider";
 import { PayrollService } from "./payroll.service";
 import { StaffLifecycleController } from "./staff-lifecycle.controller";
 import { StaffLifecycleService } from "./staff-lifecycle.service";
@@ -76,6 +78,10 @@ import { StaffReminderProcessor } from "./staff-reminder.processor";
     StaffReminderScheduler,
     StaffReminderProcessor,
     { provide: HR_REMINDER_DATABASE, useExisting: PrivilegedDatabaseService },
+    {
+      provide: STORAGE_PROVIDER,
+      useClass: process.env.STORAGE_PROVIDER === "s3" ? S3StorageProvider : StubStorageProvider,
+    },
   ],
   exports: [HrService, LeaveService, SalaryService, PayrollService, StaffLifecycleService, HrReviewsService],
 })

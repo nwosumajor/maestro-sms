@@ -200,6 +200,8 @@ export interface ApplicantDto {
   stage: string;
   notes: string | null;
   convertedUserId: string | null;
+  /** Original filename of the uploaded CV (PDF), or null. */
+  cvName: string | null;
   createdAt: Date;
 }
 
