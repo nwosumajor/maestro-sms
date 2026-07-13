@@ -35,6 +35,9 @@ import {
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
+import { NotificationService } from "../notifications/notification.service";
+import { EmailService } from "../notifications/email.service";
+import { mintInviteToken } from "../auth/invite";
 
 // Roles a super_admin may seed into a school via provisioning (the admin tier).
 const ADMIN_ROLES = new Set(["school_admin", "principal", "head_admin", "hr_manager"]);
@@ -54,6 +57,8 @@ export class OperatorProvisioningService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly privileged: PrivilegedDatabaseService,
+    private readonly notifications: NotificationService,
+    private readonly email: EmailService,
   ) {}
 
   private client(): PrismaClient {
@@ -81,6 +86,9 @@ export class OperatorProvisioningService {
       overrides?: { enabled?: string[]; disabled?: string[] };
       admin?: AdminInput;
       admins?: AdminInput[];
+      /** When provisioning FROM a public onboarding request: link it, so the
+       *  request auto-flips to APPROVED with this provision. */
+      onboardingRequestId?: string;
     },
   ) {
     const db = this.client();
@@ -143,7 +151,9 @@ export class OperatorProvisioningService {
       const created: Array<{ id: string; email: string; role: string; tempPassword: string }> = [];
       for (const a of prepared) {
         const u = await tx.user.create({
-          data: { schoolId: school.id, email: a.email, name: a.name, passwordHash: a.passwordHash },
+          // passwordChangedAt: null = the forced-first-reset state — it makes the
+          // temp password single-session AND arms the emailed set-password invite.
+          data: { schoolId: school.id, email: a.email, name: a.name, passwordHash: a.passwordHash, passwordChangedAt: null },
         });
         await tx.userRole.create({ data: { schoolId: school.id, userId: u.id, roleId: a.roleId } });
         created.push({ id: u.id, email: a.email, role: a.role, tempPassword: a.tempPassword });
@@ -155,11 +165,97 @@ export class OperatorProvisioningService {
       slug,
       plan,
       admins: result.created.map((a) => ({ email: a.email, role: a.role })),
+      onboardingRequestId: input.onboardingRequestId ?? null,
     });
+
+    // Provisioned from a public onboarding request → the request is now APPROVED
+    // (audited via the same review path) and the REQUESTER gets a direct
+    // "your school is live" email (they may differ from the created admins).
+    // Best-effort: the school exists either way.
+    if (input.onboardingRequestId) {
+      try {
+        await this.setOnboardingRequestStatus(
+          p,
+          input.onboardingRequestId,
+          "APPROVED",
+          `Provisioned as ${result.school.slug}`,
+        );
+        const req = await db.onboardingRequest.findFirst({
+          where: { id: input.onboardingRequestId },
+          select: { contactName: true, contactEmail: true },
+        });
+        if (req) {
+          await this.email.send(
+            req.contactEmail,
+            `${result.school.name} is now live on SMS`,
+            `Hello ${req.contactName},\n\n` +
+              `Great news — ${result.school.name} has been approved and set up on the ${plan} plan. ` +
+              `Your school's sign-in page is /login?school=${result.school.slug}. The founding admin ` +
+              `accounts have been created; temporary passwords are shared separately by our team, never ` +
+              `by email. Your 30-day free trial starts today.\n\n— The SMS Platform team`,
+          );
+        }
+      } catch {
+        // Unknown/already-handled request id — never undo a committed provision.
+      }
+    }
+
+    // Welcome each founding admin: an in-app notification (fans to email async)
+    // PLUS a personal one-time SET-PASSWORD invite link by direct email — the
+    // client activates their own account without any password changing hands.
+    // (The one-time temp password in the console stays as the fallback.)
+    // Best-effort, after the commit.
+    try {
+      for (const a of result.created) {
+        await this.sendInviteEmail(a.id, a.email, result.school.id, result.school.name, result.school.slug);
+        await this.notifications.enqueue(
+          { schoolId: result.school.id, userId: p.userId },
+          {
+            recipientId: a.id,
+            type: "ANNOUNCEMENT",
+            title: `Welcome to ${result.school.name}`,
+            body:
+              `Your school is set up on the ${plan} plan. Use the set-password link emailed to you ` +
+              `(valid 7 days) to activate your account, then sign in at /login?school=${result.school.slug}. ` +
+              `The in-app Help page has the getting-started guide. Passwords are never sent by email.`,
+            data: { schoolSlug: result.school.slug, plan },
+            channels: ["EMAIL"],
+          },
+        );
+      }
+    } catch {
+      // Notification delivery must never fail provisioning.
+    }
+
     return {
       school: { id: result.school.id, name: result.school.name, slug: result.school.slug, plan },
       admins: result.created,
     };
+  }
+
+  /** Personal one-time set-password invite (7-day signed link) by direct email.
+   *  Best-effort; the console's one-time temp password remains the fallback. */
+  private async sendInviteEmail(
+    userId: string,
+    email: string,
+    schoolId: string,
+    schoolName: string,
+    slug: string,
+  ): Promise<void> {
+    try {
+      const base = process.env.PUBLIC_WEB_URL ?? "http://localhost:3000";
+      const link = `${base}/welcome?token=${encodeURIComponent(mintInviteToken(userId, schoolId))}`;
+      await this.email.send(
+        email,
+        `Activate your ${schoolName} account`,
+        `Hello,\n\nAn account has been created for you on the SMS platform for ${schoolName}. ` +
+          `Set your password using this one-time link (valid for 7 days):\n\n${link}\n\n` +
+          `After that, sign in any time at ${base}/login?school=${slug}. If the link has expired, ` +
+          `ask your platform contact for the one-time temporary password instead.\n\n— The SMS Platform team`,
+      );
+    } catch {
+      // Invite email is best-effort — the temp-password fallback always exists.
+    }
   }
 
   /** Add another admin user to an EXISTING school. Returns one-time creds. */
@@ -180,7 +276,8 @@ export class OperatorProvisioningService {
     const passwordHash = await bcrypt.hash(tempPassword, 10);
     const admin = await db.$transaction(async (tx) => {
       const u = await tx.user.create({
-        data: { schoolId, email: input.email, name: input.name, passwordHash },
+        // Same forced-first-reset posture as provisionSchool (arms the invite).
+        data: { schoolId, email: input.email, name: input.name, passwordHash, passwordChangedAt: null },
       });
       await tx.userRole.create({ data: { schoolId, userId: u.id, roleId: roleRow.id } });
       return u;
@@ -191,6 +288,7 @@ export class OperatorProvisioningService {
       email: input.email,
       role,
     });
+    await this.sendInviteEmail(admin.id, input.email, schoolId, school.name, school.slug);
     return { id: admin.id, email: input.email, role, tempPassword };
   }
 
@@ -209,13 +307,29 @@ export class OperatorProvisioningService {
     note?: string,
   ) {
     const db = this.client();
-    const existing = await db.onboardingRequest.findFirst({ where: { id }, select: { id: true } });
+    const existing = await db.onboardingRequest.findFirst({
+      where: { id },
+      select: { id: true, status: true, schoolName: true, contactName: true, contactEmail: true },
+    });
     if (!existing) throw new NotFoundException("Onboarding request not found");
     const updated = await db.onboardingRequest.update({
       where: { id },
       data: { status, reviewedById: p.userId, reviewNote: note ?? null },
     });
     await this.auditInOperatorTenant(p, "operator.onboarding.review", "onboarding_request", id, { status });
+    // A REJECTED requester gets a courteous direct email (best-effort; only on
+    // the first transition into REJECTED so re-saves don't re-send).
+    if (status === "REJECTED" && existing.status !== "REJECTED") {
+      await this.email.send(
+        existing.contactEmail,
+        `Update on your onboarding request for ${existing.schoolName}`,
+        `Hello ${existing.contactName},\n\n` +
+          `Thank you for your interest in the SMS platform. After review, we are unable to proceed ` +
+          `with onboarding ${existing.schoolName} at this time.` +
+          `${note ? `\n\nNote from our team: ${note}` : ""}\n\n` +
+          `You are welcome to reach out or reapply in the future.\n\n— The SMS Platform team`,
+      );
+    }
     return updated;
   }
 

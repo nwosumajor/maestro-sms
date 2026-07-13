@@ -23,7 +23,7 @@ export function LoginForm() {
     setBusy(false);
     if (res?.error) {
       setError(
-        "Invalid email, password, or 2FA code. After 3 failed attempts the account is locked — a platform administrator must reactivate it.",
+        "Invalid email, password, or 2FA code. After 3 failed attempts the account is locked — a platform administrator must reactivate it. If your school's access has been suspended, contact the platform operator.",
       );
       return;
     }
@@ -71,6 +71,11 @@ export function LoginForm() {
       <Button type="submit" className="w-full" disabled={busy}>
         {busy ? "Signing in…" : "Sign in"}
       </Button>
+      <p className="text-center text-sm">
+        <a href="/reset-password" className="text-primary underline-offset-2 hover:underline">
+          Forgot your password?
+        </a>
+      </p>
     </form>
   );
 }

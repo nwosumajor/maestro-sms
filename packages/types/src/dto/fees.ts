@@ -70,3 +70,14 @@ export interface FeeReportDto {
   };
   pendingApprovals?: { count: number; amountMinor: number };
 }
+
+/** The school's fee SETTLEMENT posture (Paystack split). Never carries the
+ *  full account number — display fields only. */
+export interface SettlementAccountDto {
+  /** True once a subaccount exists — fee charges then split to the school's bank. */
+  configured: boolean;
+  bankCode: string | null;
+  bankName: string | null;
+  accountLast4: string | null;
+  subaccountCode: string | null;
+}

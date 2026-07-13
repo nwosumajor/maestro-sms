@@ -12,10 +12,13 @@ import { BadRequestException, Inject, Injectable, Logger, NotFoundException, Ser
 import jwt from "jsonwebtoken";
 import { Prisma } from "@sms/db";
 import {
+  SUBSCRIPTION_GRACE_DAYS,
+  SUBSCRIPTION_STATUS,
   isModuleKey,
   isPlan,
   isSubscriptionStatus,
   type ModuleOverrides,
+  type OperatorBillingAlertDto,
   type Plan,
   type SubscriptionDto,
   type SubscriptionStatus,
@@ -199,6 +202,72 @@ export class OperatorService {
     return this.db.runAsTenant(this.ctx(p), (tx) =>
       tx.school.findMany({ where: { isPlatform: false }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
     );
+  }
+
+  /** Enable/disable a SCHOOL (the hard deactivation lever). DISABLED blocks
+   *  every member login (checked in AuthService after password verification) and
+   *  hides the school from the public directory; nothing is deleted, so
+   *  re-enabling restores everything instantly. The school registry is global —
+   *  the app role is SELECT-only on it, so the write uses the PRIVILEGED client
+   *  (503 when unconfigured, like provisioning). Audited. */
+  async setSchoolStatus(p: Principal, schoolId: string, status: "ACTIVE" | "DISABLED") {
+    const client = this.privileged.client;
+    if (!client) throw new ServiceUnavailableException("School administration requires the privileged database configuration");
+    const school = await client.school.findFirst({ where: { id: schoolId, isPlatform: false }, select: { id: true, name: true } });
+    if (!school) throw new NotFoundException("School not found");
+    await client.school.update({ where: { id: schoolId }, data: { status } });
+    await this.db.runAsTenant(this.ctx(p), (tx) =>
+      this.audit.record(
+        {
+          actorId: p.userId,
+          action: "operator.school.status",
+          entity: "school",
+          entityId: schoolId,
+          schoolId: p.schoolId,
+          metadata: { targetSchoolId: schoolId, name: school.name, status },
+        },
+        tx,
+      ),
+    );
+    return { id: schoolId, status };
+  }
+
+  /** Every tenant currently past its paid period — feeds the operator console's
+   *  red billing banner. Subscription rows are tenant-scoped, so this runs on
+   *  the PRIVILEGED client (like the registry); [] without a privileged URL. */
+  async listBillingAlerts(): Promise<OperatorBillingAlertDto[]> {
+    const client = this.privileged.client;
+    if (!client) return [];
+    const now = new Date();
+    const lapsed = await client.schoolSubscription.findMany({
+      where: { status: SUBSCRIPTION_STATUS.PAST_DUE },
+      select: { schoolId: true, plan: true, currentPeriodEnd: true },
+    });
+    if (lapsed.length === 0) return [];
+    const schools = await client.school.findMany({
+      where: { id: { in: lapsed.map((s) => s.schoolId) }, isPlatform: false },
+      select: { id: true, name: true, slug: true },
+    });
+    const byId = new Map(schools.map((s) => [s.id, s]));
+    return lapsed
+      .flatMap((s) => {
+        const school = byId.get(s.schoolId);
+        if (!school) return [];
+        const end = s.currentPeriodEnd ? new Date(s.currentPeriodEnd) : null;
+        const daysPastDue = end ? Math.max(0, Math.floor((now.getTime() - end.getTime()) / 86_400_000)) : 0;
+        return [
+          {
+            schoolId: s.schoolId,
+            name: school.name,
+            slug: school.slug,
+            plan: s.plan,
+            currentPeriodEnd: s.currentPeriodEnd,
+            daysPastDue,
+            downgraded: daysPastDue > SUBSCRIPTION_GRACE_DAYS,
+          },
+        ];
+      })
+      .sort((a, b) => b.daysPastDue - a.daysPastDue);
   }
 
   /** Every enrolled student of a given school (cross-tenant; the operator sets the

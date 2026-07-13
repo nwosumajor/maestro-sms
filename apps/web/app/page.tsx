@@ -41,14 +41,19 @@ import {
   Gamepad2Icon,
 } from "lucide-react";
 import {
+  BILLING_CYCLES,
+  CURRENCY_SYMBOL,
+  CYCLE_DISCOUNT_PERCENT,
+  CYCLE_MONTHS,
   PLANS as PLAN_KEYS,
   PLAN_MODULES,
-  PLAN_PRICING,
+  PLAN_PRICING_BY_CURRENCY,
+  applyCycleDiscountMinor,
+  defaultCurrencyFor,
   type Plan,
   type PlanPriceDto,
 } from "@sms/types";
 import { Button } from "@/components/ui/button";
-import { OnboardForm } from "@/components/public/OnboardForm";
 import { HeroCarousel } from "@/components/public/HeroCarousel";
 
 // Auto-sliding hero photos — polished, international education imagery.
@@ -96,7 +101,7 @@ export const metadata = {
 // =============================================================================
 // PUBLIC landing page (no auth) — "The Register" direction.
 // Job: convince a school leader to request onboarding (and reassure parents),
-// then capture the request via the embedded OnboardForm (#onboard).
+// then send them to the dedicated /onboard intake page (#onboard links to it).
 // =============================================================================
 
 // Ruled-grid (exercise-book) texture — the signature motif, also on /login.
@@ -239,19 +244,40 @@ const PLAN_META: Record<Plan, { tagline: string; highlight: boolean }> = {
 
 const API_BASE = process.env.API_BASE_URL ?? "http://localhost:3001";
 
+/** Whole numbers stay whole (₦1,425); fractional amounts get 2dp (₦2,137.50). */
+function fmtAmount(n: number): string {
+  return n.toLocaleString("en-NG", { minimumFractionDigits: n % 1 === 0 ? 0 : 2, maximumFractionDigits: 2 });
+}
+
 async function effectivePlans() {
   let rows: PlanPriceDto[] | null = null;
   try {
-    const res = await fetch(`${API_BASE}/public/plan-pricing`, { next: { revalidate: 300 } });
+    // no-store: an operator price change must show on the very next page view —
+    // the Next data-cache window here (revalidate) hid updates for minutes. The
+    // per-request cost is one API call answered from PlanPricingService's
+    // in-memory cache (dropped instantly on write, incl. across replicas).
+    const res = await fetch(`${API_BASE}/public/plan-pricing`, { cache: "no-store" });
     if (res.ok) rows = (await res.json()) as PlanPriceDto[];
   } catch {
     // API unreachable (e.g. static build) -> platform default pricing below.
   }
   return (Object.values(PLAN_KEYS) as Plan[]).map((plan) => {
-    const row = rows?.find((r) => r.plan === plan);
+    // Each tier displays in its DEFAULT currency: ₦ locally, $ for ENTERPRISE
+    // (USD-only — it targets international schools). Rows are per-currency.
+    const currency = defaultCurrencyFor(plan);
+    const row = rows?.find((r) => r.plan === plan && r.currency === currency);
+    const fallback = PLAN_PRICING_BY_CURRENCY[currency][plan].perSeatMonthlyMinor;
+    const perSeatMinor = row?.perSeatMonthlyMinor ?? fallback;
+    // Cycle marketing: the SAME discount rule checkout charges with (one source).
+    const toMajor = (minor: number) => Math.round((minor / 100) * 100) / 100;
+    const perStudent = (cycle: keyof typeof CYCLE_MONTHS) =>
+      toMajor(applyCycleDiscountMinor(perSeatMinor * CYCLE_MONTHS[cycle], cycle));
     return {
       name: plan.charAt(0) + plan.slice(1).toLowerCase(),
-      price: Math.round((row?.perSeatMonthlyMinor ?? PLAN_PRICING[plan].perSeatMonthlyMinor) / 100),
+      symbol: CURRENCY_SYMBOL[currency],
+      price: toMajor(perSeatMinor),
+      termPrice: perStudent(BILLING_CYCLES.TERM),
+      yearPrice: perStudent(BILLING_CYCLES.YEAR),
       modules: row?.modulesIncluded ?? PLAN_MODULES[plan].length,
       ...PLAN_META[plan],
     };
@@ -769,11 +795,16 @@ async function Plans() {
               <p className="text-sm font-semibold tracking-tight">{p.name}</p>
               <p className="mt-1 text-xs text-muted-foreground">{p.tagline}</p>
               <p className="mt-5 flex items-baseline gap-1">
-                <span className="text-xs text-muted-foreground">₦</span>
+                <span className="text-xs text-muted-foreground">{p.symbol}</span>
                 <span className="tnum font-display text-3xl font-semibold tracking-tight">{p.price}</span>
                 <span className="text-xs text-muted-foreground">/student/mo</span>
               </p>
-              <p className="tnum mt-4 text-sm text-muted-foreground">
+              <p className="tnum mt-2 text-xs text-muted-foreground">
+                {p.symbol}{fmtAmount(p.termPrice)}/term <span className="font-medium text-emerald-600 dark:text-emerald-400">(save {CYCLE_DISCOUNT_PERCENT.TERM}%)</span>
+                {" · "}
+                {p.symbol}{fmtAmount(p.yearPrice)}/year <span className="font-medium text-emerald-600 dark:text-emerald-400">(save {CYCLE_DISCOUNT_PERCENT.YEAR}%)</span>
+              </p>
+              <p className="tnum mt-3 text-sm text-muted-foreground">
                 <span className="font-semibold text-foreground">{p.modules}</span> modules included
               </p>
               <a href="#onboard" className="mt-6">
@@ -785,8 +816,9 @@ async function Plans() {
           ))}
         </div>
         <p className="mt-6 text-xs text-muted-foreground">
-          Prices in Nigerian naira. Annual and per-term billing available. Your school owner controls which
-          modules are switched on.
+          Standard, Premium and Ultimate are priced in Nigerian naira (card payments via Paystack); Enterprise
+          is billed in US dollars (Stripe) for schools worldwide. Pay monthly, per term (3 months — save 5%)
+          or per year (3 terms / 9 months — save 15%). Your school owner controls which modules are switched on.
         </p>
       </div>
     </section>
@@ -859,10 +891,21 @@ function Onboard() {
         </div>
         <div className="rounded-2xl bg-card p-6 text-card-foreground shadow-pop sm:p-8">
           <h3 className="text-lg font-semibold tracking-tight">Request onboarding</h3>
-          <p className="mt-1 text-sm text-muted-foreground">Takes about two minutes. We&apos;ll be in touch by email.</p>
-          <div className="mt-5">
-            <OnboardForm />
-          </div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Tell us about your school — location, size, the modules you need and who to reach. Takes about
+            five minutes; we review every request and get back to you within 1–2 working days.
+          </p>
+          <ul className="mt-4 space-y-2 text-sm text-muted-foreground">
+            {["School profile & location", "Student and staff numbers (drives your live price estimate)", "Plan tier and add-on modules", "Your contact details"].map((t) => (
+              <li key={t} className="flex items-center gap-2.5">
+                <CheckIcon className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+                {t}
+              </li>
+            ))}
+          </ul>
+          <Link href="/onboard" className="mt-6 block">
+            <Button size="lg" className="w-full">Start your onboarding request</Button>
+          </Link>
         </div>
       </div>
     </section>

@@ -162,6 +162,14 @@ export class AuthService {
         // super_admin is EXEMPT from the 30-day reset policy.
         const passwordExpired = isPasswordExpired(sec?.passwordChangedAt, roles.includes("super_admin"));
         const school = await tx.school.findUnique({ where: { id: user.school_id } });
+        // A manually-DISABLED school blocks ALL of its members' logins (the hard
+        // deactivation lever — distinct from PAST_DUE, which only degrades
+        // modules so the school can still reach /billing and pay). Checked AFTER
+        // the password verified so failures don't oracle school state. The
+        // platform owner is exempt — the operator can never lock themselves out.
+        if (school?.status !== "ACTIVE" && !roles.includes("super_admin")) {
+          return { status: "SCHOOL_SUSPENDED" as const };
+        }
         return {
           status: "OK" as const,
           result: {
@@ -183,6 +191,9 @@ export class AuthService {
     }
     if (outcome.status === "BAD_PASSWORD") throw new UnauthorizedException("Invalid credentials");
     if (outcome.status === "MFA_REQUIRED") throw new UnauthorizedException("MFA_REQUIRED");
+    if (outcome.status === "SCHOOL_SUSPENDED") {
+      throw new UnauthorizedException("SCHOOL_SUSPENDED");
+    }
     // Resolve the school's subscription-enabled modules (outside the login tx) so
     // the web can hide modules the plan doesn't include.
     const modules = await this.modules.effectiveModules(outcome.result.schoolId);

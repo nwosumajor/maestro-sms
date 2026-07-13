@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Param, Patch, Post, Query, Req } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Param, Patch, Post, Put, Query, Req } from "@nestjs/common";
 import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
 import type { RawBodyRequest } from "@nestjs/common";
@@ -13,6 +13,7 @@ import type {
   PendingPaymentDto,
 } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
+import { RequireStepUp } from "../auth/require-stepup.decorator";
 import { Public } from "../auth/public.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
@@ -55,6 +56,13 @@ const paymentSchema = z.object({
   paidAt: z.string().datetime().optional(),
 });
 
+const settlementSchema = z.object({
+  /** Paystack bank code (e.g. "058" GTBank). */
+  bankCode: z.string().min(3).max(10),
+  /** 10-digit NUBAN — sent to Paystack, never stored. */
+  accountNumber: z.string().regex(/^\d{10}$/),
+});
+
 @RequireModule(MODULES.FEES)
 @Controller()
 export class FeesController {
@@ -79,6 +87,26 @@ export class FeesController {
     @Headers("x-paystack-signature") signature?: string,
   ) {
     return this.gateway.handleWebhook(req.rawBody, signature);
+  }
+
+  /** The school's fee-settlement posture (bank display fields, never the full
+   *  account number). Finance staff only. */
+  @Get("fees/settlement")
+  @RequirePermission(FEES_PERMISSIONS.FEE_MANAGE)
+  settlement(@CurrentPrincipal() p: Principal) {
+    return this.gateway.getSettlement(p);
+  }
+
+  /** Set the school's settlement bank (creates the Paystack subaccount; every
+   *  fee charge then splits to the school's own account). Step-up: money-critical. */
+  @Put("fees/settlement")
+  @RequirePermission(FEES_PERMISSIONS.FEE_MANAGE)
+  @RequireStepUp()
+  setSettlement(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(settlementSchema)) body: z.infer<typeof settlementSchema>,
+  ) {
+    return this.gateway.setSettlement(p, body);
   }
 
   /** Send payment reminders to guardians of students with outstanding invoices. */

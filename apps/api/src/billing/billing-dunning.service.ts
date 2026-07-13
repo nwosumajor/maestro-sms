@@ -26,6 +26,8 @@ export interface DunningResult {
   reminded: number;
   pastDue: number;
   scanned: number;
+  /** Lapsed schools reported to the platform owners in the red alert. */
+  alerted: number;
   skipped?: "NO_DB";
 }
 
@@ -48,7 +50,7 @@ export class BillingDunningService {
     const client = this.db.client;
     if (!client) {
       this.logger.warn("Dunning sweep requested but no privileged DB — skipping.");
-      return { reminded: 0, pastDue: 0, scanned: 0, skipped: "NO_DB" };
+      return { reminded: 0, pastDue: 0, scanned: 0, alerted: 0, skipped: "NO_DB" };
     }
     const now = new Date();
     const subs = await client.schoolSubscription.findMany({
@@ -84,8 +86,73 @@ export class BillingDunningService {
       }
     }
 
-    this.logger.log(`Dunning sweep (${trigger}): scanned=${subs.length} reminded=${reminded} pastDue=${pastDue}`);
-    return { reminded, pastDue, scanned: subs.length };
+    // RED ALERT to the platform owners: one aggregated daily digest of EVERY
+    // school currently past its paid period (new flips + still-unpaid + already
+    // downgraded past grace), so a lapsed school can never sit unnoticed.
+    const alerted = await this.alertPlatformOwners(client);
+
+    this.logger.log(
+      `Dunning sweep (${trigger}): scanned=${subs.length} reminded=${reminded} pastDue=${pastDue} alerted=${alerted}`,
+    );
+    return { reminded, pastDue, scanned: subs.length, alerted };
+  }
+
+  /** One aggregated OPERATOR_ALERT (in-app red + email) per super_admin listing
+   *  all currently-lapsed schools. Best-effort: an alert failure never fails the
+   *  sweep. Returns the number of lapsed schools reported (0 = nothing to say). */
+  private async alertPlatformOwners(client: NonNullable<PrivilegedDatabaseService["client"]>): Promise<number> {
+    try {
+      const now = new Date();
+      const lapsed = await client.schoolSubscription.findMany({
+        where: { status: SUBSCRIPTION_STATUS.PAST_DUE },
+        select: { schoolId: true, plan: true, currentPeriodEnd: true },
+      });
+      if (lapsed.length === 0) return 0;
+
+      const schools = await client.school.findMany({
+        where: { id: { in: lapsed.map((s) => s.schoolId) } },
+        select: { id: true, name: true },
+      });
+      const nameOf = new Map(schools.map((s) => [s.id, s.name]));
+
+      const lines = lapsed
+        .map((s) => {
+          const end = s.currentPeriodEnd ? new Date(s.currentPeriodEnd) : null;
+          const daysPast = end ? Math.max(0, Math.floor((now.getTime() - end.getTime()) / 86_400_000)) : 0;
+          const downgraded = daysPast > SUBSCRIPTION_GRACE_DAYS;
+          return {
+            daysPast,
+            text: `${nameOf.get(s.schoolId) ?? s.schoolId} (${s.plan}) — ${daysPast} day${daysPast === 1 ? "" : "s"} past due, ${
+              downgraded ? "DOWNGRADED to Standard" : `${SUBSCRIPTION_GRACE_DAYS - daysPast} grace day(s) left`
+            }`,
+          };
+        })
+        .sort((a, b) => b.daysPast - a.daysPast);
+      const shown = lines.slice(0, 12).map((l) => l.text);
+      if (lines.length > shown.length) shown.push(`…and ${lines.length - shown.length} more`);
+
+      const owners = await client.user.findMany({
+        where: { roles: { some: { role: { name: "super_admin" } } } },
+        select: { id: true, schoolId: true },
+      });
+      for (const owner of owners) {
+        await this.notifications.enqueue(
+          { schoolId: owner.schoolId, userId: owner.id },
+          {
+            recipientId: owner.id,
+            type: "OPERATOR_ALERT",
+            title: `Billing alert: ${lines.length} school${lines.length === 1 ? "" : "s"} past due`,
+            body: `${shown.join("\n")}\n\nReview and act in the operator console (extend, comp, or restore on payment).`,
+            data: { lapsed: lines.length },
+            channels: ["EMAIL"],
+          },
+        );
+      }
+      return lines.length;
+    } catch (e) {
+      this.logger.warn(`operator billing alert failed: ${(e as Error).message}`);
+      return 0;
+    }
   }
 
   /** Best-effort in-app notice to a school's principals/admins. Never throws. */
@@ -103,9 +170,10 @@ export class BillingDunningService {
         distinct: ["userId"],
       });
       for (const a of admins) {
+        // Renewal/past-due notices are revenue-critical: in-app AND email.
         await this.notifications.enqueue(
           { schoolId, userId: a.userId },
-          { recipientId: a.userId, type: "BILLING", title, body },
+          { recipientId: a.userId, type: "BILLING", title, body, channels: ["EMAIL"] },
         );
       }
     } catch (e) {

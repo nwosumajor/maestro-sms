@@ -1,6 +1,6 @@
 "use client";
 
-import type { BillingQuoteDto, Serialized } from "@sms/types";
+import { CYCLE_MONTHS, type BillingCycle, type BillingQuoteDto, type Serialized } from "@sms/types";
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,7 +10,11 @@ import { readApiError } from "@/lib/api-error";
 
 type Quote = Serialized<BillingQuoteDto>;
 
-const CYCLE_LABEL: Record<string, string> = { MONTH: "Monthly", TERM: "Per term", YEAR: "Annual" };
+const CYCLE_LABEL: Record<string, string> = {
+  MONTH: "Monthly",
+  TERM: "Per term — 3 months, save 5%",
+  YEAR: "Per year — 3 terms (9 months), save 15%",
+};
 
 /**
  * Client island: pick a tier + billing cycle and start a hosted Paystack
@@ -31,10 +35,28 @@ export function BillingCheckout({
   const cycles = React.useMemo(() => Array.from(new Set(quotes.map((q) => q.billingCycle))), [quotes]);
   const [plan, setPlan] = React.useState(plans[0] ?? "STANDARD");
   const [cycle, setCycle] = React.useState(cycles[1] ?? cycles[0] ?? "TERM");
+  // Currency choice follows the tier: ₦ (Paystack) or $ (Stripe); ENTERPRISE is
+  // USD-only, so its quotes carry only USD and the selector collapses to it.
+  const planCurrencies = React.useMemo(
+    () => Array.from(new Set(quotes.filter((q) => q.plan === plan).map((q) => q.currency))),
+    [quotes, plan],
+  );
+  const [currency, setCurrency] = React.useState(planCurrencies[0] ?? "NGN");
+  const effectiveCurrency = planCurrencies.includes(currency) ? currency : planCurrencies[0] ?? "NGN";
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
 
-  const selected = quotes.find((q) => q.plan === plan && q.billingCycle === cycle);
+  const selected = quotes.find(
+    (q) => q.plan === plan && q.billingCycle === cycle && q.currency === effectiveCurrency,
+  );
+  const gateway = effectiveCurrency === "USD" ? "Stripe" : "Paystack";
+  // Savings vs paying month-by-month for the same coverage: the MONTH quote is
+  // undiscounted, so gross = monthly quote × the cycle's months.
+  const monthQuote = quotes.find(
+    (q) => q.plan === plan && q.billingCycle === "MONTH" && q.currency === effectiveCurrency,
+  );
+  const savings =
+    selected && monthQuote ? monthQuote.priceMinor * CYCLE_MONTHS[cycle as BillingCycle] - selected.priceMinor : 0;
 
   if (!canManage) return null;
 
@@ -44,7 +66,11 @@ export function BillingCheckout({
     setMsg(null);
     // Checkout is step-up gated: the shared sender handles the password re-auth
     // (prompt + retry on a wrong password) transparently.
-    const res = await postWithStepUp("billing/checkout/init", { plan, billingCycle: cycle });
+    const res = await postWithStepUp("billing/checkout/init", {
+      plan,
+      billingCycle: cycle,
+      currency: effectiveCurrency,
+    });
     if (res.ok) {
       const { authorizationUrl } = (await res.json()) as { authorizationUrl: string };
       window.location.href = authorizationUrl;
@@ -53,7 +79,7 @@ export function BillingCheckout({
     setBusy(false);
     setMsg(
       res.status === 503
-        ? "Online payments are not configured yet. Contact the platform operator."
+        ? `${effectiveCurrency === "USD" ? "Dollar" : "Naira"} payments are not configured yet. Contact the platform operator.`
         : await readApiError(res),
     );
   }
@@ -63,8 +89,10 @@ export function BillingCheckout({
       <CardHeader>
         <CardTitle>Upgrade or renew</CardTitle>
         <CardDescription>
-          Per-seat pricing across {activeStudents} active student{activeStudents === 1 ? "" : "s"}. You pay securely via
-          Paystack; your plan activates automatically once the payment is confirmed.
+          Per-seat pricing across {activeStudents} active student{activeStudents === 1 ? "" : "s"}. Pay monthly,
+          per term (3 months — 5% off) or per year (9 months — 15% off), in naira (Paystack) or US dollars
+          (Stripe) — Enterprise is billed in dollars. Your plan activates automatically once the payment is
+          confirmed.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -96,13 +124,32 @@ export function BillingCheckout({
             </select>
           </div>
           <div className="space-y-1.5">
+            <label className="text-sm font-medium" htmlFor="bill-currency">Currency</label>
+            <select
+              id="bill-currency"
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+              value={effectiveCurrency}
+              onChange={(e) => setCurrency(e.target.value as typeof currency)}
+              disabled={planCurrencies.length === 1}
+            >
+              {planCurrencies.map((c) => (
+                <option key={c} value={c}>{c === "NGN" ? "₦ Naira" : "$ US Dollar"}</option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1.5">
             <span className="block text-sm font-medium">Total</span>
             <span className="block h-9 leading-9 text-lg font-semibold tabular-nums">
-              {selected ? money(selected.priceMinor) : "—"}
+              {selected ? money(selected.priceMinor, selected.currency) : "—"}
+              {savings > 0 && selected && (
+                <span className="ml-2 align-middle rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                  save {money(savings, selected.currency)}
+                </span>
+              )}
             </span>
           </div>
           <Button type="submit" disabled={busy || !selected}>
-            {busy ? "Redirecting…" : "Pay with Paystack"}
+            {busy ? "Redirecting…" : `Pay with ${gateway}`}
           </Button>
         </form>
         {msg && <p className="mt-3 text-sm text-muted-foreground">{msg}</p>}

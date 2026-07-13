@@ -7,27 +7,39 @@
 // gated (money + a privilege change, consistent with maker-checker / impersonation).
 // The Paystack webhook is NOT here — it stays on the single @Public fees route and
 // is dispatched to BillingService by metadata.kind (Paystack allows one webhook URL).
+// The STRIPE webhook (USD subscriptions) IS here: Stripe is used only for platform
+// billing, so its endpoint lives with the billing surface. @Public + signature-
+// verified against the raw body, mirroring the Paystack posture.
 // =============================================================================
 
-import { Body, Controller, Get, Post } from "@nestjs/common";
-import { BILLING_CYCLES, BILLING_PERMISSIONS, PLANS } from "@sms/types";
+import { Body, Controller, Get, Headers, Post, Req } from "@nestjs/common";
+import type { RawBodyRequest } from "@nestjs/common";
+import type { Request } from "express";
+import { BILLING_CYCLES, CURRENCIES, BILLING_PERMISSIONS, PLANS } from "@sms/types";
 import type { BillingOverviewDto, CheckoutInitResultDto } from "@sms/types";
 import { z } from "zod";
+import { Public } from "../auth/public.decorator";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { RequireStepUp } from "../auth/require-stepup.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
+import { StripeService } from "../payments/stripe.service";
 import { BillingService } from "./billing.service";
 
 const checkoutSchema = z.object({
   plan: z.enum([PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE]),
   billingCycle: z.enum([BILLING_CYCLES.MONTH, BILLING_CYCLES.TERM, BILLING_CYCLES.YEAR]),
+  // NGN → Paystack, USD → Stripe. Omitted → the tier's default (₦; $ for ENTERPRISE).
+  currency: z.enum([CURRENCIES.NGN, CURRENCIES.USD]).optional(),
 });
 
 @Controller("billing")
 export class BillingController {
-  constructor(private readonly billing: BillingService) {}
+  constructor(
+    private readonly billing: BillingService,
+    private readonly stripe: StripeService,
+  ) {}
 
   /** The billing screen: current subscription + per-tier quotes + history. */
   @Get()
@@ -53,6 +65,20 @@ export class BillingController {
     @Body(new ZodValidationPipe(checkoutSchema)) body: z.infer<typeof checkoutSchema>,
   ): Promise<CheckoutInitResultDto> {
     return this.billing.initCheckout(p, body);
+  }
+
+  /** Stripe webhook (USD subscription payments). Public: carries no session;
+   *  authenticated by the Stripe-Signature HMAC over the RAW body. Disabled
+   *  (no-op 200) when STRIPE_WEBHOOK_SECRET is unset. */
+  @Public()
+  @Post("stripe/webhook")
+  async stripeWebhook(
+    @Req() req: RawBodyRequest<Request>,
+    @Headers("stripe-signature") signature: string | undefined,
+  ): Promise<{ ok: boolean }> {
+    const event = this.stripe.verifyWebhook(req.rawBody, signature);
+    if (!event) return { ok: true }; // gateway disabled / empty body
+    return this.billing.applyStripeSubscriptionEvent(event);
   }
 
   /** super_admin manual dunning sweep (the scheduled job runs daily). */

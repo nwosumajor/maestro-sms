@@ -5,7 +5,7 @@
 // quotes and start a Paystack checkout. Money is integer MINOR units (kobo), NGN.
 // No student PII — purely the school's own plan/seat/payment posture.
 
-import type { BillingCycle, Plan } from "../modules";
+import type { BillingCycle, Currency, Plan } from "../modules";
 import type { SubscriptionDto } from "./subscription";
 
 /** One platform subscription payment (append-only ledger row). */
@@ -16,6 +16,8 @@ export interface PlatformPaymentDto {
   billingCycle: BillingCycle;
   seats: number;
   amountMinor: number;
+  /** NGN (kobo, Paystack) or USD (cents, Stripe). */
+  currency: Currency;
   /** PENDING | PAID | FAILED. */
   status: string;
   periodStart: Date | null;
@@ -24,12 +26,14 @@ export interface PlatformPaymentDto {
   createdAt: Date;
 }
 
-/** A live price quote for a tier at the school's current seat count + a cycle. */
+/** A live price quote for a tier at the school's current seat count + a cycle.
+ *  One quote per (tier × cycle × ALLOWED currency) — ENTERPRISE is USD-only. */
 export interface BillingQuoteDto {
   plan: Plan;
   billingCycle: BillingCycle;
   seats: number;
   priceMinor: number;
+  currency: Currency;
 }
 
 /** The full billing overview screen payload. */
@@ -43,10 +47,12 @@ export interface BillingOverviewDto {
   payments: PlatformPaymentDto[];
 }
 
-/** School-initiated checkout input. */
+/** School-initiated checkout input. Currency picks the gateway: NGN → Paystack,
+ *  USD → Stripe. Omitted → the tier's default (₦, or $ for ENTERPRISE). */
 export interface CheckoutInitDto {
   plan: Plan;
   billingCycle: BillingCycle;
+  currency?: Currency;
 }
 
 /** Hosted-checkout handoff returned to the client. */
@@ -55,10 +61,13 @@ export interface CheckoutInitResultDto {
   reference: string;
 }
 
-/** One tier's effective per-seat monthly price (operator console + public page). */
+/** One (tier, currency)'s effective per-seat monthly price (operator console +
+ *  public page). ENTERPRISE appears ONLY as a USD row. */
 export interface PlanPriceDto {
   plan: Plan;
-  /** Effective per-seat monthly price, kobo. */
+  /** NGN or USD — the row's currency (minor unit: kobo / cents). */
+  currency: Currency;
+  /** Effective per-seat monthly price in the currency's minor unit. */
   perSeatMonthlyMinor: number;
   /** True when this is the platform default (no operator override row). */
   isDefault: boolean;
@@ -66,7 +75,8 @@ export interface PlanPriceDto {
   modulesIncluded: number;
 }
 
-/** super_admin pricing update: one entry per tier to override. */
+/** super_admin pricing update: one entry per (tier, currency) to override.
+ *  Omitted currency = NGN (back-compat); ENTERPRISE accepts only USD. */
 export interface PlanPriceUpdateDto {
-  prices: { plan: Plan; perSeatMonthlyMinor: number }[];
+  prices: { plan: Plan; perSeatMonthlyMinor: number; currency?: Currency }[];
 }

@@ -164,12 +164,29 @@ export const BILLING_CYCLES = {
 } as const;
 export type BillingCycle = (typeof BILLING_CYCLES)[keyof typeof BILLING_CYCLES];
 
-/** Months billed per cycle (a Nigerian school TERM ≈ 4 months, 3 terms/year). */
+/** Months billed per cycle: a TERM is 3 months; an academic YEAR is 3 terms =
+ *  9 billed months (holiday months are not billed). */
 export const CYCLE_MONTHS: Record<BillingCycle, number> = {
   MONTH: 1,
-  TERM: 4,
-  YEAR: 12,
+  TERM: 3,
+  YEAR: 9,
 };
+
+/** Commitment discount per cycle (percent off the gross): pay-per-term saves
+ *  5%, pay-per-year saves 15%. ONE constant drives quotes, checkout charges,
+ *  the homepage marketing line and the onboarding estimate — they can't drift. */
+export const CYCLE_DISCOUNT_PERCENT: Record<BillingCycle, number> = {
+  MONTH: 0,
+  TERM: 5,
+  YEAR: 15,
+};
+
+/** Pure: apply a cycle's commitment discount to a gross minor-unit amount.
+ *  Single deterministic rounding rule (round-half-up on the discounted value)
+ *  so every surface computes the identical integer. */
+export function applyCycleDiscountMinor(grossMinor: number, cycle: BillingCycle): number {
+  return Math.round((grossMinor * (100 - CYCLE_DISCOUNT_PERCENT[cycle])) / 100);
+}
 
 export function isBillingCycle(value: string): value is BillingCycle {
   return (Object.values(BILLING_CYCLES) as string[]).includes(value);
@@ -186,23 +203,62 @@ export function isSubscriptionStatus(value: string): value is SubscriptionStatus
   return (Object.values(SUBSCRIPTION_STATUS) as string[]).includes(value);
 }
 
-/** Per-seat monthly pricing by tier (kobo). */
+// --- Currency (dual-gateway billing: NGN via Paystack, USD via Stripe) -------
+export const CURRENCIES = {
+  NGN: "NGN",
+  USD: "USD",
+} as const;
+export type Currency = (typeof CURRENCIES)[keyof typeof CURRENCIES];
+export function isCurrency(v: unknown): v is Currency {
+  return v === CURRENCIES.NGN || v === CURRENCIES.USD;
+}
+export const CURRENCY_SYMBOL: Record<Currency, string> = { NGN: "₦", USD: "$" };
+
+/** Which currencies a tier may be quoted/sold in. ENTERPRISE is USD-ONLY — it
+ *  targets international schools and is indicated in dollars EVERYWHERE
+ *  (homepage, quotes, checkout, operator pricing). */
+export function planCurrencies(plan: Plan): Currency[] {
+  return plan === PLANS.ENTERPRISE ? [CURRENCIES.USD] : [CURRENCIES.NGN, CURRENCIES.USD];
+}
+/** The currency a tier is DISPLAYED in by default (₦ locally, $ for ENTERPRISE). */
+export function defaultCurrencyFor(plan: Plan): Currency {
+  return plan === PLANS.ENTERPRISE ? CURRENCIES.USD : CURRENCIES.NGN;
+}
+
+/** Per-seat monthly pricing by tier, in ONE currency's minor unit (kobo/cents). */
 export type PlanPricing = Record<Plan, { perSeatMonthlyMinor: number }>;
+/** Per-currency pricing tables. */
+export type MultiCurrencyPlanPricing = Record<Currency, PlanPricing>;
 
 /**
  * DEFAULT per-seat (per active student) price each MONTH, in kobo, by tier.
  * STANDARD is the entry tier (and the delinquency floor); higher tiers cost more
  * per seat. These are the FALLBACK values — the super_admin can override any
- * tier's price via the operator console (stored in the global `plan_price`
- * table); `PlanPricingService.effective()` merges those rows over this constant,
- * and everything that quotes or charges (billing overview, checkout, the public
- * landing page) reads the merged result.
+ * (tier, currency) price via the operator console (stored in the global
+ * `plan_price` table); `PlanPricingService.effective()` merges those rows over
+ * these constants, and everything that quotes or charges (billing overview,
+ * checkout, the public landing page) reads the merged result.
+ * NOTE: an ENTERPRISE NGN entry exists to keep the Record type total, but the
+ * tier is never quoted/sold in NGN — `planCurrencies` gates every surface.
  */
 export const PLAN_PRICING: PlanPricing = {
   STANDARD: { perSeatMonthlyMinor: 20_000 }, // ₦200 / student / month
   PREMIUM: { perSeatMonthlyMinor: 35_000 }, // ₦350 / student / month
   ULTIMATE: { perSeatMonthlyMinor: 50_000 }, // ₦500 / student / month
-  ENTERPRISE: { perSeatMonthlyMinor: 75_000 }, // ₦750 / student / month
+  ENTERPRISE: { perSeatMonthlyMinor: 75_000 }, // (unsellable in NGN — see note)
+};
+
+/** USD defaults, in cents. ENTERPRISE is sold ONLY in USD. */
+export const PLAN_PRICING_USD: PlanPricing = {
+  STANDARD: { perSeatMonthlyMinor: 25 }, // $0.25 / student / month
+  PREMIUM: { perSeatMonthlyMinor: 40 }, // $0.40 / student / month
+  ULTIMATE: { perSeatMonthlyMinor: 60 }, // $0.60 / student / month
+  ENTERPRISE: { perSeatMonthlyMinor: 100 }, // $1.00 / student / month
+};
+
+export const PLAN_PRICING_BY_CURRENCY: MultiCurrencyPlanPricing = {
+  NGN: PLAN_PRICING,
+  USD: PLAN_PRICING_USD,
 };
 
 /** Days a school keeps its paid plan after period end before the dunning downgrade. */
@@ -237,10 +293,9 @@ export function isSubscriptionInGoodStanding(
   return now <= cutoff;
 }
 
-/** Pure: price to run `plan` for `activeStudents` over one `cycle` (minor units).
- *  `pricing` defaults to the platform constants; pass the operator-resolved
- *  effective pricing so overridden tier prices flow into quotes and charges. */
-export function computeSubscriptionPriceMinor(
+/** Pure: the UNDISCOUNTED price to run `plan` for `activeStudents` over one
+ *  `cycle` (minor units) — per-seat monthly rate × seats × cycle months. */
+export function computeSubscriptionGrossMinor(
   plan: Plan,
   activeStudents: number,
   cycle: BillingCycle,
@@ -248,6 +303,19 @@ export function computeSubscriptionPriceMinor(
 ): number {
   const seats = Math.max(1, Math.floor(activeStudents));
   return pricing[plan].perSeatMonthlyMinor * seats * CYCLE_MONTHS[cycle];
+}
+
+/** Pure: the CHARGED price for a cycle — gross minus the commitment discount
+ *  (TERM −5%, YEAR −15%). `pricing` defaults to the platform constants; pass the
+ *  operator-resolved effective pricing so overrides flow into quotes and charges.
+ *  This ONE function prices every surface: quotes, checkout, homepage, estimates. */
+export function computeSubscriptionPriceMinor(
+  plan: Plan,
+  activeStudents: number,
+  cycle: BillingCycle,
+  pricing: PlanPricing = PLAN_PRICING,
+): number {
+  return applyCycleDiscountMinor(computeSubscriptionGrossMinor(plan, activeStudents, cycle, pricing), cycle);
 }
 
 /**

@@ -20,8 +20,10 @@ export interface SubscriptionDto {
   currentPeriodEnd: Date | null;
   /** Seat count last billed against. */
   seats: number | null;
-  /** Amount last charged (minor units). */
+  /** Amount last charged (minor units of `currency`). */
   priceMinor: number | null;
+  /** Currency of the last charge (NGN via Paystack / USD via Stripe); null if never paid. */
+  currency: string | null;
   /** The tier actually ENFORCED now (falls to STANDARD when past-due beyond grace). */
   effectivePlan: Plan;
 }

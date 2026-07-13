@@ -35,6 +35,7 @@ import {
   FileBarChartIcon,
   WalletIcon,
   ScrollTextIcon,
+  CircleHelpIcon,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -93,7 +94,8 @@ type NavKey =
   | "operatoraudit"
   | "directory"
   | "announcements"
-  | "account";
+  | "account"
+  | "help";
 
 // `module` ties a nav item to a subscription module: when the school's plan
 // doesn't include it, the item is hidden (and the backend 404s the routes too).
@@ -152,6 +154,9 @@ const NAV: {
   // super_admin-only permission is the gate.
   { key: "ultimate", label: "Ultimate", icon: TrophyIcon, href: "/games/ultimate", perm: "game.ultimate.admin" },
   { key: "account", label: "Account", icon: UserIcon, href: "/account" },
+  // The application manual — visible to EVERY signed-in role (content inside is
+  // role-aware), so a brand-new user can always find their footing.
+  { key: "help", label: "Help", icon: CircleHelpIcon, href: "/help" },
 ];
 
 // The nav keys a platform owner (super_admin) sees — platform surfaces only, since
@@ -164,6 +169,7 @@ const PLATFORM_OWNER_NAV = new Set<NavKey>([
   "ultimate",
   "notifications",
   "account",
+  "help",
 ]);
 
 // The 30+ modules are grouped into labelled sections — the "register sections"
@@ -189,6 +195,7 @@ const NAV_GROUP: Record<NavKey, string> = {
   discussion: "community", polls: "community", forms: "community", discipline: "community",
   games: "community", ultimate: "community",
   operator: "platform", operatoraudit: "platform", directory: "platform", admin: "platform", account: "platform",
+  help: "platform",
 };
 
 export interface AppShellProps {

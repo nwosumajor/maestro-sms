@@ -11,8 +11,19 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 type Tenant = { id: string; name: string };
+/** Pre-fill from a public onboarding request ("Approve & provision"). */
+export type ProvisionPrefill = {
+  requestId: string;
+  schoolName: string;
+  desiredSlug: string | null;
+  contactName: string;
+  contactEmail: string;
+  desiredPlan: string | null;
+  desiredModules: string[] | null;
+};
 const ROLES = ["school_admin", "principal", "head_admin", "hr_manager"] as const;
 const PLAN_LIST: Plan[] = [PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE];
+const isPlanKey = (s: string | null): s is Plan => !!s && (PLAN_LIST as string[]).includes(s);
 
 /** Lowercase, hyphenated, [a-z0-9-] only — matches the API's slug rule. */
 function slugify(s: string): string {
@@ -21,7 +32,7 @@ function slugify(s: string): string {
 type CreatedAdmin = { email: string; role: string; tempPassword: string };
 type ProvisionResult = { school: string; plan: string; admins: CreatedAdmin[] };
 
-export function Provisioning({ tenants }: { tenants: Tenant[] }) {
+export function Provisioning({ tenants, prefill }: { tenants: Tenant[]; prefill?: ProvisionPrefill | null }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState<string | null>(null);
   const [result, setResult] = React.useState<string | null>(null);
@@ -31,17 +42,25 @@ export function Provisioning({ tenants }: { tenants: Tenant[] }) {
   const [copied, setCopied] = React.useState(false);
 
   // Provision a school + its founding admin tier (school_admin + principal).
-  const [name, setName] = React.useState("");
-  const [slug, setSlug] = React.useState("");
-  const [slugTouched, setSlugTouched] = React.useState(false);
-  const [aName, setAName] = React.useState("");
-  const [aEmail, setAEmail] = React.useState("");
+  // When entered via "Approve & provision", the fields start from the public
+  // request: contact person becomes the school_admin, wish plan/modules applied.
+  // (The parent keys this component on the request id, so state re-initialises.)
+  const [name, setName] = React.useState(prefill?.schoolName ?? "");
+  const [slug, setSlug] = React.useState(prefill ? (prefill.desiredSlug ?? slugify(prefill.schoolName)) : "");
+  const [slugTouched, setSlugTouched] = React.useState(Boolean(prefill?.desiredSlug));
+  const [aName, setAName] = React.useState(prefill?.contactName ?? "");
+  const [aEmail, setAEmail] = React.useState(prefill?.contactEmail ?? "");
   const [pName, setPName] = React.useState("");
   const [pEmail, setPEmail] = React.useState("");
 
   // Plan tier + extra add-on modules (force-on beyond the plan bundle).
-  const [plan, setPlan] = React.useState<Plan>(PLANS.ENTERPRISE);
-  const [extras, setExtras] = React.useState<Set<ModuleKey>>(new Set());
+  const [plan, setPlan] = React.useState<Plan>(isPlanKey(prefill?.desiredPlan ?? null) ? (prefill!.desiredPlan as Plan) : PLANS.ENTERPRISE);
+  const [extras, setExtras] = React.useState<Set<ModuleKey>>(() => {
+    if (!prefill?.desiredModules?.length) return new Set();
+    const chosenPlan = isPlanKey(prefill.desiredPlan) ? (prefill.desiredPlan as Plan) : PLANS.ENTERPRISE;
+    const included = new Set<string>(PLAN_MODULES[chosenPlan]);
+    return new Set(prefill.desiredModules.filter((m): m is ModuleKey => !included.has(m)));
+  });
   const inPlan = React.useMemo(() => new Set<ModuleKey>(PLAN_MODULES[plan]), [plan]);
   // Modules NOT in the chosen plan are the "extra" add-ons the operator can include.
   const addOnCatalog = MODULE_CATALOG.filter((m) => !inPlan.has(m.key));
@@ -88,6 +107,8 @@ export function Provisioning({ tenants }: { tenants: Tenant[] }) {
       plan,
       overrides: { enabled: [...extras], disabled: [] },
       admins,
+      // Provisioning from a public request flips it to APPROVED server-side.
+      ...(prefill ? { onboardingRequestId: prefill.requestId } : {}),
     });
     setBusy(null);
     if (res.ok) {
@@ -97,6 +118,8 @@ export function Provisioning({ tenants }: { tenants: Tenant[] }) {
       setResult(null);
       setName(""); setSlug(""); setSlugTouched(false); setAName(""); setAEmail(""); setPName(""); setPEmail("");
       setPlan(PLANS.ENTERPRISE); setExtras(new Set());
+      // Drop the ?provision=<id> param so a refresh doesn't re-prefill.
+      if (prefill) router.push("/operator");
       router.refresh();
     } else setResult(await readApiError(res));
   };
@@ -151,6 +174,17 @@ export function Provisioning({ tenants }: { tenants: Tenant[] }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
+        {prefill && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-primary/40 bg-primary/5 px-3 py-2 text-sm">
+            <span>
+              Pre-filled from <span className="font-medium">{prefill.schoolName}</span>&apos;s onboarding request —
+              creating the school will mark the request approved.
+            </span>
+            <button type="button" onClick={() => router.push("/operator")} className="text-xs text-muted-foreground underline-offset-2 hover:underline">
+              Clear
+            </button>
+          </div>
+        )}
         <form onSubmit={provision} className="space-y-3">
           <div className="flex flex-wrap items-end gap-2">
             <div className="space-y-1.5">

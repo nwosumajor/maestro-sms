@@ -22,11 +22,18 @@ import { readApiError } from "@/lib/api-error";
 
 const PLAN_LIST: Plan[] = [PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE];
 
+const STATUS_LIST = ["ACTIVE", "PAST_DUE", "CANCELED"] as const;
+
 export function SubscriptionManager({ schoolId, plan: initialPlan }: { schoolId: string; plan: string }) {
   const [open, setOpen] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [plan, setPlan] = React.useState<Plan>((initialPlan as Plan) ?? PLANS.ENTERPRISE);
   const [selected, setSelected] = React.useState<Set<ModuleKey>>(new Set());
+  // Billing override controls (comp/extend/restore): the operator can force a
+  // status and/or set the paid-period end — e.g. restore a PAST_DUE school after
+  // an offline payment, or comp an extension.
+  const [status, setStatus] = React.useState<(typeof STATUS_LIST)[number]>("ACTIVE");
+  const [periodEnd, setPeriodEnd] = React.useState(""); // yyyy-mm-dd ("" = keep)
   const [msg, setMsg] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
 
@@ -40,6 +47,8 @@ export function SubscriptionManager({ schoolId, plan: initialPlan }: { schoolId:
       const sub = (await res.json()) as Serialized<SubscriptionDto>;
       setPlan(sub.plan as Plan);
       setSelected(new Set(sub.modules as ModuleKey[]));
+      if ((STATUS_LIST as readonly string[]).includes(sub.status)) setStatus(sub.status as (typeof STATUS_LIST)[number]);
+      setPeriodEnd(sub.currentPeriodEnd ? sub.currentPeriodEnd.slice(0, 10) : "");
     }
   };
 
@@ -66,7 +75,13 @@ export function SubscriptionManager({ schoolId, plan: initialPlan }: { schoolId:
     const res = await fetch(`/api/sms/operator/tenants/${schoolId}/subscription`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ plan, overrides: { enabled, disabled } }),
+      body: JSON.stringify({
+        plan,
+        overrides: { enabled, disabled },
+        status,
+        // Date-only input → end of that day UTC; empty = clear the paid period.
+        currentPeriodEnd: periodEnd ? new Date(`${periodEnd}T23:59:59Z`).toISOString() : null,
+      }),
     });
     setBusy(false);
     setMsg(res.ok ? "Saved." : await readApiError(res));
@@ -130,6 +145,34 @@ export function SubscriptionManager({ schoolId, plan: initialPlan }: { schoolId:
                 </label>
               );
             })}
+          </div>
+
+          {/* Billing overrides: comp/extend/restore. Paying normally also restores. */}
+          <div className="flex flex-wrap items-end gap-3 rounded-md border border-border p-3">
+            <div className="space-y-1">
+              <label className="block text-xs font-medium" htmlFor={`st-${schoolId}`}>Billing status</label>
+              <select
+                id={`st-${schoolId}`}
+                value={status}
+                onChange={(e) => setStatus(e.target.value as (typeof STATUS_LIST)[number])}
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+              >
+                {STATUS_LIST.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="block text-xs font-medium" htmlFor={`pe-${schoolId}`}>Paid period ends</label>
+              <input
+                id={`pe-${schoolId}`}
+                type="date"
+                value={periodEnd}
+                onChange={(e) => setPeriodEnd(e.target.value)}
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+              />
+            </div>
+            <p className="max-w-xs text-xs text-muted-foreground">
+              Restore a lapsed school: set ACTIVE + a future end date (e.g. after an offline payment or as a comp).
+            </p>
           </div>
 
           <div className="flex items-center gap-3">

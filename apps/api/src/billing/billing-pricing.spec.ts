@@ -14,19 +14,45 @@ import {
   PLAN_PRICING,
   SUBSCRIPTION_GRACE_DAYS,
   SUBSCRIPTION_STATUS,
+  applyCycleDiscountMinor,
+  computeSubscriptionGrossMinor,
   computeSubscriptionPriceMinor,
   effectivePlan,
 } from "@sms/types";
 
 describe("computeSubscriptionPriceMinor", () => {
-  it("is per-seat × monthly rate × cycle months", () => {
+  it("is per-seat × monthly rate × cycle months, minus the commitment discount", () => {
     const seats = 400;
     const monthly = PLAN_PRICING.STANDARD.perSeatMonthlyMinor;
+    // MONTH: 1 month, no discount.
     expect(computeSubscriptionPriceMinor(PLANS.STANDARD, seats, BILLING_CYCLES.MONTH)).toBe(monthly * seats * 1);
+    // TERM: 3 months at 5% off.
+    expect(CYCLE_MONTHS.TERM).toBe(3);
     expect(computeSubscriptionPriceMinor(PLANS.STANDARD, seats, BILLING_CYCLES.TERM)).toBe(
-      monthly * seats * CYCLE_MONTHS.TERM,
+      Math.round(monthly * seats * 3 * 0.95),
     );
-    expect(computeSubscriptionPriceMinor(PLANS.STANDARD, seats, BILLING_CYCLES.YEAR)).toBe(monthly * seats * 12);
+    // YEAR: 9 billed months (3 terms) at 15% off.
+    expect(CYCLE_MONTHS.YEAR).toBe(9);
+    expect(computeSubscriptionPriceMinor(PLANS.STANDARD, seats, BILLING_CYCLES.YEAR)).toBe(
+      Math.round(monthly * seats * 9 * 0.85),
+    );
+  });
+
+  it("discount rounding is deterministic and integer (kobo/cents never fractional)", () => {
+    // 3 seats × ₦333.33 × 3 months × 0.95 exercises the rounding path.
+    const odd = { ...PLAN_PRICING, STANDARD: { perSeatMonthlyMinor: 33_333 } };
+    const gross = computeSubscriptionGrossMinor(PLANS.STANDARD, 3, BILLING_CYCLES.TERM, odd);
+    const net = computeSubscriptionPriceMinor(PLANS.STANDARD, 3, BILLING_CYCLES.TERM, odd);
+    expect(Number.isInteger(net)).toBe(true);
+    expect(net).toBe(Math.round(gross * 0.95));
+    expect(net).toBe(applyCycleDiscountMinor(gross, BILLING_CYCLES.TERM));
+  });
+
+  it("a year (9 months at 15% off) beats three terms (9 months at 5% off)", () => {
+    const seats = 250;
+    const threeTerm = 3 * computeSubscriptionPriceMinor(PLANS.PREMIUM, seats, BILLING_CYCLES.TERM);
+    const year = computeSubscriptionPriceMinor(PLANS.PREMIUM, seats, BILLING_CYCLES.YEAR);
+    expect(year).toBeLessThan(threeTerm);
   });
 
   it("clamps seats to at least 1 (never charges for 0 students)", () => {
@@ -87,5 +113,42 @@ describe("effectivePlan", () => {
     expect(effectivePlan(PLANS.STANDARD, SUBSCRIPTION_STATUS.PAST_DUE, longPast, SUBSCRIPTION_GRACE_DAYS, now)).toBe(
       PLANS.STANDARD,
     );
+  });
+});
+
+// --- Dual-currency rules (NGN Paystack / USD Stripe; ENTERPRISE = USD only) ---
+import {
+  CURRENCIES,
+  PLAN_PRICING_USD,
+  defaultCurrencyFor,
+  isCurrency,
+  planCurrencies,
+} from "@sms/types";
+
+describe("currency rules", () => {
+  it("ENTERPRISE is USD-only; other tiers sell in NGN and USD", () => {
+    expect(planCurrencies(PLANS.ENTERPRISE)).toEqual([CURRENCIES.USD]);
+    for (const plan of [PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE]) {
+      expect(planCurrencies(plan)).toEqual([CURRENCIES.NGN, CURRENCIES.USD]);
+    }
+  });
+
+  it("defaults: ₦ locally, $ for ENTERPRISE", () => {
+    expect(defaultCurrencyFor(PLANS.ENTERPRISE)).toBe(CURRENCIES.USD);
+    expect(defaultCurrencyFor(PLANS.STANDARD)).toBe(CURRENCIES.NGN);
+  });
+
+  it("isCurrency accepts only NGN/USD", () => {
+    expect(isCurrency("NGN")).toBe(true);
+    expect(isCurrency("USD")).toBe(true);
+    expect(isCurrency("EUR")).toBe(false);
+    expect(isCurrency(undefined)).toBe(false);
+  });
+
+  it("USD pricing computes in cents with the USD table", () => {
+    const seats = 500;
+    expect(
+      computeSubscriptionPriceMinor(PLANS.ENTERPRISE, seats, BILLING_CYCLES.MONTH, PLAN_PRICING_USD),
+    ).toBe(PLAN_PRICING_USD.ENTERPRISE.perSeatMonthlyMinor * seats);
   });
 });

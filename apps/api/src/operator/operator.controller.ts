@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Post, Put, Query, Res, StreamableFile } from "@nestjs/common";
 import type { Response } from "express";
 import type {
+  OperatorBillingAlertDto,
   OperatorStudentDto,
   OperatorUserDto,
   PlatformAnalyticsDto,
@@ -69,6 +70,8 @@ const provisionSchema = z
     // principal. `admin` (single) is accepted for back-compat.
     admin: adminSchema.optional(),
     admins: z.array(adminSchema).min(1).max(6).optional(),
+    // Provisioning from a public onboarding request links + auto-APPROVEs it.
+    onboardingRequestId: z.string().uuid().optional(),
   })
   .refine((v) => Boolean(v.admin) || (v.admins && v.admins.length > 0), {
     message: "at least one admin is required",
@@ -97,10 +100,13 @@ const pricingSchema = z.object({
       z.object({
         plan: z.enum([PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE]),
         perSeatMonthlyMinor: z.number().int().positive(),
+        // NGN default (back-compat). ENTERPRISE accepts USD only (service-enforced).
+        currency: z.enum(["NGN", "USD"]).optional(),
       }),
     )
     .min(1)
-    .max(4),
+    // One row per sellable (tier, currency): 3 NGN + 4 USD.
+    .max(7),
 });
 
 @Controller("operator")
@@ -162,6 +168,26 @@ export class OperatorController {
   @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
   tenantNames(@CurrentPrincipal() p: Principal): Promise<TenantNameDto[]> {
     return this.operator.listTenantNames(p);
+  }
+
+  /** Enable/disable a SCHOOL — the hard deactivation lever (blocks every member
+   *  login; nothing deleted). Step-up: outage-grade action. */
+  @Put("tenants/:schoolId/status")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  @RequireStepUp()
+  schoolStatus(
+    @CurrentPrincipal() p: Principal,
+    @Param("schoolId") schoolId: string,
+    @Body(new ZodValidationPipe(statusSchema)) body: z.infer<typeof statusSchema>,
+  ) {
+    return this.operator.setSchoolStatus(p, schoolId, body.status);
+  }
+
+  /** Tenants currently past their paid period (red banner on the console). */
+  @Get("billing-alerts")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  billingAlerts(): Promise<OperatorBillingAlertDto[]> {
+    return this.operator.listBillingAlerts();
   }
 
   /** Platform-owner business dashboard: cross-tenant schools/revenue/plan metrics. */

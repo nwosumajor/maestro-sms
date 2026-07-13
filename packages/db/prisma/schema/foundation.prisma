@@ -20,6 +20,16 @@ model School {
   /// platform billing. Lets the super_admin be a platform identity (not a member
   /// of any customer school) while keeping user.schoolId non-null + RLS intact.
   isPlatform Boolean @default(false)
+  /// Paystack SPLIT settlement for parent fee payments: when set, every fee
+  /// charge carries this subaccount so the money settles to the SCHOOL's own
+  /// bank (platform keeps only the configured commission %). Managed by the
+  /// school's own finance staff via PUT /fees/settlement (step-up).
+  paystackSubaccountCode String?
+  settlementBankCode     String?
+  settlementBankName     String?
+  /// Display-only last 4 digits of the settlement account (full number is never
+  /// stored — it lives with Paystack).
+  settlementAccountLast4 String?
   /// NDPR-aligned retention window (days) for integrity TELEMETRY on minors —
   /// integrity_signal / submission_draft / submission_telemetry. Read by the
   /// privileged retention job; rows older than this are purged. Per-school policy
@@ -161,6 +171,8 @@ model SchoolSubscription {
   currentPeriodEnd  DateTime?
   /// Seat count (active students) last billed.
   seats             Int?
+  /// Currency of the last charge (NGN | USD); null when never paid.
+  currency          String?
   /// Amount last charged (minor units, NGN kobo).
   priceMinor        Int?
   /// Paystack customer code (reserved for future saved-card recurring).
@@ -181,11 +193,15 @@ model SchoolSubscription {
 /// the least-privilege app role has SELECT only (see rls/46_plan_pricing_rls.sql).
 model PlanPrice {
   /// STANDARD | PREMIUM | ULTIMATE | ENTERPRISE (validated against @sms/types PLANS).
-  plan               String   @id
-  /// Per-seat (active student) monthly price, minor units (NGN kobo).
+  plan               String
+  /// NGN | USD — one override row per (tier, currency). ENTERPRISE is USD-only
+  /// (enforced in PlanPricingService.update, not the schema).
+  currency           String   @default("NGN")
+  /// Per-seat (active student) monthly price, minor units (kobo / cents).
   perSeatMonthlyMinor Int
   updatedAt          DateTime @updatedAt
 
+  @@id([plan, currency])
   @@map("plan_price")
 }
 
@@ -202,9 +218,11 @@ model PlatformSubscriptionPayment {
   billingCycle  String
   /// Seat count snapshot the price was computed from.
   seats         Int
-  /// Charge amount (minor units, NGN kobo).
+  /// Charge amount (minor units of `currency`: NGN kobo / USD cents).
   amountMinor   Int
-  /// Idempotency + Paystack transaction reference.
+  /// NGN (Paystack) | USD (Stripe).
+  currency      String    @default("NGN")
+  /// Idempotency + gateway transaction reference (Paystack ref / Stripe session).
   reference     String    @unique
   /// PENDING | PAID | FAILED.
   status        String    @default("PENDING")

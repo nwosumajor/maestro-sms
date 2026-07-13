@@ -16,13 +16,14 @@
 import { Pool } from "pg";
 import { randomUUID } from "node:crypto";
 import { PrismaClient, prisma } from "@sms/db";
-import { MODULES } from "@sms/types";
+import { MODULES, computeSubscriptionPriceMinor } from "@sms/types";
 import { BillingService } from "../../src/billing/billing.service";
 import { BillingDunningService } from "../../src/billing/billing-dunning.service";
 import { ModuleEntitlementService } from "../../src/foundation/module-entitlement.service";
 import { PrismaTenantService } from "../../src/foundation/prisma-tenant.service";
 import { AuditLogService } from "../../src/foundation/audit-log.service";
 import { PaystackService, type PaystackEvent } from "../../src/payments/paystack.service";
+import { StripeService } from "../../src/payments/stripe.service";
 import { PlanPricingService } from "../../src/billing/plan-pricing.service";
 import type { NotificationService } from "../../src/notifications/notification.service";
 import type { Principal } from "../../src/integrity/integrity.foundation";
@@ -85,6 +86,7 @@ d("BillingService integration (per-seat checkout, webhook, dunning, RLS)", () =>
       entitlements,
       notifications,
       new PaystackService(),
+      new StripeService(),
       dunning,
       planPricing,
     );
@@ -115,12 +117,16 @@ d("BillingService integration (per-seat checkout, webhook, dunning, RLS)", () =>
       `INSERT INTO platform_subscription_payment
          (id,"schoolId",plan,"billingCycle",seats,"amountMinor",reference,status,"initiatedById","updatedAt")
        VALUES ($1,$2,'STANDARD','TERM',400,$3,$4,'PENDING',$5,now())`,
-      [randomUUID(), SA, 400 * 20_000 * 4, REF, UA],
+      [randomUUID(), SA, computeSubscriptionPriceMinor("STANDARD", 400, "TERM"), REF, UA],
     );
 
     const event: PaystackEvent = {
       event: "charge.success",
-      data: { amount: 400 * 20_000 * 4, reference: REF, metadata: { kind: "subscription", schoolId: SA } },
+      data: {
+        amount: computeSubscriptionPriceMinor("STANDARD", 400, "TERM"),
+        reference: REF,
+        metadata: { kind: "subscription", schoolId: SA },
+      },
     };
     await billing.applySubscriptionPayment(event);
 
@@ -136,6 +142,46 @@ d("BillingService integration (per-seat checkout, webhook, dunning, RLS)", () =>
     await billing.applySubscriptionPayment(event);
     const after = (await subRow(SA))!.currentPeriodEnd;
     expect(new Date(after!).getTime()).toBe(new Date(before!).getTime());
+  });
+
+  it("a mismatched settlement NEVER activates: underpaid or wrong-currency → FAILED + audited", async () => {
+    const expected = computeSubscriptionPriceMinor("STANDARD", 400, "TERM");
+    const REF_UNDER = `SUB-under-${randomUUID().slice(0, 8)}`;
+    const REF_CCY = `SUB-ccy-${randomUUID().slice(0, 8)}`;
+    for (const ref of [REF_UNDER, REF_CCY]) {
+      await admin.query(
+        `INSERT INTO platform_subscription_payment
+           (id,"schoolId",plan,"billingCycle",seats,"amountMinor",reference,status,"initiatedById","updatedAt")
+         VALUES ($1,$2,'STANDARD','TERM',400,$3,$4,'PENDING',$5,now())`,
+        [randomUUID(), SA, expected, ref, UA],
+      );
+    }
+    const periodBefore = (await subRow(SA))?.currentPeriodEnd ?? null;
+
+    // Underpaid: gateway reports LESS than the quoted charge.
+    await billing.applySubscriptionPayment({
+      event: "charge.success",
+      data: { amount: expected - 1, reference: REF_UNDER, metadata: { kind: "subscription", schoolId: SA } },
+    });
+    // Wrong currency: right amount, different settlement currency.
+    await billing.applySubscriptionPayment({
+      event: "charge.success",
+      data: { amount: expected, currency: "USD", reference: REF_CCY, metadata: { kind: "subscription", schoolId: SA } },
+    });
+
+    for (const ref of [REF_UNDER, REF_CCY]) {
+      const pay = await admin.query(`SELECT status FROM platform_subscription_payment WHERE reference = $1`, [ref]);
+      expect(pay.rows[0].status).toBe("FAILED");
+    }
+    // The subscription period never moved.
+    const periodAfter = (await subRow(SA))?.currentPeriodEnd ?? null;
+    expect(String(periodAfter)).toBe(String(periodBefore));
+    // And the refusal is audited.
+    const audits = await admin.query(
+      `SELECT count(*)::int AS n FROM audit_log WHERE "schoolId" = $1 AND action = 'billing.subscription.payment.mismatch'`,
+      [SA],
+    );
+    expect(audits.rows[0].n).toBeGreaterThanOrEqual(2);
   });
 
   it("dunning flips an elapsed ACTIVE subscription PAST_DUE; entitlements drop to BASIC", async () => {

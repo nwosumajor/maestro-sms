@@ -1,11 +1,13 @@
 import { Module } from "@nestjs/common";
 import { PaystackService } from "./paystack.service";
+import { StripeService } from "./stripe.service";
 
-// Shared Paystack client. Imported by both FeesModule (parent->school invoices)
-// and BillingModule (school->platform subscriptions) so there is ONE place that
-// talks to Paystack and verifies its webhook signature.
+// Shared payment-gateway clients. Paystack (NGN) is imported by both FeesModule
+// (parent->school invoices) and BillingModule (school->platform subscriptions);
+// Stripe (USD) serves platform subscriptions only — ONE place per gateway that
+// talks to the API and verifies its webhook signature.
 @Module({
-  providers: [PaystackService],
-  exports: [PaystackService],
+  providers: [PaystackService, StripeService],
+  exports: [PaystackService, StripeService],
 })
 export class PaymentsModule {}

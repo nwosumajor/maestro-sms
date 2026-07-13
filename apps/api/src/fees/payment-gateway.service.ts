@@ -12,7 +12,8 @@
 // disabled path and signature verification are testable.
 // =============================================================================
 
-import { ForbiddenException, Inject, Injectable, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Inject, Injectable, ServiceUnavailableException } from "@nestjs/common";
+import type { SettlementAccountDto } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -24,6 +25,7 @@ import {
 import { BillingService } from "../billing/billing.service";
 import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
 import { PaystackService, type PaystackEvent } from "../payments/paystack.service";
+import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 
 @Injectable()
 export class PaymentGatewayService {
@@ -32,6 +34,7 @@ export class PaymentGatewayService {
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly paystack: PaystackService,
     private readonly billing: BillingService,
+    private readonly privileged: PrivilegedDatabaseService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -43,7 +46,7 @@ export class PaymentGatewayService {
     if (!this.paystack.isConfigured()) {
       throw new ServiceUnavailableException("Online payments are not configured");
     }
-    const { email, amountMinor, reference } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+    const { email, amountMinor, reference, subaccount } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const inv = await tx.invoice.findFirst({ where: { id: invoiceId } });
       if (!inv) throw new ForbiddenException("Invoice not found");
       // Payer must be able to see this invoice (their child's / own).
@@ -54,7 +57,18 @@ export class PaymentGatewayService {
       const balance = inv.totalMinor - paid;
       if (balance <= 0) throw new ForbiddenException("Nothing to pay");
       const user = await tx.user.findFirst({ where: { id: p.userId }, select: { email: true } });
-      return { email: user?.email ?? "payer@school", amountMinor: balance, reference: `PAY-${invoiceId.slice(0, 8)}-${Date.now()}` };
+      // The school's settlement subaccount (global registry, readable in-tenant):
+      // when configured, this charge SPLITS to the school's own bank.
+      const school = await tx.school.findFirst({
+        where: { id: p.schoolId },
+        select: { paystackSubaccountCode: true },
+      });
+      return {
+        email: user?.email ?? "payer@school",
+        amountMinor: balance,
+        reference: `PAY-${invoiceId.slice(0, 8)}-${Date.now()}`,
+        subaccount: school?.paystackSubaccountCode ?? undefined,
+      };
     });
 
     const { authorizationUrl } = await this.paystack.initialize({
@@ -62,8 +76,84 @@ export class PaymentGatewayService {
       amountMinor,
       reference,
       metadata: { kind: "invoice", invoiceId, schoolId: p.schoolId },
+      // Split settlement: money lands in the SCHOOL's bank; the school bears the
+      // gateway fee on its own collections. Unset → legacy platform settlement.
+      subaccount,
+      bearer: "subaccount",
     });
     return { authorizationUrl, reference };
+  }
+
+  /** The school's fee-settlement posture (never the full account number). */
+  async getSettlement(p: Principal): Promise<SettlementAccountDto> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const school = await tx.school.findFirst({
+        where: { id: p.schoolId },
+        select: { paystackSubaccountCode: true, settlementBankCode: true, settlementBankName: true, settlementAccountLast4: true },
+      });
+      return {
+        configured: !!school?.paystackSubaccountCode,
+        bankCode: school?.settlementBankCode ?? null,
+        bankName: school?.settlementBankName ?? null,
+        accountLast4: school?.settlementAccountLast4 ?? null,
+        subaccountCode: school?.paystackSubaccountCode ?? null,
+      };
+    });
+  }
+
+  /**
+   * Set the school's SETTLEMENT bank: creates a Paystack subaccount and stamps
+   * its code on the school. From then on, every parent fee charge splits to the
+   * school's own bank (platform keeps only PLATFORM_FEES_COMMISSION_PERCENT).
+   * Money-critical: fee.manage + step-up at the controller; audited. The school
+   * registry is global (app role SELECT-only), so the write uses the PRIVILEGED
+   * client. Full account numbers are NEVER stored — only the last 4 digits.
+   */
+  async setSettlement(
+    p: Principal,
+    input: { bankCode: string; accountNumber: string },
+  ): Promise<SettlementAccountDto> {
+    if (!this.paystack.isConfigured()) {
+      throw new ServiceUnavailableException("Online payments are not configured");
+    }
+    const client = this.privileged.client;
+    if (!client) {
+      throw new ServiceUnavailableException("Settlement management requires the privileged database configuration");
+    }
+    if (!/^\d{10}$/.test(input.accountNumber)) {
+      throw new BadRequestException("accountNumber must be a 10-digit NUBAN");
+    }
+    const school = await client.school.findFirst({ where: { id: p.schoolId }, select: { name: true } });
+    if (!school) throw new ServiceUnavailableException("School not found");
+
+    const { subaccountCode, bankName } = await this.paystack.createSubaccount({
+      businessName: school.name,
+      bankCode: input.bankCode,
+      accountNumber: input.accountNumber,
+    });
+    await client.school.update({
+      where: { id: p.schoolId },
+      data: {
+        paystackSubaccountCode: subaccountCode,
+        settlementBankCode: input.bankCode,
+        settlementBankName: bankName,
+        settlementAccountLast4: input.accountNumber.slice(-4),
+      },
+    });
+    await this.db.runAsTenant(this.ctx(p), (tx) =>
+      this.audit.record(
+        {
+          actorId: p.userId,
+          action: "fee.settlement.set",
+          entity: "school",
+          entityId: p.schoolId,
+          schoolId: p.schoolId,
+          metadata: { bankCode: input.bankCode, accountLast4: input.accountNumber.slice(-4), subaccountCode },
+        },
+        tx,
+      ),
+    );
+    return this.getSettlement(p);
   }
 
   /**

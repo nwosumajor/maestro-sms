@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import type { PublicBrandingDto } from "@sms/types";
 import { LoginForm } from "@/components/auth/LoginForm";
+import { LoginShowcase } from "@/components/auth/LoginShowcase";
+
 
 export const dynamic = "force-dynamic";
 
@@ -31,58 +33,10 @@ export default async function LoginPage({ searchParams }: { searchParams: { scho
 
   return (
     <main className="grid min-h-screen lg:grid-cols-[1.05fr_1fr]">
-      {/* Identity panel — the console's thesis. Hidden on small screens. */}
-      <aside className="relative hidden overflow-hidden bg-primary text-primary-foreground lg:flex lg:flex-col lg:justify-between lg:p-12">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 opacity-[0.18]"
-          style={{
-            backgroundImage:
-              "linear-gradient(hsl(0 0% 100% / 0.6) 1px, transparent 1px), linear-gradient(90deg, hsl(0 0% 100% / 0.6) 1px, transparent 1px)",
-            backgroundSize: "32px 32px",
-          }}
-        />
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -right-24 -top-24 h-96 w-96 rounded-full bg-white/10 blur-3xl"
-        />
-        {/* The red margin rule over the squared paper — the exercise-book page, literal. */}
-        <div aria-hidden className="pointer-events-none absolute inset-y-0 left-8 w-px bg-rule/80" />
-        <div className="relative flex items-center gap-3">
-          {branding?.logoUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element -- remote tenant logo, not a build asset
-            <img src={branding.logoUrl} alt={`${schoolName} logo`} className="h-11 w-11 rounded-xl bg-white/10 object-contain p-1.5" />
-          ) : (
-            <div className="grid h-11 w-11 place-items-center rounded-xl bg-white/12 text-lg font-bold ring-1 ring-inset ring-white/20">
-              {initial}
-            </div>
-          )}
-          <span className="text-sm font-semibold tracking-tight">{schoolName}</span>
-        </div>
-
-        <div className="relative max-w-md">
-          <p className="eyebrow text-primary-foreground/70">School operations, in one register</p>
-          <h1 className="mt-3 text-4xl font-semibold leading-[1.1] tracking-tight">
-            Every class, fee, and record — kept in order.
-          </h1>
-          <p className="mt-4 text-sm leading-relaxed text-primary-foreground/80">
-            Attendance, timetables, results, and approvals for your whole school, with the
-            privacy and least-privilege controls a school owes its students.
-          </p>
-        </div>
-
-        <dl className="relative grid grid-cols-3 gap-6 border-t border-white/15 pt-6 text-primary-foreground/90">
-          {[
-            ["1 sign-in", "for every role"],
-            ["Tenant-isolated", "by design"],
-            ["Audit-logged", "end to end"],
-          ].map(([stat, label]) => (
-            <div key={stat}>
-              <dt className="text-sm font-semibold tracking-tight">{stat}</dt>
-              <dd className="mt-0.5 text-xs text-primary-foreground/65">{label}</dd>
-            </div>
-          ))}
-        </dl>
+      {/* Identity panel — FULL-BLEED sliding photography; text takes each
+          image's own colour palette. No brand colour field at all. */}
+      <aside className="relative hidden overflow-hidden lg:block">
+        <LoginShowcase logoUrl={branding?.logoUrl ?? null} schoolName={schoolName} initial={initial} />
       </aside>
 
       {/* Sign-in panel */}

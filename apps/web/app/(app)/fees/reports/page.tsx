@@ -1,4 +1,5 @@
-import type { FeeReportBucketDto, FeeReportDto, Serialized } from "@sms/types";
+import type { FeeReportBucketDto, FeeReportDto, Serialized, SettlementAccountDto } from "@sms/types";
+import { SettlementAccountCard } from "@/components/fees/SettlementAccountCard";
 import { hasPermission } from "@/lib/permissions";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -18,7 +19,11 @@ export default async function FinanceReportsPage() {
   const session = await auth();
   const user = session!.user;
   if (!hasPermission(user.permissions, "fee.read")) redirect("/dashboard");
-  const r = await apiGet<Report>("/fees/reports");
+  const canManage = hasPermission(user.permissions, "fee.manage");
+  const [r, settlement] = await Promise.all([
+    apiGet<Report>("/fees/reports"),
+    canManage ? apiGet<SettlementAccountDto>("/fees/settlement") : Promise.resolve(null),
+  ]);
   if (!r || r.scope !== "school") redirect("/fees");
 
   const ageRows: [string, Bucket][] = [
@@ -38,6 +43,8 @@ export default async function FinanceReportsPage() {
           </div>
           <Link href="/fees" className="text-sm text-muted-foreground hover:underline">← Fees</Link>
         </div>
+
+        {settlement && <SettlementAccountCard initial={settlement} />}
 
         <Card>
           <CardHeader>

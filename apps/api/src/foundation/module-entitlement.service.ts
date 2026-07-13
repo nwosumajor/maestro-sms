@@ -54,6 +54,7 @@ interface Resolved {
   currentPeriodEnd: Date | null;
   seats: number | null;
   priceMinor: number | null;
+  currency: string | null;
 }
 
 @Injectable()
@@ -99,6 +100,7 @@ export class ModuleEntitlementService implements OnModuleInit {
           currentPeriodEnd: true,
           seats: true,
           priceMinor: true,
+          currency: true,
         },
       }),
     );
@@ -122,6 +124,7 @@ export class ModuleEntitlementService implements OnModuleInit {
       currentPeriodEnd,
       seats: row?.seats ?? null,
       priceMinor: row?.priceMinor ?? null,
+      currency: row?.currency ?? null,
     };
     this.cache.set(schoolId, { at: Date.now(), value });
     return value;
@@ -139,6 +142,7 @@ export class ModuleEntitlementService implements OnModuleInit {
       currentPeriodEnd: r.currentPeriodEnd,
       seats: r.seats,
       priceMinor: r.priceMinor,
+      currency: r.currency,
       effectivePlan: r.effectivePlan,
     };
   }

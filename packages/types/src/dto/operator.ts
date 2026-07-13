@@ -122,6 +122,19 @@ export interface PlatformAuditPageDto {
   nextCursor: string | null;
 }
 
+/** A lapsed tenant on the operator's red billing banner (GET /operator/billing-alerts). */
+export interface OperatorBillingAlertDto {
+  schoolId: string;
+  name: string;
+  slug: string;
+  plan: string;
+  currentPeriodEnd: Date | null;
+  /** Whole days past the paid period end. */
+  daysPastDue: number;
+  /** True once past the grace window — the school is limited to the Standard floor. */
+  downgraded: boolean;
+}
+
 /** An enrolled student as seen by the super_admin cross-tenant student view. */
 export interface OperatorStudentDto {
   id: string;

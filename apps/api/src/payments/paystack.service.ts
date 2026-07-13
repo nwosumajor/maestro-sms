@@ -19,6 +19,8 @@ export interface PaystackEvent {
   event: string;
   data: {
     amount: number;
+    /** ISO currency of the charge (e.g. "NGN"). */
+    currency?: string;
     reference: string;
     metadata?: Record<string, unknown>;
   };
@@ -38,12 +40,17 @@ export class PaystackService {
     return s;
   }
 
-  /** Start a hosted Paystack checkout; returns the authorization URL. */
+  /** Start a hosted Paystack checkout; returns the authorization URL.
+   *  With `subaccount` set, Paystack SPLITS settlement to that subaccount's bank
+   *  (parent fees → the school's own account); `bearer` says who pays Paystack's
+   *  transaction fee ("subaccount" = the school, on their own collections). */
   async initialize(input: {
     email: string;
     amountMinor: number;
     reference: string;
     metadata: Record<string, unknown>;
+    subaccount?: string;
+    bearer?: "account" | "subaccount";
   }): Promise<{ authorizationUrl: string }> {
     const secret = this.secret();
     const res = await fetch(`${PAYSTACK}/transaction/initialize`, {
@@ -54,6 +61,7 @@ export class PaystackService {
         amount: input.amountMinor,
         reference: input.reference,
         metadata: input.metadata,
+        ...(input.subaccount ? { subaccount: input.subaccount, bearer: input.bearer ?? "subaccount" } : {}),
       }),
     });
     if (!res.ok) {
@@ -62,6 +70,37 @@ export class PaystackService {
     }
     const json = (await res.json()) as { data: { authorization_url: string } };
     return { authorizationUrl: json.data.authorization_url };
+  }
+
+  /**
+   * Create a settlement SUBACCOUNT (the school's own bank) for split payments.
+   * `percentageCharge` is the PLATFORM's share of each split transaction
+   * (PLATFORM_FEES_COMMISSION_PERCENT env, default 0). Returns the subaccount
+   * code to stamp on future fee charges.
+   */
+  async createSubaccount(input: {
+    businessName: string;
+    bankCode: string;
+    accountNumber: string;
+  }): Promise<{ subaccountCode: string; bankName: string }> {
+    const secret = this.secret();
+    const percentageCharge = Number(process.env.PLATFORM_FEES_COMMISSION_PERCENT ?? 0);
+    const res = await fetch(`${PAYSTACK}/subaccount`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        business_name: input.businessName,
+        settlement_bank: input.bankCode,
+        account_number: input.accountNumber,
+        percentage_charge: Number.isFinite(percentageCharge) ? percentageCharge : 0,
+      }),
+    });
+    if (!res.ok) {
+      this.logger.error(`Paystack subaccount create failed: ${res.status}`);
+      throw new ServiceUnavailableException("Could not verify the bank account with the payment provider");
+    }
+    const json = (await res.json()) as { data: { subaccount_code: string; settlement_bank: string } };
+    return { subaccountCode: json.data.subaccount_code, bankName: json.data.settlement_bank };
   }
 
   /**

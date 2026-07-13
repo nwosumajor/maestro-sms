@@ -17,7 +17,11 @@ const TYPE_VARIANT: Record<string, "default" | "secondary" | "destructive" | "ou
   PAYMENT_RECEIVED: "secondary",
   DOCUMENT_AVAILABLE: "secondary",
   ANNOUNCEMENT: "default",
+  OPERATOR_ALERT: "destructive",
 };
+
+/** Types rendered as RED alerts (destructive card frame, not just the badge). */
+const ALERT_TYPES = new Set(["OPERATOR_ALERT"]);
 
 export function NotificationInbox({ initial }: { initial: InboxData }) {
   const [items, setItems] = React.useState(initial.items);
@@ -55,15 +59,26 @@ export function NotificationInbox({ initial }: { initial: InboxData }) {
       ) : (
         <div className="space-y-2">
           {items.map((n) => (
-            <Card key={n.id} className={cn(!n.readAt && "border-primary/40 bg-primary/[0.03]")}>
+            <Card
+              key={n.id}
+              className={cn(
+                !n.readAt && "border-primary/40 bg-primary/[0.03]",
+                ALERT_TYPES.has(n.type) && "border-destructive/50 bg-destructive/[0.06]",
+              )}
+            >
               <CardContent className="flex items-start justify-between gap-4 p-4">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    {!n.readAt && <span className="h-2 w-2 shrink-0 rounded-full bg-primary" aria-label="unread" />}
-                    <span className="font-medium">{n.title}</span>
+                    {!n.readAt && (
+                      <span
+                        className={cn("h-2 w-2 shrink-0 rounded-full", ALERT_TYPES.has(n.type) ? "bg-destructive" : "bg-primary")}
+                        aria-label="unread"
+                      />
+                    )}
+                    <span className={cn("font-medium", ALERT_TYPES.has(n.type) && "text-destructive")}>{n.title}</span>
                     <Badge variant={TYPE_VARIANT[n.type] ?? "outline"}>{titleCase(n.type)}</Badge>
                   </div>
-                  <p className="mt-1 text-sm text-muted-foreground">{n.body}</p>
+                  <p className="mt-1 whitespace-pre-line text-sm text-muted-foreground">{n.body}</p>
                   <p className="mt-1 text-xs text-muted-foreground">{dateTime(n.createdAt)}</p>
                 </div>
                 {!n.readAt && (

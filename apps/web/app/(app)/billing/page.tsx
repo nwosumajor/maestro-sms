@@ -64,7 +64,8 @@ export default async function BillingPage() {
                   {data.subscription.currentPeriodEnd
                     ? `Renews ${shortDate(data.subscription.currentPeriodEnd)}`
                     : "No active paid period"}
-                  {data.subscription.priceMinor != null && ` · Last charged ${money(data.subscription.priceMinor)}`}
+                  {data.subscription.priceMinor != null &&
+                    ` · Last charged ${money(data.subscription.priceMinor, data.subscription.currency ?? "NGN")}`}
                 </CardDescription>
               </CardHeader>
               {data.subscription.status === "PAST_DUE" && (
@@ -111,7 +112,7 @@ export default async function BillingPage() {
                             <td className="py-2 pr-4">{pmt.plan}</td>
                             <td className="py-2 pr-4">{titleCase(pmt.billingCycle)}</td>
                             <td className="py-2 pr-4 tabular-nums">{pmt.seats}</td>
-                            <td className="py-2 pr-4 tabular-nums">{money(pmt.amountMinor)}</td>
+                            <td className="py-2 pr-4 tabular-nums">{money(pmt.amountMinor, pmt.currency)}</td>
                             <td className="py-2 pr-4">
                               <Badge variant={PAYMENT_VARIANT[pmt.status] ?? "outline"}>{titleCase(pmt.status)}</Badge>
                             </td>

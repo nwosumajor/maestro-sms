@@ -163,7 +163,9 @@ const ROLE_PERMS: Record<string, string[]> = {
   // Platform owner: cross-tenant operator console + audited impersonation.
   // super_admin is the cross-tenant operator; the ONLY game permission it holds
   // is the cross-school Ultimate admin (+ leaderboard read to view it).
-  super_admin: ["platform.operate", "billing.dunning.run", "security.audit.read", "directory.search", "game.ultimate.admin", "game.leaderboard.read", "scholarship.admin", "scholarship.read"],
+  // notification.read: the operator's in-app inbox (new-onboarding-request
+  // alerts). Self-scoped reads only — grants no reach into tenant data.
+  super_admin: ["platform.operate", "billing.dunning.run", "security.audit.read", "directory.search", "game.ultimate.admin", "game.leaderboard.read", "scholarship.admin", "scholarship.read", "notification.read"],
   // Board: read-only oversight + ultimate veto on workflows.
   board: ["poll.vote", "discussion.participate", "discipline.file", "form.respond", "class.read", "grade.read", "integrity.report.read", "workflow.read", "workflow.veto", "notification.read", "fee.read", "document.read", "timetable.read", "message.read", "message.send", "event.read", "announcement.read", "billing.read", "scholarship.read",
   ],
