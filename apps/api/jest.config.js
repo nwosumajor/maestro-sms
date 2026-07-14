@@ -11,6 +11,11 @@ module.exports = {
     "^@sms/game-engine$": "<rootDir>/../../packages/game-engine/src/index.ts",
   },
   transform: {
-    "^.+\\.ts$": ["ts-jest", { tsconfig: "<rootDir>/tsconfig.json" }],
+    // The app tsconfig is `module: nodenext` (modern resolution, matches the
+    // build). Jest runs on CommonJS, so tests compile through tsconfig.spec.json
+    // — it EXTENDS tsconfig.json (inheriting strict, decorators, emitDecorator-
+    // Metadata, types, etc.) and only flips module/moduleResolution back to a
+    // CommonJS-compatible pair so ts-jest emits requireable CJS.
+    "^.+\\.ts$": ["ts-jest", { tsconfig: "<rootDir>/tsconfig.spec.json" }],
   },
 };
