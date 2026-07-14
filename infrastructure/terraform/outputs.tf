@@ -10,6 +10,11 @@ output "rds_address" {
   value = aws_db_instance.main.address
 }
 
+output "rds_replica_addresses" {
+  description = "Read-replica endpoints (empty when db_read_replica_count = 0)."
+  value       = aws_db_instance.replica[*].address
+}
+
 output "redis_primary_endpoint" {
   value = aws_elasticache_replication_group.main.primary_endpoint_address
 }

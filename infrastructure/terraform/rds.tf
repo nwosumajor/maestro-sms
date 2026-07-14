@@ -50,3 +50,27 @@ resource "aws_db_instance" "main" {
 
   tags = { Name = "${local.name}-pg" }
 }
+
+# =============================================================================
+# Read replica(s) — offload read/report/analytics load off the primary writer,
+# paired with the app's `runAsTenantReadOnly` path (DATABASE_REPLICA_URL). 0 by
+# default so small deployments stay single-DB; raise db_read_replica_count as
+# read load grows (Aurora would allow up to 15). Replicas inherit the primary's
+# roles, so the app connects with the same least-privilege user; RLS applies.
+# =============================================================================
+resource "aws_db_instance" "replica" {
+  count = var.db_read_replica_count
+
+  identifier          = "${local.name}-pg-replica-${count.index}"
+  replicate_source_db = aws_db_instance.main.identifier
+  instance_class      = coalesce(var.db_replica_instance_class, var.db_instance_class)
+
+  storage_encrypted            = true
+  vpc_security_group_ids       = [aws_security_group.rds.id]
+  publicly_accessible          = false
+  performance_insights_enabled = true
+  auto_minor_version_upgrade   = true
+  skip_final_snapshot          = true
+
+  tags = { Name = "${local.name}-pg-replica-${count.index}" }
+}

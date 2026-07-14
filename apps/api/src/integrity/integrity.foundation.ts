@@ -43,6 +43,14 @@ export interface Principal extends TenantContext {
  */
 export interface TenantDatabase {
   runAsTenant<T>(ctx: TenantContext, fn: (tx: TenantTx) => Promise<T>): Promise<T>;
+  /**
+   * Like `runAsTenant`, but routed to the READ REPLICA (when `DATABASE_REPLICA_URL`
+   * is configured) and marked READ ONLY. For aggregate/list/report endpoints that
+   * never write — offloads read load from the primary writer at scale. The same
+   * tenant GUC + RLS apply. Falls back to the primary when no replica is set, so
+   * it is always safe to use for a read path. // SECURITY: still tenant-isolated.
+   */
+  runAsTenantReadOnly<T>(ctx: TenantContext, fn: (tx: TenantTx) => Promise<T>): Promise<T>;
 }
 
 export interface AuditEntry {

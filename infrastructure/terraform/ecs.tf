@@ -87,6 +87,7 @@ resource "aws_ecs_task_definition" "api" {
     ] : [])
     secrets = concat([
       { name = "DATABASE_URL", valueFrom = local.secret_arns["db-app-url"] },
+      { name = "DATABASE_REPLICA_URL", valueFrom = local.secret_arns["db-replica-url"] },
       { name = "AUTH_SECRET", valueFrom = local.secret_arns["auth-secret"] },
       { name = "DATA_ENCRYPTION_KEY", valueFrom = local.secret_arns["data-encryption-key"] },
       { name = "PAYSTACK_SECRET_KEY", valueFrom = local.secret_arns["paystack-secret-key"] },

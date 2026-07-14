@@ -5,18 +5,39 @@
 export * from "@prisma/client";
 import { PrismaClient } from "@prisma/client";
 
-const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
+const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient; readPrisma?: PrismaClient };
+
+const logLevels: ("warn" | "error")[] =
+  process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"];
 
 /**
- * App-wide Prisma client. The application connects as the least-privilege role
- * (`major_user`); migrations run separately under the privileged role. Tenant
- * isolation (RLS) is applied per-request via `SET LOCAL app.current_school_id`
- * — see the API's tenant runner, not this client directly.
+ * App-wide (PRIMARY / writer) Prisma client. The application connects as the
+ * least-privilege role (`major_user`); migrations run separately under the
+ * privileged role. Tenant isolation (RLS) is applied per-request via
+ * `SET LOCAL app.current_school_id` — see the API's tenant runner, not this
+ * client directly. In production `DATABASE_URL` should point at the connection
+ * pooler (RDS Proxy / PgBouncer, transaction mode) — the tenant GUC is set with
+ * `set_config(..., true)` (transaction-local), which is pooler-safe.
  */
 export const prisma =
   globalForPrisma.prisma ??
-  new PrismaClient({
-    log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
-  });
+  new PrismaClient({ log: logLevels });
 
-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+/**
+ * READ-REPLICA client for scaling read load off the primary writer. When
+ * `DATABASE_REPLICA_URL` is set (e.g. an Aurora reader endpoint), the API's
+ * read-only tenant path (`runAsTenantReadOnly`) routes aggregate/list queries
+ * here; when it is UNSET this IS the primary client, so single-database
+ * deployments behave identically with zero code changes. RLS + the per-request
+ * GUC apply on the replica exactly as on the primary.
+ */
+export const readPrisma: PrismaClient =
+  globalForPrisma.readPrisma ??
+  (process.env.DATABASE_REPLICA_URL
+    ? new PrismaClient({ datasourceUrl: process.env.DATABASE_REPLICA_URL, log: logLevels })
+    : prisma);
+
+if (process.env.NODE_ENV !== "production") {
+  globalForPrisma.prisma = prisma;
+  globalForPrisma.readPrisma = readPrisma;
+}
