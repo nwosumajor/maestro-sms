@@ -45,6 +45,7 @@ export default async function HelpPage() {
   const isStaffAdmin = can("rbac.manage") || can("fee.manage");
   const isTeacher = can("grade.write") || can("attendance.write");
   const isParentOrStudent = !isStaffAdmin && !isTeacher && (can("fee.read") || can("document.read"));
+  const canHostGames = can("game.quiz.host");
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="help" permissions={user.permissions}>
@@ -106,6 +107,36 @@ export default async function HelpPage() {
               { title: "Pay fees online", body: "Fees: open an invoice and pay the outstanding balance by card — the receipt lands in Notifications and Documents." },
               { title: "Download documents", body: "Documents: report cards, receipts and certificates are issued here as secure downloads." },
               { title: "Message the school", body: "Messages: write to your teachers or the school office; replies appear here and in Notifications." },
+            ]}
+          />
+        )}
+
+        {can("game.leaderboard.read") && (
+          <Guide
+            title="Games — learning through play"
+            description="Curriculum-themed games for engagement and friendly competition. They only ever produce points and practice — never a grade or a penalty."
+            steps={[
+              { title: "Find the games", body: "Games in the left menu lists every game. Each has its own screen with a live leaderboard that updates as you play." },
+              {
+                title: "Live Quiz",
+                body: canHostGames
+                  ? "Author a themed multiple-choice quiz (Geography, Science, Art, Literature) at an EASY/MEDIUM/HARD difficulty, then host a session for one of your classes — students join and answer against a timer, scoring more for faster correct answers. Four starter quizzes are ready to host, and you can edit or delete your own."
+                  : "When your teacher hosts a quiz for your class, join it and answer each question before the timer runs out — the quicker and more accurate you are, the higher you score.",
+              },
+              {
+                title: "Hangman & Typing Race",
+                body: canHostGames
+                  ? "Host a Hangman round (students guess the word before the lives run out) or a Typing Race (type the shared passage fastest and most accurately) for a class; difficulty sets the challenge. You can supply your own word or passage, or let the game pick one."
+                  : "Join a Hangman round or Typing Race your teacher opens — guess letters to reveal the word, or type the passage as fast and accurately as you can. Speed and accuracy both count.",
+              },
+              {
+                title: "Checkers & Chess",
+                body: "Challenge a classmate directly: create a game and share it (or join an open one), then take turns. Each game carries a chess clock — pick the time control (Classical, Rapid or Blitz) when you start. If your opponent's clock runs out, you can claim the win.",
+              },
+              {
+                title: "Fair play by design",
+                body: "Every move, guess and answer is validated by the server, so the games are cheat-resistant — and nothing a game does ever affects a mark, a grade or a record.",
+              },
             ]}
           />
         )}

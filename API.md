@@ -1,6 +1,6 @@
 # API Reference — School Management System
 
-Complete HTTP endpoint reference for the NestJS API (`apps/api`). **371 endpoints across 56 controllers.**
+Complete HTTP endpoint reference for the NestJS API (`apps/api`). **523 endpoints across 70 controllers.**
 
 ## Conventions
 
@@ -417,7 +417,13 @@ All gated by 🔑 `platform.operate`.
 
 ---
 
-## Dead & Wounded games 📦 `games`
+## Games 📦 `games`
+
+All game tables are tenant-scoped + RLS, relationship-scoped (404-not-403),
+audited, and server-authoritative (secrets/answers/moves validated server-side;
+never trusted from the client). Pure logic lives in `@sms/game-engine`.
+
+### Dead & Wounded (number-guessing family)
 
 | Area | Endpoints | Gate | Purpose |
 |---|---|---|---|
@@ -428,6 +434,24 @@ All gated by 🔑 `platform.operate`.
 | League / Knockout | `POST /competitions` · `GET /competitions` · `/:id` · `POST /:id/{start,sweep,cancel}` | 🔑 `game.league.create` / `leaderboard.read` | Round-robin / bracket |
 | Ultimate (cross-school) | `POST /ultimate/competitions` · `/:id/{cancel,enroll,enter,guess}` · `PUT /ultimate/consent` · `GET /ultimate/competitions` · `/:id/{leaderboard,me}` | 🔑 `game.ultimate.admin` / `enroll` / `play` / `leaderboard.read` | Cross-school arena (two-tier consent) |
 | Settings | `GET · PUT /game-settings` | 🔑 `game.leaderboard.read` / `game.settings.manage` | Per-school game config |
+
+### Classroom games
+
+Curriculum-themed engagement games. The first three are **class-hosted** (a
+teacher hosts for a class; enrolled students play). Difficulty = EASY/MEDIUM/HARD.
+
+| Area | Endpoints | Gate | Purpose |
+|---|---|---|---|
+| Live Quiz | `POST · GET /quizzes` · `GET · PUT · DELETE /quizzes/:id` · `POST /quiz-sessions` · `GET /quiz-sessions` · `GET /quiz-sessions/:id` · `POST /quiz-sessions/:id/{join,next,answer,end}` | 🔑 `game.quiz.host` (author/host) / `game.play` (join/answer) / `game.leaderboard.read` | Kahoot-style themed quiz (Geography/Science/Art/Literature/General). Speed-scored; correct answer hidden from players until a question closes. DELETE = soft-archive. |
+| Hangman | `POST · GET /hangman` · `GET /hangman/:id` · `POST /hangman/:id/{join,start,guess,end}` | 🔑 `game.hangman.host` / `game.play` / `game.leaderboard.read` | Letter-guessing; word server-only while live, revealed on finish. Difficulty sets lives. |
+| Typing Race | `POST · GET /typing-races` · `GET /typing-races/:id` · `POST /typing-races/:id/{join,start,progress,end}` | 🔑 `game.typing.host` / `game.play` / `game.leaderboard.read` | Passage typing; net WPM computed server-side from reported text + server-measured elapsed. |
+| Checkers | `POST · GET /checkers` · `GET /checkers/:id` · `POST /checkers/:id/{join,move,resign,claim-time}` | 🔑 `game.play` / `game.leaderboard.read` | 2-player 8×8 draughts (peer duel). Moves engine-validated. |
+| Chess | `POST · GET /chess` · `GET /chess/:id` · `POST /chess/:id/{join,move,resign,claim-time}` | 🔑 `game.play` / `game.leaderboard.read` | Full-rules 2-player chess (peer duel): check/mate/stalemate/draw, castling, en passant, promotion. |
+
+Board games (checkers/chess) carry a **per-player chess clock** — difficulty sets
+the time control (Classical 15+10 / Rapid 5+5 / Blitz 3+2); a move deducts the
+turn's elapsed time and adds the increment, a flag-fall loses, and `claim-time`
+lets the opponent claim once the mover's clock hits zero.
 
 ---
 
