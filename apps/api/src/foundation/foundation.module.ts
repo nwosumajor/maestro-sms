@@ -13,6 +13,7 @@ import { ModuleEntitlementService } from "./module-entitlement.service";
 import { AuthService } from "./auth.service";
 import { AuthController } from "./auth.controller";
 import { RedisPubSubService } from "../common/redis-pubsub.service";
+import { TenantRateLimitService } from "../common/tenant-rate-limit.service";
 
 /**
  * The real foundation: tenant-scoped DB runner, durable audit log, NDPR consent,
@@ -28,6 +29,7 @@ import { RedisPubSubService } from "../common/redis-pubsub.service";
     { provide: AUDIT_LOG_SERVICE, useClass: AuditLogService },
     { provide: CONSENT_SERVICE, useClass: ConsentService },
     RedisPubSubService,
+    TenantRateLimitService,
     ModuleEntitlementService,
     AuthService,
     // EMBEDDING_PROVIDER intentionally unbound — prose similarity is skipped

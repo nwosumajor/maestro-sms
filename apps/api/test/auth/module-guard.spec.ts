@@ -19,12 +19,16 @@ import { STEPUP_KEY } from "../../src/auth/require-stepup.decorator";
 
 function makeCtx(): ExecutionContext {
   const req = { headers: { authorization: "Bearer token" } };
+  const res = { setHeader: jest.fn() };
   return {
-    switchToHttp: () => ({ getRequest: () => req }),
+    switchToHttp: () => ({ getRequest: () => req, getResponse: () => res }),
     getHandler: () => null,
     getClass: () => null,
   } as unknown as ExecutionContext;
 }
+
+// Rate limiter that always allows (the default for these module-gate tests).
+const allowRate = { consume: jest.fn().mockResolvedValue({ allowed: true, limit: 1200, remaining: 1199, resetMs: 60_000 }) };
 
 function makeReflector(requiredModule: string): Reflector {
   const map: Record<string, unknown> = {
@@ -44,6 +48,7 @@ describe("PermissionGuard — module entitlement gate", () => {
       {} as never,
       {} as never,
       modules as never,
+      allowRate as never,
     );
     await expect(guard.canActivate(makeCtx())).rejects.toThrow(NotFoundException);
     expect(modules.isEnabled).toHaveBeenCalledWith("s", "fees");
@@ -56,7 +61,23 @@ describe("PermissionGuard — module entitlement gate", () => {
       {} as never,
       {} as never,
       modules as never,
+      allowRate as never,
     );
     await expect(guard.canActivate(makeCtx())).resolves.toBe(true);
+  });
+
+  it("429s when the tenant is over its per-school rate budget (before any module/DB work)", async () => {
+    const modules = { isEnabled: jest.fn().mockResolvedValue(true) };
+    const denyRate = { consume: jest.fn().mockResolvedValue({ allowed: false, limit: 100, remaining: 0, resetMs: 30_000 }) };
+    const guard = new PermissionGuard(
+      makeReflector("fees"),
+      {} as never,
+      {} as never,
+      modules as never,
+      denyRate as never,
+    );
+    await expect(guard.canActivate(makeCtx())).rejects.toMatchObject({ status: 429 });
+    // Rejected cheaply — the module gate never ran.
+    expect(modules.isEnabled).not.toHaveBeenCalled();
   });
 });
