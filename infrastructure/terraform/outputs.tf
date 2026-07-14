@@ -15,6 +15,11 @@ output "rds_replica_addresses" {
   value       = aws_db_instance.replica[*].address
 }
 
+output "rds_proxy_endpoint" {
+  description = "RDS Proxy pooler endpoint (empty when enable_rds_proxy = false)."
+  value       = aws_db_proxy.main[*].endpoint
+}
+
 output "redis_primary_endpoint" {
   value = aws_elasticache_replication_group.main.primary_endpoint_address
 }

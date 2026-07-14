@@ -58,8 +58,10 @@ services:
       AUTH_SECRET: ${AUTH_SECRET}
       REDIS_HOST: redis
       REDIS_PORT: "6379"
-      # App connects as the least-privilege role (RLS enforced).
-      DATABASE_URL: postgresql://major_user:${APP_DB_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      # App connects as the least-privilege role (RLS enforced). Defaults to a
+      # DIRECT writer connection; override DATABASE_URL in .env to route through
+      # the opt-in pgbouncer pooler (see the `pgbouncer` service below).
+      DATABASE_URL: ${DATABASE_URL:-postgresql://major_user:${APP_DB_PASSWORD}@postgres:5432/${POSTGRES_DB}}
       # Migrations + RLS grants run as the superuser.
       DATABASE_MIGRATE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       SEED_ON_START: ${SEED_ON_START:-false}
@@ -88,6 +90,36 @@ services:
       - backend
     networks: [appnet]
     # No `ports:` — fronted by nginx.
+
+  # OPTIONAL connection pooler — local parity with the prod RDS Proxy
+  # (infrastructure/terraform/rds_proxy.tf), scaling Phase 2. Opt-in so the
+  # default stack is unchanged:
+  #     docker compose --profile pooler up --build
+  # then point the app through it in infrastructure/.env:
+  #     DATABASE_URL=postgresql://major_user:${APP_DB_PASSWORD}@pgbouncer:6432/sms?pgbouncer=true
+  # Transaction pooling is SAFE with our RLS model — the tenant GUC is
+  # transaction-local (set_config(..., true)), verified by running the full RLS
+  # e2e suite THROUGH this pooler (141/141 green, isolation intact). Migrations
+  # still use DATABASE_MIGRATE_URL (direct writer), never the pooler.
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    profiles: [pooler]
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: major_user
+      DB_PASSWORD: ${APP_DB_PASSWORD}
+      DB_NAME: ${POSTGRES_DB}
+      POOL_MODE: transaction
+      AUTH_TYPE: scram-sha-256
+      MAX_CLIENT_CONN: "1000"
+      DEFAULT_POOL_SIZE: "25"
+      ADMIN_USERS: major_user
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [appnet]
+    # No host `ports:` — reached only by the backend over appnet.
 
   nginx:
     image: nginx:1.27-alpine

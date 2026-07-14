@@ -74,6 +74,12 @@ variable "db_multi_az" {
   default     = true
 }
 
+variable "enable_rds_proxy" {
+  description = "Provision an RDS Proxy connection pooler and route the app (DATABASE_URL) through it. Off by default (small deployments connect direct); turn on to decouple Postgres connection count from ECS task count at scale."
+  type        = bool
+  default     = false
+}
+
 variable "db_name" {
   description = "Application database name."
   type        = string
