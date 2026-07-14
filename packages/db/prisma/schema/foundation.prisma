@@ -136,6 +136,9 @@ model School {
   liveQuizSessions     LiveQuizSession[]
   liveQuizParticipants LiveQuizParticipant[]
   liveQuizAnswers      LiveQuizAnswer[]
+  // Hangman (classroom letter-guessing)
+  hangmanGames         HangmanGame[]
+  hangmanPlayers       HangmanPlayer[]
   // Ultimate (cross-school) — ONLY the tenant-scoped governance/bridge tables
   // relate back to School; the cross-tenant arena tables deliberately do not.
   ultimateEnrollments  UltimateEnrollment[]

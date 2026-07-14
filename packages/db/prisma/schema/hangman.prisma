@@ -1,0 +1,79 @@
+// =============================================================================
+// Hangman — durable records (classroom letter-guessing game)
+// =============================================================================
+// A teacher HOSTS a hangman round for a class around ONE server-only word (from
+// the built-in word bank, or teacher-supplied); enrolled students each play
+// their OWN board of that word in PARALLEL (own lives, own guessed letters), and
+// whoever solves with the fewest wrong guesses (then earliest) wins. Difficulty
+// sets the lives + word-length band (see @sms/game-engine hangman.ts). All
+// tenant-scoped (non-null schoolId) + RLS (65_hangman_rls.sql); relationship
+// scoping (host = teacher of the class; players = enrolled students) is enforced
+// in HangmanService. 404-not-403 cross-tenant.
+//
+// SECURITY (spec §9): HangmanGame.word is server-only — never serialized to any
+// client while the round is live (each player sees only their MASKED word). It is
+// REVEALED once the round finishes (the answer is the educational payoff) and
+// retained as the round record. Every mutation is audit-logged (Golden Rule #5).
+// =============================================================================
+
+enum HangmanGameStatus {
+  LOBBY
+  ACTIVE
+  FINISHED
+}
+
+/// One hangman round for a class around a single server-only word.
+model HangmanGame {
+  id           String            @id @default(uuid()) @db.Uuid
+  schoolId     String            @db.Uuid
+  classId      String            @db.Uuid
+  hostId       String            @db.Uuid
+  /// EASY | MEDIUM | HARD — drives lives + word length (engine).
+  difficulty   String
+  /// SECURITY: the target word (UPPER-CASE). Server-only WHILE LIVE; revealed +
+  /// retained on finish (the answer is the round's payoff, not a lasting secret).
+  word         String?
+  status       HangmanGameStatus @default(LOBBY)
+  winnerUserId String?           @db.Uuid
+
+  startedAt  DateTime?
+  finishedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  school  School          @relation(fields: [schoolId], references: [id])
+  players HangmanPlayer[]
+
+  @@index([schoolId])
+  @@index([schoolId, status])
+  @@index([schoolId, classId])
+  @@map("hangman_game")
+}
+
+/// A student's own board within a round: their guessed letters + derived state.
+/// The engine recomputes wrong/status from (word, guessed) — this row is the
+/// durable projection.
+model HangmanPlayer {
+  id       String    @id @default(uuid()) @db.Uuid
+  schoolId String    @db.Uuid
+  gameId   String    @db.Uuid
+  userId   String    @db.Uuid
+  /// Guessed letters (JSON string[]), in guess order, upper-case.
+  guessed  Json
+  wrong    Int       @default(0)
+  /// PLAYING | WON | LOST (mirrors the engine's HangmanStatus).
+  status   String    @default("PLAYING")
+  /// Podium rank once solved (1 = first to solve); null until WON.
+  rank     Int?
+  solvedAt DateTime?
+
+  joinedAt  DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School      @relation(fields: [schoolId], references: [id])
+  game   HangmanGame @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@unique([gameId, userId])
+  @@index([schoolId])
+  @@map("hangman_player")
+}

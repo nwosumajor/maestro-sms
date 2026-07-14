@@ -63,6 +63,9 @@ d("RLS cross-tenant isolation", () => {
   const liveQuizSessionA = randomUUID();
   const liveQuizParticipantA = randomUUID();
   const liveQuizAnswerA = randomUUID();
+  // Hangman: game + player.
+  const hangmanGameA = randomUUID();
+  const hangmanPlayerA = randomUUID();
   // Ultimate: ONLY the tenant-scoped governance/bridge tables are isolation-tested.
   // The arena tables (ultimate_competition / ultimate_participant) are
   // CROSS-TENANT by design (RLS-exempt — see 21_ultimate_rls.sql) and carry no PII.
@@ -346,6 +349,15 @@ d("RLS cross-tenant isolation", () => {
     await a.query(
       `INSERT INTO live_quiz_answer (id,"schoolId","sessionId","participantId","questionIndex","choiceIndex",correct,"elapsedMs",points) VALUES ($1,$2,$3,$4,0,0,true,500,700)`,
       [liveQuizAnswerA, A, liveQuizSessionA, liveQuizParticipantA],
+    );
+    // Hangman: a round + a player in A.
+    await a.query(
+      `INSERT INTO hangman_game (id,"schoolId","classId","hostId",difficulty,word,"updatedAt") VALUES ($1,$2,$3,$4,'MEDIUM','VOLCANO',now())`,
+      [hangmanGameA, A, classA, userA],
+    );
+    await a.query(
+      `INSERT INTO hangman_player (id,"schoolId","gameId","userId",guessed,"updatedAt") VALUES ($1,$2,$3,$4,$5::jsonb,now())`,
+      [hangmanPlayerA, A, hangmanGameA, userA, "[]"],
     );
     // Ultimate (step 8): an arena competition (cross-tenant) + the tenant-scoped
     // enrollment/consent/entry-link governance rows for school A.
@@ -890,6 +902,9 @@ d("RLS cross-tenant isolation", () => {
       "live_quiz_session",
       "live_quiz_question",
       "live_quiz",
+      // Hangman: player → game.
+      "hangman_player",
+      "hangman_game",
       // Ultimate: bridge/governance + participant are schoolId-scoped; the arena
       // `ultimate_competition` has NO schoolId (cross-tenant) → deleted by id below.
       "ultimate_entry_link",
@@ -996,6 +1011,8 @@ d("RLS cross-tenant isolation", () => {
     ["live_quiz_session", liveQuizSessionA],
     ["live_quiz_participant", liveQuizParticipantA],
     ["live_quiz_answer", liveQuizAnswerA],
+    ["hangman_game", hangmanGameA],
+    ["hangman_player", hangmanPlayerA],
     ["lms_content", lmsContentA],
     ["quiz_attempt", quizAttemptA],
     ["forum_post", forumPostA],
