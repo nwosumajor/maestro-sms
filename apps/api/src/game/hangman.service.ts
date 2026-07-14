@@ -365,9 +365,12 @@ export class HangmanService {
     return game;
   }
 
-  private async displayName(tx: TenantTx, userId: string): Promise<string> {
-    const u = await tx.user.findFirst({ where: { id: userId }, select: { name: true } });
-    return u?.name ?? "Player";
+  /** Batch-resolve display names in ONE query (leaderboards are polled often). */
+  private async displayNames(tx: TenantTx, userIds: string[]): Promise<Map<string, string>> {
+    const ids = [...new Set(userIds)];
+    if (ids.length === 0) return new Map();
+    const users = await tx.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } });
+    return new Map(users.map((u) => [u.id, u.name ?? "Player"]));
   }
 
   /** Build the viewer-redacted round view. SECURITY: the word is exposed only
@@ -407,15 +410,13 @@ export class HangmanService {
     const solvers = players
       .filter((pl) => pl.status === "WON" && pl.rank != null)
       .sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
-    const leaderboard = [];
-    for (const s of solvers) {
-      leaderboard.push({
-        userId: s.userId,
-        displayName: await this.displayName(tx, s.userId),
-        rank: s.rank as number,
-        wrong: s.wrong,
-      });
-    }
+    const names = await this.displayNames(tx, solvers.map((s) => s.userId));
+    const leaderboard = solvers.map((s) => ({
+      userId: s.userId,
+      displayName: names.get(s.userId) ?? "Player",
+      rank: s.rank as number,
+      wrong: s.wrong,
+    }));
 
     return {
       id: game.id,

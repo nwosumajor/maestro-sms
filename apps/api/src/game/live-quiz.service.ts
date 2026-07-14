@@ -472,9 +472,12 @@ export class LiveQuizService {
     return session;
   }
 
-  private async displayName(tx: TenantTx, userId: string): Promise<string> {
-    const u = await tx.user.findFirst({ where: { id: userId }, select: { name: true } });
-    return u?.name ?? "Player";
+  /** Batch-resolve display names in ONE query (leaderboards are polled often). */
+  private async displayNames(tx: TenantTx, userIds: string[]): Promise<Map<string, string>> {
+    const ids = [...new Set(userIds)];
+    if (ids.length === 0) return new Map();
+    const users = await tx.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } });
+    return new Map(users.map((u) => [u.id, u.name ?? "Player"]));
   }
 
   private async buildQuizView(tx: TenantTx, quizId: string): Promise<LiveQuizDto> {
@@ -563,17 +566,14 @@ export class LiveQuizService {
       streak: pt.streak,
     }));
     const ranked = rankQuizStandings(standings).slice(0, LEADERBOARD_SIZE);
-    const leaderboard = [];
-    let rank = 1;
-    for (const row of ranked) {
-      leaderboard.push({
-        userId: row.playerId,
-        displayName: await this.displayName(tx, row.playerId),
-        score: row.score,
-        correct: row.correct,
-        rank: rank++,
-      });
-    }
+    const names = await this.displayNames(tx, ranked.map((r) => r.playerId));
+    const leaderboard = ranked.map((row, i) => ({
+      userId: row.playerId,
+      displayName: names.get(row.playerId) ?? "Player",
+      score: row.score,
+      correct: row.correct,
+      rank: i + 1,
+    }));
 
     return {
       id: session.id,
