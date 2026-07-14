@@ -31,6 +31,7 @@ export default async function GamesPage() {
   const canSettings = hasPermission(user.permissions, "game.settings.manage");
   const canQuizHost = hasPermission(user.permissions, "game.quiz.host");
   const canHangmanHost = hasPermission(user.permissions, "game.hangman.host");
+  const canTypingHost = hasPermission(user.permissions, "game.typing.host");
 
   const [openGames, classes, races, competitions, people, settings] = await Promise.all([
     canPlay ? apiGet<Serialized<OpenGameDto>[]>("/games/open") : Promise.resolve(null),
@@ -103,6 +104,21 @@ export default async function GamesPage() {
           <CardContent>
             <Link href="/games/hangman" className={cn(buttonVariants({ size: "sm" }))}>
               {canHangmanHost ? "Host or join hangman" : "Join a hangman round"}
+            </Link>
+          </CardContent>
+        </Card>
+
+        {/* Typing Race — classroom typing game. */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Typing Race</CardTitle>
+            <CardDescription>
+              Type the passage fast and accurately — highest net WPM wins. Great for ICT and keyboard skills.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Link href="/games/typing" className={cn(buttonVariants({ size: "sm" }))}>
+              {canTypingHost ? "Host or join a race" : "Join a typing race"}
             </Link>
           </CardContent>
         </Card>
