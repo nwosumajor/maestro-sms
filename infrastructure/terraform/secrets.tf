@@ -15,7 +15,11 @@ resource "random_id" "data_encryption_key" {
 }
 
 locals {
-  db_app_url     = "postgresql://${var.db_app_username}:${random_password.db_app.result}@${aws_db_instance.main.address}:5432/${var.db_name}"
+  # App reads/writes go through the RDS Proxy pooler when enabled (transaction
+  # pooling is safe — the tenant GUC is transaction-local; `?pgbouncer=true`
+  # keeps Prisma from leaning on persistent prepared statements). Migrations
+  # ALWAYS connect direct to the writer (DDL/advisory locks need a real session).
+  db_app_url     = var.enable_rds_proxy ? "postgresql://${var.db_app_username}:${random_password.db_app.result}@${aws_db_proxy.main[0].endpoint}:5432/${var.db_name}?pgbouncer=true" : "postgresql://${var.db_app_username}:${random_password.db_app.result}@${aws_db_instance.main.address}:5432/${var.db_name}"
   db_migrate_url = "postgresql://${var.db_master_username}:${random_password.db_master.result}@${aws_db_instance.main.address}:5432/${var.db_name}"
   # Read path: the replica endpoint when one exists, else the primary (so the
   # app's read-only tenant path is always valid and identical in single-DB mode).
