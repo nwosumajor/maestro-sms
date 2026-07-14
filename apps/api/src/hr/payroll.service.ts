@@ -140,12 +140,15 @@ export class PayrollService {
   async listRuns(p: Principal): Promise<PayrollRunDto[]> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const runs = await tx.payrollRun.findMany({ orderBy: [{ periodYear: "desc" }, { periodMonth: "desc" }] });
-      const out: PayrollRunDto[] = [];
-      for (const r of runs) {
-        const count = await tx.payslip.count({ where: { payrollRunId: r.id } });
-        out.push(this.decorateRun(r, count, undefined));
-      }
-      return out;
+      if (runs.length === 0) return [];
+      // Batch the payslip counts in ONE groupBy (not one count per run).
+      const counts = await tx.payslip.groupBy({
+        by: ["payrollRunId"],
+        where: { payrollRunId: { in: runs.map((r) => r.id) } },
+        _count: { _all: true },
+      });
+      const byRun = new Map(counts.map((c) => [c.payrollRunId, c._count._all]));
+      return runs.map((r) => this.decorateRun(r, byRun.get(r.id) ?? 0, undefined));
     });
   }
 

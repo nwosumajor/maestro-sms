@@ -31,7 +31,10 @@ function makeService(f: Fakes) {
         Promise.resolve({ ...createdInvoice, ...f.invoiceRow, ...data }),
       ),
     },
-    invoiceLineItem: { create: jest.fn().mockResolvedValue({ id: "li-1" }) },
+    invoiceLineItem: {
+      create: jest.fn().mockResolvedValue({ id: "li-1" }),
+      createMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
     payment: {
       create: jest.fn(({ data }: { data: Record<string, unknown> }) => Promise.resolve({ id: "pay-1", ...data })),
       findFirst: jest.fn().mockResolvedValue(f.pendingPayment ?? null),

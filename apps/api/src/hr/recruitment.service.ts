@@ -71,9 +71,15 @@ export class RecruitmentService {
   async listRequisitions(p: Principal): Promise<JobRequisitionDto[]> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const reqs = await tx.jobRequisition.findMany({ orderBy: { createdAt: "desc" } });
-      const out: JobRequisitionDto[] = [];
-      for (const r of reqs) out.push(this.reqDto(r, await tx.applicant.count({ where: { requisitionId: r.id } })));
-      return out;
+      if (reqs.length === 0) return [];
+      // Batch the applicant counts in ONE groupBy (not one count per requisition).
+      const counts = await tx.applicant.groupBy({
+        by: ["requisitionId"],
+        where: { requisitionId: { in: reqs.map((r) => r.id) } },
+        _count: { _all: true },
+      });
+      const byReq = new Map(counts.map((c) => [c.requisitionId, c._count._all]));
+      return reqs.map((r) => this.reqDto(r, byReq.get(r.id) ?? 0));
     });
   }
 
