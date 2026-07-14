@@ -25,7 +25,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { chess } from "@sms/game-engine";
+import { BOARD_TIME_CONTROLS, chess, isGameDifficulty, type GameDifficulty } from "@sms/game-engine";
 import { Prisma } from "@sms/db";
 import type {
   ChessBoardDto,
@@ -87,9 +87,11 @@ export class ChessService {
 
   // --- lifecycle ----------------------------------------------------------
   /** Create a game; the creator plays white (moves first). */
-  async createGame(p: Principal): Promise<ChessGameDto> {
+  async createGame(p: Principal, input: { difficulty?: string } = {}): Promise<ChessGameDto> {
     return this.withEmit(p, null, async (tx) => {
       await this.assertGamesEnabled(tx, p.schoolId);
+      const difficulty = this.difficultyOf(input.difficulty);
+      const base = BOARD_TIME_CONTROLS[difficulty].baseSeconds * 1000;
       const s = chess.newChessGame();
       const game = await tx.chessGame.create({
         data: {
@@ -104,9 +106,12 @@ export class ChessService {
           halfmove: s.halfmove,
           fullmove: s.fullmove,
           chessStatus: "PLAYING",
+          difficulty,
+          whiteTimeMs: base,
+          blackTimeMs: base,
         },
       });
-      await this.log(tx, p, "chess.create", game.id);
+      await this.log(tx, p, "chess.create", game.id, { difficulty });
       return this.buildView(tx, game.id, p);
     });
   }
@@ -118,14 +123,15 @@ export class ChessService {
       if (game.whiteUserId === p.userId) throw new ConflictException("You can't join your own game");
       await tx.chessGame.update({
         where: { id: gameId },
-        data: { blackUserId: p.userId, status: "ACTIVE", startedAt: new Date() },
+        data: { blackUserId: p.userId, status: "ACTIVE", startedAt: new Date(), turnStartedAt: new Date() },
       });
       await this.log(tx, p, "chess.join", gameId);
       return this.buildView(tx, gameId, p);
     });
   }
 
-  /** Apply a move on the caller's turn (validated by the engine). */
+  /** Apply a move on the caller's turn (validated by the engine). Deducts the
+   *  turn's elapsed time from the mover's clock (flag-fall = loss) + increment. */
   async move(p: Principal, gameId: string, move: ChessMoveDto): Promise<ChessGameDto> {
     return this.withEmit(p, gameId, async (tx) => {
       const game = await this.requireGame(tx, gameId);
@@ -133,6 +139,24 @@ export class ChessService {
       const color = this.colorOf(game, p.userId);
       if (!color) throw new NotFoundException("Game not found"); // relationship scope
       if (game.turn !== color) throw new ConflictException("It is not your turn");
+
+      // Clock: has the mover already run out of time on this turn?
+      const now = Date.now();
+      const moverTime = color === "w" ? game.whiteTimeMs : game.blackTimeMs;
+      const elapsed = game.turnStartedAt ? now - game.turnStartedAt.getTime() : 0;
+      const remaining = moverTime - elapsed;
+      if (remaining <= 0) {
+        const winner = color === "w" ? game.blackUserId : game.whiteUserId;
+        await tx.chessGame.update({
+          where: { id: gameId },
+          data: {
+            status: "FINISHED", finishedAt: new Date(), winnerUserId: winner, outcome: "TIME", turnStartedAt: null,
+            ...(color === "w" ? { whiteTimeMs: 0 } : { blackTimeMs: 0 }),
+          },
+        });
+        await this.log(tx, p, "chess.flag", gameId);
+        return this.buildView(tx, gameId, p);
+      }
 
       const state = this.toState(game);
       let next: chess.ChessState;
@@ -142,6 +166,8 @@ export class ChessService {
         throw new BadRequestException("Illegal move");
       }
 
+      const inc = BOARD_TIME_CONTROLS[this.difficultyOf(game.difficulty)].incrementSeconds * 1000;
+      const newMoverTime = remaining + inc;
       const finished = next.status === "CHECKMATE" || next.status === "STALEMATE" || next.status === "DRAW";
       const winnerUserId =
         next.status === "CHECKMATE" ? (color === "w" ? game.whiteUserId : game.blackUserId) : null;
@@ -156,10 +182,36 @@ export class ChessService {
           turn: next.turn,
           chessStatus: next.status,
           moveCount: game.moveCount + 1,
+          ...(color === "w" ? { whiteTimeMs: newMoverTime } : { blackTimeMs: newMoverTime }),
+          turnStartedAt: finished ? null : new Date(),
           ...(finished ? { status: "FINISHED", finishedAt: new Date(), winnerUserId, outcome: next.status } : {}),
         },
       });
       await this.log(tx, p, "chess.move", gameId, { moveCount: game.moveCount + 1, status: next.status });
+      return this.buildView(tx, gameId, p);
+    });
+  }
+
+  /** Claim the win when it's the OPPONENT's move and their clock has run out. */
+  async claimTime(p: Principal, gameId: string): Promise<ChessGameDto> {
+    return this.withEmit(p, gameId, async (tx) => {
+      const game = await this.requireGame(tx, gameId);
+      if (game.status !== "ACTIVE") throw new ConflictException("Game is not in play");
+      const color = this.colorOf(game, p.userId);
+      if (!color) throw new NotFoundException("Game not found");
+      if (color === game.turn) throw new ConflictException("It's your move — you can't claim your own clock");
+      const curTime = game.turn === "w" ? game.whiteTimeMs : game.blackTimeMs;
+      const elapsed = game.turnStartedAt ? Date.now() - game.turnStartedAt.getTime() : 0;
+      if (curTime - elapsed > 0) throw new ConflictException("Your opponent still has time");
+      const winner = color === "w" ? game.whiteUserId : game.blackUserId;
+      await tx.chessGame.update({
+        where: { id: gameId },
+        data: {
+          status: "FINISHED", finishedAt: new Date(), winnerUserId: winner, outcome: "TIME", turnStartedAt: null,
+          ...(game.turn === "w" ? { whiteTimeMs: 0 } : { blackTimeMs: 0 }),
+        },
+      });
+      await this.log(tx, p, "chess.claim_time", gameId);
       return this.buildView(tx, gameId, p);
     });
   }
@@ -232,6 +284,10 @@ export class ChessService {
     return null;
   }
 
+  private difficultyOf(d?: string | null): GameDifficulty {
+    return d && isGameDifficulty(d) ? d : "MEDIUM";
+  }
+
   /** Rebuild the engine state from the persisted row. */
   private toState(game: GameRow): chess.ChessState {
     return {
@@ -290,6 +346,10 @@ export class ChessService {
       legalMoves,
       winnerUserId: game.winnerUserId,
       outcome: game.outcome,
+      difficulty: this.difficultyOf(game.difficulty) as "EASY" | "MEDIUM" | "HARD",
+      whiteTimeMs: game.whiteTimeMs,
+      blackTimeMs: game.blackTimeMs,
+      turnStartedAt: game.turnStartedAt,
       createdAt: game.createdAt,
     };
   }

@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { StatusLine, postSms, usePolled } from "./play-ui";
+import { BoardClocks, StatusLine, liveClockMs, postSms, useNowTick, usePolled } from "./play-ui";
 
 type Game = Serialized<CheckersGameDto>;
 // Serialized<> flattens the [number,number] tuples to number[], so compare loosely.
@@ -28,6 +28,13 @@ export function CheckersPlay({ initial }: { initial: Game }) {
   const [msg, setMsg] = React.useState<string | null>(null);
   const [err, setErr] = React.useState(false);
   const [selected, setSelected] = React.useState<Sq | null>(null);
+
+  // Claim button appears once the opponent's live clock hits zero on their turn.
+  const now = useNowTick(500);
+  const curStored = g.turn === "b" ? g.blackTimeMs : g.whiteTimeMs;
+  const oppFlagged =
+    g.status === "ACTIVE" && !!g.yourColor && g.turn !== g.yourColor &&
+    liveClockMs(curStored, true, g.turnStartedAt, now) <= 0;
 
   const act = async (fn: () => ReturnType<typeof postSms>) => {
     setMsg(null);
@@ -78,6 +85,18 @@ export function CheckersPlay({ initial }: { initial: Game }) {
           <Badge variant={g.status === "ACTIVE" ? "default" : "secondary"}>{g.status}</Badge>
         </CardHeader>
         <CardContent className="space-y-4">
+          {g.status !== "LOBBY" && (
+            <BoardClocks
+              difficulty={g.difficulty}
+              players={[
+                ["b", `● ${g.black.displayName}`, g.blackTimeMs],
+                ["w", `○ ${g.white?.displayName ?? "waiting…"}`, g.whiteTimeMs],
+              ]}
+              turn={g.turn}
+              turnStartedAt={g.turnStartedAt}
+              finished={g.status === "FINISHED"}
+            />
+          )}
           {g.status === "ACTIVE" && (
             <p className="text-sm">
               {g.yourTurn ? (
@@ -143,11 +162,18 @@ export function CheckersPlay({ initial }: { initial: Game }) {
 
           <StatusLine msg={msg} error={err} />
 
-          {g.status === "ACTIVE" && g.yourColor && (
-            <Button variant="outline" size="sm" onClick={() => act(() => postSms(`checkers/${g.id}/resign`))}>
-              Resign
-            </Button>
-          )}
+          <div className="flex flex-wrap gap-2">
+            {oppFlagged && (
+              <Button size="sm" onClick={() => act(() => postSms(`checkers/${g.id}/claim-time`))}>
+                Claim win on time
+              </Button>
+            )}
+            {g.status === "ACTIVE" && g.yourColor && (
+              <Button variant="outline" size="sm" onClick={() => act(() => postSms(`checkers/${g.id}/resign`))}>
+                Resign
+              </Button>
+            )}
+          </div>
         </CardContent>
       </Card>
     </div>

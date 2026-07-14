@@ -19,6 +19,7 @@ import type { Principal } from "../integrity/integrity.foundation";
 import { CheckersService } from "./checkers.service";
 
 const sq = z.tuple([z.number().int().min(0).max(7), z.number().int().min(0).max(7)]);
+const createSchema = z.object({ difficulty: z.enum(["EASY", "MEDIUM", "HARD"]).optional() });
 const moveSchema = z.object({
   from: sq,
   path: z.array(sq).min(1).max(6),
@@ -32,8 +33,11 @@ export class CheckersController {
 
   @Post("checkers")
   @RequirePermission(GAME_PERMISSIONS.PLAY)
-  create(@CurrentPrincipal() p: Principal): Promise<CheckersGameDto> {
-    return this.checkers.createGame(p);
+  create(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(createSchema)) body: z.infer<typeof createSchema>,
+  ): Promise<CheckersGameDto> {
+    return this.checkers.createGame(p, body);
   }
 
   @Get("checkers")
@@ -68,5 +72,11 @@ export class CheckersController {
   @RequirePermission(GAME_PERMISSIONS.PLAY)
   resign(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<CheckersGameDto> {
     return this.checkers.resign(p, id);
+  }
+
+  @Post("checkers/:id/claim-time")
+  @RequirePermission(GAME_PERMISSIONS.PLAY)
+  claimTime(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<CheckersGameDto> {
+    return this.checkers.claimTime(p, id);
   }
 }

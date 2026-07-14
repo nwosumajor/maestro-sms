@@ -19,6 +19,7 @@ import type { Principal } from "../integrity/integrity.foundation";
 import { ChessService } from "./chess.service";
 
 const sq = z.tuple([z.number().int().min(0).max(7), z.number().int().min(0).max(7)]);
+const createSchema = z.object({ difficulty: z.enum(["EASY", "MEDIUM", "HARD"]).optional() });
 const moveSchema = z.object({
   from: sq,
   to: sq,
@@ -33,8 +34,11 @@ export class ChessController {
 
   @Post("chess")
   @RequirePermission(GAME_PERMISSIONS.PLAY)
-  create(@CurrentPrincipal() p: Principal): Promise<ChessGameDto> {
-    return this.chess.createGame(p);
+  create(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(createSchema)) body: z.infer<typeof createSchema>,
+  ): Promise<ChessGameDto> {
+    return this.chess.createGame(p, body);
   }
 
   @Get("chess")
@@ -69,5 +73,11 @@ export class ChessController {
   @RequirePermission(GAME_PERMISSIONS.PLAY)
   resign(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<ChessGameDto> {
     return this.chess.resign(p, id);
+  }
+
+  @Post("chess/:id/claim-time")
+  @RequirePermission(GAME_PERMISSIONS.PLAY)
+  claimTime(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<ChessGameDto> {
+    return this.chess.claimTime(p, id);
   }
 }

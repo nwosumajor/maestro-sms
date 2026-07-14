@@ -43,8 +43,17 @@ model ChessGame {
   moveCount    Int         @default(0)
   /// Set on finish.
   winnerUserId String?     @db.Uuid
-  /// CHECKMATE | STALEMATE | DRAW | RESIGN.
+  /// CHECKMATE | STALEMATE | DRAW | RESIGN | TIME.
   outcome      String?
+
+  /// Time control difficulty: EASY(Classical) | MEDIUM(Rapid) | HARD(Blitz).
+  difficulty    String    @default("MEDIUM")
+  /// Remaining clock per player (ms). Decremented on each move by the elapsed
+  /// turn time; the increment is added back. A player who flags (0 ms) loses.
+  whiteTimeMs   Int       @default(300000)
+  blackTimeMs   Int       @default(300000)
+  /// When the current turn began — the ticking clock is measured from here.
+  turnStartedAt DateTime?
 
   startedAt  DateTime?
   finishedAt DateTime?
