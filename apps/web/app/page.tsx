@@ -55,6 +55,7 @@ import {
 } from "@sms/types";
 import { Button } from "@/components/ui/button";
 import { HeroCarousel } from "@/components/public/HeroCarousel";
+import { ThemeToggle } from "@/components/shell/ThemeToggle";
 
 // Auto-sliding hero photos — polished, international education imagery.
 const HERO_IMAGES = [
@@ -140,7 +141,7 @@ const MODULE_GROUPS: { label: string; icon: typeof BookOpenIcon; items: ModuleIt
     label: "Money & Operations",
     icon: WalletIcon,
     items: [
-      { name: "Fees & Billing", desc: "Invoices, online payments and receipts in exact kobo.", icon: ReceiptIcon },
+      { name: "Fees & Billing", desc: "Invoices, card payments and receipts — settled straight to your school's bank.", icon: ReceiptIcon },
       { name: "Document vault", desc: "Report cards and receipts, stored and shared securely.", icon: FolderLockIcon },
       { name: "Hostel", desc: "Boarding houses, rooms, allocations and rent.", icon: BedDoubleIcon },
       { name: "Transport", desc: "Vehicles, routes, stops and transport fees.", icon: BusIcon },
@@ -201,6 +202,7 @@ const AUDIENCES = [
     alt: "A smiling teacher standing at the whiteboard in a classroom",
     points: [
       "Attendance, fees, results and approvals in real time",
+      "Online fee payments settle directly to your school's bank",
       "HR, payroll and leave with maker-checker controls",
       "Turn modules on or off to fit your budget",
     ],
@@ -288,17 +290,17 @@ const STEPS: { icon: typeof ClipboardListIcon; title: string; body: string }[] =
   {
     icon: ClipboardListIcon,
     title: "Request onboarding",
-    body: "Tell us about your school using the form below. It takes about two minutes.",
+    body: "Tell us about your school — location, size, and the plan and modules you want. About five minutes, with a live price estimate as you type.",
   },
   {
     icon: ServerCogIcon,
     title: "We provision your tenant",
-    body: "Our team sets up your isolated school space with an administrator and a principal account.",
+    body: "We review within 1–2 working days and set up your isolated school space. Your admins receive secure set-password links by email — no passwords ever travel.",
   },
   {
     icon: RocketIcon,
     title: "Your team goes live",
-    body: "Add staff and students, switch on the modules you need, and start running your school.",
+    body: "Bulk-import your students, add staff, and run your first term free for 30 days on the full plan. The in-app guide walks every role through their first week.",
   },
 ];
 
@@ -335,9 +337,9 @@ function NavBar() {
     <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur-md">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5 sm:px-8">
         <Link href="/" className="flex items-center gap-2.5">
-          <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary text-sm font-bold text-primary-foreground shadow-xs ring-1 ring-inset ring-white/10">
-            S
-          </span>
+          {/* Platform default mark (MajorGBN) — a school's own logo appears
+              only inside THEIR portal, never here. */}
+          <img src="/images/platform-mark.png" alt="MajorGBN" width={128} height={128} className="h-9 w-9 object-contain" />
           <span className="text-sm font-semibold tracking-tight">School Management System</span>
         </Link>
         <nav className="hidden items-center gap-7 text-sm font-medium text-muted-foreground md:flex">
@@ -348,6 +350,7 @@ function NavBar() {
           <Link href="/careers" className="transition-colors hover:text-foreground">Careers</Link>
         </nav>
         <div className="flex items-center gap-2.5">
+          <ThemeToggle className="hidden sm:inline-flex" />
           <Link
             href="/login"
             className="hidden rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground sm:block"
@@ -404,7 +407,7 @@ function Hero() {
             Full plan from day one · no card required · billed per active student after the trial
           </p>
           <ul className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs font-medium text-white/80">
-            {["Tenant-isolated", "NDPR-aligned", "Audit-logged", "Role-based access"].map((t) => (
+            {["Fees settle to your bank", "Tenant-isolated", "NDPR-aligned", "Audit-logged", "Role-based access"].map((t) => (
               <li key={t} className="flex items-center gap-1.5">
                 <CheckIcon className="h-3.5 w-3.5 text-white" aria-hidden />
                 {t}
@@ -461,11 +464,14 @@ function StatBand() {
 function Security() {
   return (
     <section id="security" className="relative scroll-mt-20 overflow-hidden border-b border-border/60 bg-neutral-950 text-white">
+      {/* Photographic depth under the vault — campus imagery, heavily veiled. */}
+      <img src="/images/hero-2.jpg" alt="" aria-hidden width={2000} height={1333} loading="lazy" className="absolute inset-0 h-full w-full object-cover opacity-25" />
+      <div aria-hidden className="absolute inset-0 bg-gradient-to-b from-neutral-950/80 via-neutral-950/85 to-neutral-950/95" />
       <div aria-hidden className="pointer-events-none absolute inset-0 opacity-[0.06]" style={RULE_GRID} />
-      <div aria-hidden className="pointer-events-none absolute -right-40 -top-32 h-[30rem] w-[30rem] rounded-full bg-[hsl(184_70%_45%)]/20 blur-3xl" />
+      <div aria-hidden className="pointer-events-none absolute -right-40 -top-32 h-[30rem] w-[30rem] rounded-full bg-[hsl(203_70%_45%)]/20 blur-3xl" />
       <div className="relative mx-auto max-w-6xl px-5 py-24 sm:px-8">
         <div className="max-w-2xl">
-          <p className="eyebrow text-[hsl(184_72%_60%)]">Trust &amp; safety</p>
+          <p className="eyebrow text-[hsl(203_72%_62%)]">Trust &amp; safety</p>
           <h2 className="mt-3 font-display text-3xl font-semibold tracking-tight sm:text-4xl">
             Built for the data you&apos;re trusted with.
           </h2>
@@ -479,7 +485,7 @@ function Security() {
             const Icon = s.icon;
             return (
               <div key={s.title} className="rounded-xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur-sm transition-colors hover:bg-white/[0.07]">
-                <span className="grid h-10 w-10 place-items-center rounded-lg bg-[hsl(184_72%_60%)]/15 text-[hsl(184_72%_60%)]">
+                <span className="grid h-10 w-10 place-items-center rounded-lg bg-[hsl(203_72%_62%)]/15 text-[hsl(203_72%_62%)]">
                   <Icon className="h-5 w-5" aria-hidden />
                 </span>
                 <h3 className="mt-4 text-base font-semibold">{s.title}</h3>
@@ -565,7 +571,7 @@ function ProductShowcase() {
     ["Role-aware by design", "Each of the 17 roles sees only what their job needs, backed by MFA and step-up."],
     ["Modules you control", "Switch products on and off to match your budget; billing follows your active students."],
   ];
-  const accent = "text-[hsl(184_72%_62%)]";
+  const accent = "text-[hsl(203_72%_62%)]";
   return (
     <section
       id="product"
@@ -606,7 +612,7 @@ function ProductShowcase() {
           <div className="mt-8 flex flex-wrap gap-x-4 gap-y-1 text-xs font-medium text-white/70">
             {["Leadership dashboard", "Student LMS", "Analytics", "Gradebook"].map((t) => (
               <span key={t} className="flex items-center gap-1.5">
-                <span className="h-1.5 w-1.5 rounded-full bg-[hsl(184_72%_62%)]" />
+                <span className="h-1.5 w-1.5 rounded-full bg-[hsl(203_72%_62%)]" />
                 {t}
               </span>
             ))}
@@ -629,20 +635,23 @@ function ProductShowcase() {
 
 function Testimonials() {
   return (
-    <section className="border-b border-border/60 bg-card">
-      <div className="mx-auto max-w-6xl px-5 py-20 sm:px-8">
+    <section className="relative overflow-hidden border-b border-border/60">
+      {/* Full-bleed photography — voices over the community they serve. */}
+      <img src="/images/audience-parents.jpg" alt="" aria-hidden width={2000} height={1333} loading="lazy" className="absolute inset-0 h-full w-full object-cover" />
+      <div aria-hidden className="absolute inset-0 bg-gradient-to-b from-neutral-950/85 via-neutral-950/75 to-neutral-950/85" />
+      <div className="relative mx-auto max-w-6xl px-5 py-20 text-white sm:px-8">
         <div className="max-w-2xl">
-          <p className="eyebrow">Trusted with what matters most</p>
+          <p className="eyebrow text-white/70">Trusted with what matters most</p>
           <h2 className="mt-3 font-display text-3xl font-semibold tracking-tight sm:text-4xl">
             Built for schools that take data seriously.
           </h2>
-          <p className="mt-4 text-base leading-relaxed text-muted-foreground">
+          <p className="mt-4 text-base leading-relaxed text-white/80">
             Leaders, teachers and parents rely on the same secure register every day — and every one of these
             protections is already switched on, out of the box.
           </p>
           <ul className="mt-6 flex flex-wrap gap-2">
             {TRUST_CHIPS.map((c) => (
-              <li key={c} className="inline-flex items-center gap-1.5 rounded-full border border-primary/25 bg-primary/5 px-3 py-1 text-xs font-medium text-primary">
+              <li key={c} className="inline-flex items-center gap-1.5 rounded-full border border-white/25 bg-white/10 px-3 py-1 text-xs font-medium text-white">
                 <ShieldCheckIcon className="h-3.5 w-3.5" aria-hidden />
                 {c}
               </li>
@@ -651,17 +660,17 @@ function Testimonials() {
         </div>
         <div className="mt-12 grid gap-4 md:grid-cols-3">
           {TESTIMONIALS.map((t) => (
-            <figure key={t.quote} className="flex flex-col rounded-xl border border-border/70 bg-background p-6 shadow-card">
-              <QuoteIcon className="h-6 w-6 text-primary/40" aria-hidden />
+            <figure key={t.quote} className="flex flex-col rounded-xl border border-white/15 bg-white/[0.07] p-6 backdrop-blur-md">
+              <QuoteIcon className="h-6 w-6 text-white/40" aria-hidden />
               <div className="mt-3 flex gap-0.5" aria-label="5 out of 5">
                 {Array.from({ length: 5 }).map((_, i) => (
-                  <StarIcon key={i} className="h-3.5 w-3.5 fill-primary text-primary" aria-hidden />
+                  <StarIcon key={i} className="h-3.5 w-3.5 fill-amber-300 text-amber-300" aria-hidden />
                 ))}
               </div>
-              <blockquote className="mt-3 flex-1 text-sm leading-relaxed text-foreground/90">&ldquo;{t.quote}&rdquo;</blockquote>
-              <figcaption className="mt-5 border-t border-border/60 pt-4">
+              <blockquote className="mt-3 flex-1 text-sm leading-relaxed text-white/90">&ldquo;{t.quote}&rdquo;</blockquote>
+              <figcaption className="mt-5 border-t border-white/15 pt-4">
                 <p className="text-sm font-semibold tracking-tight">{t.name}</p>
-                <p className="text-xs text-muted-foreground">{t.role}</p>
+                <p className="text-xs text-white/65">{t.role}</p>
               </figcaption>
             </figure>
           ))}
@@ -734,7 +743,7 @@ function Audiences() {
               <ul className="mt-5 space-y-2.5 text-sm text-muted-foreground">
                 {a.points.map((p) => (
                   <li key={p} className="flex gap-2.5">
-                    <CheckIcon className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
+                    <CheckIcon className="mt-0.5 h-4 w-4 shrink-0 text-brand2" aria-hidden />
                     <span>{p}</span>
                   </li>
                 ))}
@@ -757,6 +766,61 @@ function Audiences() {
   );
 }
 
+// The money section — fee collection is the #1 operational pain for school
+// owners, and the strongest single reason to buy. Every claim here is enforced
+// in the product (split settlement, reminders, receipts, maker-checker).
+function RevenueBand() {
+  const points: { title: string; body: string }[] = [
+    {
+      title: "Parents pay by card, from their phone",
+      body: "Every invoice carries a pay-online button. No more chasing cash or decoding bank-transfer screenshots.",
+    },
+    {
+      title: "Money lands in YOUR bank account",
+      body: "Register your school's account once and Paystack splits every payment straight to it — the platform never holds your fees.",
+    },
+    {
+      title: "Automatic reminders & receipts",
+      body: "Guardians are nudged about outstanding balances in-app and by email; receipts issue themselves the moment payment lands.",
+    },
+    {
+      title: "Controls your auditor will love",
+      body: "Exact-kobo ledgers, no hard-deletes, receivables-aging reports, and a second approver required on large postings and every refund.",
+    },
+  ];
+  return (
+    <section className="relative overflow-hidden border-b border-border/60">
+      {/* Full-bleed photography — the money story told over real school life. */}
+      <img src="/images/audience-leaders.jpg" alt="" aria-hidden width={2000} height={1333} loading="lazy" className="absolute inset-0 h-full w-full object-cover" />
+      <div aria-hidden className="absolute inset-0 bg-gradient-to-r from-neutral-950/90 via-neutral-950/75 to-neutral-950/55" />
+      <div className="relative mx-auto max-w-6xl px-5 py-20 text-white sm:px-8">
+        <div className="max-w-2xl">
+          <p className="eyebrow text-emerald-300">Get paid faster</p>
+          <h2 className="mt-3 font-display text-3xl font-semibold tracking-tight sm:text-4xl">
+            Fee collection that runs itself — settled to your own bank.
+          </h2>
+          <p className="mt-4 text-base leading-relaxed text-white/80">
+            Schools on paper chase fees all term. Here, invoices go out, parents pay online, reminders send
+            themselves, and settlements arrive in the school&apos;s own account — with an audit trail behind
+            every kobo.
+          </p>
+        </div>
+        <div className="mt-12 grid gap-4 sm:grid-cols-2">
+          {points.map((pt) => (
+            <div key={pt.title} className="rounded-xl border border-white/15 bg-white/[0.07] p-6 backdrop-blur-md transition-colors hover:bg-white/[0.1]">
+              <h3 className="flex items-start gap-2.5 text-base font-semibold tracking-tight">
+                <CheckIcon className="mt-1 h-4 w-4 shrink-0 text-emerald-300" aria-hidden />
+                {pt.title}
+              </h3>
+              <p className="mt-2 pl-[1.65rem] text-sm leading-relaxed text-white/75">{pt.body}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 async function Plans() {
   const plans = await effectivePlans();
   return (
@@ -771,7 +835,7 @@ async function Plans() {
             Billed per active student, per month. Move up a tier the moment you need more — your school keeps
             everything it already had.
           </p>
-          <p className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-primary/25 bg-primary/5 px-3 py-1 text-xs font-medium text-primary">
+          <p className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-brand2/30 bg-brand2/10 px-3 py-1 text-xs font-medium text-brand2">
             <CheckIcon className="h-3.5 w-3.5" aria-hidden />
             Every school starts with a 30-day free trial — no card required
           </p>
@@ -818,7 +882,8 @@ async function Plans() {
         <p className="mt-6 text-xs text-muted-foreground">
           Standard, Premium and Ultimate are priced in Nigerian naira (card payments via Paystack); Enterprise
           is billed in US dollars (Stripe) for schools worldwide. Pay monthly, per term (3 months — save 5%)
-          or per year (3 terms / 9 months — save 15%). Your school owner controls which modules are switched on.
+          or per year (3 terms / 9 months — save 15%). No setup fees, change plans any time, and your data is
+          never deleted — even if a payment lapses, your school keeps running on the core modules until you renew.
         </p>
       </div>
     </section>
@@ -855,6 +920,63 @@ function Steps() {
             );
           })}
         </ol>
+      </div>
+    </section>
+  );
+}
+
+// Objection handling right before the ask — every answer states enforced,
+// verifiable product behaviour (nothing aspirational).
+const FAQS: { q: string; a: string }[] = [
+  {
+    q: "What happens when the 30-day trial ends?",
+    a: "You pay per active student — monthly, per term (3 months, 5% off) or per year (9 months, 15% off) — from inside the app, by card. If you don't pay, nothing is deleted: after a 7-day grace period your school simply runs on the core Standard modules until payment, and your full plan returns the instant you pay.",
+  },
+  {
+    q: "Where does parents' fee money go?",
+    a: "Straight to your school's own bank account. You register your settlement account once; every card payment then splits directly to it via Paystack. The platform never warehouses your fees.",
+  },
+  {
+    q: "How safe is our students' data?",
+    a: "Each school lives in its own isolated tenant enforced at three layers, down to the database rows. Every read and change of student records is audit-logged, medical fields are encrypted at rest, staff use MFA and step-up re-authentication, and NDPR consent, retention and data-export rights are built in.",
+  },
+  {
+    q: "Can we start small and grow?",
+    a: "Yes — pricing is per student, and plans can change at any time. Start on Standard, switch on more modules when you're ready, and your data carries over untouched. Downgrading never deletes anything either.",
+  },
+  {
+    q: "We're outside Nigeria — can we use it?",
+    a: "Yes. The Enterprise plan is billed in US dollars via Stripe, and every plan can also be paid in dollars. Handles and per-school theming keep each school's identity its own.",
+  },
+  {
+    q: "How long does onboarding actually take?",
+    a: "The request form takes about five minutes; we review within 1–2 working days. Your admins get secure set-password links by email, bulk student import creates accounts with login slips in minutes, and the in-app guide walks every role through their first week.",
+  },
+];
+
+function Faq() {
+  return (
+    <section className="border-b border-border/60 bg-card">
+      <div className="mx-auto max-w-6xl px-5 py-20 sm:px-8">
+        <div className="max-w-2xl">
+          <p className="eyebrow">Before you ask</p>
+          <h2 className="mt-3 font-display text-3xl font-semibold tracking-tight sm:text-4xl">
+            The questions every proprietor asks us.
+          </h2>
+        </div>
+        <div className="mt-10 grid gap-4 lg:grid-cols-2">
+          {FAQS.map((f) => (
+            <details key={f.q} className="group rounded-xl border border-border/70 bg-background p-5 shadow-card open:shadow-elevated">
+              <summary className="cursor-pointer list-none text-base font-semibold tracking-tight marker:content-none">
+                <span className="flex items-start justify-between gap-3">
+                  {f.q}
+                  <span aria-hidden className="mt-0.5 text-primary transition-transform group-open:rotate-45">+</span>
+                </span>
+              </summary>
+              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{f.a}</p>
+            </details>
+          ))}
+        </div>
       </div>
     </section>
   );
@@ -945,27 +1067,84 @@ function ParentBand() {
 }
 
 function Footer() {
+  const columns: { title: string; links: { label: string; href: string; external?: boolean }[] }[] = [
+    {
+      title: "Product",
+      links: [
+        { label: "Modules", href: "#modules" },
+        { label: "Security & privacy", href: "#security" },
+        { label: "Plans & pricing", href: "#plans" },
+        { label: "How onboarding works", href: "#onboard" },
+      ],
+    },
+    {
+      title: "For schools",
+      links: [
+        { label: "Request onboarding", href: "/onboard" },
+        { label: "Sign in to your portal", href: "/login" },
+        { label: "Reset your password", href: "/reset-password" },
+      ],
+    },
+    {
+      title: "For parents & careers",
+      links: [
+        { label: "Browse schools", href: "/schools" },
+        { label: "Apply for admission", href: "/apply" },
+        { label: "Work with a school", href: "/careers" },
+      ],
+    },
+  ];
   return (
     <footer className="relative overflow-hidden bg-background">
       <div aria-hidden className="pointer-events-none absolute inset-0 opacity-[0.5]" style={RULE_GRID} />
-      <div className="relative mx-auto flex max-w-6xl flex-col gap-6 px-5 py-12 sm:px-8 md:flex-row md:items-center md:justify-between">
-        <div className="flex items-center gap-2.5">
-          <span className="grid h-8 w-8 place-items-center rounded-lg bg-primary text-xs font-bold text-primary-foreground">S</span>
-          <span className="text-sm font-semibold tracking-tight">School Management System</span>
+      <div className="relative mx-auto grid max-w-6xl gap-10 px-5 py-14 sm:px-8 md:grid-cols-[1.3fr_1fr_1fr_1fr]">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <img src="/images/platform-mark.png" alt="MajorGBN" width={128} height={128} className="h-9 w-9 object-contain" />
+            <div className="leading-tight">
+              <span className="block text-sm font-semibold tracking-tight">MAESTRO-SMS</span>
+              <span className="block text-xs text-muted-foreground">School Management System</span>
+            </div>
+          </div>
+          <p className="mt-4 max-w-xs text-sm leading-relaxed text-muted-foreground">
+            One secure register for your whole school — admissions to alumni, classes to fees, with
+            student-data privacy and least-privilege access at its core.
+          </p>
+          <ul className="mt-4 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
+            {["NDPR-aligned", "Audit-logged", "Tenant-isolated"].map((t) => (
+              <li key={t} className="flex items-center gap-1.5">
+                <CheckIcon className="h-3 w-3 text-brand2" aria-hidden />
+                {t}
+              </li>
+            ))}
+          </ul>
         </div>
-        <nav className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-muted-foreground">
-          <a href="#modules" className="hover:text-foreground">Modules</a>
-          <a href="#security" className="hover:text-foreground">Security</a>
-          <a href="#plans" className="hover:text-foreground">Plans</a>
-          <Link href="/schools" className="hover:text-foreground">Browse schools</Link>
-          <Link href="/login" className="hover:text-foreground">Sign in</Link>
-        </nav>
+        {columns.map((col) => (
+          <nav key={col.title} aria-label={col.title}>
+            <p className="eyebrow">{col.title}</p>
+            <ul className="mt-3 space-y-2 text-sm text-muted-foreground">
+              {col.links.map((l) => (
+                <li key={l.label}>
+                  {l.href.startsWith("#") ? (
+                    <a href={l.href} className="hover:text-foreground">{l.label}</a>
+                  ) : (
+                    <Link href={l.href} className="hover:text-foreground">{l.label}</Link>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </nav>
+        ))}
       </div>
       <div className="relative border-t border-border/60">
-        <p className="mx-auto max-w-6xl px-5 py-5 text-xs text-muted-foreground sm:px-8">
-          Multi-tenant, NDPR-aligned and audit-logged. Built with least-privilege access and student-data
-          privacy at its core.
-        </p>
+        <div className="mx-auto flex max-w-6xl flex-col gap-2 px-5 py-5 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:px-8">
+          <p>
+            © {new Date().getFullYear()} MAESTRO-SMS · Powered by{" "}
+            <span className="font-semibold text-foreground/80">MajorGBN Innovations Limited</span> —
+            willingness to serve, readiness to lead.
+          </p>
+          <p>Multi-tenant · NDPR-aligned · audit-logged · least-privilege by design.</p>
+        </div>
       </div>
     </footer>
   );
@@ -983,8 +1162,10 @@ export default function Home() {
       <Audiences />
       <Testimonials />
       <PhotoMarquee />
+      <RevenueBand />
       <Plans />
       <Steps />
+      <Faq />
       <Onboard />
       <ParentBand />
       <Footer />

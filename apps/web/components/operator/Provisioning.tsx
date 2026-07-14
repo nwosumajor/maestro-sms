@@ -36,22 +36,53 @@ export function Provisioning({ tenants, prefill }: { tenants: Tenant[]; prefill?
   const router = useRouter();
   const [busy, setBusy] = React.useState<string | null>(null);
   const [result, setResult] = React.useState<string | null>(null);
-  // Credentials are shown ONCE. Keep them in structured state (not a transient
-  // string) so they render in a persistent, copyable panel until dismissed.
+  // Credentials are shown ONCE, in a copyable panel that AUTO-HIDES after a
+  // short window (or on dismiss) so temp passwords never linger on screen.
   const [credentials, setCredentials] = React.useState<ProvisionResult | null>(null);
   const [copied, setCopied] = React.useState(false);
+  const CREDENTIAL_TTL_S = 10 * 60;
+  const [credsLeft, setCredsLeft] = React.useState(CREDENTIAL_TTL_S);
+  React.useEffect(() => {
+    if (!credentials) return;
+    setCredsLeft(CREDENTIAL_TTL_S);
+    const id = window.setInterval(() => {
+      setCredsLeft((s) => {
+        if (s <= 1) {
+          window.clearInterval(id);
+          setCredentials(null);
+          return 0;
+        }
+        return s - 1;
+      });
+    }, 1000);
+    return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- restart per panel
+  }, [credentials]);
 
   // Provision a school + its founding admin tier (school_admin + principal).
   // When entered via "Approve & provision", the fields start from the public
-  // request: contact person becomes the school_admin, wish plan/modules applied.
+  // request: name/slug/plan/modules from the request, and BOTH founding
+  // accounts' sign-in emails are AUTO-GENERATED from the slug (admin@<slug>
+  // .school / principal@<slug>.school — login identifiers, editable). The
+  // requester's contact email stays on the request for correspondence; the
+  // provision email sends them the sign-in emails + set-password links.
   // (The parent keys this component on the request id, so state re-initialises.)
+  const initialSlug = prefill ? (prefill.desiredSlug ?? slugify(prefill.schoolName)) : "";
   const [name, setName] = React.useState(prefill?.schoolName ?? "");
-  const [slug, setSlug] = React.useState(prefill ? (prefill.desiredSlug ?? slugify(prefill.schoolName)) : "");
+  const [slug, setSlug] = React.useState(initialSlug);
   const [slugTouched, setSlugTouched] = React.useState(Boolean(prefill?.desiredSlug));
   const [aName, setAName] = React.useState(prefill?.contactName ?? "");
-  const [aEmail, setAEmail] = React.useState(prefill?.contactEmail ?? "");
-  const [pName, setPName] = React.useState("");
-  const [pEmail, setPEmail] = React.useState("");
+  const [aEmail, setAEmail] = React.useState(prefill ? `admin@${initialSlug}.school` : "");
+  const [pName, setPName] = React.useState(prefill ? "Principal" : "");
+  const [pEmail, setPEmail] = React.useState(prefill ? `principal@${initialSlug}.school` : "");
+  // Generated sign-in emails track the slug until the operator edits them.
+  const [aEmailTouched, setAEmailTouched] = React.useState(false);
+  const [pEmailTouched, setPEmailTouched] = React.useState(false);
+  const syncGeneratedEmails = (nextSlug: string) => {
+    if (!prefill || !nextSlug) return;
+    if (!aEmailTouched) setAEmail(`admin@${nextSlug}.school`);
+    if (!pEmailTouched) setPEmail(`principal@${nextSlug}.school`);
+  };
 
   // Plan tier + extra add-on modules (force-on beyond the plan bundle).
   const [plan, setPlan] = React.useState<Plan>(isPlanKey(prefill?.desiredPlan ?? null) ? (prefill!.desiredPlan as Plan) : PLANS.ENTERPRISE);
@@ -117,6 +148,7 @@ export function Provisioning({ tenants, prefill }: { tenants: Tenant[]; prefill?
       setCopied(false);
       setResult(null);
       setName(""); setSlug(""); setSlugTouched(false); setAName(""); setAEmail(""); setPName(""); setPEmail("");
+      setAEmailTouched(false); setPEmailTouched(false);
       setPlan(PLANS.ENTERPRISE); setExtras(new Set());
       // Drop the ?provision=<id> param so a refresh doesn't re-prefill.
       if (prefill) router.push("/operator");
@@ -194,7 +226,11 @@ export function Provisioning({ tenants, prefill }: { tenants: Tenant[]; prefill?
                 value={name}
                 onChange={(e) => {
                   setName(e.target.value);
-                  if (!slugTouched) setSlug(slugify(e.target.value)); // auto-derive until edited
+                  if (!slugTouched) {
+                    const next = slugify(e.target.value); // auto-derive until edited
+                    setSlug(next);
+                    syncGeneratedEmails(next);
+                  }
                 }}
                 placeholder="St. Mary's"
               />
@@ -204,7 +240,12 @@ export function Provisioning({ tenants, prefill }: { tenants: Tenant[]; prefill?
               <Input
                 id="pv-slug"
                 value={slug}
-                onChange={(e) => { setSlugTouched(true); setSlug(slugify(e.target.value)); }}
+                onChange={(e) => {
+                  setSlugTouched(true);
+                  const next = slugify(e.target.value);
+                  setSlug(next);
+                  syncGeneratedEmails(next);
+                }}
                 placeholder="st-marys"
                 className="w-40"
               />
@@ -212,12 +253,19 @@ export function Provisioning({ tenants, prefill }: { tenants: Tenant[]; prefill?
           </div>
           <div className="flex flex-wrap items-end gap-2">
             <div className="space-y-1.5"><Label htmlFor="pv-aname">School admin name</Label><Input id="pv-aname" value={aName} onChange={(e) => setAName(e.target.value)} /></div>
-            <div className="space-y-1.5"><Label htmlFor="pv-aemail">School admin email</Label><Input id="pv-aemail" type="email" value={aEmail} onChange={(e) => setAEmail(e.target.value)} /></div>
+            <div className="space-y-1.5"><Label htmlFor="pv-aemail">School admin sign-in email</Label><Input id="pv-aemail" type="email" value={aEmail} onChange={(e) => { setAEmailTouched(true); setAEmail(e.target.value); }} /></div>
           </div>
           <div className="flex flex-wrap items-end gap-2">
             <div className="space-y-1.5"><Label htmlFor="pv-pname">Principal name <span className="font-normal text-muted-foreground">(optional)</span></Label><Input id="pv-pname" value={pName} onChange={(e) => setPName(e.target.value)} /></div>
-            <div className="space-y-1.5"><Label htmlFor="pv-pemail">Principal email</Label><Input id="pv-pemail" type="email" value={pEmail} onChange={(e) => setPEmail(e.target.value)} /></div>
+            <div className="space-y-1.5"><Label htmlFor="pv-pemail">Principal sign-in email</Label><Input id="pv-pemail" type="email" value={pEmail} onChange={(e) => { setPEmailTouched(true); setPEmail(e.target.value); }} /></div>
           </div>
+          {prefill && (
+            <p className="text-xs text-muted-foreground">
+              Sign-in emails are auto-generated from the slug (editable). On create, the requester
+              ({prefill.contactEmail}) is emailed both sign-in emails with one-time set-password links —
+              temporary passwords appear only here, never in email.
+            </p>
+          )}
 
           {/* Subscription tier + extra add-on modules (what the school pays for). */}
           <div className="space-y-2 rounded-md border border-border p-3">
@@ -294,7 +342,10 @@ export function Provisioning({ tenants, prefill }: { tenants: Tenant[]; prefill?
               </button>
             </div>
             <p className="text-xs font-medium text-amber-700 dark:text-amber-400">
-              ⚠ These temporary passwords are shown only once. Copy and share them securely now.
+              ⚠ These temporary passwords are shown only once and auto-hide in{" "}
+              <span className="tnum">{Math.floor(credsLeft / 60)}:{String(credsLeft % 60).padStart(2, "0")}</span>.
+              Copy and share them securely now — the requester was emailed the sign-in emails and
+              set-password links, never the passwords.
             </p>
             <ul className="space-y-1">
               {credentials.admins.map((a) => (

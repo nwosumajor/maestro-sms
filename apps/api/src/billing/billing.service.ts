@@ -247,15 +247,53 @@ export class BillingService {
    * same core, same idempotency on the reference.
    */
   async applyStripeSubscriptionEvent(event: StripeEvent): Promise<{ ok: boolean }> {
-    if (event.type !== "checkout.session.completed") return { ok: true };
     const session = event.data.object;
-    if (session.payment_status !== "paid") return { ok: true };
     if (session.metadata?.kind !== "subscription") return { ok: true };
     const reference = session.client_reference_id ?? session.metadata?.reference;
+
+    // Async payment methods (e.g. bank debits) can FAIL after checkout completes:
+    // mark the payment FAILED and tell the payer — never leave silence.
+    if (event.type === "checkout.session.async_payment_failed") {
+      return this.failByReference(session.metadata?.schoolId, reference, "Your payment did not complete");
+    }
+    if (event.type !== "checkout.session.completed") return { ok: true };
+    if (session.payment_status !== "paid") return { ok: true };
     return this.applyPaidByReference(session.metadata?.schoolId, reference, {
       amountMinor: session.amount_total,
       currency: session.currency?.toUpperCase(),
     });
+  }
+
+  /** Mark a PENDING payment FAILED + notify the initiator (in-app + email). */
+  private async failByReference(
+    schoolId: string | undefined,
+    reference: string | undefined,
+    reason: string,
+  ): Promise<{ ok: boolean }> {
+    if (!schoolId || !reference) return { ok: true };
+    const failed = await this.db.runAsTenant({ schoolId, userId: SYSTEM_ACTOR_ID }, async (tx) => {
+      const payment = await tx.platformSubscriptionPayment.findFirst({ where: { reference } });
+      if (!payment || payment.status !== "PENDING") return null;
+      await tx.platformSubscriptionPayment.update({ where: { id: payment.id }, data: { status: "FAILED" } });
+      return { recipientId: payment.initiatedById, plan: payment.plan };
+    });
+    if (failed) {
+      try {
+        await this.notifications.enqueue(
+          { schoolId, userId: failed.recipientId },
+          {
+            recipientId: failed.recipientId,
+            type: "BILLING",
+            title: "Payment failed",
+            body: `${reason} (ref ${reference}). Your ${failed.plan} subscription was NOT extended and no changes were made — please try again from the Billing page.`,
+            channels: ["EMAIL"],
+          },
+        );
+      } catch {
+        // best-effort
+      }
+    }
+    return { ok: true };
   }
 
   /**
@@ -306,7 +344,7 @@ export class BillingService {
           },
           tx,
         );
-        return null; // never extend the subscription on a mismatched settlement
+        return { mismatch: { recipientId: payment.initiatedById, plan: payment.plan } };
       }
 
       const plan: Plan = isPlan(payment.plan) ? payment.plan : DEFAULT_PLAN;
@@ -350,17 +388,41 @@ export class BillingService {
     });
 
     if (!applied) return { ok: true };
+    // A mismatched settlement tells the payer it FAILED (never silence on money).
+    const mismatch = (applied as { mismatch?: { recipientId: string; plan: string } }).mismatch;
+    if (mismatch) {
+      try {
+        await this.notifications.enqueue(
+          { schoolId, userId: mismatch.recipientId },
+          {
+            recipientId: mismatch.recipientId,
+            type: "BILLING",
+            title: "Payment failed",
+            body:
+              `Your ${mismatch.plan} subscription payment (ref ${reference}) could not be applied ` +
+              `because the settled amount or currency did not match the quote. Your subscription was NOT ` +
+              `extended — please contact the platform operator.`,
+            channels: ["EMAIL"],
+          },
+        );
+      } catch {
+        // best-effort
+      }
+      return { ok: true };
+    }
+    // Narrow the success shape (the tx return is a union with the mismatch case).
+    const ok = applied as { plan: Plan; periodEnd: Date; recipientId: string };
     // New posture takes effect immediately (don't wait for the 30s cache TTL).
     this.entitlements.invalidate(schoolId);
     // Best-effort confirmation to the staff member who paid.
     try {
       await this.notifications.enqueue(
-        { schoolId, userId: applied.recipientId },
+        { schoolId, userId: ok.recipientId },
         {
-          recipientId: applied.recipientId,
+          recipientId: ok.recipientId,
           type: "BILLING",
           title: "Subscription active",
-          body: `Your ${applied.plan} plan is active until ${applied.periodEnd.toDateString()}. This message is your payment receipt.`,
+          body: `Your ${ok.plan} plan is active until ${ok.periodEnd.toDateString()}. This message is your payment receipt.`,
           channels: ["EMAIL"],
         },
       );

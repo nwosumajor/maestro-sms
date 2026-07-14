@@ -47,8 +47,9 @@ function makeService(f: Fakes) {
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const notifications = { enqueue: jest.fn().mockResolvedValue({ id: "n-1" }) };
-  const service = new FeesService(db as never, audit as never, notifications as never);
-  return { service, tx, audit, notifications };
+  const paystack = { isConfigured: () => false, refund: jest.fn() };
+  const service = new FeesService(db as never, audit as never, notifications as never, paystack as never);
+  return { service, tx, audit, notifications, paystack };
 }
 
 const principal = (roles: string[], userId = "u-1"): Principal => ({
@@ -72,7 +73,7 @@ describe("FeesService", () => {
     expect((tx.invoice.create as jest.Mock).mock.calls[0][0].data.totalMinor).toBe(55000);
   });
 
-  it("a small payment posts immediately -> PARTIALLY_PAID, no receipt", async () => {
+  it("a small payment posts immediately -> PARTIALLY_PAID, and RECEIPTS with the balance", async () => {
     const { service, notifications, tx } = makeService({
       invoiceRow: { id: "inv-1", status: "ISSUED", studentId: "stu-1", reference: "INV-X", totalMinor: 10000, currency: "NGN" },
       posted: [],
@@ -80,7 +81,14 @@ describe("FeesService", () => {
     const pay = await service.recordPayment(principal(["accountant"]), "inv-1", { amountMinor: 4000, method: "CASH" });
     expect(pay.status).toBe("POSTED");
     expect((tx.invoice.update as jest.Mock).mock.calls[0][0].data.status).toBe("PARTIALLY_PAID");
-    expect(notifications.enqueue).not.toHaveBeenCalled();
+    // EVERY posted payment receipts — partial ones include the outstanding balance.
+    expect(notifications.enqueue).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        type: "PAYMENT_RECEIVED",
+        body: expect.stringContaining("Outstanding balance"),
+      }),
+    );
   });
 
   it("a final payment -> PAID and sends a receipt", async () => {
@@ -136,7 +144,7 @@ describe("FeesService", () => {
 
   it("a different approver posts the payment and updates the invoice", async () => {
     const { service, tx } = makeService({
-      pendingPayment: { id: "pay-1", status: "PENDING_APPROVAL", recordedById: "u-2", invoiceId: "inv-1", kind: "PAYMENT", amountMinor: 10000 },
+      pendingPayment: { id: "pay-1", status: "PENDING_APPROVAL", recordedById: "u-2", invoiceId: "inv-1", kind: "PAYMENT", amountMinor: 10000, method: "CASH", reference: null },
       invoiceRow: { id: "inv-1", status: "ISSUED", studentId: "stu-1", totalMinor: 10000, currency: "NGN", reference: "INV-X" },
       posted: [{ amountMinor: 10000, kind: "PAYMENT" }],
     });

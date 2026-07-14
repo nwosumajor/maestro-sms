@@ -23,8 +23,8 @@ export const neutral = {
   950: "222 47% 7%",
 } as const;
 
-/** Default brand (deep academic teal). Per-tenant theming overrides H/S/L at runtime. */
-export const brand = { h: 184, s: 68, l: 31 } as const;
+/** Default brand: the MajorGBN navy (logo wordmark). Per-tenant theming overrides H/S/L at runtime. */
+export const brand = { h: 205, s: 68, l: 26 } as const;
 
 /** Semantic roles for the default (light) theme. */
 export const semanticLight = {

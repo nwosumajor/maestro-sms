@@ -62,7 +62,7 @@ export default async function HelpPage() {
           steps={[
             { title: "Navigation", body: "The left menu shows only what your role can use. Your school's enabled modules decide which sections exist." },
             { title: "Notifications", body: "The Notifications page is your in-app inbox — payment receipts, absences, approvals and announcements land there (and by email where configured)." },
-            { title: "Your account", body: "Change your password and enrol two-factor authentication (recommended for all staff) on the Account page." },
+            { title: "Your account", body: "Change your password and enrol two-factor authentication (recommended for all staff) on the Account page. Forgot your password? Use the link on the sign-in page — a one-time reset link is emailed to you." },
             { title: "Security", body: "Sensitive actions ask you to re-confirm your password. Passwords expire every 30 days for staff; never share your login." },
           ]}
         />
@@ -106,6 +106,69 @@ export default async function HelpPage() {
               { title: "Pay fees online", body: "Fees: open an invoice and pay the outstanding balance by card — the receipt lands in Notifications and Documents." },
               { title: "Download documents", body: "Documents: report cards, receipts and certificates are issued here as secure downloads." },
               { title: "Message the school", body: "Messages: write to your teachers or the school office; replies appear here and in Notifications." },
+            ]}
+          />
+        )}
+
+        {(can("fee.approve") || (can("fee.manage") && !can("rbac.manage"))) && (
+          <Guide
+            title="Finance — fees, approvals & settlement"
+            description="Collecting, controlling and reconciling school money."
+            steps={[
+              { title: "Issue and track invoices", body: "Fees: build fee items, raise invoices, and follow DRAFT → ISSUED → PARTIALLY PAID → PAID. Parents can pay any invoice online by card." },
+              { title: "Understand maker-checker", body: "Payments of ₦50,000+ and ALL refunds post as pending until a DIFFERENT staff member with approval rights confirms them — you cannot approve your own entry. This protects you as much as the school." },
+              { title: "Receipts send themselves", body: "Every posted payment — cash you record or a card payment online, partial or full — automatically receipts the payer, the guardians and the student by email and in-app, with the new balance." },
+              { title: "Set up direct settlement", body: "Fees → Reports → Fee settlement account: register the school's bank once and every online payment settles straight to it." },
+              { title: "Read the reports", body: "Fees → Reports: receivables aging and collection summaries; send bulk payment reminders to guardians from the same page." },
+            ]}
+          />
+        )}
+
+        {can("hr.read") && (
+          <Guide
+            title="HR — staff records, leave & payroll"
+            description="The staff lifecycle from employment record to exit."
+            steps={[
+              { title: "Keep the register complete", body: "HR: every staff account should have an employment record — the page flags accounts still missing one. Salaries are encrypted; every view of them is logged." },
+              { title: "Leave flows through approvals", body: "Staff apply on the Leave page; requests route head → HR manager → principal. Balances update automatically on final approval." },
+              { title: "Salary changes are maker-checker", body: "One person requests, a different person approves — both with password re-confirmation. The request history IS the salary history." },
+              { title: "Run payroll", body: "HR → Payroll: a run snapshots active salaries with Nigerian PAYE and pension computed; a second person finalises. Payslips and bank-export CSVs come from the run." },
+              { title: "Exits are settled, not deleted", body: "Offboarding computes the final settlement (pro-rata pay + unused leave − outstanding loans) under maker-checker, and the record is retained as statutory history." },
+            ]}
+          />
+        )}
+
+        {(can("workflow.review.head") || can("workflow.review.hr")) && (
+          <Guide
+            title="Approvers — your stage in the chain"
+            description="For heads and HR managers who approve staff requests."
+            steps={[
+              { title: "Check Approvals regularly", body: "Workflows → your queue shows requests waiting at YOUR stage (leave, staff requests). The chain is head → HR manager → principal." },
+              { title: "One person, one stage", body: "You cannot act twice on the same request, and you cannot approve something you initiated — the engine enforces separation of duties." },
+              { title: "Approve or reject with a note", body: "Your decision advances the request to the next stage (or ends it). The requester is notified automatically at the end." },
+            ]}
+          />
+        )}
+
+        {(can("hostel.manage") || can("transport.manage") || can("library.manage")) && (
+          <Guide
+            title="Facilities — hostel, transport & library"
+            description="For wardens, drivers/fleet heads and librarians."
+            steps={[
+              { title: "Hostel (wardens)", body: "Hostel: rooms, bed availability and student allocation for your house — head wardens see every hostel. Hostel fee runs route through an approval before they bill." },
+              { title: "Transport (drivers & fleet)", body: "Transport: your vehicle, route and passenger list — the head driver manages the whole fleet. Route changes automatically alert affected parents." },
+              { title: "Library (librarians)", body: "Library: the barcode catalogue, loans and fines. A copy must be available to issue; books with loan history can't be deleted." },
+            ]}
+          />
+        )}
+
+        {can("workflow.veto") && (
+          <Guide
+            title="Board — oversight"
+            description="Read-only visibility with one deliberate power."
+            steps={[
+              { title: "See without touching", body: "You can read classes, grades, workflows, fees and documents across the school — but not modify them." },
+              { title: "The veto", body: "On any approval workflow you may exercise a veto — the one active power the board holds, and it is audit-logged like everything else." },
             ]}
           />
         )}

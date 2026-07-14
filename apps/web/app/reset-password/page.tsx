@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export default function ResetPasswordPage({ searchParams }: { searchParams: { token?: string } }) {
   const token = searchParams.token ?? "";
   return (
-    <main className="grid min-h-screen place-items-center bg-background p-6">
+    <main className="force-light grid min-h-screen place-items-center bg-background p-6">
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle>{token ? "Set a new password" : "Forgot your password?"}</CardTitle>

@@ -31,7 +31,8 @@ export const config = {
     "/admin/:path*",
     "/analytics/:path*",
     "/classes/:path*",
-    "/grades/:path*",
+    "/content/:path*",
+    "/gradebook/:path*",
     "/workflows/:path*",
     "/assessments/:path*",
     "/notifications/:path*",
@@ -61,5 +62,8 @@ export const config = {
     "/operator/:path*",
     "/directory/:path*",
     "/announcements/:path*",
+    "/family/:path*",
+    "/scholarships/:path*",
+    "/help/:path*",
   ],
 };

@@ -16,7 +16,7 @@ export default async function CareersPage({ params }: { params: { slug: string }
   }
 
   return (
-    <main className="mx-auto min-h-screen max-w-3xl bg-background p-6">
+    <main className="force-light mx-auto min-h-screen max-w-3xl bg-background p-6">
       <h1 className="text-2xl font-semibold tracking-tight">
         {data ? `Careers at ${data.school}` : "Careers"}
       </h1>

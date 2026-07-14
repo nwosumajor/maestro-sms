@@ -30,6 +30,8 @@ const config: Config = {
           DEFAULT: "hsl(var(--primary) / <alpha-value>)",
           foreground: "hsl(var(--primary-foreground) / <alpha-value>)",
         },
+        // The logo's green — affirmative accents (checks, chips, highlights).
+        brand2: "hsl(var(--accent-2) / <alpha-value>)",
         secondary: {
           DEFAULT: "hsl(var(--secondary) / <alpha-value>)",
           foreground: "hsl(var(--secondary-foreground) / <alpha-value>)",

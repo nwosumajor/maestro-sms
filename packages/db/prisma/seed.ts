@@ -351,8 +351,8 @@ async function main() {
   // super_admin is therefore a member of NO customer school.
   const platformOrg = await prisma.school.upsert({
     where: { slug: "sms-platform" },
-    update: { isPlatform: true },
-    create: { name: "SMS Platform", slug: "sms-platform", isPlatform: true },
+    update: { isPlatform: true, name: "MAESTRO-SMS" },
+    create: { name: "MAESTRO-SMS", slug: "sms-platform", isPlatform: true },
   });
 
   for (const key of PERMS) {
@@ -413,6 +413,10 @@ async function main() {
   const librarian = await mkUser("librarian@demo.school", "Demo Librarian");
   // The platform owner lives in the platform org, NOT the demo customer school.
   const owner = await mkUser("owner@sms.platform", "Platform Owner", platformOrg.id);
+  // SELF-HEAL: upsert never moves an existing user, so a DB seeded before the
+  // platform-org model leaves the owner parked in the demo school (their console
+  // then reads "St. Andrews Academy"). Relocate explicitly on every seed.
+  await prisma.user.update({ where: { id: owner.id }, data: { schoolId: platformOrg.id } });
 
   const roleByName = async (name: string) =>
     (await prisma.role.findUniqueOrThrow({ where: { name } })).id;
@@ -440,7 +444,8 @@ async function main() {
     const roleSchoolId = userId === owner.id ? platformOrg.id : school.id;
     await prisma.userRole.upsert({
       where: { userId_roleId: { userId, roleId } },
-      update: {},
+      // Self-healing: corrects rows created before the platform-org model.
+      update: { schoolId: roleSchoolId },
       create: { schoolId: roleSchoolId, userId, roleId },
     });
   }

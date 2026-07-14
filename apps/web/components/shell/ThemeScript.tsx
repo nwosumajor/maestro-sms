@@ -9,7 +9,7 @@
 const SCRIPT = `(function(){
   var KEY="theme";
   var mq=window.matchMedia("(prefers-color-scheme: dark)");
-  function pref(){try{return localStorage.getItem(KEY)||"system"}catch(e){return "system"}}
+  function pref(){try{return localStorage.getItem(KEY)||"dark"}catch(e){return "dark"}}
   function resolve(p){return p==="dark"||p==="light"?p:(mq.matches?"dark":"light")}
   function apply(p){
     var mode=resolve(p);

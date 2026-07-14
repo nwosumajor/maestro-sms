@@ -26,6 +26,7 @@ import { BillingService } from "../billing/billing.service";
 import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
 import { PaystackService, type PaystackEvent } from "../payments/paystack.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
+import { NotificationService } from "../notifications/notification.service";
 
 @Injectable()
 export class PaymentGatewayService {
@@ -35,6 +36,7 @@ export class PaymentGatewayService {
     private readonly paystack: PaystackService,
     private readonly billing: BillingService,
     private readonly privileged: PrivilegedDatabaseService,
+    private readonly notifications: NotificationService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -75,7 +77,9 @@ export class PaymentGatewayService {
       email,
       amountMinor,
       reference,
-      metadata: { kind: "invoice", invoiceId, schoolId: p.schoolId },
+      // payerId: the signed-in user who clicked pay — the receipt goes to them
+      // (plus the guardians and the student) when the webhook confirms.
+      metadata: { kind: "invoice", invoiceId, schoolId: p.schoolId, payerId: p.userId },
       // Split settlement: money lands in the SCHOOL's bank; the school bears the
       // gateway fee on its own collections. Unset → legacy platform settlement.
       subaccount,
@@ -169,15 +173,20 @@ export class PaymentGatewayService {
     return this.handleInvoiceCharge(event);
   }
 
-  /** On charge.success for an invoice, post the payment + advance the status. */
+  /** On charge.success for an invoice, post the payment + advance the status,
+   *  then RECEIPT the payer, the guardians and the student (in-app + email). */
   private async handleInvoiceCharge(event: PaystackEvent): Promise<{ ok: boolean }> {
-    const { invoiceId, schoolId } = (event.data.metadata ?? {}) as { invoiceId?: string; schoolId?: string };
+    const { invoiceId, schoolId, payerId } = (event.data.metadata ?? {}) as {
+      invoiceId?: string;
+      schoolId?: string;
+      payerId?: string;
+    };
     if (!invoiceId || !schoolId) return { ok: true };
 
     // System-context write (no user): the actor is the invoice's creator.
-    await this.db.runAsTenant({ schoolId, userId: SYSTEM_ACTOR_ID }, async (tx) => {
+    const receipt = await this.db.runAsTenant({ schoolId, userId: SYSTEM_ACTOR_ID }, async (tx) => {
       const inv = await tx.invoice.findFirst({ where: { id: invoiceId } });
-      if (!inv) return;
+      if (!inv) return null;
       // IDEMPOTENCY: Paystack RETRIES a webhook on any non-2xx / timeout (and can
       // double-deliver). Without this guard each retry would insert ANOTHER POSTED
       // payment for the same gateway reference and double-credit the invoice. The
@@ -186,7 +195,7 @@ export class PaymentGatewayService {
         where: { invoiceId, reference: event.data.reference },
         select: { id: true },
       });
-      if (already) return;
+      if (already) return null;
       await tx.payment.create({
         data: {
           schoolId,
@@ -208,7 +217,89 @@ export class PaymentGatewayService {
         { actorId: inv.createdById, action: "fee.payment.online", entity: "invoice", entityId: invoiceId, schoolId, metadata: { reference: event.data.reference } },
         tx,
       );
+      const guardians = await tx.parentChild.findMany({
+        where: { studentId: inv.studentId },
+        select: { parentId: true },
+      });
+      // OVERPAYMENT detection: two guardians can legitimately race to pay the
+      // same invoice — both charges succeed at the gateway. The ledger records
+      // it honestly; finance must be TOLD so the excess is refunded promptly.
+      let financeRecipients: string[] = [];
+      if (paid > inv.totalMinor) {
+        const finance = await tx.userRole.findMany({
+          where: { role: { name: { in: ["accountant", "school_admin"] } } },
+          select: { userId: true },
+          distinct: ["userId"],
+        });
+        financeRecipients = [...new Set([...finance.map((f: { userId: string }) => f.userId), inv.createdById])];
+      }
+      return {
+        invoiceRef: inv.reference,
+        currency: inv.currency,
+        balanceAfter: inv.totalMinor - paid,
+        overpaidMinor: Math.max(0, paid - inv.totalMinor),
+        financeRecipients,
+        recipients: [
+          ...new Set([
+            ...guardians.map((g: { parentId: string }) => g.parentId),
+            inv.studentId,
+            ...(payerId ? [payerId] : []),
+          ]),
+        ],
+      };
     });
+
+    // Receipt AFTER the committed write — a notification failure never undoes
+    // a recorded payment. Every online payment gets one, partial or full.
+    if (receipt) {
+      const amount = new Intl.NumberFormat("en-NG", { style: "currency", currency: receipt.currency }).format(
+        event.data.amount / 100,
+      );
+      const balanceLine =
+        receipt.balanceAfter <= 0
+          ? "The invoice is now fully paid. Thank you."
+          : `Outstanding balance: ${new Intl.NumberFormat("en-NG", { style: "currency", currency: receipt.currency }).format(receipt.balanceAfter / 100)}.`;
+      for (const recipientId of receipt.recipients) {
+        try {
+          await this.notifications.enqueue(
+            { schoolId, userId: recipientId },
+            {
+              recipientId,
+              type: "PAYMENT_RECEIVED",
+              title: "Payment receipt — successful",
+              body: `We received ${amount} by card on invoice ${receipt.invoiceRef} (ref ${event.data.reference}). ${balanceLine}`,
+              data: { invoiceId, reference: event.data.reference, amountMinor: event.data.amount },
+              channels: ["EMAIL"],
+            },
+          );
+        } catch {
+          // best-effort per recipient
+        }
+      }
+      // Overpayment alert to finance: the excess is refund-due, not a windfall.
+      if (receipt.overpaidMinor > 0) {
+        const over = new Intl.NumberFormat("en-NG", { style: "currency", currency: receipt.currency }).format(
+          receipt.overpaidMinor / 100,
+        );
+        for (const recipientId of receipt.financeRecipients) {
+          try {
+            await this.notifications.enqueue(
+              { schoolId, userId: recipientId },
+              {
+                recipientId,
+                type: "BILLING",
+                title: "Overpayment on an invoice — refund due",
+                body: `Invoice ${receipt.invoiceRef} is overpaid by ${over} (likely two payers paying at once, ref ${event.data.reference}). Record a refund of the excess from the invoice page.`,
+                data: { invoiceId, overpaidMinor: receipt.overpaidMinor },
+                channels: ["EMAIL"],
+              },
+            );
+          } catch {
+            // best-effort per recipient
+          }
+        }
+      }
+    }
     return { ok: true };
   }
 

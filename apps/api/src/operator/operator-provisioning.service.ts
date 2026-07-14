@@ -185,14 +185,27 @@ export class OperatorProvisioningService {
           select: { contactName: true, contactEmail: true },
         });
         if (req) {
+          // The requester receives each founding account's LOGIN EMAIL plus its
+          // one-time set-password link. SECURITY: the temporary password itself
+          // is never emailed — it is shown once in the operator console; the
+          // links are single-use (armed by passwordChangedAt=null) and expire.
+          const base = process.env.PUBLIC_WEB_URL ?? "http://localhost:3000";
+          const accountLines = result.created
+            .map(
+              (a) =>
+                `• ${a.role}\n  Sign-in email: ${a.email}\n  Set your password (one-time link, valid 7 days):\n  ${base}/welcome?token=${encodeURIComponent(mintInviteToken(a.id, result.school.id))}`,
+            )
+            .join("\n\n");
           await this.email.send(
             req.contactEmail,
             `${result.school.name} is now live on SMS`,
             `Hello ${req.contactName},\n\n` +
               `Great news — ${result.school.name} has been approved and set up on the ${plan} plan. ` +
-              `Your school's sign-in page is /login?school=${result.school.slug}. The founding admin ` +
-              `accounts have been created; temporary passwords are shared separately by our team, never ` +
-              `by email. Your 30-day free trial starts today.\n\n— The SMS Platform team`,
+              `Your 30-day free trial starts today.\n\n` +
+              `Your founding accounts:\n\n${accountLines}\n\n` +
+              `After setting each password, sign in any time at ${base}/login?school=${result.school.slug}. ` +
+              `For security, passwords are never sent by email — each link above works once; if one expires, ` +
+              `your platform contact can share a one-time temporary password securely.\n\n— The SMS Platform team`,
           );
         }
       } catch {
@@ -207,7 +220,13 @@ export class OperatorProvisioningService {
     // Best-effort, after the commit.
     try {
       for (const a of result.created) {
-        await this.sendInviteEmail(a.id, a.email, result.school.id, result.school.name, result.school.slug);
+        // From a public onboarding request the login emails are usually
+        // GENERATED identifiers (no real inbox) and the requester email above
+        // already carries every set-password link — skip the per-account invite
+        // so a real provider never bounces on a synthetic address.
+        if (!input.onboardingRequestId) {
+          await this.sendInviteEmail(a.id, a.email, result.school.id, result.school.name, result.school.slug);
+        }
         await this.notifications.enqueue(
           { schoolId: result.school.id, userId: p.userId },
           {
@@ -215,8 +234,9 @@ export class OperatorProvisioningService {
             type: "ANNOUNCEMENT",
             title: `Welcome to ${result.school.name}`,
             body:
-              `Your school is set up on the ${plan} plan. Use the set-password link emailed to you ` +
-              `(valid 7 days) to activate your account, then sign in at /login?school=${result.school.slug}. ` +
+              `Your school is set up on the ${plan} plan. Use the set-password link (valid 7 days) sent ` +
+              `to ${input.onboardingRequestId ? "your onboarding contact" : "your email"} to activate ` +
+              `your account, then sign in at /login?school=${result.school.slug}. ` +
               `The in-app Help page has the getting-started guide. Passwords are never sent by email.`,
             data: { schoolSlug: result.school.slug, plan },
             channels: ["EMAIL"],

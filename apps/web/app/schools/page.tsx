@@ -21,7 +21,7 @@ export default async function SchoolsPage() {
   const schools = await getSchools();
 
   return (
-    <main className="mx-auto min-h-screen max-w-4xl bg-background p-6">
+    <main className="force-light mx-auto min-h-screen max-w-4xl bg-background p-6">
       <header className="flex items-center justify-between py-4">
         <Link href="/" className="text-lg font-semibold tracking-tight">SMS</Link>
         <Link href="/login" className="text-sm text-muted-foreground hover:text-foreground">Sign in</Link>

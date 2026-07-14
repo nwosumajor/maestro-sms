@@ -26,6 +26,7 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 import { NotificationService } from "../notifications/notification.service";
+import { PaystackService } from "../payments/paystack.service";
 
 /** Roles that see ALL billing rows in the tenant. */
 const BILLING_WIDE_ROLES = new Set([
@@ -74,6 +75,7 @@ export class FeesService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly notifications: NotificationService,
+    private readonly paystack: PaystackService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -363,8 +365,9 @@ export class FeesService {
       });
 
       let invoice = inv;
+      const netAfter = kind === "REFUND" ? paid - input.amountMinor : paid + input.amountMinor;
       if (!needsApproval) {
-        invoice = await this.applyToInvoiceStatus(tx, inv, paid + input.amountMinor);
+        invoice = await this.applyToInvoiceStatus(tx, inv, netAfter);
       }
       await this.log(tx, p, "fee.payment.record", "invoice", invoiceId, {
         kind,
@@ -372,11 +375,17 @@ export class FeesService {
         method: input.method,
         status: payment.status,
       });
-      return { payment, invoice, posted: !needsApproval };
+      return { payment, invoice, posted: !needsApproval, balanceAfter: inv.totalMinor - netAfter };
     });
 
-    if (result.posted && result.invoice.status === "PAID") {
-      await this.receiptNotification(p, result.invoice);
+    // EVERY posted payment gets a receipt — partial payments included.
+    if (result.posted) {
+      await this.sendPaymentReceipt(
+        p,
+        result.invoice,
+        { amountMinor: input.amountMinor, method: input.method, reference: input.reference, kind },
+        result.balanceAfter,
+      );
     }
     return result.payment;
   }
@@ -414,11 +423,76 @@ export class FeesService {
         kind: pay.kind,
         amountMinor: pay.amountMinor,
       });
-      return { invoice, kind: pay.kind };
+      // For an approved CARD refund, locate the ORIGINAL card charge so the
+      // money can be pushed back to the same card via the gateway. The most
+      // recent POSTED card payment with enough value is the anchor.
+      let gatewayRef: string | null = null;
+      if (pay.kind === "REFUND") {
+        const original = await tx.payment.findFirst({
+          where: {
+            invoiceId: pay.invoiceId,
+            kind: "PAYMENT",
+            method: "CARD",
+            status: "POSTED",
+            reference: { not: null },
+            amountMinor: { gte: pay.amountMinor },
+          },
+          orderBy: { createdAt: "desc" },
+          select: { reference: true },
+        });
+        gatewayRef = original?.reference ?? null;
+      }
+      return {
+        invoice,
+        payment: { amountMinor: pay.amountMinor, method: pay.method, reference: pay.reference, kind: pay.kind },
+        balanceAfter: inv.totalMinor - net,
+        gatewayRef,
+      };
     });
-    if (result.kind === "PAYMENT" && result.invoice.status === "PAID") {
-      await this.receiptNotification(p, result.invoice);
+
+    // Gateway-executed refund: push the money back to the ORIGINAL card. The
+    // ledger decision above is committed either way (a business decision); if
+    // the gateway push fails or isn't possible (cash payment / gateway unset),
+    // the approver is told explicitly to return the funds manually — never
+    // silent, never redirectable to a different account.
+    let refundNote = "";
+    if (result.payment.kind === "REFUND") {
+      if (result.gatewayRef && this.paystack.isConfigured()) {
+        const pushed = await this.paystack.refund({
+          transactionReference: result.gatewayRef,
+          amountMinor: result.payment.amountMinor,
+        });
+        await this.db.runAsTenant(this.ctx(p), (tx) =>
+          this.log(tx, p, pushed.ok ? "fee.refund.gateway" : "fee.refund.gateway.failed", "invoice", result.invoice.id, {
+            paymentId,
+            transactionReference: result.gatewayRef,
+            amountMinor: result.payment.amountMinor,
+            ...(pushed.error ? { error: pushed.error } : {}),
+          }),
+        );
+        refundNote = pushed.ok
+          ? " The money is being returned to the original card by the payment provider."
+          : " Automatic card refund FAILED — the school will return the funds manually.";
+        if (!pushed.ok) {
+          // Tell the approver immediately; the audit entry has the details.
+          try {
+            await this.notifications.enqueue(this.ctx(p), {
+              recipientId: p.userId,
+              type: "BILLING",
+              title: "Card refund needs manual action",
+              body: `The gateway refund for invoice ${result.invoice.reference} (${this.money(result.payment.amountMinor, result.invoice.currency)}) failed — return the funds manually and keep the transfer evidence.`,
+              channels: ["EMAIL"],
+            });
+          } catch {
+            // best-effort
+          }
+        }
+      } else {
+        refundNote = " The school will return the funds to you directly.";
+      }
     }
+    // Approved payments AND refunds both notify — partial or full.
+    await this.sendPaymentReceipt(p, result.invoice, result.payment, result.balanceAfter, refundNote);
     return { id: paymentId, status: "POSTED" };
   }
 
@@ -442,16 +516,38 @@ export class FeesService {
     return tx.invoice.update({ where: { id: inv.id }, data: { status } });
   }
 
-  private async receiptNotification(
+  /**
+   * Universal payment receipt: EVERY posted payment (manual or online, partial
+   * or full) notifies the guardians AND the student (in-app + email) with the
+   * amount, method, reference and the NEW balance. Refunds send a refund notice.
+   * Best-effort — never fails the financial action.
+   */
+  private async sendPaymentReceipt(
     p: Principal,
     invoice: { id: string; studentId: string; reference: string; currency: string; totalMinor: number },
+    payment: { amountMinor: number; method: string; reference?: string | null; kind: string },
+    balanceAfter: number,
+    extraLine = "",
   ) {
-    await this.notifyGuardians(p, invoice.studentId, {
-      type: "PAYMENT_RECEIVED",
-      title: "Payment received",
-      body: `Invoice ${invoice.reference} is now fully paid (${this.money(invoice.totalMinor, invoice.currency)}). Thank you.`,
-      data: { invoiceId: invoice.id, reference: invoice.reference },
-    });
+    const amount = this.money(payment.amountMinor, invoice.currency);
+    const isRefund = payment.kind === "REFUND";
+    const balanceLine =
+      balanceAfter <= 0
+        ? "The invoice is now fully paid. Thank you."
+        : `Outstanding balance: ${this.money(balanceAfter, invoice.currency)}.`;
+    await this.notifyGuardians(
+      p,
+      invoice.studentId,
+      {
+        type: "PAYMENT_RECEIVED",
+        title: isRefund ? "Refund processed" : "Payment receipt — successful",
+        body:
+          `${isRefund ? "A refund of" : "We received"} ${amount} on invoice ${invoice.reference} ` +
+          `(${payment.method.toLowerCase()}${payment.reference ? `, ref ${payment.reference}` : ""}). ${balanceLine}${extraLine}`,
+        data: { invoiceId: invoice.id, reference: invoice.reference, amountMinor: payment.amountMinor },
+      },
+      [invoice.studentId],
+    );
   }
 
   async listPayments(p: Principal, invoiceId: string) {
@@ -556,14 +652,18 @@ export class FeesService {
     p: Principal,
     studentId: string,
     msg: { type: string; title: string; body: string; data?: Record<string, unknown> },
+    extraRecipientIds: string[] = [],
   ) {
     try {
       const guardians = await this.db.runAsTenant(this.ctx(p), (tx) =>
         tx.parentChild.findMany({ where: { studentId }, select: { parentId: true } }),
       );
-      for (const g of guardians as { parentId: string }[]) {
+      const recipients = [
+        ...new Set([...(guardians as { parentId: string }[]).map((g) => g.parentId), ...extraRecipientIds]),
+      ];
+      for (const recipientId of recipients) {
         await this.notifications.enqueue(this.ctx(p), {
-          recipientId: g.parentId,
+          recipientId,
           type: msg.type,
           title: msg.title,
           body: msg.body,

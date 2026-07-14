@@ -2,7 +2,6 @@ import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
 import { ThemeScript } from "@/components/shell/ThemeScript";
-import { ThemeToggle } from "@/components/shell/ThemeToggle";
 import { ServiceWorkerRegister } from "@/components/pwa/ServiceWorkerRegister";
 
 // SELF-HOSTED fonts (woff2 in ./fonts, downloaded from Google Fonts, latin subset)
@@ -57,8 +56,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="min-h-screen bg-background text-foreground antialiased">
         <ServiceWorkerRegister />
         {children}
-        {/* Universal theme control — reachable on every page, signed in or not. */}
-        <ThemeToggle className="fixed bottom-4 right-4 z-50 print:hidden" />
+        {/* The theme control lives in the AppShell topbar — public pages are
+            pinned light (.force-light), so a toggle there would be a no-op. */}
       </body>
     </html>
   );

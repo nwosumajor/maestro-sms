@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 // here on its own page; the homepage links to it.
 export default function OnboardPage() {
   return (
-    <main className="min-h-screen bg-background p-6">
+    <main className="force-light min-h-screen bg-background p-6">
       <div className="mx-auto max-w-3xl py-8">
         <Card>
           <CardHeader>

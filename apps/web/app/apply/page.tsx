@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 // PUBLIC page — no authentication. A prospective family applies for admission.
 export default function ApplyPage() {
   return (
-    <main className="grid min-h-screen place-items-center bg-background p-6">
+    <main className="force-light grid min-h-screen place-items-center bg-background p-6">
       <Card className="w-full max-w-lg">
         <CardHeader>
           <CardTitle>Apply for admission</CardTitle>

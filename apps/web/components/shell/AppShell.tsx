@@ -41,6 +41,7 @@ import {
 import { cn } from "@/lib/utils";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
+import { ThemeToggle } from "@/components/shell/ThemeToggle";
 import type { TenantTheme } from "@sms/tokens";
 import {
   MODULES,
@@ -276,7 +277,10 @@ export async function AppShell({
     }
   }
   return (
-    <div data-tenant style={brandStyle(theme, fontFamily)} className="min-h-screen bg-background">
+    // Theme is owned by the html-level ThemeScript + the topbar ThemeToggle
+    // (defaulting to the graphite dark console). Public pages pin themselves
+    // light via .force-light, so the toggle only ever restyles the app.
+    <div data-tenant style={brandStyle(theme, fontFamily)} className="min-h-screen bg-background text-foreground">
       {/* Top bar */}
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-border/70 bg-card/80 px-4 backdrop-blur-md supports-[backdrop-filter]:bg-card/65">
         <div className="flex items-center gap-2.5">
@@ -288,16 +292,20 @@ export async function AppShell({
               className="h-8 w-8 rounded-lg border border-border/60 bg-white object-contain"
             />
           ) : (
-            <div className="grid h-8 w-8 place-items-center rounded-lg bg-primary text-primary-foreground text-sm font-bold shadow-xs ring-1 ring-inset ring-white/10">
-              {schoolName.slice(0, 1).toUpperCase()}
-            </div>
+            // Platform default mark (MajorGBN) until the school uploads its own.
+            // eslint-disable-next-line @next/next/no-img-element -- static platform asset
+            <img src="/images/platform-mark.png" alt="MajorGBN" className="h-8 w-8 object-contain" />
           )}
           <div className="leading-tight">
             <span className="block font-display text-[0.95rem] font-semibold tracking-tight">{schoolName}</span>
-            <span className="eyebrow hidden text-[0.6rem] sm:block">School Console</span>
+            <span className="eyebrow hidden text-[0.6rem] sm:block">
+              {isPlatformOwner ? "Super Admin Console" : "School Console"}
+            </span>
           </div>
         </div>
         <div className="flex items-center gap-2.5">
+          {/* Light / Auto / Dark — the console defaults to the graphite dark theme. */}
+          <ThemeToggle />
           <div className="hidden items-center gap-2.5 rounded-full border border-border/70 bg-background/60 py-1 pl-2.5 pr-1 sm:flex">
             <span className="text-sm font-medium text-foreground/80">{userName}</span>
             <div className="grid h-7 w-7 place-items-center rounded-full bg-primary/12 text-[0.7rem] font-semibold text-primary">

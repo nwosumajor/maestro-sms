@@ -24,11 +24,9 @@ const INTERVAL_MS = 6000;
 export function LoginShowcase({
   logoUrl,
   schoolName,
-  initial,
 }: {
   logoUrl: string | null;
   schoolName: string;
-  initial: string;
 }) {
   const [index, setIndex] = React.useState(0);
   const [paused, setPaused] = React.useState(false);
@@ -56,27 +54,27 @@ export function LoginShowcase({
           src={s.src}
           alt={i === index ? s.alt : ""}
           aria-hidden={i !== index}
-          className="absolute inset-0 h-full w-full object-cover transition-opacity duration-1000"
+          // inset-0 + h/w-full fills the panel exactly (an <img> is a replaced
+          // element, so it honours the explicit 100%/100%). The panel width/height
+          // are fractional (grid fr units), so an exactly-fitted photo can
+          // rasterize a hair short and leave a 1px seam at the right/bottom edge;
+          // scale-[1.006] bleeds it a couple of px past all edges and the aside's
+          // overflow-hidden clips the excess. No visible zoom at this factor.
+          className="absolute inset-0 h-full w-full scale-[1.006] object-cover transition-opacity duration-1000"
           style={{ opacity: i === index ? 1 : 0 }}
         />
       ))}
       {/* Legibility scrim — photos stay the star, text stays readable. */}
-      <div aria-hidden className="pointer-events-none absolute inset-0 bg-gradient-to-t from-neutral-950/85 via-neutral-950/40 to-neutral-950/25" />
-      {/* The exercise-book margin rule, tinted by the current image's palette. */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-y-0 left-8 w-px transition-colors duration-1000"
-        style={{ backgroundColor: accent, opacity: 0.7 }}
-      />
+      <div aria-hidden className="pointer-events-none absolute -inset-px bg-gradient-to-t from-neutral-950/85 via-neutral-950/40 to-neutral-950/25" />
 
       <div className="relative flex items-center gap-3">
         {logoUrl ? (
           // eslint-disable-next-line @next/next/no-img-element -- remote tenant logo
           <img src={logoUrl} alt={`${schoolName} logo`} className="h-11 w-11 rounded-xl bg-white/10 object-contain p-1.5" />
         ) : (
-          <div className="grid h-11 w-11 place-items-center rounded-xl bg-white/12 text-lg font-bold ring-1 ring-inset ring-white/20">
-            {initial}
-          </div>
+          // Platform default mark until the school uploads its own logo.
+          // eslint-disable-next-line @next/next/no-img-element -- static platform asset
+          <img src="/images/platform-mark.png" alt="MajorGBN" className="h-11 w-11 rounded-xl bg-white/10 object-contain p-1 ring-1 ring-inset ring-white/20 backdrop-blur-sm" />
         )}
         <span className="text-sm font-semibold tracking-tight drop-shadow">{schoolName}</span>
       </div>
@@ -94,7 +92,7 @@ export function LoginShowcase({
         </p>
       </div>
 
-      <dl className="relative grid grid-cols-3 gap-6 border-t border-white/20 pt-6">
+      <dl className="relative grid grid-cols-3 gap-6 pt-6">
         {[
           ["1 sign-in", "for every role"],
           ["Tenant-isolated", "by design"],

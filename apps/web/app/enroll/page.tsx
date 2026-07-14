@@ -22,7 +22,7 @@ export default async function EnrollPage({ searchParams }: { searchParams: { sch
   const schools = await getSchools();
 
   return (
-    <main className="mx-auto min-h-screen max-w-2xl bg-background p-6">
+    <main className="force-light mx-auto min-h-screen max-w-2xl bg-background p-6">
       <header className="flex items-center justify-between py-4">
         <Link href="/" className="text-lg font-semibold tracking-tight">SMS</Link>
         <Link href="/schools" className="text-sm text-muted-foreground hover:text-foreground">All schools</Link>

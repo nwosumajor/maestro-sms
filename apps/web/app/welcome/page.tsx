@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export default function WelcomePage({ searchParams }: { searchParams: { token?: string } }) {
   const token = searchParams.token ?? "";
   return (
-    <main className="grid min-h-screen place-items-center bg-background p-6">
+    <main className="force-light grid min-h-screen place-items-center bg-background p-6">
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle>Welcome — activate your account</CardTitle>

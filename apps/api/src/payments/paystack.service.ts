@@ -104,6 +104,34 @@ export class PaystackService {
   }
 
   /**
+   * Refund (part of) a settled transaction BACK TO THE ORIGINAL CARD. Keyed on
+   * the original transaction reference, so money can only ever return to the
+   * instrument that paid — never be redirected. Paystack tracks the refundable
+   * remainder per transaction, so an accidental double call is rejected there
+   * too. Best-effort contract: returns {ok:false} rather than throwing, so the
+   * caller can fall back to the manual-return path with an explicit notice.
+   */
+  async refund(input: { transactionReference: string; amountMinor: number }): Promise<{ ok: boolean; error?: string }> {
+    const secret = process.env.PAYSTACK_SECRET_KEY;
+    if (!secret) return { ok: false, error: "gateway not configured" };
+    try {
+      const res = await fetch(`${PAYSTACK}/refund`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ transaction: input.transactionReference, amount: input.amountMinor }),
+      });
+      if (!res.ok) {
+        this.logger.error(`Paystack refund failed: ${res.status} (ref ${input.transactionReference})`);
+        return { ok: false, error: `provider ${res.status}` };
+      }
+      return { ok: true };
+    } catch (err) {
+      this.logger.error(`Paystack refund error: ${(err as Error).message}`);
+      return { ok: false, error: (err as Error).message };
+    }
+  }
+
+  /**
    * Verify a webhook's HMAC-SHA512 signature against the raw body. Returns the
    * parsed event, or null when the gateway is disabled / there is no body.
    * THROWS on a present-but-bad signature.

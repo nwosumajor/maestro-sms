@@ -17,7 +17,7 @@ export default async function CareersIndexPage() {
   }
 
   return (
-    <main className="mx-auto min-h-screen max-w-3xl bg-background p-6">
+    <main className="force-light mx-auto min-h-screen max-w-3xl bg-background p-6">
       <h1 className="text-2xl font-semibold tracking-tight">Careers</h1>
       <p className="mt-1 text-sm text-muted-foreground">
         Work at a school on the platform — pick a school to see its open positions.

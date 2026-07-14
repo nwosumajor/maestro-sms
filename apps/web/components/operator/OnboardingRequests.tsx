@@ -41,8 +41,11 @@ export function OnboardingRequests({ requests }: { requests: Req[] }) {
         <CardTitle className="text-base">Onboarding requests ({pending.length} open)</CardTitle>
         <CardDescription>
           Prospective schools that asked to join from the public site. &ldquo;Approve &amp; provision&rdquo;
-          pre-fills the onboarding form above with the request&apos;s details and plan/module wishes; the
-          request flips to approved when the school is created.
+          pre-fills the onboarding form above with the request&apos;s details and plan/module wishes and
+          auto-generates the founding school_admin + principal sign-in accounts. One click on
+          &ldquo;Create school&rdquo; then provisions the tenant, emails the requester the sign-in emails
+          with set-password links (never passwords), and shows the one-time temporary passwords here
+          briefly for copying. The request flips to approved when the school is created.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">
