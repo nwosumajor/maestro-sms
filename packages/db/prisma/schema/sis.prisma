@@ -16,8 +16,8 @@
 
 /// One demographic/contact profile per student (1:1 with a student User).
 model StudentProfile {
-  id       String @id @default(uuid()) @db.Uuid
-  schoolId String @db.Uuid
+  id        String @id @default(uuid()) @db.Uuid
+  schoolId  String @db.Uuid
   /// FK -> User(id) of the student. One profile per student per school.
   studentId String @db.Uuid
 
@@ -67,7 +67,7 @@ model EmergencyContact {
   phone        String
   email        String?
   /// Call order; lower is contacted first.
-  priority     Int    @default(1)
+  priority     Int     @default(1)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -129,12 +129,12 @@ model StudentImportBatch {
   uploadedById String            @db.Uuid
   reviewedById String?           @db.Uuid
   /// Parsed SIS rows awaiting approval (AdmissionImportRow[] in @sms/types).
-  rows    Json
+  rows         Json
   /// Dry-run / result summary (counts of new vs duplicate, created, errors).
-  summary Json?
-  reviewNote String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  summary      Json?
+  reviewNote   String?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
 
   school School @relation(fields: [schoolId], references: [id])
 
@@ -154,11 +154,11 @@ model ParentImportBatch {
   status       ImportBatchStatus @default(PENDING)
   uploadedById String            @db.Uuid
   reviewedById String?           @db.Uuid
-  rows       Json
-  summary    Json?
-  reviewNote String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  rows         Json
+  summary      Json?
+  reviewNote   String?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
 
   school School @relation(fields: [schoolId], references: [id])
 

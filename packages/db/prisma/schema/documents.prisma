@@ -26,17 +26,17 @@ enum DocumentStatus {
 }
 
 model Document {
-  id       String @id @default(uuid()) @db.Uuid
-  schoolId String @db.Uuid
+  id        String  @id @default(uuid()) @db.Uuid
+  schoolId  String  @db.Uuid
   /// Student this document pertains to (DB FK to user; null = school-level doc,
   /// staff-only). No Prisma relation, to keep the User model lean.
   studentId String? @db.Uuid
 
-  type  DocumentType
-  title String
+  type        DocumentType
+  title       String
   /// Object-storage key (e.g. schools/<schoolId>/documents/<id>/<name>). The
   /// bytes live in S3/R2 under this key — never in Postgres.
-  storageKey  String @unique
+  storageKey  String         @unique
   contentType String
   sizeBytes   Int?
   status      DocumentStatus @default(PENDING)

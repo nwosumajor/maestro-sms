@@ -46,7 +46,7 @@ model UltimateCompetition {
   startAt          DateTime
   endAt            DateTime
   /// super_admin userId (audit field; scalar — NO cross-tenant user relation).
-  createdById String @db.Uuid
+  createdById      String         @db.Uuid
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -60,25 +60,25 @@ model UltimateCompetition {
 model UltimateParticipant {
   /// Opaque player id — the public arena identity. NOT a userId. The userId
   /// mapping lives ONLY in the RLS-scoped `ultimate_entry_link`.
-  id            String @id @default(uuid()) @db.Uuid
-  competitionId String @db.Uuid
+  id            String  @id @default(uuid()) @db.Uuid
+  competitionId String  @db.Uuid
   /// Grouping/leaderboard only (spec §7 allows the school NAME across the wall).
   /// Scalar uuid + DB FK to school; NO Prisma relation (keeps the arena standalone).
-  schoolId String @db.Uuid
+  schoolId      String  @db.Uuid
   /// The student-chosen pseudonym (spec §7). NEVER a real name.
-  handle String
+  handle        String
   /// SECURITY: per-entry target secret — SERVER-ONLY, never serialized, cleared
   /// on finish. Per-entry (not one shared secret) is the leak-resistant choice
   /// (spec §5 reasoning applied to a multi-day, cross-school, unmonitored event).
-  secret String?
+  secret        String?
 
   startedAt   DateTime                  @default(now())
   guessCount  Int                       @default(0)
   lastGuessAt DateTime?
   /// Elapsed ms from this player's OWN start (time-independent ranking, §7).
-  elapsedMs  Int?
-  finishedAt DateTime?
-  status     UltimateParticipantStatus @default(ACTIVE)
+  elapsedMs   Int?
+  finishedAt  DateTime?
+  status      UltimateParticipantStatus @default(ACTIVE)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

@@ -18,7 +18,7 @@ model Employee {
   id       String @id @default(uuid()) @db.Uuid
   schoolId String @db.Uuid
   /// The staff user this record belongs to (DB FK to user; one record per user).
-  userId String @db.Uuid
+  userId   String @db.Uuid
 
   jobTitle       String
   department     String?
@@ -40,22 +40,22 @@ model Employee {
 
   /// Statutory identifiers for remittance schedules (PAYE TIN, pension RSA PIN)
   /// — HR-maintained, field-ENCRYPTED at rest, exported on the remittance pack.
-  tinEnc            String?
-  rsaPinEnc         String?
+  tinEnc    String?
+  rsaPinEnc String?
 
   /// Reporting line: the user id of this employee's LINE MANAGER (null = top
   /// of the org / reports to the proprietor). Drives the org chart and future
   /// route-to-manager approvals. Cycle-checked at the API boundary.
-  managerId         String?   @db.Uuid
+  managerId String? @db.Uuid
 
   /// Contract & confirmation lifecycle. New hires may start on PROBATION;
   /// flipping to CONFIRMED goes through the employment_change_request
   /// maker-checker, never a direct edit. endDate above doubles as the
   /// fixed-term contract end; the reminder sweep nudges HR 30 days out.
-  confirmationStatus      String    @default("CONFIRMED")
-  probationEndsAt         DateTime? @db.Date
-  gradeLevel              String?
-  contractReminderSentAt  DateTime?
+  confirmationStatus     String    @default("CONFIRMED")
+  probationEndsAt        DateTime? @db.Date
+  gradeLevel             String?
+  contractReminderSentAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -188,18 +188,18 @@ model PayrollRun {
 
 /// One employee's payslip within a run. Amounts ENCRYPTED at rest (per-tenant key).
 model Payslip {
-  id             String   @id @default(uuid()) @db.Uuid
-  schoolId       String   @db.Uuid
-  payrollRunId   String   @db.Uuid
-  userId         String   @db.Uuid
-  grossEnc       String?
-  deductionsEnc  String?
-  netEnc         String?
+  id            String   @id @default(uuid()) @db.Uuid
+  schoolId      String   @db.Uuid
+  payrollRunId  String   @db.Uuid
+  userId        String   @db.Uuid
+  grossEnc      String?
+  deductionsEnc String?
+  netEnc        String?
   /// Full component breakdown (base/allowances/statutory/other deductions/loan
   /// installments) as an ENCRYPTED JSON snapshot — the payslip renders from
   /// THIS, never by recomputing (rules/components may change after the run).
-  breakdownEnc   String?
-  createdAt      DateTime @default(now())
+  breakdownEnc  String?
+  createdAt     DateTime @default(now())
 
   @@unique([payrollRunId, userId])
   @@index([schoolId])
@@ -389,18 +389,18 @@ model Appraisal {
 
 /// A disciplinary case against a staff member, with an append-only entry log.
 model DisciplinaryCase {
-  id          String   @id @default(uuid()) @db.Uuid
-  schoolId    String   @db.Uuid
-  userId      String   @db.Uuid
-  title       String
-  category    String?
+  id         String   @id @default(uuid()) @db.Uuid
+  schoolId   String   @db.Uuid
+  userId     String   @db.Uuid
+  title      String
+  category   String?
   /// LOW | MEDIUM | HIGH.
-  severity    String   @default("LOW")
+  severity   String   @default("LOW")
   /// OPEN | UNDER_REVIEW | RESOLVED | DISMISSED.
-  status      String   @default("OPEN")
-  openedById  String   @db.Uuid
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  status     String   @default("OPEN")
+  openedById String   @db.Uuid
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   @@index([schoolId])
   @@index([schoolId, userId])
@@ -509,20 +509,20 @@ model StaffAttendance {
 /// drives the rotating gate-display code is field-ENCRYPTED at rest; rotating it
 /// invalidates all outstanding codes instantly.
 model AttendanceKiosk {
-  id         String   @id @default(uuid()) @db.Uuid
-  schoolId   String   @db.Uuid
-  enabled    Boolean  @default(false)
-  secretEnc  String
+  id          String   @id @default(uuid()) @db.Uuid
+  schoolId    String   @db.Uuid
+  enabled     Boolean  @default(false)
+  secretEnc   String
   /// Comma-separated public IPs/prefixes the school's network egresses from;
   /// clock-ins from elsewhere are FLAGGED (signal), not blocked.
-  allowedIps String?
+  allowedIps  String?
   /// Clock-in window + lateness boundary, school-local "HH:MM".
-  windowStart String  @default("06:00")
-  windowEnd   String  @default("10:00")
-  lateAfter   String  @default("08:00")
-  updatedById String  @db.Uuid
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  windowStart String   @default("06:00")
+  windowEnd   String   @default("10:00")
+  lateAfter   String   @default("08:00")
+  updatedById String   @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@unique([schoolId])
   @@map("attendance_kiosk")
@@ -616,17 +616,17 @@ model StaffExit {
 /// templates NEVER enter this system — matching happens ON the device; we store
 /// only attendance EVENTS (who/when/which device). Deleting = decommissioning.
 model AttendanceDevice {
-  id         String    @id @default(uuid()) @db.Uuid
-  schoolId   String    @db.Uuid
-  name       String
+  id          String    @id @default(uuid()) @db.Uuid
+  schoolId    String    @db.Uuid
+  name        String
   /// The identifier the terminal sends with each batch (unique per school).
-  deviceId   String
-  secretEnc  String
-  enabled    Boolean   @default(true)
-  lastSeenAt DateTime?
-  createdById String   @db.Uuid
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  deviceId    String
+  secretEnc   String
+  enabled     Boolean   @default(true)
+  lastSeenAt  DateTime?
+  createdById String    @db.Uuid
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@unique([schoolId, deviceId])
   @@index([schoolId])

@@ -6,22 +6,22 @@
 // =============================================================================
 
 model Alumnus {
-  id            String   @id @default(uuid()) @db.Uuid
-  schoolId      String   @db.Uuid
+  id             String   @id @default(uuid()) @db.Uuid
+  schoolId       String   @db.Uuid
   /// Optional link to the original student User (null if recorded after the fact).
-  userId        String?  @db.Uuid
-  name          String
-  email         String?
-  phone         String?
+  userId         String?  @db.Uuid
+  name           String
+  email          String?
+  phone          String?
   /// Year they graduated / left.
   graduationYear Int?
   /// Last class/level attended.
-  lastClass     String?
-  occupation    String?
-  notes         String?
-  createdById   String   @db.Uuid
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  lastClass      String?
+  occupation     String?
+  notes          String?
+  createdById    String   @db.Uuid
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   @@index([schoolId])
   @@index([schoolId, graduationYear])

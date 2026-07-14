@@ -23,6 +23,8 @@ export const GAME_PERMISSIONS = {
   MATCH_MODERATE: "game.match.moderate",
   /** View leaderboards/standings (own school). */
   LEADERBOARD_READ: "game.leaderboard.read",
+  /** Author + host a live quiz (teacher: own classes; principal/school_admin). */
+  QUIZ_HOST: "game.quiz.host",
   /** Manage school-wide game settings/config (school_admin). */
   SETTINGS_MANAGE: "game.settings.manage",
   /** Enroll the school into an Ultimate (cross-school) competition. */
@@ -43,6 +45,7 @@ export const GAME_ROLE_PERMISSIONS = {
     GAME_PERMISSIONS.RACE_OPEN,
     GAME_PERMISSIONS.MATCH_MODERATE,
     GAME_PERMISSIONS.LEADERBOARD_READ,
+    GAME_PERMISSIONS.QUIZ_HOST,
   ],
   principal: [
     GAME_PERMISSIONS.RACE_OPEN,
@@ -50,6 +53,7 @@ export const GAME_ROLE_PERMISSIONS = {
     GAME_PERMISSIONS.LEAGUE_CREATE,
     GAME_PERMISSIONS.MATCH_MODERATE,
     GAME_PERMISSIONS.LEADERBOARD_READ,
+    GAME_PERMISSIONS.QUIZ_HOST,
     GAME_PERMISSIONS.ULTIMATE_ENROLL,
   ],
   school_admin: [
@@ -58,6 +62,7 @@ export const GAME_ROLE_PERMISSIONS = {
     GAME_PERMISSIONS.LEAGUE_CREATE,
     GAME_PERMISSIONS.MATCH_MODERATE,
     GAME_PERMISSIONS.LEADERBOARD_READ,
+    GAME_PERMISSIONS.QUIZ_HOST,
     GAME_PERMISSIONS.SETTINGS_MANAGE,
     GAME_PERMISSIONS.ULTIMATE_ENROLL,
     GAME_PERMISSIONS.ULTIMATE_CONSENT,

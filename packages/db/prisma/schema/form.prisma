@@ -31,15 +31,15 @@ model Form {
 }
 
 model FormResponse {
-  id          String   @id @default(uuid()) @db.Uuid
-  schoolId    String   @db.Uuid
-  formId      String   @db.Uuid
+  id           String   @id @default(uuid()) @db.Uuid
+  schoolId     String   @db.Uuid
+  formId       String   @db.Uuid
   /// SECURITY: enforces one response per member + audit. NEVER returned for an
   /// anonymous form.
-  respondentId String  @db.Uuid
+  respondentId String   @db.Uuid
   /// { [fieldKey]: value } answers.
-  answers     Json     @default("{}")
-  createdAt   DateTime @default(now())
+  answers      Json     @default("{}")
+  createdAt    DateTime @default(now())
 
   form Form @relation(fields: [formId], references: [id])
 

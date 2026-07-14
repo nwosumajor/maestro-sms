@@ -57,6 +57,12 @@ d("RLS cross-tenant isolation", () => {
   const competitionA = randomUUID();
   const standingA = randomUUID();
   const gameSettingsA = randomUUID();
+  // Live Quiz (Kahoot-style): quiz + question + session + participant + answer.
+  const liveQuizA = randomUUID();
+  const liveQuizQuestionA = randomUUID();
+  const liveQuizSessionA = randomUUID();
+  const liveQuizParticipantA = randomUUID();
+  const liveQuizAnswerA = randomUUID();
   // Ultimate: ONLY the tenant-scoped governance/bridge tables are isolation-tested.
   // The arena tables (ultimate_competition / ultimate_participant) are
   // CROSS-TENANT by design (RLS-exempt — see 21_ultimate_rls.sql) and carry no PII.
@@ -319,6 +325,27 @@ d("RLS cross-tenant isolation", () => {
     await a.query(
       `INSERT INTO game_settings (id,"schoolId","updatedAt") VALUES ($1,$2,now())`,
       [gameSettingsA, A],
+    );
+    // Live Quiz: a quiz + question + session + participant + answer in A.
+    await a.query(
+      `INSERT INTO live_quiz (id,"schoolId",title,theme,difficulty,"createdById","updatedAt") VALUES ($1,$2,'Geo','GEOGRAPHY','MEDIUM',$3,now())`,
+      [liveQuizA, A, userA],
+    );
+    await a.query(
+      `INSERT INTO live_quiz_question (id,"schoolId","quizId","orderIndex",prompt,choices,"answerIndex") VALUES ($1,$2,$3,0,'Q?',$4::jsonb,0)`,
+      [liveQuizQuestionA, A, liveQuizA, '["A","B"]'],
+    );
+    await a.query(
+      `INSERT INTO live_quiz_session (id,"schoolId","quizId","hostId","updatedAt") VALUES ($1,$2,$3,$4,now())`,
+      [liveQuizSessionA, A, liveQuizA, userA],
+    );
+    await a.query(
+      `INSERT INTO live_quiz_participant (id,"schoolId","sessionId","userId") VALUES ($1,$2,$3,$4)`,
+      [liveQuizParticipantA, A, liveQuizSessionA, userA],
+    );
+    await a.query(
+      `INSERT INTO live_quiz_answer (id,"schoolId","sessionId","participantId","questionIndex","choiceIndex",correct,"elapsedMs",points) VALUES ($1,$2,$3,$4,0,0,true,500,700)`,
+      [liveQuizAnswerA, A, liveQuizSessionA, liveQuizParticipantA],
     );
     // Ultimate (step 8): an arena competition (cross-tenant) + the tenant-scoped
     // enrollment/consent/entry-link governance rows for school A.
@@ -857,6 +884,12 @@ d("RLS cross-tenant isolation", () => {
       "standing",
       "competition",
       "game_settings",
+      // Live Quiz: children (answer/participant) → session → question → quiz.
+      "live_quiz_answer",
+      "live_quiz_participant",
+      "live_quiz_session",
+      "live_quiz_question",
+      "live_quiz",
       // Ultimate: bridge/governance + participant are schoolId-scoped; the arena
       // `ultimate_competition` has NO schoolId (cross-tenant) → deleted by id below.
       "ultimate_entry_link",
@@ -958,6 +991,11 @@ d("RLS cross-tenant isolation", () => {
     ["competition", competitionA],
     ["standing", standingA],
     ["game_settings", gameSettingsA],
+    ["live_quiz", liveQuizA],
+    ["live_quiz_question", liveQuizQuestionA],
+    ["live_quiz_session", liveQuizSessionA],
+    ["live_quiz_participant", liveQuizParticipantA],
+    ["live_quiz_answer", liveQuizAnswerA],
     ["lms_content", lmsContentA],
     ["quiz_attempt", quizAttemptA],
     ["forum_post", forumPostA],

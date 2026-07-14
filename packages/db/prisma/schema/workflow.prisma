@@ -10,28 +10,28 @@
 // =============================================================================
 
 model WorkflowRequest {
-  id          String   @id @default(uuid()) @db.Uuid
-  schoolId    String   @db.Uuid
+  id           String   @id @default(uuid()) @db.Uuid
+  schoolId     String   @db.Uuid
   /// LEAVE | PURCHASE_ORDER | DISCIPLINARY
-  type        String
-  title       String
+  type         String
+  title        String
   /// Flexible request body (leave dates, PO line items, etc.).
-  payload     Json
+  payload      Json
   /// Current state of the machine.
-  state       String   @default("DRAFT")
+  state        String   @default("DRAFT")
   /// Multi-stage approval chain (ordered [{key,label,permission}]). Empty = a
   /// single-stage request (legacy behaviour). See STAFF_REQUEST_CHAIN in @sms/types.
-  stages       Json    @default("[]")
+  stages       Json     @default("[]")
   /// Pointer into `stages` for the NEXT approval. Advances on each stage APPROVE
   /// until the last stage finalizes the request to APPROVED.
-  currentStage Int     @default(0)
+  currentStage Int      @default(0)
   /// Who has approved which stage so far ([{stageKey,approverId,at}]). Drives
   /// separation of duties — a user already here cannot approve another stage.
   /// Reset to [] (with currentStage→0) on REQUEST_REVISION.
-  approvals    Json    @default("[]")
-  initiatorId String   @db.Uuid
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  approvals    Json     @default("[]")
+  initiatorId  String   @db.Uuid
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   school    School             @relation(fields: [schoolId], references: [id])
   initiator User               @relation("InitiatedWorkflows", fields: [initiatorId], references: [id])

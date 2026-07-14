@@ -20,9 +20,9 @@ model ErasureRequest {
   schoolId String @db.Uuid
 
   /// The student whose data is requested for erasure (DB FK to user; scalar).
-  studentId String @db.Uuid
+  studentId     String        @db.Uuid
   /// Who raised it (the subject or a guardian; DB FK to user; scalar).
-  requestedById String @db.Uuid
+  requestedById String        @db.Uuid
   reason        String
   status        ErasureStatus @default(PENDING)
   /// The controller who reviewed it (DB FK to user; scalar).
