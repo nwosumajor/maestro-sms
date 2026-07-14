@@ -29,6 +29,7 @@ export default async function GamesPage() {
   const canRaceOpen = hasPermission(user.permissions, "game.race.open");
   const canLeague = hasPermission(user.permissions, "game.league.create");
   const canSettings = hasPermission(user.permissions, "game.settings.manage");
+  const canQuizHost = hasPermission(user.permissions, "game.quiz.host");
 
   const [openGames, classes, races, competitions, people, settings] = await Promise.all([
     canPlay ? apiGet<Serialized<OpenGameDto>[]>("/games/open") : Promise.resolve(null),
@@ -74,6 +75,21 @@ export default async function GamesPage() {
             </Card>
           </div>
         )}
+
+        {/* Live Quiz — Kahoot-style, curriculum-themed. */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Live Quiz</CardTitle>
+            <CardDescription>
+              Kahoot-style themed quizzes — Geography, Science, Art, Literature. Answer correctly and fast to win.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Link href="/games/quiz" className={cn(buttonVariants({ size: "sm" }))}>
+              {canQuizHost ? "Host or join a quiz" : "Join a live quiz"}
+            </Link>
+          </CardContent>
+        </Card>
 
         {canPlay && openGames && openGames.length > 0 && (
           <Card>
