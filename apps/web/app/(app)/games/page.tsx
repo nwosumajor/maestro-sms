@@ -31,6 +31,7 @@ export default async function GamesPage() {
   const canSettings = hasPermission(user.permissions, "game.settings.manage");
   const canQuizHost = hasPermission(user.permissions, "game.quiz.host");
   const canHangmanHost = hasPermission(user.permissions, "game.hangman.host");
+  const canTypingHost = hasPermission(user.permissions, "game.typing.host");
 
   const [openGames, classes, races, competitions, people, settings] = await Promise.all([
     canPlay ? apiGet<Serialized<OpenGameDto>[]>("/games/open") : Promise.resolve(null),
@@ -106,6 +107,50 @@ export default async function GamesPage() {
             </Link>
           </CardContent>
         </Card>
+
+        {/* Typing Race — classroom typing game. */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Typing Race</CardTitle>
+            <CardDescription>
+              Type the passage fast and accurately — highest net WPM wins. Great for ICT and keyboard skills.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Link href="/games/typing" className={cn(buttonVariants({ size: "sm" }))}>
+              {canTypingHost ? "Host or join a race" : "Join a typing race"}
+            </Link>
+          </CardContent>
+        </Card>
+
+        {/* Checkers & Chess — 2-player board duels. */}
+        {canPlay && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Checkers</CardTitle>
+              <CardDescription>Classic 8×8 draughts — challenge a classmate to a turn-by-turn duel.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Link href="/games/checkers" className={cn(buttonVariants({ size: "sm" }))}>
+                Play checkers
+              </Link>
+            </CardContent>
+          </Card>
+        )}
+
+        {canPlay && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Chess</CardTitle>
+              <CardDescription>Full-rules chess — checkmate, castling, en passant, promotion, and all.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Link href="/games/chess" className={cn(buttonVariants({ size: "sm" }))}>
+                Play chess
+              </Link>
+            </CardContent>
+          </Card>
+        )}
 
         {canPlay && openGames && openGames.length > 0 && (
           <Card>

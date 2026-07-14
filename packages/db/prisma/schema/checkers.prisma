@@ -1,0 +1,52 @@
+// =============================================================================
+// Checkers / Draughts — durable records (turn-based 2-player peer duel)
+// =============================================================================
+// A peer duel (like the Dead & Wounded duel): a player CREATES a game (they play
+// black, which moves first), another player in the same school JOINS as white,
+// and they alternate turns. Moves are validated SERVER-SIDE against the pure
+// engine (@sms/game-engine checkers.ts) — clients are display-only (spec §9).
+// Perfect-information game (the whole board is visible), so nothing is redacted;
+// the server offers the current player's legal moves in the view.
+//
+// Tenant-scoped (non-null schoolId) + RLS (68_checkers_rls.sql); relationship
+// scoping (only the two participants — plus school-wide staff — may act/view an
+// active game) is enforced in CheckersService. 404-not-403. Audited. No enforced
+// clock in v1 (board-game time controls are a deferred enhancement).
+// =============================================================================
+
+enum CheckersStatus {
+  LOBBY
+  ACTIVE
+  FINISHED
+}
+
+/// One checkers game between two players in a school.
+model CheckersGame {
+  id           String         @id @default(uuid()) @db.Uuid
+  schoolId     String         @db.Uuid
+  status       CheckersStatus @default(LOBBY)
+  createdById  String         @db.Uuid
+  /// The two players (scalar uuids; creator is black and moves first).
+  blackUserId  String         @db.Uuid
+  whiteUserId  String?        @db.Uuid
+  /// Whose turn: 'b' | 'w'.
+  turn         String         @default("b")
+  /// The 8x8 board state (engine CheckerBoard: (piece|null)[][]).
+  board        Json
+  moveCount    Int            @default(0)
+  /// Set on finish.
+  winnerUserId String?        @db.Uuid
+  /// B_WON | W_WON | RESIGN.
+  outcome      String?
+
+  startedAt  DateTime?
+  finishedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, status])
+  @@map("checkers_game")
+}

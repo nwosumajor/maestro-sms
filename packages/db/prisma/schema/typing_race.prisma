@@ -1,0 +1,77 @@
+// =============================================================================
+// Typing Race — durable records (classroom typing game)
+// =============================================================================
+// A teacher HOSTS a typing race for a class around a passage; enrolled students
+// type it in PARALLEL and are ranked by net WPM (speed adjusted for accuracy),
+// then accuracy, then finish time (scoring in @sms/game-engine typing.ts). Unlike
+// hangman/race, the PASSAGE IS SHOWN — players type it, so it is not a secret and
+// needs no redaction. All tenant-scoped (non-null schoolId) + RLS
+// (67_typing_race_rls.sql); relationship scoping (host = teacher of the class;
+// players = enrolled students) is enforced in TypingRaceService. 404-not-403.
+//
+// Every mutation is audit-logged (Golden Rule #5 — minors' game telemetry). No
+// automated consequence (Golden Rule #8): a race produces WPM/fun, not a grade.
+// =============================================================================
+
+enum TypingRaceStatus {
+  LOBBY
+  ACTIVE
+  FINISHED
+}
+
+/// One typing race for a class around a shared passage.
+model TypingRace {
+  id           String           @id @default(uuid()) @db.Uuid
+  schoolId     String           @db.Uuid
+  classId      String           @db.Uuid
+  hostId       String           @db.Uuid
+  /// EASY | MEDIUM | HARD — selects the passage profile (length/punctuation).
+  difficulty   String
+  /// The passage to type (shown to players — NOT a secret).
+  passage      String
+  status       TypingRaceStatus @default(LOBBY)
+  winnerUserId String?          @db.Uuid
+
+  startedAt  DateTime?
+  finishedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  school School        @relation(fields: [schoolId], references: [id])
+  racers TypingRacer[]
+
+  @@index([schoolId])
+  @@index([schoolId, status])
+  @@index([schoolId, classId])
+  @@map("typing_race")
+}
+
+/// A student's progress within a race: latest computed metrics (server-side).
+model TypingRacer {
+  id         String    @id @default(uuid()) @db.Uuid
+  schoolId   String    @db.Uuid
+  raceId     String    @db.Uuid
+  userId     String    @db.Uuid
+  /// Net WPM (gross * accuracy), computed server-side from the typed text.
+  netWpm     Float     @default(0)
+  /// Accuracy 0..1 over what was typed.
+  accuracy   Float     @default(1)
+  /// Characters correctly typed so far (for a live progress bar).
+  progress   Int       @default(0)
+  finished   Boolean   @default(false)
+  /// Ms from race start to the racer's latest update / finish.
+  elapsedMs  Int       @default(0)
+  /// Podium rank once finished (1 = first to finish); null until finished.
+  rank       Int?
+  finishedAt DateTime?
+
+  joinedAt  DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School     @relation(fields: [schoolId], references: [id])
+  race   TypingRace @relation(fields: [raceId], references: [id], onDelete: Cascade)
+
+  @@unique([raceId, userId])
+  @@index([schoolId])
+  @@map("typing_racer")
+}
