@@ -19,3 +19,16 @@ export * from "./race";
 // target, handle-only, standings-ranked). Governance-free; the SMS service adds
 // the cross-school consent/bridge above it.
 export * from "./arena";
+
+// ---------------------------------------------------------------------------
+// Classroom game suite (new) — pure engines, one shared difficulty scale. Each
+// integrates through the SMS with the standard tenant/RLS/relationship pattern.
+// ---------------------------------------------------------------------------
+export * from "./difficulty"; // shared EASY/MEDIUM/HARD scale + board time controls
+export * from "./quiz"; // Kahoot-style live quiz scoring (themed banks)
+export * from "./typing"; // typing-race WPM/accuracy scoring
+export * from "./hangman"; // hangman state machine
+// Chess & checkers share generic names (legalMoves/applyMove/movesEqual/Sq), so
+// they are NAMESPACED — consumers use `chess.legalMoves` / `checkers.applyMove`.
+export * as chess from "./chess"; // full-rules chess (legal moves, mate/stalemate/draw)
+export * as checkers from "./checkers"; // 8x8 draughts rules
