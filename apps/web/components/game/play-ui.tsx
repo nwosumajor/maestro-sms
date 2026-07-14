@@ -359,3 +359,74 @@ export function StatusLine({ msg, error }: { msg: string | null; error?: boolean
   if (!msg) return null;
   return <p className={cn("text-sm", error ? "text-destructive" : "text-muted-foreground")}>{msg}</p>;
 }
+
+// --- board-game clocks -------------------------------------------------------
+
+/** Re-render on an interval so ticking clocks stay live. */
+export function useNowTick(ms = 500): number {
+  const [now, setNow] = React.useState(() => Date.now());
+  React.useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), ms);
+    return () => clearInterval(id);
+  }, [ms]);
+  return now;
+}
+
+/** Format milliseconds as m:ss (floored at 0). */
+export function fmtClock(ms: number): string {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+const TIME_LABEL: Record<string, string> = {
+  EASY: "Classical · 15 min + 10s",
+  MEDIUM: "Rapid · 5 min + 5s",
+  HARD: "Blitz · 3 min + 2s",
+};
+
+/** The live remaining ms for a colour (ticks down while it's their turn). */
+export function liveClockMs(storedMs: number, isActive: boolean, turnStartedAt: string | null, now: number): number {
+  if (isActive && turnStartedAt) return storedMs - (now - new Date(turnStartedAt).getTime());
+  return storedMs;
+}
+
+/** Two-player clock panel for the board games (checkers / chess). The active
+ *  clock ticks and turns red when low. `players` = [color, label, storedMs][]. */
+export function BoardClocks({
+  difficulty,
+  players,
+  turn,
+  turnStartedAt,
+  finished,
+}: {
+  difficulty: string;
+  players: Array<[string, string, number]>;
+  turn: string;
+  turnStartedAt: string | null;
+  finished: boolean;
+}) {
+  const now = useNowTick(500);
+  return (
+    <div className="space-y-1.5">
+      <p className="text-xs text-muted-foreground">{TIME_LABEL[difficulty] ?? difficulty}</p>
+      {players.map(([color, label, stored]) => {
+        const active = !finished && turn === color;
+        const ms = liveClockMs(stored, active, turnStartedAt, now);
+        return (
+          <div
+            key={color}
+            className={cn(
+              "flex items-center justify-between rounded-md border px-3 py-1.5",
+              active ? "border-primary bg-primary/5" : "border-border",
+            )}
+          >
+            <span className="text-sm">{label}</span>
+            <span className={cn("tnum font-mono text-sm font-semibold", ms < 20000 && "text-destructive", ms <= 0 && "opacity-70")}>
+              {fmtClock(ms)}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}

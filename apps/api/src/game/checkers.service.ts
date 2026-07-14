@@ -25,9 +25,10 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { checkers } from "@sms/game-engine";
+import { BOARD_TIME_CONTROLS, checkers, isGameDifficulty, type GameDifficulty } from "@sms/game-engine";
 import { Prisma } from "@sms/db";
 import type {
+  BoardDifficultyDto,
   CheckerBoardDto,
   CheckersColor,
   CheckersGameDto,
@@ -76,9 +77,11 @@ export class CheckersService {
 
   // --- lifecycle ----------------------------------------------------------
   /** Create a game; the creator plays black (moves first). */
-  async createGame(p: Principal): Promise<CheckersGameDto> {
+  async createGame(p: Principal, input: { difficulty?: string } = {}): Promise<CheckersGameDto> {
     return this.withEmit(p, null, async (tx) => {
       await this.assertGamesEnabled(tx, p.schoolId);
+      const difficulty = this.difficultyOf(input.difficulty);
+      const base = BOARD_TIME_CONTROLS[difficulty].baseSeconds * 1000;
       const fresh = checkers.newCheckersGame();
       const game = await tx.checkersGame.create({
         data: {
@@ -88,14 +91,17 @@ export class CheckersService {
           blackUserId: p.userId,
           turn: "b",
           board: fresh.board as unknown as Prisma.InputJsonValue,
+          difficulty,
+          whiteTimeMs: base,
+          blackTimeMs: base,
         },
       });
-      await this.log(tx, p, "checkers.create", game.id);
+      await this.log(tx, p, "checkers.create", game.id, { difficulty });
       return this.buildView(tx, game.id, p);
     });
   }
 
-  /** Join an open game as white. */
+  /** Join an open game as white; both clocks start ticking from black's turn. */
   async joinGame(p: Principal, gameId: string): Promise<CheckersGameDto> {
     return this.withEmit(p, gameId, async (tx) => {
       const game = await this.requireGame(tx, gameId);
@@ -103,14 +109,15 @@ export class CheckersService {
       if (game.blackUserId === p.userId) throw new ConflictException("You can't join your own game");
       await tx.checkersGame.update({
         where: { id: gameId },
-        data: { whiteUserId: p.userId, status: "ACTIVE", startedAt: new Date() },
+        data: { whiteUserId: p.userId, status: "ACTIVE", startedAt: new Date(), turnStartedAt: new Date() },
       });
       await this.log(tx, p, "checkers.join", gameId);
       return this.buildView(tx, gameId, p);
     });
   }
 
-  /** Apply a move on the caller's turn (validated by the engine). */
+  /** Apply a move on the caller's turn (validated by the engine). Deducts the
+   *  turn's elapsed time from the mover's clock (flag-fall = loss) + increment. */
   async move(p: Principal, gameId: string, move: CheckersMoveDto): Promise<CheckersGameDto> {
     return this.withEmit(p, gameId, async (tx) => {
       const game = await this.requireGame(tx, gameId);
@@ -118,6 +125,24 @@ export class CheckersService {
       const color = this.colorOf(game, p.userId);
       if (!color) throw new NotFoundException("Game not found"); // relationship scope
       if (game.turn !== color) throw new ConflictException("It is not your turn");
+
+      // Clock: has the mover already run out of time on this turn?
+      const now = Date.now();
+      const moverTime = color === "b" ? game.blackTimeMs : game.whiteTimeMs;
+      const elapsed = game.turnStartedAt ? now - game.turnStartedAt.getTime() : 0;
+      const remaining = moverTime - elapsed;
+      if (remaining <= 0) {
+        const winner = color === "b" ? game.whiteUserId : game.blackUserId;
+        await tx.checkersGame.update({
+          where: { id: gameId },
+          data: {
+            status: "FINISHED", finishedAt: new Date(), winnerUserId: winner, outcome: "TIME", turnStartedAt: null,
+            ...(color === "b" ? { blackTimeMs: 0 } : { whiteTimeMs: 0 }),
+          },
+        });
+        await this.log(tx, p, "checkers.flag", gameId);
+        return this.buildView(tx, gameId, p);
+      }
 
       const state: checkers.CheckersState = {
         board: game.board as unknown as checkers.CheckerBoard,
@@ -131,6 +156,8 @@ export class CheckersService {
         throw new BadRequestException("Illegal move");
       }
 
+      const inc = BOARD_TIME_CONTROLS[this.difficultyOf(game.difficulty)].incrementSeconds * 1000;
+      const newMoverTime = remaining + inc;
       const finished = next.status !== "PLAYING";
       const winnerUserId = finished ? (next.status === "B_WON" ? game.blackUserId : game.whiteUserId) : null;
       await tx.checkersGame.update({
@@ -139,10 +166,36 @@ export class CheckersService {
           board: next.board as unknown as Prisma.InputJsonValue,
           turn: next.turn,
           moveCount: game.moveCount + 1,
+          ...(color === "b" ? { blackTimeMs: newMoverTime } : { whiteTimeMs: newMoverTime }),
+          turnStartedAt: finished ? null : new Date(),
           ...(finished ? { status: "FINISHED", finishedAt: new Date(), winnerUserId, outcome: next.status } : {}),
         },
       });
       await this.log(tx, p, "checkers.move", gameId, { moveCount: game.moveCount + 1, finished });
+      return this.buildView(tx, gameId, p);
+    });
+  }
+
+  /** Claim the win when it's the OPPONENT's move and their clock has run out. */
+  async claimTime(p: Principal, gameId: string): Promise<CheckersGameDto> {
+    return this.withEmit(p, gameId, async (tx) => {
+      const game = await this.requireGame(tx, gameId);
+      if (game.status !== "ACTIVE") throw new ConflictException("Game is not in play");
+      const color = this.colorOf(game, p.userId);
+      if (!color) throw new NotFoundException("Game not found");
+      if (color === game.turn) throw new ConflictException("It's your move — you can't claim your own clock");
+      const curTime = game.turn === "b" ? game.blackTimeMs : game.whiteTimeMs;
+      const elapsed = game.turnStartedAt ? Date.now() - game.turnStartedAt.getTime() : 0;
+      if (curTime - elapsed > 0) throw new ConflictException("Your opponent still has time");
+      const winner = color === "b" ? game.blackUserId : game.whiteUserId;
+      await tx.checkersGame.update({
+        where: { id: gameId },
+        data: {
+          status: "FINISHED", finishedAt: new Date(), winnerUserId: winner, outcome: "TIME", turnStartedAt: null,
+          ...(game.turn === "b" ? { blackTimeMs: 0 } : { whiteTimeMs: 0 }),
+        },
+      });
+      await this.log(tx, p, "checkers.claim_time", gameId);
       return this.buildView(tx, gameId, p);
     });
   }
@@ -218,6 +271,10 @@ export class CheckersService {
     return null;
   }
 
+  private difficultyOf(d?: string | null): GameDifficulty {
+    return d && isGameDifficulty(d) ? d : "MEDIUM";
+  }
+
   private async assertGamesEnabled(tx: TenantTx, schoolId: string): Promise<void> {
     const settings = effectiveGameSettings(await tx.gameSettings.findFirst({ where: { schoolId } }));
     if (!settings.gamesEnabled) throw new ForbiddenException("Games are disabled for your school");
@@ -267,6 +324,10 @@ export class CheckersService {
       legalMoves,
       winnerUserId: game.winnerUserId,
       outcome: game.outcome,
+      difficulty: this.difficultyOf(game.difficulty) as BoardDifficultyDto,
+      whiteTimeMs: game.whiteTimeMs,
+      blackTimeMs: game.blackTimeMs,
+      turnStartedAt: game.turnStartedAt,
       createdAt: game.createdAt,
     };
   }

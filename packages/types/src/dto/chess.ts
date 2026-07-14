@@ -45,6 +45,13 @@ export interface ChessGameDto {
   legalMoves: ChessMoveDto[];
   winnerUserId: string | null;
   outcome: string | null;
+  /** Time control + live clocks. */
+  difficulty: "EASY" | "MEDIUM" | "HARD";
+  /** Remaining clock per player (ms) as of the last move. */
+  whiteTimeMs: number;
+  blackTimeMs: number;
+  /** When the current turn began — the client ticks the active clock from here. */
+  turnStartedAt: Date | null;
   createdAt: Date;
 }
 

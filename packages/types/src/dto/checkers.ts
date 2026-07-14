@@ -4,6 +4,7 @@
 
 export type CheckersColor = "b" | "w";
 export type CheckersStatusDto = "LOBBY" | "ACTIVE" | "FINISHED";
+export type BoardDifficultyDto = "EASY" | "MEDIUM" | "HARD";
 
 /** A board cell: a piece or empty (null). Mirrors the engine CheckerPiece. */
 export interface CheckerPieceDto {
@@ -43,6 +44,13 @@ export interface CheckersGameDto {
   legalMoves: CheckersMoveDto[];
   winnerUserId: string | null;
   outcome: string | null;
+  /** Time control + live clocks. */
+  difficulty: BoardDifficultyDto;
+  /** Remaining clock per player (ms) as of the last move. */
+  whiteTimeMs: number;
+  blackTimeMs: number;
+  /** When the current turn began — the client ticks the active clock from here. */
+  turnStartedAt: Date | null;
   createdAt: Date;
 }
 
