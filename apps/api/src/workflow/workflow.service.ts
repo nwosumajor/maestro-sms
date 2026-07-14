@@ -27,6 +27,7 @@ import {
   CUSTOM_CHAIN_MAX_STAGES,
   CUSTOM_CHAIN_MIN_STAGES,
   STAGED_WORKFLOW_TYPES,
+  LIST_CAP,
   STAFF_REQUEST_CHAIN,
   WORKFLOW_PERMISSIONS,
   WORKFLOW_TRANSITIONS,
@@ -240,10 +241,12 @@ export class WorkflowService {
 
   // --- reads (scoped) --------------------------------------------------------
   async listRequests(p: Principal): Promise<WorkflowInboxItemDto[]> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    // Pure read → replica path (Phase 1). scale: reviewers see the whole tenant's
+    // requests, which grows without bound over time — cap to the most-recent page.
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       // Reviewers/board see all in-tenant; everyone else sees only what they raised.
       const where = this.isReviewer(p) ? {} : { initiatorId: p.userId };
-      const rows = await tx.workflowRequest.findMany({ where, orderBy: { createdAt: "desc" } });
+      const rows = await tx.workflowRequest.findMany({ where, orderBy: { createdAt: "desc" }, take: LIST_CAP });
       return rows.map((r) => {
         const stages = (r.stages as WorkflowStage[] | null) ?? [];
         const pending = r.state === "PENDING_REVIEW" ? (stages[r.currentStage]?.label ?? null) : null;

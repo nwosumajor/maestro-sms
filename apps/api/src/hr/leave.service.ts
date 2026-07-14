@@ -12,6 +12,7 @@
 
 import { BadRequestException, Inject, Injectable, NotFoundException, type OnModuleInit } from "@nestjs/common";
 import {
+  LIST_CAP,
   STAFF_REQUEST_CHAIN,
   type LeaveBalanceDto,
   type LeaveRequestDto,
@@ -193,8 +194,10 @@ export class LeaveService implements OnModuleInit {
   }
 
   private async listRequestsWhere(p: Principal, where: { userId?: string }): Promise<LeaveRequestDto[]> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const rows = await tx.leaveRequest.findMany({ where, orderBy: { createdAt: "desc" } });
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      // scale: the school-wide approver view ({}) grows without bound over time —
+      // cap to the most-recent page. Self-service ({userId}) is naturally small.
+      const rows = await tx.leaveRequest.findMany({ where, orderBy: { createdAt: "desc" }, take: LIST_CAP });
       const typeIds = [...new Set(rows.map((r) => r.leaveTypeId))];
       const userIds = [...new Set(rows.map((r) => r.userId))];
       const types = await tx.leaveType.findMany({ where: { id: { in: typeIds } }, select: { id: true, name: true } });
