@@ -12,7 +12,7 @@
 // =============================================================================
 
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { NON_STAFF_ROLE_NAMES, type UserKind } from "@sms/types";
+import { NON_STAFF_ROLE_NAMES, SEARCH_CAP, type UserKind } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -386,8 +386,18 @@ export class LmsService {
   /** The students the caller may see (id + name): self / their children / the
    *  students in classes they teach / ALL students by role (school-wide staff).
    *  Powers the student pickers in the SIS, attendance, and fees UIs. */
-  async listStudents(p: Principal) {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+  async listStudents(p: Principal, q?: string) {
+    // scale: an optional `q` typeahead narrows the roster server-side and caps
+    // the result (SEARCH_CAP) so a large school's picker never ships thousands
+    // of rows. Without `q` the whole-school path stays UNCAPPED on purpose — the
+    // admin dashboard derives its student count from this list, so truncating it
+    // would undercount. Pure read → replica path (Phase 1).
+    const search = q?.trim();
+    const nameFilter: { name?: { contains: string; mode: "insensitive" } } = search
+      ? { name: { contains: search, mode: "insensitive" } }
+      : {};
+    const searchLimit: { take?: number } = search ? { take: SEARCH_CAP } : {};
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       if (this.isRosterWide(p)) {
         // Whole-school staff (ROSTER_WIDE_ROLES: admin/principal/HR) see EVERY
         // student in the tenant — by ROLE, not by enrollment. Deriving from
@@ -398,9 +408,10 @@ export class LmsService {
         // platform-wide) and is a single relation-filtered query instead of a
         // two-step ID-set round trip.
         return tx.user.findMany({
-          where: { roles: { some: { role: { name: "student" } } } },
+          where: { roles: { some: { role: { name: "student" } } }, ...nameFilter },
           select: { id: true, name: true },
           orderBy: { name: "asc" },
+          ...searchLimit,
         });
       }
       // Relationship-scoped callers (teacher/parent/student): membership joins
@@ -426,9 +437,10 @@ export class LmsService {
       children.forEach((c: { studentId: string }) => ids.add(c.studentId));
       if (ids.size === 0) return [];
       return tx.user.findMany({
-        where: { id: { in: [...ids] } },
+        where: { id: { in: [...ids] }, ...nameFilter },
         select: { id: true, name: true },
         orderBy: { name: "asc" },
+        ...searchLimit,
       });
     });
   }

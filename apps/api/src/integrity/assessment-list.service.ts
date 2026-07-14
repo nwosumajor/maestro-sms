@@ -10,7 +10,7 @@
 // =============================================================================
 
 import { ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { INTEGRITY_PERMISSIONS, type AssessmentSubmissionDto, type AssessmentSummaryDto } from "@sms/types";
+import { INTEGRITY_PERMISSIONS, LIST_CAP, type AssessmentSubmissionDto, type AssessmentSummaryDto } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -38,14 +38,16 @@ export class AssessmentListService {
   }
 
   async listAssessments(p: Principal): Promise<AssessmentSummaryDto[]> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       let where: Record<string, unknown> = {};
       if (!this.schoolWide(p)) {
         const taught = (await tx.classTeacher.findMany({ where: { teacherId: p.userId }, select: { classId: true } })).map((c) => c.classId);
         const enrolled = (await tx.enrollment.findMany({ where: { studentId: p.userId }, select: { classId: true } })).map((e) => e.classId);
         where = { OR: [{ createdById: p.userId }, { classId: { in: [...taught, ...enrolled] } }] };
       }
-      const assessments = await tx.assessment.findMany({ where, orderBy: { createdAt: "desc" } });
+      // scale: school-wide staff see every assessment ever created — cap to the
+      // most-recent page so a long-lived tenant can't force an unbounded scan.
+      const assessments = await tx.assessment.findMany({ where, orderBy: { createdAt: "desc" }, take: LIST_CAP });
       if (assessments.length === 0) return [];
       const ids = assessments.map((a) => a.id);
       const classIds = [...new Set(assessments.map((a) => a.classId).filter((c): c is string => !!c))];

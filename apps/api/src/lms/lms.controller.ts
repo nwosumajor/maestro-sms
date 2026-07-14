@@ -188,11 +188,12 @@ export class LmsController {
     return this.lms.listMyClasses(p);
   }
 
-  /** Relationship-scoped student directory (id + name) for UI pickers. */
+  /** Relationship-scoped student directory (id + name) for UI pickers.
+   *  `?q=` narrows server-side and caps the result — for large-school typeahead. */
   @Get("students")
   @RequirePermission(LMS_PERMISSIONS.CLASS_READ)
-  students(@CurrentPrincipal() p: Principal): Promise<IdNameDto[]> {
-    return this.lms.listStudents(p);
+  students(@CurrentPrincipal() p: Principal, @Query("q") q?: string): Promise<IdNameDto[]> {
+    return this.lms.listStudents(p, q);
   }
 
   /** Staff user directory (id + name + roles) for admin pickers. class.write-gated.
