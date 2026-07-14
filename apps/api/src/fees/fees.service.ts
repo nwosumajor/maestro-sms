@@ -161,18 +161,17 @@ export class FeesService {
           createdById: p.userId,
         },
       });
-      for (const l of input.lines) {
-        await tx.invoiceLineItem.create({
-          data: {
-            schoolId: p.schoolId,
-            invoiceId: invoice.id,
-            feeItemId: l.feeItemId ?? null,
-            description: l.description,
-            amountMinor: l.amountMinor,
-            quantity: l.quantity ?? 1,
-          },
-        });
-      }
+      // One bulk insert for the invoice lines (not one INSERT per line).
+      await tx.invoiceLineItem.createMany({
+        data: input.lines.map((l) => ({
+          schoolId: p.schoolId,
+          invoiceId: invoice.id,
+          feeItemId: l.feeItemId ?? null,
+          description: l.description,
+          amountMinor: l.amountMinor,
+          quantity: l.quantity ?? 1,
+        })),
+      });
       await this.log(tx, p, "fee.invoice.create", "invoice", invoice.id, {
         studentId: input.studentId,
         totalMinor: total,

@@ -65,10 +65,10 @@ export class PollService {
           closesAt: input.closesAt ? new Date(input.closesAt) : null,
         },
       });
-      let seq = 0;
-      for (const label of opts) {
-        await tx.pollOption.create({ data: { schoolId: p.schoolId, pollId: poll.id, label, sequence: seq++ } });
-      }
+      // One bulk insert for the options (not one INSERT per option).
+      await tx.pollOption.createMany({
+        data: opts.map((label, i) => ({ schoolId: p.schoolId, pollId: poll.id, label, sequence: i })),
+      });
       await this.log(tx, p, "poll.create", poll.id, { audience: input.audience, options: opts.length });
       return this.pollDto(tx, poll.id, p);
     });

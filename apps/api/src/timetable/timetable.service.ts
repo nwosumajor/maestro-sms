@@ -209,19 +209,18 @@ export class TimetableService {
       }
 
       const result = generateTimetable(offerings, slots, { classBusy, teacherBusy });
-      for (const lesson of result.placed) {
-        await tx.timetableEntry.create({
-          data: {
-            schoolId: p.schoolId,
-            classId: lesson.classId,
-            dayOfWeek: lesson.day as DayOfWeekValue,
-            periodId: lesson.periodId,
-            subject: lesson.subject,
-            teacherId: lesson.teacherId,
-            roomId: null,
-          },
-        });
-      }
+      // One bulk insert for all generated lessons (not one INSERT per lesson).
+      await tx.timetableEntry.createMany({
+        data: result.placed.map((lesson) => ({
+          schoolId: p.schoolId,
+          classId: lesson.classId,
+          dayOfWeek: lesson.day as DayOfWeekValue,
+          periodId: lesson.periodId,
+          subject: lesson.subject,
+          teacherId: lesson.teacherId,
+          roomId: null,
+        })),
+      });
       await this.log(tx, p, "timetable.generate", "timetable", "auto", {
         classes: targetClassIds.length,
         placed: result.placed.length,
