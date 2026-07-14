@@ -2,13 +2,15 @@ import {
   CanActivate,
   ExecutionContext,
   ForbiddenException,
+  HttpException,
+  HttpStatus,
   Inject,
   Injectable,
   NotFoundException,
   UnauthorizedException,
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
-import type { Request } from "express";
+import type { Request, Response } from "express";
 import { isElevatable, type ModuleKey } from "@sms/types";
 import { PERMISSION_KEY } from "./require-permission.decorator";
 import { MODULE_KEY } from "./require-module.decorator";
@@ -24,6 +26,7 @@ import {
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
 import { ModuleEntitlementService } from "../foundation/module-entitlement.service";
+import { TenantRateLimitService } from "../common/tenant-rate-limit.service";
 
 export interface AuthedRequest extends Request {
   principal?: Principal;
@@ -48,6 +51,7 @@ export class PermissionGuard implements CanActivate {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly modules: ModuleEntitlementService,
+    private readonly rateLimit: TenantRateLimitService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -60,6 +64,18 @@ export class PermissionGuard implements CanActivate {
     const req = context.switchToHttp().getRequest<AuthedRequest>();
     const principal = this.authenticate(req);
     req.principal = principal;
+
+    // Per-tenant rate limit — BEFORE the module/permission DB work, so a flooding
+    // tenant is rejected cheaply. Keyed on the JWT school_id; fails OPEN if Redis
+    // is down. Noisy-neighbor isolation: one school's budget never touches another's.
+    const rl = await this.rateLimit.consume(principal.schoolId);
+    const res = context.switchToHttp().getResponse<Response>();
+    res.setHeader("X-RateLimit-Limit", rl.limit);
+    res.setHeader("X-RateLimit-Remaining", rl.remaining);
+    if (!rl.allowed) {
+      res.setHeader("Retry-After", Math.ceil(rl.resetMs / 1000));
+      throw new HttpException("Rate limit exceeded for this school — retry shortly.", HttpStatus.TOO_MANY_REQUESTS);
+    }
 
     // Module-entitlement gate: if this route belongs to a subscription module the
     // school's plan doesn't include, it doesn't exist for them → 404 (never-leak).
