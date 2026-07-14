@@ -32,7 +32,9 @@ export class AnalyticsService {
   }
 
   async overview(p: Principal) {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    // Read-only aggregate — routed to the read replica (when configured) to keep
+    // reporting load off the primary writer. Reference use of runAsTenantReadOnly.
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       const staff = this.isStaff(p);
       const studentIds = staff ? null : await this.scopedStudentIds(tx, p);
       const since = new Date(Date.now() - 30 * 86_400_000);

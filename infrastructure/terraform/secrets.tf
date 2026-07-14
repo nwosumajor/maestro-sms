@@ -17,6 +17,9 @@ resource "random_id" "data_encryption_key" {
 locals {
   db_app_url     = "postgresql://${var.db_app_username}:${random_password.db_app.result}@${aws_db_instance.main.address}:5432/${var.db_name}"
   db_migrate_url = "postgresql://${var.db_master_username}:${random_password.db_master.result}@${aws_db_instance.main.address}:5432/${var.db_name}"
+  # Read path: the replica endpoint when one exists, else the primary (so the
+  # app's read-only tenant path is always valid and identical in single-DB mode).
+  db_replica_url = var.db_read_replica_count > 0 ? "postgresql://${var.db_app_username}:${random_password.db_app.result}@${aws_db_instance.replica[0].address}:5432/${var.db_name}" : local.db_app_url
 
   # Base secrets, plus the Redis auth token only when transit encryption is on.
   secret_values = merge(
@@ -25,6 +28,7 @@ locals {
       "data-encryption-key" = random_id.data_encryption_key.b64_std
       "db-app-url"          = local.db_app_url
       "db-migrate-url"      = local.db_migrate_url
+      "db-replica-url"      = local.db_replica_url
       "db-app-password"     = random_password.db_app.result
       "paystack-secret-key" = var.paystack_secret_key
     },

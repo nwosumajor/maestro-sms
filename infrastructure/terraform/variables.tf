@@ -56,6 +56,18 @@ variable "db_allocated_storage" {
   default     = 20
 }
 
+variable "db_read_replica_count" {
+  description = "Number of RDS read replicas. 0 = single-DB; raise to offload read/report load off the primary writer at scale (paired with the app's DATABASE_REPLICA_URL)."
+  type        = number
+  default     = 0
+}
+
+variable "db_replica_instance_class" {
+  description = "Instance class for read replicas (defaults to db_instance_class when null)."
+  type        = string
+  default     = null
+}
+
 variable "db_multi_az" {
   description = "Run RDS Multi-AZ (recommended for prod)."
   type        = bool
