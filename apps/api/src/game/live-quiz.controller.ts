@@ -8,7 +8,7 @@
 // correct answer never crosses the wire to a player until it closes.
 // =============================================================================
 
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Put } from "@nestjs/common";
 import { GAME_PERMISSIONS, MODULES } from "@sms/types";
 import type {
   LiveQuizAnswerResultDto,
@@ -64,6 +64,22 @@ export class LiveQuizController {
   @RequirePermission(GAME_PERMISSIONS.QUIZ_HOST)
   get(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<LiveQuizDto> {
     return this.quiz.getQuiz(p, id);
+  }
+
+  @Put("quizzes/:id")
+  @RequirePermission(GAME_PERMISSIONS.QUIZ_HOST)
+  update(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(createQuizSchema)) body: z.infer<typeof createQuizSchema>,
+  ): Promise<LiveQuizDto> {
+    return this.quiz.updateQuiz(p, id, body);
+  }
+
+  @Delete("quizzes/:id")
+  @RequirePermission(GAME_PERMISSIONS.QUIZ_HOST)
+  remove(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<{ id: string; archived: true }> {
+    return this.quiz.archiveQuiz(p, id);
   }
 
   // --- session lifecycle --------------------------------------------------

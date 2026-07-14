@@ -106,22 +106,8 @@ export class LiveQuizService {
     if (!title) throw new BadRequestException("title is required");
     if (!isQuizTheme(input.theme)) throw new BadRequestException("invalid theme");
     if (!isGameDifficulty(input.difficulty)) throw new BadRequestException("invalid difficulty");
-    const questions = input.questions ?? [];
-    if (questions.length < 1) throw new BadRequestException("at least one question is required");
-    // Validate every question via the engine (2–6 choices, one valid answer).
-    questions.forEach((q, i) => {
-      const candidate: QuizQuestion = {
-        id: String(i),
-        prompt: q.prompt,
-        choices: q.choices,
-        answerIndex: q.answerIndex,
-        theme: input.theme as QuizThemeDto,
-        difficulty: input.difficulty as GameDifficulty,
-      };
-      if (!isValidQuizQuestion(candidate)) {
-        throw new BadRequestException(`question ${i + 1} is invalid (2–6 non-empty choices, one valid answer)`);
-      }
-    });
+    this.validateQuestions(input.questions ?? [], input.theme, input.difficulty);
+    const questions = input.questions;
 
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.assertGamesEnabled(tx, p.schoolId);
@@ -149,10 +135,94 @@ export class LiveQuizService {
     });
   }
 
-  /** The caller's school quiz library (staff pick when hosting). */
+  /** Validate a themed question set via the engine (2–6 choices, one answer). */
+  private validateQuestions(questions: QuestionInput[], theme: string, difficulty: string): void {
+    if (!questions || questions.length < 1) throw new BadRequestException("at least one question is required");
+    questions.forEach((q, i) => {
+      const candidate: QuizQuestion = {
+        id: String(i),
+        prompt: q.prompt,
+        choices: q.choices,
+        answerIndex: q.answerIndex,
+        theme: theme as QuizThemeDto,
+        difficulty: difficulty as GameDifficulty,
+      };
+      if (!isValidQuizQuestion(candidate)) {
+        throw new BadRequestException(`question ${i + 1} is invalid (2–6 non-empty choices, one valid answer)`);
+      }
+    });
+  }
+
+  /**
+   * Edit a quiz: update metadata and REPLACE its question set. Blocked while any
+   * session for the quiz is live/lobby (editing under a running game would shift
+   * questions out from under players). Question replacement uses the scoped
+   * DELETE policy on live_quiz_question (66_*).
+   */
+  async updateQuiz(
+    p: Principal,
+    quizId: string,
+    input: { title: string; theme: string; difficulty: string; questions: QuestionInput[] },
+  ): Promise<LiveQuizDto> {
+    const title = (input.title ?? "").trim();
+    if (!title) throw new BadRequestException("title is required");
+    if (!isQuizTheme(input.theme)) throw new BadRequestException("invalid theme");
+    if (!isGameDifficulty(input.difficulty)) throw new BadRequestException("invalid difficulty");
+    this.validateQuestions(input.questions ?? [], input.theme, input.difficulty);
+
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const quiz = await tx.liveQuiz.findFirst({ where: { id: quizId } });
+      if (!quiz) throw new NotFoundException("Quiz not found");
+      const liveSessions = await tx.liveQuizSession.count({
+        where: { quizId, status: { in: ["LOBBY", "ACTIVE"] } },
+      });
+      if (liveSessions > 0) {
+        throw new ConflictException("Can't edit a quiz while a session of it is live — end it first");
+      }
+      await tx.liveQuiz.update({
+        where: { id: quizId },
+        data: { title, theme: input.theme, difficulty: input.difficulty },
+      });
+      await tx.liveQuizQuestion.deleteMany({ where: { quizId } });
+      await tx.liveQuizQuestion.createMany({
+        data: input.questions.map((q, i) => ({
+          schoolId: p.schoolId,
+          quizId,
+          orderIndex: i,
+          prompt: q.prompt.trim(),
+          choices: q.choices as unknown as Prisma.InputJsonValue,
+          answerIndex: q.answerIndex,
+        })),
+      });
+      await this.log(tx, p, "quiz.update", quizId, { questions: input.questions.length });
+      return this.buildQuizView(tx, quizId);
+    });
+  }
+
+  /** "Delete" a quiz: soft-archive it (hidden from the library, no new sessions).
+   *  Its past sessions/answers stay as durable game history. Idempotent. */
+  async archiveQuiz(p: Principal, quizId: string): Promise<{ id: string; archived: true }> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const quiz = await tx.liveQuiz.findFirst({ where: { id: quizId } });
+      if (!quiz) throw new NotFoundException("Quiz not found");
+      const liveSessions = await tx.liveQuizSession.count({
+        where: { quizId, status: { in: ["LOBBY", "ACTIVE"] } },
+      });
+      if (liveSessions > 0) {
+        throw new ConflictException("Can't delete a quiz while a session of it is live — end it first");
+      }
+      if (!quiz.archived) {
+        await tx.liveQuiz.update({ where: { id: quizId }, data: { archived: true } });
+        await this.log(tx, p, "quiz.archive", quizId);
+      }
+      return { id: quizId, archived: true as const };
+    });
+  }
+
+  /** The caller's school quiz library (staff pick when hosting). Archived hidden. */
   async listQuizzes(p: Principal): Promise<LiveQuizSummaryDto[]> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const quizzes = await tx.liveQuiz.findMany({ orderBy: { createdAt: "desc" }, take: 100 });
+      const quizzes = await tx.liveQuiz.findMany({ where: { archived: false }, orderBy: { createdAt: "desc" }, take: 100 });
       if (quizzes.length === 0) return [];
       const counts = await tx.liveQuizQuestion.groupBy({
         by: ["quizId"],
@@ -181,7 +251,7 @@ export class LiveQuizService {
     return this.withEmit(p, null, async (tx) => {
       await this.assertGamesEnabled(tx, p.schoolId);
       const quiz = await tx.liveQuiz.findFirst({ where: { id: input.quizId } });
-      if (!quiz) throw new NotFoundException("Quiz not found");
+      if (!quiz || quiz.archived) throw new NotFoundException("Quiz not found");
       await this.assertTeacherOfClass(tx, p, input.classId);
       const session = await tx.liveQuizSession.create({
         data: {

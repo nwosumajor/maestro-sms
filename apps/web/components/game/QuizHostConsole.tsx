@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { StatusLine, postSms } from "./play-ui";
+import { StatusLine, postSms, sendSms } from "./play-ui";
 
 const THEMES = ["GEOGRAPHY", "SCIENCE", "ART", "LITERATURE", "GENERAL"] as const;
 const DIFFICULTIES = ["EASY", "MEDIUM", "HARD"] as const;
@@ -34,13 +34,23 @@ export function QuizHostConsole({
   const [msg, setMsg] = React.useState<string | null>(null);
   const [err, setErr] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
+  // Null = create mode; a quiz id = editing that quiz (PUT instead of POST).
+  const [editingId, setEditingId] = React.useState<string | null>(null);
 
   const setQ = (i: number, patch: Partial<Draft>) =>
     setQuestions((qs) => qs.map((q, j) => (j === i ? { ...q, ...patch } : q)));
   const setChoice = (i: number, c: number, v: string) =>
     setQuestions((qs) => qs.map((q, j) => (j === i ? { ...q, choices: q.choices.map((x, k) => (k === c ? v : x)) } : q)));
 
-  const createQuiz = async () => {
+  const resetForm = () => {
+    setEditingId(null);
+    setTitle("");
+    setTheme("GEOGRAPHY");
+    setDifficulty("MEDIUM");
+    setQuestions([emptyQuestion()]);
+  };
+
+  const saveQuiz = async () => {
     setMsg(null);
     setErr(false);
     // Drop blank trailing choices; every question needs >= 2 non-empty choices.
@@ -56,13 +66,50 @@ export function QuizHostConsole({
       if (q.answerIndex >= q.choices.length) return fail(`Question ${i + 1}: pick which choice is correct.`);
     }
     setBusy(true);
-    const r = await postSms("quizzes", { title: title.trim(), theme, difficulty, questions: cleaned });
+    const body = { title: title.trim(), theme, difficulty, questions: cleaned };
+    const r = editingId ? await sendSms("PUT", `quizzes/${editingId}`, body) : await postSms("quizzes", body);
     setBusy(false);
     if (!r.ok) return fail(r.error ?? `Failed (${r.status}).`);
-    setMsg("Quiz saved. Open a session below to host it.");
+    setMsg(editingId ? "Quiz updated." : "Quiz saved. Open a session below to host it.");
     setErr(false);
-    setTitle("");
-    setQuestions([emptyQuestion()]);
+    resetForm();
+    router.refresh();
+  };
+
+  // Load a quiz into the form to edit it (GET returns questions incl. answers).
+  const loadForEdit = async (quizId: string) => {
+    setMsg(null);
+    setErr(false);
+    const res = await fetch(`/api/sms/quizzes/${quizId}`, { cache: "no-store" });
+    if (!res.ok) return fail("Couldn't load that quiz for editing.");
+    const q = (await res.json()) as {
+      title: string;
+      theme: (typeof THEMES)[number];
+      difficulty: (typeof DIFFICULTIES)[number];
+      questions: Array<{ prompt: string; choices: string[]; answerIndex: number }>;
+    };
+    setEditingId(quizId);
+    setTitle(q.title);
+    setTheme(q.theme);
+    setDifficulty(q.difficulty);
+    setQuestions(
+      q.questions.map((qq) => ({
+        prompt: qq.prompt,
+        // Pad up to 4 choice inputs so the editor always shows the grid.
+        choices: [...qq.choices, "", "", "", ""].slice(0, Math.max(4, qq.choices.length)),
+        answerIndex: qq.answerIndex,
+      })),
+    );
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const deleteQuiz = async (quizId: string) => {
+    setMsg(null);
+    setErr(false);
+    const r = await sendSms("DELETE", `quizzes/${quizId}`);
+    if (!r.ok) return fail(r.error ?? `Failed (${r.status}).`);
+    if (editingId === quizId) resetForm();
+    setMsg("Quiz deleted.");
     router.refresh();
   };
 
@@ -80,10 +127,10 @@ export function QuizHostConsole({
 
   return (
     <div className="space-y-6">
-      {/* Author a quiz */}
+      {/* Author / edit a quiz */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Create a quiz</CardTitle>
+          <CardTitle className="text-base">{editingId ? "Edit quiz" : "Create a quiz"}</CardTitle>
           <CardDescription>
             Build a themed multiple-choice quiz. Harder difficulty gives players less time and more points.
           </CardDescription>
@@ -169,23 +216,39 @@ export function QuizHostConsole({
           </div>
 
           <StatusLine msg={msg} error={err} />
-          <Button onClick={createQuiz} disabled={busy}>
-            {busy ? "Saving…" : "Save quiz"}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button onClick={saveQuiz} disabled={busy}>
+              {busy ? "Saving…" : editingId ? "Save changes" : "Save quiz"}
+            </Button>
+            {editingId && (
+              <Button variant="ghost" onClick={resetForm} disabled={busy}>
+                Cancel
+              </Button>
+            )}
+          </div>
         </CardContent>
       </Card>
 
       {/* Host a session */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Host a session</CardTitle>
-          <CardDescription>Pick a saved quiz and a class; students in that class can then join.</CardDescription>
+          <CardTitle className="text-base">Your quizzes</CardTitle>
+          <CardDescription>Host a session for a class, or edit / delete a quiz.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           {quizzes.length === 0 ? (
             <p className="text-sm text-muted-foreground">No quizzes yet — create one above.</p>
           ) : (
-            quizzes.map((quiz) => <HostRow key={quiz.id} quiz={quiz} classes={classes} onOpen={openSession} />)
+            quizzes.map((quiz) => (
+              <HostRow
+                key={quiz.id}
+                quiz={quiz}
+                classes={classes}
+                onOpen={openSession}
+                onEdit={loadForEdit}
+                onDelete={deleteQuiz}
+              />
+            ))
           )}
         </CardContent>
       </Card>
@@ -197,12 +260,17 @@ function HostRow({
   quiz,
   classes,
   onOpen,
+  onEdit,
+  onDelete,
 }: {
   quiz: Serialized<LiveQuizSummaryDto>;
   classes: Serialized<IdNameDto>[];
   onOpen: (quizId: string, classId: string) => void;
+  onEdit: (quizId: string) => void;
+  onDelete: (quizId: string) => void;
 }) {
   const [classId, setClassId] = React.useState(classes[0]?.id ?? "");
+  const [confirming, setConfirming] = React.useState(false);
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3 py-2">
       <div className="min-w-0">
@@ -213,6 +281,18 @@ function HostRow({
         </p>
       </div>
       <div className="flex items-center gap-2">
+        <button type="button" onClick={() => onEdit(quiz.id)} className="text-xs text-muted-foreground hover:text-foreground">
+          Edit
+        </button>
+        {confirming ? (
+          <button type="button" onClick={() => onDelete(quiz.id)} className="text-xs font-medium text-destructive">
+            Confirm delete
+          </button>
+        ) : (
+          <button type="button" onClick={() => setConfirming(true)} className="text-xs text-muted-foreground hover:text-destructive">
+            Delete
+          </button>
+        )}
         <select
           value={classId}
           onChange={(e) => setClassId(e.target.value)}

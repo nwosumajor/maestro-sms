@@ -24,14 +24,18 @@ enum LiveQuizStatus {
 
 /// A reusable, themed quiz definition owned by its author's school.
 model LiveQuiz {
-  id          String @id @default(uuid()) @db.Uuid
-  schoolId    String @db.Uuid
+  id          String  @id @default(uuid()) @db.Uuid
+  schoolId    String  @db.Uuid
   title       String
   /// Theme (GEOGRAPHY|SCIENCE|ART|LITERATURE|GENERAL) — see @sms/game-engine.
   theme       String
   /// Difficulty (EASY|MEDIUM|HARD) — drives per-question timer + points.
   difficulty  String
-  createdById String @db.Uuid
+  /// Soft-delete flag. "Deleting" a quiz archives it (hides from the library,
+  /// blocks new sessions) rather than hard-deleting — its past sessions/answers
+  /// are durable game history that a cascade delete would destroy.
+  archived    Boolean @default(false)
+  createdById String  @db.Uuid
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
