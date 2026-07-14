@@ -30,6 +30,7 @@ export default async function GamesPage() {
   const canLeague = hasPermission(user.permissions, "game.league.create");
   const canSettings = hasPermission(user.permissions, "game.settings.manage");
   const canQuizHost = hasPermission(user.permissions, "game.quiz.host");
+  const canHangmanHost = hasPermission(user.permissions, "game.hangman.host");
 
   const [openGames, classes, races, competitions, people, settings] = await Promise.all([
     canPlay ? apiGet<Serialized<OpenGameDto>[]>("/games/open") : Promise.resolve(null),
@@ -87,6 +88,21 @@ export default async function GamesPage() {
           <CardContent>
             <Link href="/games/quiz" className={cn(buttonVariants({ size: "sm" }))}>
               {canQuizHost ? "Host or join a quiz" : "Join a live quiz"}
+            </Link>
+          </CardContent>
+        </Card>
+
+        {/* Hangman — classroom letter-guessing. */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Hangman</CardTitle>
+            <CardDescription>
+              Guess the word letter by letter before the lives run out. Fewest wrong guesses wins.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Link href="/games/hangman" className={cn(buttonVariants({ size: "sm" }))}>
+              {canHangmanHost ? "Host or join hangman" : "Join a hangman round"}
             </Link>
           </CardContent>
         </Card>
