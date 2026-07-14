@@ -17,6 +17,8 @@ import { HangmanController } from "./hangman.controller";
 import { HangmanService } from "./hangman.service";
 import { TypingRaceController } from "./typing-race.controller";
 import { TypingRaceService } from "./typing-race.service";
+import { CheckersController } from "./checkers.controller";
+import { CheckersService } from "./checkers.service";
 import { GameEventsService } from "./game-events.service";
 
 // Depends on the global FoundationModule (TENANT_DATABASE, AUDIT_LOG_SERVICE,
@@ -41,6 +43,7 @@ import { GameEventsService } from "./game-events.service";
     LiveQuizController,
     HangmanController,
     TypingRaceController,
+    CheckersController,
   ],
   providers: [
     GameService,
@@ -52,6 +55,7 @@ import { GameEventsService } from "./game-events.service";
     LiveQuizService,
     HangmanService,
     TypingRaceService,
+    CheckersService,
     GameEventsService,
   ],
   exports: [
@@ -64,6 +68,7 @@ import { GameEventsService } from "./game-events.service";
     LiveQuizService,
     HangmanService,
     TypingRaceService,
+    CheckersService,
     GameEventsService,
   ],
 })

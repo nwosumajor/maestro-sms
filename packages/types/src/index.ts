@@ -83,6 +83,7 @@ export * from "./dto/game-settings";
 export * from "./dto/live-quiz";
 export * from "./dto/hangman";
 export * from "./dto/typing-race";
+export * from "./dto/checkers";
 export * from "./dto/ultimate";
 export * from "./payroll";
 export * from "./elevation";

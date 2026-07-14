@@ -123,6 +123,21 @@ export default async function GamesPage() {
           </CardContent>
         </Card>
 
+        {/* Checkers — 2-player board duel. */}
+        {canPlay && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Checkers</CardTitle>
+              <CardDescription>Classic 8×8 draughts — challenge a classmate to a turn-by-turn duel.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Link href="/games/checkers" className={cn(buttonVariants({ size: "sm" }))}>
+                Play checkers
+              </Link>
+            </CardContent>
+          </Card>
+        )}
+
         {canPlay && openGames && openGames.length > 0 && (
           <Card>
             <CardHeader>
