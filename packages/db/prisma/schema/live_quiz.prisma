@@ -1,0 +1,144 @@
+// =============================================================================
+// Live Quiz — Kahoot-style, curriculum-themed (durable records)
+// =============================================================================
+// A teacher AUTHORS a themed quiz (Geography / Science / Art / Literature /
+// General) at a difficulty (EASY/MEDIUM/HARD), then HOSTS a live session for a
+// class: students join, the host advances question-by-question, and students
+// score more for answering correctly AND quickly (scoring in @sms/game-engine
+// `quiz.ts`). All tenant-scoped (non-null schoolId) + RLS (64_live_quiz_rls.sql);
+// relationship scoping (host = teacher of the class; players = enrolled students)
+// is enforced in LiveQuizService. 404-not-403 cross-tenant.
+//
+// SECURITY (spec §9): LiveQuizQuestion.answerIndex is server-authoritative and is
+// NEVER serialized to a student while a question is live — only revealed after
+// the question closes or the session ends. Every mutation is audit-logged
+// (Golden Rule #5 — minors' game telemetry). Named Live* to avoid colliding with
+// the LMS `QuizAttempt` content model.
+// =============================================================================
+
+enum LiveQuizStatus {
+  LOBBY
+  ACTIVE
+  ENDED
+}
+
+/// A reusable, themed quiz definition owned by its author's school.
+model LiveQuiz {
+  id          String  @id @default(uuid()) @db.Uuid
+  schoolId    String  @db.Uuid
+  title       String
+  /// Theme (GEOGRAPHY|SCIENCE|ART|LITERATURE|GENERAL) — see @sms/game-engine.
+  theme       String
+  /// Difficulty (EASY|MEDIUM|HARD) — drives per-question timer + points.
+  difficulty  String
+  /// Soft-delete flag. "Deleting" a quiz archives it (hides from the library,
+  /// blocks new sessions) rather than hard-deleting — its past sessions/answers
+  /// are durable game history that a cascade delete would destroy.
+  archived    Boolean @default(false)
+  createdById String  @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school    School             @relation(fields: [schoolId], references: [id])
+  questions LiveQuizQuestion[]
+  sessions  LiveQuizSession[]
+
+  @@index([schoolId])
+  @@index([schoolId, theme])
+  @@map("live_quiz")
+}
+
+/// One multiple-choice question. `answerIndex` is server-only until reveal.
+model LiveQuizQuestion {
+  id          String @id @default(uuid()) @db.Uuid
+  schoolId    String @db.Uuid
+  quizId      String @db.Uuid
+  orderIndex  Int
+  prompt      String
+  /// String[] of 2–6 choices (validated by the engine).
+  choices     Json
+  answerIndex Int
+
+  createdAt DateTime @default(now())
+
+  school School   @relation(fields: [schoolId], references: [id])
+  quiz   LiveQuiz @relation(fields: [quizId], references: [id], onDelete: Cascade)
+
+  @@unique([quizId, orderIndex])
+  @@index([schoolId])
+  @@map("live_quiz_question")
+}
+
+/// A live run of a quiz for a class. The host advances `currentIndex`; the
+/// server stamps `questionStartedAt` so answer timing is authoritative.
+model LiveQuizSession {
+  id                String         @id @default(uuid()) @db.Uuid
+  schoolId          String         @db.Uuid
+  quizId            String         @db.Uuid
+  /// The class this session is scoped to (relationship scoping in the service).
+  classId           String?        @db.Uuid
+  hostId            String         @db.Uuid
+  status            LiveQuizStatus @default(LOBBY)
+  /// Index of the live question (-1 before the first `next`).
+  currentIndex      Int            @default(-1)
+  /// When the current question was shown — answer timing is measured from here.
+  questionStartedAt DateTime?
+
+  startedAt DateTime?
+  endedAt   DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  school       School                @relation(fields: [schoolId], references: [id])
+  quiz         LiveQuiz              @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  participants LiveQuizParticipant[]
+  answers      LiveQuizAnswer[]
+
+  @@index([schoolId])
+  @@index([schoolId, status])
+  @@index([schoolId, classId])
+  @@map("live_quiz_session")
+}
+
+/// A student who joined a session; running score/streak/correct tally.
+model LiveQuizParticipant {
+  id        String   @id @default(uuid()) @db.Uuid
+  schoolId  String   @db.Uuid
+  sessionId String   @db.Uuid
+  userId    String   @db.Uuid
+  score     Int      @default(0)
+  correct   Int      @default(0)
+  streak    Int      @default(0)
+  joinedAt  DateTime @default(now())
+
+  school  School          @relation(fields: [schoolId], references: [id])
+  session LiveQuizSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, userId])
+  @@index([schoolId])
+  @@map("live_quiz_participant")
+}
+
+/// One answer to one question — append-only; unique per (session, participant,
+/// question) so a student cannot answer the same question twice.
+model LiveQuizAnswer {
+  id            String  @id @default(uuid()) @db.Uuid
+  schoolId      String  @db.Uuid
+  sessionId     String  @db.Uuid
+  participantId String  @db.Uuid
+  questionIndex Int
+  choiceIndex   Int
+  correct       Boolean
+  elapsedMs     Int
+  points        Int
+
+  createdAt DateTime @default(now())
+
+  school  School          @relation(fields: [schoolId], references: [id])
+  session LiveQuizSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, participantId, questionIndex])
+  @@index([schoolId])
+  @@map("live_quiz_answer")
+}

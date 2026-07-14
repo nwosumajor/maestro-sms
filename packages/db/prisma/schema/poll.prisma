@@ -7,17 +7,17 @@
 // =============================================================================
 
 model Poll {
-  id          String   @id @default(uuid()) @db.Uuid
-  schoolId    String   @db.Uuid
+  id          String    @id @default(uuid()) @db.Uuid
+  schoolId    String    @db.Uuid
   question    String
   /// ALL | STUDENTS | STAFF — who may vote (mirrors the announcement audiences).
-  audience    String   @default("ALL")
-  createdById String   @db.Uuid
+  audience    String    @default("ALL")
+  createdById String    @db.Uuid
   /// OPEN | CLOSED — closing freezes voting; results visible to the creator/staff.
-  status      String   @default("OPEN")
+  status      String    @default("OPEN")
   closesAt    DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   options PollOption[]
   votes   PollVote[]

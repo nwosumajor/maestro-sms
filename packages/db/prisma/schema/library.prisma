@@ -6,19 +6,19 @@
 // =============================================================================
 
 model LibraryBook {
-  id             String   @id @default(uuid()) @db.Uuid
-  schoolId       String   @db.Uuid
-  title          String
-  author         String?
-  isbn           String?
+  id              String   @id @default(uuid()) @db.Uuid
+  schoolId        String   @db.Uuid
+  title           String
+  author          String?
+  isbn            String?
   /// Barcode label (scanned to issue/return). Unique within a school.
-  barcode        String
-  category       String?
-  totalCopies    Int      @default(1)
-  availableCopies Int     @default(1)
-  customFields   Json     @default("{}")
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  barcode         String
+  category        String?
+  totalCopies     Int      @default(1)
+  availableCopies Int      @default(1)
+  customFields    Json     @default("{}")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   loans BookLoan[]
 

@@ -54,35 +54,35 @@ enum CompetitionStatus {
 
 /// One game instance (any mode). Step 3 only creates DUEL.
 model Game {
-  id               String     @id @default(uuid()) @db.Uuid
-  schoolId         String     @db.Uuid
-  mode             GameMode   @default(DUEL)
-  difficultyLength Int
-  status           GameStatus @default(LOBBY)
+  id                  String     @id @default(uuid()) @db.Uuid
+  schoolId            String     @db.Uuid
+  mode                GameMode   @default(DUEL)
+  difficultyLength    Int
+  status              GameStatus @default(LOBBY)
   /// The user who opened the game (DB FK to school; audit field).
-  createdById String @db.Uuid
+  createdById         String     @db.Uuid
   /// GamePlayer.id whose turn it is (null in lobby/setup/finished).
-  currentTurnPlayerId String? @db.Uuid
+  currentTurnPlayerId String?    @db.Uuid
   /// GamePlayer.id of the winner (null until finished).
-  winnerPlayerId String? @db.Uuid
+  winnerPlayerId      String?    @db.Uuid
   /// When the current turn began — used to validate the 60s turn limit
   /// server-side (Elimination Ring, spec §4). Null when not in a timed turn.
-  turnStartedAt DateTime?
+  turnStartedAt       DateTime?
   /// FK to a Competition when part of a league/knockout/tournament (step 4+).
-  competitionId String? @db.Uuid
+  competitionId       String?    @db.Uuid
   /// Round this match belongs to within a competition (knockout brackets / league
   /// schedule rounds). Null for ad-hoc duels.
-  roundNumber Int?
+  roundNumber         Int?
   /// Play window close for a competition match (spec §6: 48h). No-show → forfeit.
-  deadlineAt DateTime?
+  deadlineAt          DateTime?
   /// Class Race (RACE mode, spec §5): the class this race belongs to. Null for
   /// duels and league/knockout matches. Scalar uuid (relationship scoping in the
   /// service joins via Enrollment/ClassTeacher), matching the timetable pattern.
-  classId String? @db.Uuid
+  classId             String?    @db.Uuid
   /// SECURITY: a Class Race's ONE shared target secret — server-only (spec §9),
   /// like GamePlayer.secret: never serialized to any client, cleared on finish.
   /// Null for duels (per-player secrets) and competition matches.
-  targetSecret String?
+  targetSecret        String?
 
   startedAt  DateTime?
   finishedAt DateTime?
@@ -115,11 +115,11 @@ model Competition {
   difficultyLength Int
   status           CompetitionStatus @default(DRAFT)
   /// Play period (spec §6). Per-match 48h windows are derived from round starts.
-  startAt DateTime
-  endAt   DateTime
+  startAt          DateTime
+  endAt            DateTime
   /// Highest round generated so far (knockout advances round by round).
-  currentRound Int    @default(0)
-  createdById  String @db.Uuid
+  currentRound     Int               @default(0)
+  createdById      String            @db.Uuid
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -147,10 +147,10 @@ model Standing {
   totalGuesses  Int     @default(0)
   rank          Int?
   /// Knockout: deepest round the player reached. League: unused.
-  roundNumber Int?
-  eliminated  Boolean @default(false)
+  roundNumber   Int?
+  eliminated    Boolean @default(false)
   /// Knockout: how many byes this player has received (never give two — §6).
-  byes Int @default(0)
+  byes          Int     @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -197,7 +197,7 @@ model GamePlayer {
 
   /// SECURITY: server-only secret (distinct digits). Never sent to a client;
   /// nulled when the game finishes (retention).
-  secret String?
+  secret            String?
   /// GamePlayer.id this player targets (Ring; for a duel = the opponent).
   targetId          String?  @db.Uuid
   eliminated        Boolean  @default(false)
@@ -205,8 +205,8 @@ model GamePlayer {
   /// Ring (spec §4): the GamePlayer.id who cracked/eliminated this player. Scopes
   /// the "inherited history" reward — the cracker may read THIS player's session
   /// guess history, nobody else. Null if not yet eliminated or self-forfeited.
-  eliminatedById String?  @db.Uuid
-  joinedAt       DateTime @default(now())
+  eliminatedById    String?  @db.Uuid
+  joinedAt          DateTime @default(now())
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 

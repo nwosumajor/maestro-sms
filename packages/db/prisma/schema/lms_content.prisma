@@ -11,38 +11,38 @@
 
 /// One approval-gated content item attached to a class.
 model LmsContent {
-  id        String   @id @default(uuid()) @db.Uuid
-  schoolId  String   @db.Uuid
-  classId   String   @db.Uuid
+  id                String   @id @default(uuid()) @db.Uuid
+  schoolId          String   @db.Uuid
+  classId           String   @db.Uuid
   /// MATERIAL | LESSON | QUIZ | FORUM_THREAD
-  type      String
-  title     String
+  type              String
+  title             String
   /// Polymorphic body (lesson html / quiz definition incl. answer key / forum
   /// intro / material description). The quiz answer key is stripped server-side
   /// before a student sees it.
-  body      Json     @default("{}")
+  body              Json     @default("{}")
   /// DRAFT | PENDING_APPROVAL | PUBLISHED | REJECTED | REVISION_REQUESTED
-  status    String   @default("DRAFT")
-  authorId  String   @db.Uuid
+  status            String   @default("DRAFT")
+  authorId          String   @db.Uuid
   /// The linked approval WorkflowRequest id (plain uuid, cross-module decoupled).
-  approvalRequestId String? @db.Uuid
+  approvalRequestId String?  @db.Uuid
   /// Optional module/unit grouping (plain uuid; null = ungrouped / "General").
-  moduleId  String?  @db.Uuid
+  moduleId          String?  @db.Uuid
   /// Gradebook tag (plain uuid; both null = not counted toward the report card).
   /// A QUIZ/ASSIGNMENT tagged with a (subjectId, termId) can be pulled into the
   /// SubjectResult "assignment" CA component by the subject teacher.
-  subjectId String?  @db.Uuid
-  termId    String?  @db.Uuid
+  subjectId         String?  @db.Uuid
+  termId            String?  @db.Uuid
   /// MATERIAL PDF: object-storage key + original filename + upload-confirmed flag.
-  fileKey      String?
-  fileName     String?
-  fileUploaded Boolean @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  fileKey           String?
+  fileName          String?
+  fileUploaded      Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  school  School @relation(fields: [schoolId], references: [id])
-  class   Class  @relation(fields: [classId], references: [id])
-  author  User   @relation("ContentAuthor", fields: [authorId], references: [id])
+  school   School        @relation(fields: [schoolId], references: [id])
+  class    Class         @relation(fields: [classId], references: [id])
+  author   User          @relation("ContentAuthor", fields: [authorId], references: [id])
   attempts QuizAttempt[]
   posts    ForumPost[]
 
@@ -53,21 +53,21 @@ model LmsContent {
 
 /// A student's (single) attempt at a published quiz, auto-graded server-side.
 model QuizAttempt {
-  id        String   @id @default(uuid()) @db.Uuid
-  schoolId  String   @db.Uuid
-  contentId String   @db.Uuid
-  studentId String   @db.Uuid
+  id          String   @id @default(uuid()) @db.Uuid
+  schoolId    String   @db.Uuid
+  contentId   String   @db.Uuid
+  studentId   String   @db.Uuid
   /// The student's submitted answers (per-question), kept for review.
-  answers   Json     @default("{}")
-  score     Int
-  total     Int
+  answers     Json     @default("{}")
+  score       Int
+  total       Int
   /// 1-based attempt number (multi-attempt quizzes).
-  attemptNo Int      @default(1)
+  attemptNo   Int      @default(1)
   /// GRADED | PENDING_MANUAL (has essay questions awaiting a teacher).
-  status    String   @default("GRADED")
+  status      String   @default("GRADED")
   /// Per-essay-question grades set by a teacher (questionId -> points).
-  essayGrades Json   @default("{}")
-  createdAt DateTime @default(now())
+  essayGrades Json     @default("{}")
+  createdAt   DateTime @default(now())
 
   school  School     @relation(fields: [schoolId], references: [id])
   content LmsContent @relation(fields: [contentId], references: [id])
@@ -138,20 +138,20 @@ model LmsModule {
 /// Plain UUIDs (cross-module decoupled). One row per (assignment, student); the
 /// student may re-submit until it's GRADED. Grade + feedback are set by staff.
 model LmsSubmission {
-  id          String   @id @default(uuid()) @db.Uuid
-  schoolId    String   @db.Uuid
-  contentId   String   @db.Uuid
-  studentId   String   @db.Uuid
+  id          String    @id @default(uuid()) @db.Uuid
+  schoolId    String    @db.Uuid
+  contentId   String    @db.Uuid
+  studentId   String    @db.Uuid
   text        String
   /// SUBMITTED | GRADED
-  status      String   @default("SUBMITTED")
-  late        Boolean  @default(false)
+  status      String    @default("SUBMITTED")
+  late        Boolean   @default(false)
   grade       Int?
   feedback    String?
-  gradedById  String?  @db.Uuid
+  gradedById  String?   @db.Uuid
   gradedAt    DateTime?
-  submittedAt DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  submittedAt DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@unique([contentId, studentId])
   @@index([schoolId])
@@ -210,14 +210,14 @@ model LmsLiveSession {
 /// row (recognition, not a legal record). Relationship-scoped in the service:
 /// teacher-of-class awards/revokes; student sees own; guardian sees children.
 model LmsAward {
-  id           String   @id @default(uuid()) @db.Uuid
-  schoolId     String   @db.Uuid
-  classId      String   @db.Uuid
-  studentId    String   @db.Uuid
-  badge        String
-  note         String?
-  awardedById  String   @db.Uuid
-  createdAt    DateTime @default(now())
+  id          String   @id @default(uuid()) @db.Uuid
+  schoolId    String   @db.Uuid
+  classId     String   @db.Uuid
+  studentId   String   @db.Uuid
+  badge       String
+  note        String?
+  awardedById String   @db.Uuid
+  createdAt   DateTime @default(now())
 
   @@index([schoolId])
   @@index([schoolId, classId])

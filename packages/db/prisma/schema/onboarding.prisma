@@ -17,39 +17,39 @@ enum OnboardingRequestStatus {
 }
 
 model OnboardingRequest {
-  id           String                  @id @default(uuid()) @db.Uuid
-  schoolName   String
-  contactName  String
-  contactEmail String
-  contactPhone String?
+  id             String                  @id @default(uuid()) @db.Uuid
+  schoolName     String
+  contactName    String
+  contactEmail   String
+  contactPhone   String?
   // Prospective slug the requester would like (validated/uniqueness checked only
   // at provisioning time — this is just a request).
-  desiredSlug  String?
+  desiredSlug    String?
   // Requested subscription tier + add-on module keys (string[] as JSON) — a WISH
   // recorded at intake; the operator decides the real plan at provisioning time.
   desiredPlan    String?
   desiredModules Json?
   // --- school profile (sales-qualifying detail, all requester-supplied) ------
   /// PRIMARY | SECONDARY | PRIMARY_AND_SECONDARY | TERTIARY | OTHER
-  schoolType String?
-  address    String?
-  city       String?
-  state      String?
-  country    String?
-  website    String?
+  schoolType     String?
+  address        String?
+  city           String?
+  state          String?
+  country        String?
+  website        String?
   /// Approximate sizes — studentCount also feeds the per-seat price estimate.
-  studentCount Int?
-  staffCount   Int?
+  studentCount   Int?
+  staffCount     Int?
   /// The requester's position at the school (Proprietor / Principal / …).
-  contactRole String?
+  contactRole    String?
   /// What they run today (paper, spreadsheets, another SMS) — migration context.
-  currentSystem String?
-  notes        String?
-  status       OnboardingRequestStatus @default(NEW)
-  reviewedById String?                 @db.Uuid
-  reviewNote   String?
-  createdAt    DateTime                @default(now())
-  updatedAt    DateTime                @updatedAt
+  currentSystem  String?
+  notes          String?
+  status         OnboardingRequestStatus @default(NEW)
+  reviewedById   String?                 @db.Uuid
+  reviewNote     String?
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
 
   @@index([status])
   @@map("onboarding_request")

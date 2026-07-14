@@ -79,18 +79,18 @@ model Invoice {
   schoolId String @db.Uuid
 
   /// Student the invoice is for (DB FK to user; no Prisma relation).
-  studentId String @db.Uuid
+  studentId   String        @db.Uuid
   /// Human-friendly invoice number, unique within the school.
-  reference String
-  status    InvoiceStatus @default(DRAFT)
-  currency  String        @default("NGN")
+  reference   String
+  status      InvoiceStatus @default(DRAFT)
+  currency    String        @default("NGN")
   /// Sum of line totals (amountMinor * quantity), in minor units.
-  totalMinor Int          @default(0)
-  dueDate   DateTime      @db.Date
-  issuedAt  DateTime?
-  notes     String?
+  totalMinor  Int           @default(0)
+  dueDate     DateTime      @db.Date
+  issuedAt    DateTime?
+  notes       String?
   /// Staff who created it (DB FK to user; audit field, no Prisma relation).
-  createdById String @db.Uuid
+  createdById String        @db.Uuid
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -117,7 +117,7 @@ model InvoiceLineItem {
   description String
   /// Per-unit amount in minor units.
   amountMinor Int
-  quantity    Int @default(1)
+  quantity    Int    @default(1)
 
   createdAt DateTime @default(now())
 
@@ -134,22 +134,22 @@ model Payment {
   id       String @id @default(uuid()) @db.Uuid
   schoolId String @db.Uuid
 
-  invoiceId   String        @db.Uuid
+  invoiceId    String        @db.Uuid
   /// Amount in minor units (always positive; REFUND kind subtracts on balance).
-  amountMinor Int
-  method      PaymentMethod
-  kind        PaymentKind   @default(PAYMENT)
+  amountMinor  Int
+  method       PaymentMethod
+  kind         PaymentKind   @default(PAYMENT)
   /// POSTED affects the balance immediately; PENDING_APPROVAL awaits a second
   /// approver (maker-checker); REJECTED never counts.
-  status      PaymentStatus @default(POSTED)
+  status       PaymentStatus @default(POSTED)
   /// Staff who approved a PENDING_APPROVAL payment (≠ recordedById).
-  approvedById String?      @db.Uuid
+  approvedById String?       @db.Uuid
   /// External transaction reference (bank/gateway), if any.
-  reference   String?
-  note        String?
-  paidAt      DateTime      @default(now())
+  reference    String?
+  note         String?
+  paidAt       DateTime      @default(now())
   /// Staff who recorded it (DB FK to user; audit field, no Prisma relation).
-  recordedById String @db.Uuid
+  recordedById String        @db.Uuid
 
   createdAt DateTime @default(now())
 

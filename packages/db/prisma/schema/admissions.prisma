@@ -23,7 +23,7 @@ model AdmissionApplication {
   applicantEmail String
   applicantPhone String?
   childName      String
-  childDob       DateTime? @db.Date
+  childDob       DateTime?       @db.Date
   notes          String?
   status         AdmissionStatus @default(NEW)
   reviewedById   String?         @db.Uuid

@@ -12,36 +12,36 @@
 /// A class/section within a school (e.g. "History 101"). Assessments belong to
 /// a class, which is how integrity reports become teacher-of-class scoped.
 model Class {
-  id        String   @id @default(uuid()) @db.Uuid
-  schoolId  String   @db.Uuid
-  name      String
-  subject   String?
+  id           String   @id @default(uuid()) @db.Uuid
+  schoolId     String   @db.Uuid
+  name         String
+  subject      String?
   /// Ordering within the school's progression (e.g. JSS1=1, JSS2=2). Drives the
   /// "promote to the next class" flow together with nextClassId.
-  level     Int?
+  level        Int?
   /// The class students promote INTO at end of session. Null = final/terminal
   /// class (promotion graduates instead of moving). Self-relation within a school.
-  nextClassId String? @db.Uuid
+  nextClassId  String?  @db.Uuid
   /// A staff member who supervises this class (form teacher). Gains roster READ
   /// access to the class even if not a subject teacher. Optional.
-  supervisorId String? @db.Uuid
+  supervisorId String?  @db.Uuid
   /// Max ACTIVE enrollments; enrollment/import/promotion refuse to exceed it. Null
   /// = unlimited.
   capacity     Int?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  school      School         @relation(fields: [schoolId], references: [id])
-  teachers    ClassTeacher[]
-  enrollments Enrollment[]
-  assessments Assessment[]
+  school             School                @relation(fields: [schoolId], references: [id])
+  teachers           ClassTeacher[]
+  enrollments        Enrollment[]
+  assessments        Assessment[]
   attendanceSessions AttendanceSession[]
-  lmsContents LmsContent[]
-  subjectTeachers ClassSubjectTeacher[]
+  lmsContents        LmsContent[]
+  subjectTeachers    ClassSubjectTeacher[]
 
-  nextClass       Class?  @relation("ClassProgression", fields: [nextClassId], references: [id])
-  previousClasses Class[] @relation("ClassProgression")
-  supervisor      User?   @relation("ClassSupervisor", fields: [supervisorId], references: [id])
+  nextClass       Class?           @relation("ClassProgression", fields: [nextClassId], references: [id])
+  previousClasses Class[]          @relation("ClassProgression")
+  supervisor      User?            @relation("ClassSupervisor", fields: [supervisorId], references: [id])
   promotionsFrom  PromotionBatch[] @relation("PromotionSource")
   promotionsTo    PromotionBatch[] @relation("PromotionTarget")
 
@@ -148,15 +148,15 @@ model ClassTeacher {
 /// Student enrollment in a class. Drives "student sees only their classes" and
 /// (via ParentChild) "parent sees only their children's classes".
 model Enrollment {
-  id         String   @id @default(uuid()) @db.Uuid
-  schoolId   String   @db.Uuid
-  classId    String   @db.Uuid
-  studentId  String   @db.Uuid
+  id           String   @id @default(uuid()) @db.Uuid
+  schoolId     String   @db.Uuid
+  classId      String   @db.Uuid
+  studentId    String   @db.Uuid
   /// ACTIVE | PROMOTED | GRADUATED | TRANSFERRED | WITHDRAWN.
-  status     String   @default("ACTIVE")
+  status       String   @default("ACTIVE")
   /// Reason captured on a transfer/withdrawal (lifecycle audit context).
   statusReason String?
-  enrolledAt DateTime @default(now())
+  enrolledAt   DateTime @default(now())
 
   school  School @relation(fields: [schoolId], references: [id])
   class   Class  @relation(fields: [classId], references: [id])

@@ -131,6 +131,9 @@ apply_rls packages/db/prisma/rls/60_duty_roster_rls.sql          duty_assignment
 apply_rls packages/db/prisma/rls/61_employment_lifecycle_rls.sql employment_change_request_update
 apply_rls packages/db/prisma/rls/62_staff_exit_rls.sql           staff_exit_update
 apply_rls packages/db/prisma/rls/63_biometric_rls.sql            biometric_enrollment_delete
+apply_rls packages/db/prisma/rls/64_live_quiz_rls.sql            live_quiz_answer_update
+apply_rls packages/db/prisma/rls/65_hangman_rls.sql              hangman_player_update
+apply_rls packages/db/prisma/rls/66_live_quiz_question_delete.sql live_quiz_question_delete
 
 # Seed on first provision (compose: SEED_ON_START=true; cloud migrate task: always).
 if [ "${SEED_ON_START}" = "true" ] || [ "$MODE" = "migrate" ]; then

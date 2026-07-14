@@ -10,16 +10,16 @@
 
 /// GLOBAL (RLS-exempt): the tenant registry.
 model School {
-  id        String   @id @default(uuid()) @db.Uuid
-  name      String
-  slug      String   @unique
-  status    String   @default("ACTIVE")
+  id                     String   @id @default(uuid()) @db.Uuid
+  name                   String
+  slug                   String   @unique
+  status                 String   @default("ACTIVE")
   /// TRUE only for the single platform-owner organization ("SMS Platform") that
   /// hosts super_admin(s). It is NOT a customer tenant: excluded from the public
   /// school directory, the operator tenant list, cross-school directory search and
   /// platform billing. Lets the super_admin be a platform identity (not a member
   /// of any customer school) while keeping user.schoolId non-null + RLS intact.
-  isPlatform Boolean @default(false)
+  isPlatform             Boolean  @default(false)
   /// Paystack SPLIT settlement for parent fee payments: when set, every fee
   /// charge carries this subaccount so the money settles to the SCHOOL's own
   /// bank (platform keeps only the configured commission %). Managed by the
@@ -34,9 +34,9 @@ model School {
   /// integrity_signal / submission_draft / submission_telemetry. Read by the
   /// privileged retention job; rows older than this are purged. Per-school policy
   /// on the global registry (RLS-exempt). 0 disables purging for the school.
-  integrityRetentionDays Int @default(365)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  integrityRetentionDays Int      @default(365)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
 
   // foundation relations
   users             User[]
@@ -45,10 +45,10 @@ model School {
   integrityConsents IntegrityConsent[]
 
   // LMS relations
-  classes        Class[]
-  classTeachers  ClassTeacher[]
-  enrollments    Enrollment[]
-  parentChildren ParentChild[]
+  classes              Class[]
+  classTeachers        ClassTeacher[]
+  enrollments          Enrollment[]
+  parentChildren       ParentChild[]
   subjects             Subject[]
   classSubjectTeachers ClassSubjectTeacher[]
   promotionBatches     PromotionBatch[]
@@ -57,9 +57,9 @@ model School {
   announcements        Announcement[]
 
   // Gradebook
-  grades            Grade[]
-  subjectResults    SubjectResult[]
-  subjectSelections SubjectSelection[]
+  grades                  Grade[]
+  subjectResults          SubjectResult[]
+  subjectSelections       SubjectSelection[]
   scholarshipApplications ScholarshipApplication[]
 
   // Approval workflow
@@ -76,9 +76,9 @@ model School {
   integrityRetentionRuns     IntegrityRetentionRun[]
 
   // SIS relations
-  studentProfiles   StudentProfile[]
-  emergencyContacts EmergencyContact[]
-  medicalRecords    MedicalRecord[]
+  studentProfiles      StudentProfile[]
+  emergencyContacts    EmergencyContact[]
+  medicalRecords       MedicalRecord[]
   studentImportBatches StudentImportBatch[]
   parentImportBatches  ParentImportBatch[]
 
@@ -87,7 +87,7 @@ model School {
   attendanceRecords  AttendanceRecord[]
 
   // Notifications relations
-  notifications        Notification[]
+  notifications          Notification[]
   notificationDeliveries NotificationDelivery[]
 
   // Fees / Billing relations
@@ -100,8 +100,8 @@ model School {
   documents Document[]
 
   // Timetabling relations
-  periods         Period[]
-  rooms           Room[]
+  periods          Period[]
+  rooms            Room[]
   timetableEntries TimetableEntry[]
 
   // Security relations
@@ -123,21 +123,30 @@ model School {
   admissionApplications AdmissionApplication[]
 
   // Dead & Wounded game
-  games        Game[]
-  gamePlayers  GamePlayer[]
-  guesses      Guess[]
-  gameResults  GameResult[]
-  competitions Competition[]
-  standings    Standing[]
-  gameSettings GameSettings[]
+  games                Game[]
+  gamePlayers          GamePlayer[]
+  guesses              Guess[]
+  gameResults          GameResult[]
+  competitions         Competition[]
+  standings            Standing[]
+  gameSettings         GameSettings[]
+  // Live Quiz (Kahoot-style, curriculum-themed)
+  liveQuizzes          LiveQuiz[]
+  liveQuizQuestions    LiveQuizQuestion[]
+  liveQuizSessions     LiveQuizSession[]
+  liveQuizParticipants LiveQuizParticipant[]
+  liveQuizAnswers      LiveQuizAnswer[]
+  // Hangman (classroom letter-guessing)
+  hangmanGames         HangmanGame[]
+  hangmanPlayers       HangmanPlayer[]
   // Ultimate (cross-school) — ONLY the tenant-scoped governance/bridge tables
   // relate back to School; the cross-tenant arena tables deliberately do not.
-  ultimateEnrollments UltimateEnrollment[]
-  ultimateConsents    UltimateConsent[]
-  ultimateEntryLinks  UltimateEntryLink[]
+  ultimateEnrollments  UltimateEnrollment[]
+  ultimateConsents     UltimateConsent[]
+  ultimateEntryLinks   UltimateEntryLink[]
 
   // Subscription / module entitlement (one row per school)
-  subscription SchoolSubscription?
+  subscription     SchoolSubscription?
   // Platform billing — append-only payment ledger (school -> platform)
   platformPayments PlatformSubscriptionPayment[]
 
@@ -155,30 +164,30 @@ model School {
 /// super_admin writes via a per-school GUC (like the rest of the operator console).
 /// A school with NO row falls back to DEFAULT_PLAN (the STANDARD floor — fail-closed).
 model SchoolSubscription {
-  id        String   @id @default(uuid()) @db.Uuid
-  schoolId  String   @unique @db.Uuid
+  id                   String    @id @default(uuid()) @db.Uuid
+  schoolId             String    @unique @db.Uuid
   /// STANDARD | PREMIUM | ULTIMATE | ENTERPRISE (validated against @sms/types PLANS).
   /// This is the PURCHASED tier; delinquency NEVER overwrites it — the effective
   /// plan is computed (effectivePlan) from `status` + `currentPeriodEnd` instead.
-  plan      String   @default("ENTERPRISE")
+  plan                 String    @default("ENTERPRISE")
   /// { enabled?: string[]; disabled?: string[] } — per-school deviations.
-  overrides Json     @default("{}")
+  overrides            Json      @default("{}")
   /// ACTIVE | PAST_DUE | CANCELED (validated against @sms/types SUBSCRIPTION_STATUS).
-  status            String    @default("ACTIVE")
+  status               String    @default("ACTIVE")
   /// MONTH | TERM | YEAR.
-  billingCycle      String    @default("TERM")
+  billingCycle         String    @default("TERM")
   /// End of the currently-paid period; null for never-paid (default/comp).
-  currentPeriodEnd  DateTime?
+  currentPeriodEnd     DateTime?
   /// Seat count (active students) last billed.
-  seats             Int?
+  seats                Int?
   /// Currency of the last charge (NGN | USD); null when never paid.
-  currency          String?
+  currency             String?
   /// Amount last charged (minor units, NGN kobo).
-  priceMinor        Int?
+  priceMinor           Int?
   /// Paystack customer code (reserved for future saved-card recurring).
   paystackCustomerCode String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
   school School @relation(fields: [schoolId], references: [id])
 
@@ -193,13 +202,13 @@ model SchoolSubscription {
 /// the least-privilege app role has SELECT only (see rls/46_plan_pricing_rls.sql).
 model PlanPrice {
   /// STANDARD | PREMIUM | ULTIMATE | ENTERPRISE (validated against @sms/types PLANS).
-  plan               String
+  plan                String
   /// NGN | USD — one override row per (tier, currency). ENTERPRISE is USD-only
   /// (enforced in PlanPricingService.update, not the schema).
-  currency           String   @default("NGN")
+  currency            String   @default("NGN")
   /// Per-seat (active student) monthly price, minor units (kobo / cents).
   perSeatMonthlyMinor Int
-  updatedAt          DateTime @updatedAt
+  updatedAt           DateTime @updatedAt
 
   @@id([plan, currency])
   @@map("plan_price")
@@ -244,36 +253,36 @@ model PlatformSubscriptionPayment {
 /// TENANT-SCOPED: a person in a school. Email is globally unique so login is
 /// unambiguous. passwordHash is bcrypt; the app NEVER stores plaintext.
 model User {
-  id           String   @id @default(uuid()) @db.Uuid
-  schoolId     String   @db.Uuid
-  email        String   @unique
-  name         String
-  passwordHash String
-  status       String   @default("ACTIVE")
+  id                String    @id @default(uuid()) @db.Uuid
+  schoolId          String    @db.Uuid
+  email             String    @unique
+  name              String
+  passwordHash      String
+  status            String    @default("ACTIVE")
   /// Human-readable GLOBAL unique identifier for every person (student + staff) —
   /// for ID cards, audit, and cross-school search. Auto-generated by a DB default
   /// on every insert (so ALL creation paths get one with no app code), globally
   /// unique. Format: SMS-XXXXXXXXXXXX.
-  uniqueId     String   @unique @default(dbgenerated("('SMS-' || upper(substr(md5((random())::text || (clock_timestamp())::text), 1, 12)))"))
+  uniqueId          String    @unique @default(dbgenerated("('SMS-' || upper(substr(md5((random())::text || (clock_timestamp())::text), 1, 12)))"))
   /// TOTP MFA: base32 secret (null until enrolled) + whether it's confirmed/on.
-  mfaSecret    String?
-  mfaEnabled   Boolean  @default(false)
+  mfaSecret         String?
+  mfaEnabled        Boolean   @default(false)
   /// Platform-owner mandate: when true, login is blocked until the user enrols
   /// MFA (mfaEnabled). Set by super_admin per-user or per-role from the operator
   /// console. Distinct from mfaEnabled (the user's own enrolment state).
-  mfaRequired  Boolean  @default(false)
+  mfaRequired       Boolean   @default(false)
   /// Brute-force protection: consecutive failed logins. On the 3rd miss the account
   /// is LOCKED (permanent — cleared only by a super_admin). lockedUntil records when.
-  failedLoginCount Int      @default(0)
-  lockedUntil      DateTime?
+  failedLoginCount  Int       @default(0)
+  lockedUntil       DateTime?
   /// True once locked out; only a super_admin (operator console) can reactivate.
-  locked       Boolean  @default(false)
+  locked            Boolean   @default(false)
   /// When the password was last set. Non-super_admin accounts must reset every 30
   /// days (enforced at login). Defaults to now() so new/existing accounts get a
   /// fresh window; set to null by an admin password reset to force an immediate change.
   passwordChangedAt DateTime? @default(now())
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   school School     @relation(fields: [schoolId], references: [id])
   roles  UserRole[]
@@ -292,20 +301,20 @@ model User {
   consentsRevoked   IntegrityConsent[] @relation("ConsentRevokedBy")
 
   // LMS relations
-  teacherClasses    ClassTeacher[] @relation("TeacherClasses")
-  studentEnrollments Enrollment[]  @relation("StudentEnrollments")
-  parentLinks       ParentChild[]  @relation("ParentLinks")
-  childLinks        ParentChild[]  @relation("ChildLinks")
-  supervisedClasses Class[]               @relation("ClassSupervisor")
-  subjectTeaching   ClassSubjectTeacher[] @relation("SubjectTeaching")
+  teacherClasses     ClassTeacher[]        @relation("TeacherClasses")
+  studentEnrollments Enrollment[]          @relation("StudentEnrollments")
+  parentLinks        ParentChild[]         @relation("ParentLinks")
+  childLinks         ParentChild[]         @relation("ChildLinks")
+  supervisedClasses  Class[]               @relation("ClassSupervisor")
+  subjectTeaching    ClassSubjectTeacher[] @relation("SubjectTeaching")
 
   // LMS learning content
-  authoredContent   LmsContent[]  @relation("ContentAuthor")
-  quizAttempts      QuizAttempt[] @relation("StudentQuizAttempts")
-  forumPosts        ForumPost[]   @relation("ForumAuthor")
+  authoredContent LmsContent[]  @relation("ContentAuthor")
+  quizAttempts    QuizAttempt[] @relation("StudentQuizAttempts")
+  forumPosts      ForumPost[]   @relation("ForumAuthor")
 
   // Gradebook
-  gradesGiven       Grade[]        @relation("GradesGiven")
+  gradesGiven Grade[] @relation("GradesGiven")
 
   // Approval workflow
   initiatedWorkflows WorkflowRequest[] @relation("InitiatedWorkflows")
@@ -328,8 +337,8 @@ model User {
 /// student, parent, finance). All but super_admin are scoped to a school via
 /// the UserRole assignment, not the role itself.
 model Role {
-  id          String   @id @default(uuid()) @db.Uuid
-  name        String   @unique
+  id          String  @id @default(uuid()) @db.Uuid
+  name        String  @unique
   description String?
 
   permissions RolePermission[]
@@ -424,18 +433,18 @@ model IntegrityConsent {
 /// the key is stored here. The public login page reads it (via the branding
 /// endpoint, which sets the tenant GUC after resolving the school by slug).
 model SchoolBranding {
-  id        String   @id @default(uuid()) @db.Uuid
-  schoolId  String   @unique @db.Uuid
+  id         String   @id @default(uuid()) @db.Uuid
+  schoolId   String   @unique @db.Uuid
   /// Object-storage key for the uploaded logo (null = none).
-  logoKey   String?
+  logoKey    String?
   /// Per-school theme: brand colour as HSL (hue 0–360, sat/light 0–100) + an
   /// optional font-family stack. Null = inherit the platform default tokens.
   brandHue   Int?
   brandSat   Int?
   brandLight Int?
   fontFamily String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   @@index([schoolId])
   @@map("school_branding")

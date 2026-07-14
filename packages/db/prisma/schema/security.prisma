@@ -23,7 +23,7 @@ model PrivilegeGrant {
   schoolId String @db.Uuid
 
   /// The grantee (DB FK to user; scalar, no Prisma relation).
-  userId String @db.Uuid
+  userId     String      @db.Uuid
   /// The fine-grained permission being temporarily granted (e.g. "fee.manage").
   permission String
   reason     String
@@ -32,9 +32,9 @@ model PrivilegeGrant {
   breakGlass Boolean     @default(false)
 
   /// Who asked (DB FK to user; audit field).
-  requestedById String  @db.Uuid
+  requestedById String    @db.Uuid
   /// Who approved — MUST differ from requestedById (DB FK to user; audit field).
-  approvedById  String? @db.Uuid
+  approvedById  String?   @db.Uuid
   /// When the elevation stops being honored.
   expiresAt     DateTime?
 

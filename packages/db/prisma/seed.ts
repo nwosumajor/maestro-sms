@@ -111,6 +111,8 @@ const PERMS = [
   // enroll/consent/admin) — the full finalized §8 permission set
   "game.play",
   "game.leaderboard.read",
+  "game.quiz.host",
+  "game.hangman.host",
   "game.league.create",
   "game.race.open",
   "game.race.tournament",
@@ -194,7 +196,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     "privacy.erasure.review", "message.read", "message.send", "event.read", "announcement.read", "event.write",
     "hr.read", "hr.self", "hr.write", "hr.salary.approve", "hr.payroll.run", "hr.appraisal.manage", "hr.disciplinary.manage", "hr.recruit.manage", "school.branding.manage", "rbac.manage", "admission.review", "directory.search", "announcement.manage", "announcement.read",
     "game.league.create", "game.leaderboard.read",
-    "game.race.open", "game.race.tournament", "game.match.moderate",
+    "game.race.open", "game.race.tournament", "game.match.moderate", "game.quiz.host", "game.hangman.host",
     "game.ultimate.enroll",
     "lms.content.read", "lms.content.approve",
     "billing.read", "billing.manage",
@@ -226,7 +228,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     // School admin approves end-of-session promotions (maker-checker checker).
     "class.promote.approve",
     "game.league.create", "game.leaderboard.read",
-    "game.race.open", "game.race.tournament", "game.match.moderate",
+    "game.race.open", "game.race.tournament", "game.match.moderate", "game.quiz.host", "game.hangman.host",
     "game.settings.manage",
     "game.ultimate.enroll", "game.ultimate.consent",
     "lms.content.read", "lms.content.write", "lms.forum.post",
@@ -245,7 +247,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     "document.read", "document.write",
     "timetable.read",
     "security.elevation.request", "message.read", "message.send", "event.read", "announcement.read", "event.write",
-    "game.play", "game.leaderboard.read", "game.race.open", "game.match.moderate",
+    "game.play", "game.leaderboard.read", "game.quiz.host", "game.hangman.host", "game.race.open", "game.match.moderate",
     "lms.content.read", "lms.content.write", "lms.forum.post",
     "scholarship.apply",
   ],
@@ -511,6 +513,79 @@ async function main() {
       integrityEnabled: true,
     },
   });
+
+  // --- Live Quiz starter content (one themed quiz per subject) ---------------
+  // So a school can host a quiz out of the box without authoring first.
+  // Idempotent: only seeds when the school has no quizzes yet.
+  const STARTER_QUIZZES: Array<{
+    title: string;
+    theme: string;
+    difficulty: string;
+    questions: Array<{ prompt: string; choices: string[]; answerIndex: number }>;
+  }> = [
+    {
+      title: "World Capitals",
+      theme: "GEOGRAPHY",
+      difficulty: "EASY",
+      questions: [
+        { prompt: "What is the capital of Kenya?", choices: ["Nairobi", "Lagos", "Cairo", "Accra"], answerIndex: 0 },
+        { prompt: "What is the capital of Japan?", choices: ["Seoul", "Tokyo", "Beijing", "Bangkok"], answerIndex: 1 },
+        { prompt: "On which continent is Egypt?", choices: ["Asia", "Europe", "Africa", "South America"], answerIndex: 2 },
+        { prompt: "Which is the longest river in the world?", choices: ["Amazon", "Nile", "Yangtze", "Congo"], answerIndex: 1 },
+      ],
+    },
+    {
+      title: "Science Basics",
+      theme: "SCIENCE",
+      difficulty: "MEDIUM",
+      questions: [
+        { prompt: "What gas do plants absorb from the air?", choices: ["Oxygen", "Nitrogen", "Carbon dioxide", "Hydrogen"], answerIndex: 2 },
+        { prompt: "What is the chemical symbol for water?", choices: ["WO", "H2O", "HO2", "O2"], answerIndex: 1 },
+        { prompt: "Which planet is known as the Red Planet?", choices: ["Venus", "Jupiter", "Mars", "Saturn"], answerIndex: 2 },
+        { prompt: "What force pulls objects toward the Earth?", choices: ["Magnetism", "Gravity", "Friction", "Tension"], answerIndex: 1 },
+      ],
+    },
+    {
+      title: "Art & Artists",
+      theme: "ART",
+      difficulty: "MEDIUM",
+      questions: [
+        { prompt: "Who painted the Mona Lisa?", choices: ["Van Gogh", "Picasso", "Leonardo da Vinci", "Monet"], answerIndex: 2 },
+        { prompt: "Which colours mix to make green?", choices: ["Red + Blue", "Blue + Yellow", "Red + Yellow", "Black + White"], answerIndex: 1 },
+        { prompt: "A sculpture is a work of art that is…", choices: ["Painted flat", "Three-dimensional", "A photograph", "A song"], answerIndex: 1 },
+        { prompt: "Which movement is Salvador Dalí associated with?", choices: ["Surrealism", "Cubism", "Impressionism", "Baroque"], answerIndex: 0 },
+      ],
+    },
+    {
+      title: "Classic Literature",
+      theme: "LITERATURE",
+      difficulty: "HARD",
+      questions: [
+        { prompt: "Who wrote 'Romeo and Juliet'?", choices: ["Charles Dickens", "William Shakespeare", "Jane Austen", "Mark Twain"], answerIndex: 1 },
+        { prompt: "'Things Fall Apart' was written by…", choices: ["Wole Soyinka", "Chinua Achebe", "Ngũgĩ wa Thiong'o", "Ben Okri"], answerIndex: 1 },
+        { prompt: "What is a group of lines in a poem called?", choices: ["Chapter", "Stanza", "Verse chapter", "Paragraph"], answerIndex: 1 },
+        { prompt: "Who is the author of 'Pride and Prejudice'?", choices: ["Emily Brontë", "Jane Austen", "Virginia Woolf", "George Eliot"], answerIndex: 1 },
+      ],
+    },
+  ];
+  const existingQuizzes = await prisma.liveQuiz.count({ where: { schoolId: school.id } });
+  if (existingQuizzes === 0) {
+    for (const q of STARTER_QUIZZES) {
+      const quiz = await prisma.liveQuiz.create({
+        data: { schoolId: school.id, title: q.title, theme: q.theme, difficulty: q.difficulty, createdById: teacher.id },
+      });
+      await prisma.liveQuizQuestion.createMany({
+        data: q.questions.map((qq, i) => ({
+          schoolId: school.id,
+          quizId: quiz.id,
+          orderIndex: i,
+          prompt: qq.prompt,
+          choices: qq.choices,
+          answerIndex: qq.answerIndex,
+        })),
+      });
+    }
+  }
 
   console.log("Seeded:", { school: school.id, teacher: teacher.id, student: student.id });
 }

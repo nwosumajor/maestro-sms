@@ -66,7 +66,7 @@ enum IntegritySignalSeverity {
 /// opt-in per-assessment, so monitoring is never silent or accidental
 /// (transparency requirement, Golden Rule #5).
 model Assessment {
-  id     String @id @default(uuid()) @db.Uuid
+  id       String @id @default(uuid()) @db.Uuid
   /// Tenant key — set from the verified JWT, enforced by RLS. Never from input.
   schoolId String @db.Uuid
 
@@ -84,14 +84,14 @@ model Assessment {
 
   // --- Integrity toggles (all default OFF; opt-in only) ---
   /// Capture (NOT silently block) paste events into answer fields.
-  pasteBlocked     Boolean @default(false)
+  pasteBlocked      Boolean @default(false)
   /// Track visibilitychange/blur focus-loss events.
-  focusTracked     Boolean @default(false)
+  focusTracked      Boolean @default(false)
   /// Capture coarse typing cadence (derived metrics only, never raw keystrokes).
-  typingTracked    Boolean @default(false)
+  typingTracked     Boolean @default(false)
   /// Master switch: when false, NO signals are accepted or generated for this
   /// assessment regardless of the flags above.
-  integrityEnabled Boolean @default(false)
+  integrityEnabled  Boolean @default(false)
   /// When true, students may attach a FILE (e.g. a worked PDF) as their answer.
   /// Teacher-controlled per assessment; default OFF (text-only).
   fileUploadEnabled Boolean @default(false)
@@ -131,29 +131,29 @@ model Submission {
   /// FK -> User(id) of the student. PII of a minor — RLS + audit-logged access.
   studentId    String @db.Uuid
 
-  status      SubmissionStatus      @default(IN_PROGRESS)
-  contentKind SubmissionContentKind @default(PROSE)
+  status       SubmissionStatus      @default(IN_PROGRESS)
+  contentKind  SubmissionContentKind @default(PROSE)
   /// The student's work. Sensitive PII; tenant-isolated by RLS. Stored as text
   /// (not in S3) because detectors need to read it; large file attachments still
   /// go to S3/R2 per stack rules.
-  content     String?
+  content      String?
   /// Optional FILE answer (when the assessment has fileUploadEnabled). Bytes live
   /// in S3/R2 via the StorageProvider; only the key + original name + upload state
   /// are stored here. One file per submission (re-upload replaces it).
   fileKey      String?
   fileName     String?
-  fileUploaded Boolean  @default(false)
+  fileUploaded Boolean               @default(false)
   /// For a TIMED exam: when the student began the attempt. The submit deadline is
   /// startedAt + assessment.durationMinutes (and never past assessment.closesAt).
-  startedAt   DateTime?
-  submittedAt DateTime?
+  startedAt    DateTime?
+  submittedAt  DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  school     School               @relation(fields: [schoolId], references: [id])
-  student    User                 @relation("SubmissionStudent", fields: [studentId], references: [id])
-  assessment Assessment           @relation(fields: [assessmentId], references: [id])
+  school     School                @relation(fields: [schoolId], references: [id])
+  student    User                  @relation("SubmissionStudent", fields: [studentId], references: [id])
+  assessment Assessment            @relation(fields: [assessmentId], references: [id])
   drafts     SubmissionDraft[]
   signals    IntegritySignal[]
   telemetry  SubmissionTelemetry[]
@@ -173,7 +173,7 @@ model SubmissionDraft {
   id       String @id @default(uuid()) @db.Uuid
   schoolId String @db.Uuid
 
-  submissionId String @db.Uuid
+  submissionId String  @db.Uuid
   /// Monotonic order of snapshots within a submission.
   sequence     Int
   /// SHA-256 of `content` at snapshot time — lets us detect duplicate/no-op saves
@@ -270,7 +270,7 @@ model StudentIntegrityExemption {
 
   reason      String
   /// FK -> User(id) of the staff member who granted it (school_admin/teacher).
-  grantedById String   @db.Uuid
+  grantedById String @db.Uuid
 
   /// Soft-delete: active when null. We never hard-delete an accommodation record.
   revokedAt   DateTime?
