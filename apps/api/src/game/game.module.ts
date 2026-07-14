@@ -19,6 +19,8 @@ import { TypingRaceController } from "./typing-race.controller";
 import { TypingRaceService } from "./typing-race.service";
 import { CheckersController } from "./checkers.controller";
 import { CheckersService } from "./checkers.service";
+import { ChessController } from "./chess.controller";
+import { ChessService } from "./chess.service";
 import { GameEventsService } from "./game-events.service";
 
 // Depends on the global FoundationModule (TENANT_DATABASE, AUDIT_LOG_SERVICE,
@@ -44,6 +46,7 @@ import { GameEventsService } from "./game-events.service";
     HangmanController,
     TypingRaceController,
     CheckersController,
+    ChessController,
   ],
   providers: [
     GameService,
@@ -56,6 +59,7 @@ import { GameEventsService } from "./game-events.service";
     HangmanService,
     TypingRaceService,
     CheckersService,
+    ChessService,
     GameEventsService,
   ],
   exports: [
@@ -69,6 +73,7 @@ import { GameEventsService } from "./game-events.service";
     HangmanService,
     TypingRaceService,
     CheckersService,
+    ChessService,
     GameEventsService,
   ],
 })

@@ -1,0 +1,59 @@
+// =============================================================================
+// Chess — durable records (turn-based 2-player peer duel)
+// =============================================================================
+// A peer duel (like checkers): a player CREATES a game (they play WHITE, which
+// moves first), another player in the same school JOINS as black, and they
+// alternate turns. Every move is validated SERVER-SIDE against the full-rules
+// engine (@sms/game-engine `chess`) — clients are display-only (spec §9). The
+// full game state needed to judge legality (castling rights, en-passant target,
+// half-move clock) is persisted so the engine can be rebuilt each move.
+//
+// Tenant-scoped (non-null schoolId) + RLS (69_chess_rls.sql); relationship
+// scoping (only the two participants — plus school-wide staff — may act/view an
+// active game) is enforced in ChessService. 404-not-403. Audited. No enforced
+// clock in v1 (board-game time controls are a deferred enhancement).
+// =============================================================================
+
+enum ChessStatus {
+  LOBBY
+  ACTIVE
+  FINISHED
+}
+
+/// One chess game between two players in a school.
+model ChessGame {
+  id           String      @id @default(uuid()) @db.Uuid
+  schoolId     String      @db.Uuid
+  status       ChessStatus @default(LOBBY)
+  createdById  String      @db.Uuid
+  /// The two players (scalar uuids; creator is white and moves first).
+  whiteUserId  String      @db.Uuid
+  blackUserId  String?     @db.Uuid
+  /// Whose turn: 'w' | 'b'.
+  turn         String      @default("w")
+  /// Engine ChessState pieces — board (8x8), castling rights, en-passant target.
+  board        Json
+  castling     Json
+  /// En-passant target square [r,c], or null.
+  ep           Json?
+  halfmove     Int         @default(0)
+  fullmove     Int         @default(1)
+  /// Engine status for display: PLAYING | CHECK | CHECKMATE | STALEMATE | DRAW.
+  chessStatus  String      @default("PLAYING")
+  moveCount    Int         @default(0)
+  /// Set on finish.
+  winnerUserId String?     @db.Uuid
+  /// CHECKMATE | STALEMATE | DRAW | RESIGN.
+  outcome      String?
+
+  startedAt  DateTime?
+  finishedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, status])
+  @@map("chess_game")
+}

@@ -71,6 +71,8 @@ d("RLS cross-tenant isolation", () => {
   const typingRacerA = randomUUID();
   // Checkers: one game.
   const checkersGameA = randomUUID();
+  // Chess: one game.
+  const chessGameA = randomUUID();
   // Ultimate: ONLY the tenant-scoped governance/bridge tables are isolation-tested.
   // The arena tables (ultimate_competition / ultimate_participant) are
   // CROSS-TENANT by design (RLS-exempt — see 21_ultimate_rls.sql) and carry no PII.
@@ -377,6 +379,11 @@ d("RLS cross-tenant isolation", () => {
     await a.query(
       `INSERT INTO checkers_game (id,"schoolId","createdById","blackUserId",board,"updatedAt") VALUES ($1,$2,$3,$3,$4::jsonb,now())`,
       [checkersGameA, A, userA, "[]"],
+    );
+    // Chess: one game in A (board/castling JSON; content irrelevant to isolation).
+    await a.query(
+      `INSERT INTO chess_game (id,"schoolId","createdById","whiteUserId",board,castling,"updatedAt") VALUES ($1,$2,$3,$3,$4::jsonb,$5::jsonb,now())`,
+      [chessGameA, A, userA, "[]", "{}"],
     );
     // Ultimate (step 8): an arena competition (cross-tenant) + the tenant-scoped
     // enrollment/consent/entry-link governance rows for school A.
@@ -928,6 +935,7 @@ d("RLS cross-tenant isolation", () => {
       "typing_racer",
       "typing_race",
       "checkers_game",
+      "chess_game",
       // Ultimate: bridge/governance + participant are schoolId-scoped; the arena
       // `ultimate_competition` has NO schoolId (cross-tenant) → deleted by id below.
       "ultimate_entry_link",
@@ -1039,6 +1047,7 @@ d("RLS cross-tenant isolation", () => {
     ["typing_race", typingRaceA],
     ["typing_racer", typingRacerA],
     ["checkers_game", checkersGameA],
+    ["chess_game", chessGameA],
     ["lms_content", lmsContentA],
     ["quiz_attempt", quizAttemptA],
     ["forum_post", forumPostA],
