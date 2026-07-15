@@ -54,8 +54,12 @@ import { RedisPubSubService } from "../common/redis-pubsub.service";
 // a BILLING gate, not a security one (permissions + RLS are the security layers),
 // and it fails toward the previously-purchased plan, never toward more access.
 const CACHE_TTL_MS = 600_000;
-/** Bound memory at high tenant counts — evict oldest once past this many schools. */
-const CACHE_MAX_ENTRIES = 20_000;
+/** Bound memory at high tenant counts — evict oldest once past this many schools.
+ *  Keep this WELL ABOVE the tenant count: eviction here is insertion-order (FIFO),
+ *  not LRU, so a bound at/below the number of active schools evicts entries that
+ *  are still hot and reintroduces the miss storm this cache exists to prevent.
+ *  ~500B/entry ⇒ 50k ≈ 25MB per task, cheap next to the round-trips it saves. */
+const CACHE_MAX_ENTRIES = 50_000;
 /** Redis channel: "drop the cached entitlements for this school on every task". */
 const INVALIDATE_CHANNEL = "entitlement:invalidate";
 
