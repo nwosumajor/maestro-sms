@@ -11,7 +11,7 @@ import type {
   TenantPageDto,
 } from "@sms/types";
 import { z } from "zod";
-import { OPERATOR_PERMISSIONS, PLANS, SUBSCRIPTION_STATUS, isPlan, isSubscriptionStatus } from "@sms/types";
+import { OPERATOR_PERMISSIONS, PLANS, SUBSCRIPTION_STATUS, isPlan, isSubscriptionStatus, type PlatformStaffDto } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { RequireStepUp } from "../auth/require-stepup.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -24,6 +24,12 @@ import { OperatorExportService } from "./operator-export.service";
 import { PlatformAnalyticsService } from "./platform-analytics.service";
 import { PlatformAuditService, type PlatformAuditFilter } from "./platform-audit.service";
 import { PlanPricingService } from "../billing/plan-pricing.service";
+
+const platformStaffSchema = z.object({
+  email: z.string().email(),
+  name: z.string().min(1).max(120),
+});
+const staffStatusSchema = z.object({ status: z.enum(["ACTIVE", "DISABLED"]) });
 
 /** Parse audit query params into a typed filter (all optional). */
 function auditFilter(q: Record<string, string>): PlatformAuditFilter {
@@ -142,6 +148,38 @@ export class OperatorController {
     @Body(new ZodValidationPipe(adminSchema)) body: z.infer<typeof adminSchema>,
   ) {
     return this.provisioning.createAdmin(p, schoolId, body);
+  }
+
+  // --- platform staff (the owner hiring help) — OWNER-ONLY -----------------
+  /** Current platform managers. */
+  @Get("platform-staff")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_STAFF_MANAGE)
+  listPlatformStaff(@CurrentPrincipal() p: Principal): Promise<PlatformStaffDto[]> {
+    return this.provisioning.listPlatformStaff(p);
+  }
+
+  /** Hire a platform manager (manager_admin). Step-up: creates an identity with
+   *  cross-tenant reach. Invite-link only — no password is ever returned. */
+  @Post("platform-staff")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_STAFF_MANAGE)
+  @RequireStepUp()
+  createPlatformStaff(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(platformStaffSchema)) body: z.infer<typeof platformStaffSchema>,
+  ): Promise<PlatformStaffDto> {
+    return this.provisioning.createPlatformStaff(p, body);
+  }
+
+  /** Revoke / reinstate a platform manager. Step-up: destructive. */
+  @Put("platform-staff/:userId/status")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_STAFF_MANAGE)
+  @RequireStepUp()
+  setPlatformStaffStatus(
+    @CurrentPrincipal() p: Principal,
+    @Param("userId") userId: string,
+    @Body(new ZodValidationPipe(staffStatusSchema)) body: z.infer<typeof staffStatusSchema>,
+  ): Promise<PlatformStaffDto> {
+    return this.provisioning.setPlatformStaffStatus(p, userId, body.status);
   }
 
   @Get("tenants")

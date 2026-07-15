@@ -145,3 +145,16 @@ export interface OperatorStudentDto {
   /** Class names the student is actively enrolled in. */
   classes: string[];
 }
+
+/** A platform STAFF member (manager_admin) — the owner's employed help. */
+export interface PlatformStaffDto {
+  id: string;
+  email: string;
+  name: string;
+  /** ACTIVE | DISABLED — DISABLED blocks every login. */
+  status: string;
+  mfaEnabled: boolean;
+  /** Has the invite actually been used yet (password set)? */
+  activated: boolean;
+  createdAt: Date;
+}

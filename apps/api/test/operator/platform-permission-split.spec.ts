@@ -29,6 +29,7 @@ const OWNER_ONLY = [
   OPERATOR_PERMISSIONS.PLATFORM_SUBSCRIPTION_MANAGE, // revenue
   OPERATOR_PERMISSIONS.PLATFORM_PRICING_MANAGE, // revenue
   OPERATOR_PERMISSIONS.PLATFORM_STUDENT_READ, // minors' PII, cross-tenant
+  OPERATOR_PERMISSIONS.PLATFORM_STAFF_MANAGE, // staff creating staff = a manager mints a manager
 ];
 
 describe("platform permission split", () => {

@@ -116,6 +116,7 @@ const PERMS = [
   "platform.subscription.manage",
   "platform.pricing.manage",
   "platform.student.read",
+  "platform.staff.manage",
   // Platform billing (self-serve subscription + dunning)
   "billing.read",
   "billing.manage",
@@ -191,6 +192,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     "platform.audit.read", "platform.user.read", "platform.user.unlock",
     "platform.impersonate", "platform.user.credentials", "platform.tenants.status",
     "platform.subscription.manage", "platform.pricing.manage", "platform.student.read",
+    "platform.staff.manage",
     "billing.dunning.run", "security.audit.read", "directory.search",
     "game.ultimate.admin", "game.leaderboard.read", "scholarship.admin", "scholarship.read",
     "notification.read",
@@ -493,9 +495,14 @@ async function main() {
     [owner.id, await roleByName("super_admin")],
     [managerAdmin.id, await roleByName("manager_admin")],
   ] as const) {
-    // The super_admin's role is scoped to the platform org, every other demo
-    // user's to the demo school.
-    const roleSchoolId = userId === owner.id ? platformOrg.id : school.id;
+    // A role row must be scoped to the org the user actually BELONGS to — login
+    // resolves roles for the user's own school, so a mismatch silently yields
+    // roles:[] / permissions:[] (the account logs in and can do nothing).
+    // Keyed on platform MEMBERSHIP, not on one hard-coded id: super_admin was
+    // special-cased here, so manager_admin — also a platform-org member — landed
+    // in the demo school and was invisible to its own login.
+    const platformMembers = new Set<string>([owner.id, managerAdmin.id]);
+    const roleSchoolId = platformMembers.has(userId) ? platformOrg.id : school.id;
     await prisma.userRole.upsert({
       where: { userId_roleId: { userId, roleId } },
       // Self-healing: corrects rows created before the platform-org model.
