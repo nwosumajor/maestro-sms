@@ -53,8 +53,18 @@ export const OPERATOR_PERMISSIONS = {
   PLATFORM_PRICING_MANAGE: "platform.pricing.manage",
   /** Read/export a school's student records cross-tenant. Minors' PII. */
   PLATFORM_STUDENT_READ: "platform.student.read",
+  /** Hire/revoke PLATFORM STAFF (manager_admin). Owner-only and never delegable:
+   *  if staff could create staff, one manager could mint another and "only the
+   *  owner has absolute control" quietly dissolves. The endpoint's role allow-list
+   *  is exactly ["manager_admin"], so it can never mint a second super_admin. */
+  PLATFORM_STAFF_MANAGE: "platform.staff.manage",
 } as const;
 export type OperatorPermission = (typeof OPERATOR_PERMISSIONS)[keyof typeof OPERATOR_PERMISSIONS];
+
+/** The ONLY role POST /operator/platform-staff may ever create. Pinned here rather
+ *  than passed by the caller: a caller-chosen role would make that endpoint a route
+ *  to minting a second super_admin. */
+export const PLATFORM_STAFF_ROLE = "manager_admin";
 
 /** Every platform permission — all cross-tenant, therefore all non-elevatable. */
 export const ALL_PLATFORM_PERMISSIONS: readonly string[] = Object.values(OPERATOR_PERMISSIONS);

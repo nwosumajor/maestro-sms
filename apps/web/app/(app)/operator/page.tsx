@@ -25,6 +25,7 @@ import { StudentDataExport } from "@/components/operator/StudentDataExport";
 import { ScholarshipAdmin } from "@/components/operator/ScholarshipAdmin";
 import { OnboardingRequests } from "@/components/operator/OnboardingRequests";
 import { PricingManager } from "@/components/operator/PricingManager";
+import { PlatformStaff } from "@/components/operator/PlatformStaff";
 import { TenantFilterBar } from "@/components/operator/TenantFilterBar";
 
 export const dynamic = "force-dynamic";
@@ -52,6 +53,9 @@ export default async function OperatorPage({
   // password is a working login for that account — impersonation by another route.
   const canCredentials = hasPermission(user.permissions, "platform.user.credentials");
   const canImpersonate = hasPermission(user.permissions, "platform.impersonate");
+  // Hiring platform staff is the one duty that can never be delegated: staff
+  // creating staff would let a manager mint another manager.
+  const canManageStaff = hasPermission(user.permissions, "platform.staff.manage");
   const canReadStudents = hasPermission(user.permissions, "platform.student.read");
   const q = searchParams.q ?? "";
   const plan = searchParams.plan ?? "";
@@ -141,6 +145,7 @@ export default async function OperatorPage({
         {pricing && canManagePricing && <PricingManager initial={pricing} />}
 
         {canReviewOnboarding && <OnboardingRequests requests={onboarding ?? []} />}
+        {canManageStaff && <PlatformStaff />}
 
         <TenantFilterBar
           q={q}

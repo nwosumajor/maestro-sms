@@ -26,7 +26,15 @@ import {
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import { Prisma, type PrismaClient } from "@sms/db";
-import { DEFAULT_PLAN, SUBSCRIPTION_TRIAL_DAYS, isPlan, isModuleKey, type ModuleOverrides } from "@sms/types";
+import {
+  DEFAULT_PLAN,
+  PLATFORM_STAFF_ROLE,
+  SUBSCRIPTION_TRIAL_DAYS,
+  isPlan,
+  isModuleKey,
+  type ModuleOverrides,
+  type PlatformStaffDto,
+} from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -372,5 +380,127 @@ export class OperatorProvisioningService {
     } catch (err) {
       this.logger.warn(`operator audit '${action}' failed (non-fatal): ${String(err)}`);
     }
+  }
+  // ===========================================================================
+  // PLATFORM STAFF (manager_admin) — the owner hiring help
+  // ===========================================================================
+  // Deliberately SEPARATE from school provisioning (createAdmin), which allow-lists
+  // school roles and is delegable. Hiring platform staff is NOT delegable: if staff
+  // could create staff, one manager could mint another and "only the owner has
+  // absolute control" quietly dissolves. Hence platform.staff.manage — owner-only,
+  // non-elevatable, step-up gated, audited.
+  //
+  // THE critical constraint is the role allow-list: exactly manager_admin. Without
+  // it this endpoint would be a route to minting a second super_admin — a
+  // privilege-escalation path built into the console itself.
+  // ===========================================================================
+
+  /** The platform org (isPlatform). Staff live here, never in a customer school. */
+  private async platformOrg(db: PrismaClient) {
+    const org = await db.school.findFirst({ where: { isPlatform: true }, select: { id: true, name: true, slug: true } });
+    if (!org) throw new ServiceUnavailableException("Platform organisation is not provisioned");
+    return org;
+  }
+
+  /** Current platform staff (manager_admin members of the platform org). */
+  async listPlatformStaff(_p: Principal): Promise<PlatformStaffDto[]> {
+    const db = this.client();
+    const org = await this.platformOrg(db);
+    const rows = await db.user.findMany({
+      where: { schoolId: org.id, roles: { some: { role: { name: PLATFORM_STAFF_ROLE } } } },
+      select: { id: true, email: true, name: true, status: true, mfaEnabled: true, passwordChangedAt: true, createdAt: true },
+      orderBy: { createdAt: "desc" },
+    });
+    return rows.map((u) => ({
+      id: u.id,
+      email: u.email,
+      name: u.name,
+      status: u.status,
+      mfaEnabled: u.mfaEnabled,
+      // passwordChangedAt is nulled on create and set on first reset — so this is
+      // "have they actually activated their invite yet?".
+      activated: u.passwordChangedAt !== null,
+      createdAt: u.createdAt,
+    }));
+  }
+
+  /** Hire a platform manager. Invite-link only — we never hand out a password. */
+  async createPlatformStaff(p: Principal, input: { email: string; name: string }): Promise<PlatformStaffDto> {
+    const db = this.client();
+    const org = await this.platformOrg(db);
+    if (await db.user.findFirst({ where: { email: input.email } })) {
+      throw new ConflictException("That email is already in use");
+    }
+    // SECURITY: hard-pinned. This endpoint mints manager_admin and nothing else —
+    // never a role the caller chooses, so it can never produce a second super_admin.
+    const roleRow = await db.role.findFirst({ where: { name: PLATFORM_STAFF_ROLE } });
+    if (!roleRow) throw new BadRequestException(`role ${PLATFORM_STAFF_ROLE} is not seeded`);
+
+    // No password is ever returned or emailed (the onboarding posture: send the
+    // link, never the secret). An unguessable hash parks the account until the
+    // invite is used; passwordChangedAt=null forces a set-password on first login.
+    const passwordHash = await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10);
+    const staff = await db.$transaction(async (tx) => {
+      const u = await tx.user.create({
+        data: {
+          schoolId: org.id,
+          email: input.email,
+          name: input.name,
+          passwordHash,
+          passwordChangedAt: null,
+          // Platform staff can onboard schools and read the whole platform audit
+          // trail — MFA is mandatory, not a preference.
+          mfaRequired: true,
+        },
+      });
+      await tx.userRole.create({ data: { schoolId: org.id, userId: u.id, roleId: roleRow.id } });
+      return u;
+    });
+
+    await this.auditInOperatorTenant(p, "operator.platform.staff.create", "user", staff.id, {
+      email: input.email,
+      role: PLATFORM_STAFF_ROLE,
+    });
+    await this.sendInviteEmail(staff.id, input.email, org.id, org.name, org.slug);
+    return {
+      id: staff.id,
+      email: staff.email,
+      name: staff.name,
+      status: staff.status,
+      mfaEnabled: false,
+      activated: false,
+      createdAt: staff.createdAt,
+    };
+  }
+
+  /** Revoke (DISABLED blocks every login) or reinstate a platform manager. */
+  async setPlatformStaffStatus(p: Principal, userId: string, status: "ACTIVE" | "DISABLED"): Promise<PlatformStaffDto> {
+    const db = this.client();
+    const org = await this.platformOrg(db);
+    // SECURITY: scope to platform-org manager_admins ONLY. Without this the route
+    // would accept ANY userId — including the owner's own, or another super_admin's
+    // — turning "revoke a manager" into "disable the platform owner". 404, never
+    // 403: don't confirm the existence of an id this route may not touch.
+    const target = await db.user.findFirst({
+      where: { id: userId, schoolId: org.id, roles: { some: { role: { name: PLATFORM_STAFF_ROLE } } } },
+      select: { id: true },
+    });
+    if (!target) throw new NotFoundException("Platform staff member not found");
+
+    const updated = await db.user.update({
+      where: { id: userId },
+      data: { status },
+      select: { id: true, email: true, name: true, status: true, mfaEnabled: true, passwordChangedAt: true, createdAt: true },
+    });
+    await this.auditInOperatorTenant(p, "operator.platform.staff.status", "user", userId, { status });
+    return {
+      id: updated.id,
+      email: updated.email,
+      name: updated.name,
+      status: updated.status,
+      mfaEnabled: updated.mfaEnabled,
+      activated: updated.passwordChangedAt !== null,
+      createdAt: updated.createdAt,
+    };
   }
 }
