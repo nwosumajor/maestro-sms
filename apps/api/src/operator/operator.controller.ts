@@ -123,7 +123,7 @@ export class OperatorController {
 
   /** Self-serve onboard a NEW school + its first admin (step-up: creates creds). */
   @Post("tenants")
-  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_WRITE)
   @RequireStepUp()
   provision(
     @CurrentPrincipal() p: Principal,
@@ -134,7 +134,7 @@ export class OperatorController {
 
   /** Add another admin user to an existing school (step-up: creates creds). */
   @Post("tenants/:schoolId/admins")
-  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_WRITE)
   @RequireStepUp()
   addAdmin(
     @CurrentPrincipal() p: Principal,
@@ -145,7 +145,7 @@ export class OperatorController {
   }
 
   @Get("tenants")
-  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
   tenants(
     @CurrentPrincipal() p: Principal,
     @Query("q") q?: string,
@@ -165,7 +165,7 @@ export class OperatorController {
 
   /** Lightweight id+name list for pickers (add-admin etc.). */
   @Get("tenant-names")
-  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
   tenantNames(@CurrentPrincipal() p: Principal): Promise<TenantNameDto[]> {
     return this.operator.listTenantNames(p);
   }
@@ -173,7 +173,7 @@ export class OperatorController {
   /** Enable/disable a SCHOOL — the hard deactivation lever (blocks every member
    *  login; nothing deleted). Step-up: outage-grade action. */
   @Put("tenants/:schoolId/status")
-  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_STATUS)
   @RequireStepUp()
   schoolStatus(
     @CurrentPrincipal() p: Principal,
@@ -185,14 +185,14 @@ export class OperatorController {
 
   /** Tenants currently past their paid period (red banner on the console). */
   @Get("billing-alerts")
-  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
   billingAlerts(): Promise<OperatorBillingAlertDto[]> {
     return this.operator.listBillingAlerts();
   }
 
   /** Platform-owner business dashboard: cross-tenant schools/revenue/plan metrics. */
   @Get("analytics")
-  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
   async analytics(@CurrentPrincipal() p: Principal): Promise<PlatformAnalyticsDto> {
     const result = await this.analyticsSvc.overview(p);
     await this.analyticsSvc.auditView(p);
@@ -202,7 +202,7 @@ export class OperatorController {
   /** Cross-tenant audit trail: every change/approval, attributed to actor
    *  email + unique id + roles + school. For oversight and investigation. */
   @Get("audit")
-  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_AUDIT_READ)
   audit(
     @CurrentPrincipal() p: Principal,
     @Query() q: Record<string, string>,
@@ -212,7 +212,7 @@ export class OperatorController {
 
   /** Downloadable CSV of the same audit query — an exportable report. */
   @Get("audit/export.csv")
-  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_AUDIT_READ)
   async auditExport(
     @CurrentPrincipal() p: Principal,
     @Query() q: Record<string, string>,
@@ -225,7 +225,7 @@ export class OperatorController {
 
   /** Impersonation requires a fresh step-up — the riskiest action in the system. */
   @Post("impersonate")
-  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_IMPERSONATE)
   @RequireStepUp()
   impersonate(
     @CurrentPrincipal() p: Principal,
@@ -236,7 +236,7 @@ export class OperatorController {
 
   // --- subscription / module entitlements (super_admin) -------------------
   @Get("tenants/:schoolId/subscription")
-  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
   getSubscription(
     @CurrentPrincipal() p: Principal,
     @Param("schoolId") schoolId: string,
@@ -245,7 +245,7 @@ export class OperatorController {
   }
 
   @Put("tenants/:schoolId/subscription")
-  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_SUBSCRIPTION_MANAGE)
   setSubscription(
     @CurrentPrincipal() p: Principal,
     @Param("schoolId") schoolId: string,
@@ -257,14 +257,14 @@ export class OperatorController {
   // --- platform-wide plan-tier pricing (super_admin) ------------------------
   /** Effective per-tier pricing (defaults + operator overrides). */
   @Get("pricing")
-  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
   getPricing() {
     return this.pricing.list();
   }
 
   /** Set per-tier prices. Step-up: platform-wide money configuration. Audited. */
   @Put("pricing")
-  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_PRICING_MANAGE)
   @RequireStepUp()
   setPricing(
     @CurrentPrincipal() p: Principal,
@@ -275,13 +275,13 @@ export class OperatorController {
 
   // --- public onboarding-request review (super_admin) ------------------------
   @Get("onboarding-requests")
-  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_ONBOARDING_REVIEW)
   onboardingRequests(@CurrentPrincipal() p: Principal) {
     return this.provisioning.listOnboardingRequests(p);
   }
 
   @Post("onboarding-requests/:id/status")
-  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_ONBOARDING_REVIEW)
   setOnboardingStatus(
     @CurrentPrincipal() p: Principal,
     @Param("id") id: string,
@@ -292,7 +292,7 @@ export class OperatorController {
 
   /** Every enrolled student of a school (cross-tenant; audited). */
   @Get("tenants/:schoolId/students")
-  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_STUDENT_READ)
   listSchoolStudents(
     @CurrentPrincipal() p: Principal,
     @Param("schoolId") schoolId: string,
@@ -304,7 +304,7 @@ export class OperatorController {
    *  e.g. years later). Runs under the target school's RLS context; medical is
    *  opt-in. super_admin only, step-up, audited. */
   @Post("tenants/:schoolId/students/export")
-  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_STUDENT_READ)
   @RequireStepUp()
   exportStudents(
     @CurrentPrincipal() p: Principal,
@@ -316,7 +316,7 @@ export class OperatorController {
 
   // --- cross-tenant user directory + governance (super_admin) ----------------
   @Get("tenants/:schoolId/users")
-  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_USER_READ)
   listUsers(
     @CurrentPrincipal() _p: Principal,
     @Param("schoolId") schoolId: string,
@@ -326,7 +326,7 @@ export class OperatorController {
 
   /** Suspend / reactivate an account (DISABLED blocks login). Step-up: destructive. */
   @Put("tenants/:schoolId/users/:userId/status")
-  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_USER_CREDENTIALS)
   @RequireStepUp()
   setUserStatus(
     @CurrentPrincipal() p: Principal,
@@ -339,7 +339,7 @@ export class OperatorController {
 
   /** Clear a lockout (failed-login counters). */
   @Post("tenants/:schoolId/users/:userId/unlock")
-  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_USER_UNLOCK)
   unlockUser(
     @CurrentPrincipal() p: Principal,
     @Param("schoolId") schoolId: string,
@@ -350,7 +350,7 @@ export class OperatorController {
 
   /** Issue a one-time temp password (shown once). Step-up: credential change. */
   @Post("tenants/:schoolId/users/:userId/reset-password")
-  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_USER_CREDENTIALS)
   @RequireStepUp()
   resetUserPassword(
     @CurrentPrincipal() p: Principal,
@@ -362,7 +362,7 @@ export class OperatorController {
 
   /** Reset (disable) a user's TOTP MFA. Step-up: weakens an auth factor. */
   @Post("tenants/:schoolId/users/:userId/mfa/reset")
-  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_USER_CREDENTIALS)
   @RequireStepUp()
   resetUserMfa(
     @CurrentPrincipal() p: Principal,
@@ -374,7 +374,7 @@ export class OperatorController {
 
   /** Mandate / release MFA enrolment for a single user. */
   @Put("tenants/:schoolId/users/:userId/mfa-required")
-  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_USER_CREDENTIALS)
   setUserMfaRequired(
     @CurrentPrincipal() p: Principal,
     @Param("schoolId") schoolId: string,
@@ -386,7 +386,7 @@ export class OperatorController {
 
   /** Mandate / release MFA for every user holding a role. */
   @Put("tenants/:schoolId/roles/:roleName/mfa-required")
-  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_USER_CREDENTIALS)
   setRoleMfaRequired(
     @CurrentPrincipal() p: Principal,
     @Param("schoolId") schoolId: string,

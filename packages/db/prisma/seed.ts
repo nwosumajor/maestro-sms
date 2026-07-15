@@ -98,8 +98,24 @@ const PERMS = [
   // Announcements
   "announcement.manage",
   "announcement.read",
-  // Platform operator
+  // Platform operator. `platform.operate` is the OWNER-IDENTITY marker (cross-school
+  // directory + owner console framing); the granular platform.* set below gates the
+  // operator endpoints so duties can be delegated to manager_admin without handing
+  // over owner identity. Split by risk of escalation — see permissions/operator.ts.
   "platform.operate",
+  "platform.tenants.read",
+  "platform.tenants.write",
+  "platform.onboarding.review",
+  "platform.audit.read",
+  "platform.user.read",
+  "platform.user.unlock",
+  // owner-only (each is, or becomes, absolute control)
+  "platform.impersonate",
+  "platform.user.credentials",
+  "platform.tenants.status",
+  "platform.subscription.manage",
+  "platform.pricing.manage",
+  "platform.student.read",
   // Platform billing (self-serve subscription + dunning)
   "billing.read",
   "billing.manage",
@@ -168,7 +184,38 @@ const ROLE_PERMS: Record<string, string[]> = {
   // is the cross-school Ultimate admin (+ leaderboard read to view it).
   // notification.read: the operator's in-app inbox (new-onboarding-request
   // alerts). Self-scoped reads only — grants no reach into tenant data.
-  super_admin: ["platform.operate", "billing.dunning.run", "security.audit.read", "directory.search", "game.ultimate.admin", "game.leaderboard.read", "scholarship.admin", "scholarship.read", "notification.read"],
+  super_admin: [
+    // Owner identity + EVERY platform power, including the ones never delegated.
+    "platform.operate",
+    "platform.tenants.read", "platform.tenants.write", "platform.onboarding.review",
+    "platform.audit.read", "platform.user.read", "platform.user.unlock",
+    "platform.impersonate", "platform.user.credentials", "platform.tenants.status",
+    "platform.subscription.manage", "platform.pricing.manage", "platform.student.read",
+    "billing.dunning.run", "security.audit.read", "directory.search",
+    "game.ultimate.admin", "game.leaderboard.read", "scholarship.admin", "scholarship.read",
+    "notification.read",
+  ],
+  // Platform STAFF, employed by the owner to run day-to-day duties. Lives in the
+  // platform org alongside super_admin, but is NOT the owner: it deliberately does
+  // NOT hold `platform.operate` (so no cross-school directory / owner framing), nor
+  // anything that is or becomes absolute control —
+  //   impersonate .......... becomes any user
+  //   user.credentials ..... a temp password / MFA reset IS a login for that account
+  //   tenants.status ....... takes a paying school offline
+  //   subscription/pricing . changes what customers pay
+  //   student.read ......... minors' PII across every tenant (Golden Rule #5)
+  //   rbac.manage .......... would let it grant itself roles
+  // All of the above are ALSO non-elevatable, so it cannot JIT-elevate into them.
+  // Every action it takes is audited and attributed to it, exactly like the owner's.
+  manager_admin: [
+    "platform.tenants.read", // registry, analytics, billing alerts
+    "platform.tenants.write", // onboard schools + add their admins
+    "platform.onboarding.review", // triage public signup requests
+    "platform.audit.read", // see what's happening platform-wide
+    "platform.user.read", // support triage: look up an account
+    "platform.user.unlock", // support: clear a lockout (grants no access)
+    "notification.read", // own inbox (onboarding alerts)
+  ],
   // Board: read-only oversight + ultimate veto on workflows.
   board: ["poll.vote", "discussion.participate", "discipline.file", "form.respond", "class.read", "grade.read", "integrity.report.read", "workflow.read", "workflow.veto", "notification.read", "fee.read", "document.read", "timetable.read", "message.read", "message.send", "event.read", "announcement.read", "billing.read", "scholarship.read",
   ],
@@ -420,6 +467,9 @@ async function main() {
   // platform-org model leaves the owner parked in the demo school (their console
   // then reads "St. Andrews Academy"). Relocate explicitly on every seed.
   await prisma.user.update({ where: { id: owner.id }, data: { schoolId: platformOrg.id } });
+  // Platform STAFF employed by the owner: same org, deliberately fewer powers.
+  const managerAdmin = await mkUser("manager@sms.platform", "Platform Manager", platformOrg.id);
+  await prisma.user.update({ where: { id: managerAdmin.id }, data: { schoolId: platformOrg.id } });
 
   const roleByName = async (name: string) =>
     (await prisma.role.findUniqueOrThrow({ where: { name } })).id;
@@ -441,6 +491,7 @@ async function main() {
     [headDriver.id, await roleByName("head_driver")],
     [librarian.id, await roleByName("librarian")],
     [owner.id, await roleByName("super_admin")],
+    [managerAdmin.id, await roleByName("manager_admin")],
   ] as const) {
     // The super_admin's role is scoped to the platform org, every other demo
     // user's to the demo school.

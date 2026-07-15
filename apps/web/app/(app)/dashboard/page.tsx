@@ -25,7 +25,7 @@ export default async function DashboardPage() {
 
   // The platform owner has no tenant data — their dashboard is a graphical,
   // cross-tenant business overview (management lives on the Operator console).
-  if (hasPermission(user.permissions, "platform.operate")) {
+  if (hasPermission(user.permissions, "platform.tenants.read")) {
     const analytics = await apiGet<Serialized<PlatformAnalyticsDto>>("/operator/analytics");
     return (
       <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="dashboard" permissions={user.permissions}>

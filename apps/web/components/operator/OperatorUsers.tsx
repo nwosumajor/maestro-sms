@@ -21,7 +21,12 @@ const MANAGED_ROLES = [
   "teacher",
 ] as const;
 
-export function OperatorUsers({ schoolId }: { schoolId: string }) {
+/** `canCredentials` = platform.user.credentials. Without it (delegated platform
+ *  staff) this stays a read + unlock console: no password resets, MFA resets or
+ *  suspensions — a temp password is a working login for that account, i.e.
+ *  impersonation by another route, so it stays with the owner. The API enforces
+ *  this regardless; hiding the buttons just avoids dead controls. */
+export function OperatorUsers({ schoolId, canCredentials = true }: { schoolId: string; canCredentials?: boolean }) {
   const [open, setOpen] = React.useState(false);
   const [users, setUsers] = React.useState<User[] | null>(null);
   const [busy, setBusy] = React.useState<string | null>(null);
@@ -68,7 +73,7 @@ export function OperatorUsers({ schoolId }: { schoolId: string }) {
         >
           {open ? "Hide users" : "Manage users"}
         </button>
-        {open && (
+        {open && canCredentials && (
           <div className="flex items-center gap-1.5 text-xs">
             <span className="text-muted-foreground">Require 2FA for role:</span>
             <select
@@ -143,7 +148,7 @@ export function OperatorUsers({ schoolId }: { schoolId: string }) {
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-1">
-                {u.status === "ACTIVE" ? (
+                {canCredentials && (u.status === "ACTIVE" ? (
                   <Button
                     size="sm"
                     variant="outline"
@@ -171,7 +176,7 @@ export function OperatorUsers({ schoolId }: { schoolId: string }) {
                   >
                     Reactivate
                   </Button>
-                )}
+                ))}
                 {u.locked && (
                   <Button
                     size="sm"
@@ -185,6 +190,7 @@ export function OperatorUsers({ schoolId }: { schoolId: string }) {
                     Reactivate (unlock)
                   </Button>
                 )}
+                {canCredentials && (<>
                 <Button
                   size="sm"
                   variant="ghost"
@@ -229,6 +235,7 @@ export function OperatorUsers({ schoolId }: { schoolId: string }) {
                 >
                   {u.mfaRequired ? "Release 2FA" : "Require 2FA"}
                 </Button>
+                </>)}
               </div>
             </div>
           ))}

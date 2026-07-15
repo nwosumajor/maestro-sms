@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 export default async function OperatorAuditPage() {
   const session = await auth();
   const user = session!.user;
-  if (!hasPermission(user.permissions, "platform.operate")) redirect("/dashboard");
+  if (!hasPermission(user.permissions, "platform.audit.read")) redirect("/dashboard");
   // Lightweight id+name list for the filter dropdown. NOTE: /operator/tenants
   // returns a PAGINATED object ({ tenants, total, … }), not an array — use the
   // dedicated picker endpoint so this never regresses to `.map is not a function`.

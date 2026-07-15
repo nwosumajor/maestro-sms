@@ -113,8 +113,8 @@ const NAV: {
 }[] = [
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboardIcon, href: "/dashboard" },
   { key: "analytics", label: "Analytics", icon: BarChart3Icon, href: "/analytics", module: MODULES.ANALYTICS },
-  { key: "operator", label: "Operator", icon: Building2Icon, href: "/operator", perm: "platform.operate" },
-  { key: "operatoraudit", label: "Platform audit", icon: ScrollTextIcon, href: "/operator/audit", perm: "platform.operate" },
+  { key: "operator", label: "Operator", icon: Building2Icon, href: "/operator", perm: "platform.tenants.read" },
+  { key: "operatoraudit", label: "Platform audit", icon: ScrollTextIcon, href: "/operator/audit", perm: "platform.audit.read" },
   { key: "directory", label: "Directory", icon: SearchIcon, href: "/directory", perm: "directory.search" },
   { key: "admin", label: "Admin", icon: SettingsIcon, href: "/admin", perm: "fee.manage" },
   { key: "announcements", label: "Announcements", icon: MegaphoneIcon, href: "/announcements", perm: "announcement.read" },
@@ -238,7 +238,10 @@ export async function AppShell({
   // The platform owner (super_admin) is not a member of any customer school, so the
   // tenant-operational pages (Analytics, Games, …) are noise for them. Restrict
   // their nav to the platform surfaces; the operator console is their home.
-  const isPlatformOwner = permissions.includes("platform.operate");
+  // Platform PEOPLE (owner or delegated staff): the operator console is their home,
+  // so tenant-operational nav is noise for both. Keyed on the console-entry
+  // permission rather than owner identity, so manager_admin gets the same shell.
+  const isPlatformOwner = permissions.includes("platform.tenants.read");
   const items = NAV.filter(
     (item) =>
       (!isPlatformOwner || PLATFORM_OWNER_NAV.has(item.key)) &&
