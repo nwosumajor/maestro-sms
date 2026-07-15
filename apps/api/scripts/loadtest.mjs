@@ -211,7 +211,9 @@ async function seed(db) {
     const schoolId = randomUUID();
     const slug = `loadtest-${RUN_ID}-${s}`;
     schoolRows.push(`('${schoolId}','LoadTest ${s}','${slug}',now())`);
-    subRows.push(`('${randomUUID()}','${schoolId}',now())`);
+    // Plan EXPLICIT: the harness needs the full suite (module-gated endpoints in
+    // the mix), and the DB column default is now the fail-closed STANDARD floor.
+    subRows.push(`('${randomUUID()}','${schoolId}','ENTERPRISE',now())`);
 
     if (!WORKLOAD) {
       // Overhead mode: bare users, no roster.
@@ -279,7 +281,7 @@ async function seed(db) {
   }
 
   await bulk(db, `INSERT INTO school (id,name,slug,"updatedAt") VALUES `, schoolRows);
-  await bulk(db, `INSERT INTO school_subscription (id,"schoolId","updatedAt") VALUES `, subRows);
+  await bulk(db, `INSERT INTO school_subscription (id,"schoolId",plan,"updatedAt") VALUES `, subRows);
   await bulk(db, `INSERT INTO "user" (id,"schoolId",email,name,"passwordHash","updatedAt") VALUES `, userRows);
   if (WORKLOAD) {
     await bulk(db, `INSERT INTO user_role (id,"schoolId","userId","roleId") VALUES `, roleRows);

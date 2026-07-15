@@ -8,8 +8,12 @@
 //   - OperatorService (super_admin reads/writes a school's plan).
 //
 // The guard hits this on (almost) every request, so resolution is cached per
-// school for a short TTL. A school with NO row defaults to ENTERPRISE so the
-// layer only ever RESTRICTS — it never breaks a tenant predating subscriptions.
+// school for a TTL (see CACHE_TTL_MS). A school with NO row FAILS CLOSED to
+// DEFAULT_PLAN = STANDARD (core teaching): a data gap under-provisions rather
+// than silently giving away the premium suite. Onboarding writes an explicit
+// row for every school, so this only ever bites truly row-less tenants —
+// live-verified: a row-less school 404s on an ENTERPRISE module (hr) while
+// STANDARD modules (lms) still work.
 // =============================================================================
 
 import { Inject, Injectable, Optional, type OnModuleInit } from "@nestjs/common";
