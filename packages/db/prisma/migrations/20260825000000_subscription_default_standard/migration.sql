@@ -1,0 +1,15 @@
+-- =============================================================================
+-- school_subscription.plan: default ENTERPRISE -> STANDARD (fail-closed)
+-- =============================================================================
+-- The application-level no-row fallback is already the STANDARD floor
+-- (DEFAULT_PLAN in @sms/types, enforced by ModuleEntitlementService). The COLUMN
+-- default was still ENTERPRISE — so a row created without an explicit plan (raw
+-- SQL, a future code path that forgets the field) silently granted the full
+-- premium suite. Align the DB layer with the fail-closed posture: a data gap
+-- must under-provision (core teaching), never give the product away.
+--
+-- DEFAULT-only change: no existing row is modified. Every real creation path
+-- (onboarding, billing checkout, operator console, seed) sets the plan
+-- explicitly, so behaviour only changes for inserts that omit it — which is
+-- exactly the case this closes.
+ALTER TABLE "school_subscription" ALTER COLUMN "plan" SET DEFAULT 'STANDARD';

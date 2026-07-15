@@ -176,7 +176,11 @@ model SchoolSubscription {
   /// STANDARD | PREMIUM | ULTIMATE | ENTERPRISE (validated against @sms/types PLANS).
   /// This is the PURCHASED tier; delinquency NEVER overwrites it — the effective
   /// plan is computed (effectivePlan) from `status` + `currentPeriodEnd` instead.
-  plan                 String    @default("ENTERPRISE")
+  /// FAIL-CLOSED default: a row created without an explicit plan gets the entry
+  /// tier, mirroring DEFAULT_PLAN in @sms/types — a data gap under-provisions,
+  /// never silently hands out the premium suite. Every real path (onboarding,
+  /// billing, operator, seed) sets the plan explicitly anyway.
+  plan                 String    @default("STANDARD")
   /// { enabled?: string[]; disabled?: string[] } — per-school deviations.
   overrides            Json      @default("{}")
   /// ACTIVE | PAST_DUE | CANCELED (validated against @sms/types SUBSCRIPTION_STATUS).
