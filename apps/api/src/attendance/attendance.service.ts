@@ -11,7 +11,10 @@
 // Not-visible -> 404 (never 403). Records are corrected, never deleted.
 // =============================================================================
 
+import { randomUUID } from "node:crypto";
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
+// VALUE import: Prisma.sql/join only resolve as values, not types (CLAUDE.md).
+import { Prisma } from "@sms/db";
 import type { AttendanceStatusValue } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -76,19 +79,26 @@ export class AttendanceService {
         create: { schoolId: p.schoolId, classId, date, takenById: p.userId },
       });
 
-      for (const r of input.records) {
-        await tx.attendanceRecord.upsert({
-          where: { sessionId_studentId: { sessionId: session.id, studentId: r.studentId } },
-          update: { status: r.status, note: r.note ?? null },
-          create: {
-            schoolId: p.schoolId,
-            sessionId: session.id,
-            studentId: r.studentId,
-            status: r.status,
-            note: r.note ?? null,
-          },
-        });
-      }
+      // ONE statement for the whole register. This used to be a per-student
+      // `upsert` in a loop — i.e. a round-trip per student (a 40-pupil class =
+      // 40 sequential round-trips) with the tenant transaction held open the
+      // whole time, on the highest-volume write in the product (every class,
+      // every day). Load-testing made it the slowest endpoint we have. The
+      // @@unique([sessionId, studentId]) constraint lets ON CONFLICT express the
+      // exact same upsert semantics in a single round-trip.
+      // RLS still applies: the INSERT is checked against the school's WITH CHECK
+      // policy and the DO UPDATE against the UPDATE policy, same as before.
+      const now = new Date();
+      const values = input.records.map(
+        (r) => Prisma.sql`(${randomUUID()}::uuid, ${p.schoolId}::uuid, ${session.id}::uuid, ${r.studentId}::uuid,
+             ${r.status}::"AttendanceStatus", ${r.note ?? null}, ${now}, ${now})`,
+      );
+      await tx.$executeRaw`
+        INSERT INTO "attendance_record" ("id", "schoolId", "sessionId", "studentId", "status", "note", "createdAt", "updatedAt")
+        VALUES ${Prisma.join(values)}
+        ON CONFLICT ("sessionId", "studentId")
+        DO UPDATE SET "status" = EXCLUDED."status", "note" = EXCLUDED."note", "updatedAt" = EXCLUDED."updatedAt"
+      `;
 
       await this.log(tx, p, "attendance.mark", "attendance_session", session.id, {
         classId,
