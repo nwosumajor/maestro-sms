@@ -13,6 +13,7 @@ import bcrypt from "bcryptjs";
 import { SECURITY_PERMISSIONS, isElevatable, type AuditLogPageDto } from "@sms/types";
 import { generateSecret, otpauthUri, verifyTotp } from "../auth/totp";
 import { signStepUp } from "../auth/stepup";
+import { decodeAuditCursor, encodeAuditCursor } from "../common/audit-cursor";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -67,12 +68,15 @@ export class SecurityService {
         };
       }
       const pageSize = Math.min(Math.max(f.limit ?? 50, 1), 200);
+      // audit_log is partitioned on createdAt, so its key — and therefore any
+      // Prisma cursor — is the COMPOSITE (id, createdAt). The token stays opaque.
+      const cursor = decodeAuditCursor(f.cursor);
       const rows = await tx.auditLog.findMany({
         where,
         // Stable keyset order (createdAt can tie; id breaks ties deterministically).
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         take: pageSize,
-        ...(f.cursor ? { cursor: { id: f.cursor }, skip: 1 } : {}),
+        ...(cursor ? { cursor: { id_createdAt: cursor }, skip: 1 } : {}),
       });
       const actorIds = [...new Set(rows.map((r: { actorId: string }) => r.actorId))];
       const users = await tx.user.findMany({
@@ -88,8 +92,8 @@ export class SecurityService {
         actorName: name.get(r.actorId) ?? "system",
         createdAt: r.createdAt,
       }));
-      // A full page implies there may be more — hand back the last id as the cursor.
-      const nextCursor = entries.length === pageSize ? entries[entries.length - 1].id : null;
+      // A full page implies there may be more — hand back the last row's key.
+      const nextCursor = rows.length === pageSize ? encodeAuditCursor(rows[rows.length - 1]) : null;
       return { entries, nextCursor };
     });
   }

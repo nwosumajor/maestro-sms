@@ -396,8 +396,14 @@ model UserRole {
 /// TENANT-SCOPED, APPEND-ONLY: the durable audit trail (Golden Rule #5). The RLS
 /// migration grants INSERT/SELECT only — never UPDATE/DELETE — so entries are
 /// tamper-evident. Every mutation across the app writes one of these.
+/// APPEND-ONLY. RANGE-PARTITIONED by month on `createdAt` (migration
+/// 20260824000000_audit_log_partition) — the highest-write table, and it grows
+/// forever. Postgres requires the partition key in every PK, hence the COMPOSITE
+/// id: safe because this table is only ever findMany/create — never findUnique,
+/// update or delete by id (RLS grants INSERT/SELECT only). Partition maintenance
+/// (rolling the window forward) is AuditPartitionService.
 model AuditLog {
-  id        String   @id @default(uuid()) @db.Uuid
+  id        String   @default(uuid()) @db.Uuid
   schoolId  String   @db.Uuid
   actorId   String   @db.Uuid
   action    String
@@ -409,6 +415,7 @@ model AuditLog {
   school School @relation(fields: [schoolId], references: [id])
   actor  User   @relation("AuditActor", fields: [actorId], references: [id])
 
+  @@id([id, createdAt])
   @@index([schoolId])
   @@index([schoolId, entity, entityId])
   @@index([schoolId, createdAt])

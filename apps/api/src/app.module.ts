@@ -14,6 +14,7 @@ import { AttendanceModule } from "./attendance/attendance.module";
 import { NotificationModule } from "./notifications/notification.module";
 import { FeesModule } from "./fees/fees.module";
 import { BillingModule } from "./billing/billing.module";
+import { MaintenanceModule } from "./maintenance/maintenance.module";
 import { DocumentsModule } from "./documents/documents.module";
 import { BrandingModule } from "./branding/branding.module";
 import { TimetableModule } from "./timetable/timetable.module";
@@ -100,6 +101,7 @@ import { HealthController } from "./health.controller";
     FormModule,
     GameModule,
     GameSocketModule,
+    MaintenanceModule,
   ],
   controllers: [HealthController],
 })

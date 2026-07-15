@@ -1170,10 +1170,16 @@ d("RLS cross-tenant isolation", () => {
     // schoolId for grouping but intentionally no RLS (see 21_ultimate_rls.sql),
     // so it won't appear in the query below — listed here for the record.
     const exempt = new Set<string>(["ultimate_participant"]);
+    // relkind: 'r' ordinary table, 'p' PARTITIONED parent (audit_log). Include 'p'
+    // so a table doesn't silently escape this gate merely by being partitioned.
+    // Exclude individual partitions (relispartition): each one carries its own RLS
+    // (defence in depth) but is covered by its PARENT's case here — and their names
+    // roll monthly, so they can never be enumerated in `covered`.
     const { rows } = await adminPool.query<{ relname: string }>(`
       SELECT c.relname
       FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-      WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relrowsecurity = true
+      WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND c.relrowsecurity = true
+        AND c.relispartition = false
         AND EXISTS (
           SELECT 1 FROM information_schema.columns col
           WHERE col.table_schema = 'public' AND col.table_name = c.relname
