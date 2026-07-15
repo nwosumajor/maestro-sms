@@ -27,6 +27,7 @@ import {
 } from "../integrity/integrity.foundation";
 import { ModuleEntitlementService } from "../foundation/module-entitlement.service";
 import { TenantRateLimitService } from "../common/tenant-rate-limit.service";
+import { requestContext } from "./request-context";
 
 export interface AuthedRequest extends Request {
   principal?: Principal;
@@ -64,6 +65,13 @@ export class PermissionGuard implements CanActivate {
     const req = context.switchToHttp().getRequest<AuthedRequest>();
     const principal = this.authenticate(req);
     req.principal = principal;
+
+    // Record the real actor for the audit log. This is the ONLY place the token
+    // has been verified, so it is the only place allowed to assert it.
+    if (principal.impersonatedBy) {
+      const store = requestContext.getStore();
+      if (store) store.impersonatedBy = principal.impersonatedBy;
+    }
 
     // Per-tenant rate limit — BEFORE the module/permission DB work, so a flooding
     // tenant is rejected cheaply. Keyed on the JWT school_id; fails OPEN if Redis

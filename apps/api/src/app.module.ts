@@ -15,6 +15,7 @@ import { NotificationModule } from "./notifications/notification.module";
 import { FeesModule } from "./fees/fees.module";
 import { BillingModule } from "./billing/billing.module";
 import { MaintenanceModule } from "./maintenance/maintenance.module";
+import { RequestContextMiddleware } from "./auth/request-context.middleware";
 import { DocumentsModule } from "./documents/documents.module";
 import { BrandingModule } from "./branding/branding.module";
 import { TimetableModule } from "./timetable/timetable.module";
@@ -110,6 +111,10 @@ export class AppModule implements NestModule {
   // it sees the final status + the matched principal). Request LOGGING is handled
   // automatically by nestjs-pino (ObservabilityModule).
   configure(consumer: MiddlewareConsumer): void {
-    consumer.apply(MetricsMiddleware).forRoutes("*");
+    // RequestContext FIRST: it opens the AsyncLocalStorage store that the
+    // PermissionGuard fills with the real actor when impersonating, and that
+    // AuditLogService reads. Middleware wraps next(), which is what makes the
+    // store propagate through the request's whole async continuation.
+    consumer.apply(RequestContextMiddleware, MetricsMiddleware).forRoutes("*");
   }
 }
