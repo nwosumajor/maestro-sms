@@ -24,10 +24,16 @@ export function verifyToken(token: string): Principal {
   const userId = (payload.userId ?? payload.sub) as string | undefined;
   const schoolId = (payload.school_id ?? payload.schoolId) as string | undefined;
   if (!userId || !schoolId) throw new UnauthorizedException("Token missing tenant claims");
+  // `imp.by` marks an impersonation token minted by /operator/impersonate. It
+  // grants NOTHING — the claims above already are the target's — it exists so the
+  // audit log can say "the owner did this, as them" instead of silently
+  // attributing the action to the target (Golden Rule #5).
+  const imp = payload.imp as { by?: string } | undefined;
   return {
     userId,
     schoolId,
     roles: Array.isArray(payload.roles) ? (payload.roles as string[]) : [],
     permissions: Array.isArray(payload.permissions) ? (payload.permissions as string[]) : [],
+    ...(imp?.by ? { impersonatedBy: String(imp.by) } : {}),
   };
 }

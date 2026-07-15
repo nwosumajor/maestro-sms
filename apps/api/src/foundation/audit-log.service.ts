@@ -1,5 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { Prisma } from "@sms/db";
+import { currentImpersonator } from "../auth/request-context";
 import type {
   AuditEntry,
   AuditLogService as IAuditLogService,
@@ -11,6 +12,12 @@ import type {
  * table INSIDE the caller's active tenant transaction, so the entry shares the
  * transaction's RLS context and atomicity with the mutation it records. The RLS
  * migration grants INSERT/SELECT only — entries can never be altered.
+ *
+ * IMPERSONATION: when the platform owner acts THROUGH a user, the principal — and
+ * so `actorId` — genuinely is that user (same tenant/roles/RLS). Left alone, the
+ * trail would read "the parent did this", hiding the owner completely. Every entry
+ * therefore picks up `impersonatedBy` from the request context automatically, so
+ * no call site can forget it and no impersonated action is unattributable.
  */
 @Injectable()
 export class AuditLogService implements IAuditLogService {
@@ -25,6 +32,13 @@ export class AuditLogService implements IAuditLogService {
       );
       return;
     }
+    // Stamp the real actor when this request is an impersonation. Taken from the
+    // request context (set by the guard, the only place the token is verified) —
+    // never from the caller, so it cannot be forgotten or forged.
+    const impersonatedBy = currentImpersonator();
+    const metadata = impersonatedBy
+      ? { ...(entry.metadata ?? {}), impersonatedBy }
+      : entry.metadata;
     await tx.auditLog.create({
       data: {
         schoolId: entry.schoolId,
@@ -33,7 +47,7 @@ export class AuditLogService implements IAuditLogService {
         entity: entry.entity,
         entityId: entry.entityId,
         // Audit metadata is arbitrary JSON; assert Prisma's JSON-input type.
-        metadata: (entry.metadata ?? undefined) as Prisma.InputJsonValue | undefined,
+        metadata: (metadata ?? undefined) as Prisma.InputJsonValue | undefined,
       },
     });
   }
