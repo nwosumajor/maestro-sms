@@ -1,0 +1,27 @@
+# =============================================================================
+# Local DEV override — publish Postgres + Redis to the host
+# =============================================================================
+# The base compose deliberately publishes NO host ports for postgres/redis: in
+# the full containerised stack only nginx is exposed and the backend reaches them
+# over the internal `appnet` bridge. That's the right posture for a deployment.
+#
+# But when you run the API and web NATIVELY (pnpm dev → :3001 / :3000) for a fast
+# edit-reload loop, those two processes live on the HOST and need a reachable
+# port. This override adds exactly that — nothing else.
+#
+# Usage (DB + cache only; api/web run natively):
+#     cd infrastructure
+#     docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres redis
+#
+# Postgres → localhost:5433 (5432 is left free for any system postgres)
+# Redis    → localhost:6379
+# See README "Local development" for the full native-dev recipe.
+# =============================================================================
+
+services:
+  postgres:
+    ports:
+      - "5433:5432"
+  redis:
+    ports:
+      - "6379:6379"

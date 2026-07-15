@@ -13,28 +13,68 @@ packages/tokens design tokens (cross-platform)
 ## Prerequisites
 - Node 20+, pnpm 9, PostgreSQL 14+, Redis 6+.
 
-## First-time setup
+## Local development (native: web :3000 + api :3001 + dockerised DB)
+
+The fast edit-reload loop: Postgres/Redis in Docker, web + api natively on the host.
+
+**1 — dependencies + Prisma client**
 ```bash
 pnpm install
-
-# env: copy and fill the examples (keep AUTH_SECRET identical in web + api)
-cp apps/api/.env.example       apps/api/.env
-cp apps/web/.env.example        apps/web/.env
-cp packages/db/.env.example     packages/db/.env
-
-# database
-pnpm db:generate                          # prisma client
-pnpm --filter @sms/db migrate             # tables (as the app/migrate role)
-pnpm --filter @sms/db rls                 # apply RLS policies (privileged role)
+pnpm db:generate
 ```
 
-> RLS is applied SEPARATELY from the Prisma migration, on purpose (CLAUDE.md).
-> Tables run as the privileged role; the app connects as `major_user`.
-
-## Run (dev)
+**2 — Postgres + Redis on the host.** The base compose publishes NO host ports
+(only nginx is exposed in the full stack), so use the dev override, which adds
+just those two port mappings:
 ```bash
-pnpm dev          # turbo: web on :3000, api on :3001
+cd infrastructure
+cp .env.example .env      # first time only
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres redis
+# → Postgres localhost:5433, Redis localhost:6379
 ```
+
+**3 — create the schema (first time, or after new migrations).** RLS is applied
+SEPARATELY from the Prisma migration, on purpose (CLAUDE.md) — tables run as the
+privileged role; the app connects as the least-privilege `major_user`.
+```bash
+export DATABASE_URL='postgresql://major_user:change-me-app@localhost:5433/sms'
+export DATABASE_MIGRATE_URL='postgresql://postgres:change-me-superuser@localhost:5433/sms'
+pnpm --filter @sms/db setup      # migrate deploy + apply RLS + seed
+```
+
+**4 — API on :3001.** NOTE: the API does **not** read a `.env` file (no dotenv /
+ConfigModule) — it reads `process.env`, so the vars must be **exported in the
+shell that launches it**. `AUTH_SECRET` MUST equal the one in `apps/web/.env.local`:
+the web *signs* the session JWT and the API *verifies* it — a mismatch 401s every
+request.
+```bash
+cd apps/api
+export DATABASE_URL='postgresql://major_user:change-me-app@localhost:5433/sms'
+export DATABASE_MIGRATE_URL='postgresql://postgres:change-me-superuser@localhost:5433/sms'
+export AUTH_SECRET='dev-secret-verify-please-change'    # must match apps/web/.env.local
+export REDIS_HOST=127.0.0.1 REDIS_PORT=6379
+export API_PORT=3001 WEB_ORIGIN=http://localhost:3000
+export DATA_ENCRYPTION_KEY='Q5gcF3Ehy9TDmCWdhBIcu3BMCdoapo/z6xroVbv6zoE='   # dev-only key
+pnpm dev            # nest start --watch  (or: node dist/main.js after pnpm build)
+```
+
+**5 — web on :3000** (reads `apps/web/.env.local` itself; needs `AUTH_SECRET` +
+`API_BASE_URL=http://localhost:3001`):
+```bash
+cd apps/web && pnpm dev
+```
+
+Then open **http://localhost:3000**.
+
+### Alternative: the whole stack in Docker
+```bash
+cd infrastructure && cp .env.example .env && docker compose up --build
+```
+Serves on **http://localhost** (port 80, via nginx) — not :3000. Here web+api both
+take `AUTH_SECRET` from `infrastructure/.env`, so they always agree.
+
+---
+
 Sign in at http://localhost:3000 with a demo account (dev only) — password
 `password123`: `teacher@` / `student@` / `parent@` / `admin@` / `principal@` /
 `hrmanager@` / `warden@` / `librarian@demo.school`, etc. (see CLAUDE.md for the
