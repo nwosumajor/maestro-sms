@@ -11,7 +11,15 @@ packages/tokens design tokens (cross-platform)
 ```
 
 ## Prerequisites
-- Node 20+, pnpm 9, PostgreSQL 14+, Redis 6+.
+- Node 20+, pnpm 9, **PostgreSQL 16+**, Redis 6+.
+
+> 16 is the real floor, not a preference — local/CI/prod all run 16 (`postgres:16-alpine`,
+> Terraform `engine_version = "16"`). Older majors don't just warn, they fail:
+> `audit_log` is partitioned with a foreign key **from** a partitioned table (needs PG 12+),
+> the RLS coverage gate reads `pg_class.relispartition` (10+), tenant isolation relies on
+> `FORCE ROW LEVEL SECURITY` (9.5+), and migrations/seeding call `gen_random_uuid()`
+> unqualified (built in from 13; earlier needs the `pgcrypto` extension).
+> Also verified green on PostgreSQL 18 — see CLAUDE.md.
 
 ## Local development (native: web :3000 + api :3001 + dockerised DB)
 
