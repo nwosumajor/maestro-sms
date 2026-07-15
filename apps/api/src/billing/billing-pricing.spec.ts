@@ -78,6 +78,23 @@ describe("effectivePlan", () => {
   const justPast = new Date("2026-06-25T00:00:00Z"); // 2 days ago (within grace)
   const longPast = new Date("2026-06-01T00:00:00Z"); // 26 days ago (beyond grace)
 
+  // Per-school grace override (operator-set, bounded 0..GRACE_DAYS_MAX at the API).
+  it("a LONGER per-school grace keeps the plan where the default would downgrade", () => {
+    // 26 days past due: default 7-day grace -> STANDARD; a 30-day override -> keeps it.
+    expect(effectivePlan(PLANS.ENTERPRISE, SUBSCRIPTION_STATUS.PAST_DUE, longPast, SUBSCRIPTION_GRACE_DAYS, now)).toBe(
+      PLANS.STANDARD,
+    );
+    expect(effectivePlan(PLANS.ENTERPRISE, SUBSCRIPTION_STATUS.PAST_DUE, longPast, 30, now)).toBe(PLANS.ENTERPRISE);
+  });
+
+  it("a ZERO per-school grace downgrades immediately once past due", () => {
+    // 2 days past due: default grace still covers it; grace 0 does not.
+    expect(effectivePlan(PLANS.ULTIMATE, SUBSCRIPTION_STATUS.PAST_DUE, justPast, SUBSCRIPTION_GRACE_DAYS, now)).toBe(
+      PLANS.ULTIMATE,
+    );
+    expect(effectivePlan(PLANS.ULTIMATE, SUBSCRIPTION_STATUS.PAST_DUE, justPast, 0, now)).toBe(PLANS.STANDARD);
+  });
+
   it("ACTIVE keeps the purchased plan regardless of period", () => {
     expect(effectivePlan(PLANS.ENTERPRISE, SUBSCRIPTION_STATUS.ACTIVE, null, SUBSCRIPTION_GRACE_DAYS, now)).toBe(
       PLANS.ENTERPRISE,

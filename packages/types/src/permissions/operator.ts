@@ -38,6 +38,11 @@ export const OPERATOR_PERMISSIONS = {
   PLATFORM_USER_READ: "platform.user.read",
   /** Clear a login lockout — routine support; grants no access by itself. */
   PLATFORM_USER_UNLOCK: "platform.user.unlock",
+  /** Set a school's PER-SCHOOL grace window (days past due before the STANDARD
+   *  floor kicks in). Delegable BECAUSE the API hard-caps it at GRACE_DAYS_MAX —
+   *  bounded goodwill, not a comp. Unbounded plan/period changes stay owner-only
+   *  (platform.subscription.manage). */
+  PLATFORM_GRACE_MANAGE: "platform.grace.manage",
 
   // --- owner-only: is, or becomes, absolute control --------------------------
   /** Sign in AS any user in any school. The total-control backdoor. */
@@ -78,4 +83,5 @@ export const DELEGABLE_PLATFORM_PERMISSIONS: readonly string[] = [
   OPERATOR_PERMISSIONS.PLATFORM_AUDIT_READ,
   OPERATOR_PERMISSIONS.PLATFORM_USER_READ,
   OPERATOR_PERMISSIONS.PLATFORM_USER_UNLOCK,
+  OPERATOR_PERMISSIONS.PLATFORM_GRACE_MANAGE,
 ];

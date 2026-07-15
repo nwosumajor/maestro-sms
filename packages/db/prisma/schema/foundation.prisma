@@ -185,6 +185,11 @@ model SchoolSubscription {
   overrides            Json      @default("{}")
   /// ACTIVE | PAST_DUE | CANCELED (validated against @sms/types SUBSCRIPTION_STATUS).
   status               String    @default("ACTIVE")
+  /// Per-school grace window (days past `currentPeriodEnd` before the effective
+  /// plan drops to the STANDARD floor). NULL → platform default
+  /// (SUBSCRIPTION_GRACE_DAYS). Bounded 0–GRACE_DAYS_MAX at the API — a bounded
+  /// customer-service lever (delegable), never an unbounded comp (owner-only).
+  graceDays            Int?
   /// MONTH | TERM | YEAR.
   billingCycle         String    @default("TERM")
   /// End of the currently-paid period; null for never-paid (default/comp).

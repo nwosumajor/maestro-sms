@@ -18,6 +18,8 @@ export interface SubscriptionDto {
   billingCycle: BillingCycle;
   /** When the current paid period ends; null if never paid (e.g. comp/default). */
   currentPeriodEnd: Date | null;
+  /** Per-school grace override (days); null -> platform default (SUBSCRIPTION_GRACE_DAYS). */
+  graceDays: number | null;
   /** Seat count last billed against. */
   seats: number | null;
   /** Amount last charged (minor units of `currency`). */

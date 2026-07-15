@@ -192,7 +192,7 @@ export class OperatorService {
     for (const s of schools as Array<{ id: string; name: string; slug: string; status: string; createdAt: Date }>) {
       const users = await this.db.runAsTenant({ schoolId: s.id, userId: p.userId }, (tx) => tx.user.count());
       const ent = await this.entitlements.resolve(s.id);
-      out.push({ ...s, users, plan: ent.plan, moduleCount: ent.modules.length, subscriptionStatus: ent.status });
+      out.push({ ...s, users, plan: ent.plan, moduleCount: ent.modules.length, graceDays: ent.graceDays, subscriptionStatus: ent.status });
     }
     return { tenants: out, total, page, pageSize };
   }
@@ -241,7 +241,7 @@ export class OperatorService {
     const now = new Date();
     const lapsed = await client.schoolSubscription.findMany({
       where: { status: SUBSCRIPTION_STATUS.PAST_DUE },
-      select: { schoolId: true, plan: true, currentPeriodEnd: true },
+      select: { schoolId: true, plan: true, currentPeriodEnd: true, graceDays: true },
     });
     if (lapsed.length === 0) return [];
     const schools = await client.school.findMany({
@@ -263,11 +263,42 @@ export class OperatorService {
             plan: s.plan,
             currentPeriodEnd: s.currentPeriodEnd,
             daysPastDue,
-            downgraded: daysPastDue > SUBSCRIPTION_GRACE_DAYS,
+            downgraded: daysPastDue > (s.graceDays ?? SUBSCRIPTION_GRACE_DAYS), // per-school grace wins
           },
         ];
       })
       .sort((a, b) => b.daysPastDue - a.daysPastDue);
+  }
+
+  /** Set a school's PER-SCHOOL grace window (days past due before the STANDARD
+   *  floor). null resets to the platform default. Bounded 0..GRACE_DAYS_MAX at the
+   *  controller — the cap is what makes this DELEGABLE (manager_admin): bounded
+   *  goodwill for a late-paying school, never an unbounded comp. Audited. */
+  async setGraceDays(p: Principal, schoolId: string, graceDays: number | null): Promise<SubscriptionDto> {
+    await this.db.runAsTenant({ schoolId, userId: p.userId }, async (tx) => {
+      const school = await tx.school.findFirst({ where: { id: schoolId }, select: { id: true } });
+      if (!school) throw new NotFoundException("School not found");
+      const existing = await tx.schoolSubscription.findFirst({ where: { schoolId }, select: { id: true } });
+      if (existing) {
+        await tx.schoolSubscription.update({ where: { id: existing.id }, data: { graceDays } });
+      } else {
+        // No row yet (pre-billing tenant): create one on the fail-closed default
+        // plan carrying only the grace override.
+        await tx.schoolSubscription.create({ data: { schoolId, graceDays } });
+      }
+    });
+    await this.auditAsOperator(p, {
+      actorId: p.userId,
+      action: "operator.subscription.grace.set",
+      entity: "school_subscription",
+      entityId: schoolId,
+      schoolId: p.schoolId,
+      metadata: { targetSchoolId: schoolId, graceDays },
+    });
+    // Grace feeds effectivePlan, so the cached entitlement is stale on every task.
+    this.entitlements.invalidate(schoolId);
+    const resolved = await this.entitlements.resolve(schoolId);
+    return this.entitlements.dtoFrom(schoolId, resolved);
   }
 
   /** Every enrolled student of a given school (cross-tenant; the operator sets the

@@ -263,6 +263,12 @@ export const PLAN_PRICING_BY_CURRENCY: MultiCurrencyPlanPricing = {
 
 /** Days a school keeps its paid plan after period end before the dunning downgrade. */
 export const SUBSCRIPTION_GRACE_DAYS = 7;
+
+/** Upper bound for a PER-SCHOOL grace override. The cap is what makes grace a
+ *  delegable customer-service lever (manager_admin) rather than a revenue power:
+ *  bounded goodwill tops out at two months of leeway — an unbounded value would
+ *  be a free comp, which stays owner-only (platform.subscription.manage). */
+export const GRACE_DAYS_MAX = 60;
 /** Days before period end to send a renewal reminder (2 weeks). */
 export const RENEWAL_REMINDER_DAYS = 14;
 /**

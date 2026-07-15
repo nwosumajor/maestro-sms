@@ -11,7 +11,7 @@ import type {
   TenantPageDto,
 } from "@sms/types";
 import { z } from "zod";
-import { OPERATOR_PERMISSIONS, PLANS, SUBSCRIPTION_STATUS, isPlan, isSubscriptionStatus, type PlatformStaffDto } from "@sms/types";
+import { GRACE_DAYS_MAX, OPERATOR_PERMISSIONS, PLANS, SUBSCRIPTION_STATUS, isPlan, isSubscriptionStatus, type PlatformStaffDto } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { RequireStepUp } from "../auth/require-stepup.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -30,6 +30,10 @@ const platformStaffSchema = z.object({
   name: z.string().min(1).max(120),
 });
 const staffStatusSchema = z.object({ status: z.enum(["ACTIVE", "DISABLED"]) });
+// Bounded 0..GRACE_DAYS_MAX — the cap is what makes grace DELEGABLE (bounded
+// goodwill); null resets to the platform default. Unbounded comping stays with
+// the owner via the subscription PUT.
+const graceSchema = z.object({ graceDays: z.number().int().min(0).max(GRACE_DAYS_MAX).nullable() });
 
 /** Parse audit query params into a typed filter (all optional). */
 function auditFilter(q: Record<string, string>): PlatformAuditFilter {
@@ -293,6 +297,20 @@ export class OperatorController {
   }
 
   // --- platform-wide plan-tier pricing (super_admin) ------------------------
+  /** Per-school grace window. DELEGABLE (manager_admin): hard-capped by the
+   *  schema, so it is customer-service leeway, never a comp. Step-up: it delays
+   *  a revenue-enforcing downgrade. Audited. */
+  @Put("tenants/:schoolId/grace")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_GRACE_MANAGE)
+  @RequireStepUp()
+  setGraceDays(
+    @CurrentPrincipal() p: Principal,
+    @Param("schoolId") schoolId: string,
+    @Body(new ZodValidationPipe(graceSchema)) body: z.infer<typeof graceSchema>,
+  ): Promise<SubscriptionDto> {
+    return this.operator.setGraceDays(p, schoolId, body.graceDays);
+  }
+
   /** Effective per-tier pricing (defaults + operator overrides). */
   @Get("pricing")
   @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
