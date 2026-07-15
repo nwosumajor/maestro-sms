@@ -54,6 +54,7 @@ describe("platform permission split", () => {
         "platform.tenants.write",
         "platform.user.read",
         "platform.user.unlock",
+        "platform.grace.manage",
       ].sort(),
     );
   });

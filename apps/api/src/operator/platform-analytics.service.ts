@@ -74,7 +74,7 @@ export class PlatformAnalyticsService {
     // --- subscriptions (drives plan mix, MRR, module adoption, risk) ---
     const subs = await client.schoolSubscription.findMany({
       where: { schoolId: { in: customerIds } },
-      select: { schoolId: true, plan: true, status: true, currentPeriodEnd: true, seats: true, overrides: true },
+      select: { schoolId: true, plan: true, status: true, currentPeriodEnd: true, graceDays: true, seats: true, overrides: true },
     });
     const subBySchool = new Map(subs.map((s) => [s.schoolId, s]));
 
@@ -116,7 +116,7 @@ export class PlatformAnalyticsService {
       const purchased = (sub && isPlan(sub.plan) ? sub.plan : DEFAULT_PLAN) as Plan;
       const status = (sub?.status ?? SUBSCRIPTION_STATUS.ACTIVE) as SubscriptionStatus;
       const effective = sub
-        ? effectivePlan(purchased, status, sub.currentPeriodEnd)
+        ? effectivePlan(purchased, status, sub.currentPeriodEnd, sub.graceDays ?? undefined)
         : DEFAULT_PLAN;
       const seats = sub?.seats && sub.seats > 0 ? sub.seats : students;
       const monthly = perSeatMonthly(effective) * seats;

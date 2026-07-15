@@ -55,7 +55,7 @@ export class BillingDunningService {
     const now = new Date();
     const subs = await client.schoolSubscription.findMany({
       where: { status: SUBSCRIPTION_STATUS.ACTIVE, currentPeriodEnd: { not: null } },
-      select: { id: true, schoolId: true, currentPeriodEnd: true, plan: true },
+      select: { id: true, schoolId: true, currentPeriodEnd: true, plan: true, graceDays: true },
     });
 
     let reminded = 0;
@@ -73,7 +73,7 @@ export class BillingDunningService {
           client,
           s.schoolId,
           "Subscription past due",
-          `Your ${s.plan} plan payment is overdue. Renew within ${SUBSCRIPTION_GRACE_DAYS} days to avoid a downgrade to the Standard plan.`,
+          `Your ${s.plan} plan payment is overdue. Renew within ${s.graceDays ?? SUBSCRIPTION_GRACE_DAYS} days to avoid a downgrade to the Standard plan.`,
         );
       } else if (s.currentPeriodEnd <= addDays(now, RENEWAL_REMINDER_DAYS)) {
         reminded++;
@@ -105,7 +105,7 @@ export class BillingDunningService {
       const now = new Date();
       const lapsed = await client.schoolSubscription.findMany({
         where: { status: SUBSCRIPTION_STATUS.PAST_DUE },
-        select: { schoolId: true, plan: true, currentPeriodEnd: true },
+        select: { schoolId: true, plan: true, currentPeriodEnd: true, graceDays: true },
       });
       if (lapsed.length === 0) return 0;
 
@@ -119,11 +119,12 @@ export class BillingDunningService {
         .map((s) => {
           const end = s.currentPeriodEnd ? new Date(s.currentPeriodEnd) : null;
           const daysPast = end ? Math.max(0, Math.floor((now.getTime() - end.getTime()) / 86_400_000)) : 0;
-          const downgraded = daysPast > SUBSCRIPTION_GRACE_DAYS;
+          const grace = s.graceDays ?? SUBSCRIPTION_GRACE_DAYS; // per-school override wins
+          const downgraded = daysPast > grace;
           return {
             daysPast,
             text: `${nameOf.get(s.schoolId) ?? s.schoolId} (${s.plan}) — ${daysPast} day${daysPast === 1 ? "" : "s"} past due, ${
-              downgraded ? "DOWNGRADED to Standard" : `${SUBSCRIPTION_GRACE_DAYS - daysPast} grace day(s) left`
+              downgraded ? "DOWNGRADED to Standard" : `${grace - daysPast} grace day(s) left`
             }`,
           };
         })

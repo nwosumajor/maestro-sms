@@ -11,6 +11,8 @@ export interface TenantDto {
   plan: string;
   /** Count of subscription-enabled modules. */
   moduleCount: number;
+  /** Per-school grace override (days); null -> platform default. */
+  graceDays: number | null;
   /** Billing status (ACTIVE | PAST_DUE | CANCELED). */
   subscriptionStatus: string;
 }

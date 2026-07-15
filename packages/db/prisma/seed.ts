@@ -109,6 +109,7 @@ const PERMS = [
   "platform.audit.read",
   "platform.user.read",
   "platform.user.unlock",
+  "platform.grace.manage",
   // owner-only (each is, or becomes, absolute control)
   "platform.impersonate",
   "platform.user.credentials",
@@ -189,7 +190,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     // Owner identity + EVERY platform power, including the ones never delegated.
     "platform.operate",
     "platform.tenants.read", "platform.tenants.write", "platform.onboarding.review",
-    "platform.audit.read", "platform.user.read", "platform.user.unlock",
+    "platform.audit.read", "platform.user.read", "platform.user.unlock", "platform.grace.manage",
     "platform.impersonate", "platform.user.credentials", "platform.tenants.status",
     "platform.subscription.manage", "platform.pricing.manage", "platform.student.read",
     "platform.staff.manage",
@@ -216,6 +217,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     "platform.audit.read", // see what's happening platform-wide
     "platform.user.read", // support triage: look up an account
     "platform.user.unlock", // support: clear a lockout (grants no access)
+    "platform.grace.manage", // extend a late payer's grace (hard-capped => not a comp)
     "notification.read", // own inbox (onboarding alerts)
   ],
   // Board: read-only oversight + ultimate veto on workflows.

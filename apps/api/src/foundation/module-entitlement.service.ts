@@ -78,6 +78,8 @@ interface Resolved {
   status: SubscriptionStatus;
   billingCycle: BillingCycle;
   currentPeriodEnd: Date | null;
+  /** Per-school grace override; null -> platform default (SUBSCRIPTION_GRACE_DAYS). */
+  graceDays: number | null;
   seats: number | null;
   priceMinor: number | null;
   currency: string | null;
@@ -124,6 +126,7 @@ export class ModuleEntitlementService implements OnModuleInit {
           status: true,
           billingCycle: true,
           currentPeriodEnd: true,
+          graceDays: true,
           seats: true,
           priceMinor: true,
           currency: true,
@@ -139,7 +142,10 @@ export class ModuleEntitlementService implements OnModuleInit {
     const currentPeriodEnd = row?.currentPeriodEnd ?? null;
     // Delinquency downgrades the EFFECTIVE plan only — the stored `plan` stands,
     // so a payment restores access (next cache cycle / on invalidate).
-    const eff = effectivePlan(plan, status, currentPeriodEnd, SUBSCRIPTION_GRACE_DAYS, new Date());
+    // Per-school grace wins over the platform default — set from the operator
+    // console (bounded 0..GRACE_DAYS_MAX at the API).
+    const graceDays = row?.graceDays ?? null;
+    const eff = effectivePlan(plan, status, currentPeriodEnd, graceDays ?? SUBSCRIPTION_GRACE_DAYS, new Date());
     const value: Resolved = {
       plan,
       effectivePlan: eff,
@@ -148,6 +154,7 @@ export class ModuleEntitlementService implements OnModuleInit {
       status,
       billingCycle,
       currentPeriodEnd,
+      graceDays,
       seats: row?.seats ?? null,
       priceMinor: row?.priceMinor ?? null,
       currency: row?.currency ?? null,
@@ -172,6 +179,7 @@ export class ModuleEntitlementService implements OnModuleInit {
       status: r.status,
       billingCycle: r.billingCycle,
       currentPeriodEnd: r.currentPeriodEnd,
+      graceDays: r.graceDays,
       seats: r.seats,
       priceMinor: r.priceMinor,
       currency: r.currency,

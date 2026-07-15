@@ -26,6 +26,7 @@ import { ScholarshipAdmin } from "@/components/operator/ScholarshipAdmin";
 import { OnboardingRequests } from "@/components/operator/OnboardingRequests";
 import { PricingManager } from "@/components/operator/PricingManager";
 import { PlatformStaff } from "@/components/operator/PlatformStaff";
+import { GraceEditor } from "@/components/operator/GraceEditor";
 import { TenantFilterBar } from "@/components/operator/TenantFilterBar";
 
 export const dynamic = "force-dynamic";
@@ -56,6 +57,8 @@ export default async function OperatorPage({
   // Hiring platform staff is the one duty that can never be delegated: staff
   // creating staff would let a manager mint another manager.
   const canManageStaff = hasPermission(user.permissions, "platform.staff.manage");
+  // Delegable: bounded per-school grace (the API caps it at GRACE_DAYS_MAX).
+  const canManageGrace = hasPermission(user.permissions, "platform.grace.manage");
   const canReadStudents = hasPermission(user.permissions, "platform.student.read");
   const q = searchParams.q ?? "";
   const plan = searchParams.plan ?? "";
@@ -185,6 +188,7 @@ export default async function OperatorPage({
                   {canSetStatus && <SchoolStatusToggle schoolId={t.id} status={t.status} />}
                 </div>
                 {canManageSubscription && <SubscriptionManager schoolId={t.id} plan={t.plan} />}
+                {canManageGrace && <GraceEditor schoolId={t.id} initial={t.graceDays} />}
                 {canReadUsers && (
                   <OperatorUsers schoolId={t.id} schoolName={t.name} canCredentials={canCredentials} canImpersonate={canImpersonate} />
                 )}
