@@ -319,6 +319,7 @@ export class OperatorService {
     const target = await this.db.runAsTenant({ schoolId, userId: p.userId }, async (tx) => {
       const u = await tx.user.findFirst({ where: { id: userId }, select: { id: true, name: true } });
       if (!u) throw new NotFoundException("Target user not found");
+      const school = await tx.school.findFirst({ where: { id: schoolId }, select: { name: true } });
       const userRoles = await tx.userRole.findMany({
         where: { userId },
         include: { role: { include: { permissions: { include: { permission: true } } } } },
@@ -331,13 +332,28 @@ export class OperatorService {
           ),
         ),
       ];
-      return { name: u.name, roles, permissions };
+      return { name: u.name, schoolName: school?.name ?? "", roles, permissions };
     });
 
     const secret = process.env.AUTH_SECRET;
     if (!secret) throw new NotFoundException("Auth not configured");
+    // The target school's effective modules — the web nav is module-gated, so an
+    // impersonated session without them renders an empty app.
+    const modules = await this.entitlements.effectiveModules(schoolId);
     const token = jwt.sign(
-      { userId, school_id: schoolId, roles: target.roles, permissions: target.permissions, imp: { by: p.userId } },
+      {
+        userId,
+        school_id: schoolId,
+        roles: target.roles,
+        permissions: target.permissions,
+        // Everything the web session needs rides INSIDE the signed token: the
+        // browser must not be able to hand itself a different school or module set.
+        // (The API ignores these; it re-derives entitlements server-side anyway.)
+        name: target.name,
+        schoolName: target.schoolName,
+        modules,
+        imp: { by: p.userId },
+      },
       secret,
       { algorithm: "HS256", expiresIn: IMPERSONATION_TTL },
     );

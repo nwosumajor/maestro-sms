@@ -40,6 +40,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { auth } from "@/lib/auth";
+import { ImpersonationBanner } from "./ImpersonationBanner";
 import { apiGet } from "@/lib/api";
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
 import type { TenantTheme } from "@sms/tokens";
@@ -235,6 +236,10 @@ export async function AppShell({
   // the session (set at login); if absent (older session) we don't module-gate.
   const session = await auth();
   const modules = session?.user?.modules ?? null;
+  // Impersonation: the shell is the target's, so this banner is the ONLY thing
+  // distinguishing "you are the owner" from "you are them". Read from the session
+  // rather than a prop so no caller can render an impersonated shell without it.
+  const impersonating = Boolean(session?.user?.impersonatedBy);
   // The platform owner (super_admin) is not a member of any customer school, so the
   // tenant-operational pages (Analytics, Games, …) are noise for them. Restrict
   // their nav to the platform surfaces; the operator console is their home.
@@ -284,6 +289,7 @@ export async function AppShell({
     // (defaulting to the graphite dark console). Public pages pin themselves
     // light via .force-light, so the toggle only ever restyles the app.
     <div data-tenant style={brandStyle(theme, fontFamily)} className="min-h-screen bg-background text-foreground">
+      {impersonating && <ImpersonationBanner userName={userName} schoolName={schoolName} />}
       {/* Top bar */}
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-border/70 bg-card/80 px-4 backdrop-blur-md supports-[backdrop-filter]:bg-card/65">
         <div className="flex items-center gap-2.5">
