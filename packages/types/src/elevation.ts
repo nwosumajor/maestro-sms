@@ -11,8 +11,14 @@
 // (SecurityService) and at use time (PermissionGuard) — defence in depth, so even
 // a legacy or tampered ACTIVE grant for one of these is never honoured.
 // =============================================================================
+import { ALL_PLATFORM_PERMISSIONS } from "./permissions/operator";
+
 export const NON_ELEVATABLE_PERMISSIONS: ReadonlySet<string> = new Set<string>([
-  "platform.operate", // cross-tenant operator console + impersonation
+  // EVERY platform.* permission — the whole cross-tenant operator surface. Spread
+  // from the source of truth so a NEW platform permission is non-elevatable the
+  // moment it is defined: forgetting one here would hand a manager_admin a
+  // self-service path to owner-only powers (impersonate, pricing, credentials).
+  ...ALL_PLATFORM_PERMISSIONS,
   "billing.manage", // self-serve subscription / spend
   "billing.dunning.run", // privileged cross-tenant sweep
   "rbac.manage", // assign roles → escalate others

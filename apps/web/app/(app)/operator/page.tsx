@@ -38,7 +38,20 @@ export default async function OperatorPage({
 }) {
   const session = await auth();
   const user = session!.user;
-  if (!hasPermission(user.permissions, "platform.operate")) redirect("/dashboard");
+  if (!hasPermission(user.permissions, "platform.tenants.read")) redirect("/dashboard");
+  // Platform duties are delegable (manager_admin) but ownership is not. Show each
+  // control only when the caller holds the permission its API actually requires —
+  // the API enforces this regardless (403), this just avoids dead buttons.
+  const canProvision = hasPermission(user.permissions, "platform.tenants.write");
+  const canSetStatus = hasPermission(user.permissions, "platform.tenants.status");
+  const canManageSubscription = hasPermission(user.permissions, "platform.subscription.manage");
+  const canManagePricing = hasPermission(user.permissions, "platform.pricing.manage");
+  const canReviewOnboarding = hasPermission(user.permissions, "platform.onboarding.review");
+  const canReadUsers = hasPermission(user.permissions, "platform.user.read");
+  // Credential powers (password reset / MFA reset / suspend) are owner-only: a temp
+  // password is a working login for that account — impersonation by another route.
+  const canCredentials = hasPermission(user.permissions, "platform.user.credentials");
+  const canReadStudents = hasPermission(user.permissions, "platform.student.read");
   const q = searchParams.q ?? "";
   const plan = searchParams.plan ?? "";
   const billing = searchParams.billing ?? "";
@@ -120,13 +133,13 @@ export default async function OperatorPage({
         )}
 
         {/* Keyed on the request id so entering/leaving prefill re-initialises the form. */}
-        <Provisioning key={prefill?.requestId ?? "blank"} tenants={names ?? []} prefill={prefill} />
+        {canProvision && <Provisioning key={prefill?.requestId ?? "blank"} tenants={names ?? []} prefill={prefill} />}
 
         <ScholarshipAdmin />
 
-        {pricing && <PricingManager initial={pricing} />}
+        {pricing && canManagePricing && <PricingManager initial={pricing} />}
 
-        <OnboardingRequests requests={onboarding ?? []} />
+        {canReviewOnboarding && <OnboardingRequests requests={onboarding ?? []} />}
 
         <TenantFilterBar
           q={q}
@@ -163,12 +176,12 @@ export default async function OperatorPage({
               </CardHeader>
               <CardContent>
                 <div className="mb-3">
-                  <SchoolStatusToggle schoolId={t.id} status={t.status} />
+                  {canSetStatus && <SchoolStatusToggle schoolId={t.id} status={t.status} />}
                 </div>
-                <SubscriptionManager schoolId={t.id} plan={t.plan} />
-                <OperatorUsers schoolId={t.id} />
-                <OperatorStudents schoolId={t.id} />
-                <StudentDataExport schoolId={t.id} schoolName={t.name} />
+                {canManageSubscription && <SubscriptionManager schoolId={t.id} plan={t.plan} />}
+                {canReadUsers && <OperatorUsers schoolId={t.id} canCredentials={canCredentials} />}
+                {canReadStudents && <OperatorStudents schoolId={t.id} />}
+                {canReadStudents && <StudentDataExport schoolId={t.id} schoolName={t.name} />}
               </CardContent>
             </Card>
           ))}
