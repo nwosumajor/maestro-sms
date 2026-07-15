@@ -54,18 +54,31 @@ describe("PlatformAuditService", () => {
     expect(e.action).toBe("fee.approve");
   });
 
-  it("paginates: a full page hands back the last row id as nextCursor", async () => {
+  // audit_log is partitioned on createdAt, so its key — and any Prisma cursor — is
+  // the COMPOSITE (id, createdAt). The token stays an opaque string on the wire.
+  it("paginates: a full page hands back the last row's composite key as nextCursor", async () => {
     const { service } = makeService(makeClient());
     const page = await service.list(owner, { limit: 1 });
     expect(page.entries).toHaveLength(1);
-    expect(page.nextCursor).toBe("a1");
+    expect(page.nextCursor).toBe(`${now.toISOString()}_a1`);
   });
 
   it("applies the cursor (keyset pagination) to the audit query", async () => {
     const client = makeClient();
     const { service } = makeService(client);
-    await service.list(owner, { cursor: "a1", limit: 1 });
-    expect(client.auditLog.findMany).toHaveBeenCalledWith(expect.objectContaining({ cursor: { id: "a1" }, skip: 1 }));
+    await service.list(owner, { cursor: `${now.toISOString()}_a1`, limit: 1 });
+    expect(client.auditLog.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ cursor: { id_createdAt: { id: "a1", createdAt: now } }, skip: 1 }),
+    );
+  });
+
+  it("ignores a malformed/legacy bare-id cursor instead of erroring (restarts at page 1)", async () => {
+    const client = makeClient();
+    const { service } = makeService(client);
+    await expect(service.list(owner, { cursor: "a1", limit: 1 })).resolves.toBeDefined();
+    const args = client.auditLog.findMany.mock.calls[0][0];
+    expect(args.cursor).toBeUndefined();
+    expect(args.skip).toBeUndefined();
   });
 
   it("filters to a role (narrows the actor set) and excludes the platform org", async () => {

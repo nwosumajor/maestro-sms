@@ -12,6 +12,7 @@
 import { Inject, Injectable, Logger, ServiceUnavailableException } from "@nestjs/common";
 import type { PlatformAuditEntryDto, PlatformAuditPageDto } from "@sms/types";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
+import { decodeAuditCursor, encodeAuditCursor } from "../common/audit-cursor";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -52,8 +53,8 @@ export class PlatformAuditService {
     const pageSize = Math.min(Math.max(f.limit ?? 50, 1), 200);
     const entries = await this.query(f, pageSize);
     await this.auditMeta(p, "operator.audit.view", { count: entries.length, filter: f as Record<string, unknown> });
-    // A full page implies there may be more — hand back the last id as the cursor.
-    const nextCursor = entries.length === pageSize ? entries[entries.length - 1].id : null;
+    // A full page implies there may be more — hand back the last row's key.
+    const nextCursor = entries.length === pageSize ? encodeAuditCursor(entries[entries.length - 1]) : null;
     return { entries, nextCursor };
   }
 
@@ -95,12 +96,15 @@ export class PlatformAuditService {
       where.createdAt = { ...(f.from ? { gte: new Date(f.from) } : {}), ...(f.to ? { lte: new Date(f.to) } : {}) };
     }
 
+    // audit_log is partitioned on createdAt, so its key — and therefore any Prisma
+    // cursor — is the COMPOSITE (id, createdAt). The token stays opaque.
+    const cursor = decodeAuditCursor(f.cursor);
     const rows = await client.auditLog.findMany({
       where,
       // Stable keyset ordering (createdAt can tie; id breaks ties deterministically).
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take,
-      ...(f.cursor ? { cursor: { id: f.cursor }, skip: 1 } : {}),
+      ...(cursor ? { cursor: { id_createdAt: cursor }, skip: 1 } : {}),
     });
 
     // Resolve actors: email + uniqueId + name + roles.
