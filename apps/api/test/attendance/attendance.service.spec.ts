@@ -37,9 +37,11 @@ function makeService(f: Fakes) {
       findMany: jest.fn().mockResolvedValue([]),
     },
     attendanceRecord: {
-      upsert: jest.fn().mockResolvedValue({ id: "rec-1" }),
       findMany: jest.fn().mockResolvedValue([]),
     },
+    // The register is written as ONE bulk upsert (INSERT … ON CONFLICT), not a
+    // per-student upsert loop — see AttendanceService.markAttendance.
+    $executeRaw: jest.fn().mockResolvedValue(1),
   } as unknown as TenantTx;
 
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
