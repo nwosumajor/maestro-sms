@@ -6,6 +6,7 @@ import { sendWithStepUp } from "@/lib/stepup";
 import { readApiError } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { ImpersonateButton } from "./ImpersonateButton";
 
 type User = Serialized<OperatorUserDto>;
 
@@ -26,7 +27,7 @@ const MANAGED_ROLES = [
  *  suspensions — a temp password is a working login for that account, i.e.
  *  impersonation by another route, so it stays with the owner. The API enforces
  *  this regardless; hiding the buttons just avoids dead controls. */
-export function OperatorUsers({ schoolId, canCredentials = true }: { schoolId: string; canCredentials?: boolean }) {
+export function OperatorUsers({ schoolId, schoolName, canCredentials = true, canImpersonate = false }: { schoolId: string; schoolName: string; canCredentials?: boolean; canImpersonate?: boolean }) {
   const [open, setOpen] = React.useState(false);
   const [users, setUsers] = React.useState<User[] | null>(null);
   const [busy, setBusy] = React.useState<string | null>(null);
@@ -148,6 +149,9 @@ export function OperatorUsers({ schoolId, canCredentials = true }: { schoolId: s
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-1">
+                {canImpersonate && (
+                  <ImpersonateButton schoolId={schoolId} userId={u.id} userName={u.name} schoolName={schoolName} />
+                )}
                 {canCredentials && (u.status === "ACTIVE" ? (
                   <Button
                     size="sm"

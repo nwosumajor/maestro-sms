@@ -9,8 +9,21 @@
 
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
+import jwt from "jsonwebtoken";
 
 const API_BASE = process.env.API_BASE_URL ?? "http://localhost:3001";
+
+/** Claims the API stamps into an impersonation token (POST /operator/impersonate). */
+interface ImpersonationClaims {
+  userId: string;
+  school_id: string;
+  name?: string;
+  schoolName?: string;
+  roles?: string[];
+  permissions?: string[];
+  modules?: string[];
+  imp?: { by?: string };
+}
 
 interface LoginResult {
   userId: string;
@@ -63,6 +76,49 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         };
       },
     }),
+    // -----------------------------------------------------------------------
+    // Impersonation: the ONLY session not minted from email+password.
+    // -----------------------------------------------------------------------
+    // The API's step-up-gated, audited, super_admin-only POST /operator/impersonate
+    // mints a short-lived HS256 token for the target. Possessing a VALID one IS the
+    // authorization — it can be obtained no other way — so this provider's job is
+    // simply to prove the token is genuine and turn it into a session:
+    //   * verify the signature with AUTH_SECRET (pinned HS256), and
+    //   * REQUIRE `imp.by` — i.e. it must be an impersonation token specifically,
+    //     never an ordinary 5-minute service token, which would otherwise be a
+    //     free session-minting oracle for anything that ever leaked one.
+    // Claims are read only from the verified token, never from the caller, so the
+    // browser cannot hand itself another school, role or module set.
+    Credentials({
+      id: "impersonate",
+      name: "Impersonate",
+      credentials: { token: { label: "Impersonation token" } },
+      authorize: async (creds) => {
+        const raw = String(creds?.token ?? "");
+        const secret = process.env.AUTH_SECRET;
+        if (!raw || !secret) return null;
+        let claims: ImpersonationClaims;
+        try {
+          claims = jwt.verify(raw, secret, { algorithms: ["HS256"] }) as unknown as ImpersonationClaims;
+        } catch {
+          return null; // bad signature / expired -> no session
+        }
+        if (!claims.imp?.by || !claims.userId || !claims.school_id) return null;
+        return {
+          id: claims.userId,
+          name: claims.name ?? "User",
+          email: "",
+          schoolId: claims.school_id,
+          schoolName: claims.schoolName ?? "",
+          roles: claims.roles ?? [],
+          permissions: claims.permissions ?? [],
+          modules: claims.modules ?? [],
+          mfaEnrollRequired: false, // already satisfied by the OPERATOR's own login
+          passwordExpired: false,
+          impersonatedBy: claims.imp.by,
+        };
+      },
+    }),
   ],
   callbacks: {
     // Presence check only. The matched (protected) routes' actual redirects —
@@ -81,6 +137,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           modules: string[];
           mfaEnrollRequired: boolean;
           passwordExpired: boolean;
+          impersonatedBy?: string;
         };
         token.userId = u.id;
         token.schoolId = u.schoolId;
@@ -90,6 +147,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.modules = u.modules;
         token.mfaEnrollRequired = u.mfaEnrollRequired;
         token.passwordExpired = u.passwordExpired;
+        // Present ONLY for a session minted by the impersonate provider. It must
+        // survive into the API token (see apiToken.ts) or impersonated actions
+        // become unattributable in the audit log again.
+        token.impersonatedBy = u.impersonatedBy;
       }
       return token;
     },
@@ -102,6 +163,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       session.user.modules = (token.modules as string[]) ?? [];
       session.user.mfaEnrollRequired = (token.mfaEnrollRequired as boolean) ?? false;
       session.user.passwordExpired = (token.passwordExpired as boolean) ?? false;
+      session.user.impersonatedBy = (token.impersonatedBy as string | undefined) ?? undefined;
       return session;
     },
   },

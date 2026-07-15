@@ -18,6 +18,10 @@ export async function bearerForSession(): Promise<string | null> {
       school_id: session.user.schoolId,
       roles: session.user.roles,
       permissions: session.user.permissions,
+      // Impersonation: the principal IS the target (same tenant/roles/RLS), so this
+      // is what lets the API attribute every action to the operator driving it.
+      // Dropping it here would re-open the audit hole the API fix closed.
+      ...(session.user.impersonatedBy ? { imp: { by: session.user.impersonatedBy } } : {}),
     },
     secret,
     { algorithm: "HS256", expiresIn: "5m" },

@@ -51,6 +51,7 @@ export default async function OperatorPage({
   // Credential powers (password reset / MFA reset / suspend) are owner-only: a temp
   // password is a working login for that account — impersonation by another route.
   const canCredentials = hasPermission(user.permissions, "platform.user.credentials");
+  const canImpersonate = hasPermission(user.permissions, "platform.impersonate");
   const canReadStudents = hasPermission(user.permissions, "platform.student.read");
   const q = searchParams.q ?? "";
   const plan = searchParams.plan ?? "";
@@ -179,7 +180,9 @@ export default async function OperatorPage({
                   {canSetStatus && <SchoolStatusToggle schoolId={t.id} status={t.status} />}
                 </div>
                 {canManageSubscription && <SubscriptionManager schoolId={t.id} plan={t.plan} />}
-                {canReadUsers && <OperatorUsers schoolId={t.id} canCredentials={canCredentials} />}
+                {canReadUsers && (
+                  <OperatorUsers schoolId={t.id} schoolName={t.name} canCredentials={canCredentials} canImpersonate={canImpersonate} />
+                )}
                 {canReadStudents && <OperatorStudents schoolId={t.id} />}
                 {canReadStudents && <StudentDataExport schoolId={t.id} schoolName={t.name} />}
               </CardContent>
