@@ -153,6 +153,48 @@ async function bulk(db, prefix, rows, chunk = 1000) {
   }
 }
 
+/**
+ * Generate the attendance history INSIDE Postgres (one session per class/day, one
+ * record per enrolled student per session). Set-based INSERT…SELECT over
+ * generate_series: the row count is students × days — millions at realistic scale —
+ * so it must never be materialised in Node.
+ *
+ * Done in BATCHES OF SCHOOLS, not one statement. A single INSERT…SELECT for the
+ * whole run is one enormous transaction: minutes with no progress, WAL blowout,
+ * and nothing to show for it if you interrupt (measured: >9min for 6M rows, no
+ * visibility). Batching commits incrementally, keeps each transaction small, and
+ * prints progress. Scoped strictly to THIS run's schools.
+ */
+async function seedHistoryInDb(db, schoolIds, batchSize = 100) {
+  let sessions = 0;
+  let records = 0;
+  for (let i = 0; i < schoolIds.length; i += batchSize) {
+    const batch = schoolIds.slice(i, i + batchSize);
+    const list = batch.map((id) => `'${id}'::uuid`).join(",");
+    const s = await db.query(`
+      INSERT INTO attendance_session (id, "schoolId", "classId", date, "takenById", "createdAt", "updatedAt")
+      SELECT gen_random_uuid(), c."schoolId", c.id, d::date, ct."teacherId", now(), now()
+      FROM class c
+      JOIN class_teacher ct ON ct."classId" = c.id
+      CROSS JOIN generate_series(CURRENT_DATE - ${DAYS}, CURRENT_DATE - 1, interval '1 day') d
+      WHERE c."schoolId" IN (${list})
+    `);
+    const r = await db.query(`
+      INSERT INTO attendance_record (id, "schoolId", "sessionId", "studentId", status, "createdAt", "updatedAt")
+      SELECT gen_random_uuid(), s."schoolId", s.id, e."studentId",
+             (CASE WHEN random() < 0.08 THEN 'ABSENT' ELSE 'PRESENT' END)::"AttendanceStatus", now(), now()
+      FROM attendance_session s
+      JOIN enrollment e ON e."classId" = s."classId"
+      WHERE s."schoolId" IN (${list})
+    `);
+    sessions += s.rowCount ?? 0;
+    records += r.rowCount ?? 0;
+    process.stdout.write(`\r  seeding history… ${i + batch.length}/${schoolIds.length} schools, ${records} records`);
+  }
+  process.stdout.write("\n");
+  return { sessions, records };
+}
+
 async function seed(db) {
   const schools = [];
   const schoolRows = [];
@@ -162,8 +204,6 @@ async function seed(db) {
   const classRows = [];
   const classTeacherRows = [];
   const enrollRows = [];
-  const sessionRows = [];
-  const recordRows = [];
   const feeItemRows = [];
   const invoiceRows = [];
 
@@ -214,18 +254,10 @@ async function seed(db) {
       enrollRows.push(`('${randomUUID()}','${schoolId}','${classId}','${studentId}')`);
     }
 
-    // Attendance history — the high-volume per-tenant table.
-    for (let d = 1; d <= DAYS; d++) {
-      const date = new Date(Date.now() - d * 86400000).toISOString().slice(0, 10);
-      for (let c = 0; c < CLASSES; c++) {
-        const sessionId = randomUUID();
-        sessionRows.push(`('${sessionId}','${schoolId}','${classIds[c]}','${date}','${teacherId}',now())`);
-        for (const studentId of classStudents[classIds[c]]) {
-          const status = Math.random() < 0.08 ? "ABSENT" : "PRESENT";
-          recordRows.push(`('${randomUUID()}','${schoolId}','${sessionId}','${studentId}','${status}',now())`);
-        }
-      }
-    }
+    // NOTE: attendance history is NOT built here — it is generated SERVER-SIDE
+    // after this loop (see seedHistoryInDb). At volume it is by far the biggest
+    // table (students × days), and materialising tens of millions of row-literals
+    // in Node would exhaust the heap long before Postgres broke a sweat.
 
     // Fees: one fee item + an invoice per student (analytics reads these).
     const feeItemId = randomUUID();
@@ -254,8 +286,8 @@ async function seed(db) {
     await bulk(db, `INSERT INTO class (id,"schoolId",name,"updatedAt") VALUES `, classRows);
     await bulk(db, `INSERT INTO class_teacher (id,"schoolId","classId","teacherId") VALUES `, classTeacherRows);
     await bulk(db, `INSERT INTO enrollment (id,"schoolId","classId","studentId") VALUES `, enrollRows);
-    await bulk(db, `INSERT INTO attendance_session (id,"schoolId","classId",date,"takenById","updatedAt") VALUES `, sessionRows);
-    await bulk(db, `INSERT INTO attendance_record (id,"schoolId","sessionId","studentId",status,"updatedAt") VALUES `, recordRows);
+    // The big one — generated server-side, in batches (students × days rows).
+    const hist = await seedHistoryInDb(db, schools.map((s) => s.schoolId));
     await bulk(db, `INSERT INTO fee_item (id,"schoolId",name,"amountMinor","updatedAt") VALUES `, feeItemRows);
     await bulk(
       db,
@@ -264,7 +296,7 @@ async function seed(db) {
     );
     console.log(
       `  seeded workload: ${SCHOOLS} schools × (${STUDENTS} students, ${CLASSES} classes, ${DAYS}d attendance) ` +
-        `→ ${userRows.length} users, ${recordRows.length} attendance records, ${invoiceRows.length} invoices`,
+        `→ ${userRows.length} users, ${hist.sessions} sessions, ${hist.records} attendance records, ${invoiceRows.length} invoices`,
     );
   }
   return schools;
