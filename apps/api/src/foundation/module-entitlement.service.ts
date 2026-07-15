@@ -37,7 +37,25 @@ import {
 } from "../integrity/integrity.foundation";
 import { RedisPubSubService } from "../common/redis-pubsub.service";
 
-const CACHE_TTL_MS = 30_000;
+// This cache is on the hot path of (almost) EVERY request, so its miss rate is a
+// direct scaling limit: with a process-local TTL, each school reloads once per
+// TTL, so misses/sec = tenants / TTL — INDEPENDENT of traffic. Measured at 5,000
+// tenants a 30s TTL meant 5000/30 = ~167 reloads/sec, i.e. ~35% of all requests
+// paying for a full interactive transaction (BEGIN + 2×set_config + SELECT +
+// COMMIT) just to check entitlement — module-gated endpoints ran 4× slower than
+// always-on ones and total throughput fell 38%. At 10 minutes that is ~8/sec
+// (~1.7%), and the cost stops scaling with tenant count.
+//
+// SAFE because the TTL is NOT the correctness mechanism: every subscription write
+// calls invalidate(), which drops the entry on THIS task and publishes to all
+// others (see RedisPubSubService) — so a plan change still applies immediately.
+// The TTL is only a backstop for the degraded case where Redis pub/sub is down;
+// there, a change takes up to this long to propagate. Tolerable: module gating is
+// a BILLING gate, not a security one (permissions + RLS are the security layers),
+// and it fails toward the previously-purchased plan, never toward more access.
+const CACHE_TTL_MS = 600_000;
+/** Bound memory at high tenant counts — evict oldest once past this many schools. */
+const CACHE_MAX_ENTRIES = 20_000;
 /** Redis channel: "drop the cached entitlements for this school on every task". */
 const INVALIDATE_CHANNEL = "entitlement:invalidate";
 
@@ -127,6 +145,12 @@ export class ModuleEntitlementService implements OnModuleInit {
       currency: row?.currency ?? null,
     };
     this.cache.set(schoolId, { at: Date.now(), value });
+    // Bound memory: a long TTL across thousands of tenants would otherwise retain
+    // every school ever seen by this task. Insertion-ordered Map ⇒ oldest first.
+    if (this.cache.size > CACHE_MAX_ENTRIES) {
+      const oldest = this.cache.keys().next().value;
+      if (oldest !== undefined) this.cache.delete(oldest);
+    }
     return value;
   }
 
