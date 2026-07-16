@@ -81,6 +81,31 @@ cd infrastructure && cp .env.example .env && docker compose up --build
 Serves on **http://localhost** (port 80, via nginx) — not :3000. Here web+api both
 take `AUTH_SECRET` from `infrastructure/.env`, so they always agree.
 
+#### Build notes (slow / flaky networks)
+The image builds are hardened for high-latency links, where three failures used
+to masquerade as a broken compose file:
+
+- **`EAI_AGAIN registry.npmjs.org`** — corepack's lazy download of pnpm has no
+  retry, and musl gives DNS only ~5s. The base stage now bakes pnpm in via
+  `corepack prepare` with a retry loop.
+- **`ETIMEDOUT` fetching Prisma engines** — Node 20's happy-eyeballs gives each
+  connect attempt ~250ms, which a congested link blows past even though `curl`
+  succeeds on the same URL. `pnpm install` now runs with
+  `--network-family-autoselection-attempt-timeout=10000` inside a 6-attempt
+  retry loop.
+- **Backend exiting at boot fetching `schema-engine`** — the install stage must
+  have `openssl` so Prisma detects the runtime libssl (3.x) and bundles the
+  matching engines at build time; the runtime container is not guaranteed egress
+  to binaries.prisma.sh. Baked into the base stage — don't remove it.
+
+Expectations: the FIRST full build downloads the whole workspace (~950 packages
+per image) and is download-bound — on a slow connection allow **45+ minutes**.
+Rebuilds are fast: the pnpm store and Prisma engine cache live on shared
+BuildKit cache mounts (`id=pnpm-store`, `id=prisma-cache`), reused across
+retries, rebuilds, and both images. `.npmrc` deliberately serializes fetches
+(`network-concurrency=1`) for reliability over speed — keep it. If a build
+still dies mid-download, just re-run it; everything already fetched is cached.
+
 ---
 
 Sign in at http://localhost:3000 with a demo account (dev only) — password
