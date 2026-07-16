@@ -57,6 +57,7 @@ type GameRow = {
   fullmove: number;
   turn: string;
   chessStatus: string;
+  repetition: unknown;
 };
 
 @Injectable()
@@ -105,6 +106,7 @@ export class ChessService {
           ep: Prisma.DbNull,
           halfmove: s.halfmove,
           fullmove: s.fullmove,
+          repetition: (s.repetition ?? {}) as Prisma.InputJsonValue,
           chessStatus: "PLAYING",
           difficulty,
           whiteTimeMs: base,
@@ -179,6 +181,7 @@ export class ChessService {
           ep: next.ep ? (next.ep as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
           halfmove: next.halfmove,
           fullmove: next.fullmove,
+          repetition: (next.repetition ?? {}) as Prisma.InputJsonValue,
           turn: next.turn,
           chessStatus: next.status,
           moveCount: game.moveCount + 1,
@@ -298,6 +301,8 @@ export class ChessService {
       halfmove: game.halfmove,
       fullmove: game.fullmove,
       status: game.chessStatus as chess.ChessStatus,
+      // Rows from before the repetition column simply start counting now.
+      repetition: (game.repetition as unknown as Record<string, number> | null) ?? undefined,
     };
   }
 

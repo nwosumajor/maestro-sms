@@ -156,6 +156,9 @@ model School {
   subscription     SchoolSubscription?
   // Platform billing — append-only payment ledger (school -> platform)
   platformPayments PlatformSubscriptionPayment[]
+  // Referral program (this school as the REFERRER)
+  referralCode        SchoolReferralCode?
+  referralConversions SchoolReferralConversion[]
 
   // LMS learning content
   lmsContents  LmsContent[]
@@ -202,6 +205,12 @@ model SchoolSubscription {
   priceMinor           Int?
   /// Paystack customer code (reserved for future saved-card recurring).
   paystackCustomerCode String?
+  /// Set at provisioning when this school arrived via a referral code — the
+  /// school that referred them. The billing webhook grants BOTH sides one free
+  /// term on this school's FIRST paid subscription, then stamps
+  /// referralRewardAt so a retry / later renewal can never double-grant.
+  referredBySchoolId   String?   @db.Uuid
+  referralRewardAt     DateTime?
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 

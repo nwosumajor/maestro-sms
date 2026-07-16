@@ -1,0 +1,49 @@
+// =============================================================================
+// School referral program (growth loop on the billing engine)
+// =============================================================================
+// A school shares its referral code; a new school quotes it on the public
+// onboarding form. When the referred school's FIRST paid subscription lands,
+// BOTH sides earn one free term (CYCLE_MONTHS.TERM) of platform usage —
+// granted atomically in the webhook transaction, idempotently (a gateway retry
+// or second payment can never double-grant).
+//
+// Multi-tenancy: both tables are owned by the REFERRER school (non-null
+// schoolId + standard RLS, rls/70_referral_rls.sql). The one deliberate
+// cross-tenant touch — resolving a code to its owning school at provisioning —
+// happens on the PRIVILEGED client, exactly like the rest of provisioning.
+
+/// One shareable referral code per school (the REFERRER owns the row).
+model SchoolReferralCode {
+  id          String   @id @default(uuid()) @db.Uuid
+  schoolId    String   @unique @db.Uuid
+  /// Globally-unique, human-shareable (e.g. "GREENFIELD-7K2M").
+  code        String   @unique
+  createdById String   @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@map("school_referral_code")
+}
+
+/// APPEND-ONLY record of a successful referral, owned by the REFERRER school.
+/// Written in the SAME transaction as both term rewards; the unique
+/// referredSchoolId is the database-level guarantee that a referred school can
+/// ever be rewarded once.
+model SchoolReferralConversion {
+  id                 String   @id @default(uuid()) @db.Uuid
+  schoolId           String   @db.Uuid
+  referredSchoolId   String   @unique @db.Uuid
+  referredSchoolName String
+  /// Months of free usage granted to EACH side (one term = 3).
+  rewardMonths       Int
+  /// The referrer's currentPeriodEnd after the reward was applied.
+  newPeriodEnd       DateTime
+  createdAt          DateTime @default(now())
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId])
+  @@map("school_referral_conversion")
+}

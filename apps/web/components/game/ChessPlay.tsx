@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { BoardClocks, StatusLine, liveClockMs, postSms, useNowTick, usePolled } from "./play-ui";
+import { BoardClocks, ResultBanner, StatusLine, liveClockMs, postSms, useCelebratable, useNowTick, usePolled } from "./play-ui";
 
 type Game = Serialized<ChessGameDto>;
 type Sq = number[];
@@ -33,6 +33,7 @@ export function ChessPlay({ initial }: { initial: Game }) {
   const [err, setErr] = React.useState(false);
   const [selected, setSelected] = React.useState<Sq | null>(null);
   const [promote, setPromote] = React.useState<{ moves: Move[] } | null>(null);
+  const celebratable = useCelebratable(initial.status === "FINISHED");
 
   const now = useNowTick(500);
   const curStored = g.turn === "w" ? g.whiteTimeMs : g.blackTimeMs;
@@ -126,17 +127,26 @@ export function ChessPlay({ initial }: { initial: Game }) {
             </div>
           )}
           {g.status === "FINISHED" && (
-            <p className={cn("text-sm font-medium", youWon ? "text-brand2" : "text-muted-foreground")}>
-              {g.outcome === "CHECKMATE" && "Checkmate. "}
-              {g.outcome === "STALEMATE" && "Stalemate — draw. "}
-              {g.outcome === "DRAW" && "Draw. "}
-              {g.outcome === "RESIGN" && "Resigned. "}
-              {youWon ? "You won! 🎉" : g.yourColor && g.winnerUserId ? "You lost." : "Game over."}
-            </p>
+            <ResultBanner
+              won={Boolean(youWon)}
+              celebrate={celebratable}
+              title={youWon ? "You won!" : g.yourColor && g.winnerUserId ? "You lost." : "Game over."}
+              subtitle={
+                g.outcome === "CHECKMATE"
+                  ? "Checkmate."
+                  : g.outcome === "STALEMATE"
+                    ? "Stalemate — draw."
+                    : g.outcome === "DRAW"
+                      ? "Draw."
+                      : g.outcome === "RESIGN"
+                        ? "By resignation."
+                        : undefined
+              }
+            />
           )}
 
-          {/* Board */}
-          <div className="relative inline-grid grid-cols-8 overflow-hidden rounded-md border border-border">
+          {/* Board — coordinates live inside the edge squares, like a print set. */}
+          <div className="relative inline-grid animate-pop-in grid-cols-8 overflow-hidden rounded-lg border-2 border-[hsl(25_25%_28%)] shadow-card">
             {g.board.map((row, r) =>
               row.map((cell, c) => {
                 const dark = (r + c) % 2 === 1;
@@ -144,6 +154,7 @@ export function ChessPlay({ initial }: { initial: Game }) {
                 const selectable = g.yourTurn && hasMoveFrom(sq);
                 const isSel = selected && eq(selected, sq);
                 const isDest = selected && destOf(sq).length > 0;
+                const isCapture = isDest && !!cell;
                 return (
                   <button
                     key={`${r}-${c}`}
@@ -151,18 +162,53 @@ export function ChessPlay({ initial }: { initial: Game }) {
                     disabled={!g.yourTurn}
                     onClick={() => onSquare(r, c)}
                     className={cn(
-                      "relative grid h-9 w-9 place-items-center text-2xl leading-none sm:h-11 sm:w-11",
-                      dark ? "bg-[hsl(28_25%_45%)]" : "bg-[hsl(36_38%_84%)]",
-                      selectable && "cursor-pointer",
+                      "relative grid h-10 w-10 place-items-center text-[26px] leading-none sm:h-14 sm:w-14 sm:text-4xl",
+                      dark ? "bg-[hsl(25_28%_42%)]" : "bg-[hsl(36_42%_86%)]",
+                      selectable && "cursor-pointer hover:brightness-110",
                       isSel && "ring-2 ring-inset ring-primary",
                     )}
                   >
+                    {c === 0 && (
+                      <span
+                        aria-hidden
+                        className={cn(
+                          "absolute left-0.5 top-0.5 text-[8px] font-semibold sm:text-[10px]",
+                          dark ? "text-[hsl(36_42%_86%)]/70" : "text-[hsl(25_28%_42%)]/70",
+                        )}
+                      >
+                        {8 - r}
+                      </span>
+                    )}
+                    {r === 7 && (
+                      <span
+                        aria-hidden
+                        className={cn(
+                          "absolute bottom-0.5 right-1 text-[8px] font-semibold sm:text-[10px]",
+                          dark ? "text-[hsl(36_42%_86%)]/70" : "text-[hsl(25_28%_42%)]/70",
+                        )}
+                      >
+                        {"abcdefgh"[c]}
+                      </span>
+                    )}
                     {cell && (
-                      <span className={cell.color === "w" ? "text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.6)]" : "text-neutral-900"}>
+                      <span
+                        className={cn(
+                          "transition-transform",
+                          isSel && "scale-110",
+                          cell.color === "w"
+                            ? "text-white drop-shadow-[0_1.5px_1.5px_rgba(0,0,0,0.65)]"
+                            : "text-neutral-900 drop-shadow-[0_1px_1px_rgba(255,255,255,0.15)]",
+                        )}
+                      >
                         {GLYPH[cell.type]?.[cell.color === "w" ? 0 : 1]}
                       </span>
                     )}
-                    {isDest && <span aria-hidden className="absolute h-2.5 w-2.5 rounded-full bg-brand2/80" />}
+                    {isDest && !isCapture && (
+                      <span aria-hidden className="absolute h-3 w-3 rounded-full bg-brand2/80 shadow-sm" />
+                    )}
+                    {isCapture && (
+                      <span aria-hidden className="absolute inset-0.5 rounded-full ring-[3px] ring-inset ring-brand2/80" />
+                    )}
                   </button>
                 );
               }),

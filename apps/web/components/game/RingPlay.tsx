@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { GuessForm, GuessList, LiveDot, StatusLine, digitsValid, postSms, useLiveGame } from "./play-ui";
+import { GuessForm, GuessList, LiveDot, ResultBanner, StatusLine, digitsValid, postSms, useCelebratable, useLiveGame } from "./play-ui";
 import { Input } from "@/components/ui/input";
 
 type Ring = Serialized<RingDto>;
@@ -24,6 +24,7 @@ export function RingPlay({ initial, canModerate }: { initial: Ring; canModerate:
   });
   const [msg, setMsg] = React.useState<string | null>(null);
   const [err, setErr] = React.useState(false);
+  const celebratable = useCelebratable(initial.status === "FINISHED");
 
   const me = ring.players.find((p) => p.playerId === ring.you) ?? null;
   const nameOf = (playerId: string | null) =>
@@ -42,6 +43,22 @@ export function RingPlay({ initial, canModerate }: { initial: Ring; canModerate:
 
   const yourTurn = ring.status === "ACTIVE" && ring.currentTurnPlayerId === ring.you;
   const secondsLeft = useCountdown(ring.turnExpiresAt);
+
+  // Auto-nudge: the turn limit is server law (validated from turnStartedAt), but
+  // the server applies it only when someone acts — so when the visible countdown
+  // expires, any watching participant nudges POST /timeout, once per expired
+  // turn. A short grace lets the current player's own last-moment move land
+  // first; a premature or racing nudge is harmlessly rejected server-side.
+  const nudgedFor = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (ring.status !== "ACTIVE" || !me || !ring.turnExpiresAt || secondsLeft > 0) return;
+    if (nudgedFor.current === ring.turnExpiresAt) return;
+    nudgedFor.current = ring.turnExpiresAt;
+    const t = setTimeout(() => {
+      void postSms(`rings/${ring.id}/timeout`).then(() => refresh());
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [ring.status, ring.turnExpiresAt, secondsLeft, me, ring.id, refresh]);
 
   return (
     <div className="space-y-6">
@@ -112,11 +129,11 @@ export function RingPlay({ initial, canModerate }: { initial: Ring; canModerate:
           )}
 
           {ring.status === "FINISHED" && (
-            <div className={cn("rounded-md border p-4", ring.winnerPlayerId === ring.you ? "border-primary/40 bg-primary/5" : "border-border")}>
-              <p className="text-lg font-semibold">
-                {ring.winnerPlayerId === ring.you ? "🏆 You are the last standing!" : `${nameOf(ring.winnerPlayerId)} wins`}
-              </p>
-            </div>
+            <ResultBanner
+              won={ring.winnerPlayerId === ring.you}
+              celebrate={celebratable}
+              title={ring.winnerPlayerId === ring.you ? "You are the last standing!" : `${nameOf(ring.winnerPlayerId)} wins`}
+            />
           )}
 
           <StatusLine msg={msg} error={err} />

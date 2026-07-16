@@ -111,11 +111,23 @@ const config: Config = {
           from: { transform: "translateX(0)" },
           to: { transform: "translateX(-50%)" },
         },
+        // game surfaces: question/board entrance
+        "pop-in": {
+          from: { opacity: "0", transform: "scale(0.96)" },
+          to: { opacity: "1", transform: "scale(1)" },
+        },
+        // one-shot win confetti (pieces stagger via inline delay/duration)
+        "confetti-fall": {
+          from: { transform: "translateY(-8vh) rotate(0deg)", opacity: "1" },
+          to: { transform: "translateY(108vh) rotate(600deg)", opacity: "0.6" },
+        },
       },
       animation: {
         "fade-up": "fade-up 0.4s cubic-bezier(0.22, 1, 0.36, 1) both",
         kenburns: "kenburns 20s ease-in-out infinite alternate",
         marquee: "marquee 85s linear infinite",
+        "pop-in": "pop-in 0.3s cubic-bezier(0.22, 1, 0.36, 1) both",
+        "confetti-fall": "confetti-fall 2.6s ease-in both",
       },
     },
   },

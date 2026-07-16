@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { StatusLine, postSms, usePolled } from "./play-ui";
+import { Celebrate, StatusLine, postSms, useCelebratable, usePolled } from "./play-ui";
 
 type Race = Serialized<TypingRaceDto>;
 
@@ -32,6 +32,7 @@ export function TypingPlay({ initial }: { initial: Race }) {
   const joined = !!race.you;
   const finished = !!race.you?.finished;
   const active = race.status === "ACTIVE";
+  const celebratable = useCelebratable(!!initial.you?.finished);
 
   const act = async (fn: () => ReturnType<typeof postSms>) => {
     setMsg(null);
@@ -114,7 +115,12 @@ export function TypingPlay({ initial }: { initial: Race }) {
               <span>
                 Accuracy: <span className="tnum font-semibold">{Math.round(race.you.accuracy * 100)}%</span>
               </span>
-              {finished && race.you.rank && <span className="font-medium text-brand2">Finished #{race.you.rank} 🎉</span>}
+              {finished && race.you.rank && (
+                <span className="font-medium text-brand2">
+                  {race.you.rank === 1 ? "🏆" : "🎉"} Finished #{race.you.rank}
+                  {race.you.rank === 1 && celebratable && <Celebrate />}
+                </span>
+              )}
             </div>
           )}
 
@@ -137,6 +143,11 @@ export function TypingPlay({ initial }: { initial: Race }) {
               autoFocus
               value={typed}
               onChange={(e) => onType(e.target.value)}
+              // Friction only — the server independently rejects implausibly
+              // fast progress, so bypassing these buys a cheater nothing.
+              onPaste={(e) => e.preventDefault()}
+              onDrop={(e) => e.preventDefault()}
+              autoComplete="off"
               rows={3}
               spellCheck={false}
               placeholder="Start typing the passage above…"

@@ -38,6 +38,10 @@ model ChessGame {
   ep           Json?
   halfmove     Int         @default(0)
   fullmove     Int         @default(1)
+  /// Position-occurrence counts since the last irreversible move (threefold-
+  /// repetition rule). Nullable: rows from before the rule simply start
+  /// counting at their next move (the engine tolerates a missing map).
+  repetition   Json?
   /// Engine status for display: PLAYING | CHECK | CHECKMATE | STALEMATE | DRAW.
   chessStatus  String      @default("PLAYING")
   moveCount    Int         @default(0)

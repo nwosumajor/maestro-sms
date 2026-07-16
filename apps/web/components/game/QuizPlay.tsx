@@ -12,9 +12,20 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { StatusLine, postSms, usePolled } from "./play-ui";
+import { Celebrate, StatusLine, postSms, useCelebratable, usePolled } from "./play-ui";
 
 type Session = Serialized<LiveQuizSessionDto>;
+
+/** The Kahoot answer grammar: colour + shape identify a choice faster than a
+ *  letter can. Fixed per INDEX (game semantics, not tenant branding). */
+const TILE = [
+  { bg: "bg-red-500", shape: "▲" },
+  { bg: "bg-blue-500", shape: "◆" },
+  { bg: "bg-amber-500", shape: "●" },
+  { bg: "bg-emerald-600", shape: "■" },
+  { bg: "bg-violet-500", shape: "⬟" },
+  { bg: "bg-sky-500", shape: "✚" },
+] as const;
 
 /** Live countdown from the question's server start + its time limit. */
 function useCountdown(startedAt: string | null, limitSeconds: number): number {
@@ -28,6 +39,45 @@ function useCountdown(startedAt: string | null, limitSeconds: number): number {
   return Math.max(0, Math.ceil((end - now) / 1000));
 }
 
+/** Final top-three, laid out 2nd · 1st · 3rd with rising columns. */
+function Podium({ rows }: { rows: Session["leaderboard"] }) {
+  const top = [rows.find((r) => r.rank === 2), rows.find((r) => r.rank === 1), rows.find((r) => r.rank === 3)];
+  const style = [
+    { h: "h-16", medal: "🥈", delay: "0.15s" },
+    { h: "h-24", medal: "🥇", delay: "0.3s" },
+    { h: "h-12", medal: "🥉", delay: "0s" },
+  ];
+  if (!top[1]) return null;
+  return (
+    <div className="flex items-end justify-center gap-3 pt-2">
+      {top.map((row, i) =>
+        row ? (
+          <div
+            key={row.userId}
+            className="flex w-24 animate-fade-up flex-col items-center gap-1.5 sm:w-28"
+            style={{ animationDelay: style[i]!.delay }}
+          >
+            <span className="text-2xl" aria-hidden>
+              {style[i]!.medal}
+            </span>
+            <span className="max-w-full truncate text-sm font-medium">{row.displayName}</span>
+            <span className="tnum text-xs text-muted-foreground">{row.score}</span>
+            <div
+              className={cn(
+                "w-full rounded-t-md border border-b-0 border-border",
+                style[i]!.h,
+                row.rank === 1 ? "bg-amber-500/25" : "bg-muted",
+              )}
+            />
+          </div>
+        ) : (
+          <div key={`empty-${i}`} className="w-24 sm:w-28" />
+        ),
+      )}
+    </div>
+  );
+}
+
 export function QuizPlay({ initial }: { initial: Session }) {
   const { data: s, refresh } = usePolled<Session>(`quiz-sessions/${initial.id}`, initial, {
     intervalMs: 1500,
@@ -36,6 +86,7 @@ export function QuizPlay({ initial }: { initial: Session }) {
   const [msg, setMsg] = React.useState<string | null>(null);
   const [err, setErr] = React.useState(false);
   const [pending, setPending] = React.useState<number | null>(null);
+  const celebratable = useCelebratable(initial.status === "ENDED");
 
   const q = s.question;
   const remaining = useCountdown(q?.startedAt ?? null, q?.timeLimitSeconds ?? 0);
@@ -62,6 +113,8 @@ export function QuizPlay({ initial }: { initial: Session }) {
   };
 
   const themeLabel = s.theme.charAt(0) + s.theme.slice(1).toLowerCase();
+  const youTopped = s.status === "ENDED" && s.you?.rank === 1 && s.you.score > 0;
+  const timePct = q && q.timeLimitSeconds > 0 ? Math.min(100, (remaining / q.timeLimitSeconds) * 100) : 0;
 
   return (
     <div className="space-y-6">
@@ -93,9 +146,9 @@ export function QuizPlay({ initial }: { initial: Session }) {
             </div>
           )}
 
-          {/* Active question */}
+          {/* Active question — keyed by index so each question pops in fresh. */}
           {s.status === "ACTIVE" && q && (
-            <div className="space-y-4">
+            <div key={q.index} className="animate-pop-in space-y-4">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium text-muted-foreground">
                   Question {q.index + 1} of {s.questionCount}
@@ -109,12 +162,23 @@ export function QuizPlay({ initial }: { initial: Session }) {
                   {remaining}s
                 </span>
               </div>
+              {/* Time drains visibly, not just numerically. */}
+              <div className="h-1 overflow-hidden rounded-full bg-muted">
+                <div
+                  className={cn(
+                    "h-full rounded-full transition-[width] duration-500 ease-linear",
+                    remaining <= 5 ? "bg-destructive" : "bg-primary",
+                  )}
+                  style={{ width: `${timePct}%` }}
+                />
+              </div>
               <p className="text-lg font-medium">{q.prompt}</p>
 
-              <div className="grid gap-2 sm:grid-cols-2">
+              <div className="grid gap-2.5 sm:grid-cols-2">
                 {q.choices.map((choice, i) => {
                   // Reveal correctness once the answer is known (host always;
                   // players after the question closes — server-driven).
+                  const tile = TILE[i % TILE.length]!;
                   const revealed = q.answerIndex !== null;
                   const isCorrect = revealed && i === q.answerIndex;
                   const isWrong = revealed && !isCorrect;
@@ -126,20 +190,24 @@ export function QuizPlay({ initial }: { initial: Session }) {
                       disabled={!canPick}
                       onClick={() => answer(i)}
                       className={cn(
-                        "flex items-center gap-2 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors",
-                        canPick && "hover:border-primary hover:bg-primary/5",
+                        "flex min-h-14 items-center gap-3 rounded-lg px-4 py-3 text-left text-sm font-medium text-white shadow-card transition-all",
+                        tile.bg,
+                        canPick && "hover:brightness-110 active:scale-[0.99]",
                         !canPick && "cursor-default",
-                        isCorrect && "border-brand2/60 bg-brand2/10 font-medium",
-                        isWrong && "border-border opacity-60",
-                        !revealed && "border-border",
-                        pending === i && "border-primary bg-primary/5",
+                        isCorrect && "ring-2 ring-white/80",
+                        isWrong && "opacity-35 saturate-50",
+                        pending === i && "ring-2 ring-white/60",
                       )}
                     >
-                      <span className="grid h-5 w-5 shrink-0 place-items-center rounded bg-muted text-xs font-semibold">
-                        {"ABCDEF"[i]}
+                      <span aria-hidden className="text-lg leading-none drop-shadow-sm">
+                        {tile.shape}
                       </span>
-                      <span>{choice}</span>
-                      {isCorrect && <span className="ml-auto text-brand2">✓</span>}
+                      <span className="drop-shadow-sm">{choice}</span>
+                      {isCorrect && (
+                        <span className="ml-auto grid h-6 w-6 shrink-0 place-items-center rounded-full bg-white/90 text-sm font-bold text-emerald-600">
+                          ✓
+                        </span>
+                      )}
                     </button>
                   );
                 })}
@@ -149,7 +217,7 @@ export function QuizPlay({ initial }: { initial: Session }) {
               {!isHost && joined && answered && (
                 <div
                   className={cn(
-                    "rounded-md border p-3 text-sm",
+                    "animate-fade-up rounded-md border p-3 text-sm",
                     s.you?.currentCorrect
                       ? "border-brand2/50 bg-brand2/10"
                       : "border-border bg-muted/50 text-muted-foreground",
@@ -179,13 +247,23 @@ export function QuizPlay({ initial }: { initial: Session }) {
           )}
 
           {s.status === "ENDED" && (
-            <p className="text-sm text-muted-foreground">The quiz has ended — final standings below. 🎉</p>
+            <div className="space-y-1">
+              <Podium rows={s.leaderboard} />
+              <p className="pt-2 text-center text-sm text-muted-foreground">
+                {youTopped ? "🏆 Top of the class — well played!" : "The quiz has ended — final standings below."}
+              </p>
+              {youTopped && celebratable && <Celebrate />}
+            </div>
           )}
 
           {s.you && (
             <p className="text-sm">
               Your score: <span className="tnum font-semibold">{s.you.score}</span>
-              {s.you.streak > 1 && <span className="ml-2 text-brand2">🔥 {s.you.streak} streak</span>}
+              {s.you.streak > 1 && (
+                <span className="ml-2 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-semibold text-amber-600">
+                  🔥 {s.you.streak} streak
+                </span>
+              )}
             </p>
           )}
 

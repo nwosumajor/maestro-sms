@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { BoardClocks, StatusLine, liveClockMs, postSms, useNowTick, usePolled } from "./play-ui";
+import { BoardClocks, ResultBanner, StatusLine, liveClockMs, postSms, useCelebratable, useNowTick, usePolled } from "./play-ui";
 
 type Game = Serialized<CheckersGameDto>;
 // Serialized<> flattens the [number,number] tuples to number[], so compare loosely.
@@ -28,6 +28,7 @@ export function CheckersPlay({ initial }: { initial: Game }) {
   const [msg, setMsg] = React.useState<string | null>(null);
   const [err, setErr] = React.useState(false);
   const [selected, setSelected] = React.useState<Sq | null>(null);
+  const celebratable = useCelebratable(initial.status === "FINISHED");
 
   // Claim button appears once the opponent's live clock hits zero on their turn.
   const now = useNowTick(500);
@@ -115,14 +116,16 @@ export function CheckersPlay({ initial }: { initial: Game }) {
             </div>
           )}
           {g.status === "FINISHED" && (
-            <p className={cn("text-sm font-medium", youWon ? "text-brand2" : "text-muted-foreground")}>
-              {g.outcome === "RESIGN" ? "Resigned. " : ""}
-              {youWon ? "You won! 🎉" : g.yourColor ? "You lost." : "Game over."}
-            </p>
+            <ResultBanner
+              won={Boolean(youWon)}
+              celebrate={celebratable}
+              title={youWon ? "You won!" : g.yourColor ? "You lost." : "Game over."}
+              subtitle={g.outcome === "RESIGN" ? "By resignation." : undefined}
+            />
           )}
 
           {/* Board */}
-          <div className="inline-grid grid-cols-8 overflow-hidden rounded-md border border-border">
+          <div className="inline-grid animate-pop-in grid-cols-8 overflow-hidden rounded-lg border-2 border-[hsl(25_25%_28%)] shadow-card">
             {g.board.map((row, r) =>
               row.map((cell, c) => {
                 const dark = (r + c) % 2 === 1;
@@ -137,23 +140,26 @@ export function CheckersPlay({ initial }: { initial: Game }) {
                     disabled={!dark || !g.yourTurn}
                     onClick={() => onSquare(r, c)}
                     className={cn(
-                      "relative grid h-9 w-9 place-items-center sm:h-11 sm:w-11",
-                      dark ? "bg-[hsl(28_25%_38%)]" : "bg-[hsl(36_38%_82%)]",
-                      selectable && "cursor-pointer",
+                      "relative grid h-10 w-10 place-items-center sm:h-14 sm:w-14",
+                      dark ? "bg-[hsl(25_28%_36%)]" : "bg-[hsl(36_42%_84%)]",
+                      selectable && "cursor-pointer hover:brightness-110",
                       isSel && "ring-2 ring-inset ring-primary",
                     )}
                   >
                     {cell && (
                       <span
                         className={cn(
-                          "grid h-6 w-6 place-items-center rounded-full text-[10px] font-bold shadow sm:h-8 sm:w-8",
-                          cell.color === "b" ? "bg-neutral-900 text-neutral-300" : "bg-neutral-100 text-neutral-500",
+                          "grid h-7 w-7 place-items-center rounded-full text-xs font-bold shadow-md ring-1 transition-transform sm:h-10 sm:w-10 sm:text-base",
+                          isSel && "scale-110",
+                          cell.color === "b"
+                            ? "bg-gradient-to-b from-neutral-700 to-neutral-950 text-amber-400 ring-black/60"
+                            : "bg-gradient-to-b from-white to-neutral-300 text-amber-600 ring-neutral-400/60",
                         )}
                       >
-                        {cell.king ? "♚" : ""}
+                        {cell.king ? "♛" : ""}
                       </span>
                     )}
-                    {dest && <span aria-hidden className="absolute h-2.5 w-2.5 rounded-full bg-brand2/80" />}
+                    {dest && <span aria-hidden className="absolute h-3 w-3 rounded-full bg-brand2/80 shadow-sm" />}
                   </button>
                 );
               }),

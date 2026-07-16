@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { SetPasswordForm } from "@/components/public/SetPasswordForm";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ThemeToggle } from "@/components/shell/ThemeToggle";
 
 export const dynamic = "force-dynamic";
 
@@ -9,7 +10,8 @@ export const dynamic = "force-dynamic";
 export default function WelcomePage({ searchParams }: { searchParams: { token?: string } }) {
   const token = searchParams.token ?? "";
   return (
-    <main className="force-light grid min-h-screen place-items-center bg-background p-6">
+    <main className="relative grid min-h-screen place-items-center bg-background p-6">
+      <ThemeToggle className="absolute right-4 top-4 z-20" />
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle>Welcome — activate your account</CardTitle>

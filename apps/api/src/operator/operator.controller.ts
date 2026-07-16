@@ -82,6 +82,9 @@ const provisionSchema = z
     admins: z.array(adminSchema).min(1).max(6).optional(),
     // Provisioning from a public onboarding request links + auto-APPROVEs it.
     onboardingRequestId: z.string().uuid().optional(),
+    // Referral code the new school arrived with (defaults to the linked
+    // onboarding request's stored code; explicit value wins for manual entry).
+    referralCode: z.string().max(40).optional(),
   })
   .refine((v) => Boolean(v.admin) || (v.admins && v.admins.length > 0), {
     message: "at least one admin is required",

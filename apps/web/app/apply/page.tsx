@@ -1,12 +1,14 @@
 import { ApplyForm } from "@/components/admissions/ApplyForm";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ThemeToggle } from "@/components/shell/ThemeToggle";
 
 export const dynamic = "force-dynamic";
 
 // PUBLIC page — no authentication. A prospective family applies for admission.
 export default function ApplyPage() {
   return (
-    <main className="force-light grid min-h-screen place-items-center bg-background p-6">
+    <main className="relative grid min-h-screen place-items-center bg-background p-6">
+      <ThemeToggle className="absolute right-4 top-4 z-20" />
       <Card className="w-full max-w-lg">
         <CardHeader>
           <CardTitle>Apply for admission</CardTitle>

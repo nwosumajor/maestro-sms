@@ -44,6 +44,9 @@ model OnboardingRequest {
   contactRole    String?
   /// What they run today (paper, spreadsheets, another SMS) — migration context.
   currentSystem  String?
+  /// Referral code quoted by the requester (raw string; resolved to the owning
+  /// school only at provisioning time, on the privileged client).
+  referralCode   String?
   notes          String?
   status         OnboardingRequestStatus @default(NEW)
   reviewedById   String?                 @db.Uuid

@@ -66,7 +66,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-export function OnboardForm() {
+export function OnboardForm({ defaultReferralCode = "" }: { defaultReferralCode?: string }) {
   const [f, setF] = React.useState({
     schoolName: "",
     schoolType: "" as string,
@@ -83,6 +83,7 @@ export function OnboardForm() {
     contactPhone: "",
     desiredSlug: "",
     currentSystem: "",
+    referralCode: defaultReferralCode,
     notes: "",
   });
   const [plan, setPlan] = React.useState<Plan>(PLANS.STANDARD);
@@ -176,6 +177,7 @@ export function OnboardForm() {
         desiredPlan: plan,
         desiredModules: [...extras],
         currentSystem: f.currentSystem.trim() || undefined,
+        referralCode: f.referralCode.trim() || undefined,
         notes: f.notes.trim() || undefined,
       }),
     });
@@ -336,6 +338,22 @@ export function OnboardForm() {
         <div className="space-y-1.5">
           <Label htmlFor="o-current">What do you use today? <span className="font-normal text-muted-foreground">(optional)</span></Label>
           <Input id="o-current" value={f.currentSystem} onChange={set("currentSystem")} placeholder="Paper records, spreadsheets, another system…" />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="o-referral">
+            Referral code <span className="font-normal text-muted-foreground">(optional)</span>
+          </Label>
+          <Input
+            id="o-referral"
+            value={f.referralCode}
+            onChange={set("referralCode")}
+            placeholder="e.g. GREENFIELD-7K2M"
+            className="uppercase"
+          />
+          <p className="text-xs text-muted-foreground">
+            Referred by a school already on the platform? Enter their code — when you subscribe, BOTH
+            schools get one school term of platform usage free.
+          </p>
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="o-notes">Notes <span className="font-normal text-muted-foreground">(optional)</span></Label>

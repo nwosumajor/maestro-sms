@@ -624,7 +624,7 @@ export class LiveQuizService {
           currentCorrect = ans.correct;
         }
       }
-      you = { participantId: me.id, score: me.score, streak: me.streak, answeredCurrent, currentCorrect };
+      you = { participantId: me.id, score: me.score, streak: me.streak, answeredCurrent, currentCorrect, rank: null };
     }
 
     // Leaderboard (top N by score).
@@ -635,7 +635,14 @@ export class LiveQuizService {
       correct: pt.correct,
       streak: pt.streak,
     }));
-    const ranked = rankQuizStandings(standings).slice(0, LEADERBOARD_SIZE);
+    const rankedAll = rankQuizStandings(standings);
+    const ranked = rankedAll.slice(0, LEADERBOARD_SIZE);
+    // The viewer's rank on the SAME ordering the leaderboard displays — so the
+    // UI never has to guess (score-matching would misfire on ties).
+    if (you && me) {
+      const idx = rankedAll.findIndex((r) => r.playerId === me.userId);
+      you = { ...you, rank: idx >= 0 ? idx + 1 : null };
+    }
     const names = await this.displayNames(tx, ranked.map((r) => r.playerId));
     const leaderboard = ranked.map((row, i) => ({
       userId: row.playerId,

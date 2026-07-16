@@ -10,6 +10,7 @@ import { BillingDunningService } from "./billing-dunning.service";
 import { BillingDunningScheduler } from "./billing-dunning.scheduler";
 import { BillingDunningProcessor } from "./billing-dunning.processor";
 import { PlanPricingService } from "./plan-pricing.service";
+import { ReferralService } from "./referral.service";
 
 // School self-serve platform billing. Depends on the global FoundationModule
 // (TENANT_DATABASE, AUDIT_LOG_SERVICE, ModuleEntitlementService), the shared
@@ -29,6 +30,7 @@ import { PlanPricingService } from "./plan-pricing.service";
     BillingDunningScheduler,
     BillingDunningProcessor,
     PlanPricingService,
+    ReferralService,
     { provide: BILLING_DATABASE, useExisting: PrivilegedDatabaseService },
   ],
   // PlanPricingService is exported for the operator console (super_admin sets

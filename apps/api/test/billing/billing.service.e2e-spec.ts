@@ -25,6 +25,7 @@ import { AuditLogService } from "../../src/foundation/audit-log.service";
 import { PaystackService, type PaystackEvent } from "../../src/payments/paystack.service";
 import { StripeService } from "../../src/payments/stripe.service";
 import { PlanPricingService } from "../../src/billing/plan-pricing.service";
+import { ReferralService } from "../../src/billing/referral.service";
 import type { NotificationService } from "../../src/notifications/notification.service";
 import type { Principal } from "../../src/integrity/integrity.foundation";
 
@@ -48,10 +49,12 @@ d("BillingService integration (per-seat checkout, webhook, dunning, RLS)", () =>
 
   const subRow = async (schoolId: string) => {
     const r = await admin.query(
-      `SELECT plan,status,"currentPeriodEnd" FROM school_subscription WHERE "schoolId" = $1`,
+      `SELECT plan,status,"currentPeriodEnd","referralRewardAt" FROM school_subscription WHERE "schoolId" = $1`,
       [schoolId],
     );
-    return r.rows[0] as { plan: string; status: string; currentPeriodEnd: Date | null } | undefined;
+    return r.rows[0] as
+      | { plan: string; status: string; currentPeriodEnd: Date | null; referralRewardAt: Date | null }
+      | undefined;
   };
 
   beforeAll(async () => {
@@ -89,11 +92,19 @@ d("BillingService integration (per-seat checkout, webhook, dunning, RLS)", () =>
       new StripeService(),
       dunning,
       planPricing,
+      new ReferralService(tenant, new AuditLogService() as never),
     );
   });
 
   afterAll(async () => {
-    for (const t of ["platform_subscription_payment", "school_subscription", "audit_log", "notification"]) {
+    for (const t of [
+      "school_referral_conversion",
+      "school_referral_code",
+      "platform_subscription_payment",
+      "school_subscription",
+      "audit_log",
+      "notification",
+    ]) {
       await admin.query(`DELETE FROM ${t} WHERE "schoolId" = ANY($1)`, [[SA, SB]]);
     }
     await admin.query(`DELETE FROM "user" WHERE "schoolId" = ANY($1)`, [[SA, SB]]);
@@ -204,5 +215,55 @@ d("BillingService integration (per-seat checkout, webhook, dunning, RLS)", () =>
     // Effective entitlement is BASIC: LMS stays, FEES (a STANDARD module) is gone.
     expect(await entitlements.isEnabled(SA, MODULES.LMS)).toBe(true);
     expect(await entitlements.isEnabled(SA, MODULES.FEES)).toBe(false);
+  });
+
+  it("a referred school's FIRST paid subscription rewards BOTH sides one free term — once", async () => {
+    const dayMs = 24 * 3600 * 1000;
+    const priceMinor = computeSubscriptionPriceMinor("STANDARD", 400, "TERM");
+    const pay = async (ref: string) => {
+      await admin.query(
+        `INSERT INTO platform_subscription_payment
+           (id,"schoolId",plan,"billingCycle",seats,"amountMinor",reference,status,"initiatedById","updatedAt")
+         VALUES ($1,$2,'STANDARD','TERM',400,$3,$4,'PENDING',$5,now())`,
+        [randomUUID(), SA, priceMinor, ref, UA],
+      );
+      await billing.applySubscriptionPayment({
+        event: "charge.success",
+        data: { amount: priceMinor, reference: ref, metadata: { kind: "subscription", schoolId: SA } },
+      });
+    };
+
+    // School B referred school A: B owns a code; A's subscription is stamped.
+    await admin.query(
+      `INSERT INTO school_referral_code (id,"schoolId",code,"createdById","updatedAt") VALUES ($1,$2,$3,$4,now())`,
+      [randomUUID(), SB, `BILLB-${randomUUID().slice(0, 4).toUpperCase()}`, UA],
+    );
+    await admin.query(`UPDATE school_subscription SET "referredBySchoolId" = $1 WHERE "schoolId" = $2`, [SB, SA]);
+
+    await pay(`SUB-ref1-${randomUUID().slice(0, 8)}`);
+
+    // The payer got the paid TERM (3 mo) PLUS the referral bonus term (3 mo).
+    const subA = (await subRow(SA))!;
+    expect(subA.referralRewardAt).not.toBeNull();
+    const paidGain = new Date(subA.currentPeriodEnd!).getTime() - Date.now();
+    expect(paidGain).toBeGreaterThan(170 * dayMs); // ~6 months, not just the paid 3
+
+    // The REFERRER's subscription was created/extended ~one term and a
+    // conversion ledger row records it.
+    const subB = (await subRow(SB))!;
+    expect(new Date(subB.currentPeriodEnd!).getTime() - Date.now()).toBeGreaterThan(80 * dayMs);
+    const conv = await admin.query(
+      `SELECT "referredSchoolId","rewardMonths" FROM school_referral_conversion WHERE "schoolId" = $1`,
+      [SB],
+    );
+    expect(conv.rows).toHaveLength(1);
+    expect(conv.rows[0].referredSchoolId).toBe(SA);
+
+    // A SECOND payment renews normally but grants NO second reward.
+    const endB = subB.currentPeriodEnd!;
+    await pay(`SUB-ref2-${randomUUID().slice(0, 8)}`);
+    const convAfter = await admin.query(`SELECT count(*)::int AS n FROM school_referral_conversion WHERE "schoolId" = $1`, [SB]);
+    expect(convAfter.rows[0].n).toBe(1);
+    expect(new Date((await subRow(SB))!.currentPeriodEnd!).getTime()).toBe(new Date(endB).getTime());
   });
 });

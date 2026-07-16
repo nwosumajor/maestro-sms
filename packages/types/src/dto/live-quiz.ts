@@ -67,6 +67,9 @@ export interface LiveQuizSelfDto {
   answeredCurrent: boolean;
   /** Correctness of the viewer's answer to the current question, if answered. */
   currentCorrect: boolean | null;
+  /** The viewer's rank on the SAME ordering the leaderboard shows (1 = top),
+   *  or null before any scoring. Server-computed — the UI never derives it. */
+  rank: number | null;
 }
 
 /** A live-quiz session, redacted for the requesting viewer. */

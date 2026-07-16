@@ -81,6 +81,16 @@ export function OnboardingRequests({ requests }: { requests: Req[] }) {
                 </p>
               )}
               {r.currentSystem && <p className="mt-0.5 text-xs text-muted-foreground">Currently uses: {r.currentSystem}</p>}
+              {r.referralCode && (
+                <p className="mt-0.5 text-xs">
+                  <span className="rounded bg-brand2/15 px-1.5 py-0.5 font-mono font-semibold text-brand2">
+                    Referred · {r.referralCode}
+                  </span>{" "}
+                  <span className="text-muted-foreground">
+                    (both schools earn a free term on their first paid subscription)
+                  </span>
+                </p>
+              )}
               {r.notes && <p className="mt-0.5 text-xs text-muted-foreground">{r.notes}</p>}
             </div>
             <div className="flex items-center gap-1.5">

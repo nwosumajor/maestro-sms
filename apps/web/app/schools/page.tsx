@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { PublicSchoolDto } from "@sms/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ThemeToggle } from "@/components/shell/ThemeToggle";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,8 @@ export default async function SchoolsPage() {
   const schools = await getSchools();
 
   return (
-    <main className="force-light mx-auto min-h-screen max-w-4xl bg-background p-6">
+    <main className="relative mx-auto min-h-screen max-w-4xl bg-background p-6">
+      <ThemeToggle className="absolute right-4 top-4 z-20" />
       <header className="flex items-center justify-between py-4">
         <Link href="/" className="text-lg font-semibold tracking-tight">SMS</Link>
         <Link href="/login" className="text-sm text-muted-foreground hover:text-foreground">Sign in</Link>

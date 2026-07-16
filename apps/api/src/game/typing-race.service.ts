@@ -168,6 +168,15 @@ export class TypingRaceService {
       }
       const elapsedMs = Math.max(0, Date.now() - race.startedAt.getTime());
       const r = computeTypingResult(race.passage, typed, elapsedMs);
+      // Plausibility ceiling (anti-paste): correct chars can never outrun a
+      // superhuman sustained rate from the race start — world-record typing is
+      // ~18 chars/sec, so 20/sec plus a small startup slack. Pasting the visible
+      // passage fails this instantly. The update is simply rejected: previous
+      // progress stands and the racer can keep typing — no further penalty.
+      const maxPlausibleChars = (elapsedMs / 1000) * 20 + 15;
+      if (r.correctChars > maxPlausibleChars) {
+        throw new BadRequestException("That progress arrived faster than humanly possible — it wasn't counted");
+      }
       const justFinished = r.finished;
       let rank = me.rank;
       if (justFinished) rank = await this.recordFinish(tx, race, p.userId);

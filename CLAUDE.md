@@ -146,7 +146,18 @@ conflicts with it, flag the conflict before proceeding.
   client) flips elapsed ACTIVE subs to PAST_DUE + sends renewal reminders.
   super_admin keeps override/comp via the operator PUT (now also accepts
   `status`/`currentPeriodEnd`). Perms `billing.read`/`billing.manage`/`billing.dunning.run`
-  seeded. Verified: 8 pure pricing/effective-plan unit tests + DB-gated
+  seeded. **REFERRAL PROGRAM — BUILT** (growth loop on this engine): a school
+  generates a shareable code (`GET/POST /billing/referral*`, panel on `/billing`);
+  the public `/onboard?ref=` form carries it; PRIVILEGED provisioning resolves it
+  onto the new school's `SchoolSubscription.referredBySchoolId`; the webhook's
+  FIRST paid subscription grants BOTH sides one free term (`REFERRAL_REWARD_MONTHS`
+  = CYCLE_MONTHS.TERM = 3) — atomically in the payment tx (tx-local GUC switch in
+  `ReferralService.grantRewardsInTx`, the ONE billing tenant-boundary crossing),
+  idempotent twice over (`referralRewardAt` claim + UNIQUE `referredSchoolId` on
+  the append-only `school_referral_conversion` ledger). Tables owned by the
+  REFERRER (RLS `70_referral_rls.sql`, migration `20260828000000_referral`); both
+  sides audited + notified; conversions listed on `/billing`, referral chip on the
+  operator's onboarding review. Verified: 8 pure pricing/effective-plan unit tests + DB-gated
   `billing.service.e2e` (checkout-503 / webhook apply+extend+idempotency / dunning→
   PAST_DUE→effective-BASIC) + an RLS cross-tenant case on the new payment table.
 
