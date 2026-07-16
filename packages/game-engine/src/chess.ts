@@ -3,8 +3,9 @@
 // =============================================================================
 // Complete standard rules: piece movement, check, checkmate, stalemate,
 // castling (king/queen side, with the "not through check" rule), en passant,
-// promotion, plus insufficient-material and 50-move draw detection. Two players;
-// difficulty is a time control (see `difficulty`) — the rules never change.
+// promotion, plus insufficient-material, 50-move, and threefold-repetition draw
+// detection. Two players; difficulty is a time control (see `difficulty`) — the
+// rules never change.
 //
 // Pure + framework-independent: the server drives it (validate every submitted
 // move against `legalMoves`), and clients are display-only (spec §9 authority).
@@ -40,6 +41,14 @@ export interface ChessState {
   readonly halfmove: number;
   readonly fullmove: number;
   readonly status: ChessStatus;
+  /**
+   * Occurrence count per position key since the last capture/pawn move, for the
+   * threefold-repetition draw. Any capture or pawn push makes earlier positions
+   * unrepeatable, so the map resets whenever `halfmove` resets — it stays tiny.
+   * OPTIONAL so states persisted before this rule existed still parse; counting
+   * then simply starts from the next move.
+   */
+  readonly repetition?: Readonly<Record<string, number>>;
 }
 
 export interface ChessMove {
@@ -73,7 +82,7 @@ export function newChessGame(): ChessState {
     board[6]![c] = { color: "w", type: "p" };
     board[7]![c] = { color: "w", type: back[c]! };
   }
-  return {
+  const start: Omit<ChessState, "repetition"> = {
     board,
     turn: "w",
     castling: { wK: true, wQ: true, bK: true, bQ: true },
@@ -82,6 +91,26 @@ export function newChessGame(): ChessState {
     fullmove: 1,
     status: "PLAYING",
   };
+  return { ...start, repetition: { [positionKey(start)]: 1 } };
+}
+
+/**
+ * Position identity for the repetition rule: piece placement + side to move +
+ * castling rights + en-passant target. (Using the raw ep square is the standard
+ * simplification of FIDE's "ep capture actually possible" wording — at worst it
+ * under-counts a repetition, never over-counts one.)
+ */
+export function positionKey(s: Pick<ChessState, "board" | "turn" | "castling" | "ep">): string {
+  const rows = s.board
+    .map((row) =>
+      row
+        .map((p) => (p ? (p.color === "w" ? p.type.toUpperCase() : p.type) : "."))
+        .join(""),
+    )
+    .join("/");
+  const castle =
+    (s.castling.wK ? "K" : "") + (s.castling.wQ ? "Q" : "") + (s.castling.bK ? "k" : "") + (s.castling.bQ ? "q" : "") || "-";
+  return `${rows} ${s.turn} ${castle} ${s.ep ? sqName(s.ep) : "-"}`;
 }
 
 const KNIGHT = [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]] as const;
@@ -336,7 +365,14 @@ export function applyMove(state: ChessState, move: ChessMove): ChessState {
   const turn = other(state.turn);
 
   const next: ChessState = { board, turn, castling, ep, halfmove, fullmove, status: "PLAYING" };
-  return { ...next, status: computeStatus(next) };
+  // Threefold repetition: count this position; an irreversible move (halfmove
+  // reset) makes every earlier position unrepeatable, so start a fresh map.
+  const key = positionKey(next);
+  const count = halfmove === 0 ? 1 : (state.repetition?.[key] ?? 0) + 1;
+  const repetition = halfmove === 0 ? { [key]: 1 } : { ...(state.repetition ?? {}), [key]: count };
+  let status = computeStatus(next);
+  if (count >= 3 && (status === "PLAYING" || status === "CHECK")) status = "DRAW";
+  return { ...next, repetition, status };
 }
 
 function dropRookRight(c: CastlingRights, r: number, col: number): void {

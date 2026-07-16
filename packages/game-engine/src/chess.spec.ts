@@ -6,6 +6,7 @@ import {
   insufficientMaterial,
   movesEqual,
   nameSq,
+  positionKey,
   sqName,
   type Board,
   type ChessState,
@@ -135,5 +136,36 @@ describe("Chess engine", () => {
 
   it("rejects an illegal move", () => {
     expect(() => applyMove(newChessGame(), mv("e2", "e5"))).toThrow();
+  });
+
+  it("threefold repetition is a draw (knight shuffle back to the start twice)", () => {
+    // Each 4-ply shuffle returns to the starting position: counted at game
+    // start (1), after the first shuffle (2), after the second (3) → DRAW.
+    const shuffle = [mv("g1", "f3"), mv("g8", "f6"), mv("f3", "g1"), mv("f6", "g8")];
+    let g = newChessGame();
+    for (const m of shuffle) g = applyMove(g, m);
+    expect(g.status).toBe("PLAYING"); // 2nd occurrence — not yet a draw
+    for (const m of shuffle.slice(0, 3)) g = applyMove(g, m);
+    expect(g.status).toBe("PLAYING");
+    g = applyMove(g, shuffle[3]!);
+    expect(g.status).toBe("DRAW"); // 3rd occurrence
+    expect(legalMoves(g).length).toBe(0); // terminal — no moves offered
+  });
+
+  it("an irreversible move (pawn push / capture) resets repetition counting", () => {
+    const shuffle = [mv("g1", "f3"), mv("g8", "f6"), mv("f3", "g1"), mv("f6", "g8")];
+    let g = newChessGame();
+    for (const m of shuffle) g = applyMove(g, m); // start position ×2
+    g = applyMove(g, mv("e2", "e4")); // pawn push — nothing before can recur
+    expect(g.status).toBe("PLAYING");
+    expect(Object.keys(g.repetition!)).toEqual([positionKey(g)]);
+    expect(g.repetition![positionKey(g)]).toBe(1);
+  });
+
+  it("tolerates legacy states persisted without a repetition map", () => {
+    const s = makeState({ e1: "wk", a1: "wr", e8: "bk" }, "w"); // no `repetition`
+    const after = applyMove(s, mv("a1", "a2"));
+    expect(after.status).toBe("PLAYING");
+    expect(after.repetition![positionKey(after)]).toBe(1); // counting starts now
   });
 });
