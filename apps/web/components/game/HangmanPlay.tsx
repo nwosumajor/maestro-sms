@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { StatusLine, postSms, usePolled } from "./play-ui";
+import { Celebrate, StatusLine, postSms, useCelebratable, usePolled } from "./play-ui";
 
 type Game = Serialized<HangmanGameDto>;
 const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
@@ -24,6 +24,7 @@ export function HangmanPlay({ initial }: { initial: Game }) {
   const [msg, setMsg] = React.useState<string | null>(null);
   const [err, setErr] = React.useState(false);
   const [pending, setPending] = React.useState<string | null>(null);
+  const celebratable = useCelebratable(initial.you?.status === "WON");
 
   const isHost = g.isHost;
   const you = g.you;
@@ -127,8 +128,9 @@ export function HangmanPlay({ initial }: { initial: Game }) {
 
           {/* Player outcome */}
           {you?.status === "WON" && (
-            <p className="rounded-md border border-brand2/50 bg-brand2/10 p-3 text-center text-sm font-medium">
-              ✅ Solved it{you.rank ? ` — placed #${you.rank}!` : "!"}
+            <p className="animate-pop-in rounded-md border border-brand2/50 bg-brand2/10 p-3 text-center text-sm font-medium">
+              {you.rank && you.rank <= 3 ? "🏆" : "✅"} Solved it{you.rank ? ` — placed #${you.rank}!` : "!"}
+              {you.rank === 1 && celebratable && <Celebrate />}
             </p>
           )}
           {you?.status === "LOST" && (

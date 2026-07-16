@@ -360,6 +360,88 @@ export function StatusLine({ msg, error }: { msg: string | null; error?: boolean
   return <p className={cn("text-sm", error ? "text-destructive" : "text-muted-foreground")}>{msg}</p>;
 }
 
+// --- win moments ---------------------------------------------------------------
+
+const CONFETTI_COLORS = ["#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#a855f7"];
+
+/** One-shot full-screen confetti burst. Purely decorative: pointer-events-none,
+ *  hidden under prefers-reduced-motion, and unmounts itself when the fall ends. */
+export function Celebrate() {
+  const [done, setDone] = React.useState(false);
+  React.useEffect(() => {
+    const id = setTimeout(() => setDone(true), 4200);
+    return () => clearTimeout(id);
+  }, []);
+  const pieces = React.useMemo(
+    () =>
+      Array.from({ length: 36 }, (_, i) => ({
+        left: (i * 137.5) % 100, // golden-angle spread — even but not gridded
+        delay: (i % 9) * 0.14,
+        duration: 2.2 + (i % 5) * 0.3,
+        color: CONFETTI_COLORS[i % CONFETTI_COLORS.length]!,
+        size: 6 + (i % 3) * 3,
+        skew: (i % 2 ? 1 : -1) * (i % 4) * 8,
+      })),
+    [],
+  );
+  if (done) return null;
+  return (
+    <div aria-hidden className="pointer-events-none fixed inset-0 z-50 overflow-hidden motion-reduce:hidden">
+      {pieces.map((p, i) => (
+        <span
+          key={i}
+          className="absolute top-0 block animate-confetti-fall rounded-[1px]"
+          style={{
+            left: `${p.left}%`,
+            width: p.size,
+            height: p.size * 0.45,
+            backgroundColor: p.color,
+            animationDelay: `${p.delay}s`,
+            animationDuration: `${p.duration}s`,
+            transform: `skewX(${p.skew}deg)`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** Track whether a finish deserves a celebration: only when the game ENDS while
+ *  this screen is watching — reloading an already-finished game stays quiet. */
+export function useCelebratable(initiallyFinished: boolean): boolean {
+  return React.useRef(!initiallyFinished).current;
+}
+
+/** The shared end-of-game banner. A personal win gets the trophy treatment (and
+ *  confetti when `celebrate`); everything else stays a quiet, factual close. */
+export function ResultBanner({
+  won,
+  title,
+  subtitle,
+  celebrate = false,
+}: {
+  won: boolean;
+  title: string;
+  subtitle?: string;
+  celebrate?: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        "animate-pop-in rounded-lg border p-4",
+        won ? "border-brand2/50 bg-brand2/10" : "border-border bg-muted/30",
+      )}
+    >
+      <p className="text-lg font-semibold">
+        {won ? "🏆 " : ""}
+        {title}
+      </p>
+      {subtitle && <p className="mt-0.5 text-sm text-muted-foreground">{subtitle}</p>}
+      {won && celebrate && <Celebrate />}
+    </div>
+  );
+}
+
 // --- board-game clocks -------------------------------------------------------
 
 /** Re-render on an interval so ticking clocks stay live. */

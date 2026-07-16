@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { GuessForm, GuessList, LiveDot, StatusLine, postSms, useLiveGame } from "./play-ui";
+import { Celebrate, GuessForm, GuessList, LiveDot, StatusLine, postSms, useCelebratable, useLiveGame } from "./play-ui";
 
 type Race = Serialized<RaceDto>;
 
@@ -22,6 +22,7 @@ export function RacePlay({ initial, canOpen }: { initial: Race; canOpen: boolean
   });
   const [msg, setMsg] = React.useState<string | null>(null);
   const [err, setErr] = React.useState(false);
+  const celebratable = useCelebratable(!!initial.yourFinish);
 
   const act = async (fn: () => ReturnType<typeof postSms>) => {
     setMsg(null);
@@ -75,9 +76,10 @@ export function RacePlay({ initial, canOpen }: { initial: Race; canOpen: boolean
           )}
 
           {race.status === "ACTIVE" && joined && finished && race.yourFinish && (
-            <div className="rounded-md border border-primary/40 bg-primary/5 p-4">
+            <div className="animate-pop-in rounded-md border border-brand2/50 bg-brand2/10 p-4">
+              {race.yourFinish.rank <= 3 && celebratable && <Celebrate />}
               <p className="font-semibold">
-                ✅ Cracked it in {race.yourFinish.guessCount} guesses — placed #{race.yourFinish.rank}!
+                {race.yourFinish.rank <= 3 ? "🏆" : "✅"} Cracked it in {race.yourFinish.guessCount} guesses — placed #{race.yourFinish.rank}!
               </p>
             </div>
           )}

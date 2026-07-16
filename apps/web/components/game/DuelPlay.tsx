@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { GuessForm, LiveDot, ScorePips, StatusLine, digitsValid, postSms, useLiveGame } from "./play-ui";
+import { GuessForm, LiveDot, ResultBanner, ScorePips, StatusLine, digitsValid, postSms, useCelebratable, useLiveGame } from "./play-ui";
 import { Input } from "@/components/ui/input";
 
 type Game = Serialized<GameDto>;
@@ -21,6 +21,7 @@ export function DuelPlay({ initial }: { initial: Game }) {
   });
   const [msg, setMsg] = React.useState<string | null>(null);
   const [err, setErr] = React.useState(false);
+  const celebratable = useCelebratable(initial.status === "FINISHED");
 
   const me = game.players.find((p) => p.playerId === game.you) ?? null;
   const opponent = game.players.find((p) => p.playerId !== game.you) ?? null;
@@ -100,7 +101,18 @@ export function DuelPlay({ initial }: { initial: Game }) {
           )}
 
           {game.status === "FINISHED" && (
-            <Result won={game.winnerPlayerId === game.you} winner={game.winnerPlayerId ? nameOf(game.winnerPlayerId) : null} />
+            <ResultBanner
+              won={game.winnerPlayerId === game.you}
+              celebrate={celebratable}
+              title={
+                game.winnerPlayerId === game.you
+                  ? "You cracked it — you win!"
+                  : game.winnerPlayerId
+                    ? `${nameOf(game.winnerPlayerId)} won`
+                    : "Game over"
+              }
+              subtitle="The secrets were cleared from the server."
+            />
           )}
 
           {game.status === "ABANDONED" && (
@@ -195,15 +207,6 @@ function SecretSetup({
         </Button>
       </div>
       <p className="text-xs text-muted-foreground">Your opponent never sees this — the server keeps it.</p>
-    </div>
-  );
-}
-
-function Result({ won, winner }: { won: boolean; winner: string | null }) {
-  return (
-    <div className={cn("rounded-md border p-4", won ? "border-primary/40 bg-primary/5" : "border-border")}>
-      <p className="text-lg font-semibold">{won ? "🎉 You won!" : winner ? `${winner} won` : "Game over"}</p>
-      <p className="text-sm text-muted-foreground">The secrets were cleared from the server.</p>
     </div>
   );
 }
