@@ -838,7 +838,14 @@ async function Plans() {
           <p className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-brand2/30 bg-brand2/10 px-3 py-1 text-xs font-medium text-brand2">
             <CheckIcon className="h-3.5 w-3.5" aria-hidden />
             Every school starts with a 30-day free trial — no card required
-          </p>
+          </p>{" "}
+          <a
+            href="#referral"
+            className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-brand2/30 bg-brand2/10 px-3 py-1 text-xs font-medium text-brand2 transition-colors hover:bg-brand2/20"
+          >
+            <CheckIcon className="h-3.5 w-3.5" aria-hidden />
+            Referred by a school? You BOTH get a free term when you subscribe →
+          </a>
         </div>
         <div className="mt-12 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           {plans.map((p) => (
@@ -885,6 +892,71 @@ async function Plans() {
           or per year (3 terms / 9 months — save 15%). No setup fees, change plans any time, and your data is
           never deleted — even if a payment lapses, your school keeps running on the core modules until you renew.
         </p>
+      </div>
+    </section>
+  );
+}
+
+function ReferralBand() {
+  return (
+    <section id="referral" className="scroll-mt-20 border-b border-border/60 bg-background">
+      <div className="mx-auto max-w-6xl px-5 py-16 sm:px-8">
+        <div className="grid items-center gap-10 lg:grid-cols-[1.2fr_1fr]">
+          <div>
+            <p className="eyebrow text-brand2">Referral programme</p>
+            <h2 className="mt-3 font-display text-3xl font-semibold tracking-tight sm:text-4xl">
+              Give a term, get a term.
+            </h2>
+            <p className="mt-4 max-w-xl text-base leading-relaxed text-muted-foreground">
+              Know another school that should be here? Share your referral code — when they subscribe to
+              any paid plan, <span className="font-semibold text-foreground">both schools get one school
+              term (3 months) of platform usage free</span>. Yours is added to your current plan; theirs
+              stacks on top of the plan they chose.
+            </p>
+            <ul className="mt-5 space-y-2 text-sm text-muted-foreground">
+              {[
+                "Applied automatically the moment their first subscription payment lands",
+                "No limit — every school you refer earns you another free term",
+                "Track every referral and reward from your Billing page",
+              ].map((t) => (
+                <li key={t} className="flex items-start gap-2">
+                  <CheckIcon className="mt-0.5 h-4 w-4 shrink-0 text-brand2" aria-hidden />
+                  {t}
+                </li>
+              ))}
+            </ul>
+            <div className="mt-7 flex flex-wrap gap-3">
+              <Link href="/login">
+                <Button>Get your referral code</Button>
+              </Link>
+              <Link href="/onboard">
+                <Button variant="outline">Been referred? Start here</Button>
+              </Link>
+            </div>
+            <p className="mt-3 text-xs text-muted-foreground">
+              Your code lives in Billing → Refer a school. Referred schools enter it on the onboarding
+              form — or just use your share link.
+            </p>
+          </div>
+          {/* The offer, stated as the receipt it becomes. */}
+          <div className="rounded-xl border border-brand2/30 bg-brand2/[0.06] p-6 shadow-card">
+            <p className="font-mono text-xs uppercase tracking-wider text-muted-foreground">When they subscribe</p>
+            <div className="mt-4 space-y-3">
+              <div className="flex items-center justify-between rounded-lg border border-border bg-background px-4 py-3">
+                <span className="text-sm font-medium">Your school</span>
+                <span className="text-sm font-semibold text-brand2">+1 term free · your plan</span>
+              </div>
+              <div className="flex items-center justify-between rounded-lg border border-border bg-background px-4 py-3">
+                <span className="text-sm font-medium">The school you referred</span>
+                <span className="text-sm font-semibold text-brand2">+1 term free · their plan</span>
+              </div>
+            </div>
+            <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
+              One school term = 3 months. Rewards extend the paid period directly — no coupons, no forms,
+              audit-logged like everything else.
+            </p>
+          </div>
+        </div>
       </div>
     </section>
   );
@@ -951,6 +1023,10 @@ const FAQS: { q: string; a: string }[] = [
   {
     q: "How long does onboarding actually take?",
     a: "The request form takes about five minutes; we review within 1–2 working days. Your admins get secure set-password links by email, bulk student import creates accounts with login slips in minutes, and the in-app guide walks every role through their first week.",
+  },
+  {
+    q: "Do you reward referrals?",
+    a: "Yes — give a term, get a term. Share your school's referral code (Billing → Refer a school); when the school you referred makes its first paid subscription on any plan, both schools automatically get one school term (3 months) of platform usage free. There's no cap: every school you refer earns another free term, and every reward shows in your billing history.",
   },
 ];
 
@@ -1074,6 +1150,7 @@ function Footer() {
         { label: "Modules", href: "#modules" },
         { label: "Security & privacy", href: "#security" },
         { label: "Plans & pricing", href: "#plans" },
+        { label: "Referral programme", href: "#referral" },
         { label: "How onboarding works", href: "#onboard" },
       ],
     },
@@ -1164,6 +1241,7 @@ export default function Home() {
       <PhotoMarquee />
       <RevenueBand />
       <Plans />
+      <ReferralBand />
       <Steps />
       <Faq />
       <Onboard />
