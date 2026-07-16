@@ -41,6 +41,11 @@ import {
   NOTIFICATION_CHANNEL_PROVIDER,
   type NotificationChannelProvider,
 } from "../notifications/notification.constants";
+import { BadRequestException, ServiceUnavailableException } from "@nestjs/common";
+import { computePlatformFeeMinor } from "@sms/types";
+import { PaystackService, type PaystackEvent } from "../payments/paystack.service";
+import { PlatformFeeService } from "../billing/platform-fee.service";
+import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 
 const ZERO = "00000000-0000-0000-0000-000000000000";
 
@@ -72,6 +77,8 @@ interface AppRow {
   examDate: Date | null;
   examNote: string | null;
   reviewNote: string | null;
+  formFeeMinor: number;
+  formFeePaidAt: Date | null;
   createdAt: Date;
 }
 
@@ -81,6 +88,9 @@ export class AdmissionsService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     @Inject(NOTIFICATION_CHANNEL_PROVIDER) private readonly channel: NotificationChannelProvider,
+    private readonly paystack: PaystackService,
+    private readonly platformFees: PlatformFeeService,
+    private readonly privileged: PrivilegedDatabaseService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -90,13 +100,22 @@ export class AdmissionsService {
   /** PUBLIC: submit a comprehensive enrolment application to a school by slug. */
   async submit(input: AdmissionInput) {
     // School is RLS-exempt, so we can resolve the slug under a placeholder GUC.
-    const school = await this.db.runAsTenant<{ id: string } | null>(
-      { schoolId: ZERO, userId: ZERO },
-      (tx) => tx.school.findFirst({ where: { slug: input.schoolSlug, status: "ACTIVE", isPlatform: false }, select: { id: true } }),
+    const school = await this.db.runAsTenant<
+      { id: string; admissionFormFeeMinor: number; paystackSubaccountCode: string | null } | null
+    >({ schoolId: ZERO, userId: ZERO }, (tx) =>
+      tx.school.findFirst({
+        where: { slug: input.schoolSlug, status: "ACTIVE", isPlatform: false },
+        select: { id: true, admissionFormFeeMinor: true, paystackSubaccountCode: true },
+      }),
     );
     if (!school) throw new NotFoundException("School not found");
 
-    return this.db.runAsTenant({ schoolId: school.id, userId: ZERO }, (tx) =>
+    // Snapshot the form fee at submission — a later fee change never affects an
+    // in-flight application. The fee is only collectable online, so it applies
+    // only while the gateway is configured.
+    const formFeeMinor = this.paystack.isConfigured() ? Math.max(0, school.admissionFormFeeMinor) : 0;
+
+    const created = await this.db.runAsTenant({ schoolId: school.id, userId: ZERO }, (tx) =>
       tx.admissionApplication.create({
         data: {
           schoolId: school.id,
@@ -108,6 +127,7 @@ export class AdmissionsService {
           desiredClass: input.desiredClass ?? input.details?.desiredClass ?? null,
           notes: input.notes ?? input.details?.notes ?? null,
           details: input.details ? (input.details as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
+          formFeeMinor,
           // Initialise the maker-checker chain (Admin → HR → Principal).
           stages: ADMISSION_REVIEW_CHAIN as unknown as Prisma.InputJsonValue,
           currentStage: 0,
@@ -117,6 +137,124 @@ export class AdmissionsService {
         select: { id: true, status: true },
       }),
     );
+
+    // Fee due → hand the applicant straight to the hosted checkout. A failure
+    // here never loses the application: the public retry init covers it.
+    if (formFeeMinor > 0) {
+      try {
+        const pay = await this.initFormFeeCharge(school.id, created.id, input.applicantEmail, formFeeMinor, school.paystackSubaccountCode);
+        return { ...created, formFeeMinor, payment: pay };
+      } catch {
+        return { ...created, formFeeMinor, payment: null };
+      }
+    }
+    return { ...created, formFeeMinor, payment: null };
+  }
+
+  /** PUBLIC: (re)start the hosted checkout for an application's form fee — the
+   *  applicant may have abandoned the first redirect. The application id is an
+   *  unguessable uuid; the slug scopes the tenant lookup. */
+  async initFormFeePayment(schoolSlug: string, applicationId: string) {
+    if (!this.paystack.isConfigured()) {
+      throw new ServiceUnavailableException("Online payments are not configured");
+    }
+    const school = await this.db.runAsTenant<
+      { id: string; paystackSubaccountCode: string | null } | null
+    >({ schoolId: ZERO, userId: ZERO }, (tx) =>
+      tx.school.findFirst({
+        where: { slug: schoolSlug, status: "ACTIVE", isPlatform: false },
+        select: { id: true, paystackSubaccountCode: true },
+      }),
+    );
+    if (!school) throw new NotFoundException("School not found");
+    const app = await this.db.runAsTenant({ schoolId: school.id, userId: ZERO }, (tx) =>
+      tx.admissionApplication.findFirst({
+        where: { id: applicationId },
+        select: { id: true, applicantEmail: true, formFeeMinor: true, formFeePaidAt: true },
+      }),
+    );
+    if (!app) throw new NotFoundException("Application not found");
+    if (app.formFeeMinor <= 0) throw new BadRequestException("This application has no form fee");
+    if (app.formFeePaidAt) throw new ConflictException("The form fee is already paid");
+    return this.initFormFeeCharge(school.id, app.id, app.applicantEmail, app.formFeeMinor, school.paystackSubaccountCode);
+  }
+
+  /** Start the Paystack charge for a form fee: settles to the school's bank
+   *  (split) with the platform's take-rate applied — the same rails as fee
+   *  collection. The applicant always bears their own form fee. */
+  private async initFormFeeCharge(
+    schoolId: string,
+    applicationId: string,
+    email: string,
+    feeMinor: number,
+    subaccount: string | null,
+  ): Promise<{ authorizationUrl: string; reference: string; amountMinor: number }> {
+    const cfg = await this.platformFees.effective();
+    const platformTake = subaccount ? computePlatformFeeMinor(feeMinor, cfg) : 0;
+    const reference = `ADM-${applicationId.slice(0, 8)}-${Date.now()}`;
+    const { authorizationUrl } = await this.paystack.initialize({
+      email,
+      amountMinor: feeMinor,
+      reference,
+      metadata: { kind: "admission_form", applicationId, schoolId },
+      subaccount: subaccount ?? undefined,
+      bearer: "subaccount",
+      transactionChargeMinor: platformTake,
+    });
+    return { authorizationUrl, reference, amountMinor: feeMinor };
+  }
+
+  /** Verified webhook (dispatched by metadata.kind === "admission_form"):
+   *  mark the application's form fee paid. Idempotent on the gateway reference.
+   *  No audit entry: the actor is the anonymous applicant (no user FK) — the
+   *  same posture as the public careers intake. */
+  async applyFormFeePayment(event: PaystackEvent): Promise<{ ok: boolean }> {
+    if (event.event !== "charge.success") return { ok: true };
+    const { applicationId, schoolId } = (event.data.metadata ?? {}) as { applicationId?: string; schoolId?: string };
+    if (!applicationId || !schoolId) return { ok: true };
+    await this.db.runAsTenant({ schoolId, userId: ZERO }, async (tx) => {
+      // Idempotent: only the FIRST successful charge stamps the fee.
+      await tx.admissionApplication.updateMany({
+        where: { id: applicationId, formFeePaidAt: null },
+        data: { formFeePaidAt: new Date(), formFeeRef: event.data.reference },
+      });
+    });
+    return { ok: true };
+  }
+
+  /** The school's current admission-form fee (staff view). */
+  async getFormFee(p: Principal): Promise<{ formFeeMinor: number }> {
+    const row = await this.db.runAsTenant(this.ctx(p), (tx) =>
+      tx.school.findFirst({ where: { id: p.schoolId }, select: { admissionFormFeeMinor: true } }),
+    );
+    return { formFeeMinor: row?.admissionFormFeeMinor ?? 0 };
+  }
+
+  /** Finance staff set the school's admission-form fee (kobo; 0 = free).
+   *  Global-registry write → PRIVILEGED client (same posture as settlement). */
+  async setFormFee(p: Principal, feeMinor: number): Promise<{ formFeeMinor: number }> {
+    if (!Number.isInteger(feeMinor) || feeMinor < 0 || feeMinor > 100_000_000) {
+      throw new BadRequestException("feeMinor must be an integer 0–100,000,000 (kobo)");
+    }
+    const client = this.privileged.client;
+    if (!client) {
+      throw new ServiceUnavailableException("Fee management requires the privileged database configuration");
+    }
+    await client.school.update({ where: { id: p.schoolId }, data: { admissionFormFeeMinor: feeMinor } });
+    await this.db.runAsTenant(this.ctx(p), (tx) =>
+      this.audit.record(
+        {
+          actorId: p.userId,
+          action: "admission.form_fee.set",
+          entity: "school",
+          entityId: p.schoolId,
+          schoolId: p.schoolId,
+          metadata: { feeMinor },
+        },
+        tx,
+      ),
+    );
+    return { formFeeMinor: feeMinor };
   }
 
   async list(p: Principal): Promise<AdmissionApplicationDto[]> {
@@ -294,6 +432,8 @@ export class AdmissionsService {
       examDate: r.examDate,
       examNote: r.examNote,
       reviewNote: r.reviewNote,
+      formFeeMinor: r.formFeeMinor,
+      formFeePaidAt: r.formFeePaidAt,
       createdAt: r.createdAt,
     };
   }

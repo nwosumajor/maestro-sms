@@ -26,6 +26,7 @@ import { PaystackService, type PaystackEvent } from "../../src/payments/paystack
 import { StripeService } from "../../src/payments/stripe.service";
 import { PlanPricingService } from "../../src/billing/plan-pricing.service";
 import { ReferralService } from "../../src/billing/referral.service";
+import { GrowthService } from "../../src/billing/growth.service";
 import type { NotificationService } from "../../src/notifications/notification.service";
 import type { Principal } from "../../src/integrity/integrity.foundation";
 
@@ -77,6 +78,8 @@ d("BillingService integration (per-seat checkout, webhook, dunning, RLS)", () =>
       { client: privileged } as never,
       entitlements,
       notifications,
+      new PaystackService(),
+      new PlanPricingService(tenant, new AuditLogService() as never, { client: privileged } as never),
     );
     const planPricing = new PlanPricingService(
       tenant,
@@ -93,6 +96,7 @@ d("BillingService integration (per-seat checkout, webhook, dunning, RLS)", () =>
       dunning,
       planPricing,
       new ReferralService(tenant, new AuditLogService() as never),
+      new GrowthService(tenant, new AuditLogService() as never, { client: privileged } as never),
     );
   });
 

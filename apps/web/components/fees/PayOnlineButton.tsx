@@ -11,12 +11,18 @@ export function PayOnlineButton({ invoiceId }: { invoiceId: string }) {
   const pay = async () => {
     setBusy(true); setMsg(null);
     const res = await fetch(`/api/sms/invoices/${invoiceId}/pay/init`, { method: "POST" });
-    setBusy(false);
     if (res.ok) {
-      const data = (await res.json()) as { authorizationUrl: string };
+      const data = (await res.json()) as { authorizationUrl: string; feeMinor?: number; chargedMinor?: number };
+      // Transparency before the redirect: when a payer-borne convenience fee
+      // applies, say so (the gateway page shows only the total).
+      if (data.feeMinor && data.feeMinor > 0 && data.chargedMinor) {
+        const fmt = (n: number) => new Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN" }).format(n / 100);
+        setMsg(`Includes a ${fmt(data.feeMinor)} platform convenience fee — total ${fmt(data.chargedMinor)}. Redirecting…`);
+      }
       window.location.href = data.authorizationUrl;
       return;
     }
+    setBusy(false);
     setMsg(res.status === 503 ? "Online payments are not configured for this school." : await readApiError(res));
   };
 

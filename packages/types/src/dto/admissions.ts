@@ -47,5 +47,9 @@ export interface AdmissionApplicationDto {
   examDate: Date | null;
   examNote: string | null;
   reviewNote: string | null;
+  /** Form-fee snapshot at submission (kobo; 0 = free application). */
+  formFeeMinor: number;
+  /** When the form fee settled; null = unpaid (staff see an UNPAID chip). */
+  formFeePaidAt: Date | null;
   createdAt: Date;
 }

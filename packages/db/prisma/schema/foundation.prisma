@@ -30,6 +30,15 @@ model School {
   /// Display-only last 4 digits of the settlement account (full number is never
   /// stored — it lives with Paystack).
   settlementAccountLast4 String?
+  /// Per-school override of who bears the platform's online-payment convenience
+  /// fee: PARENT | SCHOOL; null → the platform-wide default. Set by the school's
+  /// own finance staff (fee.manage + step-up, privileged write like settlement).
+  paymentFeeBearer       String?
+  /// Admission-form fee (kobo) charged to PUBLIC applicants before review;
+  /// 0 = free applications. Set by finance staff (fee.manage + step-up,
+  /// privileged write). Collected via the school's settlement split with the
+  /// platform's take-rate applied — the same rails as fee collection.
+  admissionFormFeeMinor  Int      @default(0)
   /// NDPR-aligned retention window (days) for integrity TELEMETRY on minors —
   /// integrity_signal / submission_draft / submission_telemetry. Read by the
   /// privileged retention job; rows older than this are purged. Per-school policy
@@ -203,14 +212,24 @@ model SchoolSubscription {
   currency             String?
   /// Amount last charged (minor units, NGN kobo).
   priceMinor           Int?
-  /// Paystack customer code (reserved for future saved-card recurring).
+  /// Paystack customer code (captured with the saved card).
   paystackCustomerCode String?
+  /// Saved-card recurring: the reusable Paystack authorization_code, field-
+  /// encrypted at rest (per-tenant key) — captured from the school's own
+  /// successful subscription charge, never entered by hand. cardLast4 is the
+  /// display hint. autoRenew arms the pre-dunning renewal charge.
+  paystackAuthorizationEnc String?
+  cardLast4                String?
+  autoRenew                Boolean @default(false)
   /// Set at provisioning when this school arrived via a referral code — the
   /// school that referred them. The billing webhook grants BOTH sides one free
   /// term on this school's FIRST paid subscription, then stamps
   /// referralRewardAt so a retry / later renewal can never double-grant.
   referredBySchoolId   String?   @db.Uuid
   referralRewardAt     DateTime?
+  /// Agent (reseller) attribution: set at provisioning from the agent's code;
+  /// commission accrues once, on this school's FIRST paid subscription.
+  agentId              String?   @db.Uuid
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
@@ -225,6 +244,27 @@ model SchoolSubscription {
 /// tenant (quotes/checkout/public pricing page) — carries NO tenant data.
 /// Writes go ONLY through the PRIVILEGED client (operator PUT, step-up, audited);
 /// the least-privilege app role has SELECT only (see rls/46_plan_pricing_rls.sql).
+/// GLOBAL (RLS-EXEMPT, like `plan_price`): the platform's convenience fee on
+/// ONLINE school-fee payments — one row (id "fees"). App role SELECT-only;
+/// writes via the PRIVILEGED client (operator PUT, step-up, audited). Missing
+/// row ⇒ DEFAULT_PLATFORM_FEE in @sms/types (ZERO — fail-safe: nobody is
+/// charged until the operator opts in). See rls/71_platform_fee_rls.sql.
+model PlatformFeeConfig {
+  id        String   @id
+  /// Flat component, minor units (kobo).
+  flatMinor Int      @default(0)
+  /// Percentage component in basis points (100 bp = 1%).
+  percentBp Int      @default(0)
+  /// Ceiling on the total fee, minor units; null = uncapped.
+  capMinor  Int?
+  /// Platform-wide default bearer: PARENT | SCHOOL (school may override its own
+  /// via school.paymentFeeBearer).
+  bearer    String   @default("PARENT")
+  updatedAt DateTime @updatedAt
+
+  @@map("platform_fee_config")
+}
+
 model PlanPrice {
   /// STANDARD | PREMIUM | ULTIMATE | ENTERPRISE (validated against @sms/types PLANS).
   plan                String
@@ -260,6 +300,13 @@ model PlatformSubscriptionPayment {
   reference     String    @unique
   /// PENDING | PAID | FAILED.
   status        String    @default("PENDING")
+  /// How this payment applies when it settles (SUBSCRIPTION_PAYMENT_KINDS):
+  /// RENEWAL extends the period; UPGRADE restarts it from now (unused time was
+  /// credited at checkout); TRUEUP updates the billed seats only.
+  kind          String    @default("RENEWAL")
+  /// Promo code snapshot when one discounted this charge (settle-time increments
+  /// the code's usedCount).
+  promoCode     String?
   /// Period this payment covers (set when PAID).
   periodStart   DateTime?
   periodEnd     DateTime?

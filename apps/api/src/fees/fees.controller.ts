@@ -63,6 +63,8 @@ const settlementSchema = z.object({
   accountNumber: z.string().regex(/^\d{10}$/),
 });
 
+const feeBearerSchema = z.object({ bearer: z.enum(["PARENT", "SCHOOL"]) });
+
 @RequireModule(MODULES.FEES)
 @Controller()
 export class FeesController {
@@ -107,6 +109,19 @@ export class FeesController {
     @Body(new ZodValidationPipe(settlementSchema)) body: z.infer<typeof settlementSchema>,
   ) {
     return this.gateway.setSettlement(p, body);
+  }
+
+  /** Choose who bears the platform's online-payment convenience fee for this
+   *  school: PARENT (payer pays invoice + fee) or SCHOOL (fee comes out of
+   *  settlement). Step-up: it changes what parents are charged. */
+  @Put("fees/settlement/fee-bearer")
+  @RequirePermission(FEES_PERMISSIONS.FEE_MANAGE)
+  @RequireStepUp()
+  setFeeBearer(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(feeBearerSchema)) body: z.infer<typeof feeBearerSchema>,
+  ) {
+    return this.gateway.setFeeBearer(p, body.bearer);
   }
 
   /** Send payment reminders to guardians of students with outstanding invoices. */

@@ -1,10 +1,11 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Put, UseGuards } from "@nestjs/common";
 import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
 import { RateLimitGuard } from "../common/rate-limit.guard";
 import type { AdmissionApplicationDto } from "@sms/types";
 import { z } from "zod";
-import { ADMISSION_PERMISSIONS } from "@sms/types";
+import { ADMISSION_PERMISSIONS, FEES_PERMISSIONS } from "@sms/types";
+import { RequireStepUp } from "../auth/require-stepup.decorator";
 import { Public } from "../auth/public.decorator";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -49,18 +50,53 @@ const examSchema = z.object({
   desiredClass: z.string().max(80).nullish(),
 });
 
+const payInitSchema = z.object({ schoolSlug: z.string().min(1).max(80) });
+const formFeeSchema = z.object({ feeMinor: z.number().int().min(0).max(100_000_000) });
+
 @RequireModule(MODULES.ADMISSIONS)
 @Controller()
 export class AdmissionsController {
   constructor(private readonly admissions: AdmissionsService) {}
 
   /** PUBLIC application intake. No session; rate-limited in-process (backstop to
-   *  the edge WAF rule) since it is an unauthenticated write. */
+   *  the edge WAF rule) since it is an unauthenticated write. When the school
+   *  charges a form fee the response carries the hosted-checkout handoff. */
   @Public()
   @UseGuards(new RateLimitGuard(10, 60_000))
   @Post("public/admissions")
   submit(@Body(new ZodValidationPipe(submitSchema)) body: z.infer<typeof submitSchema>) {
     return this.admissions.submit(body);
+  }
+
+  /** PUBLIC: (re)start the form-fee checkout for an existing application —
+   *  covers an abandoned first redirect. Unguessable uuid + slug scoping. */
+  @Public()
+  @UseGuards(new RateLimitGuard(10, 60_000))
+  @Post("public/admissions/:id/pay/init")
+  payFormFee(
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(payInitSchema)) body: z.infer<typeof payInitSchema>,
+  ) {
+    return this.admissions.initFormFeePayment(body.schoolSlug, id);
+  }
+
+  /** Finance staff set the school's admission-form fee (0 = free). Step-up:
+   *  it changes what the PUBLIC is charged. */
+  @Put("admissions/settings/form-fee")
+  @RequirePermission(FEES_PERMISSIONS.FEE_MANAGE)
+  @RequireStepUp()
+  setFormFee(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(formFeeSchema)) body: z.infer<typeof formFeeSchema>,
+  ) {
+    return this.admissions.setFormFee(p, body.feeMinor);
+  }
+
+  /** The school's current form fee (any admission reviewer can see it). */
+  @Get("admissions/settings/form-fee")
+  @RequirePermission(ADMISSION_PERMISSIONS.ADMISSION_REVIEW)
+  getFormFee(@CurrentPrincipal() p: Principal) {
+    return this.admissions.getFormFee(p);
   }
 
   @Get("admissions")

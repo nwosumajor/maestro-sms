@@ -2,6 +2,7 @@ import type {
   OnboardingRequestDto,
   OperatorBillingAlertDto,
   PlanPriceDto,
+  PlatformFeeConfig,
   Serialized,
   TenantNameDto,
   TenantPageDto,
@@ -25,6 +26,8 @@ import { StudentDataExport } from "@/components/operator/StudentDataExport";
 import { ScholarshipAdmin } from "@/components/operator/ScholarshipAdmin";
 import { OnboardingRequests } from "@/components/operator/OnboardingRequests";
 import { PricingManager } from "@/components/operator/PricingManager";
+import { PlatformFeeManager } from "@/components/operator/PlatformFeeManager";
+import { GrowthManager } from "@/components/operator/GrowthManager";
 import { PlatformStaff } from "@/components/operator/PlatformStaff";
 import { GraceEditor } from "@/components/operator/GraceEditor";
 import { TenantFilterBar } from "@/components/operator/TenantFilterBar";
@@ -69,13 +72,23 @@ export default async function OperatorPage({
   if (plan) query.set("plan", plan);
   if (billing) query.set("billing", billing);
   query.set("page", String(pageNum));
-  const [tenantPage, names, onboarding, pricing, billingAlerts] = await Promise.all([
+  const [tenantPage, names, onboarding, pricing, billingAlerts, platformFees] = await Promise.all([
     apiGet<TenantPage>(`/operator/tenants?${query.toString()}`),
     apiGet<TenantNameDto[]>("/operator/tenant-names"),
     apiGet<Serialized<OnboardingRequestDto>[]>("/operator/onboarding-requests"),
     apiGet<PlanPriceDto[]>("/operator/pricing"),
     apiGet<Serialized<OperatorBillingAlertDto>[]>("/operator/billing-alerts"),
+    apiGet<PlatformFeeConfig>("/operator/platform-fees"),
   ]);
+  // Growth data is owner-surface; fetched separately so a 503 (no privileged DB)
+  // never blanks the rest of the console.
+  const [promos, agents, commissions] = canManagePricing
+    ? await Promise.all([
+        apiGet<never[]>("/operator/promos").then((r) => r ?? []),
+        apiGet<never[]>("/operator/agents").then((r) => r ?? []),
+        apiGet<never[]>("/operator/commissions").then((r) => r ?? []),
+      ])
+    : [[], [], []];
   const tenantList = tenantPage?.tenants ?? [];
 
   // "Approve & provision" deep-link: pre-fill the onboarding form from the
@@ -146,6 +159,8 @@ export default async function OperatorPage({
         <ScholarshipAdmin />
 
         {pricing && canManagePricing && <PricingManager initial={pricing} />}
+        {platformFees && canManagePricing && <PlatformFeeManager initial={platformFees} />}
+        {canManagePricing && <GrowthManager promos={promos} agents={agents} commissions={commissions} />}
 
         {canReviewOnboarding && <OnboardingRequests requests={onboarding ?? []} />}
         {canManageStaff && <PlatformStaff />}

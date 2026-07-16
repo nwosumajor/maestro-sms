@@ -80,4 +80,23 @@ export interface SettlementAccountDto {
   bankName: string | null;
   accountLast4: string | null;
   subaccountCode: string | null;
+  /** Who bears the platform's online-payment convenience fee for THIS school
+   *  (null = the platform-wide default applies). */
+  feeBearer: "PARENT" | "SCHOOL" | null;
+  /** The platform fee that would apply to a sample ₦10,000 payment — shown to
+   *  the school so the bearer choice is an informed one. */
+  sampleFeeMinor: number;
+}
+
+/** Returned by the pay-online init so the payer sees the full charge before the
+ *  gateway redirect. */
+export interface InvoicePayInitDto {
+  authorizationUrl: string;
+  reference: string;
+  /** The invoice balance being settled. */
+  invoiceAmountMinor: number;
+  /** Platform convenience fee (0 when none / school-borne). */
+  feeMinor: number;
+  /** What the payer's card is actually charged. */
+  chargedMinor: number;
 }

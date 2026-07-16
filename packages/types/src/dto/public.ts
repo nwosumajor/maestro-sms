@@ -5,6 +5,8 @@ export interface PublicSchoolDto {
   id: string;
   name: string;
   slug: string;
+  /** Admission-form fee (kobo; 0 = free) — shown to applicants before they apply. */
+  admissionFormFeeMinor: number;
 }
 
 /** Shared vocab for the public onboarding intake — one source for the form's

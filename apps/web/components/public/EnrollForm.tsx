@@ -28,6 +28,7 @@ export function EnrollForm({ schools, preselect }: { schools: PublicSchoolDto[];
   });
   const [busy, setBusy] = React.useState(false);
   const [done, setDone] = React.useState<string[] | null>(null);
+  const [payLinks, setPayLinks] = React.useState<{ slug: string; url: string }[]>([]);
   const [err, setErr] = React.useState<string | null>(null);
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setF({ ...f, [k]: e.target.value });
@@ -66,6 +67,7 @@ export function EnrollForm({ schools, preselect }: { schools: PublicSchoolDto[];
       notes: f.notes || null,
     };
     const ok: string[] = [];
+    const feeLinks: { slug: string; url: string }[] = [];
     for (const slug of selected) {
       const res = await fetch("/api/public/admissions", {
         method: "POST",
@@ -82,9 +84,18 @@ export function EnrollForm({ schools, preselect }: { schools: PublicSchoolDto[];
           details,
         }),
       });
-      if (res.ok) ok.push(slug);
+      if (res.ok) {
+        ok.push(slug);
+        // A school may charge an admission-form fee — collect each pay link
+        // (multi-school submit can't redirect to two checkouts at once).
+        const data = (await res.json().catch(() => null)) as {
+          payment?: { authorizationUrl: string } | null;
+        } | null;
+        if (data?.payment?.authorizationUrl) feeLinks.push({ slug, url: data.payment.authorizationUrl });
+      }
     }
     setBusy(false);
+    setPayLinks(feeLinks);
     if (ok.length === selected.length) setDone(ok);
     else setErr(`Submitted ${ok.length} of ${selected.length}. Please retry the rest.`);
   };
@@ -92,10 +103,35 @@ export function EnrollForm({ schools, preselect }: { schools: PublicSchoolDto[];
   if (done) {
     const names = schools.filter((s) => done.includes(s.slug)).map((s) => s.name);
     return (
-      <p className="text-sm">
-        Thank you — your enrolment application for <strong>{f.childName}</strong> has been submitted to{" "}
-        {names.join(" and ")}. Each school will review it and email you the entrance-exam date once decided.
-      </p>
+      <div className="space-y-3 text-sm">
+        <p>
+          Thank you — your enrolment application for <strong>{f.childName}</strong> has been submitted to{" "}
+          {names.join(" and ")}. Each school will review it and email you the entrance-exam date once decided.
+        </p>
+        {payLinks.length > 0 && (
+          <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
+            <p className="font-medium">One more step — admission form fee:</p>
+            <ul className="mt-2 space-y-1.5">
+              {payLinks.map((l) => {
+                const school = schools.find((s) => s.slug === l.slug);
+                return (
+                  <li key={l.slug}>
+                    <a href={l.url} className="text-primary underline underline-offset-2">
+                      Pay {school?.name ?? l.slug}&apos;s form fee
+                      {school && school.admissionFormFeeMinor > 0
+                        ? ` (${new Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN" }).format(school.admissionFormFeeMinor / 100)})`
+                        : ""}
+                    </a>
+                  </li>
+                );
+              })}
+            </ul>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Your application is saved either way; the school sees it as unpaid until the fee settles.
+            </p>
+          </div>
+        )}
+      </div>
     );
   }
 
@@ -115,7 +151,15 @@ export function EnrollForm({ schools, preselect }: { schools: PublicSchoolDto[];
                 } ${disabled ? "opacity-50" : ""}`}
               >
                 <input type="checkbox" checked={on} disabled={disabled} onChange={() => toggle(s.slug)} />
-                {s.name}
+                <span className="min-w-0">
+                  {s.name}
+                  {s.admissionFormFeeMinor > 0 && (
+                    <span className="ml-1.5 text-xs text-muted-foreground">
+                      · form fee{" "}
+                      {new Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN" }).format(s.admissionFormFeeMinor / 100)}
+                    </span>
+                  )}
+                </span>
               </label>
             );
           })}

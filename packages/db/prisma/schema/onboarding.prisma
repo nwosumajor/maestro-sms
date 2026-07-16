@@ -47,6 +47,8 @@ model OnboardingRequest {
   /// Referral code quoted by the requester (raw string; resolved to the owning
   /// school only at provisioning time, on the privileged client).
   referralCode   String?
+  /// Agent (reseller) attribution code, same lifecycle as referralCode.
+  agentCode      String?
   notes          String?
   status         OnboardingRequestStatus @default(NEW)
   reviewedById   String?                 @db.Uuid

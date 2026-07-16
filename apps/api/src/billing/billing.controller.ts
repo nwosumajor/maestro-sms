@@ -12,7 +12,7 @@
 // verified against the raw body, mirroring the Paystack posture.
 // =============================================================================
 
-import { Body, Controller, Get, Headers, Post, Req } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Post, Put, Req } from "@nestjs/common";
 import type { RawBodyRequest } from "@nestjs/common";
 import type { Request } from "express";
 import { BILLING_CYCLES, CURRENCIES, BILLING_PERMISSIONS, PLANS } from "@sms/types";
@@ -28,11 +28,15 @@ import { StripeService } from "../payments/stripe.service";
 import { BillingService } from "./billing.service";
 import { ReferralService } from "./referral.service";
 
+const autoRenewSchema = z.object({ enabled: z.boolean() });
+
 const checkoutSchema = z.object({
   plan: z.enum([PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE]),
   billingCycle: z.enum([BILLING_CYCLES.MONTH, BILLING_CYCLES.TERM, BILLING_CYCLES.YEAR]),
   // NGN → Paystack, USD → Stripe. Omitted → the tier's default (₦; $ for ENTERPRISE).
   currency: z.enum([CURRENCIES.NGN, CURRENCIES.USD]).optional(),
+  // Operator-issued discount — first paid charge only, validated server-side.
+  promoCode: z.string().max(30).optional(),
 });
 
 @Controller("billing")
@@ -102,5 +106,24 @@ export class BillingController {
   @RequirePermission(BILLING_PERMISSIONS.BILLING_MANAGE)
   createReferralCode(@CurrentPrincipal() p: Principal): Promise<ReferralInfoDto> {
     return this.referrals.ensureCode(p);
+  }
+
+  /** Start a checkout for the seat true-up quoted on the overview. */
+  @Post("true-up/init")
+  @RequirePermission(BILLING_PERMISSIONS.BILLING_MANAGE)
+  @RequireStepUp()
+  trueUp(@CurrentPrincipal() p: Principal): Promise<CheckoutInitResultDto> {
+    return this.billing.initTrueUpCheckout(p);
+  }
+
+  /** Opt in/out of saved-card auto-renew. Step-up: it arms future charges. */
+  @Put("auto-renew")
+  @RequirePermission(BILLING_PERMISSIONS.BILLING_MANAGE)
+  @RequireStepUp()
+  setAutoRenew(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(autoRenewSchema)) body: z.infer<typeof autoRenewSchema>,
+  ) {
+    return this.billing.setAutoRenew(p, body.enabled);
   }
 }

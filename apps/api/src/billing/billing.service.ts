@@ -20,14 +20,18 @@ import {
   CURRENCIES,
   CYCLE_MONTHS,
   DEFAULT_PLAN,
+  MIN_CHARGE_MINOR,
   PLANS,
+  SUBSCRIPTION_PAYMENT_KINDS,
   SUBSCRIPTION_STATUS,
   computeSubscriptionPriceMinor,
+  computeTrueUpMinor,
   defaultCurrencyFor,
   isBillingCycle,
   isCurrency,
   isPlan,
   planCurrencies,
+  prorationCreditMinor,
   type BillingCycle,
   type BillingOverviewDto,
   type CheckoutInitResultDto,
@@ -52,6 +56,8 @@ import { SYSTEM_ACTOR_ID } from "./billing.constants";
 import { BillingDunningService, type DunningResult } from "./billing-dunning.service";
 import { PlanPricingService } from "./plan-pricing.service";
 import { ReferralService, type ReferralGrant } from "./referral.service";
+import { encryptField } from "../foundation/field-crypto";
+import { GrowthService } from "./growth.service";
 
 /** Tiers a school can actually buy (all four are paid; STANDARD is the floor). */
 const SELLABLE_TIERS: Plan[] = [PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE];
@@ -75,6 +81,7 @@ export class BillingService {
     private readonly dunning: BillingDunningService,
     private readonly planPricing: PlanPricingService,
     private readonly referrals: ReferralService,
+    private readonly growth: GrowthService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -134,14 +141,49 @@ export class BillingService {
     const resolved = await this.entitlements.resolve(p.schoolId);
     const subscription = this.entitlements.dtoFrom(p.schoolId, resolved);
 
-    const { activeStudents, payments } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const seats = await this.activeStudents(tx);
-      const rows = await tx.platformSubscriptionPayment.findMany({
-        orderBy: { createdAt: "desc" },
-        take: 50,
-      });
-      return { activeStudents: seats, payments: rows.map((r) => this.toPaymentDto(r)) };
-    });
+    const { activeStudents, payments, autoRenew, cardLast4, subRow } = await this.db.runAsTenant(
+      this.ctx(p),
+      async (tx) => {
+        const seats = await this.activeStudents(tx);
+        const rows = await tx.platformSubscriptionPayment.findMany({
+          orderBy: { createdAt: "desc" },
+          take: 50,
+        });
+        const sub = await tx.schoolSubscription.findFirst({ where: { schoolId: p.schoolId } });
+        return {
+          activeStudents: seats,
+          payments: rows.map((r) => this.toPaymentDto(r)),
+          autoRenew: sub?.autoRenew ?? false,
+          // A saved card exists only after a successful charge; last4 is display-only.
+          cardLast4: sub?.paystackAuthorizationEnc ? (sub.cardLast4 ?? "····") : null,
+          subRow: sub,
+        };
+      },
+    );
+
+    // Mid-cycle expansion economics, quoted with the SAME rules checkout charges:
+    // the plan-change credit (unused time on the last payment) and the seat
+    // true-up (extra students since the last charge, prorated to time left).
+    const now = new Date();
+    const subCycle: BillingCycle =
+      subRow && isBillingCycle(subRow.billingCycle) ? subRow.billingCycle : BILLING_CYCLES.TERM;
+    const planChangeCreditMinor =
+      subRow && subRow.status === SUBSCRIPTION_STATUS.ACTIVE
+        ? prorationCreditMinor(subRow.priceMinor, subCycle, subRow.currentPeriodEnd, now)
+        : 0;
+    const subCurrency: Currency = subRow && isCurrency(subRow.currency ?? "") ? (subRow.currency as Currency) : CURRENCIES.NGN;
+    const trueUp =
+      subRow && isPlan(subRow.plan) && subRow.status === SUBSCRIPTION_STATUS.ACTIVE
+        ? computeTrueUpMinor(
+            subRow.plan,
+            subRow.seats,
+            activeStudents,
+            subCycle,
+            subRow.currentPeriodEnd,
+            now,
+            await this.planPricing.effective(subCurrency),
+          )
+        : null;
 
     const billableSeats = Math.max(1, activeStudents);
     // Quote with the operator-effective pricing so the screen matches checkout —
@@ -159,14 +201,125 @@ export class BillingService {
       ),
     );
 
-    return { subscription, activeStudents, quotes, payments };
+    return { subscription, activeStudents, quotes, payments, autoRenew, cardLast4, planChangeCreditMinor, trueUp };
+  }
+
+  /** Start a checkout for the seat TRUE-UP quoted on the overview: the extra
+   *  students enrolled since the last charge, priced for the time left. Applies
+   *  seats-only on settlement (the period does not move). */
+  async initTrueUpCheckout(p: Principal): Promise<CheckoutInitResultDto> {
+    const now = new Date();
+    const prep = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const sub = await tx.schoolSubscription.findFirst({ where: { schoolId: p.schoolId } });
+      if (!sub || !isPlan(sub.plan) || sub.status !== SUBSCRIPTION_STATUS.ACTIVE) {
+        throw new BadRequestException("Seat top-up needs an active paid subscription");
+      }
+      const seats = await this.activeStudents(tx);
+      const user = await tx.user.findFirst({ where: { id: p.userId }, select: { email: true } });
+      return { sub, seats, email: user?.email ?? "billing@school" };
+    });
+    const cycle: BillingCycle = isBillingCycle(prep.sub.billingCycle) ? prep.sub.billingCycle : BILLING_CYCLES.TERM;
+    const currency: Currency = isCurrency(prep.sub.currency ?? "") ? (prep.sub.currency as Currency) : CURRENCIES.NGN;
+    if (currency === CURRENCIES.NGN && !this.paystack.isConfigured()) {
+      throw new ServiceUnavailableException("Naira payments are not configured");
+    }
+    if (currency === CURRENCIES.USD && !this.stripe.isConfigured()) {
+      throw new ServiceUnavailableException("USD payments are not configured");
+    }
+    const quote = computeTrueUpMinor(
+      prep.sub.plan as Plan,
+      prep.sub.seats,
+      prep.seats,
+      cycle,
+      prep.sub.currentPeriodEnd,
+      now,
+      await this.planPricing.effective(currency),
+    );
+    if (!quote) throw new BadRequestException("No seat top-up is due right now");
+
+    const reference = `SUB-${p.schoolId.slice(0, 8)}-${Date.now()}`;
+    const paymentId = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const payment = await tx.platformSubscriptionPayment.create({
+        data: {
+          schoolId: p.schoolId,
+          plan: prep.sub.plan,
+          billingCycle: cycle,
+          seats: prep.seats,
+          amountMinor: quote.amountMinor,
+          currency,
+          reference,
+          status: "PENDING",
+          kind: SUBSCRIPTION_PAYMENT_KINDS.TRUEUP,
+          initiatedById: p.userId,
+        },
+      });
+      await this.audit.record(
+        {
+          actorId: p.userId,
+          action: "billing.trueup.init",
+          entity: "platform_subscription_payment",
+          entityId: payment.id,
+          schoolId: p.schoolId,
+          metadata: { extraSeats: quote.extraSeats, amountMinor: quote.amountMinor, currency },
+        },
+        tx,
+      );
+      return payment.id;
+    });
+
+    const { authorizationUrl } =
+      currency === CURRENCIES.USD
+        ? await this.stripe.createCheckoutSession({
+            email: prep.email,
+            amountMinor: quote.amountMinor,
+            reference,
+            description: `SMS seat top-up — ${quote.extraSeats} additional students`,
+            metadata: { kind: "subscription", schoolId: p.schoolId, paymentId, reference },
+          })
+        : await this.paystack.initialize({
+            email: prep.email,
+            amountMinor: quote.amountMinor,
+            reference,
+            metadata: { kind: "subscription", schoolId: p.schoolId, paymentId, reference },
+          });
+    return { authorizationUrl, reference };
+  }
+
+  /**
+   * Opt in/out of saved-card auto-renew. Enabling requires a stored (reusable)
+   * card authorization — captured automatically from a successful card payment.
+   * billing.manage + step-up at the controller; audited.
+   */
+  async setAutoRenew(p: Principal, enabled: boolean): Promise<{ autoRenew: boolean; cardLast4: string | null }> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const sub = await tx.schoolSubscription.findFirst({ where: { schoolId: p.schoolId } });
+      if (!sub) throw new BadRequestException("No subscription row — contact the platform operator");
+      if (enabled && !sub.paystackAuthorizationEnc) {
+        throw new BadRequestException(
+          "No saved card yet — pay once by card from this page and auto-renew can then be enabled",
+        );
+      }
+      await tx.schoolSubscription.update({ where: { id: sub.id }, data: { autoRenew: enabled } });
+      await this.audit.record(
+        {
+          actorId: p.userId,
+          action: "billing.auto_renew.set",
+          entity: "school_subscription",
+          entityId: sub.id,
+          schoolId: p.schoolId,
+          metadata: { enabled },
+        },
+        tx,
+      );
+      return { autoRenew: enabled, cardLast4: sub.cardLast4 };
+    });
   }
 
   /** Start a hosted checkout for a tier — NGN pays via Paystack, USD via Stripe
    *  (ENTERPRISE is USD/Stripe only). Returns the gateway pay URL. */
   async initCheckout(
     p: Principal,
-    input: { plan: string; billingCycle: string; currency?: string },
+    input: { plan: string; billingCycle: string; currency?: string; promoCode?: string },
   ): Promise<CheckoutInitResultDto> {
     if (!isPlan(input.plan)) throw new BadRequestException("plan must be STANDARD, PREMIUM, ULTIMATE or ENTERPRISE");
     if (!isBillingCycle(input.billingCycle)) throw new BadRequestException("billingCycle must be MONTH, TERM or YEAR");
@@ -190,16 +343,55 @@ export class BillingService {
 
     // Charge with the same operator-effective pricing the overview quoted.
     const pricing = await this.planPricing.effective(currency);
+    // Promo codes discount the FIRST paid charge only — validated up front so a
+    // bad code fails loudly before any payment row exists.
+    const promo = input.promoCode ? await this.growth.validatePromo(input.promoCode) : null;
     const { email, amountMinor, seats, reference, paymentId } = await this.db.runAsTenant(
       this.ctx(p),
       async (tx) => {
+        if (promo) {
+          const prior = await tx.platformSubscriptionPayment.findFirst({
+            where: { schoolId: p.schoolId, status: "PAID" },
+            select: { id: true },
+          });
+          if (prior) throw new BadRequestException("Promo codes apply to a school's first subscription payment only");
+        }
         const seats = await this.activeStudents(tx);
-        const amountMinor = computeSubscriptionPriceMinor(plan, seats, billingCycle, pricing);
-        if (amountMinor <= 0) throw new BadRequestException("Nothing to charge for this plan");
+        const listMinor = computeSubscriptionPriceMinor(plan, seats, billingCycle, pricing);
+        const grossMinor = promo ? Math.round((listMinor * (100 - promo.percentOff)) / 100) : listMinor;
+        if (grossMinor <= 0) throw new BadRequestException("Nothing to charge for this plan");
+
+        // Mid-cycle PLAN CHANGE: credit the unused fraction of what was last
+        // paid against this charge (floored at the gateway minimum), and mark
+        // the payment UPGRADE so applying it RESTARTS the period from now —
+        // stacking would compensate the old remainder twice. Same-plan buys
+        // stay RENEWAL (extend). Credit only applies in the SAME currency the
+        // last charge was made in (no cross-currency arithmetic).
+        const sub = await tx.schoolSubscription.findFirst({ where: { schoolId: p.schoolId } });
+        const isPlanChange = !!sub && sub.plan !== plan;
+        const credit =
+          isPlanChange && sub.status === SUBSCRIPTION_STATUS.ACTIVE && sub.currency === currency && isBillingCycle(sub.billingCycle)
+            ? prorationCreditMinor(sub.priceMinor, sub.billingCycle, sub.currentPeriodEnd, new Date())
+            : 0;
+        const amountMinor = Math.max(MIN_CHARGE_MINOR, grossMinor - credit);
+        const kind = isPlanChange ? SUBSCRIPTION_PAYMENT_KINDS.UPGRADE : SUBSCRIPTION_PAYMENT_KINDS.RENEWAL;
+
         const reference = `SUB-${p.schoolId.slice(0, 8)}-${Date.now()}`;
         const user = await tx.user.findFirst({ where: { id: p.userId }, select: { email: true } });
         const payment = await tx.platformSubscriptionPayment.create({
-          data: { schoolId: p.schoolId, plan, billingCycle, seats, amountMinor, currency, reference, status: "PENDING", initiatedById: p.userId },
+          data: {
+            schoolId: p.schoolId,
+            plan,
+            billingCycle,
+            seats,
+            amountMinor,
+            currency,
+            reference,
+            status: "PENDING",
+            kind,
+            promoCode: promo?.code ?? null,
+            initiatedById: p.userId,
+          },
         });
         await this.audit.record(
           {
@@ -208,7 +400,18 @@ export class BillingService {
             entity: "platform_subscription_payment",
             entityId: payment.id,
             schoolId: p.schoolId,
-            metadata: { plan, billingCycle, seats, amountMinor, currency },
+            metadata: {
+              plan,
+              billingCycle,
+              seats,
+              grossMinor,
+              prorationCreditMinor: credit,
+              promoCode: promo?.code ?? null,
+              promoPercentOff: promo?.percentOff ?? null,
+              amountMinor,
+              currency,
+              kind,
+            },
           },
           tx,
         );
@@ -237,9 +440,21 @@ export class BillingService {
   async applySubscriptionPayment(event: PaystackEvent): Promise<{ ok: boolean }> {
     if (event.event !== "charge.success") return { ok: true };
     const md = event.data.metadata as { schoolId?: string } | undefined;
+    // A REUSABLE card authorization enables saved-card auto-renew: captured from
+    // the school's own successful charge (never entered by hand), stored
+    // field-encrypted on the subscription row.
+    const auth =
+      event.data.authorization?.reusable && event.data.authorization.authorization_code
+        ? {
+            code: event.data.authorization.authorization_code,
+            last4: event.data.authorization.last4 ?? null,
+            customerCode: event.data.customer?.customer_code ?? null,
+          }
+        : undefined;
     return this.applyPaidByReference(md?.schoolId, event.data.reference, {
       amountMinor: event.data.amount,
       currency: event.data.currency,
+      auth,
     });
   }
 
@@ -314,7 +529,11 @@ export class BillingService {
   private async applyPaidByReference(
     schoolId: string | undefined,
     reference: string | undefined,
-    paid?: { amountMinor?: number; currency?: string },
+    paid?: {
+      amountMinor?: number;
+      currency?: string;
+      auth?: { code: string; last4: string | null; customerCode: string | null };
+    },
   ): Promise<{ ok: boolean }> {
     if (!schoolId || !reference) return { ok: true };
 
@@ -354,23 +573,51 @@ export class BillingService {
       const now = new Date();
 
       const sub = await tx.schoolSubscription.findFirst({ where: { schoolId } });
-      // Renewals stack: extend from the later of now / the current period end.
-      const base = sub?.currentPeriodEnd && sub.currentPeriodEnd > now ? sub.currentPeriodEnd : now;
-      const periodEnd = addMonths(base, CYCLE_MONTHS[cycle]);
+      // How the payment applies (SUBSCRIPTION_PAYMENT_KINDS):
+      //   RENEWAL — stack: extend from the later of now / current period end.
+      //   UPGRADE — restart from now (the unused time was credited at checkout).
+      //   TRUEUP  — seats only: the period does not move.
+      const kind = payment.kind;
+      const base =
+        kind === SUBSCRIPTION_PAYMENT_KINDS.UPGRADE
+          ? now
+          : sub?.currentPeriodEnd && sub.currentPeriodEnd > now
+            ? sub.currentPeriodEnd
+            : now;
+      const periodEnd =
+        kind === SUBSCRIPTION_PAYMENT_KINDS.TRUEUP && sub?.currentPeriodEnd
+          ? sub.currentPeriodEnd
+          : addMonths(base, CYCLE_MONTHS[cycle]);
 
       await tx.platformSubscriptionPayment.update({
         where: { id: payment.id },
-        data: { status: "PAID", paidAt: now, periodStart: base, periodEnd },
+        data: { status: "PAID", paidAt: now, periodStart: kind === SUBSCRIPTION_PAYMENT_KINDS.TRUEUP ? now : base, periodEnd },
       });
 
       const data = {
-        plan,
         status: SUBSCRIPTION_STATUS.ACTIVE,
-        billingCycle: cycle,
-        currentPeriodEnd: periodEnd,
         seats: payment.seats,
-        priceMinor: payment.amountMinor,
-        currency: payment.currency,
+        // TRUEUP only tops seats up: plan/cycle/period/last-full-price stay —
+        // overwriting priceMinor with the small top-up would corrupt the next
+        // upgrade's proration credit.
+        ...(kind === SUBSCRIPTION_PAYMENT_KINDS.TRUEUP
+          ? {}
+          : {
+              plan,
+              billingCycle: cycle,
+              currentPeriodEnd: periodEnd,
+              priceMinor: payment.amountMinor,
+              currency: payment.currency,
+            }),
+        // Refresh the saved card on every successful charge (encrypted at rest)
+        // so auto-renew always holds the most recent authorization.
+        ...(paid?.auth
+          ? {
+              paystackAuthorizationEnc: encryptField(paid.auth.code, schoolId),
+              cardLast4: paid.auth.last4,
+              ...(paid.auth.customerCode ? { paystackCustomerCode: paid.auth.customerCode } : {}),
+            }
+          : {}),
       };
       if (sub) await tx.schoolSubscription.update({ where: { id: sub.id }, data });
       else await tx.schoolSubscription.create({ data: { schoolId, ...data } });
@@ -405,6 +652,12 @@ export class BillingService {
         periodEnd: referral?.referredPeriodEnd ?? periodEnd,
         recipientId: payment.initiatedById,
         referral,
+        // Post-commit growth hooks (privileged, best-effort): promo redemption
+        // counts on settle; agent commission accrues once per school (DB-unique).
+        promoCode: payment.promoCode,
+        agentId: kind === SUBSCRIPTION_PAYMENT_KINDS.TRUEUP ? null : (sub?.agentId ?? null),
+        chargedMinor: payment.amountMinor,
+        chargedCurrency: payment.currency,
       };
     });
 
@@ -432,10 +685,31 @@ export class BillingService {
       return { ok: true };
     }
     // Narrow the success shape (the tx return is a union with the mismatch case).
-    const ok = applied as { plan: Plan; periodEnd: Date; recipientId: string; referral: ReferralGrant | null };
+    const ok = applied as {
+      plan: Plan;
+      periodEnd: Date;
+      recipientId: string;
+      referral: ReferralGrant | null;
+      promoCode: string | null;
+      agentId: string | null;
+      chargedMinor: number;
+      chargedCurrency: string;
+    };
     // New posture takes effect immediately (don't wait for the 30s cache TTL).
     this.entitlements.invalidate(schoolId);
     if (ok.referral) this.entitlements.invalidate(ok.referral.referrerSchoolId);
+    // Growth hooks — both best-effort and idempotent (a failure or retry can
+    // never affect the recorded payment).
+    if (ok.promoCode) await this.growth.redeemPromoOnSettle(ok.promoCode);
+    if (ok.agentId) {
+      await this.growth.accrueCommission({
+        schoolId,
+        agentId: ok.agentId,
+        paymentRef: reference,
+        chargedMinor: ok.chargedMinor,
+        currency: ok.chargedCurrency,
+      });
+    }
     // Best-effort confirmation to the staff member who paid.
     try {
       const bonus = ok.referral

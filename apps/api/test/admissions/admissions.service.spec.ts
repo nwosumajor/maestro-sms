@@ -50,7 +50,12 @@ function makeService(app: Row) {
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const channel = { deliver: jest.fn().mockResolvedValue({ ok: true }) };
-  const service = new AdmissionsService(db as never, audit as never, channel as never);
+  // Gateway/fee/privileged deps are unused by the review paths under test:
+  // paystack reports unconfigured, the fee resolver returns the zero default.
+  const paystack = { isConfigured: () => false } as never;
+  const platformFees = { effective: jest.fn().mockResolvedValue({ flatMinor: 0, percentBp: 0, capMinor: null, bearer: "PARENT" }) } as never;
+  const privileged = { client: null } as never;
+  const service = new AdmissionsService(db as never, audit as never, channel as never, paystack, platformFees, privileged);
   return { service, update, audit, channel, state };
 }
 

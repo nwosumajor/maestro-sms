@@ -138,6 +138,8 @@ apply_rls packages/db/prisma/rls/67_typing_race_rls.sql          typing_racer_up
 apply_rls packages/db/prisma/rls/68_checkers_rls.sql             checkers_game_update
 apply_rls packages/db/prisma/rls/69_chess_rls.sql                chess_game_update
 apply_rls packages/db/prisma/rls/70_referral_rls.sql             school_referral_conversion_insert
+apply_rls packages/db/prisma/rls/71_platform_fee_rls.sql         platform_fee_config_select
+apply_rls packages/db/prisma/rls/72_growth_rls.sql               agent_select
 
 # Seed on first provision (compose: SEED_ON_START=true; cloud migrate task: always).
 if [ "${SEED_ON_START}" = "true" ] || [ "$MODE" = "migrate" ]; then

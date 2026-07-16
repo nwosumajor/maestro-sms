@@ -45,6 +45,7 @@ export function BillingCheckout({
   const effectiveCurrency = planCurrencies.includes(currency) ? currency : planCurrencies[0] ?? "NGN";
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
+  const [promo, setPromo] = React.useState("");
 
   const selected = quotes.find(
     (q) => q.plan === plan && q.billingCycle === cycle && q.currency === effectiveCurrency,
@@ -70,6 +71,7 @@ export function BillingCheckout({
       plan,
       billingCycle: cycle,
       currency: effectiveCurrency,
+      ...(promo.trim() ? { promoCode: promo.trim().toUpperCase() } : {}),
     });
     if (res.ok) {
       const { authorizationUrl } = (await res.json()) as { authorizationUrl: string };
@@ -136,6 +138,18 @@ export function BillingCheckout({
                 <option key={c} value={c}>{c === "NGN" ? "₦ Naira" : "$ US Dollar"}</option>
               ))}
             </select>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium" htmlFor="bill-promo">
+              Promo code <span className="font-normal text-muted-foreground">(first payment only)</span>
+            </label>
+            <input
+              id="bill-promo"
+              value={promo}
+              onChange={(e) => setPromo(e.target.value.toUpperCase())}
+              placeholder="Optional"
+              className="h-9 w-32 rounded-md border border-input bg-background px-3 font-mono text-sm uppercase"
+            />
           </div>
           <div className="space-y-1.5">
             <span className="block text-sm font-medium">Total</span>

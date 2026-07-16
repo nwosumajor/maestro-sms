@@ -26,9 +26,24 @@ export function ApplyForm() {
     const res = await fetch("/api/public/admissions", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(f),
     });
+    if (res.ok) {
+      // Schools may charge an admission-form fee: the intake response then
+      // carries the hosted-checkout handoff — the application is already saved,
+      // so a payment abandoned here can be completed later from the same link.
+      const data = (await res.json()) as {
+        formFeeMinor?: number;
+        payment?: { authorizationUrl: string } | null;
+      };
+      if (data.payment?.authorizationUrl) {
+        window.location.href = data.payment.authorizationUrl;
+        return;
+      }
+      setBusy(false);
+      setDone(true);
+      return;
+    }
     setBusy(false);
-    if (res.ok) setDone(true);
-    else setErr(res.status === 404 ? "School not found." : `Something went wrong (${res.status}).`);
+    setErr(res.status === 404 ? "School not found." : `Something went wrong (${res.status}).`);
   };
 
   if (done) {

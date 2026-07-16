@@ -31,6 +31,7 @@ const onboardingSchema = z.object({
   desiredModules: z.array(z.string().max(30)).max(30).nullish(),
   currentSystem: z.string().max(300).nullish(),
   referralCode: z.string().max(40).nullish(),
+  agentCode: z.string().max(40).nullish(),
   notes: z.string().max(2000).nullish(),
 });
 const inviteSchema = z.object({
