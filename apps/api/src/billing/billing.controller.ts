@@ -16,7 +16,7 @@ import { Body, Controller, Get, Headers, Post, Req } from "@nestjs/common";
 import type { RawBodyRequest } from "@nestjs/common";
 import type { Request } from "express";
 import { BILLING_CYCLES, CURRENCIES, BILLING_PERMISSIONS, PLANS } from "@sms/types";
-import type { BillingOverviewDto, CheckoutInitResultDto } from "@sms/types";
+import type { BillingOverviewDto, CheckoutInitResultDto, ReferralInfoDto } from "@sms/types";
 import { z } from "zod";
 import { Public } from "../auth/public.decorator";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -26,6 +26,7 @@ import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { StripeService } from "../payments/stripe.service";
 import { BillingService } from "./billing.service";
+import { ReferralService } from "./referral.service";
 
 const checkoutSchema = z.object({
   plan: z.enum([PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE]),
@@ -39,6 +40,7 @@ export class BillingController {
   constructor(
     private readonly billing: BillingService,
     private readonly stripe: StripeService,
+    private readonly referrals: ReferralService,
   ) {}
 
   /** The billing screen: current subscription + per-tier quotes + history. */
@@ -86,5 +88,19 @@ export class BillingController {
   @RequirePermission(BILLING_PERMISSIONS.BILLING_DUNNING_RUN)
   dunning(@CurrentPrincipal() p: Principal) {
     return this.billing.runDunning(p);
+  }
+
+  /** The school's referral panel: shareable code + conversions earned. */
+  @Get("referral")
+  @RequirePermission(BILLING_PERMISSIONS.BILLING_READ)
+  referral(@CurrentPrincipal() p: Principal): Promise<ReferralInfoDto> {
+    return this.referrals.getMine(p);
+  }
+
+  /** Generate the school's referral code (idempotent; audited). */
+  @Post("referral/code")
+  @RequirePermission(BILLING_PERMISSIONS.BILLING_MANAGE)
+  createReferralCode(@CurrentPrincipal() p: Principal): Promise<ReferralInfoDto> {
+    return this.referrals.ensureCode(p);
   }
 }

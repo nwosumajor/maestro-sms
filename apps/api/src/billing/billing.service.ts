@@ -51,6 +51,7 @@ import { StripeService, type StripeEvent } from "../payments/stripe.service";
 import { SYSTEM_ACTOR_ID } from "./billing.constants";
 import { BillingDunningService, type DunningResult } from "./billing-dunning.service";
 import { PlanPricingService } from "./plan-pricing.service";
+import { ReferralService, type ReferralGrant } from "./referral.service";
 
 /** Tiers a school can actually buy (all four are paid; STANDARD is the floor). */
 const SELLABLE_TIERS: Plan[] = [PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE];
@@ -73,6 +74,7 @@ export class BillingService {
     private readonly stripe: StripeService,
     private readonly dunning: BillingDunningService,
     private readonly planPricing: PlanPricingService,
+    private readonly referrals: ReferralService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -384,7 +386,26 @@ export class BillingService {
         },
         tx,
       );
-      return { plan, periodEnd, recipientId: payment.initiatedById };
+
+      // Referral: a referred school's FIRST paid subscription rewards BOTH
+      // sides one free term — granted atomically with this payment (both-sided
+      // idempotency + the tenant-switch mechanics live in ReferralService).
+      let referral: ReferralGrant | null = null;
+      if (sub?.referredBySchoolId && !sub.referralRewardAt) {
+        referral = await this.referrals.grantRewardsInTx(tx, {
+          payingSchoolId: schoolId,
+          subscriptionId: sub.id,
+          referrerSchoolId: sub.referredBySchoolId,
+          paidPeriodEnd: periodEnd,
+          actorId: payment.initiatedById,
+        });
+      }
+      return {
+        plan,
+        periodEnd: referral?.referredPeriodEnd ?? periodEnd,
+        recipientId: payment.initiatedById,
+        referral,
+      };
     });
 
     if (!applied) return { ok: true };
@@ -411,23 +432,47 @@ export class BillingService {
       return { ok: true };
     }
     // Narrow the success shape (the tx return is a union with the mismatch case).
-    const ok = applied as { plan: Plan; periodEnd: Date; recipientId: string };
+    const ok = applied as { plan: Plan; periodEnd: Date; recipientId: string; referral: ReferralGrant | null };
     // New posture takes effect immediately (don't wait for the 30s cache TTL).
     this.entitlements.invalidate(schoolId);
+    if (ok.referral) this.entitlements.invalidate(ok.referral.referrerSchoolId);
     // Best-effort confirmation to the staff member who paid.
     try {
+      const bonus = ok.referral
+        ? ` Referral bonus applied: ${ok.referral.rewardMonths} extra months free (thanks to ${ok.referral.referrerSchoolName}).`
+        : "";
       await this.notifications.enqueue(
         { schoolId, userId: ok.recipientId },
         {
           recipientId: ok.recipientId,
           type: "BILLING",
           title: "Subscription active",
-          body: `Your ${ok.plan} plan is active until ${ok.periodEnd.toDateString()}. This message is your payment receipt.`,
+          body: `Your ${ok.plan} plan is active until ${ok.periodEnd.toDateString()}.${bonus} This message is your payment receipt.`,
           channels: ["EMAIL"],
         },
       );
     } catch {
       // a notification failure must never undo a recorded payment
+    }
+    // Best-effort reward notice to the REFERRER (the code's creator).
+    if (ok.referral?.referrerRecipientId) {
+      try {
+        await this.notifications.enqueue(
+          { schoolId: ok.referral.referrerSchoolId, userId: ok.referral.referrerRecipientId },
+          {
+            recipientId: ok.referral.referrerRecipientId,
+            type: "BILLING",
+            title: "Referral reward earned",
+            body:
+              `${ok.referral.referredSchoolName} subscribed using your referral code — ` +
+              `your school earned ${ok.referral.rewardMonths} months of free platform usage. ` +
+              `Your subscription now runs until ${ok.referral.referrerPeriodEnd.toDateString()}.`,
+            channels: ["EMAIL"],
+          },
+        );
+      } catch {
+        // best-effort
+      }
     }
     return { ok: true };
   }

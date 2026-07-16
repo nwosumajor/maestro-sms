@@ -73,6 +73,9 @@ d("RLS cross-tenant isolation", () => {
   const checkersGameA = randomUUID();
   // Chess: one game.
   const chessGameA = randomUUID();
+  // Referral program: school A's shareable code + one conversion it earned.
+  const referralCodeA = randomUUID();
+  const referralConversionA = randomUUID();
   // Ultimate: ONLY the tenant-scoped governance/bridge tables are isolation-tested.
   // The arena tables (ultimate_competition / ultimate_participant) are
   // CROSS-TENANT by design (RLS-exempt — see 21_ultimate_rls.sql) and carry no PII.
@@ -384,6 +387,16 @@ d("RLS cross-tenant isolation", () => {
     await a.query(
       `INSERT INTO chess_game (id,"schoolId","createdById","whiteUserId",board,castling,"updatedAt") VALUES ($1,$2,$3,$3,$4::jsonb,$5::jsonb,now())`,
       [chessGameA, A, userA, "[]", "{}"],
+    );
+    // Referral: school A's code + one conversion (referredSchoolId is any uuid —
+    // isolation is what's under test, not the billing flow).
+    await a.query(
+      `INSERT INTO school_referral_code (id,"schoolId",code,"createdById","updatedAt") VALUES ($1,$2,$3,$4,now())`,
+      [referralCodeA, A, `RLS-${referralCodeA.slice(0, 8)}`, userA],
+    );
+    await a.query(
+      `INSERT INTO school_referral_conversion (id,"schoolId","referredSchoolId","referredSchoolName","rewardMonths","newPeriodEnd") VALUES ($1,$2,$3,'Referred School',3,now())`,
+      [referralConversionA, A, randomUUID()],
     );
     // Ultimate (step 8): an arena competition (cross-tenant) + the tenant-scoped
     // enrollment/consent/entry-link governance rows for school A.
@@ -936,6 +949,8 @@ d("RLS cross-tenant isolation", () => {
       "typing_race",
       "checkers_game",
       "chess_game",
+      "school_referral_conversion",
+      "school_referral_code",
       // Ultimate: bridge/governance + participant are schoolId-scoped; the arena
       // `ultimate_competition` has NO schoolId (cross-tenant) → deleted by id below.
       "ultimate_entry_link",
@@ -1048,6 +1063,8 @@ d("RLS cross-tenant isolation", () => {
     ["typing_racer", typingRacerA],
     ["checkers_game", checkersGameA],
     ["chess_game", chessGameA],
+    ["school_referral_code", referralCodeA],
+    ["school_referral_conversion", referralConversionA],
     ["lms_content", lmsContentA],
     ["quiz_attempt", quizAttemptA],
     ["forum_post", forumPostA],

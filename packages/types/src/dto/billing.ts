@@ -61,6 +61,24 @@ export interface CheckoutInitResultDto {
   reference: string;
 }
 
+/** One successful referral this school earned (append-only ledger row). */
+export interface ReferralConversionDto {
+  id: string;
+  referredSchoolName: string;
+  /** Months of free usage EACH side received (one term = 3). */
+  rewardMonths: number;
+  /** This school's currentPeriodEnd after the reward. */
+  newPeriodEnd: Date;
+  convertedAt: Date;
+}
+
+/** The school's referral panel: its shareable code (null until generated) and
+ *  every conversion earned so far. */
+export interface ReferralInfoDto {
+  code: string | null;
+  conversions: ReferralConversionDto[];
+}
+
 /** One (tier, currency)'s effective per-seat monthly price (operator console +
  *  public page). ENTERPRISE appears ONLY as a USD row. */
 export interface PlanPriceDto {

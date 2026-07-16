@@ -97,6 +97,9 @@ export class OperatorProvisioningService {
       /** When provisioning FROM a public onboarding request: link it, so the
        *  request auto-flips to APPROVED with this provision. */
       onboardingRequestId?: string;
+      /** Referral code the new school arrived with (explicit value wins; falls
+       *  back to the linked onboarding request's stored code). */
+      referralCode?: string;
     },
   ) {
     const db = this.client();
@@ -135,6 +138,26 @@ export class OperatorProvisioningService {
       throw new ConflictException("One of those admin emails is already in use");
     }
 
+    // Referral: resolve the quoted code (explicit input wins, else the linked
+    // onboarding request's stored code) to its owning school. Privileged client
+    // — the ONLY place a code is read across tenants; an unknown code resolves
+    // to nothing and never blocks provisioning.
+    let referralCode =
+      input.referralCode
+        ?.trim()
+        .toUpperCase()
+        .replace(/[^A-Z0-9-]/g, "") || null;
+    if (!referralCode && input.onboardingRequestId) {
+      const req = await db.onboardingRequest.findFirst({
+        where: { id: input.onboardingRequestId },
+        select: { referralCode: true },
+      });
+      referralCode = req?.referralCode ?? null;
+    }
+    const referrer = referralCode
+      ? await db.schoolReferralCode.findFirst({ where: { code: referralCode }, select: { schoolId: true } })
+      : null;
+
     // Resolve each role row up front (global registry; same for all schools).
     const prepared: Array<AdminInput & { role: string; roleId: string; tempPassword: string; passwordHash: string }> = [];
     for (const a of admins) {
@@ -154,7 +177,16 @@ export class OperatorProvisioningService {
       // extend/override the period via the operator subscription PUT.
       const trialEnd = new Date(Date.now() + SUBSCRIPTION_TRIAL_DAYS * 24 * 60 * 60 * 1000);
       await tx.schoolSubscription.create({
-        data: { schoolId: school.id, plan, status: "ACTIVE", currentPeriodEnd: trialEnd, overrides: overrides as unknown as Prisma.InputJsonValue },
+        data: {
+          schoolId: school.id,
+          plan,
+          status: "ACTIVE",
+          currentPeriodEnd: trialEnd,
+          overrides: overrides as unknown as Prisma.InputJsonValue,
+          // Arms the referral reward: the billing webhook grants both sides one
+          // free term on this school's FIRST paid subscription.
+          referredBySchoolId: referrer?.schoolId ?? null,
+        },
       });
       const created: Array<{ id: string; email: string; role: string; tempPassword: string }> = [];
       for (const a of prepared) {
@@ -174,6 +206,8 @@ export class OperatorProvisioningService {
       plan,
       admins: result.created.map((a) => ({ email: a.email, role: a.role })),
       onboardingRequestId: input.onboardingRequestId ?? null,
+      referralCode,
+      referredBySchoolId: referrer?.schoolId ?? null,
     });
 
     // Provisioned from a public onboarding request → the request is now APPROVED

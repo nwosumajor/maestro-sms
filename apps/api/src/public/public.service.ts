@@ -41,6 +41,7 @@ export interface OnboardingRequestInput {
   desiredPlan?: string | null;
   desiredModules?: string[] | null;
   currentSystem?: string | null;
+  referralCode?: string | null;
   notes?: string | null;
 }
 
@@ -75,6 +76,11 @@ export class PublicService {
     // come from an unauthenticated form — never trust them shapes-deep).
     const desiredPlan = input.desiredPlan && isPlan(input.desiredPlan) ? input.desiredPlan : null;
     const desiredModules = (input.desiredModules ?? []).filter(isModuleKey);
+    // Referral code: stored as a RAW string (normalised) — resolved to its
+    // owning school only at provisioning, on the privileged client. An invalid
+    // code just resolves to nothing; it can't block a signup.
+    const rawReferral = input.referralCode?.trim().toUpperCase() ?? "";
+    const referralCode = /^[A-Z0-9-]{4,40}$/.test(rawReferral) ? rawReferral : null;
     const created = await this.db.runAsTenant({ schoolId: ZERO, userId: ZERO }, (tx) =>
       tx.onboardingRequest.create({
         data: {
@@ -95,6 +101,7 @@ export class PublicService {
           desiredPlan,
           desiredModules: desiredModules.length > 0 ? (desiredModules as Prisma.InputJsonValue) : Prisma.JsonNull,
           currentSystem: input.currentSystem?.trim() || null,
+          referralCode,
           notes: input.notes ?? null,
           status: "NEW",
         },

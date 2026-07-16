@@ -1,4 +1,4 @@
-import type { BillingOverviewDto, Serialized } from "@sms/types";
+import type { BillingOverviewDto, ReferralInfoDto, Serialized } from "@sms/types";
 import { hasPermission } from "@/lib/permissions";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { money, shortDate, titleCase } from "@/lib/format";
 import { BillingCheckout } from "@/components/billing/BillingCheckout";
+import { ReferralPanel } from "@/components/billing/ReferralPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +28,10 @@ const PAYMENT_VARIANT: Record<string, "default" | "secondary" | "destructive" | 
 export default async function BillingPage() {
   const session = await auth();
   const user = session!.user;
-  const data = await apiGet<Overview>("/billing");
+  const [data, referral] = await Promise.all([
+    apiGet<Overview>("/billing"),
+    apiGet<Serialized<ReferralInfoDto>>("/billing/referral"),
+  ]);
   const canManage = hasPermission(user.permissions, "billing.manage");
 
   return (
@@ -82,6 +86,8 @@ export default async function BillingPage() {
             </Card>
 
             <BillingCheckout quotes={data.quotes} activeStudents={data.activeStudents} canManage={canManage} />
+
+            {referral && <ReferralPanel initial={referral} canManage={canManage} />}
 
             <Card>
               <CardHeader>

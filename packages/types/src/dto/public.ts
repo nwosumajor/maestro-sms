@@ -50,6 +50,8 @@ export interface OnboardingRequestDto {
   staffCount: number | null;
   contactRole: string | null;
   currentSystem: string | null;
+  /** Referral code the requester quoted (raw; resolved at provisioning). */
+  referralCode: string | null;
   notes: string | null;
   status: string;
   reviewNote: string | null;

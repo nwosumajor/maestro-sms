@@ -281,6 +281,15 @@ export const RENEWAL_REMINDER_DAYS = 14;
 export const SUBSCRIPTION_TRIAL_DAYS = 30;
 
 /**
+ * Referral program: months of FREE platform usage granted to EACH side when a
+ * referred school's first paid subscription lands — one school term, using the
+ * platform's own definition of a term (CYCLE_MONTHS.TERM = 3 months). The
+ * referrer's reward extends their existing plan; the new school's stacks on top
+ * of the period they just bought.
+ */
+export const REFERRAL_REWARD_MONTHS = CYCLE_MONTHS.TERM;
+
+/**
  * Pure: is a school's subscription in good standing RIGHT NOW (full access)?
  * True while ACTIVE, or PAST_DUE within the grace window. False once past-due
  * beyond grace, or CANCELED past period end. Drives premium perks that lapse on
