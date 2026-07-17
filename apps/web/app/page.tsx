@@ -84,17 +84,17 @@ const PRODUCT_IMAGES = [
   { src: "/images/product-gradebook.jpg", alt: "The gradebook — a term scoresheet with component marks, grades and positions" },
 ];
 
-// Scholarship band — a full-bleed sliding carousel of international students
-// across the scholarship categories (science, art, community, maths). Reuses the
-// education photography that ships with the landing page.
+// Scholarship band — a full-bleed sliding carousel of international students.
+// Uses only the high-resolution (1600–2000px) landscape photography; the small
+// 480px "marquee" tiles were upscaled and looked soft at full-bleed size.
 const SCHOLARSHIP_IMAGES = [
-  { src: "/images/hero-1.jpg", alt: "A diverse group of pupils working together in a bright classroom" },
-  { src: "/images/marquee-5.jpg", alt: "A student looking through a microscope — science scholarship" },
-  { src: "/images/marquee-3.jpg", alt: "Children smiling at their easels in an art class — art scholarship" },
-  { src: "/images/marquee-6.jpg", alt: "Three students reading together" },
+  { src: "/images/hero-1.jpg", alt: "A diverse group of pupils working together in a bright, modern classroom" },
+  { src: "/images/band-community.jpg", alt: "Students collaborating on a community project" },
+  { src: "/images/onboard-1.jpg", alt: "Students learning together at an international school" },
   { src: "/images/hero-3.jpg", alt: "A pupil raising their hand to answer in class" },
-  { src: "/images/marquee-2.jpg", alt: "A student in a science lab wearing safety goggles" },
-  { src: "/images/marquee-8.jpg", alt: "Two pupils in uniform reading together" },
+  { src: "/images/onboard-2.jpg", alt: "Pupils engaged in a lively lesson" },
+  { src: "/images/hero-2.jpg", alt: "A landmark university campus building under a clear sky" },
+  { src: "/images/onboard-3.jpg", alt: "Students studying on a bright campus" },
   { src: "/images/hero-4.jpg", alt: "A classical university hall on a green campus" },
 ];
 
