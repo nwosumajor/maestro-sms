@@ -30,6 +30,7 @@ import { PrivilegedDatabaseService } from "../common/privileged-database.service
 import { NotificationService } from "../notifications/notification.service";
 import { PlatformFeeService } from "../billing/platform-fee.service";
 import { AdmissionsService } from "../admissions/admissions.service";
+import { MessageCreditsService } from "../notifications/message-credits.service";
 
 @Injectable()
 export class PaymentGatewayService {
@@ -42,6 +43,7 @@ export class PaymentGatewayService {
     private readonly notifications: NotificationService,
     private readonly platformFees: PlatformFeeService,
     private readonly admissions: AdmissionsService,
+    private readonly messageCredits: MessageCreditsService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -243,6 +245,7 @@ export class PaymentGatewayService {
     const kind = (event.data.metadata as { kind?: string } | undefined)?.kind;
     if (kind === "subscription") return this.billing.applySubscriptionPayment(event);
     if (kind === "admission_form") return this.admissions.applyFormFeePayment(event);
+    if (kind === "credits") return this.messageCredits.applyPurchase(event);
     if (event.event !== "charge.success") return { ok: true };
     return this.handleInvoiceCharge(event);
   }

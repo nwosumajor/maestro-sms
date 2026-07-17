@@ -15,21 +15,28 @@ export class TwilioChannelProvider implements NotificationChannelProvider {
   private readonly logger = new Logger("NotificationChannel");
 
   async deliver(req: ChannelDeliveryRequest): Promise<{ ok: boolean; error?: string }> {
-    if (req.channel !== "SMS") {
+    if (req.channel !== "SMS" && req.channel !== "WHATSAPP") {
       // EMAIL / PUSH / in-app: log-only here (replace with SES/FCM as needed).
       this.logger.log(`[non-sms] ${req.channel} -> ${req.target}`);
       return { ok: true };
     }
     const sid = process.env.TWILIO_ACCOUNT_SID;
     const token = process.env.TWILIO_AUTH_TOKEN;
-    const from = process.env.TWILIO_FROM;
+    // WhatsApp uses its own approved sender (falls back to the SMS number).
+    const from = req.channel === "WHATSAPP" ? (process.env.TWILIO_WHATSAPP_FROM ?? process.env.TWILIO_FROM) : process.env.TWILIO_FROM;
     if (!sid || !token || !from) {
-      this.logger.warn(`[sms disabled — no Twilio creds] SMS -> ${req.target}`);
+      this.logger.warn(`[messaging disabled — no Twilio creds] ${req.channel} -> ${req.target}`);
       return { ok: true }; // degrade gracefully; don't fail the pipeline
     }
     try {
       const auth = Buffer.from(`${sid}:${token}`).toString("base64");
-      const body = new URLSearchParams({ To: req.target, From: from, Body: `${req.title}\n${req.body}` });
+      // Twilio's WhatsApp transport is the same Messages API with a prefix.
+      const prefix = req.channel === "WHATSAPP" ? "whatsapp:" : "";
+      const body = new URLSearchParams({
+        To: `${prefix}${req.target}`,
+        From: `${prefix}${from}`,
+        Body: `${req.title}\n${req.body}`,
+      });
       const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
         method: "POST",
         headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/x-www-form-urlencoded" },
@@ -37,10 +44,10 @@ export class TwilioChannelProvider implements NotificationChannelProvider {
       });
       if (!res.ok) {
         const text = await res.text();
-        this.logger.error(`SMS -> ${req.target} failed (${res.status})`);
+        this.logger.error(`${req.channel} -> ${req.target} failed (${res.status})`);
         return { ok: false, error: `twilio ${res.status}: ${text.slice(0, 120)}` };
       }
-      this.logger.log(`[sms sent] SMS -> ${req.target}`);
+      this.logger.log(`[sent] ${req.channel} -> ${req.target}`);
       return { ok: true };
     } catch (err) {
       return { ok: false, error: String(err) };

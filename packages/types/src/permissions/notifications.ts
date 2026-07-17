@@ -8,8 +8,21 @@
 // are not gated by SEND.
 // =============================================================================
 
-export const NOTIFICATION_CHANNELS = ["EMAIL", "SMS", "PUSH"] as const;
+export const NOTIFICATION_CHANNELS = ["EMAIL", "SMS", "PUSH", "WHATSAPP"] as const;
 export type NotificationChannelValue = (typeof NOTIFICATION_CHANNELS)[number];
+
+/** Channels that consume prepaid message credits (1 credit per delivery). */
+export const CREDIT_CHANNELS: readonly NotificationChannelValue[] = ["SMS", "WHATSAPP"] as const;
+
+/** Prepaid message-credit bundles a school can buy (NGN kobo). Priced with
+ *  margin over Nigerian SMS gateway cost (~₦4–6/SMS); WhatsApp debits the same
+ *  credit. One constant drives the buy screen AND checkout — no drift. */
+export const MESSAGE_CREDIT_BUNDLES = [
+  { id: "S", credits: 200, priceMinor: 300_000 }, // ₦3,000 (₦15/msg)
+  { id: "M", credits: 1_000, priceMinor: 1_200_000 }, // ₦12,000 (₦12/msg)
+  { id: "L", credits: 5_000, priceMinor: 5_000_000 }, // ₦50,000 (₦10/msg)
+] as const;
+export type MessageCreditBundle = (typeof MESSAGE_CREDIT_BUNDLES)[number];
 
 export const NOTIFICATION_TYPES = [
   "ATTENDANCE_ABSENCE",

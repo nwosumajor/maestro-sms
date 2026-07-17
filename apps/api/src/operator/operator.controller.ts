@@ -26,6 +26,7 @@ import { PlatformAuditService, type PlatformAuditFilter } from "./platform-audit
 import { PlanPricingService } from "../billing/plan-pricing.service";
 import { PlatformFeeService } from "../billing/platform-fee.service";
 import { GrowthService } from "../billing/growth.service";
+import { GroupService } from "../group/group.service";
 
 const platformStaffSchema = z.object({
   email: z.string().email(),
@@ -107,6 +108,9 @@ const agentSchema = z.object({
   commissionBp: z.number().int().min(1).max(5000),
 });
 const activeSchema = z.object({ active: z.boolean() });
+const groupSchema = z.object({ name: z.string().min(1).max(160) });
+const groupMembersSchema = z.object({ schoolIds: z.array(z.string().uuid()).max(50) });
+const groupDirectorsSchema = z.object({ emails: z.array(z.string().email()).max(10) });
 
 const platformFeeSchema = z.object({
   flatMinor: z.number().int().min(0),
@@ -158,6 +162,7 @@ export class OperatorController {
     private readonly pricing: PlanPricingService,
     private readonly platformFees: PlatformFeeService,
     private readonly growth: GrowthService,
+    private readonly groups: GroupService,
   ) {}
 
   /** Self-serve onboard a NEW school + its first admin (step-up: creates creds). */
@@ -443,6 +448,47 @@ export class OperatorController {
   @RequireStepUp()
   markCommissionPaid(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
     return this.growth.markCommissionPaid(p, id);
+  }
+
+  // --- multi-school groups (franchise tier; owner-only writes) ----------------
+  @Get("groups")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
+  listGroups() {
+    return this.groups.listGroups();
+  }
+
+  @Post("groups")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_SUBSCRIPTION_MANAGE)
+  @RequireStepUp()
+  createGroup(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(groupSchema)) body: z.infer<typeof groupSchema>,
+  ) {
+    return this.groups.createGroup(p, body.name);
+  }
+
+  /** Replace a group's member schools. Step-up: it widens a cross-tenant read. */
+  @Put("groups/:id/members")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_SUBSCRIPTION_MANAGE)
+  @RequireStepUp()
+  setGroupMembers(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(groupMembersSchema)) body: z.infer<typeof groupMembersSchema>,
+  ) {
+    return this.groups.setMembers(p, id, body.schoolIds);
+  }
+
+  /** Replace a group's directors (by email; must belong to a member school). */
+  @Put("groups/:id/directors")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_SUBSCRIPTION_MANAGE)
+  @RequireStepUp()
+  setGroupDirectors(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(groupDirectorsSchema)) body: z.infer<typeof groupDirectorsSchema>,
+  ) {
+    return this.groups.setDirectors(p, id, body.emails);
   }
 
   // --- public onboarding-request review (super_admin) ------------------------

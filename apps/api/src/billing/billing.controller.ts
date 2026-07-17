@@ -27,8 +27,10 @@ import type { Principal } from "../integrity/integrity.foundation";
 import { StripeService } from "../payments/stripe.service";
 import { BillingService } from "./billing.service";
 import { ReferralService } from "./referral.service";
+import { MessageCreditsService } from "../notifications/message-credits.service";
 
 const autoRenewSchema = z.object({ enabled: z.boolean() });
+const creditsSchema = z.object({ bundleId: z.string().min(1).max(10) });
 
 const checkoutSchema = z.object({
   plan: z.enum([PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE]),
@@ -45,6 +47,7 @@ export class BillingController {
     private readonly billing: BillingService,
     private readonly stripe: StripeService,
     private readonly referrals: ReferralService,
+    private readonly messageCredits: MessageCreditsService,
   ) {}
 
   /** The billing screen: current subscription + per-tier quotes + history. */
@@ -114,6 +117,24 @@ export class BillingController {
   @RequireStepUp()
   trueUp(@CurrentPrincipal() p: Principal): Promise<CheckoutInitResultDto> {
     return this.billing.initTrueUpCheckout(p);
+  }
+
+  /** Message-credit balance + purchasable bundles (SMS/WhatsApp metering). */
+  @Get("credits")
+  @RequirePermission(BILLING_PERMISSIONS.BILLING_READ)
+  credits(@CurrentPrincipal() p: Principal) {
+    return this.messageCredits.overview(p);
+  }
+
+  /** Buy a message-credit bundle (hosted Paystack checkout). */
+  @Post("credits/checkout")
+  @RequirePermission(BILLING_PERMISSIONS.BILLING_MANAGE)
+  @RequireStepUp()
+  buyCredits(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(creditsSchema)) body: z.infer<typeof creditsSchema>,
+  ) {
+    return this.messageCredits.initPurchase(p, body.bundleId);
   }
 
   /** Opt in/out of saved-card auto-renew. Step-up: it arms future charges. */

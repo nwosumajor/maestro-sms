@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { BillingModule } from "../billing/billing.module";
 import { NotificationModule } from "../notifications/notification.module";
 import { PrivacyModule } from "../privacy/privacy.module";
+import { GroupModule } from "../group/group.module";
 import { OperatorController } from "./operator.controller";
 import { OperatorService } from "./operator.service";
 import { OperatorProvisioningService } from "./operator-provisioning.service";
@@ -16,7 +17,7 @@ import { PlatformAuditService } from "./platform-audit.service";
 // data export (one-way dep operator -> privacy).
 // NotificationModule: provisioning welcomes the founding admins in-app.
 @Module({
-  imports: [BillingModule, NotificationModule, PrivacyModule],
+  imports: [BillingModule, NotificationModule, PrivacyModule, GroupModule],
   controllers: [OperatorController],
   providers: [OperatorService, OperatorProvisioningService, OperatorUserService, OperatorExportService, PlatformAnalyticsService, PlatformAuditService],
   exports: [OperatorService, OperatorProvisioningService, OperatorUserService],

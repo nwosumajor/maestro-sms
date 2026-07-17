@@ -35,6 +35,8 @@ import { AnnouncementsModule } from "./announcements/announcements.module";
 import { HostelModule } from "./hostel/hostel.module";
 import { TransportModule } from "./transport/transport.module";
 import { LibraryModule } from "./library/library.module";
+import { GroupModule } from "./group/group.module";
+import { CbtModule } from "./cbt/cbt.module";
 import { TaskModule } from "./task/task.module";
 import { PollModule } from "./poll/poll.module";
 import { DiscussionModule } from "./discussion/discussion.module";
@@ -93,6 +95,8 @@ import { HealthController } from "./health.controller";
     HostelModule,
     TransportModule,
     LibraryModule,
+    GroupModule,
+    CbtModule,
     TaskModule,
     PollModule,
     DiscussionModule,

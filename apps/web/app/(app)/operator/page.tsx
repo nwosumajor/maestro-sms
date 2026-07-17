@@ -28,6 +28,7 @@ import { OnboardingRequests } from "@/components/operator/OnboardingRequests";
 import { PricingManager } from "@/components/operator/PricingManager";
 import { PlatformFeeManager } from "@/components/operator/PlatformFeeManager";
 import { GrowthManager } from "@/components/operator/GrowthManager";
+import { GroupsManager } from "@/components/operator/GroupsManager";
 import { PlatformStaff } from "@/components/operator/PlatformStaff";
 import { GraceEditor } from "@/components/operator/GraceEditor";
 import { TenantFilterBar } from "@/components/operator/TenantFilterBar";
@@ -89,6 +90,7 @@ export default async function OperatorPage({
         apiGet<never[]>("/operator/commissions").then((r) => r ?? []),
       ])
     : [[], [], []];
+  const groups = canManageSubscription ? await apiGet<never[]>("/operator/groups").then((r) => r ?? []) : [];
   const tenantList = tenantPage?.tenants ?? [];
 
   // "Approve & provision" deep-link: pre-fill the onboarding form from the
@@ -161,6 +163,9 @@ export default async function OperatorPage({
         {pricing && canManagePricing && <PricingManager initial={pricing} />}
         {platformFees && canManagePricing && <PlatformFeeManager initial={platformFees} />}
         {canManagePricing && <GrowthManager promos={promos} agents={agents} commissions={commissions} />}
+        {canManageSubscription && (
+          <GroupsManager groups={groups} schools={(names ?? []).map((n) => ({ id: n.id, name: n.name }))} />
+        )}
 
         {canReviewOnboarding && <OnboardingRequests requests={onboarding ?? []} />}
         {canManageStaff && <PlatformStaff />}

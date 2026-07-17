@@ -58,6 +58,9 @@ const PERMS = [
   "discipline.manage",
   // Certificate / ID generator
   "certificate.issue",
+  // CBT mock-exam hall (add-on module)
+  "cbt.manage",
+  "cbt.take",
   // Alumni
   "alumni.manage",
   // Form builder
@@ -241,7 +244,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     "library.read", "library.borrow", "library.manage",
     "task.assign", "task.participate",
     "poll.manage", "poll.vote",
-    "discussion.participate", "discussion.moderate", "discipline.file", "discipline.manage", "certificate.issue", "alumni.manage", "form.manage", "form.respond",
+    "discussion.participate", "discussion.moderate", "discipline.file", "discipline.manage", "certificate.issue", "cbt.manage", "alumni.manage", "form.manage", "form.respond",
     "document.read", "document.write",
     "timetable.read", "timetable.write",
     "security.audit.read", "security.elevation.request", "security.elevation.approve",
@@ -271,7 +274,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     "library.read", "library.borrow", "library.manage",
     "task.assign", "task.participate",
     "poll.manage", "poll.vote",
-    "discussion.participate", "discussion.moderate", "discipline.file", "discipline.manage", "certificate.issue", "alumni.manage", "form.manage", "form.respond",
+    "discussion.participate", "discussion.moderate", "discipline.file", "discipline.manage", "certificate.issue", "cbt.manage", "alumni.manage", "form.manage", "form.respond",
     "document.read", "document.write",
     "timetable.read", "timetable.write",
     "security.audit.read", "security.elevation.request", "security.elevation.approve",
@@ -288,7 +291,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     "scholarship.read",
   ],
   teacher: ["hr.self", "task.assign", "task.participate", "poll.manage", "poll.vote",
-    "discussion.participate", "discussion.moderate", "discipline.file", "discipline.manage", "certificate.issue", "alumni.manage", "form.manage", "form.respond",
+    "discussion.participate", "discussion.moderate", "discipline.file", "discipline.manage", "certificate.issue", "cbt.manage", "alumni.manage", "form.manage", "form.respond",
     "assessment.read", "assessment.write", "submission.read",
     "integrity.report.read", "integrity.exemption.read", "integrity.exemption.write",
     "student.profile.read", "student.contact.read",
@@ -309,7 +312,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     "student.profile.read", "attendance.read",
     "notification.read", "fee.read", "document.read",
     "timetable.read", "message.read", "message.send", "event.read", "announcement.read",
-    "game.play", "game.leaderboard.read",
+    "game.play", "game.leaderboard.read", "cbt.take",
     "lms.content.read", "lms.quiz.attempt", "lms.forum.post",
     "library.read", "library.borrow",
     "task.participate", "poll.vote", "discussion.participate", "discipline.file", "form.respond",

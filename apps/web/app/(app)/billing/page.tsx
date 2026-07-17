@@ -11,6 +11,7 @@ import { BillingCheckout } from "@/components/billing/BillingCheckout";
 import { ReferralPanel } from "@/components/billing/ReferralPanel";
 import { AutoRenewCard } from "@/components/billing/AutoRenewCard";
 import { TrueUpCard } from "@/components/billing/TrueUpCard";
+import { MessageCreditsCard } from "@/components/billing/MessageCreditsCard";
 
 export const dynamic = "force-dynamic";
 
@@ -30,9 +31,10 @@ const PAYMENT_VARIANT: Record<string, "default" | "secondary" | "destructive" | 
 export default async function BillingPage() {
   const session = await auth();
   const user = session!.user;
-  const [data, referral] = await Promise.all([
+  const [data, referral, credits] = await Promise.all([
     apiGet<Overview>("/billing"),
     apiGet<Serialized<ReferralInfoDto>>("/billing/referral"),
+    apiGet<{ balance: number; bundles: { id: string; credits: number; priceMinor: number }[] }>("/billing/credits"),
   ]);
   const canManage = hasPermission(user.permissions, "billing.manage");
 
@@ -105,6 +107,10 @@ export default async function BillingPage() {
             )}
 
             <AutoRenewCard autoRenew={data.autoRenew} cardLast4={data.cardLast4} canManage={canManage} />
+
+            {credits && (
+              <MessageCreditsCard balance={credits.balance} bundles={[...credits.bundles]} canManage={canManage} />
+            )}
 
             {referral && <ReferralPanel initial={referral} canManage={canManage} />}
 

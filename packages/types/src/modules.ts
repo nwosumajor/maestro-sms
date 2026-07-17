@@ -42,6 +42,12 @@ export const MODULES = {
   CERTIFICATE: "certificate",
   ALUMNI: "alumni",
   FORM: "form",
+  /// Multi-school GROUP console: paid add-on for proprietors with several
+  /// campuses — never in any plan bundle (sold via per-school overrides).
+  GROUP: "group",
+  /// CBT mock-exam hall: WAEC/JAMB-style computer-based testing — paid add-on
+  /// (per-school overrides; per-sitting metering is a future refinement).
+  CBT: "cbt",
 } as const;
 
 export type ModuleKey = (typeof MODULES)[keyof typeof MODULES];
@@ -68,6 +74,8 @@ export const MODULE_CATALOG: { key: ModuleKey; label: string; description: strin
   { key: MODULES.POLL, label: "Polls", description: "Anonymous opinion polls." },
   { key: MODULES.DISCUSSION, label: "Discussion Hub", description: "Topic groups, posts, moderation." },
   { key: MODULES.FORM, label: "Form Builder", description: "Surveys, feedback, review forms." },
+  { key: MODULES.GROUP, label: "Group Console", description: "Cross-campus dashboard for multi-school proprietors (add-on)." },
+  { key: MODULES.CBT, label: "CBT Exam Hall", description: "Timed, auto-marked computer-based mock exams with question banks (add-on)." },
   { key: MODULES.CERTIFICATE, label: "Certificates & ID", description: "ID cards and certificate generator." },
   { key: MODULES.HOSTEL, label: "Hostel", description: "Boarding houses, rooms, allocation, fees." },
   { key: MODULES.TRANSPORT, label: "Transport", description: "Vehicles, routes, stops, transport fees." },
