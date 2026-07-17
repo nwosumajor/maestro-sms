@@ -181,6 +181,9 @@ export class CbtService {
           orderBy: { startAt: "asc" },
           take: 50,
         });
+        // SECURITY: a scholarship-bound exam is visible ONLY to a student holding
+        // a QUALIFIED application for that program — never the general cohort.
+        exams = await this.filterScholarshipExams(tx, p, exams);
       }
       const out: CbtExamDto[] = [];
       for (const e of exams) out.push(await this.toExamDto(tx, e, p));
@@ -190,11 +193,36 @@ export class CbtService {
 
   // --- sittings (students) ------------------------------------------------------
 
+  /** A scholarship-bound exam requires a QUALIFIED application for that program;
+   *  keeps ordinary exams untouched. Returns only the exams the student may see. */
+  private async filterScholarshipExams<T extends { scholarshipProgramId: string | null }>(
+    tx: TenantTx,
+    p: Principal,
+    exams: T[],
+  ): Promise<T[]> {
+    const programIds = [...new Set(exams.map((e) => e.scholarshipProgramId).filter((v): v is string => !!v))];
+    if (programIds.length === 0) return exams;
+    const qualified = await tx.scholarshipApplication.findMany({
+      where: { studentId: p.userId, programId: { in: programIds }, status: "QUALIFIED" },
+      select: { programId: true },
+    });
+    const allowed = new Set(qualified.map((a: { programId: string }) => a.programId));
+    return exams.filter((e) => !e.scholarshipProgramId || allowed.has(e.scholarshipProgramId));
+  }
+
   /** Start (or resume) the caller's sitting. Samples the questions server-side. */
   async startSitting(p: Principal, examId: string): Promise<CbtSittingViewDto> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const exam = await tx.cbtExam.findFirst({ where: { id: examId } });
       if (!exam || exam.status !== "PUBLISHED") throw new NotFoundException("Exam not found");
+      // 404-not-403: a scholarship exam is invisible unless the student qualified.
+      if (exam.scholarshipProgramId) {
+        const qualified = await tx.scholarshipApplication.findFirst({
+          where: { studentId: p.userId, programId: exam.scholarshipProgramId, status: "QUALIFIED" },
+          select: { id: true },
+        });
+        if (!qualified) throw new NotFoundException("Exam not found");
+      }
       const now = new Date();
       if (now < exam.startAt) throw new ConflictException("The exam has not opened yet");
       if (now > exam.endAt) throw new ConflictException("The exam window has closed");

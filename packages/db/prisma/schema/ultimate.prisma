@@ -45,6 +45,11 @@ model UltimateCompetition {
   status           UltimateStatus @default(ACTIVE)
   startAt          DateTime
   endAt            DateTime
+  /// When set: a SCHOLARSHIP qualification event materialized by announce-exam.
+  /// Entry then requires a QUALIFIED application for that program (the chain's
+  /// principal approval stands in for the school's crossSchoolEnabled posture;
+  /// the guardian's chain approval was written as the UltimateConsent).
+  scholarshipProgramId String?    @db.Uuid
   /// super_admin userId (audit field; scalar — NO cross-tenant user relation).
   createdById      String         @db.Uuid
 

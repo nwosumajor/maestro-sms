@@ -62,6 +62,10 @@ model CbtExam {
   status          String    @default("DRAFT")
   /// Shuffle question order per sitting.
   shuffle         Boolean   @default(true)
+  /// When set, this exam is a SCHOLARSHIP qualification exam materialized by the
+  /// platform's announce step: only students holding a QUALIFIED application for
+  /// that program may see/sit it (checked in listExams/startSitting).
+  scholarshipProgramId String? @db.Uuid
   createdById     String    @db.Uuid
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt

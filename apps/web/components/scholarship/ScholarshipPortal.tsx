@@ -12,6 +12,7 @@
 
 import type { ScholarshipPortalDto, ScholarshipApplicationDto, ScholarshipRequestForm, Serialized } from "@sms/types";
 import * as React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { sendSms } from "@/components/game/play-ui";
 import { Button } from "@/components/ui/button";
@@ -423,9 +424,22 @@ function ApplicationRow({
         </div>
         <ChainTimeline app={app} />
         {app.status === "QUALIFIED" && (
-          <p className="mt-2 rounded-md bg-brand2/10 px-3 py-2 text-xs font-medium text-brand2">
-            🎓 Qualified for the scholarship exam — the exam date, category and mode arrive in your Notifications.
-          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md bg-brand2/10 px-3 py-2 text-xs font-medium text-brand2">
+            <span>
+              🎓 Qualified for the scholarship exam
+              {app.examAt ? ` — ${shortDate(app.examAt)}` : ""}
+              {app.examMode === "PHYSICAL" ? " (physical — see your Notifications for the venue)." : "."}
+            </span>
+            {isStudent && app.examMode === "ONLINE_CBT" && (
+              <Link href="/cbt" className="underline">Go to CBT Exams →</Link>
+            )}
+            {isStudent && app.examMode === "GAMES" && (
+              <Link href="/games/ultimate" className="underline">Enter the Games arena →</Link>
+            )}
+          </div>
+        )}
+        {app.examScorePct != null && app.status !== "AWARDED" && (
+          <p className="mt-1 text-xs text-muted-foreground">Your exam score: <strong>{app.examScorePct}%</strong></p>
         )}
       </CardContent>
     </Card>

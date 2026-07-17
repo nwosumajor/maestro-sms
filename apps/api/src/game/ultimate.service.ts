@@ -240,12 +240,25 @@ export class UltimateService {
       const comp = await this.requireCompetition(tx, competitionId);
       if (comp.status !== "ACTIVE") throw new ConflictException("competition is not open");
 
-      // Tier-0: the school must permit cross-school play (step-7 posture).
-      const settings = effectiveGameSettings(
-        await tx.gameSettings.findFirst({ where: { schoolId: p.schoolId } }),
-      );
-      if (!settings.crossSchoolEnabled) {
-        throw new ForbiddenException("cross-school play is disabled for your school");
+      // Tier-0: the school must permit cross-school play (step-7 posture) —
+      // EXCEPT a SCHOLARSHIP arena, where the applicant already cleared the
+      // four-stage chain (incl. the principal's approval) and the guardian's
+      // chain-approval was written as the UltimateConsent below. The scholarship
+      // sponsor's governance stands in for the school's general games posture.
+      if (!comp.scholarshipProgramId) {
+        const settings = effectiveGameSettings(
+          await tx.gameSettings.findFirst({ where: { schoolId: p.schoolId } }),
+        );
+        if (!settings.crossSchoolEnabled) {
+          throw new ForbiddenException("cross-school play is disabled for your school");
+        }
+      } else {
+        // A scholarship arena is enterable ONLY by a QUALIFIED candidate.
+        const qualified = await tx.scholarshipApplication.findFirst({
+          where: { studentId: p.userId, programId: comp.scholarshipProgramId, status: "QUALIFIED" },
+          select: { id: true },
+        });
+        if (!qualified) throw new ForbiddenException("this arena is for qualified scholarship candidates only");
       }
       // Tier-1: the school enrolled into THIS competition.
       const enrolled = await tx.ultimateEnrollment.findFirst({

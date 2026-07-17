@@ -421,14 +421,21 @@ export class ScholarshipService {
 
   private programDto(pr: {
     id: string; title: string; description: string | null; budgetMinor: number; awardMinor: number;
+    award2Minor: number | null; award3Minor: number | null;
     awardKind: string; selectionBasis: string; eligibility: unknown; opensAt: Date; closesAt: Date; status: string;
-    category: string; examMode: string | null; examAt: Date | null; examVenue: string | null; createdAt: Date;
+    category: string; examMode: string | null; examAt: Date | null; examVenue: string | null;
+    examDurationMin: number; examQuestions: unknown; createdAt: Date;
   }) {
     return {
       id: pr.id, title: pr.title, description: pr.description, budgetMinor: pr.budgetMinor, awardMinor: pr.awardMinor,
+      award2Minor: pr.award2Minor, award3Minor: pr.award3Minor,
       awardKind: pr.awardKind, selectionBasis: pr.selectionBasis, eligibility: pr.eligibility ?? null,
       opensAt: pr.opensAt, closesAt: pr.closesAt, status: pr.status,
       category: pr.category, examMode: pr.examMode, examAt: pr.examAt, examVenue: pr.examVenue,
+      examDurationMin: pr.examDurationMin,
+      // SECURITY: the count only — the question set (with answers) never leaves
+      // the platform-owned row toward applicants.
+      examQuestionCount: Array.isArray(pr.examQuestions) ? pr.examQuestions.length : 0,
       createdAt: pr.createdAt,
     };
   }
@@ -442,7 +449,7 @@ export class ScholarshipService {
       answers: unknown; signals: unknown; status: string; consentById: string | null; consentAt: Date | null;
       supervisorById: string | null; supervisorAt: Date | null; supervisorNote: string | null;
       parentNote: string | null; principalById: string | null; principalAt: Date | null; principalNote: string | null;
-      rejectedStage: string | null;
+      rejectedStage: string | null; examScorePct: number | null; awardPosition: number | null;
       awardMinor: number | null; reviewNote: string | null; createdAt: Date; updatedAt: Date;
     }>,
   ): Promise<ScholarshipApplicationDto[]> {
@@ -450,10 +457,15 @@ export class ScholarshipService {
     const programIds = [...new Set(rows.map((r) => r.programId))];
     const userIds = [...new Set(rows.flatMap((r) => [r.studentId, r.applicantId]))];
     const [programs, users] = await Promise.all([
-      tx.scholarshipProgram.findMany({ where: { id: { in: programIds } }, select: { id: true, title: true, awardMinor: true } }),
+      tx.scholarshipProgram.findMany({
+        where: { id: { in: programIds } },
+        select: { id: true, title: true, awardMinor: true, examMode: true, examAt: true },
+      }),
       tx.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } }),
     ]);
-    const prog = new Map(programs.map((pr: { id: string; title: string; awardMinor: number }) => [pr.id, pr]));
+    const prog = new Map(
+      programs.map((pr: { id: string; title: string; awardMinor: number; examMode: string | null; examAt: Date | null }) => [pr.id, pr]),
+    );
     const name = new Map(users.map((u: { id: string; name: string }) => [u.id, u.name]));
     return rows.map((r) => ({
       id: r.id,
@@ -480,6 +492,10 @@ export class ScholarshipService {
       principalAt: r.principalAt,
       principalNote: r.principalNote,
       rejectedStage: r.rejectedStage,
+      examMode: prog.get(r.programId)?.examMode ?? null,
+      examAt: prog.get(r.programId)?.examAt ?? null,
+      examScorePct: r.examScorePct,
+      awardPosition: r.awardPosition,
       awardMinor: r.awardMinor,
       reviewNote: r.reviewNote,
       createdAt: r.createdAt,

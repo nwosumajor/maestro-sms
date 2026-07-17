@@ -33,15 +33,32 @@ const programSchema = z.object({
   opensAt: z.string().datetime(),
   closesAt: z.string().datetime(),
   status: z.enum(["DRAFT", "OPEN", "CLOSED", "ARCHIVED"]).optional(),
+  award2Minor: z.number().int().positive().nullish(),
+  award3Minor: z.number().int().positive().nullish(),
   category: z.enum(["GENERAL_SCIENCE", "ART", "COMMUNITY_DEVELOPMENT", "MATHEMATICS", "SPECIAL"]).optional(),
   examMode: z.enum(["ONLINE_CBT", "GAMES", "PHYSICAL"]).nullish(),
   examAt: z.string().datetime().nullish(),
   examVenue: z.string().max(300).nullish(),
+  examDurationMin: z.number().int().min(1).max(600).optional(),
 });
-const programUpdateSchema = programSchema.partial();
+const examQuestion = z.object({
+  text: z.string().min(1).max(2000),
+  options: z.array(z.string().min(1).max(500)).min(2).max(6),
+  answerIndex: z.number().int().min(0).max(5),
+});
+const programUpdateSchema = programSchema.partial().extend({
+  // Full replace of the CBT question set, OR append one at a time (the console
+  // uses append since answers are never read back to the client).
+  examQuestions: z.array(examQuestion).max(200).nullish(),
+  appendQuestion: examQuestion.optional(),
+});
 const stageDecisionSchema = z.object({ decision: z.enum(["APPROVE", "REJECT"]), note: z.string().max(2000).optional() });
 const reviewSchema = z.object({ action: z.enum(["REVIEW", "SHORTLIST", "QUALIFY", "REJECT"]), note: z.string().max(2000).optional() });
-const awardSchema = z.object({ awardMinor: z.number().int().positive().optional(), note: z.string().max(2000).optional() });
+const awardSchema = z.object({
+  awardMinor: z.number().int().positive().optional(),
+  position: z.number().int().min(1).max(3).optional(),
+  note: z.string().max(2000).optional(),
+});
 
 @Controller("scholarships")
 export class ScholarshipController {
@@ -167,11 +184,19 @@ export class ScholarshipController {
     return this.admin.decide(p, id, { action: "AWARD", ...body });
   }
 
-  /** Announce the qualification exam to every QUALIFIED candidate (category,
-   *  mode — online CBT / games / physical — date and venue). */
+  /** Announce the qualification exam to every QUALIFIED candidate AND materialize
+   *  the real sitting surface (ONLINE_CBT per-school exams / GAMES arena). */
   @Post("programs/:id/announce-exam")
   @RequirePermission(SCHOLARSHIP_PERMISSIONS.ADMIN)
   announceExam(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
     return this.admin.announceExam(p, id);
+  }
+
+  /** Harvest CBT/arena results back onto the candidates' applications as an
+   *  exam-score SIGNAL to inform the award (Golden Rule #8). */
+  @Post("programs/:id/collect-results")
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.ADMIN)
+  collectResults(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.admin.collectExamResults(p, id);
   }
 }

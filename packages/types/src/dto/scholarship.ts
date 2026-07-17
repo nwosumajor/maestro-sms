@@ -49,6 +49,20 @@ export const SCHOLARSHIP_EXAM_MODE_LABEL: Record<ScholarshipExamMode, string> = 
 /** Number of awardees per program — the Best Three. */
 export const SCHOLARSHIP_MAX_AWARDS = 3;
 
+/** Award positions with human labels. */
+export const SCHOLARSHIP_POSITIONS = [1, 2, 3] as const;
+export type ScholarshipPosition = (typeof SCHOLARSHIP_POSITIONS)[number];
+export const SCHOLARSHIP_POSITION_LABEL: Record<number, string> = { 1: "1st", 2: "2nd", 3: "3rd" };
+
+/** One owner-authored CBT question for a scholarship qualification exam.
+ *  SECURITY: answerIndex never reaches applicants — announce materializes real
+ *  CbtQuestion rows per school and the CBT module keeps answers server-only. */
+export interface ScholarshipExamQuestion {
+  text: string;
+  options: string[];
+  answerIndex: number;
+}
+
 /** The student's own detailed request form (stored in `answers`). The verified
  *  academics/attendance/discipline/tasks snapshot lives in `signals` — the form
  *  carries what only the student can tell us. */
@@ -71,9 +85,11 @@ export interface ScholarshipProgramDto {
   id: string;
   title: string;
   description: string | null;
-  /** Integer minor units (kobo). */
+  /** Integer minor units (kobo). awardMinor = 1st prize; 2nd/3rd fall back to it. */
   budgetMinor: number;
   awardMinor: number;
+  award2Minor: number | null;
+  award3Minor: number | null;
   awardKind: string;
   selectionBasis: string;
   eligibility: unknown | null;
@@ -86,6 +102,9 @@ export interface ScholarshipProgramDto {
   examMode: string | null;
   examAt: Date | null;
   examVenue: string | null;
+  examDurationMin: number;
+  /** How many CBT questions the owner has authored (never the questions). */
+  examQuestionCount: number;
   createdAt: Date;
 }
 
@@ -136,6 +155,14 @@ export interface ScholarshipApplicationDto {
   principalNote: string | null;
   /** Where a REJECTED application died: SUPERVISOR | PARENT | PRINCIPAL | PLATFORM. */
   rejectedStage: string | null;
+  /** Bound exam pointers (from the program) so a QUALIFIED candidate can be sent
+   *  to the right surface: ONLINE_CBT -> /cbt, GAMES -> /games/ultimate. */
+  examMode: string | null;
+  examAt: Date | null;
+  /** Qualification-exam result (CBT score % or arena relative standing %). */
+  examScorePct: number | null;
+  /** 1 | 2 | 3 when AWARDED — each position granted once per program. */
+  awardPosition: number | null;
   awardMinor: number | null;
   reviewNote: string | null;
   createdAt: Date;
