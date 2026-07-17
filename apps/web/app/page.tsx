@@ -84,6 +84,20 @@ const PRODUCT_IMAGES = [
   { src: "/images/product-gradebook.jpg", alt: "The gradebook — a term scoresheet with component marks, grades and positions" },
 ];
 
+// Scholarship band — a full-bleed sliding carousel of international students
+// across the scholarship categories (science, art, community, maths). Reuses the
+// education photography that ships with the landing page.
+const SCHOLARSHIP_IMAGES = [
+  { src: "/images/hero-1.jpg", alt: "A diverse group of pupils working together in a bright classroom" },
+  { src: "/images/marquee-5.jpg", alt: "A student looking through a microscope — science scholarship" },
+  { src: "/images/marquee-3.jpg", alt: "Children smiling at their easels in an art class — art scholarship" },
+  { src: "/images/marquee-6.jpg", alt: "Three students reading together" },
+  { src: "/images/hero-3.jpg", alt: "A pupil raising their hand to answer in class" },
+  { src: "/images/marquee-2.jpg", alt: "A student in a science lab wearing safety goggles" },
+  { src: "/images/marquee-8.jpg", alt: "Two pupils in uniform reading together" },
+  { src: "/images/hero-4.jpg", alt: "A classical university hall on a green campus" },
+];
+
 // Auto-scrolling "life on the platform" strip — arch-framed portrait tiles.
 const MARQUEE_IMAGES = [
   { src: "/images/marquee-1.jpg", alt: "A pupil exploring with a magnifying glass" },
@@ -980,6 +994,35 @@ function ScholarshipBand() {
   ];
   return (
     <section id="scholarships" className="scroll-mt-20 border-b border-border/60 bg-card">
+      {/* Full-bleed sliding carousel — international students across the
+          scholarship categories, with the offer stated over the photos. */}
+      <div className="relative h-[22rem] overflow-hidden sm:h-[26rem] lg:h-[30rem]">
+        <HeroCarousel images={SCHOLARSHIP_IMAGES} intervalMs={4500} className="h-full w-full" />
+        <div aria-hidden className="pointer-events-none absolute inset-0 bg-gradient-to-r from-neutral-950/85 via-neutral-950/55 to-neutral-950/20" />
+        <div className="absolute inset-0 flex items-center">
+          <div className="mx-auto w-full max-w-6xl px-5 sm:px-8">
+            <div className="max-w-xl text-white">
+              <p className="eyebrow text-white/70">Platform scholarships</p>
+              <h2 className="mt-3 font-display text-3xl font-semibold tracking-tight drop-shadow-sm sm:text-4xl lg:text-5xl">
+                Scholarships that reach students everywhere.
+              </h2>
+              <p className="mt-4 max-w-lg text-base leading-relaxed text-white/85">
+                Funded by MajorGBN across every school on the platform — in science, art, community
+                development, mathematics and more. The best three candidates in each programme win.
+              </p>
+              <div className="mt-7 flex flex-wrap gap-3">
+                <a href="#onboard"><Button size="lg">Bring scholarships to your school</Button></a>
+                <Link href="/login">
+                  <Button size="lg" variant="outline" className="border-white/40 bg-white/10 text-white hover:bg-white/20 hover:text-white">
+                    Apply for a student
+                  </Button>
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div className="mx-auto max-w-6xl px-5 py-16 sm:px-8">
         <div className="grid items-center gap-10 lg:grid-cols-[1.2fr_1fr]">
           <div>
