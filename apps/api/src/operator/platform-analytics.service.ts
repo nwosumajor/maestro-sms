@@ -10,7 +10,15 @@
 // 503-disabled (via the privileged client being null) when no privileged URL.
 
 import { Inject, Injectable, Logger, ServiceUnavailableException } from "@nestjs/common";
-import type { ModuleKey, ModuleOverrides, PlatformAnalyticsDto, Plan, SubscriptionStatus } from "@sms/types";
+import type {
+  GamesAnalyticsDto,
+  GamesModeStatDto,
+  ModuleKey,
+  ModuleOverrides,
+  PlatformAnalyticsDto,
+  Plan,
+  SubscriptionStatus,
+} from "@sms/types";
 import {
   DEFAULT_PLAN,
   MODULE_CATALOG,
@@ -251,6 +259,165 @@ export class PlatformAnalyticsService {
   /** Audit the cross-tenant read under the operator's own (platform-org) tenant.
    *  Best-effort: this is a READ (a "viewed" log), so a logging failure (e.g. a
    *  stale session whose school no longer exists) must NOT fail the dashboard. */
+  /**
+   * Fleet-wide GAMES adoption/engagement. Aggregate and PII-free by design:
+   * every figure is a COUNT — no name, handle or per-student row ever crosses
+   * the tenant boundary here (Golden Rule #5; the pseudonymous Ultimate arena
+   * stays the only cross-school game surface). Reads through the privileged
+   * client like the business overview; a couple dozen count/groupBy queries,
+   * operator-only and viewed rarely — fine without caching.
+   */
+  async games(p: Principal): Promise<GamesAnalyticsDto> {
+    const client = this.privileged.client;
+    if (!client) throw new ServiceUnavailableException("Platform analytics are not configured");
+    void p;
+    const cutoff = new Date(Date.now() - 30 * DAY_MS);
+
+    // --- schools: entitlement + per-school opt-out + recent activity ---------
+    const schools = await client.school.findMany({
+      where: { isPlatform: false },
+      select: { id: true, subscription: { select: { plan: true, status: true, currentPeriodEnd: true, graceDays: true, overrides: true } } },
+    });
+    let gamesEntitled = 0;
+    for (const s of schools) {
+      const sub = s.subscription;
+      const purchased = sub && isPlan(sub.plan) ? sub.plan : DEFAULT_PLAN;
+      const plan = sub
+        ? effectivePlan(purchased, sub.status as SubscriptionStatus, sub.currentPeriodEnd, sub.graceDays ?? undefined)
+        : DEFAULT_PLAN;
+      const overrides = (sub?.overrides as unknown as ModuleOverrides) ?? null;
+      if (resolveModules(plan, overrides).includes("games" as ModuleKey)) gamesEntitled += 1;
+    }
+    const disabledBySetting = await client.gameSettings.count({ where: { gamesEnabled: false } });
+    // Distinct schools with ANY game created in the window (all 7 surfaces).
+    const activeSchoolRows = await client.$queryRaw<Array<{ c: bigint }>>`
+      SELECT COUNT(DISTINCT sid) AS c FROM (
+        SELECT "schoolId" AS sid FROM game            WHERE "createdAt" >= ${cutoff}
+        UNION SELECT "schoolId" FROM live_quiz_session WHERE "createdAt" >= ${cutoff}
+        UNION SELECT "schoolId" FROM typing_race       WHERE "createdAt" >= ${cutoff}
+        UNION SELECT "schoolId" FROM hangman_game      WHERE "createdAt" >= ${cutoff}
+        UNION SELECT "schoolId" FROM chess_game        WHERE "createdAt" >= ${cutoff}
+        UNION SELECT "schoolId" FROM checkers_game     WHERE "createdAt" >= ${cutoff}
+      ) AS active_schools`;
+
+    // --- players: distinct ACCOUNTS across every join surface (counts only) --
+    const playerCount = async (since?: Date): Promise<number> => {
+      const rows = since
+        ? await client.$queryRaw<Array<{ c: bigint }>>`
+            SELECT COUNT(DISTINCT uid) AS c FROM (
+              SELECT gp."userId" AS uid FROM game_player gp WHERE gp."createdAt" >= ${since}
+              UNION SELECT tr."userId" FROM typing_racer tr JOIN typing_race t ON t.id = tr."raceId" WHERE t."createdAt" >= ${since}
+              UNION SELECT hp."userId" FROM hangman_player hp JOIN hangman_game h ON h.id = hp."gameId" WHERE h."createdAt" >= ${since}
+              UNION SELECT qp."userId" FROM live_quiz_participant qp JOIN live_quiz_session s ON s.id = qp."sessionId" WHERE s."createdAt" >= ${since}
+              UNION SELECT c."whiteUserId" FROM chess_game c WHERE c."createdAt" >= ${since}
+              UNION SELECT c."blackUserId" FROM chess_game c WHERE c."blackUserId" IS NOT NULL AND c."createdAt" >= ${since}
+              UNION SELECT k."blackUserId" FROM checkers_game k WHERE k."createdAt" >= ${since}
+              UNION SELECT k."whiteUserId" FROM checkers_game k WHERE k."whiteUserId" IS NOT NULL AND k."createdAt" >= ${since}
+            ) AS players`
+        : await client.$queryRaw<Array<{ c: bigint }>>`
+            SELECT COUNT(DISTINCT uid) AS c FROM (
+              SELECT "userId" AS uid FROM game_player
+              UNION SELECT "userId" FROM typing_racer
+              UNION SELECT "userId" FROM hangman_player
+              UNION SELECT "userId" FROM live_quiz_participant
+              UNION SELECT "whiteUserId" FROM chess_game
+              UNION SELECT "blackUserId" FROM chess_game WHERE "blackUserId" IS NOT NULL
+              UNION SELECT "blackUserId" FROM checkers_game
+              UNION SELECT "whiteUserId" FROM checkers_game WHERE "whiteUserId" IS NOT NULL
+            ) AS players`;
+      return Number(rows[0]?.c ?? 0);
+    };
+
+    // --- per-surface counters: total / ACTIVE now / created in 30d -----------
+    const stat = async (
+      totalQ: () => Promise<number>,
+      activeQ: () => Promise<number>,
+      recentQ: () => Promise<number>,
+    ): Promise<GamesModeStatDto> => ({ total: await totalQ(), activeNow: await activeQ(), last30d: await recentQ() });
+
+    const guessing: Record<string, GamesModeStatDto> = {};
+    for (const mode of ["DUEL", "RING", "RACE", "LEAGUE_MATCH", "KNOCKOUT_MATCH"] as const) {
+      guessing[mode] = await stat(
+        () => client.game.count({ where: { mode } }),
+        () => client.game.count({ where: { mode, status: "ACTIVE" } }),
+        () => client.game.count({ where: { mode, createdAt: { gte: cutoff } } }),
+      );
+    }
+
+    const arcade: Record<string, GamesModeStatDto> = {
+      LIVE_QUIZ: await stat(
+        () => client.liveQuizSession.count(),
+        () => client.liveQuizSession.count({ where: { status: "ACTIVE" } }),
+        () => client.liveQuizSession.count({ where: { createdAt: { gte: cutoff } } }),
+      ),
+      TYPING_RACE: await stat(
+        () => client.typingRace.count(),
+        () => client.typingRace.count({ where: { status: "ACTIVE" } }),
+        () => client.typingRace.count({ where: { createdAt: { gte: cutoff } } }),
+      ),
+      HANGMAN: await stat(
+        () => client.hangmanGame.count(),
+        () => client.hangmanGame.count({ where: { status: "ACTIVE" } }),
+        () => client.hangmanGame.count({ where: { createdAt: { gte: cutoff } } }),
+      ),
+      CHESS: await stat(
+        () => client.chessGame.count(),
+        () => client.chessGame.count({ where: { status: "ACTIVE" } }),
+        () => client.chessGame.count({ where: { createdAt: { gte: cutoff } } }),
+      ),
+      CHECKERS: await stat(
+        () => client.checkersGame.count(),
+        () => client.checkersGame.count({ where: { status: "ACTIVE" } }),
+        () => client.checkersGame.count({ where: { createdAt: { gte: cutoff } } }),
+      ),
+    };
+
+    const compByType = await client.competition.groupBy({ by: ["type"], _count: { _all: true } });
+    const byType: Record<string, number> = {};
+    for (const row of compByType) byType[row.type] = row._count._all;
+    const competitions = {
+      total: await client.competition.count(),
+      active: await client.competition.count({ where: { status: "ACTIVE" } }),
+      byType,
+    };
+
+    const ultimate = {
+      competitions: await client.ultimateCompetition.count(),
+      active: await client.ultimateCompetition.count({ where: { status: "ACTIVE" } }),
+      participants: await client.ultimateParticipant.count(),
+      // An enrollment row IS the opt-in (per competition); count distinct schools.
+      schoolsEnrolled: (await client.ultimateEnrollment.groupBy({ by: ["schoolId"] })).length,
+      consentedStudents: await client.ultimateConsent.count({ where: { granted: true } }),
+    };
+
+    return {
+      schools: {
+        total: schools.length,
+        gamesEntitled,
+        disabledBySetting,
+        activeLast30d: Number(activeSchoolRows[0]?.c ?? 0),
+      },
+      players: { total: await playerCount(), last30d: await playerCount(cutoff) },
+      guessing,
+      competitions,
+      arcade,
+      ultimate,
+    };
+  }
+
+  async auditGamesView(p: Principal): Promise<void> {
+    try {
+      await this.db.runAsTenant({ schoolId: p.schoolId, userId: p.userId }, (tx) =>
+        this.audit.record(
+          { actorId: p.userId, action: "operator.games.analytics.view", entity: "platform", entityId: "platform", schoolId: p.schoolId, metadata: {} },
+          tx,
+        ),
+      );
+    } catch (err) {
+      this.logger.warn(`operator.games.analytics.view audit failed (non-fatal): ${String(err)}`);
+    }
+  }
+
   async auditView(p: Principal): Promise<void> {
     try {
       await this.db.runAsTenant({ schoolId: p.schoolId, userId: p.userId }, (tx) =>

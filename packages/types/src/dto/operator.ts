@@ -244,3 +244,47 @@ export interface SchoolProfileDto extends SchoolDirectoryRowDto {
   /** Recent platform-subscription payments, newest first. */
   payments: SchoolProfilePaymentDto[];
 }
+
+// --- Fleet-wide games analytics (operator) -----------------------------------
+
+/** Activity counters for one game surface. All AGGREGATE and PII-free —
+ *  counts only, never names/handles (Golden Rule #5). */
+export interface GamesModeStatDto {
+  total: number;
+  /** Currently in progress (ACTIVE status). */
+  activeNow: number;
+  /** Created in the last 30 days. */
+  last30d: number;
+}
+
+/** Cross-tenant games adoption/engagement for the platform owner. Everything is
+ *  a count; no player identity ever crosses the tenant boundary here. */
+export interface GamesAnalyticsDto {
+  schools: {
+    total: number;
+    /** Schools whose subscription entitles the GAMES module. */
+    gamesEntitled: number;
+    /** Schools whose own GameSettings switched games OFF despite entitlement. */
+    disabledBySetting: number;
+    /** Schools with at least one game of any kind created in the last 30 days. */
+    activeLast30d: number;
+  };
+  /** Distinct player ACCOUNTS that have ever joined any game / joined recently. */
+  players: { total: number; last30d: number };
+  /** Number-guessing core (Dead & Wounded) by mode: DUEL, RING, RACE,
+   *  LEAGUE_MATCH, KNOCKOUT_MATCH. */
+  guessing: Record<string, GamesModeStatDto>;
+  /** Leagues/knockouts/race tournaments. */
+  competitions: { total: number; active: number; byType: Record<string, number> };
+  /** The five classroom games: LIVE_QUIZ (sessions), TYPING_RACE, HANGMAN,
+   *  CHESS, CHECKERS. */
+  arcade: Record<string, GamesModeStatDto>;
+  /** Cross-school Ultimate arena (pseudonymous by design). */
+  ultimate: {
+    competitions: number;
+    active: number;
+    participants: number;
+    schoolsEnrolled: number;
+    consentedStudents: number;
+  };
+}

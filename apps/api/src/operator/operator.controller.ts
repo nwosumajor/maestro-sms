@@ -18,6 +18,7 @@ import {
   SUBSCRIPTION_STATUS,
   isPlan,
   isSubscriptionStatus,
+  type GamesAnalyticsDto,
   type PlatformStaffDto,
   type SchoolDirectoryPageDto,
   type SchoolProfileDto,
@@ -322,6 +323,15 @@ export class OperatorController {
   async analytics(@CurrentPrincipal() p: Principal): Promise<PlatformAnalyticsDto> {
     const result = await this.analyticsSvc.overview(p);
     await this.analyticsSvc.auditView(p);
+    return result;
+  }
+
+  /** Fleet-wide GAMES adoption/engagement — aggregate counts only, PII-free. */
+  @Get("games-analytics")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
+  async gamesAnalytics(@CurrentPrincipal() p: Principal): Promise<GamesAnalyticsDto> {
+    const result = await this.analyticsSvc.games(p);
+    await this.analyticsSvc.auditGamesView(p);
     return result;
   }
 

@@ -1,4 +1,4 @@
-import type { ClassDto, WorkflowSummaryDto, PlatformAnalyticsDto, Serialized } from "@sms/types";
+import type { ClassDto, GamesAnalyticsDto, WorkflowSummaryDto, PlatformAnalyticsDto, Serialized } from "@sms/types";
 import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
@@ -14,6 +14,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PlatformAnalytics } from "@/components/operator/PlatformAnalytics";
+import { GamesAnalytics } from "@/components/operator/GamesAnalytics";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +27,10 @@ export default async function DashboardPage() {
   // The platform owner has no tenant data — their dashboard is a graphical,
   // cross-tenant business overview (management lives on the Operator console).
   if (hasPermission(user.permissions, "platform.tenants.read")) {
-    const analytics = await apiGet<Serialized<PlatformAnalyticsDto>>("/operator/analytics");
+    const [analytics, games] = await Promise.all([
+      apiGet<Serialized<PlatformAnalyticsDto>>("/operator/analytics"),
+      apiGet<Serialized<GamesAnalyticsDto>>("/operator/games-analytics"),
+    ]);
     return (
       <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="dashboard" permissions={user.permissions}>
         <div className="space-y-6">
@@ -41,6 +45,7 @@ export default async function DashboardPage() {
             <Link href="/operator"><Button variant="outline">Operator console →</Button></Link>
           </div>
           <PlatformAnalytics data={analytics ?? null} />
+          <GamesAnalytics data={games ?? null} />
         </div>
       </AppShell>
     );
