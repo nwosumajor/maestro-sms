@@ -78,6 +78,8 @@ d("RLS cross-tenant isolation", () => {
   const referralConversionA = randomUUID();
   // Message credits: one ledger entry in A.
   const messageCreditA = randomUUID();
+  // Legal clickwrap: one acceptance in A.
+  const legalAcceptanceA = randomUUID();
   // CBT: bank → question → exam → sitting in A.
   const cbtBankA = randomUUID();
   const cbtQuestionA = randomUUID();
@@ -409,6 +411,11 @@ d("RLS cross-tenant isolation", () => {
     await a.query(
       `INSERT INTO message_credit_entry (id,"schoolId","deltaCredits",reason) VALUES ($1,$2,100,'PURCHASE')`,
       [messageCreditA, A],
+    );
+    // Legal clickwrap: one acceptance row in A.
+    await a.query(
+      `INSERT INTO legal_acceptance (id,"schoolId","userId","docVersion",context) VALUES ($1,$2,$3,'1.0','IN_APP')`,
+      [legalAcceptanceA, A, userA],
     );
     // CBT: bank → question → exam → sitting chain in A.
     await a.query(
@@ -986,6 +993,7 @@ d("RLS cross-tenant isolation", () => {
       "cbt_exam",
       "cbt_question",
       "cbt_question_bank",
+      "legal_acceptance",
       // Ultimate: bridge/governance + participant are schoolId-scoped; the arena
       // `ultimate_competition` has NO schoolId (cross-tenant) → deleted by id below.
       "ultimate_entry_link",
@@ -1101,6 +1109,7 @@ d("RLS cross-tenant isolation", () => {
     ["school_referral_code", referralCodeA],
     ["school_referral_conversion", referralConversionA],
     ["message_credit_entry", messageCreditA],
+    ["legal_acceptance", legalAcceptanceA],
     ["cbt_question_bank", cbtBankA],
     ["cbt_question", cbtQuestionA],
     ["cbt_exam", cbtExamA],

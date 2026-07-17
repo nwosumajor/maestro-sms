@@ -37,6 +37,7 @@ import { TransportModule } from "./transport/transport.module";
 import { LibraryModule } from "./library/library.module";
 import { GroupModule } from "./group/group.module";
 import { CbtModule } from "./cbt/cbt.module";
+import { LegalModule } from "./legal/legal.module";
 import { TaskModule } from "./task/task.module";
 import { PollModule } from "./poll/poll.module";
 import { DiscussionModule } from "./discussion/discussion.module";
@@ -97,6 +98,7 @@ import { HealthController } from "./health.controller";
     LibraryModule,
     GroupModule,
     CbtModule,
+    LegalModule,
     TaskModule,
     PollModule,
     DiscussionModule,

@@ -143,6 +143,7 @@ apply_rls packages/db/prisma/rls/72_growth_rls.sql               agent_select
 apply_rls packages/db/prisma/rls/73_message_credits_rls.sql      message_credit_entry_insert
 apply_rls packages/db/prisma/rls/74_group_rls.sql                school_group_marker
 apply_rls packages/db/prisma/rls/75_cbt_rls.sql                  cbt_sitting_update
+apply_rls packages/db/prisma/rls/76_legal_acceptance_rls.sql     legal_acceptance_insert
 
 # Seed on first provision (compose: SEED_ON_START=true; cloud migrate task: always).
 if [ "${SEED_ON_START}" = "true" ] || [ "$MODE" = "migrate" ]; then

@@ -1170,11 +1170,21 @@ function Footer() {
         { label: "Work with a school", href: "/careers" },
       ],
     },
+    {
+      title: "Legal",
+      links: [
+        { label: "Privacy Policy", href: "/legal/privacy" },
+        { label: "Service Agreement", href: "/legal/terms" },
+        { label: "Data Processing Agreement", href: "/legal/dpa" },
+        { label: "Refund Policy", href: "/legal/refunds" },
+        { label: "Security & Cyber Addendum", href: "/legal/security" },
+      ],
+    },
   ];
   return (
     <footer className="relative overflow-hidden bg-background">
       <div aria-hidden className="pointer-events-none absolute inset-0 opacity-[0.5]" style={RULE_GRID} />
-      <div className="relative mx-auto grid max-w-6xl gap-10 px-5 py-14 sm:px-8 md:grid-cols-[1.3fr_1fr_1fr_1fr]">
+      <div className="relative mx-auto grid max-w-6xl gap-10 px-5 py-14 sm:px-8 md:grid-cols-2 lg:grid-cols-[1.3fr_1fr_1fr_1fr_1fr]">
         <div>
           <div className="flex items-center gap-2.5">
             <img src="/images/platform-mark.png" alt="MajorGBN" width={128} height={128} className="h-9 w-9 object-contain" />

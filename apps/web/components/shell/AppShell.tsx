@@ -43,6 +43,7 @@ import { auth } from "@/lib/auth";
 import { ImpersonationBanner } from "./ImpersonationBanner";
 import { apiGet } from "@/lib/api";
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
+import { LegalAcceptBanner } from "@/components/legal/LegalAcceptBanner";
 import type { TenantTheme } from "@sms/tokens";
 import {
   MODULES,
@@ -291,6 +292,17 @@ export async function AppShell({
       else if (sub.status === "ACTIVE" && daysLeft <= 14) renewal = { kind: "ENDING", plan: sub.plan, daysLeft };
     }
   }
+
+  // Clickwrap banner: a billing MANAGER whose school hasn't accepted the
+  // current legal-pack version (provisioned admins never saw the public form;
+  // material terms changes bump the version and re-raise it).
+  let legalPrompt: { version: string } | null = null;
+  if (!isPlatformOwner && permissions.includes("billing.manage")) {
+    const legal = await apiGet<{ currentVersion: string; accepted: boolean }>("/legal/acceptance/status").catch(
+      () => null,
+    );
+    if (legal && !legal.accepted) legalPrompt = { version: legal.currentVersion };
+  }
   return (
     // Theme is owned by the html-level ThemeScript + the topbar ThemeToggle
     // (defaulting to the graphite dark console). Public pages pin themselves
@@ -345,6 +357,9 @@ export async function AppShell({
           </form>
         </div>
       </header>
+
+      {/* Clickwrap: current legal-pack version not yet accepted by this school. */}
+      {legalPrompt && <LegalAcceptBanner version={legalPrompt.version} />}
 
       {/* Renewal / past-due banner — the conversion nudge for billing.read staff. */}
       {renewal && (

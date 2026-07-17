@@ -49,6 +49,9 @@ model OnboardingRequest {
   referralCode   String?
   /// Agent (reseller) attribution code, same lifecycle as referralCode.
   agentCode      String?
+  /// Legal-pack version the requester accepted on the PUBLIC form (clickwrap
+  /// evidence pre-tenant; null for requests predating the requirement).
+  legalVersion   String?
   notes          String?
   status         OnboardingRequestStatus @default(NEW)
   reviewedById   String?                 @db.Uuid

@@ -336,6 +336,15 @@ export const RENEWAL_REMINDER_DAYS = 14;
 export const SUBSCRIPTION_TRIAL_DAYS = 30;
 
 /**
+ * Version of the platform legal pack (docs/LEGAL.md → /legal/* pages). Bump on
+ * a MATERIAL change: acceptance rows and checkout audit entries record the
+ * version in force, and the AppShell banner asks billing admins to re-accept
+ * when their school's latest acceptance predates this. The audit trail proves
+ * which version governed which payment — never retro-apply an unaccepted one.
+ */
+export const LEGAL_DOCS_VERSION = "1.0";
+
+/**
  * Referral program: months of FREE platform usage granted to EACH side when a
  * referred school's first paid subscription lands — one school term, using the
  * platform's own definition of a term (CYCLE_MONTHS.TERM = 3 months). The

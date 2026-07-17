@@ -11,7 +11,7 @@
 import { BadRequestException, Inject, Injectable, Logger } from "@nestjs/common";
 import bcrypt from "bcryptjs";
 import { Prisma, prisma } from "@sms/db";
-import { isModuleKey, isPlan, type PublicSchoolDto } from "@sms/types";
+import { LEGAL_DOCS_VERSION, isModuleKey, isPlan, type PublicSchoolDto } from "@sms/types";
 import {
   TENANT_DATABASE,
   type TenantDatabase,
@@ -108,6 +108,9 @@ export class PublicService {
           currentSystem: input.currentSystem?.trim() || null,
           referralCode,
           agentCode,
+          // Clickwrap evidence: the schema requires legalAccepted === true, so
+          // every stored request carries the pack version in force at submit.
+          legalVersion: LEGAL_DOCS_VERSION,
           notes: input.notes ?? null,
           status: "NEW",
         },

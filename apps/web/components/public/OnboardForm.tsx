@@ -86,6 +86,7 @@ export function OnboardForm({ defaultReferralCode = "" }: { defaultReferralCode?
     referralCode: defaultReferralCode,
     notes: "",
   });
+  const [legalAccepted, setLegalAccepted] = React.useState(false);
   const [plan, setPlan] = React.useState<Plan>(PLANS.STANDARD);
   const [extras, setExtras] = React.useState<Set<ModuleKey>>(new Set());
   const inPlan = React.useMemo(() => new Set<ModuleKey>(PLAN_MODULES[plan]), [plan]);
@@ -154,6 +155,10 @@ export function OnboardForm({ defaultReferralCode = "" }: { defaultReferralCode?
       setErr(`Please fill in: ${missing.join(", ")}.`);
       return;
     }
+    if (!legalAccepted) {
+      setErr("Please read and accept the Service Agreement, Data Processing Agreement and Privacy Policy.");
+      return;
+    }
     setBusy(true);
     setErr(null);
     const res = await fetch("/api/public/onboarding-requests", {
@@ -179,6 +184,7 @@ export function OnboardForm({ defaultReferralCode = "" }: { defaultReferralCode?
         currentSystem: f.currentSystem.trim() || undefined,
         referralCode: f.referralCode.trim() || undefined,
         notes: f.notes.trim() || undefined,
+        legalAccepted: true,
       }),
     });
     setBusy(false);
@@ -360,6 +366,23 @@ export function OnboardForm({ defaultReferralCode = "" }: { defaultReferralCode?
           <Textarea id="o-notes" rows={3} value={f.notes} onChange={set("notes")} />
         </div>
       </Section>
+
+      {/* Clickwrap: the requester accepts the platform terms for their school —
+          recorded with the pack version on the stored request. */}
+      <label className="flex items-start gap-2 rounded-md border border-border p-3 text-sm">
+        <input
+          type="checkbox"
+          checked={legalAccepted}
+          onChange={(e) => setLegalAccepted(e.target.checked)}
+          className="mt-0.5"
+        />
+        <span>
+          I have read and accept, on behalf of my school, the{" "}
+          <a href="/legal/terms" target="_blank" className="text-primary underline underline-offset-2">Service Agreement</a>,{" "}
+          <a href="/legal/dpa" target="_blank" className="text-primary underline underline-offset-2">Data Processing Agreement</a>{" "}
+          and <a href="/legal/privacy" target="_blank" className="text-primary underline underline-offset-2">Privacy Policy</a>. *
+        </span>
+      </label>
 
       {err && <p className="text-sm text-destructive">{err}</p>}
       <Button type="submit" className="w-full" disabled={busy}>

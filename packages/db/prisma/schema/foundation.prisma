@@ -175,6 +175,8 @@ model School {
   cbtQuestions     CbtQuestion[]
   cbtExams         CbtExam[]
   cbtSittings      CbtSitting[]
+  // Legal clickwrap ledger
+  legalAcceptances LegalAcceptance[]
 
   // LMS learning content
   lmsContents  LmsContent[]
@@ -257,6 +259,25 @@ model SchoolSubscription {
 /// tenant (quotes/checkout/public pricing page) — carries NO tenant data.
 /// Writes go ONLY through the PRIVILEGED client (operator PUT, step-up, audited);
 /// the least-privilege app role has SELECT only (see rls/46_plan_pricing_rls.sql).
+/// APPEND-ONLY clickwrap ledger: who accepted which VERSION of the platform
+/// legal pack (MSA/DPA/Privacy/Refunds/Cyber — LEGAL_DOCS_VERSION in
+/// @sms/types), when, and in what context (ONBOARDING | IN_APP). Tenant-scoped
+/// (rls/76, SELECT+INSERT only — an acceptance is evidence, never edited).
+/// Public-form acceptances (no tenant yet) live on onboarding_request instead.
+model LegalAcceptance {
+  id         String   @id @default(uuid()) @db.Uuid
+  schoolId   String   @db.Uuid
+  userId     String   @db.Uuid
+  docVersion String
+  context    String
+  acceptedAt DateTime @default(now())
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId, docVersion])
+  @@map("legal_acceptance")
+}
+
 /// GLOBAL (RLS-EXEMPT, like `plan_price`): the platform's convenience fee on
 /// ONLINE school-fee payments — one row (id "fees"). App role SELECT-only;
 /// writes via the PRIVILEGED client (operator PUT, step-up, audited). Missing

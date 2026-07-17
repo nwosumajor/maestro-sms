@@ -32,6 +32,8 @@ const onboardingSchema = z.object({
   currentSystem: z.string().max(300).nullish(),
   referralCode: z.string().max(40).nullish(),
   agentCode: z.string().max(40).nullish(),
+  // Clickwrap: the requester must tick acceptance of the MSA/DPA/Privacy pack.
+  legalAccepted: z.literal(true),
   notes: z.string().max(2000).nullish(),
 });
 const inviteSchema = z.object({
