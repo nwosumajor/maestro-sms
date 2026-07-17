@@ -447,7 +447,7 @@ function StatBand() {
     [String(MODULE_CATALOG.length), "modules"],
     ["4", "plans, per-seat"],
     ["17", "built-in roles"],
-    ["50+", "schools per deployment"],
+    ["5,000+", "schools per deployment"],
   ];
   return (
     <section className="relative overflow-hidden border-b border-border/60 bg-card">
