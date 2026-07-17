@@ -104,7 +104,9 @@ const PREMIUM_ADDS: ModuleKey[] = [
 const ULTIMATE_ADDS: ModuleKey[] = [
   MODULES.ADMISSIONS, MODULES.HOSTEL, MODULES.TRANSPORT, MODULES.DISCIPLINE, MODULES.ALUMNI,
 ];
-const ENTERPRISE_ADDS: ModuleKey[] = [MODULES.HR, MODULES.GAMES];
+// Group Console + CBT are bundled ONLY here — for every other tier they remain
+// pure paid add-ons (per-school overrides), part of Enterprise's premium pitch.
+const ENTERPRISE_ADDS: ModuleKey[] = [MODULES.HR, MODULES.GAMES, MODULES.GROUP, MODULES.CBT];
 
 /** The module bundle each named tier includes (before per-school overrides). */
 export const PLAN_MODULES: Record<Plan, ModuleKey[]> = {
@@ -114,7 +116,7 @@ export const PLAN_MODULES: Record<Plan, ModuleKey[]> = {
   PREMIUM: [...STANDARD_MODULES, ...PREMIUM_ADDS],
   // Adds facilities + student-lifecycle modules.
   ULTIMATE: [...STANDARD_MODULES, ...PREMIUM_ADDS, ...ULTIMATE_ADDS],
-  // The complete enterprise suite (HR/payroll + games).
+  // The complete enterprise suite (HR/payroll + games + group console + CBT).
   ENTERPRISE: [...STANDARD_MODULES, ...PREMIUM_ADDS, ...ULTIMATE_ADDS, ...ENTERPRISE_ADDS],
 };
 
