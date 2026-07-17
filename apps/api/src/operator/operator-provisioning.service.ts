@@ -102,6 +102,11 @@ export class OperatorProvisioningService {
       referralCode?: string;
       /** Agent (reseller) attribution code — same lifecycle as referralCode. */
       agentCode?: string;
+      /** Proprietor contact + address for the operator directory (explicit value
+       *  wins; falls back to the linked onboarding request). */
+      ownerName?: string;
+      ownerPhone?: string;
+      address?: string;
     },
   ) {
     const db = this.client();
@@ -150,13 +155,35 @@ export class OperatorProvisioningService {
         .toUpperCase()
         .replace(/[^A-Z0-9-]/g, "") || null;
     let agentCode = input.agentCode?.trim().toUpperCase().replace(/[^A-Z0-9-]/g, "") || null;
-    if (input.onboardingRequestId && (!referralCode || !agentCode)) {
+    // Proprietor contact + address: explicit input wins, else the linked
+    // onboarding request (owner fields; contact-as-PROPRIETOR as a last resort
+    // for pre-owner-field requests).
+    let ownerName = input.ownerName?.trim() || null;
+    let ownerPhone = input.ownerPhone?.trim() || null;
+    let address = input.address?.trim() || null;
+    if (input.onboardingRequestId) {
       const req = await db.onboardingRequest.findFirst({
         where: { id: input.onboardingRequestId },
-        select: { referralCode: true, agentCode: true },
+        select: {
+          referralCode: true,
+          agentCode: true,
+          ownerName: true,
+          ownerPhone: true,
+          contactName: true,
+          contactPhone: true,
+          contactRole: true,
+          address: true,
+          city: true,
+          state: true,
+        },
       });
       referralCode = referralCode ?? req?.referralCode ?? null;
       agentCode = agentCode ?? req?.agentCode ?? null;
+      const contactIsOwner = req?.contactRole === "PROPRIETOR";
+      ownerName = ownerName ?? req?.ownerName ?? (contactIsOwner ? req?.contactName ?? null : null);
+      ownerPhone = ownerPhone ?? req?.ownerPhone ?? (contactIsOwner ? req?.contactPhone ?? null : null);
+      address =
+        address ?? (req?.address ? [req.address, req.city, req.state].filter(Boolean).join(", ") : null);
     }
     const referrer = referralCode
       ? await db.schoolReferralCode.findFirst({ where: { code: referralCode }, select: { schoolId: true } })
@@ -176,7 +203,9 @@ export class OperatorProvisioningService {
     }
 
     const result = await db.$transaction(async (tx) => {
-      const school = await tx.school.create({ data: { name: input.name, slug } });
+      const school = await tx.school.create({
+        data: { name: input.name, slug, ownerName, ownerPhone, address },
+      });
       // Provision on a TRIAL: ACTIVE now, but with a period end so the dunning
       // sweep will flip an unpaid school to PAST_DUE when the trial elapses
       // (then effectivePlan drops to the floor after grace). Without this the

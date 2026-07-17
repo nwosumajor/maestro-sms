@@ -967,6 +967,83 @@ function ReferralBand() {
   );
 }
 
+// Platform-funded scholarships — accurate to the built module: MajorGBN sponsors
+// the awards, parents/teachers apply in-app, a guardian must consent before
+// anything is submitted, the platform reviews every application by hand, and an
+// award is paid straight into the student's school-fee invoice. On every plan.
+function ScholarshipBand() {
+  const steps: [string, string][] = [
+    ["Apply", "A parent or teacher nominates a student, right inside the app"],
+    ["Consent", "Nothing is submitted until the student's guardian approves"],
+    ["Review", "The platform team reviews every application by hand"],
+    ["Award", "The scholarship is credited straight to the student's school-fee bill"],
+  ];
+  return (
+    <section id="scholarships" className="scroll-mt-20 border-b border-border/60 bg-card">
+      <div className="mx-auto max-w-6xl px-5 py-16 sm:px-8">
+        <div className="grid items-center gap-10 lg:grid-cols-[1.2fr_1fr]">
+          <div>
+            <p className="eyebrow">Platform scholarships</p>
+            <h2 className="mt-3 font-display text-3xl font-semibold tracking-tight sm:text-4xl">
+              We fund scholarships for your students. Every plan, no extra cost.
+            </h2>
+            <p className="mt-4 max-w-xl text-base leading-relaxed text-muted-foreground">
+              MajorGBN sponsors scholarships across the platform —{" "}
+              <span className="font-semibold text-foreground">funded by us, not by your school</span>.
+              The day your school onboards, your parents and teachers can nominate deserving students,
+              and an award is paid directly against that student&apos;s school-fee invoice.
+            </p>
+            <ul className="mt-5 space-y-2 text-sm text-muted-foreground">
+              {[
+                "Open to every school on every plan — including the free trial",
+                "Guardian consent required before any application is submitted",
+                "Awards settle into your own fee ledger — the money reaches the school",
+                "A benefit you can announce to parents the week you launch",
+              ].map((t) => (
+                <li key={t} className="flex items-start gap-2">
+                  <CheckIcon className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
+                  {t}
+                </li>
+              ))}
+            </ul>
+            <div className="mt-7 flex flex-wrap gap-3">
+              <a href="#onboard">
+                <Button>Bring scholarships to your school</Button>
+              </a>
+              <Link href="/login">
+                <Button variant="outline">Apply for a student</Button>
+              </Link>
+            </div>
+            <p className="mt-3 text-xs text-muted-foreground">
+              Signed-in parents and teachers apply under Scholarships. Awards are reviewed and granted at
+              the platform&apos;s discretion; every decision is recorded.
+            </p>
+          </div>
+          {/* The journey, as the four steps a family actually experiences. */}
+          <div className="rounded-xl border border-primary/25 bg-primary/[0.05] p-6 shadow-card">
+            <p className="font-mono text-xs uppercase tracking-wider text-muted-foreground">How a student is funded</p>
+            <ol className="mt-4 space-y-3">
+              {steps.map(([title, body], i) => (
+                <li key={title} className="flex items-start gap-3 rounded-lg border border-border bg-background px-4 py-3">
+                  <span className="tnum mt-0.5 text-sm font-semibold text-primary">{String(i + 1).padStart(2, "0")}</span>
+                  <span className="text-sm">
+                    <span className="font-semibold">{title}.</span>{" "}
+                    <span className="text-muted-foreground">{body}</span>
+                  </span>
+                </li>
+              ))}
+            </ol>
+            <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
+              Applications carry the student&apos;s published results and attendance as context for the
+              reviewer — people decide, never a score.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function Steps() {
   return (
     <section className="relative overflow-hidden border-b border-border/60">
@@ -1028,6 +1105,10 @@ const FAQS: { q: string; a: string }[] = [
   {
     q: "How long does onboarding actually take?",
     a: "The request form takes about five minutes; we review within 1–2 working days. Your admins get secure set-password links by email, bulk student import creates accounts with login slips in minutes, and the in-app guide walks every role through their first week.",
+  },
+  {
+    q: "How do the platform scholarships work?",
+    a: "MajorGBN sponsors scholarships across the platform — funded by us, not by your school, and open on every plan. A parent or teacher nominates a student in-app; the student's guardian must consent before anything is submitted; our team reviews each application by hand (the student's published results and attendance travel with it as context). An award is paid directly against the student's school-fee invoice, so the benefit reaches the family and the money reaches the school.",
   },
   {
     q: "Do you reward referrals?",
@@ -1257,6 +1338,7 @@ export default function Home() {
       <RevenueBand />
       <Plans />
       <ReferralBand />
+      <ScholarshipBand />
       <Steps />
       <Faq />
       <Onboard />

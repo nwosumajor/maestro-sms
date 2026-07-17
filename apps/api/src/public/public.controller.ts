@@ -20,6 +20,10 @@ const onboardingSchema = z.object({
   studentCount: z.number().int().min(1).max(200_000),
   staffCount: z.number().int().min(1).max(50_000),
   // Contact person — phone is required (the review team follows up by call).
+  // Proprietor/owner — the business relationship the platform bills. Required:
+  // the operator directory keys on it. May be the same person as the contact.
+  ownerName: z.string().min(1).max(160),
+  ownerPhone: z.string().min(5).max(40),
   contactName: z.string().min(1).max(160),
   contactRole: z.enum(ONBOARDING_CONTACT_ROLES),
   contactEmail: z.string().email(),

@@ -33,6 +33,8 @@ export interface OnboardingRequestInput {
   website?: string | null;
   studentCount?: number | null;
   staffCount?: number | null;
+  ownerName?: string | null;
+  ownerPhone?: string | null;
   contactName: string;
   contactRole?: string | null;
   contactEmail: string;
@@ -98,6 +100,8 @@ export class PublicService {
           website: input.website?.trim() || null,
           studentCount: input.studentCount ?? null,
           staffCount: input.staffCount ?? null,
+          ownerName: input.ownerName ?? null,
+          ownerPhone: input.ownerPhone ?? null,
           contactName: input.contactName,
           contactRole: input.contactRole ?? null,
           contactEmail: input.contactEmail,

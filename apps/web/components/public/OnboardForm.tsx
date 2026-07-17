@@ -81,6 +81,8 @@ export function OnboardForm({ defaultReferralCode = "" }: { defaultReferralCode?
     contactRole: "" as string,
     contactEmail: "",
     contactPhone: "",
+    ownerName: "",
+    ownerPhone: "",
     desiredSlug: "",
     currentSystem: "",
     referralCode: defaultReferralCode,
@@ -151,6 +153,8 @@ export function OnboardForm({ defaultReferralCode = "" }: { defaultReferralCode?
     if (!f.contactRole) missing.push("your role");
     if (!f.contactEmail.trim()) missing.push("email");
     if (!f.contactPhone.trim()) missing.push("phone number");
+    if (!f.ownerName.trim()) missing.push("school owner's name");
+    if (!f.ownerPhone.trim()) missing.push("owner's phone number");
     if (missing.length > 0) {
       setErr(`Please fill in: ${missing.join(", ")}.`);
       return;
@@ -178,6 +182,8 @@ export function OnboardForm({ defaultReferralCode = "" }: { defaultReferralCode?
         contactRole: f.contactRole,
         contactEmail: f.contactEmail.trim(),
         contactPhone: f.contactPhone.trim(),
+        ownerName: f.ownerName.trim(),
+        ownerPhone: f.ownerPhone.trim(),
         desiredSlug: f.desiredSlug.trim() || undefined,
         desiredPlan: plan,
         desiredModules: [...extras],
@@ -292,6 +298,15 @@ export function OnboardForm({ defaultReferralCode = "" }: { defaultReferralCode?
           <div className="space-y-1.5">
             <Label htmlFor="o-phone">Phone *</Label>
             <Input id="o-phone" type="tel" value={f.contactPhone} onChange={set("contactPhone")} required />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="o-owner-name">School owner / proprietor&apos;s name *</Label>
+            <Input id="o-owner-name" value={f.ownerName} onChange={set("ownerName")} required />
+            <p className="text-xs text-muted-foreground">If that&apos;s you, enter your own name.</p>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="o-owner-phone">Owner&apos;s phone *</Label>
+            <Input id="o-owner-phone" type="tel" value={f.ownerPhone} onChange={set("ownerPhone")} required />
           </div>
         </div>
       </Section>

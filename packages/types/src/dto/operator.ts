@@ -160,3 +160,87 @@ export interface PlatformStaffDto {
   activated: boolean;
   createdAt: Date;
 }
+
+// --- School directory (operator) ---------------------------------------------
+
+/** A named person + reachable contact details, as listed in the directory
+ *  (the school's own staff accounts — never students). */
+export interface SchoolContactDto {
+  name: string;
+  email: string;
+  phone: string | null;
+}
+
+/** One school in the operator's search/filter directory. Contact people are the
+ *  FIRST school_admin / principal accounts (the profile lists all of them). */
+export interface SchoolDirectoryRowDto {
+  id: string;
+  name: string;
+  slug: string;
+  /** School status (ACTIVE | DISABLED — DISABLED blocks every member login). */
+  status: string;
+  ownerName: string | null;
+  ownerPhone: string | null;
+  address: string | null;
+  admin: SchoolContactDto | null;
+  principal: SchoolContactDto | null;
+  /** Date the school was provisioned onto the platform. */
+  onboardedAt: Date;
+  /** Purchased plan + billing status (ACTIVE | PAST_DUE | CANCELED). */
+  plan: string;
+  subscriptionStatus: string;
+  /** When the current paid/trial period ends (dunning flips PAST_DUE after). */
+  currentPeriodEnd: Date | null;
+  /** Most recent PAID platform-subscription payment (null = never paid). */
+  lastPaymentAt: Date | null;
+  /** Outstanding metered seat arrears (kobo) — usage above the billed seat
+   *  count, collected at next checkout/renewal. */
+  outstandingMinor: number;
+  students: number;
+  users: number;
+}
+
+export interface SchoolDirectoryPageDto {
+  rows: SchoolDirectoryRowDto[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+/** A platform-subscription payment line on the school profile. */
+export interface SchoolProfilePaymentDto {
+  reference: string;
+  kind: string;
+  status: string;
+  amountMinor: number;
+  currency: string;
+  createdAt: Date;
+  paidAt: Date | null;
+}
+
+/** The complete operator-facing profile of one school. */
+export interface SchoolProfileDto extends SchoolDirectoryRowDto {
+  /** ALL admin/principal accounts (the row shows only the first of each). */
+  admins: SchoolContactDto[];
+  principals: SchoolContactDto[];
+  staff: number;
+  /** Subscription detail. */
+  billingCycle: string;
+  seats: number | null;
+  priceMinor: number | null;
+  currency: string | null;
+  graceDays: number | null;
+  autoRenew: boolean;
+  cardLast4: string | null;
+  /** Effective (entitlement) plan + enabled module keys. */
+  effectivePlan: string;
+  modules: string[];
+  /** Fee-collection settlement posture. */
+  settlementBankName: string | null;
+  settlementAccountLast4: string | null;
+  admissionFormFeeMinor: number;
+  /** Referrer school name when this school arrived via a referral code. */
+  referredBy: string | null;
+  /** Recent platform-subscription payments, newest first. */
+  payments: SchoolProfilePaymentDto[];
+}

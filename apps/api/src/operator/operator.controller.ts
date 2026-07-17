@@ -11,7 +11,17 @@ import type {
   TenantPageDto,
 } from "@sms/types";
 import { z } from "zod";
-import { GRACE_DAYS_MAX, OPERATOR_PERMISSIONS, PLANS, SUBSCRIPTION_STATUS, isPlan, isSubscriptionStatus, type PlatformStaffDto } from "@sms/types";
+import {
+  GRACE_DAYS_MAX,
+  OPERATOR_PERMISSIONS,
+  PLANS,
+  SUBSCRIPTION_STATUS,
+  isPlan,
+  isSubscriptionStatus,
+  type PlatformStaffDto,
+  type SchoolDirectoryPageDto,
+  type SchoolProfileDto,
+} from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { RequireStepUp } from "../auth/require-stepup.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -21,6 +31,7 @@ import { OperatorService } from "./operator.service";
 import { OperatorProvisioningService } from "./operator-provisioning.service";
 import { OperatorUserService } from "./operator-user.service";
 import { OperatorExportService } from "./operator-export.service";
+import { OperatorDirectoryService } from "./operator-directory.service";
 import { PlatformAnalyticsService } from "./platform-analytics.service";
 import { PlatformAuditService, type PlatformAuditFilter } from "./platform-audit.service";
 import { PlanPricingService } from "../billing/plan-pricing.service";
@@ -83,6 +94,11 @@ const provisionSchema = z
     // principal. `admin` (single) is accepted for back-compat.
     admin: adminSchema.optional(),
     admins: z.array(adminSchema).min(1).max(6).optional(),
+    // Proprietor contact + address for the operator directory (optional here —
+    // provisioning falls back to the linked onboarding request's values).
+    ownerName: z.string().max(160).optional(),
+    ownerPhone: z.string().max(40).optional(),
+    address: z.string().max(400).optional(),
     // Provisioning from a public onboarding request links + auto-APPROVEs it.
     onboardingRequestId: z.string().uuid().optional(),
     // Referral code the new school arrived with (defaults to the linked
@@ -157,6 +173,7 @@ export class OperatorController {
     private readonly provisioning: OperatorProvisioningService,
     private readonly users: OperatorUserService,
     private readonly exporter: OperatorExportService,
+    private readonly directorySvc: OperatorDirectoryService,
     private readonly analyticsSvc: PlatformAnalyticsService,
     private readonly auditSvc: PlatformAuditService,
     private readonly pricing: PlanPricingService,
@@ -237,6 +254,39 @@ export class OperatorController {
       page: page ? Number(page) : undefined,
       pageSize: pageSize ? Number(pageSize) : undefined,
     });
+  }
+
+  /** Searchable school directory: proprietor + admin/principal contacts,
+   *  onboarding date, subscription posture, last payment, seat arrears. */
+  @Get("directory")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
+  directory(
+    @CurrentPrincipal() p: Principal,
+    @Query("q") q?: string,
+    @Query("plan") plan?: string,
+    @Query("billing") billing?: string,
+    @Query("status") status?: string,
+    @Query("sort") sort?: string,
+    @Query("page") page?: string,
+  ): Promise<SchoolDirectoryPageDto> {
+    return this.directorySvc.listDirectory(p, {
+      q: q?.trim() || undefined,
+      plan: plan && isPlan(plan) ? plan : undefined,
+      billing: billing && isSubscriptionStatus(billing) ? billing : undefined,
+      status: status === "ACTIVE" || status === "DISABLED" ? status : undefined,
+      sort: sort === "recent" ? "recent" : undefined,
+      page: page ? Number(page) : undefined,
+    });
+  }
+
+  /** The complete operator-facing profile of one school. */
+  @Get("schools/:schoolId/profile")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
+  schoolProfile(
+    @CurrentPrincipal() p: Principal,
+    @Param("schoolId") schoolId: string,
+  ): Promise<SchoolProfileDto> {
+    return this.directorySvc.schoolProfile(p, schoolId);
   }
 
   /** Lightweight id+name list for pickers (add-admin etc.). */

@@ -170,6 +170,12 @@ export default async function OperatorPage({
         {canReviewOnboarding && <OnboardingRequests requests={onboarding ?? []} />}
         {canManageStaff && <PlatformStaff />}
 
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Tenant registry</h2>
+          <Link href="/operator/schools" className="text-sm font-medium text-primary hover:underline">
+            Open school directory (owners, contacts, billing) →
+          </Link>
+        </div>
         <TenantFilterBar
           q={q}
           plan={plan}

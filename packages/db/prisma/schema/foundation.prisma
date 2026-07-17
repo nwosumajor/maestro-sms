@@ -44,6 +44,15 @@ model School {
   /// privileged retention job; rows older than this are purged. Per-school policy
   /// on the global registry (RLS-exempt). 0 disables purging for the school.
   integrityRetentionDays Int      @default(365)
+  /// Proprietor/owner contact — the business relationship the platform bills.
+  /// Captured at onboarding (public form requires it; provisioning stamps it,
+  /// falling back to the linked request), shown in the operator directory.
+  /// Global-registry columns: app role SELECT-only, writes via the privileged
+  /// client (provisioning / operator console) like every other school column.
+  ownerName              String?
+  ownerPhone             String?
+  /// Physical school address (from the onboarding request; operator-visible).
+  address                String?
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
 

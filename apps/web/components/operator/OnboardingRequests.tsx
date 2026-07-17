@@ -73,6 +73,12 @@ export function OnboardingRequests({ requests }: { requests: Req[] }) {
                 {r.contactRole ? ` (${r.contactRole.replaceAll("_", " ").toLowerCase()})` : ""} · {r.contactEmail}
                 {r.contactPhone ? ` · ${r.contactPhone}` : ""}
               </p>
+              {r.ownerName && (
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Owner: {r.ownerName}
+                  {r.ownerPhone ? ` · ${r.ownerPhone}` : ""}
+                </p>
+              )}
               {(r.desiredPlan || (r.desiredModules?.length ?? 0) > 0) && (
                 <p className="mt-0.5 text-xs text-muted-foreground">
                   Wants: {r.desiredPlan ? `${r.desiredPlan} plan` : "no tier picked"}

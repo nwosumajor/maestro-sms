@@ -22,6 +22,10 @@ model OnboardingRequest {
   contactName    String
   contactEmail   String
   contactPhone   String?
+  /// Proprietor/owner of the school — may differ from the day-to-day contact.
+  /// Required on the public form; provisioning stamps these onto the School.
+  ownerName      String?
+  ownerPhone     String?
   // Prospective slug the requester would like (validated/uniqueness checked only
   // at provisioning time — this is just a request).
   desiredSlug    String?

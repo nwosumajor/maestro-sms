@@ -36,6 +36,9 @@ export interface OnboardingRequestDto {
   contactName: string;
   contactEmail: string;
   contactPhone: string | null;
+  /** Proprietor/owner — may differ from the day-to-day contact. */
+  ownerName: string | null;
+  ownerPhone: string | null;
   desiredSlug: string | null;
   /** Requested tier + add-on module keys — a wish recorded at intake; the
    *  operator decides the real plan/modules at provisioning. */
