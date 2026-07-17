@@ -64,6 +64,13 @@ resource "aws_ecs_task_definition" "api" {
   execution_role_arn       = aws_iam_role.execution.arn
   task_role_arn            = aws_iam_role.api_task.arn
 
+  # Graviton (~20% cheaper vCPU-hour); images must match — deploy.yml builds
+  # on an ARM runner. Flip var.cpu_architecture to X86_64 to roll back.
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = var.cpu_architecture
+  }
+
   container_definitions = jsonencode([{
     name      = "api"
     image     = "${local.ecr_api}:${var.image_tag}"
@@ -79,9 +86,20 @@ resource "aws_ecs_task_definition" "api" {
       { name = "REDIS_HOST", value = aws_elasticache_replication_group.main.primary_endpoint_address },
       { name = "REDIS_PORT", value = "6379" },
       { name = "WEB_ORIGIN", value = "https://${var.domain_name}" },
+      { name = "PUBLIC_WEB_URL", value = "https://${var.domain_name}" },
       { name = "DOCUMENTS_BUCKET", value = aws_s3_bucket.documents.bucket },
       { name = "AWS_REGION", value = var.region },
       { name = "STORAGE_PROVIDER", value = "s3" },
+      { name = "LOG_LEVEL", value = var.log_level },
+      # Empty values are treated as unset by the app (feature disabled) — safe
+      # to wire unconditionally.
+      { name = "EMAIL_PROVIDER", value = var.email_provider },
+      { name = "EMAIL_FROM", value = var.email_from },
+      { name = "SMS_PROVIDER", value = var.sms_provider },
+      { name = "TWILIO_ACCOUNT_SID", value = var.twilio_account_sid },
+      { name = "TWILIO_FROM", value = var.twilio_from },
+      { name = "TWILIO_WHATSAPP_FROM", value = var.twilio_whatsapp_from },
+      { name = "SENTRY_DSN", value = var.sentry_dsn },
       ], var.redis_transit_encryption ? [
       { name = "REDIS_TLS", value = "true" },
     ] : [])
@@ -91,6 +109,11 @@ resource "aws_ecs_task_definition" "api" {
       { name = "AUTH_SECRET", valueFrom = local.secret_arns["auth-secret"] },
       { name = "DATA_ENCRYPTION_KEY", valueFrom = local.secret_arns["data-encryption-key"] },
       { name = "PAYSTACK_SECRET_KEY", valueFrom = local.secret_arns["paystack-secret-key"] },
+      { name = "STRIPE_SECRET_KEY", valueFrom = local.secret_arns["stripe-secret-key"] },
+      { name = "STRIPE_WEBHOOK_SECRET", valueFrom = local.secret_arns["stripe-webhook-secret"] },
+      { name = "EMAIL_API_KEY", valueFrom = local.secret_arns["email-api-key"] },
+      { name = "TWILIO_AUTH_TOKEN", valueFrom = local.secret_arns["twilio-auth-token"] },
+      { name = "METRICS_TOKEN", valueFrom = local.secret_arns["metrics-token"] },
       ], var.redis_transit_encryption ? [
       { name = "REDIS_PASSWORD", valueFrom = local.secret_arns["redis-auth-token"] },
     ] : [])
@@ -114,6 +137,11 @@ resource "aws_ecs_task_definition" "web" {
   memory                   = var.web_memory
   execution_role_arn       = aws_iam_role.execution.arn
   task_role_arn            = aws_iam_role.web_task.arn
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = var.cpu_architecture
+  }
 
   container_definitions = jsonencode([{
     name      = "web"
@@ -156,6 +184,11 @@ resource "aws_ecs_task_definition" "migrate" {
   memory                   = 1024
   execution_role_arn       = aws_iam_role.execution.arn
   task_role_arn            = aws_iam_role.api_task.arn
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = var.cpu_architecture
+  }
 
   container_definitions = jsonencode([{
     name      = "migrate"

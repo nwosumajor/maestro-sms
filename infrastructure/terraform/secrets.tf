@@ -14,6 +14,14 @@ resource "random_id" "data_encryption_key" {
   byte_length = 32
 }
 
+# METRICS_TOKEN — bearer token gating the Prometheus /metrics endpoint.
+# SECURITY: the endpoint is OPEN when this is unset, so production always
+# generates one; the scraper reads it from Secrets Manager.
+resource "random_password" "metrics_token" {
+  length  = 48
+  special = false
+}
+
 locals {
   # App reads/writes go through the RDS Proxy pooler when enabled (transaction
   # pooling is safe — the tenant GUC is transaction-local; `?pgbouncer=true`
@@ -35,6 +43,11 @@ locals {
       "db-replica-url"      = local.db_replica_url
       "db-app-password"     = random_password.db_app.result
       "paystack-secret-key" = var.paystack_secret_key
+      "stripe-secret-key"       = var.stripe_secret_key
+      "stripe-webhook-secret"   = var.stripe_webhook_secret
+      "email-api-key"           = var.email_api_key
+      "twilio-auth-token"       = var.twilio_auth_token
+      "metrics-token"           = random_password.metrics_token.result
     },
     var.redis_transit_encryption ? {
       "redis-auth-token" = random_password.redis_auth[0].result

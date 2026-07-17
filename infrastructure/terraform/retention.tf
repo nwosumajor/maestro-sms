@@ -15,6 +15,11 @@ resource "aws_ecs_task_definition" "retention" {
   execution_role_arn       = aws_iam_role.execution.arn
   task_role_arn            = aws_iam_role.web_task.arn # no AWS API perms needed
 
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = var.cpu_architecture
+  }
+
   container_definitions = jsonencode([{
     name      = "retention"
     image     = "${local.ecr_api}:${var.image_tag}"
@@ -89,7 +94,10 @@ resource "aws_scheduler_schedule" "retention" {
     role_arn = aws_iam_role.retention_scheduler.arn
 
     ecs_parameters {
-      task_definition_arn = aws_ecs_task_definition.retention.arn
+      # Revision-less ARN = RunTask uses the latest ACTIVE revision, so the
+      # nightly sweep automatically picks up the SHA-tagged task def each CI
+      # deploy re-registers (the scheduler IAM policy already allows :*).
+      task_definition_arn = aws_ecs_task_definition.retention.arn_without_revision
       launch_type         = "FARGATE"
       task_count          = 1
 

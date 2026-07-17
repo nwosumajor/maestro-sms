@@ -77,35 +77,27 @@ data of minors without these is a regulatory exposure, not a soft TODO.
 
 ---
 
-## 2. Pre-deploy engineering gap (must fix before first apply)
+## 2. Env/secret wiring — RESOLVED (was the pre-deploy gap)
 
-The Terraform wires these container env/secrets today: `AUTH_SECRET`,
-`DATA_ENCRYPTION_KEY`, DB URLs (app/migrate/replica), Redis, S3 bucket,
-`PAYSTACK_SECRET_KEY`, `WEB_ORIGIN`, `STORAGE_PROVIDER`.
+The Terraform now wires the full application surface. Via `terraform.tfvars`
+(see the updated `terraform.tfvars.example`): Stripe key + webhook secret,
+email provider/key/from, Twilio SID/token/senders, Sentry DSN, log level —
+all defaulting to empty = feature gracefully disabled (Stripe checkout 503s,
+email logs to stdout, SMS/WhatsApp fail soft). `METRICS_TOKEN` is
+**auto-generated** into Secrets Manager and injected into the API task —
+`/metrics` is never open in production; your scraper reads the token from
+the `sms/metrics-token` secret. `PUBLIC_WEB_URL` is derived from
+`domain_name`.
 
-The application has since grown and now also reads (inventory taken from the
-code): `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `EMAIL_PROVIDER`,
-`EMAIL_API_KEY`, `EMAIL_FROM`, `PUBLIC_WEB_URL`, `METRICS_TOKEN`,
-`SENTRY_DSN`, `SENTRY_TRACES_SAMPLE_RATE`, `APP_RELEASE`, `LOG_LEVEL`,
-`SMS_PROVIDER`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM`,
-`TWILIO_WHATSAPP_FROM`, `TENANT_RATE_LIMIT_PER_MIN`, cron overrides
-(`BILLING_DUNNING_CRON`, `HR_REMINDER_CRON`, `INTEGRITY_RETENTION_CRON`,
-`AUDIT_PARTITION_CRON`).
+Remaining optional envs are deliberate runtime tuners, settable per-task-def
+if ever needed: `SENTRY_TRACES_SAMPLE_RATE`, `APP_RELEASE`,
+`TENANT_RATE_LIMIT_PER_MIN`, cron overrides (`BILLING_DUNNING_CRON`,
+`HR_REMINDER_CRON`, `INTEGRITY_RETENTION_CRON`, `AUDIT_PARTITION_CRON`).
 
-**Action (small Terraform change, ~1 file each):**
-1. Add the secret-bearing ones (`stripe-secret-key`, `stripe-webhook-secret`,
-   `email-api-key`, `metrics-token`, `twilio-auth-token`) to
-   `secrets.tf` `secret_values` (as `variable`s like `paystack_secret_key`,
-   empty-string default = feature disabled).
-2. Wire them into the API task definition in `ecs.tf` (`secrets` block for
-   secret values, `environment` block for plain ones like `EMAIL_PROVIDER`,
-   `EMAIL_FROM`, `PUBLIC_WEB_URL`, `SENTRY_DSN`, `LOG_LEVEL=info`).
-3. Set `METRICS_TOKEN` — the `/metrics` endpoint is OPEN when unset. This is
-   mandatory for production, not optional.
-
-Everything unset degrades gracefully (Stripe checkout 503s, email logs to
-stdout, SMS channels fail soft) — but set at minimum: Stripe, email,
-`METRICS_TOKEN`, `PUBLIC_WEB_URL`, `SENTRY_DSN`.
+Note the two-step Stripe dance: the webhook signing secret only exists after
+you register the endpoint in the Stripe dashboard (Step 7) — first apply with
+it empty, register, then set `stripe_webhook_secret` and re-apply (task defs
+roll automatically).
 
 ---
 
@@ -122,7 +114,7 @@ Multi-AZ, `cache.t4g.micro`, 1 NAT, no replica/proxy.
 
 | Component | Sizing | Est. $/mo |
 |-----------|--------|-----------|
-| ECS Fargate (4 tasks × 0.5 vCPU/1 GB) | 24/7 | ~72 |
+| ECS Fargate (4 tasks × 0.5 vCPU/1 GB, **ARM64/Graviton**) | 24/7 | ~58 |
 | ALB | + modest LCU | ~25 |
 | NAT Gateway (1) | $0.048/h + data | ~40–55 |
 | RDS PostgreSQL `db.t4g.small` **Multi-AZ** | 20 GB gp3 | ~58 |
@@ -134,7 +126,14 @@ Multi-AZ, `cache.t4g.micro`, 1 NAT, no replica/proxy.
 | Secrets Manager (~10–12 secrets) | $0.40 each | ~5 |
 | CloudWatch logs/metrics/alarms | 30-day retention | ~10–20 |
 | Scheduled retention/dunning task | minutes/day | ~1 |
-| **Total** | | **~$245–285/mo (~₦390k–460k)** |
+| **Total** | | **~$230–270/mo (~₦370k–430k)** |
+
+The whole compute + data tier is Graviton (ARM): Fargate tasks
+(`cpu_architecture=ARM64`, images built natively on an ARM CI runner), RDS
+`t4g`/`m7g`/`r7g`, ElastiCache `t4g`/`m7g` — ~20% cheaper per unit with no
+user-facing difference. The free S3 gateway VPC endpoint is provisioned
+(cuts NAT data charges), and ECR keeps only the last 20 images per repo
+(lifecycle policy).
 
 ### 3.2 Profile B — GROWTH (~500 schools)
 Upsize: api 4× (1 vCPU/2 GB), web 3×, `db.m7g.large` Multi-AZ + 1 read
@@ -154,9 +153,10 @@ auto-scaling, `cache.m7g.large`, 500 GB+, higher log/WAF volumes.
    Buy after one month of observed steady-state, sized to the floor usage.
 2. **RDS Reserved Instance** (1-yr, no-upfront) once the instance class is
    stable: ~30–35% off the biggest line item.
-3. **VPC gateway/interface endpoints** for S3, ECR, CloudWatch, Secrets
-   Manager: cuts NAT data-processing charges (images + logs are the bulk of
-   NAT traffic). S3 gateway endpoint is free — do it immediately.
+3. **VPC endpoints:** the free S3 *gateway* endpoint is already provisioned
+   (`network.tf`). Interface endpoints (ECR/Logs/Secrets) cost ~$7.30/mo
+   *each* in fixed hourly charges — only net-positive once NAT data through
+   them exceeds that; revisit at the Growth profile, not before.
 4. **Log discipline:** 30-day CloudWatch retention (already the default
    posture), `LOG_LEVEL=info`, `/metrics` + `/health` scrapes excluded from
    request logs (already built).
@@ -224,10 +224,10 @@ ACM validation + CloudFront distribution can take 15–30 min; DNS records for
 the domain are created in the hosted zone automatically (`route53.tf`).
 
 ### Step 4 — Populate the out-of-band secrets (~30 min)
-Terraform generates DB passwords, `AUTH_SECRET`, `DATA_ENCRYPTION_KEY` itself.
-You supply, via console/CLI into the created Secrets Manager entries (or
-tfvars where a variable exists): Paystack LIVE key, Stripe key + webhook
-secret, email API key, metrics token, Twilio (when ready).
+Terraform generates DB passwords, `AUTH_SECRET`, `DATA_ENCRYPTION_KEY`, and
+`METRICS_TOKEN` itself. You supply via tfvars (§2): Paystack LIVE key, Stripe
+key (+ webhook secret after Step 7), email API key + provider + from, Sentry
+DSN, Twilio (when ready).
 
 > ⚠️ **`DATA_ENCRYPTION_KEY` is generated once and must never change** — it
 > derives the per-tenant field-encryption keys for medical/salary/bank/card
@@ -251,7 +251,7 @@ secret, email API key, metrics token, Twilio (when ready).
 [ ] https://<domain>/            → homepage 200 over TLS (CloudFront header present)
 [ ] /api health + login          → sign in as the platform owner (owner@sms.platform
                                     seed — CHANGE ITS PASSWORD IMMEDIATELY, enable TOTP)
-[ ] /metrics without token       → 401/403 (if 200, METRICS_TOKEN is unset — stop, fix §2)
+[ ] /metrics without token       → 401/403 (token is auto-generated; if 200, the task def lost its METRICS_TOKEN wiring — stop and fix)
 [ ] WebSockets                   → open a game/live screen, LiveDot shows "Live" (proves /ws/* ALB routing)
 [ ] Document upload + download   → proves S3 presigner + KMS + bucket policy
 [ ] RDS: connect as major_user   → `SELECT` on a tenant table w/o GUC returns 0 rows (RLS live);
@@ -423,7 +423,7 @@ or a scaling loop (cap max task count).
 
 | Decision | Default in code | Production recommendation |
 |----------|-----------------|---------------------------|
-| Region | `eu-west-1` | Confirm with counsel (NDPA transfer position); `af-south-1` costs ~10–15% more and has all needed services — acceptable if required. |
+| Region | `eu-west-1` | Confirm with counsel (NDPA transfer position); `af-south-1` costs ~10–15% more and has all needed services — acceptable if required. **Not `us-east-1`** despite marginally lower prices (~5% overall): Lagos→Dublin is ~100–120 ms on the West-African submarine cables vs ~160–190 ms to Virginia — a user-visible penalty on every request — and storing minors' data in a GDPR-jurisdiction region is materially easier to defend to the NDPC than a US transfer. ~$15/mo saved is not worth either. |
 | Redis transit encryption | off | Turn ON (`redis_transit_encryption=true`) — inside-VPC risk is low but the flag exists and the auth token wiring is built; cost is zero. |
 | Single NAT | 1 gateway | Accept at launch (documented in §7); revisit at Growth profile. |
 | RDS Proxy | off | Off at launch is correct; §6 trigger governs. |

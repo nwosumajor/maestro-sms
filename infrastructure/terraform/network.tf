@@ -98,3 +98,16 @@ resource "aws_route_table_association" "data" {
   subnet_id      = aws_subnet.data[count.index].id
   route_table_id = aws_route_table.data.id
 }
+
+# --- S3 gateway VPC endpoint (free) -------------------------------------------
+# Keeps Document-Vault S3 traffic (presigned puts/gets are browser-side, but the
+# API's direct S3 calls and image-layer pulls via S3-backed ECR) off the NAT
+# gateway's per-GB data-processing meter. Gateway endpoints cost nothing —
+# unlike interface endpoints, which only pay off at higher NAT volumes.
+resource "aws_vpc_endpoint" "s3" {
+  vpc_id            = aws_vpc.main.id
+  service_name      = "com.amazonaws.${var.region}.s3"
+  vpc_endpoint_type = "Gateway"
+  route_table_ids   = [aws_route_table.private.id]
+  tags              = { Name = "${local.name}-s3-endpoint" }
+}

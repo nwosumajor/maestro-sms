@@ -137,6 +137,16 @@ variable "web_desired_count" {
   default = 2
 }
 
+variable "cpu_architecture" {
+  description = "Fargate CPU architecture. ARM64 (Graviton) is ~20% cheaper per vCPU-hour; the stack is ARM-clean (node:20-alpine multi-arch, bcryptjs pure-JS, Prisma ships linux-musl-arm64 engines). CI must build matching images (see deploy.yml runs-on). Flip to X86_64 to roll back."
+  type        = string
+  default     = "ARM64"
+  validation {
+    condition     = contains(["ARM64", "X86_64"], var.cpu_architecture)
+    error_message = "cpu_architecture must be ARM64 or X86_64."
+  }
+}
+
 variable "image_tag" {
   description = "Container image tag to deploy (set by CI to the git SHA)."
   type        = string
@@ -150,9 +160,89 @@ variable "github_repo" {
 }
 
 # --- App secrets (provide real values out-of-band; never commit) -------------
+# Every one of these defaults to "" = the feature degrades gracefully (the app
+# treats an empty value as unset): Paystack/Stripe checkout 503s, email logs to
+# stdout, SMS/WhatsApp channels fail soft.
 variable "paystack_secret_key" {
   description = "Paystack secret key for online payments (empty disables it)."
   type        = string
   default     = ""
   sensitive   = true
+}
+
+variable "stripe_secret_key" {
+  description = "Stripe secret key for USD/Enterprise subscription billing (empty disables it)."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "stripe_webhook_secret" {
+  description = "Stripe webhook endpoint signing secret (per-endpoint; set after registering the webhook in the Stripe dashboard)."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "email_api_key" {
+  description = "API key for the outbound email provider (Resend/Postmark). Empty = email logs to stdout."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "twilio_auth_token" {
+  description = "Twilio auth token for SMS/WhatsApp delivery (empty disables those channels)."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+# --- App config (plain env, not secret) --------------------------------------
+variable "email_provider" {
+  description = "Outbound email provider: 'resend' or 'postmark' (empty disables real sending)."
+  type        = string
+  default     = ""
+}
+
+variable "email_from" {
+  description = "From address for outbound email, on the verified sending domain (e.g. 'MAESTRO-SMS <no-reply@maestro-sms.com>')."
+  type        = string
+  default     = ""
+}
+
+variable "sms_provider" {
+  description = "SMS/WhatsApp provider: 'twilio' (empty disables those channels)."
+  type        = string
+  default     = ""
+}
+
+variable "twilio_account_sid" {
+  description = "Twilio account SID (not secret by itself; the auth token is)."
+  type        = string
+  default     = ""
+}
+
+variable "twilio_from" {
+  description = "Twilio SMS sender (E.164 number or sender ID)."
+  type        = string
+  default     = ""
+}
+
+variable "twilio_whatsapp_from" {
+  description = "Twilio WhatsApp sender (E.164; the app prefixes 'whatsapp:')."
+  type        = string
+  default     = ""
+}
+
+variable "sentry_dsn" {
+  description = "Sentry DSN for API error tracking (empty disables Sentry)."
+  type        = string
+  default     = ""
+}
+
+variable "log_level" {
+  description = "API log level (pino)."
+  type        = string
+  default     = "info"
 }

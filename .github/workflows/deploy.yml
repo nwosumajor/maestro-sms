@@ -24,7 +24,11 @@ env:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    # ARM runner: builds linux/arm64 images NATIVELY (no QEMU slowdown) to match
+    # the Fargate Graviton runtime_platform (terraform cpu_architecture=ARM64).
+    # If cpu_architecture is ever flipped back to X86_64, change this to
+    # ubuntu-latest in the same commit — images and tasks must always match.
+    runs-on: ubuntu-24.04-arm
     environment: production
     steps:
       - uses: actions/checkout@v4
@@ -44,12 +48,35 @@ jobs:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
           TAG: ${{ github.sha }}
         run: |
+          # SHA tags ONLY: the ECR repos are tag-IMMUTABLE (supply-chain guard),
+          # so a moving `latest` tag would fail on the second push. Terraform's
+          # image_tag default ("latest") is a first-boot placeholder — services
+          # come up on the first CI deploy, which registers SHA-tagged task defs.
           for svc in api web; do
-            docker build -f apps/$svc/Dockerfile \
-              -t "$REGISTRY/$PROJECT/$svc:$TAG" \
-              -t "$REGISTRY/$PROJECT/$svc:latest" .
+            docker build --platform linux/arm64 -f apps/$svc/Dockerfile \
+              -t "$REGISTRY/$PROJECT/$svc:$TAG" .
             docker push "$REGISTRY/$PROJECT/$svc:$TAG"
-            docker push "$REGISTRY/$PROJECT/$svc:latest"
+          done
+
+      - name: Point one-off task defs (migrate, retention) at the new image
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          TAG: ${{ github.sha }}
+        run: |
+          # These task defs aren't touched by `update-service` below, and the
+          # Terraform-registered revision references a :latest tag that is never
+          # pushed (SHA-only, IMMUTABLE repos). Re-register each with the SHA
+          # image; the retention schedule targets the revision-less ARN, so it
+          # picks the new revision up automatically.
+          for family in migrate retention; do
+            DEF=$(aws ecs describe-task-definition \
+              --task-definition "${PROJECT}-prod-$family" --query 'taskDefinition')
+            NEW=$(echo "$DEF" | jq \
+              --arg img "$REGISTRY/$PROJECT/api:$TAG" '
+              .containerDefinitions[0].image = $img
+              | del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)')
+            aws ecs register-task-definition --cli-input-json "$NEW" \
+              --query 'taskDefinition.taskDefinitionArn' --output text
           done
 
       - name: Run DB migrate (one-off task, wait for completion)

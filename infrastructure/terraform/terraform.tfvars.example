@@ -22,5 +22,27 @@ github_repo     = "your-org/sms"
 # Redis in-transit TLS + auth token (recommended for prod).
 # redis_transit_encryption = true
 
-# Optional online payments. Leave empty to disable Paystack.
-# paystack_secret_key = "sk_live_xxx"
+# Fargate CPU architecture. ARM64 (Graviton, default) is ~20% cheaper; CI builds
+# matching arm64 images (deploy.yml runs on an ARM runner). Flip BOTH together.
+# cpu_architecture = "ARM64"
+
+# Payment gateways. Empty = that gateway's checkout is disabled (503).
+# paystack_secret_key   = "sk_live_xxx"
+# stripe_secret_key     = "sk_live_xxx"
+# stripe_webhook_secret = "whsec_xxx"   # set AFTER registering the webhook endpoint
+
+# Outbound email (receipts, dunning, invites). Domain must be SPF/DKIM-verified.
+# email_provider = "resend"             # or "postmark"; empty = log-only
+# email_api_key  = "re_xxx"
+# email_from     = "MAESTRO-SMS <no-reply@your-domain>"
+
+# SMS / WhatsApp delivery (message credits). Empty = channels fail soft.
+# sms_provider         = "twilio"
+# twilio_account_sid   = "ACxxx"
+# twilio_auth_token    = "xxx"
+# twilio_from          = "+234xxxxxxxxxx"
+# twilio_whatsapp_from = "+234xxxxxxxxxx"
+
+# Observability. METRICS_TOKEN is auto-generated into Secrets Manager.
+# sentry_dsn = "https://xxx@xxx.ingest.sentry.io/xxx"
+# log_level  = "info"
