@@ -5,7 +5,6 @@ import type {
   PlatformFeeConfig,
   Serialized,
   TenantNameDto,
-  TenantPageDto,
 } from "@sms/types";
 import Link from "next/link";
 import { hasPermission } from "@/lib/permissions";
@@ -15,32 +14,20 @@ import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { shortDate } from "@/lib/format";
-import { SubscriptionManager } from "@/components/operator/SubscriptionManager";
-import { SchoolStatusToggle } from "@/components/operator/SchoolStatusToggle";
 import { Provisioning } from "@/components/operator/Provisioning";
-import { OperatorUsers } from "@/components/operator/OperatorUsers";
-import { OperatorStudents } from "@/components/operator/OperatorStudents";
-import { StudentDataExport } from "@/components/operator/StudentDataExport";
-import { ScholarshipAdmin } from "@/components/operator/ScholarshipAdmin";
 import { OnboardingRequests } from "@/components/operator/OnboardingRequests";
 import { PricingManager } from "@/components/operator/PricingManager";
 import { PlatformFeeManager } from "@/components/operator/PlatformFeeManager";
 import { GrowthManager } from "@/components/operator/GrowthManager";
 import { GroupsManager } from "@/components/operator/GroupsManager";
 import { PlatformStaff } from "@/components/operator/PlatformStaff";
-import { GraceEditor } from "@/components/operator/GraceEditor";
-import { TenantFilterBar } from "@/components/operator/TenantFilterBar";
 
 export const dynamic = "force-dynamic";
-
-type TenantPage = Serialized<TenantPageDto>;
 
 export default async function OperatorPage({
   searchParams,
 }: {
-  searchParams: { q?: string; plan?: string; billing?: string; page?: string; provision?: string };
+  searchParams: { provision?: string };
 }) {
   const session = await auth();
   const user = session!.user;
@@ -49,32 +36,15 @@ export default async function OperatorPage({
   // control only when the caller holds the permission its API actually requires —
   // the API enforces this regardless (403), this just avoids dead buttons.
   const canProvision = hasPermission(user.permissions, "platform.tenants.write");
-  const canSetStatus = hasPermission(user.permissions, "platform.tenants.status");
   const canManageSubscription = hasPermission(user.permissions, "platform.subscription.manage");
   const canManagePricing = hasPermission(user.permissions, "platform.pricing.manage");
   const canReviewOnboarding = hasPermission(user.permissions, "platform.onboarding.review");
-  const canReadUsers = hasPermission(user.permissions, "platform.user.read");
-  // Credential powers (password reset / MFA reset / suspend) are owner-only: a temp
-  // password is a working login for that account — impersonation by another route.
-  const canCredentials = hasPermission(user.permissions, "platform.user.credentials");
-  const canImpersonate = hasPermission(user.permissions, "platform.impersonate");
   // Hiring platform staff is the one duty that can never be delegated: staff
   // creating staff would let a manager mint another manager.
   const canManageStaff = hasPermission(user.permissions, "platform.staff.manage");
-  // Delegable: bounded per-school grace (the API caps it at GRACE_DAYS_MAX).
-  const canManageGrace = hasPermission(user.permissions, "platform.grace.manage");
-  const canReadStudents = hasPermission(user.permissions, "platform.student.read");
-  const q = searchParams.q ?? "";
-  const plan = searchParams.plan ?? "";
-  const billing = searchParams.billing ?? "";
-  const pageNum = Math.max(1, Number(searchParams.page) || 1);
-  const query = new URLSearchParams();
-  if (q) query.set("q", q);
-  if (plan) query.set("plan", plan);
-  if (billing) query.set("billing", billing);
-  query.set("page", String(pageNum));
-  const [tenantPage, names, onboarding, pricing, billingAlerts, platformFees] = await Promise.all([
-    apiGet<TenantPage>(`/operator/tenants?${query.toString()}`),
+  const canAdminScholarships = hasPermission(user.permissions, "scholarship.admin");
+
+  const [names, onboarding, pricing, billingAlerts, platformFees] = await Promise.all([
     apiGet<TenantNameDto[]>("/operator/tenant-names"),
     apiGet<Serialized<OnboardingRequestDto>[]>("/operator/onboarding-requests"),
     apiGet<PlanPriceDto[]>("/operator/pricing"),
@@ -91,7 +61,6 @@ export default async function OperatorPage({
       ])
     : [[], [], []];
   const groups = canManageSubscription ? await apiGet<never[]>("/operator/groups").then((r) => r ?? []) : [];
-  const tenantList = tenantPage?.tenants ?? [];
 
   // "Approve & provision" deep-link: pre-fill the onboarding form from the
   // request (contact person becomes the school_admin; wish plan/modules applied).
@@ -117,16 +86,26 @@ export default async function OperatorPage({
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Operator console</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Provision schools, set each school&apos;s subscription plan and toggle modules — disabled modules
-              vanish from their app and return 404 at the API. Impersonation is step-up gated and audited.
+              Provision schools, set platform pricing and fees, review onboarding and run growth. Manage each
+              school in the Tenant registry, and platform-sponsored scholarships in Scholarship admin.
             </p>
           </div>
           <Link href="/dashboard"><Button variant="outline">Platform analytics →</Button></Link>
         </div>
 
+        {/* Quick links to the pages the registry + scholarship management moved to. */}
+        <div className="flex flex-wrap gap-2">
+          <Link href="/operator/tenants"><Button variant="outline" size="sm">Tenant registry →</Button></Link>
+          <Link href="/operator/schools"><Button variant="outline" size="sm">School directory →</Button></Link>
+          {canAdminScholarships && (
+            <Link href="/operator/scholarships"><Button variant="outline" size="sm">Scholarship admin →</Button></Link>
+          )}
+        </div>
+
         {/* RED ALERT: every school past its paid period, most overdue first. The
-            controls live on each tenant card below (restore/extend/comp via the
-            subscription editor) — this banner makes sure none sits unnoticed. */}
+            controls live on each tenant card in the Tenant registry (restore/
+            extend/comp via the subscription editor) — this banner makes sure
+            none sits unnoticed. */}
         {(billingAlerts?.length ?? 0) > 0 && (
           <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4">
             <p className="text-sm font-semibold text-destructive">
@@ -135,7 +114,7 @@ export default async function OperatorPage({
             <ul className="mt-2 space-y-1 text-sm">
               {billingAlerts!.map((a) => (
                 <li key={a.schoolId} className="flex flex-wrap items-center gap-2">
-                  <Link href={`/operator?billing=PAST_DUE&q=${encodeURIComponent(a.name)}`} className="font-medium hover:underline">
+                  <Link href={`/operator/tenants?billing=PAST_DUE&q=${encodeURIComponent(a.name)}`} className="font-medium hover:underline">
                     {a.name}
                   </Link>
                   <span className="text-muted-foreground">({a.plan})</span>
@@ -149,16 +128,15 @@ export default async function OperatorPage({
               ))}
             </ul>
             <p className="mt-2 text-xs text-muted-foreground">
-              Open the school&apos;s card below to extend the period, comp, or restore — paying restores the plan
-              automatically.
+              Open the school in the{" "}
+              <Link href="/operator/tenants?billing=PAST_DUE" className="underline">Tenant registry</Link>{" "}
+              to extend the period, comp, or restore — paying restores the plan automatically.
             </p>
           </div>
         )}
 
         {/* Keyed on the request id so entering/leaving prefill re-initialises the form. */}
         {canProvision && <Provisioning key={prefill?.requestId ?? "blank"} tenants={names ?? []} prefill={prefill} />}
-
-        <ScholarshipAdmin />
 
         {pricing && canManagePricing && <PricingManager initial={pricing} />}
         {platformFees && canManagePricing && <PlatformFeeManager initial={platformFees} />}
@@ -169,61 +147,6 @@ export default async function OperatorPage({
 
         {canReviewOnboarding && <OnboardingRequests requests={onboarding ?? []} />}
         {canManageStaff && <PlatformStaff />}
-
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Tenant registry</h2>
-          <Link href="/operator/schools" className="text-sm font-medium text-primary hover:underline">
-            Open school directory (owners, contacts, billing) →
-          </Link>
-        </div>
-        <TenantFilterBar
-          q={q}
-          plan={plan}
-          billing={billing}
-          page={tenantPage?.page ?? pageNum}
-          pageSize={tenantPage?.pageSize ?? 10}
-          total={tenantPage?.total ?? tenantList.length}
-        />
-
-        <div className="space-y-3">
-          {tenantList.length === 0 && (
-            <p className="rounded-md border border-border bg-card px-4 py-6 text-center text-sm text-muted-foreground">
-              No schools match this search/filter.
-            </p>
-          )}
-          {tenantList.map((t) => (
-            <Card key={t.id}>
-              <CardHeader className="flex-row items-center justify-between space-y-0">
-                <div>
-                  <CardTitle className="text-base">{t.name}</CardTitle>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    <span className="font-mono">{t.slug}</span> · {t.users} users · since {shortDate(t.createdAt)}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline">{t.plan}</Badge>
-                  <Badge variant="secondary">{t.moduleCount} modules</Badge>
-                  <Badge variant={t.status === "ACTIVE" ? "secondary" : "outline"}>{t.status}</Badge>
-                  <Badge variant={t.subscriptionStatus === "PAST_DUE" ? "destructive" : "outline"}>
-                    billing: {t.subscriptionStatus.toLowerCase()}
-                  </Badge>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="mb-3">
-                  {canSetStatus && <SchoolStatusToggle schoolId={t.id} status={t.status} />}
-                </div>
-                {canManageSubscription && <SubscriptionManager schoolId={t.id} plan={t.plan} />}
-                {canManageGrace && <GraceEditor schoolId={t.id} initial={t.graceDays} />}
-                {canReadUsers && (
-                  <OperatorUsers schoolId={t.id} schoolName={t.name} canCredentials={canCredentials} canImpersonate={canImpersonate} />
-                )}
-                {canReadStudents && <OperatorStudents schoolId={t.id} />}
-                {canReadStudents && <StudentDataExport schoolId={t.id} schoolName={t.name} />}
-              </CardContent>
-            </Card>
-          ))}
-        </div>
       </div>
     </AppShell>
   );

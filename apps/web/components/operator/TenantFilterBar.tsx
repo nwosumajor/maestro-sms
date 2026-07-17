@@ -13,9 +13,11 @@ const PLANS = ["STANDARD", "PREMIUM", "ULTIMATE", "ENTERPRISE"] as const;
 const BILLING = ["ACTIVE", "PAST_DUE", "CANCELED"] as const;
 
 export function TenantFilterBar({
-  q, plan, billing, page, pageSize, total,
+  q, plan, billing, page, pageSize, total, basePath = "/operator/tenants",
 }: {
   q: string; plan: string; billing: string; page: number; pageSize: number; total: number;
+  /** Route the filter/pagination navigates to (the registry now lives at /operator/tenants). */
+  basePath?: string;
 }) {
   const router = useRouter();
   const [search, setSearch] = React.useState(q);
@@ -31,7 +33,7 @@ export function TenantFilterBar({
     if (nb) params.set("billing", nb);
     const pg = next.page ?? 1; // any filter change resets to page 1
     if (pg > 1) params.set("page", String(pg));
-    router.push(`/operator${params.size ? `?${params.toString()}` : ""}`);
+    router.push(`${basePath}${params.size ? `?${params.toString()}` : ""}`);
   };
 
   const sel = "h-9 rounded-md border border-input bg-background px-3 text-sm";

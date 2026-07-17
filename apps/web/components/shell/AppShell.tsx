@@ -18,6 +18,7 @@ import {
   CalendarIcon,
   BriefcaseIcon,
   Building2Icon,
+  ServerIcon,
   SearchIcon,
   MegaphoneIcon,
   Gamepad2Icon,
@@ -96,6 +97,8 @@ type NavKey =
   | "games"
   | "ultimate"
   | "operator"
+  | "operatortenants"
+  | "operatorscholarships"
   | "operatoraudit"
   | "directory"
   | "announcements"
@@ -118,6 +121,8 @@ const NAV: {
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboardIcon, href: "/dashboard" },
   { key: "analytics", label: "Analytics", icon: BarChart3Icon, href: "/analytics", module: MODULES.ANALYTICS },
   { key: "operator", label: "Operator", icon: Building2Icon, href: "/operator", perm: "platform.tenants.read" },
+  { key: "operatortenants", label: "Tenant registry", icon: ServerIcon, href: "/operator/tenants", perm: "platform.tenants.read" },
+  { key: "operatorscholarships", label: "Scholarship admin", icon: AwardIcon, href: "/operator/scholarships", perm: "scholarship.admin" },
   { key: "operatoraudit", label: "Platform audit", icon: ScrollTextIcon, href: "/operator/audit", perm: "platform.audit.read" },
   { key: "directory", label: "Directory", icon: SearchIcon, href: "/directory", perm: "directory.search" },
   { key: "admin", label: "Admin", icon: SettingsIcon, href: "/admin", perm: "fee.manage" },
@@ -204,7 +209,8 @@ const NAV_GROUP: Record<NavKey, string> = {
   workflows: "operations", tasks: "operations", scholarships: "operations",
   discussion: "community", polls: "community", forms: "community", discipline: "community",
   games: "community", ultimate: "community",
-  operator: "platform", operatoraudit: "platform", directory: "platform", admin: "platform", account: "platform",
+  operator: "platform", operatortenants: "platform", operatorscholarships: "platform",
+  operatoraudit: "platform", directory: "platform", admin: "platform", account: "platform",
   help: "platform",
 };
 
