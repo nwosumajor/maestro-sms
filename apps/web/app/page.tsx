@@ -39,12 +39,15 @@ import {
   GavelIcon,
   BarChart3Icon,
   Gamepad2Icon,
+  MonitorCheckIcon,
+  Building2Icon,
 } from "lucide-react";
 import {
   BILLING_CYCLES,
   CURRENCY_SYMBOL,
   CYCLE_DISCOUNT_PERCENT,
   CYCLE_MONTHS,
+  MODULE_CATALOG,
   PLANS as PLAN_KEYS,
   PLAN_MODULES,
   PLAN_PRICING_BY_CURRENCY,
@@ -122,6 +125,7 @@ const MODULE_GROUPS: { label: string; icon: typeof BookOpenIcon; items: ModuleIt
       { name: "Gradebook", desc: "Record results with a full, auditable grade history.", icon: GraduationCapIcon },
       { name: "Timetabling", desc: "Periods, rooms and lessons with clash detection.", icon: CalendarClockIcon },
       { name: "Assessment integrity", desc: "Cheating signals for teacher review — never an automatic verdict.", icon: ScanFaceIcon },
+      { name: "CBT exam hall", desc: "Timed, auto-marked WAEC/JAMB-style mock exams with question banks.", icon: MonitorCheckIcon },
       { name: "Library", desc: "Barcode catalogue, loans and fines.", icon: LibraryIcon },
       { name: "Certificates & ID", desc: "Generate ID cards and certificates on demand.", icon: AwardIcon },
     ],
@@ -146,6 +150,7 @@ const MODULE_GROUPS: { label: string; icon: typeof BookOpenIcon; items: ModuleIt
       { name: "Hostel", desc: "Boarding houses, rooms, allocations and rent.", icon: BedDoubleIcon },
       { name: "Transport", desc: "Vehicles, routes, stops and transport fees.", icon: BusIcon },
       { name: "Approvals", desc: "Multi-stage workflows with separation of duties.", icon: WorkflowIcon },
+      { name: "Group console", desc: "One dashboard across every campus for multi-school proprietors.", icon: Building2Icon },
     ],
   },
   {
@@ -399,7 +404,7 @@ function Hero() {
             <a href="#onboard"><Button size="lg">Start your 30-day free trial</Button></a>
             <a href="#modules">
               <Button size="lg" variant="outline" className="border-white/40 bg-white/10 text-white hover:bg-white/20 hover:text-white">
-                Explore the 25 modules
+                Explore the {MODULE_CATALOG.length} modules
               </Button>
             </a>
           </div>
@@ -439,7 +444,7 @@ function Hero() {
 
 function StatBand() {
   const stats: [string, string][] = [
-    ["25", "modules"],
+    [String(MODULE_CATALOG.length), "modules"],
     ["4", "plans, per-seat"],
     ["17", "built-in roles"],
     ["50+", "schools per deployment"],
@@ -500,7 +505,7 @@ function Security() {
 }
 
 function Modules() {
-  let n = 0; // running "register entry" number across all groups (01–25)
+  let n = 0; // running "register entry" number across all groups (01–27)
   return (
     <section id="modules" className="relative scroll-mt-20 overflow-hidden border-b border-border/60 bg-background">
       {/* exercise-book rule-grid — the "register" motif */}
@@ -509,7 +514,7 @@ function Modules() {
         <div className="max-w-2xl">
           <p className="eyebrow">Everything your school runs on</p>
           <h2 className="mt-3 font-display text-3xl font-semibold tracking-tight sm:text-4xl">
-            Twenty-five modules, organised like a well-kept register.
+            Twenty-seven modules, organised like a well-kept register.
           </h2>
           <p className="mt-4 text-base leading-relaxed text-muted-foreground">
             Start with the essentials and add what you need. Every module is tenant-isolated,
@@ -781,7 +786,7 @@ function RevenueBand() {
     },
     {
       title: "Automatic reminders & receipts",
-      body: "Guardians are nudged about outstanding balances in-app and by email; receipts issue themselves the moment payment lands.",
+      body: "Guardians are nudged about outstanding balances in-app, by email — and by SMS or WhatsApp with message credits; receipts issue themselves the moment payment lands.",
     },
     {
       title: "Controls your auditor will love",
@@ -1002,11 +1007,11 @@ function Steps() {
 const FAQS: { q: string; a: string }[] = [
   {
     q: "What happens when the 30-day trial ends?",
-    a: "You pay per active student — monthly, per term (3 months, 5% off) or per year (9 months, 15% off) — from inside the app, by card. If you don't pay, nothing is deleted: after a 7-day grace period your school simply runs on the core Standard modules until payment, and your full plan returns the instant you pay.",
+    a: "You pay per active student — monthly, per term (3 months, 5% off) or per year (9 months, 15% off) — from inside the app, by card, and you can save a card to renew automatically. If you don't pay, nothing is deleted: after a grace period (7 days by default) your school simply runs on the core Standard modules until payment, and your full plan returns the instant you pay.",
   },
   {
     q: "Where does parents' fee money go?",
-    a: "Straight to your school's own bank account. You register your settlement account once; every card payment then splits directly to it via Paystack. The platform never warehouses your fees.",
+    a: "Straight to your school's own bank account. You register your settlement account once; every card payment then splits directly to it via Paystack. The platform never warehouses your fees, and any card-processing charge is shown on the payment page before a parent pays.",
   },
   {
     q: "How safe is our students' data?",
