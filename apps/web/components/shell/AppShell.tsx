@@ -179,6 +179,8 @@ const NAV: {
 const PLATFORM_OWNER_NAV = new Set<NavKey>([
   "dashboard",
   "operator",
+  "operatortenants",
+  "operatorscholarships",
   "operatoraudit",
   "directory",
   "ultimate",
