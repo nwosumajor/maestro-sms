@@ -126,7 +126,8 @@ Multi-AZ, `cache.t4g.micro`, 1 NAT, no replica/proxy.
 | Secrets Manager (~10–12 secrets) | $0.40 each | ~5 |
 | CloudWatch logs/metrics/alarms | 30-day retention | ~10–20 |
 | Scheduled retention/dunning task | minutes/day | ~1 |
-| **Total** | | **~$230–270/mo (~₦370k–430k)** |
+| Alarms (~18) + Route 53 health probe | detection layer | ~3 |
+| **Total** | | **~$235–275/mo (~₦375k–440k)** |
 
 The whole compute + data tier is Graviton (ARM): Fargate tasks
 (`cpu_architecture=ARM64`, images built natively on an ARM CI runner), RDS
@@ -280,18 +281,29 @@ DSN, Twilio (when ready).
 3. Verify webhook **idempotency** by redelivering an event from each
    dashboard: balance must not double-credit.
 
-### Step 8 — Observability & alarms (~1 h)
-1. Sentry DSN in (already via §2); throw a test 500, see it arrive.
-2. CloudWatch alarms (create via console or a small tf addition):
-   - ALB 5xx rate > 1% for 5 min
-   - ALB target unhealthy count ≥ 1
-   - RDS: CPU > 80% (15 min), FreeStorageSpace < 5 GB, connections > 80% max
-   - Redis: memory > 80%, evictions > 0
-   - ECS: running task count < desired
-   - Billing: the AWS Budget alerts (§9)
-   Route all to an SNS topic → your email (and phone via SMS for the 5xx one).
-3. Point an external uptime pinger (free tier of any monitor) at `/` and the
-   API health route — CloudWatch can't see a dead CloudFront distribution.
+### Step 8 — Observability & alarms (~20 min; provisioned by Terraform)
+The detection layer is code (`alarms.tf`, `autoscaling.tf`) — your job here is
+confirmation, not creation:
+1. Set `alert_email` (and `monthly_budget_usd`) in tfvars BEFORE the apply,
+   then **click the SNS confirmation links** in the two emails that arrive
+   (one per region — the outside-in probe alarms from us-east-1).
+   Unconfirmed subscription = silent alarms.
+2. What's armed: ALB target-5xx + LB-5xx, p95 latency > 2s (web/api),
+   unhealthy targets, ECS CPU saturation (auto-scaling at ceiling), RDS
+   CPU/storage/connections/memory, Redis memory/evictions (both nodes), a
+   **Route 53 external health probe** on `https://<domain>/` (the
+   wake-someone-up alarm — catches dead DNS/CloudFront that internal metrics
+   can't see), and AWS Budget alerts at 80% actual / 100% forecast.
+3. **Auto-scaling** is armed on both services: floor = `desired_count` (2 —
+   redundancy never sacrificed), ceiling 10, target-tracking on CPU 60% AND
+   ALB requests-per-target (leading indicator); scale-out 60s, scale-in
+   conservative. Note `terraform apply` never resets the live count
+   (`ignore_changes = [desired_count]`).
+4. Sentry DSN in (via §2); throw a test 500, see it arrive with request +
+   tenant context.
+5. Fire drill: stop one api task in the console → unhealthy-target alarm →
+   email arrives → service self-heals. Now you've seen the loop once before
+   it matters.
 
 ### Step 9 — Backup & restore DRILL (before first paying school)
 1. Confirm automated RDS snapshots are on (Terraform default) and take one
@@ -337,7 +349,7 @@ version upgrades: snapshot → test-restore → upgrade in window, never same-da
 
 | Signal | Action | Cost delta |
 |--------|--------|-----------|
-| API p95 latency up + Fargate CPU > 70% sustained | Raise `api_desired_count` (or add target-tracking auto-scaling on CPU 60%) | ~$18/task |
+| The `cpu-saturated` alarm fires (auto-scaling pinned at its ceiling) | Raise `api_max_count`/`web_max_count` — scaling to the current ceiling is already automatic (target-tracking on CPU 60% + ALB req/target, floor 2) | ~$15/extra ARM task |
 | DB connections approaching max (t4g.small ≈ ~400 with default params; watch the alarm) | `enable_rds_proxy = true` — decouples connection count from task count (the app's GUC handling is already pooler-safe) | ~$22+ |
 | DB CPU > 70% sustained on reads (analytics, lists) | `db_read_replica_count = 1` — the read/write split (Phase 1 scaling work) routes read-only tenant paths to it automatically via `DATABASE_REPLICA_URL` | ~$29 (t4g.small) |
 | DB CPU high on writes / IO waits | Upsize instance class (t4g.small → m7g.large → r7g.xlarge). Multi-AZ makes this a failover-blip, not an outage: modify, it applies to standby first | 2–6× DB line |
@@ -409,11 +421,12 @@ or a scaling loop (cap max task count).
 
 ## 9. Cost governance setup (15 minutes, do in Step 1)
 
-1. **AWS Budget:** monthly, amount = profile estimate +20%, alerts at 80%
-   actual and 100% forecast → email + SMS.
+1. **AWS Budget:** provisioned by Terraform (`monthly_budget_usd`, alerts at
+   80% actual / 100% forecast to `alert_email`) — just set the two tfvars.
 2. **Cost allocation tags:** activate the `Name`/project tags Terraform sets,
-   so Cost Explorer can split by component.
-3. **Cost anomaly detection:** one monitor, default settings, same SNS topic.
+   so Cost Explorer can split by component (console, once).
+3. **Cost anomaly detection:** one monitor, default settings, same SNS topic
+   (console, once).
 4. Review §3.4 levers at month 2 (Savings Plan) and month 3 (RDS RI) once
    usage is proven — reserving before observing is how you buy the wrong size.
 

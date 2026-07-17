@@ -137,6 +137,37 @@ variable "web_desired_count" {
   default = 2
 }
 
+variable "api_max_count" {
+  description = "Auto-scaling ceiling for the api service (floor = api_desired_count; bounds runaway-scale cost)."
+  type        = number
+  default     = 10
+}
+
+variable "web_max_count" {
+  description = "Auto-scaling ceiling for the web service (floor = web_desired_count)."
+  type        = number
+  default     = 10
+}
+
+# --- Alerting / cost governance ----------------------------------------------
+variable "alert_email" {
+  description = "Email for CloudWatch alarm + budget notifications (SNS sends a confirmation link on first apply — CLICK IT or alerts go nowhere). Empty = topics exist but nothing subscribes."
+  type        = string
+  default     = ""
+}
+
+variable "monthly_budget_usd" {
+  description = "AWS Budgets monthly cost ceiling (alerts at 80% actual / 100% forecast). Set ~20% above the expected profile spend."
+  type        = number
+  default     = 320
+}
+
+variable "db_connections_alarm_threshold" {
+  description = "DatabaseConnections alarm threshold. db.t4g.small (2 GiB) allows ~210 connections; alarm at ~80% of the class limit. Raise when the instance class grows or RDS Proxy absorbs the pool."
+  type        = number
+  default     = 170
+}
+
 variable "cpu_architecture" {
   description = "Fargate CPU architecture. ARM64 (Graviton) is ~20% cheaper per vCPU-hour; the stack is ARM-clean (node:20-alpine multi-arch, bcryptjs pure-JS, Prisma ships linux-musl-arm64 engines). CI must build matching images (see deploy.yml runs-on). Flip to X86_64 to roll back."
   type        = string

@@ -252,6 +252,12 @@ resource "aws_ecs_service" "api" {
     rollback = true
   }
 
+  # Auto-scaling owns the live count after first apply (autoscaling.tf);
+  # without this, every terraform apply would snap the fleet back to the floor.
+  lifecycle {
+    ignore_changes = [desired_count]
+  }
+
   # Must exist before the service can register targets (load_balancer).
   depends_on = [aws_elasticache_replication_group.main, aws_db_instance.main, aws_lb_listener.https]
 }
@@ -277,6 +283,10 @@ resource "aws_ecs_service" "web" {
   deployment_circuit_breaker {
     enable   = true
     rollback = true
+  }
+
+  lifecycle {
+    ignore_changes = [desired_count]
   }
 
   depends_on = [aws_lb_listener.https]

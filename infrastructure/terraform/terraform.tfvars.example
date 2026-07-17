@@ -46,3 +46,12 @@ github_repo     = "your-org/sms"
 # Observability. METRICS_TOKEN is auto-generated into Secrets Manager.
 # sentry_dsn = "https://xxx@xxx.ingest.sentry.io/xxx"
 # log_level  = "info"
+
+# Alerting + cost guardrail. SET THIS — alarms without a subscriber are silent.
+# After the first apply, CLICK the SNS confirmation emails (one per region).
+# alert_email        = "ops@your-domain"
+# monthly_budget_usd = 320
+
+# Auto-scaling ceilings (floors = the desired_count values above).
+# api_max_count = 10
+# web_max_count = 10
