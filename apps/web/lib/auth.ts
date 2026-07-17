@@ -223,6 +223,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       }
 
       // Existing session: periodic claim revalidation (see the header comment).
+      // SECURITY/RUNTIME: the refresh mints an HS256 bearer with `jsonwebtoken`
+      // (Node `crypto`), which the Edge runtime lacks — and this same callback
+      // runs inside the Edge middleware. Calling it there throws
+      // "edge runtime does not support crypto", which Auth.js surfaces as a
+      // JWTSessionError and the middleware then treats the user as logged out.
+      // Middleware only needs a PRESENCE check, so skip the refresh in Edge; it
+      // still runs on every Node-runtime server render within the same cadence,
+      // so revocation lands within the interval regardless.
+      if (process.env.NEXT_RUNTIME === "edge") return token;
       const now = Date.now();
       const claimsAt = typeof token.claimsAt === "number" ? token.claimsAt : 0;
       const triedAt = typeof token.claimsTriedAt === "number" ? token.claimsTriedAt : 0;
