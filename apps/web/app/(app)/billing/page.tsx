@@ -9,6 +9,9 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { money, shortDate, titleCase } from "@/lib/format";
 import { BillingCheckout } from "@/components/billing/BillingCheckout";
 import { ReferralPanel } from "@/components/billing/ReferralPanel";
+import { AutoRenewCard } from "@/components/billing/AutoRenewCard";
+import { TrueUpCard } from "@/components/billing/TrueUpCard";
+import { MessageCreditsCard } from "@/components/billing/MessageCreditsCard";
 
 export const dynamic = "force-dynamic";
 
@@ -28,9 +31,10 @@ const PAYMENT_VARIANT: Record<string, "default" | "secondary" | "destructive" | 
 export default async function BillingPage() {
   const session = await auth();
   const user = session!.user;
-  const [data, referral] = await Promise.all([
+  const [data, referral, credits] = await Promise.all([
     apiGet<Overview>("/billing"),
     apiGet<Serialized<ReferralInfoDto>>("/billing/referral"),
+    apiGet<{ balance: number; bundles: { id: string; credits: number; priceMinor: number }[] }>("/billing/credits"),
   ]);
   const canManage = hasPermission(user.permissions, "billing.manage");
 
@@ -85,7 +89,28 @@ export default async function BillingPage() {
               )}
             </Card>
 
+            {data.trueUp && (
+              <TrueUpCard trueUp={data.trueUp} currency={data.subscription.currency ?? "NGN"} canManage={canManage} />
+            )}
+
             <BillingCheckout quotes={data.quotes} activeStudents={data.activeStudents} canManage={canManage} />
+
+            {data.planChangeCreditMinor > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Switching plans mid-period? Your unused time is worth about{" "}
+                <span className="tnum font-medium text-foreground">
+                  {new Intl.NumberFormat("en-NG", { style: "currency", currency: data.subscription.currency ?? "NGN" }).format(data.planChangeCreditMinor / 100)}
+                </span>{" "}
+                — it is deducted automatically from the plan-change charge, and the new plan runs a full cycle
+                from the day you pay.
+              </p>
+            )}
+
+            <AutoRenewCard autoRenew={data.autoRenew} cardLast4={data.cardLast4} canManage={canManage} />
+
+            {credits && (
+              <MessageCreditsCard balance={credits.balance} bundles={[...credits.bundles]} canManage={canManage} />
+            )}
 
             {referral && <ReferralPanel initial={referral} canManage={canManage} />}
 

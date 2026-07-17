@@ -16,6 +16,30 @@ enum NotificationChannel {
   EMAIL
   SMS
   PUSH
+  WHATSAPP
+}
+
+/// APPEND-ONLY per-school message-credit ledger: purchases add credits
+/// (webhook, idempotent on the gateway reference), each SMS/WhatsApp delivery
+/// debits one. Balance = SUM(deltaCredits). Tenant-scoped, standard RLS with
+/// SELECT+INSERT only (rls/73) — a financial-adjacent record, never edited.
+model MessageCreditEntry {
+  id           String   @id @default(uuid()) @db.Uuid
+  schoolId     String   @db.Uuid
+  /// +credits on purchase; -1 per delivered message.
+  deltaCredits Int
+  /// PURCHASE | SEND | ADJUST.
+  reason       String
+  /// SMS | WHATSAPP for sends; null for purchases.
+  channel      String?
+  /// Gateway reference (purchases — the idempotency key) or notificationId (sends).
+  reference    String?
+  createdAt    DateTime @default(now())
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId])
+  @@map("message_credit_entry")
 }
 
 enum NotificationDeliveryStatus {

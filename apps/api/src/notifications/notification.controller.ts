@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Put, Query } from "@nestjs/common";
 import type { NotificationInboxDto } from "@sms/types";
 import { z } from "zod";
 import { NOTIFICATION_CHANNELS, NOTIFICATION_PERMISSIONS, NOTIFICATION_TYPES } from "@sms/types";
@@ -7,6 +7,14 @@ import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { NotificationService } from "./notification.service";
+
+// Loose E.164: 8–15 digits with an optional +. Empty string clears the number.
+const phoneSchema = z.object({
+  phone: z
+    .string()
+    .trim()
+    .regex(/^(\+?\d{8,15})?$/, "Enter the number in international format, e.g. +2348012345678"),
+});
 
 const sendSchema = z.object({
   recipientId: z.string().uuid(),
@@ -33,6 +41,23 @@ export class NotificationController {
   @RequirePermission(NOTIFICATION_PERMISSIONS.NOTIFICATION_READ)
   markRead(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
     return this.notifications.markRead(p, id);
+  }
+
+  /** The caller's own mobile number (SMS/WhatsApp delivery target). */
+  @Get("me/phone")
+  @RequirePermission(NOTIFICATION_PERMISSIONS.NOTIFICATION_READ)
+  myPhone(@CurrentPrincipal() p: Principal) {
+    return this.notifications.getMyPhone(p);
+  }
+
+  /** Set/clear the caller's own mobile number. Self-scoped; audited. */
+  @Put("me/phone")
+  @RequirePermission(NOTIFICATION_PERMISSIONS.NOTIFICATION_READ)
+  setMyPhone(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(phoneSchema)) body: z.infer<typeof phoneSchema>,
+  ) {
+    return this.notifications.setMyPhone(p, body.phone || null);
   }
 
   /** Staff send to a user (relationship-scoped in the service). */

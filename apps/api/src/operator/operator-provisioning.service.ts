@@ -100,6 +100,8 @@ export class OperatorProvisioningService {
       /** Referral code the new school arrived with (explicit value wins; falls
        *  back to the linked onboarding request's stored code). */
       referralCode?: string;
+      /** Agent (reseller) attribution code — same lifecycle as referralCode. */
+      agentCode?: string;
     },
   ) {
     const db = this.client();
@@ -147,15 +149,21 @@ export class OperatorProvisioningService {
         ?.trim()
         .toUpperCase()
         .replace(/[^A-Z0-9-]/g, "") || null;
-    if (!referralCode && input.onboardingRequestId) {
+    let agentCode = input.agentCode?.trim().toUpperCase().replace(/[^A-Z0-9-]/g, "") || null;
+    if (input.onboardingRequestId && (!referralCode || !agentCode)) {
       const req = await db.onboardingRequest.findFirst({
         where: { id: input.onboardingRequestId },
-        select: { referralCode: true },
+        select: { referralCode: true, agentCode: true },
       });
-      referralCode = req?.referralCode ?? null;
+      referralCode = referralCode ?? req?.referralCode ?? null;
+      agentCode = agentCode ?? req?.agentCode ?? null;
     }
     const referrer = referralCode
       ? await db.schoolReferralCode.findFirst({ where: { code: referralCode }, select: { schoolId: true } })
+      : null;
+    // Agent (reseller) attribution — unknown/inactive codes resolve to nothing.
+    const agent = agentCode
+      ? await db.agent.findFirst({ where: { code: agentCode, active: true }, select: { id: true } })
       : null;
 
     // Resolve each role row up front (global registry; same for all schools).
@@ -186,6 +194,8 @@ export class OperatorProvisioningService {
           // Arms the referral reward: the billing webhook grants both sides one
           // free term on this school's FIRST paid subscription.
           referredBySchoolId: referrer?.schoolId ?? null,
+          // Arms the agent commission (accrues once, on the first paid sub).
+          agentId: agent?.id ?? null,
         },
       });
       const created: Array<{ id: string; email: string; role: string; tempPassword: string }> = [];
@@ -208,6 +218,8 @@ export class OperatorProvisioningService {
       onboardingRequestId: input.onboardingRequestId ?? null,
       referralCode,
       referredBySchoolId: referrer?.schoolId ?? null,
+      agentCode,
+      agentId: agent?.id ?? null,
     });
 
     // Provisioned from a public onboarding request → the request is now APPROVED

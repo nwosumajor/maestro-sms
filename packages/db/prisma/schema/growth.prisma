@@ -1,0 +1,67 @@
+// =============================================================================
+// Growth levers: promo codes + agent (reseller) commissions
+// =============================================================================
+// All three tables are GLOBAL, platform-owned business data (no tenant PII) —
+// the same posture as plan_price (rls/72_growth_rls.sql): the app role gets
+// SELECT only where checkout needs it (promo validation); ALL writes and the
+// commission ledger go through the PRIVILEGED client (operator console).
+
+/// Operator-issued discount code: a percentage off a school's FIRST paid
+/// subscription charge. Never stacks with itself (one use per school by
+/// definition — first charge only).
+model PromoCode {
+  id         String    @id @default(uuid()) @db.Uuid
+  code       String    @unique
+  /// Percent off the first charge (1–100).
+  percentOff Int
+  /// Total redemption budget; null = unlimited.
+  maxUses    Int?
+  usedCount  Int       @default(0)
+  expiresAt  DateTime?
+  active     Boolean   @default(true)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@map("promo_code")
+}
+
+/// A sales agent / reseller. Their code attributes schools they bring in;
+/// commission accrues on each attributed school's FIRST paid subscription.
+model Agent {
+  id           String   @id @default(uuid()) @db.Uuid
+  name         String
+  email        String
+  /// Shareable attribution code (unique, human-friendly).
+  code         String   @unique
+  /// Commission in basis points of the first charge (100 bp = 1%).
+  commissionBp Int
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  commissions AgentCommission[]
+
+  @@map("agent")
+}
+
+/// APPEND-ONLY commission ledger row (one per attributed school, ever — the
+/// unique schoolId is the DB-level once-only guarantee). PAID_OUT is stamped by
+/// the operator when settled to the agent.
+model AgentCommission {
+  id          String    @id @default(uuid()) @db.Uuid
+  agentId     String    @db.Uuid
+  schoolId    String    @unique @db.Uuid
+  /// Gateway reference of the charge the commission accrued on.
+  paymentRef  String
+  amountMinor Int
+  currency    String    @default("NGN")
+  /// ACCRUED | PAID_OUT.
+  status      String    @default("ACCRUED")
+  paidOutAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  agent Agent @relation(fields: [agentId], references: [id])
+
+  @@index([agentId])
+  @@map("agent_commission")
+}

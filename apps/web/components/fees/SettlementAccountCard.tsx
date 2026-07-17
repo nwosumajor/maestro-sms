@@ -104,6 +104,54 @@ export function SettlementAccountCard({ initial }: { initial: SettlementAccountD
           The account is verified with Paystack; we store only the bank and last 4 digits. Gateway charges on
           fee collections are borne by the school&apos;s settlement share.
         </p>
+
+        {/* Platform convenience fee: who bears it. Shown only when a fee is
+            actually configured — a zero fee needs no decision. */}
+        {initial.sampleFeeMinor > 0 && (
+          <div className="mt-5 border-t border-border pt-4">
+            <p className="text-sm font-medium">Online-payment convenience fee</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              A platform fee applies to each online payment (about{" "}
+              {new Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN" }).format(initial.sampleFeeMinor / 100)}{" "}
+              on a ₦10,000 payment). Choose who bears it:
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {(
+                [
+                  ["PARENT", "Payer bears it", "Parents pay invoice + fee; you receive the full invoice."],
+                  ["SCHOOL", "School bears it", "Parents pay the invoice only; the fee comes out of your settlement."],
+                ] as const
+              ).map(([value, label, hint]) => {
+                const active = (initial.feeBearer ?? "PARENT") === value;
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    disabled={busy}
+                    title={hint}
+                    onClick={async () => {
+                      setBusy(true);
+                      setMsg(null);
+                      const res = await sendWithStepUp("PUT", "fees/settlement/fee-bearer", { bearer: value });
+                      setBusy(false);
+                      if (res.ok) {
+                        setMsg(`Saved — ${label.toLowerCase()}.`);
+                        router.refresh();
+                      } else setMsg(await readApiError(res));
+                    }}
+                    className={
+                      "rounded-md border px-3 py-2 text-left text-sm transition-colors " +
+                      (active ? "border-primary bg-primary/5 font-medium" : "border-border hover:bg-accent")
+                    }
+                  >
+                    {label}
+                    <span className="block text-xs font-normal text-muted-foreground">{hint}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

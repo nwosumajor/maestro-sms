@@ -1,0 +1,45 @@
+// =============================================================================
+// Multi-school GROUP console (proprietor / franchise tier)
+// =============================================================================
+// GLOBAL platform tables (no tenant data beyond school/user ids): the operator
+// defines a group, its member schools, and its DIRECTORS (existing users —
+// typically the proprietor's account in their main school). Directorship in
+// this registry IS the authorization for the cross-campus read — there is no
+// tenant-elevatable permission involved, and the app role has NO access to
+// these tables at all (rls/74 deny-all; reads go through the privileged client,
+// exactly like the operator console).
+
+model SchoolGroup {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members   SchoolGroupMember[]
+  directors SchoolGroupDirector[]
+
+  @@map("school_group")
+}
+
+model SchoolGroupMember {
+  id       String @id @default(uuid()) @db.Uuid
+  groupId  String @db.Uuid
+  schoolId String @db.Uuid
+
+  group SchoolGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, schoolId])
+  @@map("school_group_member")
+}
+
+model SchoolGroupDirector {
+  id      String @id @default(uuid()) @db.Uuid
+  groupId String @db.Uuid
+  userId  String @db.Uuid
+
+  group SchoolGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+  @@index([userId])
+  @@map("school_group_director")
+}

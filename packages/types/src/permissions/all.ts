@@ -17,6 +17,7 @@ import type { AnnouncementPermission } from "./announcements";
 import type { AttendancePermission } from "./attendance";
 import type { BillingPermission } from "./billing";
 import type { CertificatePermission } from "./certificate";
+import type { CbtPermission } from "./cbt";
 import type { CommunicationPermission } from "./communication";
 import type { DisciplinePermission } from "./discipline";
 import type { DiscussionPermission } from "./discussion";
@@ -51,6 +52,7 @@ export type Permission =
   | AttendancePermission
   | BillingPermission
   | CertificatePermission
+  | CbtPermission
   | CommunicationPermission
   | DisciplinePermission
   | DiscussionPermission

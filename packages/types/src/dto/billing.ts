@@ -45,6 +45,16 @@ export interface BillingOverviewDto {
   quotes: BillingQuoteDto[];
   /** Most-recent-first payment history. */
   payments: PlatformPaymentDto[];
+  /** Saved-card auto-renew: opted in, and the stored card's display hint
+   *  (null = no card saved yet — one successful card payment saves it). */
+  autoRenew: boolean;
+  cardLast4: string | null;
+  /** Credit (unused paid time) that would be deducted from a plan change made
+   *  right now; 0 when lapsed / never paid. */
+  planChangeCreditMinor: number;
+  /** Seat top-up owed for students enrolled since the last charge (prorated to
+   *  the time left); null when nothing is due. */
+  trueUp: { extraSeats: number; amountMinor: number } | null;
 }
 
 /** School-initiated checkout input. Currency picks the gateway: NGN → Paystack,

@@ -23,6 +23,10 @@ export interface PaystackEvent {
     currency?: string;
     reference: string;
     metadata?: Record<string, unknown>;
+    /** Card authorization (present on charge.success) — `authorization_code`
+     *  with `reusable: true` enables saved-card recurring charges. */
+    authorization?: { authorization_code?: string; reusable?: boolean; last4?: string; card_type?: string };
+    customer?: { customer_code?: string; email?: string };
   };
 }
 
@@ -43,7 +47,10 @@ export class PaystackService {
   /** Start a hosted Paystack checkout; returns the authorization URL.
    *  With `subaccount` set, Paystack SPLITS settlement to that subaccount's bank
    *  (parent fees → the school's own account); `bearer` says who pays Paystack's
-   *  transaction fee ("subaccount" = the school, on their own collections). */
+   *  transaction fee ("subaccount" = the school, on their own collections).
+   *  `transactionChargeMinor` is the PLATFORM's flat take on THIS charge (kobo)
+   *  — it overrides the subaccount's percentage_charge and is retained by the
+   *  main (platform) account before the split settles to the school. */
   async initialize(input: {
     email: string;
     amountMinor: number;
@@ -51,6 +58,7 @@ export class PaystackService {
     metadata: Record<string, unknown>;
     subaccount?: string;
     bearer?: "account" | "subaccount";
+    transactionChargeMinor?: number;
   }): Promise<{ authorizationUrl: string }> {
     const secret = this.secret();
     const res = await fetch(`${PAYSTACK}/transaction/initialize`, {
@@ -62,6 +70,9 @@ export class PaystackService {
         reference: input.reference,
         metadata: input.metadata,
         ...(input.subaccount ? { subaccount: input.subaccount, bearer: input.bearer ?? "subaccount" } : {}),
+        ...(input.subaccount && input.transactionChargeMinor && input.transactionChargeMinor > 0
+          ? { transaction_charge: input.transactionChargeMinor }
+          : {}),
       }),
     });
     if (!res.ok) {
@@ -70,6 +81,38 @@ export class PaystackService {
     }
     const json = (await res.json()) as { data: { authorization_url: string } };
     return { authorizationUrl: json.data.authorization_url };
+  }
+
+  /**
+   * Charge a SAVED card authorization (auto-renew). Synchronous: Paystack
+   * returns the charge outcome directly, and the account webhook ALSO fires —
+   * the caller's idempotency-on-reference makes the double delivery safe.
+   */
+  async chargeAuthorization(input: {
+    email: string;
+    amountMinor: number;
+    reference: string;
+    authorizationCode: string;
+    metadata: Record<string, unknown>;
+  }): Promise<{ ok: boolean; status?: string }> {
+    const secret = this.secret();
+    const res = await fetch(`${PAYSTACK}/transaction/charge_authorization`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: input.email,
+        amount: input.amountMinor,
+        reference: input.reference,
+        authorization_code: input.authorizationCode,
+        metadata: input.metadata,
+      }),
+    });
+    if (!res.ok) {
+      this.logger.warn(`Paystack charge_authorization failed: ${res.status}`);
+      return { ok: false, status: String(res.status) };
+    }
+    const json = (await res.json()) as { data?: { status?: string } };
+    return { ok: json.data?.status === "success", status: json.data?.status };
   }
 
   /**

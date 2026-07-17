@@ -42,6 +42,12 @@ export const MODULES = {
   CERTIFICATE: "certificate",
   ALUMNI: "alumni",
   FORM: "form",
+  /// Multi-school GROUP console: paid add-on for proprietors with several
+  /// campuses — never in any plan bundle (sold via per-school overrides).
+  GROUP: "group",
+  /// CBT mock-exam hall: WAEC/JAMB-style computer-based testing — paid add-on
+  /// (per-school overrides; per-sitting metering is a future refinement).
+  CBT: "cbt",
 } as const;
 
 export type ModuleKey = (typeof MODULES)[keyof typeof MODULES];
@@ -68,6 +74,8 @@ export const MODULE_CATALOG: { key: ModuleKey; label: string; description: strin
   { key: MODULES.POLL, label: "Polls", description: "Anonymous opinion polls." },
   { key: MODULES.DISCUSSION, label: "Discussion Hub", description: "Topic groups, posts, moderation." },
   { key: MODULES.FORM, label: "Form Builder", description: "Surveys, feedback, review forms." },
+  { key: MODULES.GROUP, label: "Group Console", description: "Cross-campus dashboard for multi-school proprietors (add-on)." },
+  { key: MODULES.CBT, label: "CBT Exam Hall", description: "Timed, auto-marked computer-based mock exams with question banks (add-on)." },
   { key: MODULES.CERTIFICATE, label: "Certificates & ID", description: "ID cards and certificate generator." },
   { key: MODULES.HOSTEL, label: "Hostel", description: "Boarding houses, rooms, allocation, fees." },
   { key: MODULES.TRANSPORT, label: "Transport", description: "Vehicles, routes, stops, transport fees." },
@@ -190,6 +198,51 @@ export function applyCycleDiscountMinor(grossMinor: number, cycle: BillingCycle)
 
 export function isBillingCycle(value: string): value is BillingCycle {
   return (Object.values(BILLING_CYCLES) as string[]).includes(value);
+}
+
+// --- Platform convenience fee on ONLINE fee collection (take-rate) ------------
+// The platform's cut of each online school-fee payment, taken via the gateway's
+// split (`transaction_charge`) so it never touches the school's settlement.
+// Operator-configured (global `platform_fee_config` row); FAIL-SAFE default is
+// ZERO — no school is charged until the operator explicitly sets a fee.
+
+export const PLATFORM_FEE_BEARERS = {
+  /** The payer pays invoice + fee; the school still nets the full invoice. */
+  PARENT: "PARENT",
+  /** The payer pays the invoice only; the fee comes out of the school's settlement. */
+  SCHOOL: "SCHOOL",
+} as const;
+export type PlatformFeeBearer = (typeof PLATFORM_FEE_BEARERS)[keyof typeof PLATFORM_FEE_BEARERS];
+export function isPlatformFeeBearer(value: string): value is PlatformFeeBearer {
+  return (Object.values(PLATFORM_FEE_BEARERS) as string[]).includes(value);
+}
+
+export interface PlatformFeeConfig {
+  /** Flat component, minor units (kobo). */
+  flatMinor: number;
+  /** Percentage component in BASIS POINTS (100 bp = 1%). */
+  percentBp: number;
+  /** Ceiling on the total fee, minor units; null = uncapped. */
+  capMinor: number | null;
+  /** Platform-wide default bearer; a school may override its own. */
+  bearer: PlatformFeeBearer;
+}
+
+export const DEFAULT_PLATFORM_FEE: PlatformFeeConfig = {
+  flatMinor: 0,
+  percentBp: 0,
+  capMinor: null,
+  bearer: PLATFORM_FEE_BEARERS.PARENT,
+};
+
+/** Pure: the platform's take on one online payment of `amountMinor`. Integer
+ *  math, round-half-up on the bp component, capped, never negative, and never
+ *  larger than the amount itself (a fee exceeding the payment is nonsense). */
+export function computePlatformFeeMinor(amountMinor: number, cfg: PlatformFeeConfig): number {
+  if (amountMinor <= 0) return 0;
+  const raw = Math.max(0, cfg.flatMinor) + Math.round((amountMinor * Math.max(0, cfg.percentBp)) / 10000);
+  const capped = cfg.capMinor != null ? Math.min(raw, Math.max(0, cfg.capMinor)) : raw;
+  return Math.max(0, Math.min(capped, amountMinor));
 }
 
 export const SUBSCRIPTION_STATUS = {
@@ -332,6 +385,66 @@ export function computeSubscriptionPriceMinor(
 ): number {
   return applyCycleDiscountMinor(computeSubscriptionGrossMinor(plan, activeStudents, cycle, pricing), cycle);
 }
+
+// --- Mid-cycle upgrade proration + seat true-up --------------------------------
+
+/** Pure: fraction of the paid period still ahead (0..1). The paid period is
+ *  approximated as CYCLE_MONTHS × 30 days ending at periodEnd — one deterministic
+ *  rule for credit AND true-up so the two can never disagree. */
+export function remainingPeriodRatio(cycle: BillingCycle, periodEnd: Date, now: Date): number {
+  const periodMs = CYCLE_MONTHS[cycle] * 30 * 24 * 3600 * 1000;
+  const remainingMs = periodEnd.getTime() - now.getTime();
+  if (remainingMs <= 0 || periodMs <= 0) return 0;
+  return Math.min(1, remainingMs / periodMs);
+}
+
+/** Pure: the unused-time credit when a school switches plan mid-period — the
+ *  remaining fraction of what they LAST PAID (never more than they paid; zero
+ *  when lapsed or never paid). Deducted from the upgrade charge at checkout. */
+export function prorationCreditMinor(
+  lastPriceMinor: number | null,
+  cycle: BillingCycle,
+  periodEnd: Date | null,
+  now: Date,
+): number {
+  if (!lastPriceMinor || lastPriceMinor <= 0 || !periodEnd) return 0;
+  return Math.min(lastPriceMinor, Math.round(lastPriceMinor * remainingPeriodRatio(cycle, periodEnd, now)));
+}
+
+/** Gateways refuse zero/near-zero charges — the floor for a credited upgrade. */
+export const MIN_CHARGE_MINOR = 10_000; // ₦100 in kobo
+
+/** Pure: what a mid-period seat true-up costs — the EXTRA seats at the plan's
+ *  cycle price, prorated to the time left. Null when nothing is owed. */
+export function computeTrueUpMinor(
+  plan: Plan,
+  billedSeats: number | null,
+  currentSeats: number,
+  cycle: BillingCycle,
+  periodEnd: Date | null,
+  now: Date,
+  pricing: PlanPricing = PLAN_PRICING,
+): { extraSeats: number; amountMinor: number } | null {
+  if (!periodEnd || billedSeats == null || billedSeats <= 0) return null;
+  const extraSeats = currentSeats - billedSeats;
+  if (extraSeats <= 0) return null;
+  const ratio = remainingPeriodRatio(cycle, periodEnd, now);
+  if (ratio <= 0) return null;
+  const amountMinor = Math.round(computeSubscriptionPriceMinor(plan, extraSeats, cycle, pricing) * ratio);
+  if (amountMinor < MIN_CHARGE_MINOR) return null; // not worth a charge yet
+  return { extraSeats, amountMinor };
+}
+
+/** How a platform subscription payment changes the subscription when it settles. */
+export const SUBSCRIPTION_PAYMENT_KINDS = {
+  /** Same plan again: EXTENDS currentPeriodEnd (renewals stack). */
+  RENEWAL: "RENEWAL",
+  /** Plan change: period RESTARTS from now (the unused time was credited at checkout). */
+  UPGRADE: "UPGRADE",
+  /** Seat top-up: seats update; the period does NOT move. */
+  TRUEUP: "TRUEUP",
+} as const;
+export type SubscriptionPaymentKind = (typeof SUBSCRIPTION_PAYMENT_KINDS)[keyof typeof SUBSCRIPTION_PAYMENT_KINDS];
 
 /**
  * Pure: the plan a school is ENTITLED to right now. An ACTIVE school gets its

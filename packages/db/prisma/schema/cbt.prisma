@@ -1,0 +1,102 @@
+// =============================================================================
+// CBT mock-exam hall (WAEC/JAMB/BECE-style computer-based testing) — add-on
+// =============================================================================
+// All tenant-scoped (non-null schoolId + RLS, rls/75). SERVER AUTHORITY is
+// absolute (the Games/Integrity posture): a question's answerIndex is NEVER
+// serialized to a student until their sitting is submitted; the exam window
+// and duration are enforced server-side from startedAt; sampling/shuffling is
+// server-side. Auto-marked scores are numbers a TEACHER reviews and releases —
+// consistent with Golden Rule #8, the mark itself carries no consequence until
+// staff act on it.
+
+/// A reusable pool of MCQ questions (e.g. "JSS2 Mathematics — Fractions").
+model CbtQuestionBank {
+  id          String   @id @default(uuid()) @db.Uuid
+  schoolId    String   @db.Uuid
+  name        String
+  subject     String?
+  createdById String   @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  school    School        @relation(fields: [schoolId], references: [id])
+  questions CbtQuestion[]
+  exams     CbtExam[]
+
+  @@index([schoolId])
+  @@map("cbt_question_bank")
+}
+
+model CbtQuestion {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+  bankId   String @db.Uuid
+  prompt   String
+  /// string[] of options (2–6).
+  choices  Json
+  /// Index into choices — SERVER-ONLY until the sitting is submitted.
+  answerIndex Int
+  createdAt   DateTime @default(now())
+
+  school School          @relation(fields: [schoolId], references: [id])
+  bank   CbtQuestionBank @relation(fields: [bankId], references: [id], onDelete: Cascade)
+
+  @@index([schoolId, bankId])
+  @@map("cbt_question")
+}
+
+/// A scheduled exam over one bank: N sampled questions in a timed window.
+model CbtExam {
+  id              String    @id @default(uuid()) @db.Uuid
+  schoolId        String    @db.Uuid
+  bankId          String    @db.Uuid
+  title           String
+  /// Restrict sitting to one class; null = any cbt.take holder in the school.
+  classId         String?   @db.Uuid
+  /// Questions sampled per sitting (min of this and the bank's size).
+  questionCount   Int
+  durationMinutes Int
+  startAt         DateTime
+  endAt           DateTime
+  /// DRAFT | PUBLISHED | CLOSED.
+  status          String    @default("DRAFT")
+  /// Shuffle question order per sitting.
+  shuffle         Boolean   @default(true)
+  createdById     String    @db.Uuid
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  school   School          @relation(fields: [schoolId], references: [id])
+  bank     CbtQuestionBank @relation(fields: [bankId], references: [id])
+  sittings CbtSitting[]
+
+  @@index([schoolId, status])
+  @@map("cbt_exam")
+}
+
+/// One student's attempt. questionIds fixes the sampled order at start;
+/// answers accumulate as {questionId: choiceIndex}. Score is set at submit
+/// (or expiry) and is the platform's per-sitting metering record.
+model CbtSitting {
+  id          String    @id @default(uuid()) @db.Uuid
+  schoolId    String    @db.Uuid
+  examId      String    @db.Uuid
+  studentId   String    @db.Uuid
+  startedAt   DateTime  @default(now())
+  submittedAt DateTime?
+  /// IN_PROGRESS | SUBMITTED | EXPIRED.
+  status      String    @default("IN_PROGRESS")
+  /// string[] — the sitting's fixed question order (server-sampled).
+  questionIds Json
+  /// { [questionId]: choiceIndex } — upserted as the student answers.
+  answers     Json      @default("{}")
+  score       Int?
+  total       Int?
+
+  school School  @relation(fields: [schoolId], references: [id])
+  exam   CbtExam @relation(fields: [examId], references: [id], onDelete: Cascade)
+
+  @@unique([examId, studentId])
+  @@index([schoolId, examId])
+  @@map("cbt_sitting")
+}

@@ -13,7 +13,8 @@
 // =============================================================================
 
 import { BadRequestException, ForbiddenException, Inject, Injectable, ServiceUnavailableException } from "@nestjs/common";
-import type { SettlementAccountDto } from "@sms/types";
+import { PLATFORM_FEE_BEARERS, computePlatformFeeMinor, isPlatformFeeBearer } from "@sms/types";
+import type { InvoicePayInitDto, PlatformFeeBearer, SettlementAccountDto } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -27,6 +28,9 @@ import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
 import { PaystackService, type PaystackEvent } from "../payments/paystack.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import { NotificationService } from "../notifications/notification.service";
+import { PlatformFeeService } from "../billing/platform-fee.service";
+import { AdmissionsService } from "../admissions/admissions.service";
+import { MessageCreditsService } from "../notifications/message-credits.service";
 
 @Injectable()
 export class PaymentGatewayService {
@@ -37,63 +41,101 @@ export class PaymentGatewayService {
     private readonly billing: BillingService,
     private readonly privileged: PrivilegedDatabaseService,
     private readonly notifications: NotificationService,
+    private readonly platformFees: PlatformFeeService,
+    private readonly admissions: AdmissionsService,
+    private readonly messageCredits: MessageCreditsService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
     return { schoolId: p.schoolId, userId: p.userId };
   }
 
-  /** Start a hosted Paystack checkout for the invoice's outstanding balance. */
-  async initInvoicePayment(p: Principal, invoiceId: string) {
+  /** Start a hosted Paystack checkout for the invoice's outstanding balance,
+   *  plus the platform's convenience fee when one is configured (take-rate). */
+  async initInvoicePayment(p: Principal, invoiceId: string): Promise<InvoicePayInitDto> {
     if (!this.paystack.isConfigured()) {
       throw new ServiceUnavailableException("Online payments are not configured");
     }
-    const { email, amountMinor, reference, subaccount } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const inv = await tx.invoice.findFirst({ where: { id: invoiceId } });
-      if (!inv) throw new ForbiddenException("Invoice not found");
-      // Payer must be able to see this invoice (their child's / own).
-      const visible = await this.canPay(tx, p, inv.studentId);
-      if (!visible) throw new ForbiddenException("Not your invoice");
-      const posted = await tx.payment.findMany({ where: { invoiceId, status: "POSTED" }, select: { amountMinor: true, kind: true } });
-      const paid = posted.reduce((n: number, x: { amountMinor: number; kind: string }) => n + (x.kind === "REFUND" ? -x.amountMinor : x.amountMinor), 0);
-      const balance = inv.totalMinor - paid;
-      if (balance <= 0) throw new ForbiddenException("Nothing to pay");
-      const user = await tx.user.findFirst({ where: { id: p.userId }, select: { email: true } });
-      // The school's settlement subaccount (global registry, readable in-tenant):
-      // when configured, this charge SPLITS to the school's own bank.
-      const school = await tx.school.findFirst({
-        where: { id: p.schoolId },
-        select: { paystackSubaccountCode: true },
-      });
-      return {
-        email: user?.email ?? "payer@school",
-        amountMinor: balance,
-        reference: `PAY-${invoiceId.slice(0, 8)}-${Date.now()}`,
-        subaccount: school?.paystackSubaccountCode ?? undefined,
-      };
-    });
+    const { email, balance, reference, subaccount, feeBearerOverride } = await this.db.runAsTenant(
+      this.ctx(p),
+      async (tx) => {
+        const inv = await tx.invoice.findFirst({ where: { id: invoiceId } });
+        if (!inv) throw new ForbiddenException("Invoice not found");
+        // Payer must be able to see this invoice (their child's / own).
+        const visible = await this.canPay(tx, p, inv.studentId);
+        if (!visible) throw new ForbiddenException("Not your invoice");
+        const posted = await tx.payment.findMany({ where: { invoiceId, status: "POSTED" }, select: { amountMinor: true, kind: true } });
+        const paid = posted.reduce((n: number, x: { amountMinor: number; kind: string }) => n + (x.kind === "REFUND" ? -x.amountMinor : x.amountMinor), 0);
+        const balance = inv.totalMinor - paid;
+        if (balance <= 0) throw new ForbiddenException("Nothing to pay");
+        const user = await tx.user.findFirst({ where: { id: p.userId }, select: { email: true } });
+        // The school's settlement subaccount (global registry, readable in-tenant):
+        // when configured, this charge SPLITS to the school's own bank.
+        const school = await tx.school.findFirst({
+          where: { id: p.schoolId },
+          select: { paystackSubaccountCode: true, paymentFeeBearer: true },
+        });
+        return {
+          email: user?.email ?? "payer@school",
+          balance,
+          reference: `PAY-${invoiceId.slice(0, 8)}-${Date.now()}`,
+          subaccount: school?.paystackSubaccountCode ?? undefined,
+          feeBearerOverride: school?.paymentFeeBearer ?? null,
+        };
+      },
+    );
+
+    // Platform take-rate: applies ONLY on split settlements (with no subaccount
+    // the whole charge already lands platform-side, so a fee is meaningless).
+    // PARENT bearer: the card is charged invoice + fee and the school still nets
+    // the invoice; SCHOOL bearer: the card is charged the invoice and the fee
+    // comes out of the school's settlement. Either way the platform's cut is the
+    // gateway split's transaction_charge — it never transits the school's bank.
+    const cfg = await this.platformFees.effective();
+    const feeMinor = subaccount ? computePlatformFeeMinor(balance, cfg) : 0;
+    const bearer: PlatformFeeBearer =
+      feeBearerOverride && isPlatformFeeBearer(feeBearerOverride) ? feeBearerOverride : cfg.bearer;
+    const chargedMinor = bearer === PLATFORM_FEE_BEARERS.PARENT ? balance + feeMinor : balance;
 
     const { authorizationUrl } = await this.paystack.initialize({
       email,
-      amountMinor,
+      amountMinor: chargedMinor,
       reference,
       // payerId: the signed-in user who clicked pay — the receipt goes to them
       // (plus the guardians and the student) when the webhook confirms.
-      metadata: { kind: "invoice", invoiceId, schoolId: p.schoolId, payerId: p.userId },
+      // invoiceAmountMinor/platformFeeMinor: the webhook credits the LEDGER with
+      // the invoice amount only — the fee must never inflate the invoice credit.
+      metadata: {
+        kind: "invoice",
+        invoiceId,
+        schoolId: p.schoolId,
+        payerId: p.userId,
+        invoiceAmountMinor: balance,
+        platformFeeMinor: feeMinor,
+        feeBearer: bearer,
+      },
       // Split settlement: money lands in the SCHOOL's bank; the school bears the
       // gateway fee on its own collections. Unset → legacy platform settlement.
       subaccount,
       bearer: "subaccount",
+      transactionChargeMinor: feeMinor,
     });
-    return { authorizationUrl, reference };
+    return { authorizationUrl, reference, invoiceAmountMinor: balance, feeMinor, chargedMinor };
   }
 
   /** The school's fee-settlement posture (never the full account number). */
   async getSettlement(p: Principal): Promise<SettlementAccountDto> {
+    const cfg = await this.platformFees.effective();
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const school = await tx.school.findFirst({
         where: { id: p.schoolId },
-        select: { paystackSubaccountCode: true, settlementBankCode: true, settlementBankName: true, settlementAccountLast4: true },
+        select: {
+          paystackSubaccountCode: true,
+          settlementBankCode: true,
+          settlementBankName: true,
+          settlementAccountLast4: true,
+          paymentFeeBearer: true,
+        },
       });
       return {
         configured: !!school?.paystackSubaccountCode,
@@ -101,8 +143,41 @@ export class PaymentGatewayService {
         bankName: school?.settlementBankName ?? null,
         accountLast4: school?.settlementAccountLast4 ?? null,
         subaccountCode: school?.paystackSubaccountCode ?? null,
+        feeBearer:
+          school?.paymentFeeBearer && isPlatformFeeBearer(school.paymentFeeBearer) ? school.paymentFeeBearer : null,
+        // A worked example (fee on ₦10,000) so the bearer choice is informed.
+        sampleFeeMinor: computePlatformFeeMinor(1_000_000, cfg),
       };
     });
+  }
+
+  /**
+   * The school chooses who bears the platform's convenience fee on ITS online
+   * collections: PARENT (payer pays invoice + fee) or SCHOOL (fee comes out of
+   * settlement). The school registry is global (app role SELECT-only), so the
+   * write uses the PRIVILEGED client — same posture as setSettlement. Audited.
+   */
+  async setFeeBearer(p: Principal, bearer: string): Promise<SettlementAccountDto> {
+    if (!isPlatformFeeBearer(bearer)) throw new BadRequestException("bearer must be PARENT or SCHOOL");
+    const client = this.privileged.client;
+    if (!client) {
+      throw new ServiceUnavailableException("Settlement management requires the privileged database configuration");
+    }
+    await client.school.update({ where: { id: p.schoolId }, data: { paymentFeeBearer: bearer } });
+    await this.db.runAsTenant(this.ctx(p), (tx) =>
+      this.audit.record(
+        {
+          actorId: p.userId,
+          action: "fee.settlement.fee_bearer",
+          entity: "school",
+          entityId: p.schoolId,
+          schoolId: p.schoolId,
+          metadata: { bearer },
+        },
+        tx,
+      ),
+    );
+    return this.getSettlement(p);
   }
 
   /**
@@ -169,6 +244,8 @@ export class PaymentGatewayService {
     if (!event) return { ok: true }; // disabled / nothing to do
     const kind = (event.data.metadata as { kind?: string } | undefined)?.kind;
     if (kind === "subscription") return this.billing.applySubscriptionPayment(event);
+    if (kind === "admission_form") return this.admissions.applyFormFeePayment(event);
+    if (kind === "credits") return this.messageCredits.applyPurchase(event);
     if (event.event !== "charge.success") return { ok: true };
     return this.handleInvoiceCharge(event);
   }
@@ -176,12 +253,24 @@ export class PaymentGatewayService {
   /** On charge.success for an invoice, post the payment + advance the status,
    *  then RECEIPT the payer, the guardians and the student (in-app + email). */
   private async handleInvoiceCharge(event: PaystackEvent): Promise<{ ok: boolean }> {
-    const { invoiceId, schoolId, payerId } = (event.data.metadata ?? {}) as {
+    const { invoiceId, schoolId, payerId, invoiceAmountMinor, platformFeeMinor, feeBearer } = (event.data.metadata ??
+      {}) as {
       invoiceId?: string;
       schoolId?: string;
       payerId?: string;
+      invoiceAmountMinor?: number;
+      platformFeeMinor?: number;
+      feeBearer?: string;
     };
     if (!invoiceId || !schoolId) return { ok: true };
+    // The LEDGER credit is the invoice amount, never the charged total: with a
+    // parent-borne convenience fee the charge exceeds the invoice by the fee,
+    // and crediting the full charge would silently overpay every invoice.
+    // Back-compat: charges initialized before the fee existed carry no
+    // invoiceAmountMinor — for those the charge IS the invoice amount.
+    const creditMinor =
+      typeof invoiceAmountMinor === "number" && invoiceAmountMinor > 0 ? invoiceAmountMinor : event.data.amount;
+    const feeMinor = typeof platformFeeMinor === "number" && platformFeeMinor > 0 ? platformFeeMinor : 0;
 
     // System-context write (no user): the actor is the invoice's creator.
     const receipt = await this.db.runAsTenant({ schoolId, userId: SYSTEM_ACTOR_ID }, async (tx) => {
@@ -200,12 +289,16 @@ export class PaymentGatewayService {
         data: {
           schoolId,
           invoiceId,
-          amountMinor: event.data.amount,
+          amountMinor: creditMinor,
           method: "CARD",
           kind: "PAYMENT",
           status: "POSTED",
           reference: event.data.reference,
-          note: "Online (Paystack)",
+          platformFeeMinor: feeMinor,
+          note:
+            feeMinor > 0
+              ? `Online (Paystack) · platform fee ${feeBearer === "SCHOOL" ? "school-borne" : "payer-borne"}`
+              : "Online (Paystack)",
           recordedById: inv.createdById,
         },
       });

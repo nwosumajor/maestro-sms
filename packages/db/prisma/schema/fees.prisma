@@ -146,6 +146,11 @@ model Payment {
   approvedById String?       @db.Uuid
   /// External transaction reference (bank/gateway), if any.
   reference    String?
+  /// Platform convenience fee taken on this ONLINE payment (kobo; 0 for manual
+  /// payments / no-fee schools). The fee is NEVER part of amountMinor — the
+  /// invoice is credited exactly amountMinor; this column is the reporting record
+  /// of the platform's cut on the charge.
+  platformFeeMinor Int @default(0)
   note         String?
   paidAt       DateTime      @default(now())
   /// Staff who recorded it (DB FK to user; audit field, no Prisma relation).

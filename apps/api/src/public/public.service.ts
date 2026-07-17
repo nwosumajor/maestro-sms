@@ -42,6 +42,7 @@ export interface OnboardingRequestInput {
   desiredModules?: string[] | null;
   currentSystem?: string | null;
   referralCode?: string | null;
+  agentCode?: string | null;
   notes?: string | null;
 }
 
@@ -56,12 +57,14 @@ export class PublicService {
     private readonly privileged: PrivilegedDatabaseService,
   ) {}
 
-  /** PUBLIC: list onboarded (ACTIVE) schools for the parent directory. */
+  /** PUBLIC: list onboarded (ACTIVE) schools for the parent directory. The
+   *  admission-form fee is deliberately public — applicants must see the cost
+   *  before they fill a five-minute form. */
   async listSchools(): Promise<PublicSchoolDto[]> {
     return this.db.runAsTenant({ schoolId: ZERO, userId: ZERO }, (tx) =>
       tx.school.findMany({
         where: { status: "ACTIVE", isPlatform: false },
-        select: { id: true, name: true, slug: true },
+        select: { id: true, name: true, slug: true, admissionFormFeeMinor: true },
         orderBy: { name: "asc" },
       }),
     );
@@ -81,6 +84,8 @@ export class PublicService {
     // code just resolves to nothing; it can't block a signup.
     const rawReferral = input.referralCode?.trim().toUpperCase() ?? "";
     const referralCode = /^[A-Z0-9-]{4,40}$/.test(rawReferral) ? rawReferral : null;
+    const rawAgent = input.agentCode?.trim().toUpperCase() ?? "";
+    const agentCode = /^[A-Z0-9-]{3,40}$/.test(rawAgent) ? rawAgent : null;
     const created = await this.db.runAsTenant({ schoolId: ZERO, userId: ZERO }, (tx) =>
       tx.onboardingRequest.create({
         data: {
@@ -102,6 +107,7 @@ export class PublicService {
           desiredModules: desiredModules.length > 0 ? (desiredModules as Prisma.InputJsonValue) : Prisma.JsonNull,
           currentSystem: input.currentSystem?.trim() || null,
           referralCode,
+          agentCode,
           notes: input.notes ?? null,
           status: "NEW",
         },

@@ -71,6 +71,8 @@ type NavKey =
   | "transport"
   | "library"
   | "billing"
+  | "group"
+  | "cbt"
   | "documents"
   | "scholarships"
   | "assessments"
@@ -134,11 +136,16 @@ const NAV: {
   { key: "library", label: "Library", icon: LibraryIcon, href: "/library", perm: "library.read", module: MODULES.LIBRARY },
   // Billing is the platform subscription itself — ALWAYS-ON (no module tag).
   { key: "billing", label: "Billing", icon: WalletIcon, href: "/billing", perm: "billing.read" },
+  // Group console: paid add-on for multi-school proprietors. Gated only by the
+  // MODULE (directorship is checked server-side, 404 for non-directors); shown
+  // to billing.read staff so the proprietor's account sees it.
+  { key: "group", label: "Group console", icon: BarChart3Icon, href: "/group", perm: "billing.read", module: MODULES.GROUP },
   { key: "documents", label: "Documents", icon: FolderIcon, href: "/documents", perm: "document.read", module: MODULES.DOCUMENTS },
   { key: "scholarships", label: "Scholarships", icon: AwardIcon, href: "/scholarships", anyPerm: ["scholarship.apply", "scholarship.read"] },
   { key: "leave", label: "Leave", icon: CalendarCheckIcon, href: "/leave", perm: "hr.self", module: MODULES.HR },
   { key: "hr", label: "HR", icon: BriefcaseIcon, href: "/hr", perm: "hr.read", module: MODULES.HR },
   { key: "assessments", label: "Assessments", icon: BookOpenIcon, href: "/assessments", perm: "assessment.read", module: MODULES.INTEGRITY },
+  { key: "cbt", label: "CBT exams", icon: BookOpenIcon, href: "/cbt", anyPerm: ["cbt.manage", "cbt.take"], module: MODULES.CBT },
   { key: "gradebook", label: "Grades", icon: GraduationCapIcon, href: "/gradebook", perm: "grade.read", module: MODULES.GRADEBOOK },
   { key: "workflows", label: "Approvals", icon: ClipboardCheckIcon, href: "/workflows", perm: "workflow.read", module: MODULES.WORKFLOW },
   { key: "tasks", label: "Tasks", icon: ListTodoIcon, href: "/tasks", perm: "task.participate", module: MODULES.TASK },
@@ -192,7 +199,7 @@ const NAV_GROUP: Record<NavKey, string> = {
   classes: "teaching", timetable: "teaching", assessments: "teaching", gradebook: "teaching",
   certificates: "teaching", documents: "teaching", library: "teaching",
   students: "people", family: "people", attendance: "people", hr: "people", leave: "people", alumni: "people",
-  fees: "operations", billing: "operations", hostel: "operations", transport: "operations",
+  fees: "operations", billing: "operations", group: "operations", cbt: "teaching", hostel: "operations", transport: "operations",
   workflows: "operations", tasks: "operations", scholarships: "operations",
   discussion: "community", polls: "community", forms: "community", discipline: "community",
   games: "community", ultimate: "community",

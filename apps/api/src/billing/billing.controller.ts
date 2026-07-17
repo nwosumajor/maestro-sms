@@ -12,7 +12,7 @@
 // verified against the raw body, mirroring the Paystack posture.
 // =============================================================================
 
-import { Body, Controller, Get, Headers, Post, Req } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Post, Put, Req } from "@nestjs/common";
 import type { RawBodyRequest } from "@nestjs/common";
 import type { Request } from "express";
 import { BILLING_CYCLES, CURRENCIES, BILLING_PERMISSIONS, PLANS } from "@sms/types";
@@ -27,12 +27,18 @@ import type { Principal } from "../integrity/integrity.foundation";
 import { StripeService } from "../payments/stripe.service";
 import { BillingService } from "./billing.service";
 import { ReferralService } from "./referral.service";
+import { MessageCreditsService } from "../notifications/message-credits.service";
+
+const autoRenewSchema = z.object({ enabled: z.boolean() });
+const creditsSchema = z.object({ bundleId: z.string().min(1).max(10) });
 
 const checkoutSchema = z.object({
   plan: z.enum([PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE]),
   billingCycle: z.enum([BILLING_CYCLES.MONTH, BILLING_CYCLES.TERM, BILLING_CYCLES.YEAR]),
   // NGN → Paystack, USD → Stripe. Omitted → the tier's default (₦; $ for ENTERPRISE).
   currency: z.enum([CURRENCIES.NGN, CURRENCIES.USD]).optional(),
+  // Operator-issued discount — first paid charge only, validated server-side.
+  promoCode: z.string().max(30).optional(),
 });
 
 @Controller("billing")
@@ -41,6 +47,7 @@ export class BillingController {
     private readonly billing: BillingService,
     private readonly stripe: StripeService,
     private readonly referrals: ReferralService,
+    private readonly messageCredits: MessageCreditsService,
   ) {}
 
   /** The billing screen: current subscription + per-tier quotes + history. */
@@ -102,5 +109,42 @@ export class BillingController {
   @RequirePermission(BILLING_PERMISSIONS.BILLING_MANAGE)
   createReferralCode(@CurrentPrincipal() p: Principal): Promise<ReferralInfoDto> {
     return this.referrals.ensureCode(p);
+  }
+
+  /** Start a checkout for the seat true-up quoted on the overview. */
+  @Post("true-up/init")
+  @RequirePermission(BILLING_PERMISSIONS.BILLING_MANAGE)
+  @RequireStepUp()
+  trueUp(@CurrentPrincipal() p: Principal): Promise<CheckoutInitResultDto> {
+    return this.billing.initTrueUpCheckout(p);
+  }
+
+  /** Message-credit balance + purchasable bundles (SMS/WhatsApp metering). */
+  @Get("credits")
+  @RequirePermission(BILLING_PERMISSIONS.BILLING_READ)
+  credits(@CurrentPrincipal() p: Principal) {
+    return this.messageCredits.overview(p);
+  }
+
+  /** Buy a message-credit bundle (hosted Paystack checkout). */
+  @Post("credits/checkout")
+  @RequirePermission(BILLING_PERMISSIONS.BILLING_MANAGE)
+  @RequireStepUp()
+  buyCredits(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(creditsSchema)) body: z.infer<typeof creditsSchema>,
+  ) {
+    return this.messageCredits.initPurchase(p, body.bundleId);
+  }
+
+  /** Opt in/out of saved-card auto-renew. Step-up: it arms future charges. */
+  @Put("auto-renew")
+  @RequirePermission(BILLING_PERMISSIONS.BILLING_MANAGE)
+  @RequireStepUp()
+  setAutoRenew(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(autoRenewSchema)) body: z.infer<typeof autoRenewSchema>,
+  ) {
+    return this.billing.setAutoRenew(p, body.enabled);
   }
 }

@@ -6,6 +6,7 @@ import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AdmissionsReview, type Application } from "@/components/admissions/AdmissionsReview";
+import { FormFeeCard } from "@/components/admissions/FormFeeCard";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,10 @@ export default async function AdminAdmissionsPage() {
   const session = await auth();
   const user = session!.user;
   if (!hasPermission(user.permissions, "admission.review")) redirect("/dashboard");
-  const apps = (await apiGet<Application[]>("/admissions")) ?? [];
+  const [apps, formFee] = await Promise.all([
+    apiGet<Application[]>("/admissions").then((a) => a ?? []),
+    apiGet<{ formFeeMinor: number }>("/admissions/settings/form-fee"),
+  ]);
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="admin" permissions={user.permissions}>
@@ -29,6 +33,9 @@ export default async function AdminAdmissionsPage() {
           </div>
           <Link href="/admin" className="text-sm text-muted-foreground hover:underline">← Admin</Link>
         </div>
+        {formFee && (
+          <FormFeeCard initialMinor={formFee.formFeeMinor} canManage={hasPermission(user.permissions, "fee.manage")} />
+        )}
         {apps.length === 0 ? (
           <Alert variant="info"><AlertTitle>No applications</AlertTitle><AlertDescription>None received yet.</AlertDescription></Alert>
         ) : (

@@ -87,6 +87,12 @@ function AdmissionRow({
               <span className="font-medium">{a.childName}</span>
               <Badge variant={VARIANT[a.status] ?? "outline"}>{titleCase(a.status)}</Badge>
               {a.desiredClass && <Badge variant="outline">{a.desiredClass}</Badge>}
+              {a.formFeeMinor > 0 &&
+                (a.formFeePaidAt ? (
+                  <Badge variant="secondary">Form fee paid</Badge>
+                ) : (
+                  <Badge variant="destructive">Form fee unpaid</Badge>
+                ))}
             </div>
             <p className="text-sm text-muted-foreground">
               {a.applicantName} · {a.applicantEmail}

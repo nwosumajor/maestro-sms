@@ -16,6 +16,7 @@
 
 import { InjectQueue } from "@nestjs/bullmq";
 import { ForbiddenException, Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
+import { MessageCreditsService } from "./message-credits.service";
 import { Prisma } from "@sms/db";
 import type { Queue } from "bullmq";
 import type { NotificationChannelValue, NotificationTypeValue } from "@sms/types";
@@ -57,6 +58,9 @@ export class NotificationService {
     @Optional()
     @Inject(NOTIFICATION_CHANNEL_PROVIDER)
     private readonly channels?: NotificationChannelProvider,
+    // Optional so existing unit tests / minimal wirings keep working; when
+    // absent, SMS/WhatsApp deliveries are unmetered (dev stub behaviour).
+    @Optional() private readonly credits?: MessageCreditsService,
   ) {}
 
   private ctx(p: TenantContext): TenantContext {
@@ -118,6 +122,33 @@ export class NotificationService {
     });
   }
 
+  // --- self-service delivery target (mobile number) ---------------------------
+  async getMyPhone(p: Principal): Promise<{ phone: string | null }> {
+    const row = await this.db.runAsTenant(this.ctx(p), (tx) =>
+      tx.user.findFirst({ where: { id: p.userId }, select: { phone: true } }),
+    );
+    return { phone: row?.phone ?? null };
+  }
+
+  async setMyPhone(p: Principal, phone: string | null): Promise<{ phone: string | null }> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      await tx.user.update({ where: { id: p.userId }, data: { phone } });
+      await this.audit.record(
+        {
+          actorId: p.userId,
+          action: "notification.phone.set",
+          entity: "user",
+          entityId: p.userId,
+          schoolId: p.schoolId,
+          // Never log the full number — last 4 digits identify the change.
+          metadata: { last4: phone ? phone.slice(-4) : null, cleared: !phone },
+        },
+        tx,
+      );
+      return { phone };
+    });
+  }
+
   // --- worker: perform external deliveries -----------------------------------
   async runDeliveries(job: DeliverNotificationJob): Promise<{ sent: number; failed: number }> {
     return this.db.runAsTenant(
@@ -129,7 +160,7 @@ export class NotificationService {
         if (!notification) return { sent: 0, failed: 0 };
         const recipient = await tx.user.findFirst({
           where: { id: notification.recipientId },
-          select: { email: true },
+          select: { email: true, phone: true },
         });
         const pending = await tx.notificationDelivery.findMany({
           where: { notificationId: job.notificationId, status: "PENDING" },
@@ -138,7 +169,7 @@ export class NotificationService {
         let sent = 0;
         let failed = 0;
         for (const d of pending) {
-          const target = this.resolveTarget(d.channel, recipient?.email ?? null);
+          const target = this.resolveTarget(d.channel, recipient?.email ?? null, recipient?.phone ?? null);
           if (!target) {
             await tx.notificationDelivery.update({
               where: { id: d.id },
@@ -146,6 +177,20 @@ export class NotificationService {
             });
             failed++;
             continue;
+          }
+          // SMS/WhatsApp are METERED: debit one prepaid credit before handing
+          // to the gateway; an empty balance fails the delivery soft (email +
+          // in-app still go out — parents are never silently cut off entirely).
+          if (this.credits && (d.channel === "SMS" || d.channel === "WHATSAPP")) {
+            const debited = await this.credits.debitInTx(tx, job.schoolId, d.channel, job.notificationId);
+            if (!debited) {
+              await tx.notificationDelivery.update({
+                where: { id: d.id },
+                data: { status: "FAILED", error: "no message credits — buy a bundle on the Billing page" },
+              });
+              failed++;
+              continue;
+            }
           }
           const result = this.channels
             ? await this.channels.deliver({
@@ -170,9 +215,10 @@ export class NotificationService {
   }
 
   // --- helpers ---------------------------------------------------------------
-  private resolveTarget(channel: string, email: string | null): string | null {
+  private resolveTarget(channel: string, email: string | null, phone: string | null): string | null {
     if (channel === "EMAIL") return email;
-    // SMS/PUSH targets (phone / device token) are not modelled yet.
+    if (channel === "SMS" || channel === "WHATSAPP") return phone;
+    // PUSH targets (device tokens) are not modelled yet.
     return null;
   }
 

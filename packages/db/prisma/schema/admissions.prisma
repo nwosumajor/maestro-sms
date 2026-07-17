@@ -34,6 +34,14 @@ model AdmissionApplication {
   /// Desired class/grade for the child (also surfaced from details).
   desiredClass String?
 
+  /// Admission-form fee SNAPSHOT at submission time (kobo; 0 = free — the
+  /// school's fee may change later without affecting in-flight applications).
+  formFeeMinor  Int       @default(0)
+  /// Set by the payment webhook when the form fee settles; null = unpaid.
+  formFeePaidAt DateTime?
+  /// Gateway reference of the successful form-fee charge (idempotency key).
+  formFeeRef    String?
+
   /// Maker-checker chain (ordered [{key,label,permission}], ADMISSION_REVIEW_CHAIN).
   stages       Json @default("[]")
   /// Pointer into `stages` for the NEXT decision; advances on each stage APPROVE.

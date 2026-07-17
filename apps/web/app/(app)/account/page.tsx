@@ -5,13 +5,17 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { MfaSetup } from "@/components/security/MfaSetup";
 import { ChangePasswordForm } from "@/components/auth/ChangePasswordForm";
+import { PhoneCard } from "@/components/account/PhoneCard";
 
 export const dynamic = "force-dynamic";
 
 export default async function AccountPage({ searchParams }: { searchParams: { enroll2fa?: string } }) {
   const session = await auth();
   const user = session!.user;
-  const mfa = await apiGet<{ enabled: boolean }>("/security/mfa/status");
+  const [mfa, myPhone] = await Promise.all([
+    apiGet<{ enabled: boolean }>("/security/mfa/status"),
+    apiGet<{ phone: string | null }>("/notifications/me/phone"),
+  ]);
   const mustEnroll = user.mfaEnrollRequired || searchParams.enroll2fa === "1";
 
   return (
@@ -56,6 +60,8 @@ export default async function AccountPage({ searchParams }: { searchParams: { en
             <MfaSetup enabled={Boolean(mfa?.enabled)} />
           </CardContent>
         </Card>
+
+        <PhoneCard initialPhone={myPhone?.phone ?? null} />
 
         <Card>
           <CardHeader>

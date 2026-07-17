@@ -24,6 +24,9 @@ import { OperatorExportService } from "./operator-export.service";
 import { PlatformAnalyticsService } from "./platform-analytics.service";
 import { PlatformAuditService, type PlatformAuditFilter } from "./platform-audit.service";
 import { PlanPricingService } from "../billing/plan-pricing.service";
+import { PlatformFeeService } from "../billing/platform-fee.service";
+import { GrowthService } from "../billing/growth.service";
+import { GroupService } from "../group/group.service";
 
 const platformStaffSchema = z.object({
   email: z.string().email(),
@@ -85,11 +88,36 @@ const provisionSchema = z
     // Referral code the new school arrived with (defaults to the linked
     // onboarding request's stored code; explicit value wins for manual entry).
     referralCode: z.string().max(40).optional(),
+    // Agent (reseller) attribution code — same lifecycle as referralCode.
+    agentCode: z.string().max(40).optional(),
   })
   .refine((v) => Boolean(v.admin) || (v.admins && v.admins.length > 0), {
     message: "at least one admin is required",
   });
 const statusSchema = z.object({ status: z.enum(["ACTIVE", "DISABLED"]) });
+const promoSchema = z.object({
+  code: z.string().min(3).max(30),
+  percentOff: z.number().int().min(1).max(100),
+  maxUses: z.number().int().min(1).nullish(),
+  expiresAt: z.string().datetime().nullish(),
+});
+const agentSchema = z.object({
+  name: z.string().min(1).max(160),
+  email: z.string().email(),
+  code: z.string().min(3).max(30),
+  commissionBp: z.number().int().min(1).max(5000),
+});
+const activeSchema = z.object({ active: z.boolean() });
+const groupSchema = z.object({ name: z.string().min(1).max(160) });
+const groupMembersSchema = z.object({ schoolIds: z.array(z.string().uuid()).max(50) });
+const groupDirectorsSchema = z.object({ emails: z.array(z.string().email()).max(10) });
+
+const platformFeeSchema = z.object({
+  flatMinor: z.number().int().min(0),
+  percentBp: z.number().int().min(0),
+  capMinor: z.number().int().min(0).nullish(),
+  bearer: z.enum(["PARENT", "SCHOOL"]),
+});
 const requiredSchema = z.object({ required: z.boolean() });
 const onboardingStatusSchema = z.object({
   status: z.enum(["NEW", "REVIEWING", "APPROVED", "REJECTED"]),
@@ -132,6 +160,9 @@ export class OperatorController {
     private readonly analyticsSvc: PlatformAnalyticsService,
     private readonly auditSvc: PlatformAuditService,
     private readonly pricing: PlanPricingService,
+    private readonly platformFees: PlatformFeeService,
+    private readonly growth: GrowthService,
+    private readonly groups: GroupService,
   ) {}
 
   /** Self-serve onboard a NEW school + its first admin (step-up: creates creds). */
@@ -330,6 +361,134 @@ export class OperatorController {
     @Body(new ZodValidationPipe(pricingSchema)) body: z.infer<typeof pricingSchema>,
   ) {
     return this.pricing.update(p, body);
+  }
+
+  /** The platform's convenience fee on online fee collection (take-rate). */
+  @Get("platform-fees")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
+  getPlatformFees() {
+    return this.platformFees.effective();
+  }
+
+  /** Set the take-rate. Same posture as pricing: owner-only, step-up, audited. */
+  @Put("platform-fees")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_PRICING_MANAGE)
+  @RequireStepUp()
+  setPlatformFees(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(platformFeeSchema)) body: z.infer<typeof platformFeeSchema>,
+  ) {
+    return this.platformFees.update(p, { ...body, capMinor: body.capMinor ?? null });
+  }
+
+  // --- growth: promo codes + agents/commissions (owner-only writes) ----------
+  @Get("promos")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
+  listPromos() {
+    return this.growth.listPromos();
+  }
+
+  @Post("promos")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_PRICING_MANAGE)
+  @RequireStepUp()
+  createPromo(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(promoSchema)) body: z.infer<typeof promoSchema>,
+  ) {
+    return this.growth.createPromo(p, body);
+  }
+
+  @Put("promos/:id/active")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_PRICING_MANAGE)
+  @RequireStepUp()
+  setPromoActive(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(activeSchema)) body: z.infer<typeof activeSchema>,
+  ) {
+    return this.growth.setPromoActive(p, id, body.active);
+  }
+
+  @Get("agents")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
+  listAgents() {
+    return this.growth.listAgents();
+  }
+
+  @Post("agents")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_PRICING_MANAGE)
+  @RequireStepUp()
+  createAgent(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(agentSchema)) body: z.infer<typeof agentSchema>,
+  ) {
+    return this.growth.createAgent(p, body);
+  }
+
+  @Put("agents/:id/active")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_PRICING_MANAGE)
+  @RequireStepUp()
+  setAgentActive(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(activeSchema)) body: z.infer<typeof activeSchema>,
+  ) {
+    return this.growth.setAgentActive(p, id, body.active);
+  }
+
+  @Get("commissions")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
+  listCommissions() {
+    return this.growth.listCommissions();
+  }
+
+  /** Mark a commission settled to the agent (money moved outside the system). */
+  @Post("commissions/:id/paid")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_PRICING_MANAGE)
+  @RequireStepUp()
+  markCommissionPaid(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.growth.markCommissionPaid(p, id);
+  }
+
+  // --- multi-school groups (franchise tier; owner-only writes) ----------------
+  @Get("groups")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
+  listGroups() {
+    return this.groups.listGroups();
+  }
+
+  @Post("groups")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_SUBSCRIPTION_MANAGE)
+  @RequireStepUp()
+  createGroup(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(groupSchema)) body: z.infer<typeof groupSchema>,
+  ) {
+    return this.groups.createGroup(p, body.name);
+  }
+
+  /** Replace a group's member schools. Step-up: it widens a cross-tenant read. */
+  @Put("groups/:id/members")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_SUBSCRIPTION_MANAGE)
+  @RequireStepUp()
+  setGroupMembers(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(groupMembersSchema)) body: z.infer<typeof groupMembersSchema>,
+  ) {
+    return this.groups.setMembers(p, id, body.schoolIds);
+  }
+
+  /** Replace a group's directors (by email; must belong to a member school). */
+  @Put("groups/:id/directors")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_SUBSCRIPTION_MANAGE)
+  @RequireStepUp()
+  setGroupDirectors(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(groupDirectorsSchema)) body: z.infer<typeof groupDirectorsSchema>,
+  ) {
+    return this.groups.setDirectors(p, id, body.emails);
   }
 
   // --- public onboarding-request review (super_admin) ------------------------
