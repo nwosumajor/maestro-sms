@@ -204,7 +204,7 @@ const SECURITY = [
   {
     icon: KeyRoundIcon,
     title: "Least-privilege roles",
-    body: "Seventeen roles see only what their job needs, backed by MFA, step-up re-auth and just-in-time elevation.",
+    body: "Eighteen roles see only what their job needs, backed by MFA, step-up re-auth and just-in-time elevation.",
   },
   {
     icon: GraduationCapIcon,
@@ -460,7 +460,7 @@ function StatBand() {
   const stats: [string, string][] = [
     [String(MODULE_CATALOG.length), "modules"],
     ["4", "plans, per-seat"],
-    ["17", "built-in roles"],
+    ["18", "built-in roles"],
     ["5,000+", "schools per deployment"],
   ];
   return (
@@ -587,7 +587,7 @@ function Modules() {
 function ProductShowcase() {
   const features: [string, string][] = [
     ["Everything in real time", "Attendance, fees, results and approvals update live — no end-of-day reconciling."],
-    ["Role-aware by design", "Each of the 17 roles sees only what their job needs, backed by MFA and step-up."],
+    ["Role-aware by design", "Each of the 18 roles sees only what their job needs, backed by MFA and step-up."],
     ["Modules you control", "Switch products on and off to match your budget; billing follows your active students."],
   ];
   const accent = "text-[hsl(203_72%_62%)]";
@@ -987,10 +987,10 @@ function ReferralBand() {
 // award is paid straight into the student's school-fee invoice. On every plan.
 function ScholarshipBand() {
   const steps: [string, string][] = [
-    ["Apply", "A parent or teacher nominates a student, right inside the app"],
-    ["Consent", "Nothing is submitted until the student's guardian approves"],
-    ["Review", "The platform team reviews every application by hand"],
-    ["Award", "The scholarship is credited straight to the student's school-fee bill"],
+    ["Apply", "A student applies in-app with a detailed request — or a parent or teacher applies for them"],
+    ["Approve", "The class supervisor, the guardian (whose approval gives consent) and the principal each approve in turn"],
+    ["Qualify & sit the exam", "The sponsor qualifies candidates and sets an online CBT, games or physical exam"],
+    ["Award the best three", "The top three are awarded, credited straight to their school-fee bill"],
   ];
   return (
     <section id="scholarships" className="scroll-mt-20 border-b border-border/60 bg-card">
@@ -1026,22 +1026,23 @@ function ScholarshipBand() {
       <div className="mx-auto max-w-6xl px-5 py-16 sm:px-8">
         <div className="grid items-center gap-10 lg:grid-cols-[1.2fr_1fr]">
           <div>
-            <p className="eyebrow">Platform scholarships</p>
+            <p className="eyebrow">How it works</p>
             <h2 className="mt-3 font-display text-3xl font-semibold tracking-tight sm:text-4xl">
               We fund scholarships for your students. Every plan, no extra cost.
             </h2>
             <p className="mt-4 max-w-xl text-base leading-relaxed text-muted-foreground">
               MajorGBN sponsors scholarships across the platform —{" "}
               <span className="font-semibold text-foreground">funded by us, not by your school</span>.
-              The day your school onboards, your parents and teachers can nominate deserving students,
-              and an award is paid directly against that student&apos;s school-fee invoice.
+              Students apply in-app (or a parent or teacher applies for them); the request is approved by
+              the class supervisor, guardian and principal, then our team qualifies candidates for an exam
+              and awards the best three — paid directly against their school-fee invoices.
             </p>
             <ul className="mt-5 space-y-2 text-sm text-muted-foreground">
               {[
                 "Open to every school on every plan — including the free trial",
-                "Guardian consent required before any application is submitted",
+                "Students can apply for themselves; a guardian's approval gives consent",
+                "The best three candidates in each programme are awarded",
                 "Awards settle into your own fee ledger — the money reaches the school",
-                "A benefit you can announce to parents the week you launch",
               ].map((t) => (
                 <li key={t} className="flex items-start gap-2">
                   <CheckIcon className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
@@ -1077,8 +1078,8 @@ function ScholarshipBand() {
               ))}
             </ol>
             <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
-              Applications carry the student&apos;s published results and attendance as context for the
-              reviewer — people decide, never a score.
+              Applications carry the student&apos;s results, attendance and exam performance as context — a
+              person always makes the final call, never an automatic score.
             </p>
           </div>
         </div>
@@ -1151,7 +1152,7 @@ const FAQS: { q: string; a: string }[] = [
   },
   {
     q: "How do the platform scholarships work?",
-    a: "MajorGBN sponsors scholarships across the platform — funded by us, not by your school, and open on every plan. A parent or teacher nominates a student in-app; the student's guardian must consent before anything is submitted; our team reviews each application by hand (the student's published results and attendance travel with it as context). An award is paid directly against the student's school-fee invoice, so the benefit reaches the family and the money reaches the school.",
+    a: "MajorGBN sponsors scholarships across the platform — funded by us, not by your school, and open on every plan. A student can apply for themselves, or a parent or teacher can apply on their behalf; the request is then approved in turn by the class supervisor, the guardian (whose approval also gives consent to share the student's record) and the principal before it reaches our team. We qualify candidates and hold an exam — an online CBT, a games contest or a physical exam — then award the best three, each paid directly against the student's school-fee invoice. Everyone is notified at every stage.",
   },
   {
     q: "Do you reward referrals?",
@@ -1279,6 +1280,7 @@ function Footer() {
         { label: "Modules", href: "#modules" },
         { label: "Security & privacy", href: "#security" },
         { label: "Plans & pricing", href: "#plans" },
+        { label: "Platform scholarships", href: "#scholarships" },
         { label: "Referral programme", href: "#referral" },
         { label: "How onboarding works", href: "#onboard" },
       ],
