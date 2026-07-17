@@ -201,7 +201,17 @@ export class BillingService {
       ),
     );
 
-    return { subscription, activeStudents, quotes, payments, autoRenew, cardLast4, planChangeCreditMinor, trueUp };
+    return {
+      subscription,
+      activeStudents,
+      quotes,
+      payments,
+      autoRenew,
+      cardLast4,
+      planChangeCreditMinor,
+      trueUp,
+      seatArrearsMinor: Math.max(0, subRow?.seatArrearsMinor ?? 0),
+    };
   }
 
   /** Start a checkout for the seat TRUE-UP quoted on the overview: the extra
@@ -235,7 +245,13 @@ export class BillingService {
       now,
       await this.planPricing.effective(currency),
     );
-    if (!quote) throw new BadRequestException("No seat top-up is due right now");
+    // The top-up settles BOTH sides of mid-period growth: the metered arrears
+    // already accrued (past usage) plus forward coverage for the time left.
+    // Near period end the forward quote may be null while arrears remain —
+    // still chargeable when the arrears alone clear the gateway floor.
+    const arrearsMinor = Math.max(0, prep.sub.seatArrearsMinor);
+    const amountMinor = (quote?.amountMinor ?? 0) + arrearsMinor;
+    if (amountMinor < MIN_CHARGE_MINOR) throw new BadRequestException("No seat top-up is due right now");
 
     const reference = `SUB-${p.schoolId.slice(0, 8)}-${Date.now()}`;
     const paymentId = await this.db.runAsTenant(this.ctx(p), async (tx) => {
@@ -245,11 +261,12 @@ export class BillingService {
           plan: prep.sub.plan,
           billingCycle: cycle,
           seats: prep.seats,
-          amountMinor: quote.amountMinor,
+          amountMinor,
           currency,
           reference,
           status: "PENDING",
           kind: SUBSCRIPTION_PAYMENT_KINDS.TRUEUP,
+          arrearsMinor,
           initiatedById: p.userId,
         },
       });
@@ -260,7 +277,13 @@ export class BillingService {
           entity: "platform_subscription_payment",
           entityId: payment.id,
           schoolId: p.schoolId,
-          metadata: { extraSeats: quote.extraSeats, amountMinor: quote.amountMinor, currency },
+          metadata: {
+            extraSeats: quote?.extraSeats ?? 0,
+            forwardMinor: quote?.amountMinor ?? 0,
+            seatArrearsMinor: arrearsMinor,
+            amountMinor,
+            currency,
+          },
         },
         tx,
       );
@@ -271,14 +294,16 @@ export class BillingService {
       currency === CURRENCIES.USD
         ? await this.stripe.createCheckoutSession({
             email: prep.email,
-            amountMinor: quote.amountMinor,
+            amountMinor,
             reference,
-            description: `SMS seat top-up — ${quote.extraSeats} additional students`,
+            description: quote
+              ? `SMS seat top-up — ${quote.extraSeats} additional students${arrearsMinor > 0 ? " + metered usage" : ""}`
+              : "SMS metered seat usage settlement",
             metadata: { kind: "subscription", schoolId: p.schoolId, paymentId, reference },
           })
         : await this.paystack.initialize({
             email: prep.email,
-            amountMinor: quote.amountMinor,
+            amountMinor,
             reference,
             metadata: { kind: "subscription", schoolId: p.schoolId, paymentId, reference },
           });
@@ -373,7 +398,11 @@ export class BillingService {
           isPlanChange && sub.status === SUBSCRIPTION_STATUS.ACTIVE && sub.currency === currency && isBillingCycle(sub.billingCycle)
             ? prorationCreditMinor(sub.priceMinor, sub.billingCycle, sub.currentPeriodEnd, new Date())
             : 0;
-        const amountMinor = Math.max(MIN_CHARGE_MINOR, grossMinor - credit);
+        // Outstanding seat arrears (metered unbilled seat-days) ride the next
+        // charge in the SAME currency — the guaranteed collection point.
+        const arrearsCurrency = sub?.currency && isCurrency(sub.currency) ? sub.currency : CURRENCIES.NGN;
+        const arrearsMinor = sub && arrearsCurrency === currency ? Math.max(0, sub.seatArrearsMinor) : 0;
+        const amountMinor = Math.max(MIN_CHARGE_MINOR, grossMinor - credit) + arrearsMinor;
         const kind = isPlanChange ? SUBSCRIPTION_PAYMENT_KINDS.UPGRADE : SUBSCRIPTION_PAYMENT_KINDS.RENEWAL;
 
         const reference = `SUB-${p.schoolId.slice(0, 8)}-${Date.now()}`;
@@ -390,6 +419,7 @@ export class BillingService {
             status: "PENDING",
             kind,
             promoCode: promo?.code ?? null,
+            arrearsMinor,
             initiatedById: p.userId,
           },
         });
@@ -408,6 +438,7 @@ export class BillingService {
               prorationCreditMinor: credit,
               promoCode: promo?.code ?? null,
               promoPercentOff: promo?.percentOff ?? null,
+              seatArrearsMinor: arrearsMinor,
               amountMinor,
               currency,
               kind,
@@ -597,6 +628,12 @@ export class BillingService {
       const data = {
         status: SUBSCRIPTION_STATUS.ACTIVE,
         seats: payment.seats,
+        // Settle the metered seat arrears this charge carried — decrement by
+        // EXACTLY the snapshot (never blind-zeroing: the meter may have ticked
+        // between checkout and webhook; the remainder stays owed).
+        ...(payment.arrearsMinor > 0 && sub
+          ? { seatArrearsMinor: Math.max(0, sub.seatArrearsMinor - payment.arrearsMinor) }
+          : {}),
         // TRUEUP only tops seats up: plan/cycle/period/last-full-price stay —
         // overwriting priceMinor with the small top-up would corrupt the next
         // upgrade's proration credit.

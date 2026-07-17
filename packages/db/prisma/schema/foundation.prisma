@@ -237,6 +237,12 @@ model SchoolSubscription {
   /// Agent (reseller) attribution: set at provisioning from the agent's code;
   /// commission accrues once, on this school's FIRST paid subscription.
   agentId              String?   @db.Uuid
+  /// Metered UNBILLED seat usage (kobo/cents in `currency`): the daily sweep
+  /// accrues seat-days for students above the billed `seats` count; settled
+  /// (and zeroed by the paid amount) via top-up or the next renewal charge.
+  seatArrearsMinor     Int       @default(0)
+  /// Last accrual stamp — the elapsed window the next accrual covers.
+  arrearsAccruedAt     DateTime?
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
@@ -314,6 +320,9 @@ model PlatformSubscriptionPayment {
   /// Promo code snapshot when one discounted this charge (settle-time increments
   /// the code's usedCount).
   promoCode     String?
+  /// Seat-arrears portion INCLUDED in amountMinor (settle decrements the
+  /// subscription's seatArrearsMinor by exactly this — never a blind zeroing).
+  arrearsMinor  Int       @default(0)
   /// Period this payment covers (set when PAID).
   periodStart   DateTime?
   periodEnd     DateTime?

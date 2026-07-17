@@ -20,10 +20,13 @@ import {
   RENEWAL_REMINDER_DAYS,
   SUBSCRIPTION_GRACE_DAYS,
   SUBSCRIPTION_STATUS,
+  accrueSeatArrearsMinor,
   computeSubscriptionPriceMinor,
   isBillingCycle,
+  isCurrency,
   isPlan,
   type BillingCycle,
+  type Currency,
   type Plan,
 } from "@sms/types";
 import { ModuleEntitlementService } from "../foundation/module-entitlement.service";
@@ -85,10 +88,19 @@ export class BillingDunningService {
         graceDays: true,
         billingCycle: true,
         currency: true,
+        seats: true,
         autoRenew: true,
         paystackAuthorizationEnc: true,
+        arrearsAccruedAt: true,
+        seatArrearsMinor: true,
       },
     });
+
+    // Seat-arrears metering: one fleet-wide seat count, then per-sub accrual of
+    // seat-days ABOVE the billed count since the last stamp. The stamp advances
+    // every sweep (even at zero extra) so a later surge accrues only from its
+    // own window, never from an ancient baseline.
+    await this.accrueSeatArrears(client, subs, now);
 
     let reminded = 0;
     let pastDue = 0;
@@ -149,6 +161,61 @@ export class BillingDunningService {
   }
 
   /**
+   * Daily seat-day metering. For every ACTIVE sub with a billed seat count:
+   * accrue (currentSeats − billedSeats) × perSeatDaily × elapsed since the last
+   * stamp (capped at the paid period end — lapsed time is dunning's job, not
+   * the meter's). First sight of a sub only stamps the baseline. Best-effort:
+   * a metering hiccup must never fail the sweep.
+   */
+  private async accrueSeatArrears(
+    client: NonNullable<PrivilegedDatabaseService["client"]>,
+    subs: Array<{
+      id: string;
+      schoolId: string;
+      plan: string;
+      currency: string | null;
+      seats: number | null;
+      currentPeriodEnd: Date | null;
+      arrearsAccruedAt: Date | null;
+    }>,
+    now: Date,
+  ): Promise<void> {
+    try {
+      // One fleet-wide count of distinct student-role users, grouped by school.
+      const rows = await client.userRole.findMany({
+        where: { role: { name: "student" }, schoolId: { in: subs.map((s) => s.schoolId) } },
+        select: { schoolId: true, userId: true },
+        distinct: ["schoolId", "userId"],
+      });
+      const seatCount = new Map<string, number>();
+      for (const r of rows) seatCount.set(r.schoolId, (seatCount.get(r.schoolId) ?? 0) + 1);
+
+      for (const s of subs) {
+        if (!isPlan(s.plan) || s.seats == null || s.seats <= 0) continue; // never seat-billed (trial/comp)
+        if (!s.arrearsAccruedAt) {
+          // Baseline stamp — accrual starts from the NEXT sweep.
+          await client.schoolSubscription.update({ where: { id: s.id }, data: { arrearsAccruedAt: now } });
+          continue;
+        }
+        const windowEnd = s.currentPeriodEnd && s.currentPeriodEnd < now ? s.currentPeriodEnd : now;
+        const elapsedMs = windowEnd.getTime() - s.arrearsAccruedAt.getTime();
+        const currency: Currency = isCurrency(s.currency ?? "") ? (s.currency as Currency) : CURRENCIES.NGN;
+        const pricing = await this.pricing.effective(currency);
+        const accrued = accrueSeatArrearsMinor(s.plan, s.seats, seatCount.get(s.schoolId) ?? 0, elapsedMs, pricing);
+        await client.schoolSubscription.update({
+          where: { id: s.id },
+          data: { arrearsAccruedAt: now, ...(accrued > 0 ? { seatArrearsMinor: { increment: accrued } } : {}) },
+        });
+        if (accrued > 0) {
+          this.logger.log(`seat arrears accrued school=${s.schoolId} +${accrued} minor (${currency})`);
+        }
+      }
+    } catch (e) {
+      this.logger.warn(`seat-arrears accrual failed: ${(e as Error).message}`);
+    }
+  }
+
+  /**
    * One saved-card renewal attempt for a due subscription: price the CURRENT
    * seat count at the sub's plan/cycle, record a PENDING payment, charge the
    * stored authorization. Success is applied by the account webhook (idempotent
@@ -164,6 +231,7 @@ export class BillingDunningService {
       plan: string;
       billingCycle: string;
       paystackAuthorizationEnc: string | null;
+      seatArrearsMinor: number;
     },
     now: Date,
   ): Promise<"charged" | "failed" | "skipped"> {
@@ -190,7 +258,9 @@ export class BillingDunningService {
       });
       const seats = Math.max(1, seatRows.length);
       const pricing = await this.pricing.effective(CURRENCIES.NGN);
-      const amountMinor = computeSubscriptionPriceMinor(plan, seats, cycle, pricing);
+      // Outstanding metered seat arrears ride the renewal charge (NGN path).
+      const arrearsMinor = Math.max(0, s.seatArrearsMinor);
+      const amountMinor = computeSubscriptionPriceMinor(plan, seats, cycle, pricing) + arrearsMinor;
 
       // The charge needs a customer email — the school's first admin.
       const admin = await client.userRole.findFirst({
@@ -210,6 +280,7 @@ export class BillingDunningService {
           currency: CURRENCIES.NGN,
           reference,
           status: "PENDING",
+          arrearsMinor,
           initiatedById: admin.userId,
         },
       });

@@ -89,8 +89,13 @@ export default async function BillingPage() {
               )}
             </Card>
 
-            {data.trueUp && (
-              <TrueUpCard trueUp={data.trueUp} currency={data.subscription.currency ?? "NGN"} canManage={canManage} />
+            {(data.trueUp || data.seatArrearsMinor > 0) && (
+              <TrueUpCard
+                trueUp={data.trueUp}
+                seatArrearsMinor={data.seatArrearsMinor}
+                currency={data.subscription.currency ?? "NGN"}
+                canManage={canManage}
+              />
             )}
 
             <BillingCheckout quotes={data.quotes} activeStudents={data.activeStudents} canManage={canManage} />

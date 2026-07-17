@@ -55,6 +55,9 @@ export interface BillingOverviewDto {
   /** Seat top-up owed for students enrolled since the last charge (prorated to
    *  the time left); null when nothing is due. */
   trueUp: { extraSeats: number; amountMinor: number } | null;
+  /** Metered UNBILLED seat usage already accrued (kobo/cents). Settled by the
+   *  top-up, or automatically added to the next renewal charge. */
+  seatArrearsMinor: number;
 }
 
 /** School-initiated checkout input. Currency picks the gateway: NGN → Paystack,

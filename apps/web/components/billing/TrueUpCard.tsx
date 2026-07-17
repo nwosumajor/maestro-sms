@@ -12,16 +12,20 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 
 export function TrueUpCard({
   trueUp,
+  seatArrearsMinor,
   currency,
   canManage,
 }: {
-  trueUp: { extraSeats: number; amountMinor: number };
+  trueUp: { extraSeats: number; amountMinor: number } | null;
+  seatArrearsMinor: number;
   currency: string;
   canManage: boolean;
 }) {
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
-  const fmt = new Intl.NumberFormat("en-NG", { style: "currency", currency }).format(trueUp.amountMinor / 100);
+  const money = (minor: number) => new Intl.NumberFormat("en-NG", { style: "currency", currency }).format(minor / 100);
+  const totalMinor = (trueUp?.amountMinor ?? 0) + seatArrearsMinor;
+  const fmt = money(totalMinor);
 
   const pay = async () => {
     setBusy(true);
@@ -41,15 +45,29 @@ export function TrueUpCard({
       <CardHeader>
         <CardTitle className="text-base">Seat top-up due</CardTitle>
         <CardDescription>
-          Your school has grown by <span className="font-semibold text-foreground">{trueUp.extraSeats}</span>{" "}
-          student{trueUp.extraSeats === 1 ? "" : "s"} since your last charge. Topping up covers them for the
-          rest of the current period — {fmt}, prorated to the time left. Your renewal date doesn&apos;t change.
+          {trueUp ? (
+            <>
+              Your school has grown by <span className="font-semibold text-foreground">{trueUp.extraSeats}</span>{" "}
+              student{trueUp.extraSeats === 1 ? "" : "s"} since your last charge.
+            </>
+          ) : (
+            <>Your school ran more students than it was billed for this period.</>
+          )}{" "}
+          {seatArrearsMinor > 0 && (
+            <>
+              Usage already metered: <span className="font-semibold text-foreground">{money(seatArrearsMinor)}</span>
+              {trueUp ? <> · Cover for the rest of the period: <span className="font-semibold text-foreground">{money(trueUp.amountMinor)}</span></> : null}
+              {". "}
+            </>
+          )}
+          Settling now clears it; otherwise it is added automatically to your next renewal charge. Your
+          renewal date doesn&apos;t change.
         </CardDescription>
       </CardHeader>
       {canManage && (
         <CardContent className="flex items-center gap-3">
           <Button onClick={pay} disabled={busy}>
-            {busy ? "Starting…" : `Top up ${trueUp.extraSeats} seats (${fmt})`}
+            {busy ? "Starting…" : `Settle now (${fmt})`}
           </Button>
           {msg && <p className="text-sm text-muted-foreground">{msg}</p>}
         </CardContent>

@@ -437,6 +437,30 @@ export function computeTrueUpMinor(
   return { extraSeats, amountMinor };
 }
 
+/**
+ * Pure: seat-arrears accrual — the metered cost of students ABOVE the billed
+ * seat count for an elapsed window. Rate = the plan's per-seat MONTHLY price /
+ * 30 per day, times fractional days. This is the anti-leak for mid-period
+ * growth: delay no longer discounts the top-up (the old forward-only quote
+ * shrank as the term ran down); the meter just keeps counting seat-days until
+ * it is settled — voluntarily via top-up, or automatically at the next renewal.
+ * Billed seats are a FLOOR: a shrinking roster accrues nothing (no credits).
+ */
+export function accrueSeatArrearsMinor(
+  plan: Plan,
+  billedSeats: number | null,
+  currentSeats: number,
+  elapsedMs: number,
+  pricing: PlanPricing = PLAN_PRICING,
+): number {
+  if (billedSeats == null || billedSeats <= 0 || elapsedMs <= 0) return 0;
+  const extraSeats = currentSeats - billedSeats;
+  if (extraSeats <= 0) return 0;
+  const perSeatDaily = pricing[plan].perSeatMonthlyMinor / 30;
+  const days = elapsedMs / (24 * 3600 * 1000);
+  return Math.round(extraSeats * perSeatDaily * days);
+}
+
 /** How a platform subscription payment changes the subscription when it settles. */
 export const SUBSCRIPTION_PAYMENT_KINDS = {
   /** Same plan again: EXTENDS currentPeriodEnd (renewals stack). */

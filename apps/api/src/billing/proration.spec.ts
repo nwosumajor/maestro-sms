@@ -1,5 +1,7 @@
 import {
   MIN_CHARGE_MINOR,
+  PLAN_PRICING,
+  accrueSeatArrearsMinor,
   computeSubscriptionPriceMinor,
   computeTrueUpMinor,
   prorationCreditMinor,
@@ -44,6 +46,22 @@ describe("computeTrueUpMinor", () => {
     expect(q!.extraSeats).toBe(50);
     const full = computeSubscriptionPriceMinor("STANDARD", 50, "TERM");
     expect(q!.amountMinor).toBe(Math.round(full * remainingPeriodRatio("TERM", end, now)));
+  });
+
+  it("accrueSeatArrearsMinor meters extra seat-days at the plan's daily rate", () => {
+    // 500 extra seats for exactly 1 day = 500 × monthly/30.
+    const daily = PLAN_PRICING.STANDARD.perSeatMonthlyMinor / 30;
+    expect(accrueSeatArrearsMinor("STANDARD", 1000, 1500, DAY)).toBe(Math.round(500 * daily));
+    // A week accrues 7× a day (rounding aside).
+    const week = accrueSeatArrearsMinor("STANDARD", 1000, 1500, 7 * DAY);
+    expect(week).toBe(Math.round(500 * daily * 7));
+  });
+
+  it("accrual is zero for shrinking rosters, unbilled subs, or no elapsed time", () => {
+    expect(accrueSeatArrearsMinor("STANDARD", 1000, 900, DAY)).toBe(0); // seats floor, no credits
+    expect(accrueSeatArrearsMinor("STANDARD", null, 1500, DAY)).toBe(0); // never seat-billed
+    expect(accrueSeatArrearsMinor("STANDARD", 1000, 1500, 0)).toBe(0);
+    expect(accrueSeatArrearsMinor("STANDARD", 1000, 1500, -DAY)).toBe(0);
   });
 
   it("is null when seats shrank, never billed, lapsed, or below the charge floor", () => {
