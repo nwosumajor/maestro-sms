@@ -161,6 +161,46 @@ conflicts with it, flag the conflict before proceeding.
   `billing.service.e2e` (checkout-503 / webhook apply+extend+idempotency / dunning→
   PAST_DUE→effective-BASIC) + an RLS cross-tenant case on the new payment table.
 
+## Revenue program (July 2026) — BUILT
+Eight monetization levers on the billing/gateway rails (branch feat/revenue-program):
+(1) **Fee-collection TAKE-RATE**: operator-set convenience fee (flat+bp+cap, ZERO
+fail-safe default) via the Paystack split's `transaction_charge` — global
+`platform_fee_config` (rls/71, plan_price posture), per-school bearer choice
+(PARENT adds to the charge / SCHOOL nets less; `school.paymentFeeBearer`,
+fee.manage+step-up), webhook credits the ledger with the INVOICE amount only
+(`payment.platformFeeMinor` records the cut). Operator GET/PUT
+`/operator/platform-fees`. (2) **Admission-form fees**: `school.admissionFormFeeMinor`
+snapshot per application; public checkout at intake + retry init; webhook stamps
+`formFeePaidAt` idempotently; PAID/UNPAID chips + fee setting on /admin/admissions;
+fee shown on the public directory. (3) **Saved-card AUTO-RENEW**: reusable Paystack
+authorization captured from the school's own charge (field-encrypted,
+`school_subscription.paystackAuthorizationEnc`/`cardLast4`/`autoRenew`); dunning
+sweep charges ~2 days pre-lapse at CURRENT seats (≤1 attempt/20h via AUTO-
+references; declines → notice + normal dunning). (4) **Proration + TRUE-UP**:
+`platform_subscription_payment.kind` (RENEWAL extends / UPGRADE restarts from now,
+unused time credited at checkout via pure `prorationCreditMinor` / TRUEUP updates
+seats only, never priceMinor); overview quotes `planChangeCreditMinor` + a seat
+top-up (`computeTrueUpMinor`, MIN_CHARGE_MINOR floor) with one-click checkout.
+(5) **Promos + AGENTS**: global `promo_code` (percent off FIRST charge, validated at
+checkout, usedCount++ on settle) + `agent`/`agent_commission` (rls/72; commission
+ledger DENY-ALL to the app role, unique schoolId = once-only) accrued on the first
+paid sub of an attributed school (onboarding `agentCode` → provisioning stamps
+`subscription.agentId`); operator Growth console manages both + payouts.
+(6) **MESSAGE CREDITS**: append-only `message_credit_entry` (rls/73); bundles
+(`MESSAGE_CREDIT_BUNDLES`) bought via checkout (webhook credits, idempotent);
+each SMS/WHATSAPP delivery debits 1 IN the delivery tx, empty balance fails those
+channels soft; WHATSAPP channel added (enum+types+Twilio `whatsapp:`); `user.phone`
+self-service on /account. (7) **GROUP console** (MODULES.GROUP add-on): global
+`school_group(+member,director)` registry (rls/74 deny-all; operator-managed,
+step-up) — DIRECTORSHIP is the authorization; /group renders cross-campus
+aggregates (never PII) via privileged reads, audited. (8) **CBT exam hall**
+(MODULES.CBT add-on): banks→questions (answerIndex SERVER-ONLY until a sitting
+closes)→timed exams (server-sampled per sitting)→sittings (clock is server law,
+auto-expire on read, auto-marks are staff-reviewed numbers — Golden Rule #8);
+`cbt.manage`/`cbt.take` seeded; rls/75 (sittings never hard-deleted). Migrations
+20260829–20260905, RLS 71–75, RLS-e2e cases for every new tenant table. Verified:
+494 API tests, web build 78 routes.
+
 ## Project structure
 - Monorepo (Turborepo + pnpm workspaces).
   - `apps/web` — Next.js + Auth.js
