@@ -9,13 +9,12 @@
 // =============================================================================
 
 import jwt from "jsonwebtoken";
+import { signingSecret, verifyHs256, verifyingSecrets } from "./secrets";
 
 const TTL_SECONDS = 300;
 
 export function signStepUp(userId: string, schoolId: string): { token: string; expiresIn: number } {
-  const secret = process.env.AUTH_SECRET;
-  if (!secret) throw new Error("Auth is not configured");
-  const token = jwt.sign({ sub: userId, schoolId, typ: "stepup" }, secret, {
+  const token = jwt.sign({ sub: userId, schoolId, typ: "stepup" }, signingSecret(), {
     algorithm: "HS256",
     expiresIn: TTL_SECONDS,
   });
@@ -23,11 +22,10 @@ export function signStepUp(userId: string, schoolId: string): { token: string; e
 }
 
 export function verifyStepUp(token: string, userId: string, schoolId: string): boolean {
-  const secret = process.env.AUTH_SECRET;
-  if (!secret) return false;
+  if (verifyingSecrets().length === 0) return false;
   try {
-    // Pin HS256 to match the session-token guard; forecloses algorithm substitution.
-    const p = jwt.verify(token, secret, { algorithms: ["HS256"] }) as { typ?: string; sub?: string; schoolId?: string };
+    // HS256 stays pinned inside verifyHs256; accepts the rotation window.
+    const p = verifyHs256(token) as { typ?: string; sub?: string; schoolId?: string };
     return p.typ === "stepup" && p.sub === userId && p.schoolId === schoolId;
   } catch {
     return false;

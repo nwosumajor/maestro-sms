@@ -24,6 +24,10 @@ export interface LoginResult {
   passwordExpired: boolean;
 }
 
+/** Fresh claims for an EXISTING session (GET /auth/refresh) — everything the
+ *  web re-stamps onto the JWT mid-session. No credentials involved. */
+export type RefreshedClaims = Omit<LoginResult, "userId" | "schoolId" | "name">;
+
 // A valid bcrypt hash of a random string — compared against when the user is not
 // found, so login takes ~the same time either way (mitigates user enumeration).
 const DUMMY_HASH = "$2a$10$CwTycUXWue0Thq9StjUM0uJ8DkuErEr2Q9p0a8b8a8b8a8b8a8b8a";
@@ -198,6 +202,84 @@ export class AuthService {
     // the web can hide modules the plan doesn't include.
     const modules = await this.modules.effectiveModules(outcome.result.schoolId);
     return { ...outcome.result, modules };
+  }
+
+  /**
+   * Mid-session claim revalidation (GET /auth/refresh). The session JWT is
+   * otherwise the sole claims source for its whole sliding lifetime — meaning a
+   * role revocation, account disable/lock, or school suspension would not reach
+   * an already-open session until re-login. The web's jwt callback calls this
+   * periodically and re-stamps the returned claims, so revocation lands within
+   * minutes instead of weeks.
+   *
+   * // SECURITY: throws UnauthorizedException("ACCOUNT_REVOKED") when the
+   * principal must lose their session (deleted/disabled/locked user, suspended
+   * school). The web kills the session ONLY on an explicit 401/403 — transient
+   * network/5xx failures keep the existing claims (fail-open on availability,
+   * fail-closed on revocation), so this can never cause login flapping when the
+   * API is briefly unreachable. Mirrors login's checks minus the credential
+   * verification; deliberately writes nothing (no counters, no audit spam at
+   * one call per user per interval).
+   */
+  async refreshClaims(p: { userId: string; schoolId: string }): Promise<RefreshedClaims> {
+    const outcome = await this.db.runAsTenant(
+      { schoolId: p.schoolId, userId: p.userId },
+      async (tx: TenantTx) => {
+        const u = await tx.user.findUnique({
+          where: { id: p.userId },
+          select: {
+            status: true,
+            locked: true,
+            lockedUntil: true,
+            mfaEnabled: true,
+            mfaRequired: true,
+            passwordChangedAt: true,
+          },
+        });
+        if (!u || u.status !== "ACTIVE") return { revoked: true as const };
+
+        const userRoles = await tx.userRole.findMany({
+          where: { userId: p.userId },
+          include: { role: { include: { permissions: { include: { permission: true } } } } },
+        });
+        const roles: string[] = userRoles.map((ur: { role: { name: string } }) => ur.role.name);
+        const isSuperAdmin = roles.includes("super_admin");
+
+        // Locked = revoked, with the same super_admin auto-expiry the login path
+        // honours (but WITHOUT clearing counters — this is a read-only check).
+        if (u.locked) {
+          const lockExpired =
+            isSuperAdmin &&
+            u.lockedUntil != null &&
+            Date.now() - u.lockedUntil.getTime() > SUPER_ADMIN_LOCK_MS;
+          if (!lockExpired) return { revoked: true as const };
+        }
+
+        const school = await tx.school.findUnique({ where: { id: p.schoolId } });
+        if (school?.status !== "ACTIVE" && !isSuperAdmin) return { revoked: true as const };
+
+        const permissions: string[] = [
+          ...new Set<string>(
+            userRoles.flatMap((ur: { role: { permissions: { permission: { key: string } }[] } }) =>
+              ur.role.permissions.map((rp) => rp.permission.key),
+            ),
+          ),
+        ];
+        return {
+          revoked: false as const,
+          claims: {
+            schoolName: school?.name ?? "",
+            roles,
+            permissions,
+            mfaEnrollRequired: u.mfaRequired === true && !u.mfaEnabled,
+            passwordExpired: isPasswordExpired(u.passwordChangedAt, isSuperAdmin),
+          },
+        };
+      },
+    );
+    if (outcome.revoked) throw new UnauthorizedException("ACCOUNT_REVOKED");
+    const modules = await this.modules.effectiveModules(p.schoolId);
+    return { ...outcome.claims, modules };
   }
 
   /**

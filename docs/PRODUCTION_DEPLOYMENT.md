@@ -380,8 +380,24 @@ honestly per what the drill shows (~half a day), not aspirationally.
 
 **Data breach suspicion:** breach runbook (LEGAL_ROLLOUT §7) — preserve
 CloudWatch logs + audit tables (append-only), DPO makes the 72-hour NDPC call,
-rotate `AUTH_SECRET` (forces global re-login) and affected credentials.
+rotate `AUTH_SECRET` (in a breach: rotate WITHOUT setting the previous-secret
+window — the global logout is the point) and affected credentials.
 Never rotate `DATA_ENCRYPTION_KEY` in panic (see Step 4 warning).
+
+**Routine AUTH_SECRET rotation (graceful — no fleet logout):**
+1. Read the current value: `aws secretsmanager get-secret-value --secret-id
+   sms/auth-secret`.
+2. Set `auth_secret_previous = "<that value>"` in tfvars.
+3. `terraform apply -replace=random_password.auth_secret` — new secret signs
+   everything; old sessions/invites/reset-links keep verifying via the window.
+4. After 30 days (longest-lived token = 7-day invites, sessions re-signed on
+   activity), clear `auth_secret_previous` and apply again — the old secret is
+   now fully retired.
+Session claims are also **revalidated mid-session** (`GET /auth/refresh`,
+default every 10 min of activity — `SESSION_CLAIMS_REFRESH_SEC` tunes it): a
+revoked role, disabled/locked account, or suspended school kills or updates
+the live session within minutes; a transient API failure never logs anyone
+out (fail-open on availability, fail-closed on explicit revocation).
 
 **Paystack/Stripe outage:** payments fail closed, ledgers stay consistent
 (webhook-driven, idempotent). No action beyond status-page comms; parents

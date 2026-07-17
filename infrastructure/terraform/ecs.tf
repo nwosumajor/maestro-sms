@@ -107,6 +107,7 @@ resource "aws_ecs_task_definition" "api" {
       { name = "DATABASE_URL", valueFrom = local.secret_arns["db-app-url"] },
       { name = "DATABASE_REPLICA_URL", valueFrom = local.secret_arns["db-replica-url"] },
       { name = "AUTH_SECRET", valueFrom = local.secret_arns["auth-secret"] },
+      { name = "AUTH_SECRET_PREVIOUS", valueFrom = local.secret_arns["auth-secret-previous"] },
       { name = "DATA_ENCRYPTION_KEY", valueFrom = local.secret_arns["data-encryption-key"] },
       { name = "PAYSTACK_SECRET_KEY", valueFrom = local.secret_arns["paystack-secret-key"] },
       { name = "STRIPE_SECRET_KEY", valueFrom = local.secret_arns["stripe-secret-key"] },
@@ -161,6 +162,7 @@ resource "aws_ecs_task_definition" "web" {
     ]
     secrets = [
       { name = "AUTH_SECRET", valueFrom = local.secret_arns["auth-secret"] },
+      { name = "AUTH_SECRET_PREVIOUS", valueFrom = local.secret_arns["auth-secret-previous"] },
     ]
     logConfiguration = {
       logDriver = "awslogs"

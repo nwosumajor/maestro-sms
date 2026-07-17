@@ -56,6 +56,7 @@ services:
       API_PORT: "3001"
       WEB_ORIGIN: http://localhost
       AUTH_SECRET: ${AUTH_SECRET}
+      AUTH_SECRET_PREVIOUS: ${AUTH_SECRET_PREVIOUS:-}
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       # App connects as the least-privilege role (RLS enforced). Defaults to a
@@ -84,6 +85,9 @@ services:
     environment:
       NODE_ENV: production
       AUTH_SECRET: ${AUTH_SECRET}
+      AUTH_SECRET_PREVIOUS: ${AUTH_SECRET_PREVIOUS:-}
+      # Mid-session claim revalidation cadence (seconds; default 600).
+      SESSION_CLAIMS_REFRESH_SEC: ${SESSION_CLAIMS_REFRESH_SEC:-}
       # Server-side + BFF calls reach the backend over the internal network.
       API_BASE_URL: http://backend:3001
     depends_on:

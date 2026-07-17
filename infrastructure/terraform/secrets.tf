@@ -36,7 +36,8 @@ locals {
   # Base secrets, plus the Redis auth token only when transit encryption is on.
   secret_values = merge(
     {
-      "auth-secret"         = random_password.auth_secret.result
+      "auth-secret"          = random_password.auth_secret.result
+      "auth-secret-previous" = var.auth_secret_previous
       "data-encryption-key" = random_id.data_encryption_key.b64_std
       "db-app-url"          = local.db_app_url
       "db-migrate-url"      = local.db_migrate_url

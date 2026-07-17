@@ -201,6 +201,13 @@ variable "paystack_secret_key" {
   sensitive   = true
 }
 
+variable "auth_secret_previous" {
+  description = "PREVIOUS auth secret, accepted for token VERIFICATION only, during a graceful AUTH_SECRET rotation. Rotation: copy the current secret's value here, run `terraform apply -replace=random_password.auth_secret`, then clear this after 30 days (longest-lived token = 7d invites). Empty = no rotation window."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 variable "stripe_secret_key" {
   description = "Stripe secret key for USD/Enterprise subscription billing (empty disables it)."
   type        = string

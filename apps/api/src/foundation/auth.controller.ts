@@ -1,4 +1,4 @@
-import { Body, Controller, HttpCode, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, Post, UseGuards } from "@nestjs/common";
 import { z } from "zod";
 import { Public } from "../auth/public.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -39,6 +39,17 @@ export class AuthController {
     body: { email: string; password: string; mfaCode?: string },
   ) {
     return this.auth.login(body.email, body.password, body.mfaCode);
+  }
+
+  /**
+   * Mid-session claim revalidation for the web's jwt callback. Authenticated
+   * (any principal — no permission gate: it only reads the CALLER'S own claims);
+   * answers 401 ACCOUNT_REVOKED when the session must die (disabled/locked user,
+   * suspended school), fresh claims otherwise. See AuthService.refreshClaims.
+   */
+  @Get("refresh")
+  refresh(@CurrentPrincipal() principal: Principal) {
+    return this.auth.refreshClaims(principal);
   }
 
   /** Change your own password (voluntary, or to satisfy the forced 30-day reset).

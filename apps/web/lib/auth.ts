@@ -8,10 +8,69 @@
 // =============================================================================
 
 import NextAuth from "next-auth";
+import type { JWT } from "next-auth/jwt";
 import Credentials from "next-auth/providers/credentials";
 import jwt from "jsonwebtoken";
 
 const API_BASE = process.env.API_BASE_URL ?? "http://localhost:3001";
+
+// --- Dual-secret rotation window ---------------------------------------------
+// AUTH_SECRET signs everything new; AUTH_SECRET_PREVIOUS (when set, during a
+// rotation) is accepted for VERIFICATION only. Passed as an array to Auth.js —
+// @auth/core encrypts new session cookies with secrets[0] and tries the whole
+// array on decrypt — so rotating no longer force-logs-out the entire fleet.
+const AUTH_SECRETS = [process.env.AUTH_SECRET, process.env.AUTH_SECRET_PREVIOUS].filter(
+  (s): s is string => typeof s === "string" && s.length > 0,
+);
+
+// --- Mid-session claim revalidation -------------------------------------------
+// Claims (roles/permissions/modules) otherwise live as long as the session's
+// 30-day sliding window — a revoked role or disabled account wouldn't bite until
+// re-login. The jwt callback below re-pulls claims from GET /auth/refresh every
+// CLAIMS_REFRESH_MS of activity: explicit 401/403 ⇒ the session is killed
+// (revocation lands within minutes); network/5xx ⇒ keep existing claims and
+// retry after CLAIMS_RETRY_MS (an API blip can never log users out).
+const CLAIMS_REFRESH_MS = Number(process.env.SESSION_CLAIMS_REFRESH_SEC ?? 600) * 1000;
+const CLAIMS_RETRY_MS = 60_000;
+
+interface RefreshedClaims {
+  schoolName: string;
+  roles: string[];
+  permissions: string[];
+  modules: string[];
+  mfaEnrollRequired: boolean;
+  passwordExpired: boolean;
+}
+
+/** Re-fetch the caller's claims. "revoked" ⇒ kill the session; null ⇒ transient
+ *  failure, keep what we have. The bearer is minted from the token's own claims
+ *  (same shape apiToken.ts mints from the session — auth() is unavailable here). */
+async function fetchRefreshedClaims(token: JWT): Promise<RefreshedClaims | "revoked" | null> {
+  const secret = process.env.AUTH_SECRET;
+  if (!secret || !token.userId || !token.schoolId) return null;
+  const bearer = jwt.sign(
+    {
+      userId: token.userId,
+      school_id: token.schoolId,
+      roles: token.roles ?? [],
+      permissions: token.permissions ?? [],
+      ...(token.impersonatedBy ? { imp: { by: token.impersonatedBy } } : {}),
+    },
+    secret,
+    { algorithm: "HS256", expiresIn: "5m" },
+  );
+  try {
+    const res = await fetch(`${API_BASE}/auth/refresh`, {
+      headers: { Authorization: `Bearer ${bearer}` },
+      cache: "no-store",
+    });
+    if (res.status === 401 || res.status === 403) return "revoked";
+    if (!res.ok) return null;
+    return (await res.json()) as RefreshedClaims;
+  } catch {
+    return null; // network blip — fail open on availability
+  }
+}
 
 /** Claims the API stamps into an impersonation token (POST /operator/impersonate). */
 interface ImpersonationClaims {
@@ -40,6 +99,9 @@ interface LoginResult {
 export const { handlers, auth, signIn, signOut } = NextAuth({
   // Self-hosted: trust the deployment host (NextAuth refuses otherwise -> 500).
   trustHost: true,
+  // Rotation window (see AUTH_SECRETS above); [AUTH_SECRET] alone when no
+  // rotation is in progress — identical behaviour to the plain-string default.
+  ...(AUTH_SECRETS.length > 0 ? { secret: AUTH_SECRETS } : {}),
   session: { strategy: "jwt" },
   pages: { signIn: "/login" },
   providers: [
@@ -95,14 +157,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       credentials: { token: { label: "Impersonation token" } },
       authorize: async (creds) => {
         const raw = String(creds?.token ?? "");
-        const secret = process.env.AUTH_SECRET;
-        if (!raw || !secret) return null;
-        let claims: ImpersonationClaims;
-        try {
-          claims = jwt.verify(raw, secret, { algorithms: ["HS256"] }) as unknown as ImpersonationClaims;
-        } catch {
-          return null; // bad signature / expired -> no session
+        if (!raw || AUTH_SECRETS.length === 0) return null;
+        // Accept the rotation window: an impersonation token minted by the API
+        // seconds before a rotation deploy must still exchange cleanly.
+        let claims: ImpersonationClaims | null = null;
+        for (const secret of AUTH_SECRETS) {
+          try {
+            claims = jwt.verify(raw, secret, { algorithms: ["HS256"] }) as unknown as ImpersonationClaims;
+            break;
+          } catch {
+            // try the next secret
+          }
         }
+        if (!claims) return null; // bad signature / expired -> no session
         if (!claims.imp?.by || !claims.userId || !claims.school_id) return null;
         return {
           id: claims.userId,
@@ -126,7 +193,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     // middleware.ts via the auth() wrapper (a returned NextResponse is reliably
     // honoured there, unlike a Response from this callback).
     authorized: ({ auth }) => Boolean(auth?.user),
-    jwt: ({ token, user }) => {
+    jwt: async ({ token, user }) => {
       if (user) {
         const u = user as unknown as {
           id: string;
@@ -151,6 +218,26 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         // survive into the API token (see apiToken.ts) or impersonated actions
         // become unattributable in the audit log again.
         token.impersonatedBy = u.impersonatedBy;
+        token.claimsAt = Date.now(); // login-fresh claims
+        return token;
+      }
+
+      // Existing session: periodic claim revalidation (see the header comment).
+      const now = Date.now();
+      const claimsAt = typeof token.claimsAt === "number" ? token.claimsAt : 0;
+      const triedAt = typeof token.claimsTriedAt === "number" ? token.claimsTriedAt : 0;
+      if (now - claimsAt < CLAIMS_REFRESH_MS || now - triedAt < CLAIMS_RETRY_MS) return token;
+      token.claimsTriedAt = now;
+      const fresh = await fetchRefreshedClaims(token);
+      if (fresh === "revoked") return null; // SECURITY: kills the session NOW
+      if (fresh) {
+        token.schoolName = fresh.schoolName;
+        token.roles = fresh.roles;
+        token.permissions = fresh.permissions;
+        token.modules = fresh.modules;
+        token.mfaEnrollRequired = fresh.mfaEnrollRequired;
+        token.passwordExpired = fresh.passwordExpired;
+        token.claimsAt = now;
       }
       return token;
     },

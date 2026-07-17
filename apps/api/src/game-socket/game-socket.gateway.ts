@@ -39,6 +39,7 @@ import {
   type GamePrincipal,
 } from "@sms/game-transport";
 import type { Principal } from "../integrity/integrity.foundation";
+import { verifyingSecrets } from "../auth/secrets";
 import { GameService as DurableGameService } from "../game/game.service";
 import { RingService as DurableRingService } from "../game/ring.service";
 import { RaceService as DurableRaceService } from "../game/race.service";
@@ -75,7 +76,6 @@ export class GameSocketGateway implements OnApplicationShutdown {
   /** Attach to the running http server. Call once, after `app.listen()`. */
   attach(server: HttpServer): void {
     if (this.wss) return;
-    const secret = process.env.AUTH_SECRET;
     this.wss = new WebSocketServer({ noServer: true });
 
     server.on("upgrade", (request: IncomingMessage, socket: Duplex, head: Buffer) => {
@@ -98,8 +98,22 @@ export class GameSocketGateway implements OnApplicationShutdown {
       // display identity are enforced by the transport services from this principal.
       let principal: GamePrincipal;
       try {
-        if (!secret) throw new AuthError("auth is not configured");
-        principal = verifyJwt(url.searchParams.get("token") ?? "", secret);
+        // Dual-secret rotation window (secrets.ts): try current, then previous.
+        const secrets = verifyingSecrets();
+        if (secrets.length === 0) throw new AuthError("auth is not configured");
+        const token = url.searchParams.get("token") ?? "";
+        let verified: GamePrincipal | null = null;
+        let lastErr: unknown = null;
+        for (const s of secrets) {
+          try {
+            verified = verifyJwt(token, s);
+            break;
+          } catch (e) {
+            lastErr = e;
+          }
+        }
+        if (!verified) throw lastErr ?? new AuthError("unauthorized");
+        principal = verified;
       } catch (err) {
         send({ type: "error", code: "UNAUTHORIZED", message: err instanceof AuthError ? err.message : "unauthorized" });
         socket.close(4401, "unauthorized");
