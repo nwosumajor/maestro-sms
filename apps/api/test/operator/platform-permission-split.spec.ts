@@ -104,12 +104,12 @@ const noGrantDb = { runAsTenant: async () => false, runAsTenantReadOnly: async (
 
 describe("PermissionGuard — manager_admin boundary", () => {
   it.each(OWNER_ONLY)("403s a manager_admin on owner-only %s", async (perm) => {
-    const guard = new PermissionGuard(reflector(perm), noGrantDb as never, {} as never, {} as never, allowRate as never);
+    const guard = new PermissionGuard(reflector(perm), noGrantDb as never, {} as never, {} as never, { forRoles: jest.fn().mockResolvedValue([]) } as never, allowRate as never);
     await expect(guard.canActivate(ctx())).rejects.toThrow(ForbiddenException);
   });
 
   it.each([...DELEGABLE_PLATFORM_PERMISSIONS])("allows a manager_admin on delegable %s", async (perm) => {
-    const guard = new PermissionGuard(reflector(perm), noGrantDb as never, {} as never, {} as never, allowRate as never);
+    const guard = new PermissionGuard(reflector(perm), noGrantDb as never, {} as never, {} as never, { forRoles: jest.fn().mockResolvedValue([]) } as never, allowRate as never);
     await expect(guard.canActivate(ctx())).resolves.toBe(true);
   });
 });

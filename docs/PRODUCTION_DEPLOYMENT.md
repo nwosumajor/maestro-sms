@@ -252,6 +252,13 @@ DSN, Twilio (when ready).
 [ ] https://<domain>/            → homepage 200 over TLS (CloudFront header present)
 [ ] /api health + login          → sign in as the platform owner (owner@sms.platform
                                     seed — CHANGE ITS PASSWORD IMMEDIATELY, enable TOTP)
+[ ] ROLE-HEAVY login             → also sign in as a principal/school_admin and load a few
+                                    pages. Their session cookie is the largest (most roles/
+                                    modules); an owner-only test once masked a proxy-header
+                                    502 that only role-heavy sessions triggered. The route
+                                    smoke enforces a 3 KB session-cookie budget — keep it.
+                                    (nginx exists ONLY in local compose; prod is CloudFront →
+                                    ALB → ECS, whose header limits are higher but not infinite.)
 [ ] /metrics without token       → 401/403 (token is auto-generated; if 200, the task def lost its METRICS_TOKEN wiring — stop and fix)
 [ ] WebSockets                   → open a game/live screen, LiveDot shows "Live" (proves /ws/* ALB routing)
 [ ] Document upload + download   → proves S3 presigner + KMS + bucket policy

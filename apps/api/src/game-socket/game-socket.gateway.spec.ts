@@ -56,6 +56,7 @@ function setup(getters: Getters = {}) {
     durableCompetitions as never,
     durableUltimate as never,
     events,
+    { forRoles: jest.fn().mockResolvedValue([]) } as never,
   );
   const socket = new FakeSocket();
   const sent: Frame[] = [];

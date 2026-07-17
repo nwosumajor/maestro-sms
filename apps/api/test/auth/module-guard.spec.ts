@@ -48,6 +48,7 @@ describe("PermissionGuard — module entitlement gate", () => {
       {} as never,
       {} as never,
       modules as never,
+      { forRoles: jest.fn().mockResolvedValue([]) } as never,
       allowRate as never,
     );
     await expect(guard.canActivate(makeCtx())).rejects.toThrow(NotFoundException);
@@ -61,6 +62,7 @@ describe("PermissionGuard — module entitlement gate", () => {
       {} as never,
       {} as never,
       modules as never,
+      { forRoles: jest.fn().mockResolvedValue([]) } as never,
       allowRate as never,
     );
     await expect(guard.canActivate(makeCtx())).resolves.toBe(true);
@@ -74,6 +76,7 @@ describe("PermissionGuard — module entitlement gate", () => {
       {} as never,
       {} as never,
       modules as never,
+      { forRoles: jest.fn().mockResolvedValue([]) } as never,
       denyRate as never,
     );
     await expect(guard.canActivate(makeCtx())).rejects.toMatchObject({ status: 429 });

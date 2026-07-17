@@ -25,6 +25,7 @@ export * from "./permissions/communication";
 export * from "./permissions/hr";
 export * from "./permissions/admin";
 export * from "./permissions/operator";
+export * from "./permissions/role-map";
 export * from "./permissions/billing";
 export * from "./permissions/admissions";
 export * from "./permissions/announcements";

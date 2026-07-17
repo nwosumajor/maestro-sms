@@ -16,8 +16,12 @@ export async function bearerForSession(): Promise<string | null> {
     {
       userId: session.user.id,
       school_id: session.user.schoolId,
+      // Roles ONLY — the API's PermissionGuard expands roles → permissions from
+      // the seeded tables (cached). Keeping the ~97-string permissions array out
+      // of every bearer mirrors the slim session cookie (the array is what blew
+      // past proxy header buffers) and means a re-seeded permission change takes
+      // effect API-side within its 60s cache, not at next login.
       roles: session.user.roles,
-      permissions: session.user.permissions,
       // Impersonation: the principal IS the target (same tenant/roles/RLS), so this
       // is what lets the API attribute every action to the operator driving it.
       // Dropping it here would re-open the audit hole the API fix closed.

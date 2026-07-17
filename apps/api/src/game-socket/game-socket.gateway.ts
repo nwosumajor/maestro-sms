@@ -40,6 +40,7 @@ import {
 } from "@sms/game-transport";
 import type { Principal } from "../integrity/integrity.foundation";
 import { verifyingSecrets } from "../auth/secrets";
+import { RolePermissionsService } from "../foundation/role-permissions.service";
 import { GameService as DurableGameService } from "../game/game.service";
 import { RingService as DurableRingService } from "../game/ring.service";
 import { RaceService as DurableRaceService } from "../game/race.service";
@@ -63,6 +64,7 @@ export class GameSocketGateway implements OnApplicationShutdown {
     private readonly durableCompetitions: DurableCompetitionService,
     private readonly durableUltimate: UltimateService,
     private readonly events: GameEventsService,
+    private readonly rolePerms: RolePermissionsService,
   ) {}
 
   // One process-local instance per mode (the shared transport-agnostic core).
@@ -87,7 +89,7 @@ export class GameSocketGateway implements OnApplicationShutdown {
       });
     });
 
-    this.wss.on("connection", (socket: WebSocket, request: IncomingMessage) => {
+    this.wss.on("connection", async (socket: WebSocket, request: IncomingMessage) => {
       const send = (msg: unknown) => {
         if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(msg));
       };
@@ -113,6 +115,11 @@ export class GameSocketGateway implements OnApplicationShutdown {
           }
         }
         if (!verified) throw lastErr ?? new AuthError("unauthorized");
+        // Slim ws-ticket bearers carry ROLES only — expand to permissions here,
+        // mirroring the REST guard (per-mode reads gate on permission below).
+        if (verified.permissions.length === 0 && verified.roles.length > 0) {
+          verified = { ...verified, permissions: await this.rolePerms.forRoles(verified.roles) };
+        }
         principal = verified;
       } catch (err) {
         send({ type: "error", code: "UNAUTHORIZED", message: err instanceof AuthError ? err.message : "unauthorized" });

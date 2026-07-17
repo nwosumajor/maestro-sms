@@ -26,6 +26,7 @@ import {
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
 import { ModuleEntitlementService } from "../foundation/module-entitlement.service";
+import { RolePermissionsService } from "../foundation/role-permissions.service";
 import { TenantRateLimitService } from "../common/tenant-rate-limit.service";
 import { requestContext } from "./request-context";
 
@@ -52,6 +53,7 @@ export class PermissionGuard implements CanActivate {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly modules: ModuleEntitlementService,
+    private readonly rolePerms: RolePermissionsService,
     private readonly rateLimit: TenantRateLimitService,
   ) {}
 
@@ -64,6 +66,14 @@ export class PermissionGuard implements CanActivate {
 
     const req = context.switchToHttp().getRequest<AuthedRequest>();
     const principal = this.authenticate(req);
+    // Slim bearers carry ROLES only (the web no longer ships the ~97-permission
+    // array in the session cookie / bearer — it blew past proxy header buffers).
+    // Expand roles → permissions here from the cached seeded tables. Back-compat:
+    // a bearer that DOES carry permissions (older sessions, operator
+    // impersonation tokens) is honoured unchanged.
+    if (principal.permissions.length === 0 && principal.roles.length > 0) {
+      principal.permissions = await this.rolePerms.forRoles(principal.roles);
+    }
     req.principal = principal;
 
     // Record the real actor for the audit log. This is the ONLY place the token

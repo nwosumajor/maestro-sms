@@ -11,6 +11,7 @@ import NextAuth from "next-auth";
 import type { JWT } from "next-auth/jwt";
 import Credentials from "next-auth/providers/credentials";
 import jwt from "jsonwebtoken";
+import { permissionsForRoles } from "@sms/types";
 
 const API_BASE = process.env.API_BASE_URL ?? "http://localhost:3001";
 
@@ -52,8 +53,8 @@ async function fetchRefreshedClaims(token: JWT): Promise<RefreshedClaims | "revo
     {
       userId: token.userId,
       school_id: token.schoolId,
+      // Roles only — the API guard expands roles → permissions server-side.
       roles: token.roles ?? [],
-      permissions: token.permissions ?? [],
       ...(token.impersonatedBy ? { imp: { by: token.impersonatedBy } } : {}),
     },
     secret,
@@ -210,8 +211,16 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.schoolId = u.schoolId;
         token.schoolName = u.schoolName;
         token.roles = u.roles;
-        token.permissions = u.permissions;
-        token.modules = u.modules;
+        // SECURITY/SIZE: the PERMISSIONS array is deliberately NOT stored in the
+        // cookie. A principal's ~97 permission strings pushed the encrypted
+        // session cookie to ~3.7 KB — past nginx's default 4 KB header buffer
+        // (502s) and brushing the browser's own ~4 KB cookie cap. Roles are the
+        // compact source of truth: the session callback derives UI permissions
+        // via permissionsForRoles(), and the API guard expands roles server-side
+        // for authorization. `permissions: undefined` also scrubs the big array
+        // out of PRE-EXISTING cookies on their first refresh.
+        token.permissions = undefined;
+        token.modules = u.modules; // bounded by the module catalog (small)
         token.mfaEnrollRequired = u.mfaEnrollRequired;
         token.passwordExpired = u.passwordExpired;
         // Present ONLY for a session minted by the impersonate provider. It must
@@ -242,7 +251,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (fresh) {
         token.schoolName = fresh.schoolName;
         token.roles = fresh.roles;
-        token.permissions = fresh.permissions;
+        // Never re-inflate the cookie: permissions stay OUT (derived from roles
+        // everywhere) — this also scrubs pre-slim cookies on their first refresh.
+        token.permissions = undefined;
         token.modules = fresh.modules;
         token.mfaEnrollRequired = fresh.mfaEnrollRequired;
         token.passwordExpired = fresh.passwordExpired;
@@ -255,7 +266,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       session.user.schoolId = token.schoolId as string;
       session.user.schoolName = token.schoolName as string;
       session.user.roles = (token.roles as string[]) ?? [];
-      session.user.permissions = (token.permissions as string[]) ?? [];
+      // Derived, never stored: expand roles via the SAME map the seed writes to
+      // the DB (@sms/types role-map — single source of truth), so UI gating
+      // matches the API's own role→permission resolution. Pure function — safe
+      // in the Edge middleware. Pre-slim cookies that still carry permissions
+      // are ignored in favour of the derivation (consistency over legacy).
+      session.user.permissions = permissionsForRoles((token.roles as string[]) ?? []);
       session.user.modules = (token.modules as string[]) ?? [];
       session.user.mfaEnrollRequired = (token.mfaEnrollRequired as boolean) ?? false;
       session.user.passwordExpired = (token.passwordExpired as boolean) ?? false;

@@ -105,6 +105,12 @@ function makeClient() {
     async get(path) {
       return fetch(`${WEB}${path}`, { headers: { cookie: header() }, redirect: "manual" });
     },
+    /** Bytes of the Auth.js session cookie(s) — the size guardrail reads this. */
+    sessionCookieBytes() {
+      let n = 0;
+      for (const [k, v] of jar.entries()) if (k.includes("session-token")) n += k.length + v.length + 1;
+      return n;
+    },
     // Read JSON via the BFF proxy (same auth path the app uses).
     async api(path) {
       const r = await this.get(`/api/sms${path}`);
@@ -166,12 +172,25 @@ async function main() {
   else if (await admin.login("owner@sms.platform")) ids = await resolveIds(admin);
   console.log("Resolved ids:", ids, "\n");
 
+  // GUARDRAIL: the session cookie must stay well under the ~4 KB browser cap and
+  // nginx's default header buffer. It once hit 3.7 KB (the full permissions
+  // array rode in it) and 502'd every role-heavy login — permissions are now
+  // derived from roles server-side, so a breach here means someone re-inflated
+  // the cookie. Budget is deliberately tight to catch creep early.
+  const COOKIE_BUDGET_BYTES = 3072;
+  let maxCookie = { email: "-", bytes: 0 };
+
   const failures = [];
   let skipped = 0;
   for (const email of ROLES) {
     const client = makeClient();
     if (!(await client.login(email))) { console.log(`- ${email}: login failed (skipped)`); skipped++; continue; }
+    const cookieBytes = client.sessionCookieBytes();
+    if (cookieBytes > maxCookie.bytes) maxCookie = { email, bytes: cookieBytes };
     const bad = [];
+    if (cookieBytes > COOKIE_BUDGET_BYTES) {
+      bad.push(`session cookie is ${cookieBytes} bytes (> ${COOKIE_BUDGET_BYTES} budget) — the cookie is re-inflating; see route-smoke guardrail note`);
+    }
     for (const route of routes) {
       const url = fill(route, ids);
       let res;
@@ -188,6 +207,7 @@ async function main() {
   }
 
   console.log("");
+  console.log(`Largest session cookie: ${maxCookie.bytes} bytes (${maxCookie.email}); budget ${COOKIE_BUDGET_BYTES}.`);
   if (failures.length) {
     console.log(`ROUTE SMOKE FAILED — ${failures.reduce((n, f) => n + f.bad.length, 0)} bad render(s) across ${failures.length} role(s).`);
     process.exit(1);
