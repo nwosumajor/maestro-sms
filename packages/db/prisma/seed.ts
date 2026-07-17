@@ -255,7 +255,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     "game.ultimate.enroll",
     "lms.content.read", "lms.content.approve",
     "billing.read", "billing.manage",
-    "scholarship.read",
+    "scholarship.read", "scholarship.apply",
   ],
   // School Administrator: SIS / enrollment / workflows — but NOT grade books, NOT veto.
   school_admin: [
@@ -316,6 +316,7 @@ const ROLE_PERMS: Record<string, string[]> = {
     "lms.content.read", "lms.quiz.attempt", "lms.forum.post",
     "library.read", "library.borrow",
     "task.participate", "poll.vote", "discussion.participate", "discipline.file", "form.respond",
+    "scholarship.apply",
   ],
   parent: [
     "poll.vote", "family.read",

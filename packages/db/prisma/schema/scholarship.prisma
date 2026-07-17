@@ -37,11 +37,37 @@ enum ScholarshipSelectionBasis {
   BOTH
 }
 
+/// Scholarship discipline/category (chosen by the platform owner per program).
+enum ScholarshipCategory {
+  GENERAL_SCIENCE
+  ART
+  COMMUNITY_DEVELOPMENT
+  MATHEMATICS
+  SPECIAL
+}
+
+/// How the qualification exam is sat: online CBT mock, the games arena, or a
+/// physically scheduled exam.
+enum ScholarshipExamMode {
+  ONLINE_CBT
+  GAMES
+  PHYSICAL
+}
+
 enum ScholarshipApplicationStatus {
   DRAFT
+  /// Student-initiated chain (in order): class supervisor → guardian → principal.
+  /// Each stage approves or REJECTS (rejectedStage records where it died).
+  PENDING_SUPERVISOR
+  PENDING_PARENT
+  PENDING_PRINCIPAL
+  /// Fully school-approved — in the platform owner's cross-tenant queue.
   SUBMITTED
   UNDER_REVIEW
   SHORTLISTED
+  /// Platform-approved: the student is a qualified candidate for the
+  /// scholarship exam (category + mode + date live on the program).
+  QUALIFIED
   AWARDED
   REJECTED
 }
@@ -61,6 +87,14 @@ model ScholarshipProgram {
   opensAt        DateTime
   closesAt       DateTime
   status         ScholarshipProgramStatus  @default(DRAFT)
+  /// Category the owner selects for the program (science/art/community/maths/special).
+  category       ScholarshipCategory       @default(SPECIAL)
+  /// Qualification exam details — set by the owner once candidates qualify;
+  /// announce-exam notifies every QUALIFIED student + their guardians.
+  examMode       ScholarshipExamMode?
+  examAt         DateTime?
+  /// Venue (PHYSICAL) or platform pointer (ONLINE_CBT / GAMES) — display text.
+  examVenue      String?
   /// super_admin userId (scalar audit field; NO cross-tenant user relation).
   createdById    String                    @db.Uuid
 
@@ -90,9 +124,21 @@ model ScholarshipApplication {
   signals               Json?
   status                ScholarshipApplicationStatus @default(DRAFT)
   /// Guardian consent to disclose the minor's data to the platform (REQUIRED to
-  /// submit). Scalar audit fields — who consented + when.
+  /// submit). Scalar audit fields — who consented + when. In the student-
+  /// initiated chain the PARENT-stage approval IS the consent (one act).
   consentById           String?                      @db.Uuid
   consentAt             DateTime?
+  /// Student-initiated approval chain — one scalar record per stage (who/when/
+  /// note). Append-only in spirit: set once when the stage decides.
+  supervisorById        String?                      @db.Uuid
+  supervisorAt          DateTime?
+  supervisorNote        String?
+  parentNote            String?
+  principalById         String?                      @db.Uuid
+  principalAt           DateTime?
+  principalNote         String?
+  /// Where a REJECTED application died: SUPERVISOR | PARENT | PRINCIPAL | PLATFORM.
+  rejectedStage         String?
   /// Review outcome (set by the platform owner): the award + who/why.
   awardMinor            Int?
   reviewedById          String?                      @db.Uuid

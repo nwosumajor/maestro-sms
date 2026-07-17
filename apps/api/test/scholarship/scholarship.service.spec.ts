@@ -64,6 +64,9 @@ function makeService(over: {
     subjectResult: { findMany: jest.fn().mockResolvedValue([]) },
     attendanceRecord: { groupBy: jest.fn().mockResolvedValue([]) },
     invoice: { findMany: jest.fn().mockResolvedValue([]) },
+    disciplineComplaint: { count: jest.fn().mockResolvedValue(0) },
+    taskAssignment: { count: jest.fn().mockResolvedValue(0) },
+    userRole: { findMany: jest.fn().mockResolvedValue([]) },
   } as unknown as TenantTx;
 
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };

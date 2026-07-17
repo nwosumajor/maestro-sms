@@ -37,10 +37,15 @@ export class ScholarshipService {
     return { schoolId: p.schoolId, userId: p.userId };
   }
 
-  /** Student ids the caller may apply for: a parent's children + a teacher's
-   *  taught students. School-wide staff may apply for any student in the school. */
+  /** Student ids the caller may apply for: a STUDENT applies for THEMSELVES; a
+   *  parent for their children; a teacher for students they teach. School-wide
+   *  staff may apply for any student in the school. */
   private async applicableStudentIds(tx: TenantTx, p: Principal): Promise<Set<string>> {
     const ids = new Set<string>();
+    if (p.roles.includes("student")) {
+      ids.add(p.userId);
+      return ids;
+    }
     if (p.roles.some((r) => STAFF_WIDE.has(r))) {
       const students = await tx.user.findMany({
         where: { roles: { some: { role: { name: "student" } } } },
@@ -88,12 +93,49 @@ export class ScholarshipService {
         orderBy: { createdAt: "desc" },
       });
       const applications = await this.toApplicationDtos(tx, apps);
+      const pendingDecisions = await this.toApplicationDtos(tx, await this.pendingForMe(tx, p));
       return {
         programs: programs.map((pr) => this.programDto(pr)),
         students: students.map((s: { id: string; name: string }) => ({ id: s.id, name: s.name })),
         applications,
+        pendingDecisions,
       };
     });
+  }
+
+  /** Applications sitting at MY chain stage: class supervisor → their classes'
+   *  students; guardian → their children; principal → school-wide. */
+  private async pendingForMe(tx: TenantTx, p: Principal) {
+    const out: Array<Awaited<ReturnType<TenantTx["scholarshipApplication"]["findMany"]>>[number]> = [];
+    const supervised = await tx.classTeacher.findMany({ where: { teacherId: p.userId }, select: { classId: true } });
+    if (supervised.length) {
+      const enrolled = await tx.enrollment.findMany({
+        where: { classId: { in: supervised.map((c: { classId: string }) => c.classId) }, status: "ACTIVE" },
+        select: { studentId: true },
+      });
+      const studentIds = [...new Set(enrolled.map((e: { studentId: string }) => e.studentId))];
+      if (studentIds.length) {
+        out.push(
+          ...(await tx.scholarshipApplication.findMany({
+            where: { status: "PENDING_SUPERVISOR", studentId: { in: studentIds } },
+            orderBy: { createdAt: "asc" },
+          })),
+        );
+      }
+    }
+    const children = await tx.parentChild.findMany({ where: { parentId: p.userId }, select: { studentId: true } });
+    if (children.length) {
+      out.push(
+        ...(await tx.scholarshipApplication.findMany({
+          where: { status: "PENDING_PARENT", studentId: { in: children.map((c: { studentId: string }) => c.studentId) } },
+          orderBy: { createdAt: "asc" },
+        })),
+      );
+    }
+    if (p.roles.includes("principal")) {
+      out.push(...(await tx.scholarshipApplication.findMany({ where: { status: "PENDING_PRINCIPAL" }, orderBy: { createdAt: "asc" } })));
+    }
+    return out;
   }
 
   // ---------------------------------------------------------------------------
@@ -115,7 +157,9 @@ export class ScholarshipService {
       });
       if (existing) throw new ConflictException("An application for this student already exists for this scholarship");
 
-      const applicantRole = p.roles.includes("parent") ? "parent" : p.roles.includes("teacher") ? "teacher" : p.roles[0] ?? "staff";
+      const applicantRole = p.roles.includes("student")
+        ? "student"
+        : p.roles.includes("parent") ? "parent" : p.roles.includes("teacher") ? "teacher" : p.roles[0] ?? "staff";
       const row = await tx.scholarshipApplication.create({
         data: {
           schoolId: p.schoolId,
@@ -163,30 +207,151 @@ export class ScholarshipService {
   }
 
   // ---------------------------------------------------------------------------
-  // Submit — snapshot signals, flip DRAFT → SUBMITTED (needs consent)
+  // Submit — snapshot signals, then route by who applied:
+  //   student  → PENDING_SUPERVISOR (the approval chain: class supervisor →
+  //              guardian [whose approval IS the consent] → principal → platform)
+  //   others   → SUBMITTED directly (legacy parent/teacher path; consent required
+  //              up-front as before)
   // ---------------------------------------------------------------------------
   async submit(p: Principal, id: string): Promise<ScholarshipApplicationDto> {
     const result = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const app = await this.ownDraft(tx, p, id);
-      if (!app.consentAt) {
+      const isStudentChain = app.applicantRole === "student";
+      if (isStudentChain) {
+        // The detailed request form is mandatory for a student's own request.
+        const form = (app.answers ?? {}) as { reason?: string };
+        if (!form.reason || !String(form.reason).trim()) {
+          throw new BadRequestException("Please state the reason for your scholarship request before submitting");
+        }
+      } else if (!app.consentAt) {
         throw new BadRequestException("A guardian must give consent before this application can be submitted");
       }
       const signals = await this.collectSignals(tx, app.studentId);
       const row = await tx.scholarshipApplication.update({
         where: { id: app.id },
-        data: { status: "SUBMITTED", signals: signals as never },
+        data: { status: isStudentChain ? "PENDING_SUPERVISOR" : "SUBMITTED", signals: signals as never },
       });
-      await this.log(tx, p, "scholarship.submit", app.id, { studentId: app.studentId });
-      return { row, studentId: app.studentId };
+      await this.log(tx, p, "scholarship.submit", app.id, { studentId: app.studentId, chain: isStudentChain });
+      return { row, studentId: app.studentId, isStudentChain };
     });
-    // Best-effort: let the guardian(s) know it's in.
+    // Best-effort notifications: chain → wake the class supervisor(s); legacy →
+    // tell the guardians it's in.
     try {
       const dto = await this.db.runAsTenant(this.ctx(p), (tx) => this.toApplicationDtos(tx, [result.row]));
-      await this.notifyGuardians(p, result.studentId, `Scholarship application submitted for ${dto[0].studentName}`);
+      if (result.isStudentChain) {
+        await this.notifySupervisors(
+          p,
+          result.studentId,
+          `Scholarship request from ${dto[0].studentName} awaits your approval`,
+          "Open Scholarships → Awaiting your decision to approve or reject it.",
+        );
+        await this.notifyUser(p, result.studentId, "Your scholarship request is with your class supervisor", `“${dto[0].programTitle}” — you'll be notified at every stage.`);
+      } else {
+        await this.notifyGuardians(p, result.studentId, `Scholarship application submitted for ${dto[0].studentName}`);
+      }
       return dto[0];
     } catch {
       return this.db.runAsTenant(this.ctx(p), (tx) => this.toApplicationDtos(tx, [result.row])).then((d) => d[0]);
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // The approval chain — one endpoint, routed by the application's stage.
+  // SECURITY: each stage is decided by exactly the RIGHT person, verified by
+  // RELATIONSHIP (not just role): the class supervisor must teach a class the
+  // student is actively enrolled in; the parent must be a linked guardian (their
+  // approval doubles as the Golden-Rule-#5 consent); the principal must hold the
+  // principal role in the school. Everyone else gets 404 — cross-scope existence
+  // never leaks. Every decision is audited and everyone affected is notified.
+  // ---------------------------------------------------------------------------
+  async decideStage(
+    p: Principal,
+    id: string,
+    body: { decision: "APPROVE" | "REJECT"; note?: string },
+  ): Promise<ScholarshipApplicationDto> {
+    const note = body.note?.trim() || null;
+    const outcome = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const app = await tx.scholarshipApplication.findFirst({ where: { id } });
+      if (!app) throw new NotFoundException("Application not found");
+      const approve = body.decision === "APPROVE";
+      const now = new Date();
+
+      let stage: "SUPERVISOR" | "PARENT" | "PRINCIPAL";
+      let data: Record<string, unknown>;
+      if (app.status === "PENDING_SUPERVISOR") {
+        stage = "SUPERVISOR";
+        const classIds = (
+          await tx.enrollment.findMany({ where: { studentId: app.studentId, status: "ACTIVE" }, select: { classId: true } })
+        ).map((e: { classId: string }) => e.classId);
+        const supervises = classIds.length
+          ? await tx.classTeacher.findFirst({ where: { teacherId: p.userId, classId: { in: classIds } }, select: { id: true } })
+          : null;
+        if (!supervises) throw new NotFoundException("Application not found"); // 404 not 403
+        data = {
+          supervisorById: p.userId,
+          supervisorAt: now,
+          supervisorNote: note,
+          status: approve ? "PENDING_PARENT" : "REJECTED",
+          ...(approve ? {} : { rejectedStage: "SUPERVISOR" }),
+        };
+      } else if (app.status === "PENDING_PARENT") {
+        stage = "PARENT";
+        const guardian = await tx.parentChild.findFirst({ where: { parentId: p.userId, studentId: app.studentId }, select: { id: true } });
+        if (!guardian) throw new NotFoundException("Application not found");
+        data = {
+          // Guardian approval IS the consent to disclose the minor's data to the
+          // platform (Golden Rule #5) — one act, recorded as both.
+          consentById: p.userId,
+          consentAt: now,
+          parentNote: note,
+          status: approve ? "PENDING_PRINCIPAL" : "REJECTED",
+          ...(approve ? {} : { rejectedStage: "PARENT", consentById: null, consentAt: null }),
+        };
+      } else if (app.status === "PENDING_PRINCIPAL") {
+        stage = "PRINCIPAL";
+        if (!p.roles.includes("principal")) throw new NotFoundException("Application not found");
+        data = {
+          principalById: p.userId,
+          principalAt: now,
+          principalNote: note,
+          status: approve ? "SUBMITTED" : "REJECTED",
+          ...(approve ? {} : { rejectedStage: "PRINCIPAL" }),
+        };
+      } else {
+        throw new ConflictException("This application is not awaiting a decision at your stage");
+      }
+
+      const row = await tx.scholarshipApplication.update({ where: { id }, data: data as never });
+      await this.log(tx, p, `scholarship.stage.${stage.toLowerCase()}.${approve ? "approve" : "reject"}`, id, {
+        studentId: app.studentId,
+        stage,
+      });
+      return { row, stage, approve, studentId: app.studentId };
+    });
+
+    // Best-effort stage notifications to everyone who should hear about it.
+    const dto = await this.db.runAsTenant(this.ctx(p), (tx) => this.toApplicationDtos(tx, [outcome.row]));
+    const title = dto[0].programTitle;
+    const student = dto[0].studentName;
+    try {
+      if (!outcome.approve) {
+        const stageName = outcome.stage === "SUPERVISOR" ? "class supervisor" : outcome.stage === "PARENT" ? "guardian" : "principal";
+        await this.notifyUser(p, outcome.studentId, `Your scholarship request was not approved`, `“${title}” was declined at the ${stageName} stage.${note ? ` Note: ${note}` : ""}`);
+        await this.notifyGuardians(p, outcome.studentId, `${student}'s scholarship request was declined at the ${stageName} stage`);
+      } else if (outcome.stage === "SUPERVISOR") {
+        await this.notifyUser(p, outcome.studentId, "Class supervisor approved your scholarship request", `“${title}” now awaits your parent/guardian's approval.`);
+        await this.notifyGuardians(p, outcome.studentId, `${student}'s scholarship request needs YOUR approval`, "Your approval also gives consent to share their academic record with the scholarship sponsor. Open Scholarships to decide.");
+      } else if (outcome.stage === "PARENT") {
+        await this.notifyUser(p, outcome.studentId, "Your guardian approved your scholarship request", `“${title}” now awaits the principal's approval.`);
+        await this.notifyPrincipals(p, `Scholarship request from ${student} awaits your approval`, "Open Scholarships → Awaiting your decision.");
+      } else {
+        await this.notifyUser(p, outcome.studentId, "The principal approved your scholarship request", `“${title}” has been forwarded to the scholarship sponsor for final review.`);
+        await this.notifyGuardians(p, outcome.studentId, `${student}'s scholarship request was forwarded to the sponsor`, "The platform team will review it and you'll both be notified of the outcome.");
+      }
+    } catch {
+      // notifications are best-effort; the decision itself is committed
+    }
+    return dto[0];
   }
 
   // ---------------------------------------------------------------------------
@@ -233,17 +398,38 @@ export class ScholarshipService {
       return sum + Math.max(0, inv.totalMinor - paid);
     }, 0);
 
-    return { publishedSessionAverage, attendanceRatePct, outstandingFeesMinor, capturedAt: new Date() };
+    // The student's class(es), discipline record and completed tasks — the
+    // profile context the reviewer chain asked for. Counts/names only.
+    const enrolments = await tx.enrollment.findMany({
+      where: { studentId, status: "ACTIVE" },
+      select: { class: { select: { name: true } } },
+    });
+    const classNames = enrolments.map((e: { class: { name: string } }) => e.class.name);
+    const disciplineComplaints = await tx.disciplineComplaint.count({ where: { againstId: studentId } });
+    const tasksCompleted = await tx.taskAssignment.count({ where: { assigneeId: studentId, status: "DONE" } });
+
+    return {
+      publishedSessionAverage,
+      attendanceRatePct,
+      outstandingFeesMinor,
+      classNames,
+      disciplineComplaints,
+      tasksCompleted,
+      capturedAt: new Date(),
+    };
   }
 
   private programDto(pr: {
     id: string; title: string; description: string | null; budgetMinor: number; awardMinor: number;
-    awardKind: string; selectionBasis: string; eligibility: unknown; opensAt: Date; closesAt: Date; status: string; createdAt: Date;
+    awardKind: string; selectionBasis: string; eligibility: unknown; opensAt: Date; closesAt: Date; status: string;
+    category: string; examMode: string | null; examAt: Date | null; examVenue: string | null; createdAt: Date;
   }) {
     return {
       id: pr.id, title: pr.title, description: pr.description, budgetMinor: pr.budgetMinor, awardMinor: pr.awardMinor,
       awardKind: pr.awardKind, selectionBasis: pr.selectionBasis, eligibility: pr.eligibility ?? null,
-      opensAt: pr.opensAt, closesAt: pr.closesAt, status: pr.status, createdAt: pr.createdAt,
+      opensAt: pr.opensAt, closesAt: pr.closesAt, status: pr.status,
+      category: pr.category, examMode: pr.examMode, examAt: pr.examAt, examVenue: pr.examVenue,
+      createdAt: pr.createdAt,
     };
   }
 
@@ -254,6 +440,9 @@ export class ScholarshipService {
     rows: Array<{
       id: string; programId: string; schoolId: string; studentId: string; applicantId: string; applicantRole: string;
       answers: unknown; signals: unknown; status: string; consentById: string | null; consentAt: Date | null;
+      supervisorById: string | null; supervisorAt: Date | null; supervisorNote: string | null;
+      parentNote: string | null; principalById: string | null; principalAt: Date | null; principalNote: string | null;
+      rejectedStage: string | null;
       awardMinor: number | null; reviewNote: string | null; createdAt: Date; updatedAt: Date;
     }>,
   ): Promise<ScholarshipApplicationDto[]> {
@@ -283,6 +472,14 @@ export class ScholarshipService {
       status: r.status,
       consentById: r.consentById,
       consentAt: r.consentAt,
+      supervisorById: r.supervisorById,
+      supervisorAt: r.supervisorAt,
+      supervisorNote: r.supervisorNote,
+      parentNote: r.parentNote,
+      principalById: r.principalById,
+      principalAt: r.principalAt,
+      principalNote: r.principalNote,
+      rejectedStage: r.rejectedStage,
       awardMinor: r.awardMinor,
       reviewNote: r.reviewNote,
       createdAt: r.createdAt,
@@ -290,7 +487,7 @@ export class ScholarshipService {
     }));
   }
 
-  private async notifyGuardians(p: Principal, studentId: string, title: string) {
+  private async notifyGuardians(p: Principal, studentId: string, title: string, body?: string) {
     const guardians = await this.db.runAsTenant(this.ctx(p), (tx) =>
       tx.parentChild.findMany({ where: { studentId }, select: { parentId: true } }),
     );
@@ -299,9 +496,36 @@ export class ScholarshipService {
         recipientId: g.parentId,
         type: "SCHOLARSHIP",
         title,
-        body: "You can track its status in the Scholarships section.",
+        body: body ?? "You can track its status in the Scholarships section.",
       }).catch(() => undefined);
     }
+  }
+
+  private async notifyUser(p: Principal, userId: string, title: string, body: string) {
+    await this.notifications
+      .enqueue(this.ctx(p), { recipientId: userId, type: "SCHOLARSHIP", title, body })
+      .catch(() => undefined);
+  }
+
+  /** The class supervisor(s): assigned class teachers of the student's ACTIVE classes. */
+  private async notifySupervisors(p: Principal, studentId: string, title: string, body: string) {
+    const teacherIds = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const classIds = (
+        await tx.enrollment.findMany({ where: { studentId, status: "ACTIVE" }, select: { classId: true } })
+      ).map((e: { classId: string }) => e.classId);
+      if (!classIds.length) return [] as string[];
+      const teachers = await tx.classTeacher.findMany({ where: { classId: { in: classIds } }, select: { teacherId: true } });
+      return [...new Set(teachers.map((t: { teacherId: string }) => t.teacherId))];
+    });
+    for (const id of teacherIds) await this.notifyUser(p, id, title, body);
+  }
+
+  private async notifyPrincipals(p: Principal, title: string, body: string) {
+    const principalIds = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const rows = await tx.userRole.findMany({ where: { role: { name: "principal" } }, select: { userId: true } });
+      return [...new Set(rows.map((r: { userId: string }) => r.userId))];
+    });
+    for (const id of principalIds) await this.notifyUser(p, id, title, body);
   }
 
   private async log(tx: TenantTx, p: Principal, action: string, entityId: string, metadata?: Record<string, unknown>) {

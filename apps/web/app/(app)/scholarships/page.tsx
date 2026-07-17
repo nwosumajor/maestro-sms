@@ -25,13 +25,14 @@ export default async function ScholarshipsPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Scholarships</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Platform-sponsored scholarships for students at your school. A parent or teacher applies on a student&apos;s
-            behalf; a guardian consents; the platform reviews and awards a fees credit.
+            Platform-sponsored scholarships for students at your school. Students request directly with a detailed
+            form — the request is approved by the class supervisor, then a parent/guardian, then the principal,
+            before the sponsor reviews, examines qualified candidates, and awards the best three.
           </p>
         </div>
 
         {canApply && portal ? (
-          <ScholarshipPortal portal={portal} />
+          <ScholarshipPortal portal={portal} roles={user.roles} />
         ) : canApply ? (
           <Alert variant="info">
             <AlertTitle>Couldn&apos;t load scholarships</AlertTitle>

@@ -14,7 +14,8 @@
 
 import { BadRequestException, Injectable, Logger, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { Prisma, type PrismaClient } from "@sms/db";
-import type { ScholarshipApplicationDto, ScholarshipProgramDto } from "@sms/types";
+import { SCHOLARSHIP_MAX_AWARDS, type ScholarshipApplicationDto, type ScholarshipProgramDto } from "@sms/types";
+import { NotificationService } from "../notifications/notification.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import {
   AUDIT_LOG_SERVICE,
@@ -36,6 +37,12 @@ interface ProgramInput {
   opensAt: string;
   closesAt: string;
   status?: string;
+  /** GENERAL_SCIENCE | ART | COMMUNITY_DEVELOPMENT | MATHEMATICS | SPECIAL. */
+  category?: string;
+  /** Qualification exam: ONLINE_CBT | GAMES | PHYSICAL (+ date + venue text). */
+  examMode?: string | null;
+  examAt?: string | null;
+  examVenue?: string | null;
 }
 
 @Injectable()
@@ -46,6 +53,7 @@ export class ScholarshipAdminService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly privileged: PrivilegedDatabaseService,
+    private readonly notifications: NotificationService,
   ) {}
 
   private client(): PrismaClient {
@@ -78,6 +86,10 @@ export class ScholarshipAdminService {
         opensAt,
         closesAt,
         status: (input.status ?? "DRAFT") as never,
+        category: (input.category ?? "SPECIAL") as never,
+        examMode: (input.examMode ?? null) as never,
+        examAt: input.examAt ? new Date(input.examAt) : null,
+        examVenue: input.examVenue ?? null,
         createdById: p.userId,
       },
     });
@@ -99,6 +111,10 @@ export class ScholarshipAdminService {
     if (input.opensAt !== undefined) data.opensAt = new Date(input.opensAt);
     if (input.closesAt !== undefined) data.closesAt = new Date(input.closesAt);
     if (input.status !== undefined) data.status = input.status as never;
+    if (input.category !== undefined) data.category = input.category as never;
+    if (input.examMode !== undefined) data.examMode = (input.examMode ?? null) as never;
+    if (input.examAt !== undefined) data.examAt = input.examAt ? new Date(input.examAt) : null;
+    if (input.examVenue !== undefined) data.examVenue = input.examVenue ?? null;
     const row = await this.client().scholarshipProgram.update({ where: { id }, data });
     await this.auditOwn(p, "scholarship.program.update", id, { status: input.status });
     return this.programDto(row);
@@ -141,6 +157,14 @@ export class ScholarshipAdminService {
       status: r.status,
       consentById: r.consentById,
       consentAt: r.consentAt,
+      supervisorById: r.supervisorById,
+      supervisorAt: r.supervisorAt,
+      supervisorNote: r.supervisorNote,
+      parentNote: r.parentNote,
+      principalById: r.principalById,
+      principalAt: r.principalAt,
+      principalNote: r.principalNote,
+      rejectedStage: r.rejectedStage,
       awardMinor: r.awardMinor,
       reviewNote: r.reviewNote,
       createdAt: r.createdAt,
@@ -149,17 +173,20 @@ export class ScholarshipAdminService {
   }
 
   // --- decisions -------------------------------------------------------------
-  /** Advance an application: REVIEW (→UNDER_REVIEW), SHORTLIST, REJECT, or AWARD.
-   *  AWARD disburses a FEES_CREDIT via the Fees ledger. */
+  /** Advance an application: REVIEW (→UNDER_REVIEW), SHORTLIST, QUALIFY (the
+   *  student becomes a candidate for the scholarship exam), REJECT, or AWARD.
+   *  AWARD disburses a FEES_CREDIT via the Fees ledger and is CAPPED at the
+   *  Best Three per program. Student + guardians are notified of every outcome. */
   async decide(
     p: Principal,
     id: string,
-    body: { action: "REVIEW" | "SHORTLIST" | "REJECT" | "AWARD"; note?: string; awardMinor?: number },
+    body: { action: "REVIEW" | "SHORTLIST" | "QUALIFY" | "REJECT" | "AWARD"; note?: string; awardMinor?: number },
   ): Promise<ScholarshipApplicationDto> {
     const db = this.client();
     const app = await db.scholarshipApplication.findFirst({ where: { id } });
     if (!app) throw new NotFoundException("Application not found");
-    if (app.status === "DRAFT") throw new BadRequestException("This application has not been submitted");
+    const inChain = ["DRAFT", "PENDING_SUPERVISOR", "PENDING_PARENT", "PENDING_PRINCIPAL"].includes(app.status);
+    if (inChain) throw new BadRequestException("This application has not completed its school approval chain");
     if (app.status === "AWARDED" || app.status === "REJECTED") {
       throw new BadRequestException("This application has already been finalised");
     }
@@ -168,11 +195,17 @@ export class ScholarshipAdminService {
     let nextStatus: string = app.status;
     if (body.action === "REVIEW") nextStatus = "UNDER_REVIEW";
     else if (body.action === "SHORTLIST") nextStatus = "SHORTLISTED";
+    else if (body.action === "QUALIFY") nextStatus = "QUALIFIED";
     else if (body.action === "REJECT") nextStatus = "REJECTED";
     else if (body.action === "AWARD") {
-      const program = await db.scholarshipProgram.findFirst({ where: { id: app.programId }, select: { awardMinor: true, awardKind: true } });
+      const program = await db.scholarshipProgram.findFirst({ where: { id: app.programId }, select: { title: true, awardMinor: true, awardKind: true } });
       const awardMinor = body.awardMinor ?? program?.awardMinor ?? 0;
       if (awardMinor <= 0) throw new BadRequestException("award amount must be positive");
+      // Best Three: a program grants at most SCHOLARSHIP_MAX_AWARDS awards.
+      const awarded = await db.scholarshipApplication.count({ where: { programId: app.programId, status: "AWARDED" } });
+      if (awarded >= SCHOLARSHIP_MAX_AWARDS) {
+        throw new BadRequestException(`This scholarship already has its best ${SCHOLARSHIP_MAX_AWARDS} awardees`);
+      }
       nextStatus = "AWARDED";
       // Disburse a fees credit into the student's OWN school (privileged; the
       // Payment carries the school's id so it's correctly tenant-owned).
@@ -184,17 +217,98 @@ export class ScholarshipAdminService {
         data: { status: nextStatus as never, awardMinor, reviewedById: p.userId, reviewNote: body.note ?? null, disbursementPaymentId: disbursement?.paymentId ?? null },
       });
       await this.auditOwn(p, "scholarship.award", id, { targetSchoolId: app.schoolId, studentId: app.studentId, awardMinor, disbursed: disbursement?.amountMinor ?? 0 });
+      await this.notifyFamily(
+        p,
+        app.schoolId,
+        app.studentId,
+        `🎉 Scholarship AWARDED — “${program?.title ?? "Scholarship"}”`,
+        "Congratulations! The award has been credited against the student's school fees.",
+      );
       const [row] = await this.listApplicationById(db, id);
       return row;
     }
 
     await db.scholarshipApplication.update({
       where: { id },
-      data: { status: nextStatus as never, reviewedById: p.userId, reviewNote: body.note ?? app.reviewNote },
+      data: {
+        status: nextStatus as never,
+        reviewedById: p.userId,
+        reviewNote: body.note ?? app.reviewNote,
+        ...(body.action === "REJECT" ? { rejectedStage: "PLATFORM" } : {}),
+      },
     });
     await this.auditOwn(p, `scholarship.${body.action.toLowerCase()}`, id, { targetSchoolId: app.schoolId, status: nextStatus });
+    if (body.action === "QUALIFY") {
+      const program = await db.scholarshipProgram.findFirst({ where: { id: app.programId }, select: { title: true } });
+      await this.notifyFamily(
+        p,
+        app.schoolId,
+        app.studentId,
+        `Qualified for the scholarship exam — “${program?.title ?? "Scholarship"}”`,
+        "The student is now a qualified candidate. The exam category, mode and date will be announced on the platform.",
+      );
+    } else if (body.action === "REJECT") {
+      await this.notifyFamily(
+        p,
+        app.schoolId,
+        app.studentId,
+        "Scholarship application outcome",
+        `The application was not successful at the sponsor's review.${body.note ? ` Note: ${body.note}` : ""}`,
+      );
+    }
     const [row] = await this.listApplicationById(db, id);
     return row;
+  }
+
+  /** Announce the qualification exam for a program: notifies EVERY QUALIFIED
+   *  candidate (student + guardians, in their own school's tenant) of the
+   *  category, exam mode (online CBT / games / physical), date and venue.
+   *  Requires the exam details to be set on the program first. */
+  async announceExam(p: Principal, programId: string): Promise<{ notified: number }> {
+    const db = this.client();
+    const program = await db.scholarshipProgram.findFirst({ where: { id: programId } });
+    if (!program) throw new NotFoundException("Program not found");
+    if (!program.examMode || !program.examAt) {
+      throw new BadRequestException("Set the exam mode and date on the program before announcing");
+    }
+    const candidates = await db.scholarshipApplication.findMany({
+      where: { programId, status: "QUALIFIED" },
+      select: { schoolId: true, studentId: true },
+    });
+    const when = program.examAt.toISOString().slice(0, 16).replace("T", " at ");
+    const modeLabel =
+      program.examMode === "ONLINE_CBT" ? "an online CBT mock exam" : program.examMode === "GAMES" ? "the games arena" : "a physical scheduled exam";
+    let notified = 0;
+    for (const c of candidates) {
+      await this.notifyFamily(
+        p,
+        c.schoolId,
+        c.studentId,
+        `Scholarship exam scheduled — “${program.title}”`,
+        `Category: ${String(program.category).replaceAll("_", " ").toLowerCase()}. The exam holds via ${modeLabel} on ${when} (UTC)${program.examVenue ? ` — ${program.examVenue}` : ""}. Good luck!`,
+      );
+      notified += 1;
+    }
+    await this.auditOwn(p, "scholarship.exam.announce", programId, { candidates: candidates.length, examMode: program.examMode, examAt: program.examAt });
+    return { notified };
+  }
+
+  /** Notify the student AND their guardians inside THEIR OWN school's tenant
+   *  (the operator writes the notification rows under that school's GUC — RLS
+   *  intact; recipients read them via their normal self-scoped inbox). */
+  private async notifyFamily(p: Principal, schoolId: string, studentId: string, title: string, body: string): Promise<void> {
+    const ctx = { schoolId, userId: p.userId };
+    try {
+      await this.notifications.enqueue(ctx, { recipientId: studentId, type: "SCHOLARSHIP", title, body });
+      const guardians = await this.db.runAsTenant(ctx, (tx) =>
+        tx.parentChild.findMany({ where: { studentId }, select: { parentId: true } }),
+      );
+      for (const g of guardians as Array<{ parentId: string }>) {
+        await this.notifications.enqueue(ctx, { recipientId: g.parentId, type: "SCHOLARSHIP", title, body }).catch(() => undefined);
+      }
+    } catch (err) {
+      this.logger.warn(`scholarship family notify failed (non-fatal): ${String(err)}`);
+    }
   }
 
   /** Post a SCHOLARSHIP payment against the student's most recent open invoice
@@ -256,19 +370,26 @@ export class ScholarshipAdminService {
       schoolId: r.schoolId, schoolName: school?.name ?? null, studentId: r.studentId, studentName: student?.name ?? "Student",
       applicantId: r.applicantId, applicantName: applicant?.name ?? "Applicant", applicantRole: r.applicantRole,
       answers: r.answers ?? null, signals: (r.signals as ScholarshipApplicationDto["signals"]) ?? null, status: r.status,
-      consentById: r.consentById, consentAt: r.consentAt, awardMinor: r.awardMinor, reviewNote: r.reviewNote,
+      consentById: r.consentById, consentAt: r.consentAt,
+      supervisorById: r.supervisorById, supervisorAt: r.supervisorAt, supervisorNote: r.supervisorNote,
+      parentNote: r.parentNote, principalById: r.principalById, principalAt: r.principalAt, principalNote: r.principalNote,
+      rejectedStage: r.rejectedStage,
+      awardMinor: r.awardMinor, reviewNote: r.reviewNote,
       createdAt: r.createdAt, updatedAt: r.updatedAt,
     }];
   }
 
   private programDto(r: {
     id: string; title: string; description: string | null; budgetMinor: number; awardMinor: number;
-    awardKind: string; selectionBasis: string; eligibility: unknown; opensAt: Date; closesAt: Date; status: string; createdAt: Date;
+    awardKind: string; selectionBasis: string; eligibility: unknown; opensAt: Date; closesAt: Date; status: string;
+    category: string; examMode: string | null; examAt: Date | null; examVenue: string | null; createdAt: Date;
   }): ScholarshipProgramDto {
     return {
       id: r.id, title: r.title, description: r.description, budgetMinor: r.budgetMinor, awardMinor: r.awardMinor,
       awardKind: r.awardKind, selectionBasis: r.selectionBasis, eligibility: r.eligibility ?? null,
-      opensAt: r.opensAt, closesAt: r.closesAt, status: r.status, createdAt: r.createdAt,
+      opensAt: r.opensAt, closesAt: r.closesAt, status: r.status,
+      category: r.category, examMode: r.examMode, examAt: r.examAt, examVenue: r.examVenue,
+      createdAt: r.createdAt,
     };
   }
 

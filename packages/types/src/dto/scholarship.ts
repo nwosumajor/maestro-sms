@@ -7,12 +7,59 @@ export const SCHOLARSHIP_AWARD_KINDS = ["FEES_CREDIT", "SUBSCRIPTION_CREDIT"] as
 export const SCHOLARSHIP_SELECTION_BASES = ["MERIT", "NEED", "BOTH"] as const;
 export const SCHOLARSHIP_APPLICATION_STATUSES = [
   "DRAFT",
+  "PENDING_SUPERVISOR",
+  "PENDING_PARENT",
+  "PENDING_PRINCIPAL",
   "SUBMITTED",
   "UNDER_REVIEW",
   "SHORTLISTED",
+  "QUALIFIED",
   "AWARDED",
   "REJECTED",
 ] as const;
+
+/** Program category the platform owner selects. */
+export const SCHOLARSHIP_CATEGORIES = [
+  "GENERAL_SCIENCE",
+  "ART",
+  "COMMUNITY_DEVELOPMENT",
+  "MATHEMATICS",
+  "SPECIAL",
+] as const;
+export type ScholarshipCategory = (typeof SCHOLARSHIP_CATEGORIES)[number];
+
+export const SCHOLARSHIP_CATEGORY_LABEL: Record<ScholarshipCategory, string> = {
+  GENERAL_SCIENCE: "General Science scholarship",
+  ART: "Art scholarship",
+  COMMUNITY_DEVELOPMENT: "Community Development scholarship",
+  MATHEMATICS: "Mathematics scholarship",
+  SPECIAL: "Special scholarship",
+};
+
+/** How the qualification exam is sat. */
+export const SCHOLARSHIP_EXAM_MODES = ["ONLINE_CBT", "GAMES", "PHYSICAL"] as const;
+export type ScholarshipExamMode = (typeof SCHOLARSHIP_EXAM_MODES)[number];
+
+export const SCHOLARSHIP_EXAM_MODE_LABEL: Record<ScholarshipExamMode, string> = {
+  ONLINE_CBT: "Online CBT mock exam",
+  GAMES: "Games arena",
+  PHYSICAL: "Physical scheduled exam",
+};
+
+/** Number of awardees per program — the Best Three. */
+export const SCHOLARSHIP_MAX_AWARDS = 3;
+
+/** The student's own detailed request form (stored in `answers`). The verified
+ *  academics/attendance/discipline/tasks snapshot lives in `signals` — the form
+ *  carries what only the student can tell us. */
+export interface ScholarshipRequestForm {
+  /** Why the student is requesting the scholarship (required). */
+  reason: string;
+  skills?: string;
+  achievements?: string;
+  extracurricular?: string;
+  futureGoals?: string;
+}
 
 export type ScholarshipProgramStatus = (typeof SCHOLARSHIP_PROGRAM_STATUSES)[number];
 export type ScholarshipAwardKind = (typeof SCHOLARSHIP_AWARD_KINDS)[number];
@@ -33,6 +80,12 @@ export interface ScholarshipProgramDto {
   opensAt: Date;
   closesAt: Date;
   status: string;
+  /** Category (GENERAL_SCIENCE | ART | COMMUNITY_DEVELOPMENT | MATHEMATICS | SPECIAL). */
+  category: string;
+  /** Qualification-exam details (set once candidates qualify). */
+  examMode: string | null;
+  examAt: Date | null;
+  examVenue: string | null;
   createdAt: Date;
 }
 
@@ -45,6 +98,12 @@ export interface ApplicationSignalsDto {
   attendanceRatePct: number | null;
   /** Total outstanding fees in minor units (need). */
   outstandingFeesMinor: number;
+  /** ACTIVE class enrolments at submission (the student's class). */
+  classNames?: string[];
+  /** Discipline complaints filed AGAINST the student (count only). */
+  disciplineComplaints?: number;
+  /** Completed (DONE) task assignments (count). */
+  tasksCompleted?: number;
   capturedAt: Date;
 }
 
@@ -67,6 +126,16 @@ export interface ScholarshipApplicationDto {
   status: string;
   consentById: string | null;
   consentAt: Date | null;
+  /** Student-chain stage records (who decided + when + note). */
+  supervisorById: string | null;
+  supervisorAt: Date | null;
+  supervisorNote: string | null;
+  parentNote: string | null;
+  principalById: string | null;
+  principalAt: Date | null;
+  principalNote: string | null;
+  /** Where a REJECTED application died: SUPERVISOR | PARENT | PRINCIPAL | PLATFORM. */
+  rejectedStage: string | null;
   awardMinor: number | null;
   reviewNote: string | null;
   createdAt: Date;
@@ -79,4 +148,8 @@ export interface ScholarshipPortalDto {
   programs: ScholarshipProgramDto[];
   students: { id: string; name: string }[];
   applications: ScholarshipApplicationDto[];
+  /** Applications awaiting MY decision at my chain stage: a class supervisor's
+   *  PENDING_SUPERVISOR items, a guardian's PENDING_PARENT items, a principal's
+   *  PENDING_PRINCIPAL items. Empty for students. */
+  pendingDecisions: ScholarshipApplicationDto[];
 }

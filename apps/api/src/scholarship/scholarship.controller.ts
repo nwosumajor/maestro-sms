@@ -33,9 +33,14 @@ const programSchema = z.object({
   opensAt: z.string().datetime(),
   closesAt: z.string().datetime(),
   status: z.enum(["DRAFT", "OPEN", "CLOSED", "ARCHIVED"]).optional(),
+  category: z.enum(["GENERAL_SCIENCE", "ART", "COMMUNITY_DEVELOPMENT", "MATHEMATICS", "SPECIAL"]).optional(),
+  examMode: z.enum(["ONLINE_CBT", "GAMES", "PHYSICAL"]).nullish(),
+  examAt: z.string().datetime().nullish(),
+  examVenue: z.string().max(300).nullish(),
 });
 const programUpdateSchema = programSchema.partial();
-const reviewSchema = z.object({ action: z.enum(["REVIEW", "SHORTLIST", "REJECT"]), note: z.string().max(2000).optional() });
+const stageDecisionSchema = z.object({ decision: z.enum(["APPROVE", "REJECT"]), note: z.string().max(2000).optional() });
+const reviewSchema = z.object({ action: z.enum(["REVIEW", "SHORTLIST", "QUALIFY", "REJECT"]), note: z.string().max(2000).optional() });
 const awardSchema = z.object({ awardMinor: z.number().int().positive().optional(), note: z.string().max(2000).optional() });
 
 @Controller("scholarships")
@@ -83,6 +88,21 @@ export class ScholarshipController {
   @RequirePermission(SCHOLARSHIP_PERMISSIONS.APPLY)
   submit(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
     return this.scholarships.submit(p, id);
+  }
+
+  /** Chain decision (student-initiated requests): the CLASS SUPERVISOR, then the
+   *  GUARDIAN (whose approval doubles as consent), then the PRINCIPAL each
+   *  approve or reject. One endpoint — the service routes by the application's
+   *  current stage and verifies the caller's RELATIONSHIP to the student
+   *  (teacher-of-class / linked guardian / principal role); wrong person → 404. */
+  @Post("applications/:id/decision")
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.APPLY)
+  decideStage(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(stageDecisionSchema)) body: z.infer<typeof stageDecisionSchema>,
+  ) {
+    return this.scholarships.decideStage(p, id, body);
   }
 
   // --- platform owner (super_admin) ------------------------------------------
@@ -145,5 +165,13 @@ export class ScholarshipController {
     @Body(new ZodValidationPipe(awardSchema)) body: z.infer<typeof awardSchema>,
   ) {
     return this.admin.decide(p, id, { action: "AWARD", ...body });
+  }
+
+  /** Announce the qualification exam to every QUALIFIED candidate (category,
+   *  mode — online CBT / games / physical — date and venue). */
+  @Post("programs/:id/announce-exam")
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.ADMIN)
+  announceExam(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.admin.announceExam(p, id);
   }
 }

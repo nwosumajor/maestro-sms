@@ -31,7 +31,8 @@ export function ScholarshipAdmin() {
   const [msg, setMsg] = React.useState<{ ok: boolean; text: string } | null>(null);
 
   // create-program form
-  const [f, setF] = React.useState({ title: "", description: "", award: "", budget: "", basis: "BOTH", opensAt: "", closesAt: "" });
+  const [f, setF] = React.useState({ title: "", description: "", award: "", budget: "", basis: "BOTH", opensAt: "", closesAt: "", category: "SPECIAL" });
+  const [exam, setExam] = React.useState<Record<string, { mode: string; at: string; venue: string }>>({});
 
   const loadPrograms = React.useCallback(async () => {
     const res = await fetch("/api/sms/scholarships/programs");
@@ -58,11 +59,12 @@ export function ScholarshipAdmin() {
       opensAt: new Date(f.opensAt).toISOString(),
       closesAt: new Date(f.closesAt).toISOString(),
       status: "OPEN",
+      category: f.category,
     });
     setBusy(null);
     if (res.ok) {
       setMsg({ ok: true, text: "Program created and opened for applications." });
-      setF({ title: "", description: "", award: "", budget: "", basis: "BOTH", opensAt: "", closesAt: "" });
+      setF({ title: "", description: "", award: "", budget: "", basis: "BOTH", opensAt: "", closesAt: "", category: "SPECIAL" });
       void loadPrograms();
     } else setMsg({ ok: false, text: await readApiError(res) });
   };
@@ -75,11 +77,35 @@ export function ScholarshipAdmin() {
     else setMsg({ ok: false, text: await readApiError(res) });
   };
 
-  const review = async (id: string, action: "REVIEW" | "SHORTLIST" | "REJECT") => {
+  const review = async (id: string, action: "REVIEW" | "SHORTLIST" | "QUALIFY" | "REJECT") => {
     setBusy(`rev-${id}`); setMsg(null);
     const res = await sendSms("POST", `scholarships/applications/${id}/review`, { action });
     setBusy(null);
-    if (res.ok) { setMsg({ ok: true, text: `Marked ${action.toLowerCase()}.` }); void loadApps(); }
+    if (res.ok) {
+      setMsg({ ok: true, text: action === "QUALIFY" ? "Qualified — the student and guardians have been notified." : `Marked ${action.toLowerCase()}.` });
+      void loadApps();
+    } else setMsg({ ok: false, text: res.error ?? "Failed." });
+  };
+
+  const setExamDetails = async (id: string) => {
+    const e = exam[id];
+    if (!e?.mode || !e?.at) { setMsg({ ok: false, text: "Pick an exam mode and date first." }); return; }
+    setBusy(`exam-${id}`); setMsg(null);
+    const res = await sendWithStepUp("PUT", `scholarships/programs/${id}`, {
+      examMode: e.mode,
+      examAt: new Date(e.at).toISOString(),
+      examVenue: e.venue || null,
+    });
+    setBusy(null);
+    if (res.ok) { setMsg({ ok: true, text: "Exam details saved — announce when ready." }); void loadPrograms(); }
+    else setMsg({ ok: false, text: await readApiError(res) });
+  };
+
+  const announceExam = async (id: string) => {
+    setBusy(`announce-${id}`); setMsg(null);
+    const res = await sendSms<{ notified: number }>("POST", `scholarships/programs/${id}/announce-exam`);
+    setBusy(null);
+    if (res.ok) { setMsg({ ok: true, text: `Exam announced to ${res.data?.notified ?? 0} qualified candidate(s) and their guardians.` }); }
     else setMsg({ ok: false, text: res.error ?? "Failed." });
   };
 
@@ -121,6 +147,16 @@ export function ScholarshipAdmin() {
                 <option value="BOTH">Merit + need</option><option value="MERIT">Merit</option><option value="NEED">Need</option>
               </select>
             </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Category</Label>
+              <select value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })} className={sel}>
+                <option value="GENERAL_SCIENCE">General Science</option>
+                <option value="ART">Art</option>
+                <option value="COMMUNITY_DEVELOPMENT">Community Development</option>
+                <option value="MATHEMATICS">Mathematics</option>
+                <option value="SPECIAL">Special</option>
+              </select>
+            </div>
             <div className="space-y-1"><Label className="text-xs">Opens</Label><Input type="date" className="w-40" value={f.opensAt} onChange={(e) => setF({ ...f, opensAt: e.target.value })} /></div>
             <div className="space-y-1"><Label className="text-xs">Closes</Label><Input type="date" className="w-40" value={f.closesAt} onChange={(e) => setF({ ...f, closesAt: e.target.value })} /></div>
             <Button disabled={busy === "create"} onClick={createProgram}>Create & open</Button>
@@ -133,15 +169,68 @@ export function ScholarshipAdmin() {
           <div className="space-y-1.5">
             <p className="text-xs font-medium text-muted-foreground">Programs</p>
             {programs.map((pr) => (
-              <div key={pr.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/60 px-3 py-2 text-sm">
-                <span>
-                  <span className="font-medium">{pr.title}</span> · {money(pr.awardMinor)} · closes {shortDate(pr.closesAt)}{" "}
-                  <Badge variant={pr.status === "OPEN" ? "secondary" : "outline"}>{pr.status}</Badge>
-                </span>
-                <span className="flex gap-1">
-                  {pr.status !== "OPEN" && <Button size="sm" variant="outline" disabled={busy === `prog-${pr.id}`} onClick={() => setProgramStatus(pr.id, "OPEN")}>Open</Button>}
-                  {pr.status === "OPEN" && <Button size="sm" variant="outline" disabled={busy === `prog-${pr.id}`} onClick={() => setProgramStatus(pr.id, "CLOSED")}>Close</Button>}
-                </span>
+              <div key={pr.id} className="space-y-2 rounded-md border border-border/60 px-3 py-2 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span>
+                    <span className="font-medium">{pr.title}</span> · {money(pr.awardMinor)} · closes {shortDate(pr.closesAt)}{" "}
+                    <Badge variant="outline">{String(pr.category).replaceAll("_", " ").toLowerCase()}</Badge>{" "}
+                    <Badge variant={pr.status === "OPEN" ? "secondary" : "outline"}>{pr.status}</Badge>
+                    {pr.examMode && pr.examAt && (
+                      <span className="ml-1 text-xs text-muted-foreground">
+                        exam: {pr.examMode.replaceAll("_", " ").toLowerCase()} · {shortDate(pr.examAt)}
+                      </span>
+                    )}
+                  </span>
+                  <span className="flex gap-1">
+                    {pr.status !== "OPEN" && <Button size="sm" variant="outline" disabled={busy === `prog-${pr.id}`} onClick={() => setProgramStatus(pr.id, "OPEN")}>Open</Button>}
+                    {pr.status === "OPEN" && <Button size="sm" variant="outline" disabled={busy === `prog-${pr.id}`} onClick={() => setProgramStatus(pr.id, "CLOSED")}>Close</Button>}
+                  </span>
+                </div>
+                {/* Qualification exam: pick mode + date (+ venue), save, then announce to all QUALIFIED candidates. */}
+                <div className="flex flex-wrap items-end gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Exam mode</Label>
+                    <select
+                      value={exam[pr.id]?.mode ?? pr.examMode ?? ""}
+                      onChange={(e) => setExam((s) => ({ ...s, [pr.id]: { mode: e.target.value, at: s[pr.id]?.at ?? "", venue: s[pr.id]?.venue ?? "" } }))}
+                      className={sel}
+                    >
+                      <option value="">Select…</option>
+                      <option value="ONLINE_CBT">Online CBT mock</option>
+                      <option value="GAMES">Games arena</option>
+                      <option value="PHYSICAL">Physical exam</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Exam date</Label>
+                    <Input
+                      type="datetime-local"
+                      className="w-52"
+                      value={exam[pr.id]?.at ?? ""}
+                      onChange={(e) => setExam((s) => ({ ...s, [pr.id]: { mode: s[pr.id]?.mode ?? pr.examMode ?? "", at: e.target.value, venue: s[pr.id]?.venue ?? "" } }))}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Venue / link</Label>
+                    <Input
+                      className="w-48"
+                      placeholder="Hall / platform note"
+                      value={exam[pr.id]?.venue ?? pr.examVenue ?? ""}
+                      onChange={(e) => setExam((s) => ({ ...s, [pr.id]: { mode: s[pr.id]?.mode ?? pr.examMode ?? "", at: s[pr.id]?.at ?? "", venue: e.target.value } }))}
+                    />
+                  </div>
+                  <Button size="sm" variant="outline" disabled={busy === `exam-${pr.id}`} onClick={() => setExamDetails(pr.id)}>
+                    Save exam
+                  </Button>
+                  <Button
+                    size="sm"
+                    disabled={busy === `announce-${pr.id}` || !(pr.examMode && pr.examAt)}
+                    title={pr.examMode && pr.examAt ? "Notify every qualified candidate + guardians" : "Save the exam mode and date first"}
+                    onClick={() => announceExam(pr.id)}
+                  >
+                    Announce exam
+                  </Button>
+                </div>
               </div>
             ))}
           </div>
@@ -156,6 +245,7 @@ export function ScholarshipAdmin() {
               <option value="SUBMITTED">Submitted</option>
               <option value="UNDER_REVIEW">Under review</option>
               <option value="SHORTLISTED">Shortlisted</option>
+              <option value="QUALIFIED">Qualified (exam candidates)</option>
               <option value="AWARDED">Awarded</option>
               <option value="REJECTED">Rejected</option>
             </select>
@@ -184,6 +274,11 @@ export function ScholarshipAdmin() {
                     <div className="mt-2 flex flex-wrap gap-1">
                       <Button size="sm" variant="ghost" disabled={busy === `rev-${a.id}`} onClick={() => review(a.id, "REVIEW")}>Reviewing</Button>
                       <Button size="sm" variant="ghost" disabled={busy === `rev-${a.id}`} onClick={() => review(a.id, "SHORTLIST")}>Shortlist</Button>
+                      {a.status !== "QUALIFIED" && (
+                        <Button size="sm" variant="outline" disabled={busy === `rev-${a.id}`} onClick={() => review(a.id, "QUALIFY")}>
+                          Qualify for exam
+                        </Button>
+                      )}
                       <Button size="sm" disabled={busy === `award-${a.id}`} onClick={() => award(a)}>Award {money(a.awardMinorOffered)}</Button>
                       <Button size="sm" variant="ghost" className="text-destructive" disabled={busy === `rev-${a.id}`} onClick={() => review(a.id, "REJECT")}>Reject</Button>
                     </div>
