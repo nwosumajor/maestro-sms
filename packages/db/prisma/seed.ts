@@ -214,6 +214,23 @@ async function main() {
     create: { name: "MAESTRO-SMS", slug: "sms-platform", isPlatform: true },
   });
 
+  // SYSTEM actor (fixed zero UUID = SYSTEM_ACTOR_ID in the api). Webhook/system
+  // paths (e.g. the referral-reward grant) write audit entries attributed to it;
+  // audit_log.actorId carries a FK to user, so the row must exist. NO roles, a
+  // DISABLED status and an unusable password hash — it can never log in.
+  await prisma.user.upsert({
+    where: { id: "00000000-0000-0000-0000-000000000000" },
+    update: { schoolId: platformOrg.id, status: "DISABLED" },
+    create: {
+      id: "00000000-0000-0000-0000-000000000000",
+      schoolId: platformOrg.id,
+      email: "system@sms.platform",
+      name: "System",
+      passwordHash: "!system-no-login",
+      status: "DISABLED",
+    },
+  });
+
   for (const key of PERMS) {
     await prisma.permission.upsert({ where: { key }, update: {}, create: { key } });
   }

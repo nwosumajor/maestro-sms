@@ -70,6 +70,16 @@ d("BillingService integration (per-seat checkout, webhook, dunning, RLS)", () =>
       `INSERT INTO "user" (id,"schoolId",email,name,"passwordHash","updatedAt") VALUES ($1,$2,$3,'Admin','x',now())`,
       [UA, SA, UA + "@t"],
     );
+    // The SYSTEM actor (zero UUID): the referral-reward grant audits as it, and
+    // audit_log.actorId carries a FK to user. The seed creates it in real DBs;
+    // create it here so the suite stays hermetic. Attach to school A (any
+    // school satisfies the FK) and never delete another run's row.
+    await admin.query(
+      `INSERT INTO "user" (id,"schoolId",email,name,"passwordHash",status,"updatedAt")
+       VALUES ('00000000-0000-0000-0000-000000000000',$1,'system@sms.platform','System','!','DISABLED',now())
+       ON CONFLICT (id) DO NOTHING`,
+      [SA],
+    );
 
     const tenant = new PrismaTenantService() as never;
     entitlements = new ModuleEntitlementService(tenant);
