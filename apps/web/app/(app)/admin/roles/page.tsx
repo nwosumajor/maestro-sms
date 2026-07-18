@@ -6,6 +6,7 @@ import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { UserRolesManager } from "@/components/admin/UserRolesManager";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -22,13 +23,8 @@ export default async function RolesPage() {
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="admin" permissions={user.permissions}>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Roles &amp; access</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Assign roles to users in your school. Role→permission definitions are
-              platform-level (see Recertification to review them).
-            </p>
-          </div>
+          <PageHeader title={<>Roles &amp; access</>} subtitle={<>Assign roles to users in your school. Role→permission definitions are
+              platform-level (see Recertification to review them).</>} />
           <Link href="/admin" className="text-sm text-muted-foreground hover:underline">← Admin</Link>
         </div>
         {users === null || users.length === 0 ? (

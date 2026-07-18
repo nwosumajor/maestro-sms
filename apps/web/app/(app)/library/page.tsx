@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { LibraryManager } from "@/components/library/LibraryManager";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -24,14 +25,9 @@ export default async function LibraryPage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="library" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Library</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {canManage
+        <PageHeader title={<>Library</>} subtitle={<>{canManage
               ? "Barcode catalogue, issue/return/renew, overdue fines + receipts, and CSV export."
-              : "Search the catalogue, issue books to yourself, and manage your loans."}
-          </p>
-        </div>
+              : "Search the catalogue, issue books to yourself, and manage your loans."}</>} />
         <LibraryManager books={books ?? []} loans={loans ?? []} apiBaseUrl={API_BASE} canManage={canManage} />
       </div>
     </AppShell>

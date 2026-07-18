@@ -6,6 +6,7 @@ import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { TransportManager } from "@/components/transport/TransportManager";
 import { Kpi } from "@/components/charts/charts";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -28,14 +29,9 @@ export default async function TransportPage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="transport" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Transport Management</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {isDriver
+        <PageHeader title={<>Transport Management</>} subtitle={<>{isDriver
               ? "Your assigned vehicle — its route, stops and passengers."
-              : "Vehicles, routes & stops, seat-aware student assignment, and transport-fee scheduling — billed alongside academic fees. Route changes alert parents automatically."}
-          </p>
-        </div>
+              : "Vehicles, routes & stops, seat-aware student assignment, and transport-fee scheduling — billed alongside academic fees. Route changes alert parents automatically."}</>} />
 
         {summary && (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">

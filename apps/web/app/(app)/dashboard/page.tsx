@@ -33,6 +33,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { money, shortDate } from "@/lib/format";
+import { PageHeader } from "@/components/shell/PageHeader";
 import { PlatformAnalytics } from "@/components/operator/PlatformAnalytics";
 import { GamesAnalytics } from "@/components/operator/GamesAnalytics";
 
@@ -50,13 +51,6 @@ type Ev = Serialized<CalendarEventDto>;
 // actions, and two live feeds. All data reads are null-safe: a missing
 // permission renders a smaller console, never an error.
 // =============================================================================
-
-// Exercise-book rule grid — the app's signature texture (same as /login).
-const RULE_GRID: React.CSSProperties = {
-  backgroundImage:
-    "linear-gradient(hsl(var(--foreground) / 0.05) 1px, transparent 1px), linear-gradient(90deg, hsl(var(--foreground) / 0.05) 1px, transparent 1px)",
-  backgroundSize: "32px 32px",
-};
 
 // Deterministic Lagos-time formatting (matches the app's pinned-TZ convention).
 const lagosNow = () => new Date();
@@ -146,22 +140,12 @@ export default async function DashboardPage() {
     return (
       <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="dashboard" permissions={user.permissions}>
         <div className="space-y-6">
-          <div className="relative overflow-hidden rounded-2xl border border-border/70 bg-card shadow-card">
-            <div aria-hidden className="pointer-events-none absolute inset-0 opacity-60" style={RULE_GRID} />
-            <span aria-hidden className="absolute inset-y-0 left-0 w-[3px] bg-rule/80" />
-            <div className="relative flex flex-wrap items-end justify-between gap-3 px-6 py-6">
-              <div>
-                <p className="eyebrow">{DAY_FMT.format(lagosNow())}</p>
-                <h1 className="mt-1.5 font-display text-3xl font-semibold tracking-tight">
-                  {greeting()}, {firstName}.
-                </h1>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Business health across every customer school — management lives on the Operator console.
-                </p>
-              </div>
-              <Link href="/operator"><Button variant="outline">Operator console →</Button></Link>
-            </div>
-          </div>
+          <PageHeader
+            eyebrow={DAY_FMT.format(lagosNow())}
+            title={<>{greeting()}, {firstName}.</>}
+            subtitle={<>Business health across every customer school — management lives on the Operator console.</>}
+            actions={<Link href="/operator"><Button variant="outline">Operator console →</Button></Link>}
+          />
           <PlatformAnalytics data={analytics ?? null} />
           <GamesAnalytics data={games ?? null} />
         </div>
@@ -230,16 +214,11 @@ export default async function DashboardPage() {
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="dashboard" permissions={user.permissions}>
       <div className="space-y-6">
         {/* ---- The day-ledger header: today's page of the register ---------- */}
-        <div className="relative overflow-hidden rounded-2xl border border-border/70 bg-card shadow-card">
-          <div aria-hidden className="pointer-events-none absolute inset-0 opacity-60" style={RULE_GRID} />
-          {/* The exercise book's red margin rule — the console's signature. */}
-          <span aria-hidden className="absolute inset-y-0 left-0 w-[3px] bg-rule/80" />
-          <div className="relative px-6 py-6 sm:px-7">
-            <p className="eyebrow">{DAY_FMT.format(lagosNow())}</p>
-            <h1 className="mt-1.5 font-display text-3xl font-semibold tracking-tight sm:text-[2.1rem]">
-              {greeting()}, {firstName}.
-            </h1>
-            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-muted-foreground">
+        <PageHeader
+          eyebrow={DAY_FMT.format(lagosNow())}
+          title={<>{greeting()}, {firstName}.</>}
+          subtitle={
+            <span className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
               <span className="font-medium text-foreground/80">{user.schoolName}</span>
               <span aria-hidden className="hidden h-3.5 w-px bg-border sm:block" />
               <span className="flex flex-wrap gap-1.5">
@@ -252,17 +231,18 @@ export default async function DashboardPage() {
                   </span>
                 ))}
               </span>
-            </div>
-          </div>
+            </span>
+          }
+        >
           {/* ---- Ledger KPI strip -------------------------------------------- */}
           {kpis.length > 0 && (
-            <div className="relative flex flex-wrap border-t border-border/60 bg-background/60 backdrop-blur-sm">
+            <div className="flex flex-wrap">
               {kpis.map((s) => (
                 <Stat key={s.label} {...s} />
               ))}
             </div>
           )}
-        </div>
+        </PageHeader>
 
         {/* ---- Quick actions ------------------------------------------------ */}
         {actions.length > 0 && (

@@ -9,6 +9,7 @@ import { FeeReminderButton } from "@/components/fees/FeeReminderButton";
 import { AppShell } from "@/components/shell/AppShell";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { money } from "@/lib/format";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -37,10 +38,7 @@ export default async function FinanceReportsPage() {
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="fees" permissions={user.permissions}>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Finance reports</h1>
-            <p className="mt-1 text-sm text-muted-foreground">Receivables aging and collection summary.</p>
-          </div>
+          <PageHeader title={<>Finance reports</>} subtitle={<>Receivables aging and collection summary.</>} />
           <Link href="/fees" className="text-sm text-muted-foreground hover:underline">← Fees</Link>
         </div>
 

@@ -7,6 +7,7 @@ import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { AuditLog } from "@/components/security/AuditLog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -27,13 +28,8 @@ export default async function AuditPage({ searchParams }: { searchParams: { acti
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="admin" permissions={user.permissions}>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Audit log</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Every mutation and sensitive access, append-only and tamper-evident.
-              Scoped to your school.
-            </p>
-          </div>
+          <PageHeader title={<>Audit log</>} subtitle={<>Every mutation and sensitive access, append-only and tamper-evident.
+              Scoped to your school.</>} />
           <Link href="/admin" className="text-sm text-muted-foreground hover:underline">← Admin</Link>
         </div>
 

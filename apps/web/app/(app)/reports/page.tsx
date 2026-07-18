@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { AppShell } from "@/components/shell/AppShell";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -28,10 +29,7 @@ export default async function ReportsPage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="reports" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Report Center</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Every report you can access, in one place.</p>
-        </div>
+        <PageHeader title={<>Report Center</>} subtitle={<>Every report you can access, in one place.</>} />
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {visible.map((r) => (
             <Link key={r.href} href={r.href}>

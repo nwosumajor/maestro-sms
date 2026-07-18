@@ -10,6 +10,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
 import { shortDate, titleCase } from "@/lib/format";
 import { TakeRegister } from "@/components/attendance/TakeRegister";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -45,14 +46,9 @@ export default async function AttendancePage({
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="attendance" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Attendance</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {canWrite
+        <PageHeader title={<>Attendance</>} subtitle={<>{canWrite
               ? "Take a class register, and review a student's attendance history."
-              : "Your attendance history. Guardians are alerted automatically on an absence."}
-          </p>
-        </div>
+              : "Your attendance history. Guardians are alerted automatically on an absence."}</>} />
 
         {canWrite && classes && classes.length > 0 && (
           <Card>

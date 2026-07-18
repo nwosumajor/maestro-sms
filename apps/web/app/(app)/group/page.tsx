@@ -6,6 +6,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { money, shortDate } from "@/lib/format";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -20,15 +21,8 @@ export default async function GroupPage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="group" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {data ? data.groupName : "Group console"}
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            One view across every campus — enrollment, attendance, collections, and each school&apos;s
-            subscription health.
-          </p>
-        </div>
+        <PageHeader title={<>{data ? data.groupName : "Group console"}</>} subtitle={<>One view across every campus — enrollment, attendance, collections, and each school&apos;s
+            subscription health.</>} />
 
         {!data ? (
           <Alert variant="info">

@@ -10,6 +10,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { money, shortDate, titleCase } from "@/lib/format";
 import { FeesAdmin } from "@/components/fees/FeesAdmin";
 import { PendingPayments, type PendingPayment } from "@/components/fees/PendingPayments";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -40,14 +41,9 @@ export default async function FeesPage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="fees" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Fees &amp; Billing</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {canManage
+        <PageHeader title={<>Fees &amp; Billing</>} subtitle={<>{canManage
               ? "All invoices in your school. Open one to record a payment."
-              : "Invoices for your family. Open one to see the balance and payment history."}
-          </p>
-        </div>
+              : "Invoices for your family. Open one to see the balance and payment history."}</>} />
 
         {canApprove && pending && pending.length > 0 && <PendingPayments payments={pending} />}
 

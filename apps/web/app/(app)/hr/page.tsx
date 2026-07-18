@@ -14,6 +14,7 @@ import { OrgChart } from "@/components/hr/OrgChart";
 import { EmployeeRow } from "@/components/hr/EmployeeRow";
 import { SalaryChanges } from "@/components/hr/SalaryChanges";
 import { LeaveAdmin } from "@/components/hr/LeaveAdmin";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -41,12 +42,7 @@ export default async function HrPage() {
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="hr" permissions={user.permissions}>
       <div className="space-y-6">
         <div className="flex items-start justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">HR — staff records</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Employment records. Salaries are encrypted at rest and shown only to HR readers.
-            </p>
-          </div>
+          <PageHeader title={<>HR — staff records</>} subtitle={<>Employment records. Salaries are encrypted at rest and shown only to HR readers.</>} />
           <div className="flex shrink-0 gap-2">
             <Link href="/hr/analytics" className="inline-flex h-9 items-center rounded-md border border-input px-3 text-sm font-medium hover:bg-accent">Analytics</Link>
             {hasPermission(user.permissions, "hr.recruit.manage") && (

@@ -1,5 +1,6 @@
 import { auth, signOut } from "@/lib/auth";
 import { ChangePasswordForm } from "@/components/auth/ChangePasswordForm";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -18,9 +19,7 @@ export default async function ChangePasswordPage({ searchParams }: { searchParam
           </span>
           <span className="text-sm font-semibold tracking-tight">{session?.user.schoolName ?? "Account"}</span>
         </div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          {expired ? "Your password has expired" : "Change your password"}
-        </h1>
+        <PageHeader title={<>{expired ? "Your password has expired" : "Change your password"}</>} />
         <p className="mt-1.5 text-sm text-muted-foreground">
           {expired
             ? "For security, passwords must be reset every 30 days. Set a new one to continue."

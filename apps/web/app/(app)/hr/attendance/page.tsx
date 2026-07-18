@@ -7,6 +7,7 @@ import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { AttendanceAdmin, BiometricAdmin } from "@/components/hr/AttendanceAdmin";
 import { DutyRoster } from "@/components/hr/DutyRoster";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -30,16 +31,10 @@ export default async function StaffAttendancePage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="hr" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <Link href="/hr" className="text-sm text-muted-foreground hover:underline">
+        <PageHeader eyebrow={<><Link href="/hr" className="text-sm text-muted-foreground hover:underline">
             ← Back to HR
-          </Link>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">Staff attendance</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            The daily register, the clock-in kiosk, and this month’s roll-up. Off-site clock-ins are flagged
-            for review — they never trigger automatic action.
-          </p>
-        </div>
+          </Link></>} title={<>Staff attendance</>} subtitle={<>The daily register, the clock-in kiosk, and this month’s roll-up. Off-site clock-ins are flagged
+            for review — they never trigger automatic action.</>} />
         <AttendanceAdmin initialRegister={register} initialKiosk={kiosk} initialSummary={summary} canWrite={canWrite} />
         <BiometricAdmin staff={(register?.rows ?? []).map((r) => ({ userId: r.userId, userName: r.userName }))} canWrite={canWrite} />
         <DutyRoster staff={(register?.rows ?? []).map((r) => ({ userId: r.userId, userName: r.userName }))} canWrite={canWrite} />

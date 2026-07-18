@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { dateTime } from "@/lib/format";
 import { Composer } from "@/components/messaging/Composer";
 import { ReplyBox } from "@/components/messaging/ReplyBox";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -32,7 +33,7 @@ export default async function MessagesPage({ searchParams }: { searchParams: { t
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="messages" permissions={user.permissions}>
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-semibold tracking-tight">Messages</h1>
+          <PageHeader title={<>Messages</>} />
           {canSend && contacts && <Composer contacts={contacts} />}
         </div>
 

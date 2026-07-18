@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { RosterStudents } from "@/components/lms/RosterStudents";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -30,10 +31,7 @@ export default async function ClassRosterPage({ params }: { params: { id: string
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="classes" permissions={user.permissions}>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">{roster.class.name} — roster</h1>
-            <p className="mt-1 text-sm text-muted-foreground">{roster.class.subject ?? "General"}</p>
-          </div>
+          <PageHeader title={<>{roster.class.name} — roster</>} subtitle={<>{roster.class.subject ?? "General"}</>} />
           <div className="flex items-center gap-3">
             <a href={`/api/sms/classes/${params.id}/roster.csv`} className={buttonVariants({ size: "sm", variant: "outline" })}>
               Export CSV

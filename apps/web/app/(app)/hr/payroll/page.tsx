@@ -6,6 +6,7 @@ import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { PayrollManager } from "@/components/hr/PayrollManager";
 import { LoansAdmin } from "@/components/hr/LoansAdmin";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -23,12 +24,7 @@ export default async function PayrollPage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="hr" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Payroll</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Monthly runs snapshot each active employee&apos;s salary into encrypted payslips. Draft → finalize.
-          </p>
-        </div>
+        <PageHeader title={<>Payroll</>} subtitle={<>Monthly runs snapshot each active employee&apos;s salary into encrypted payslips. Draft → finalize.</>} />
         <PayrollManager runs={runs ?? []} canRun={canRun} />
         <LoansAdmin initial={loans ?? []} canApprove={canApprove} />
       </div>

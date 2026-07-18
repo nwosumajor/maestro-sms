@@ -6,7 +6,10 @@ const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElemen
     <div
       ref={ref}
       className={cn(
-        "rounded-xl border border-border/70 bg-card text-card-foreground shadow-card transition-shadow",
+        // Double-ring surface (Android/Material outline language): a solid inner
+        // border, a 3px breathing gap, then a hairline outer ring. Drawn with
+        // `outline` so it never shifts layout.
+        "rounded-2xl border border-border/80 bg-card text-card-foreground shadow-card outline outline-1 outline-offset-[3px] outline-border/40 transition-shadow",
         className,
       )}
       {...props}

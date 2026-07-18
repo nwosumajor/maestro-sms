@@ -2,6 +2,7 @@ import { hasPermission } from "@/lib/permissions";
 import { auth } from "@/lib/auth";
 import { AppShell } from "@/components/shell/AppShell";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -61,12 +62,7 @@ export default async function HelpPage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="help" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Help &amp; user guide</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            The application manual, tailored to your role. Every action below lives in the left navigation.
-          </p>
-        </div>
+        <PageHeader title={<>Help &amp; user guide</>} subtitle={<>The application manual, tailored to your role. Every action below lives in the left navigation.</>} />
 
         <Guide
           title="The basics (everyone)"

@@ -7,6 +7,7 @@ import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { money } from "@/lib/format";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -64,12 +65,7 @@ export default async function AdminPage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="admin" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Admin</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Operational overview and quick actions for {user.schoolName}.
-          </p>
-        </div>
+        <PageHeader title={<>Admin</>} subtitle={<>Operational overview and quick actions for {user.schoolName}.</>} />
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
           {stats.map((s) => (

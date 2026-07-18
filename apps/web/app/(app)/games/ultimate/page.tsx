@@ -7,6 +7,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CreateUltimateForm } from "@/components/game/UltimateAdmin";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -19,16 +20,10 @@ export default async function UltimateListPage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="ultimate" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <Link href="/games" className="text-sm text-muted-foreground hover:text-foreground">
+        <PageHeader eyebrow={<><Link href="/games" className="text-sm text-muted-foreground hover:text-foreground">
             ← Games
-          </Link>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">Ultimate · cross-school</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Play other schools under a handle — never your real name. Requires your school to opt in and a guardian
-            consent flag on file.
-          </p>
-        </div>
+          </Link></>} title={<>Ultimate · cross-school</>} subtitle={<>Play other schools under a handle — never your real name. Requires your school to opt in and a guardian
+            consent flag on file.</>} />
 
         {canAdmin && (
           <Card>

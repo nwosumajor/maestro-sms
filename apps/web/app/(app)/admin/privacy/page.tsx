@@ -6,6 +6,7 @@ import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ErasureReview, type ErasureRequest } from "@/components/privacy/ErasureReview";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -19,12 +20,7 @@ export default async function AdminPrivacyPage() {
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="admin" permissions={user.permissions}>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Erasure requests</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Right-to-erasure requests to review against retention obligations.
-            </p>
-          </div>
+          <PageHeader title={<>Erasure requests</>} subtitle={<>Right-to-erasure requests to review against retention obligations.</>} />
           <Link href="/admin" className="text-sm text-muted-foreground hover:underline">← Admin</Link>
         </div>
         {requests.length === 0 ? (

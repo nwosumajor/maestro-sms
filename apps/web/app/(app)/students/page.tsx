@@ -5,6 +5,7 @@ import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -18,13 +19,8 @@ export default async function StudentsPage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="students" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Students</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Students you can see — your own record, your children, or those you
-            teach. Open one for their profile, contacts, and (if permitted) medical record.
-          </p>
-        </div>
+        <PageHeader title={<>Students</>} subtitle={<>Students you can see — your own record, your children, or those you
+            teach. Open one for their profile, contacts, and (if permitted) medical record.</>} />
 
         {students === null || students.length === 0 ? (
           <Alert variant="info">

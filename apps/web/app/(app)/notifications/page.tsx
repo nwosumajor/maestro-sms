@@ -5,6 +5,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { NotificationInbox, type InboxData } from "@/components/notifications/NotificationInbox";
 import { SendAnnouncement } from "@/components/notifications/SendAnnouncement";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -20,13 +21,8 @@ export default async function NotificationsPage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="notifications" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Notifications</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Your inbox. Attendance alerts, invoices, receipts, and announcements
-            arrive here; external email delivery happens asynchronously.
-          </p>
-        </div>
+        <PageHeader title={<>Notifications</>} subtitle={<>Your inbox. Attendance alerts, invoices, receipts, and announcements
+            arrive here; external email delivery happens asynchronously.</>} />
         {data === null ? (
           <Alert variant="info">
             <AlertTitle>No access</AlertTitle>

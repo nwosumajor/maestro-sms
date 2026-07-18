@@ -7,6 +7,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CreateUserForm } from "@/components/admin/CreateUserForm";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -28,12 +29,7 @@ export default async function AdminUsersPage() {
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="admin" permissions={user.permissions}>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">School profiles</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Create and view the people in your school. Use Roles &amp; access to change a user&apos;s roles.
-            </p>
-          </div>
+          <PageHeader title={<>School profiles</>} subtitle={<>Create and view the people in your school. Use Roles &amp; access to change a user&apos;s roles.</>} />
           <Link href="/admin" className="text-sm text-muted-foreground hover:underline">← Admin</Link>
         </div>
 

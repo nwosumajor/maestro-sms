@@ -32,6 +32,7 @@ import { StartDuelButton, StartRingButton } from "@/components/game/HubActions";
 import { OpenRaceForm } from "@/components/game/OpenRaceForm";
 import { CreateLeagueForm } from "@/components/game/CreateLeagueForm";
 import { GameSettingsForm } from "@/components/game/GameSettingsForm";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -103,10 +104,7 @@ export default async function GamesPage() {
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="games" permissions={user.permissions}>
       <div className="space-y-6">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Games</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Code-cracking, quizzes, and board duels — school-safe, teacher-visible, all scores on the server.
-          </p>
+          <PageHeader title={<>Games</>} subtitle={<>Code-cracking, quizzes, and board duels — school-safe, teacher-visible, all scores on the server.</>} />
           {/* The house game's grammar, shown as a worked example. */}
           <p className="mt-2 inline-flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-border bg-muted/40 px-2.5 py-1.5 font-mono text-xs text-muted-foreground">
             <span>

@@ -5,6 +5,7 @@ import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ScholarshipPortal } from "@/components/scholarship/ScholarshipPortal";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -22,14 +23,9 @@ export default async function ScholarshipsPage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="scholarships" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Scholarships</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Platform-sponsored scholarships for students at your school. Students request directly with a detailed
+        <PageHeader title={<>Scholarships</>} subtitle={<>Platform-sponsored scholarships for students at your school. Students request directly with a detailed
             form — the request is approved by the class supervisor, then a parent/guardian, then the principal,
-            before the sponsor reviews, examines qualified candidates, and awards the best three.
-          </p>
-        </div>
+            before the sponsor reviews, examines qualified candidates, and awards the best three.</>} />
 
         {canApply && portal ? (
           <ScholarshipPortal portal={portal} roles={user.roles} />

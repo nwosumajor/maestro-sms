@@ -5,6 +5,7 @@ import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { LeagueView } from "@/components/game/LeagueView";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -17,10 +18,9 @@ export default async function LeaguePage({ params }: { params: { id: string } })
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="games" permissions={user.permissions}>
       <div className="space-y-6">
         <div>
-          <Link href="/games" className="text-sm text-muted-foreground hover:text-foreground">
+          <PageHeader eyebrow={<><Link href="/games" className="text-sm text-muted-foreground hover:text-foreground">
             ← Games
-          </Link>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">{comp?.name ?? "Competition"}</h1>
+          </Link></>} title={<>{comp?.name ?? "Competition"}</>} />
           {comp && (
             <p className="mt-1 text-sm text-muted-foreground">
               {comp.type === "KNOCKOUT" ? "Knockout" : "League"} · {comp.difficultyLength} digits ·{" "}

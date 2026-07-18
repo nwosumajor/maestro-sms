@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { dateTime } from "@/lib/format";
 import { EventForm } from "@/components/calendar/EventForm";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -22,10 +23,7 @@ export default async function CalendarPage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="calendar" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Calendar</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Upcoming school events.</p>
-        </div>
+        <PageHeader title={<>Calendar</>} subtitle={<>Upcoming school events.</>} />
 
         {canWrite && <EventForm />}
 

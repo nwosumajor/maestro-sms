@@ -8,6 +8,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { NewCheckersButton } from "@/components/game/NewCheckersButton";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -22,15 +23,9 @@ export default async function CheckersPage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="games" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <Link href="/games" className="text-sm text-muted-foreground hover:text-foreground">
+        <PageHeader eyebrow={<><Link href="/games" className="text-sm text-muted-foreground hover:text-foreground">
             ← Games
-          </Link>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">Checkers</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Classic 8×8 draughts. Create a game and share it, or join an open one below.
-          </p>
-        </div>
+          </Link></>} title={<>Checkers</>} subtitle={<>Classic 8×8 draughts. Create a game and share it, or join an open one below.</>} />
 
         <Card>
           <CardHeader className="flex-row items-center justify-between space-y-0">

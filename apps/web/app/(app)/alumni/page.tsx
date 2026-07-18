@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { AlumniManager } from "@/components/alumni/AlumniManager";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -17,10 +18,7 @@ export default async function AlumniPage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="alumni" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Alumni</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Keep in touch with former students and broadcast updates.</p>
-        </div>
+        <PageHeader title={<>Alumni</>} subtitle={<>Keep in touch with former students and broadcast updates.</>} />
         <AlumniManager alumni={alumni} />
       </div>
     </AppShell>

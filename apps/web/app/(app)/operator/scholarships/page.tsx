@@ -8,6 +8,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { AppShell } from "@/components/shell/AppShell";
 import { ScholarshipAdmin } from "@/components/operator/ScholarshipAdmin";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -19,14 +20,9 @@ export default async function OperatorScholarshipsPage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="operatorscholarships" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Scholarship management</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Platform-sponsored scholarships across every school: create and fund programmes with 1st/2nd/3rd
+        <PageHeader title={<>Scholarship management</>} subtitle={<>Platform-sponsored scholarships across every school: create and fund programmes with 1st/2nd/3rd
             prizes, set the qualification exam (online CBT, games or physical), review the cross-tenant queue
-            and award the best three. Program changes and awards need step-up re-auth.
-          </p>
-        </div>
+            and award the best three. Program changes and awards need step-up re-auth.</>} />
         <ScholarshipAdmin />
       </div>
     </AppShell>

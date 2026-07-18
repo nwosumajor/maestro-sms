@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { FormBoard } from "@/components/form/FormBoard";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -18,12 +19,7 @@ export default async function FormsPage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="forms" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Forms</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {canManage ? "Build surveys, feedback, and review forms — collect responses." : "Fill in forms shared with you."}
-          </p>
-        </div>
+        <PageHeader title={<>Forms</>} subtitle={<>{canManage ? "Build surveys, feedback, and review forms — collect responses." : "Fill in forms shared with you."}</>} />
         <FormBoard forms={forms} canManage={canManage} />
       </div>
     </AppShell>

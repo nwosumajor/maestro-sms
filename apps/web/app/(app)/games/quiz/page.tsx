@@ -9,6 +9,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { QuizHostConsole } from "@/components/game/QuizHostConsole";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -26,15 +27,9 @@ export default async function LiveQuizPage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="games" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <Link href="/games" className="text-sm text-muted-foreground hover:text-foreground">
+        <PageHeader eyebrow={<><Link href="/games" className="text-sm text-muted-foreground hover:text-foreground">
             ← Games
-          </Link>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">Live Quiz</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Kahoot-style themed quizzes — answer correctly and fast to top the leaderboard.
-          </p>
-        </div>
+          </Link></>} title={<>Live Quiz</>} subtitle={<>Kahoot-style themed quizzes — answer correctly and fast to top the leaderboard.</>} />
 
         <Card>
           <CardHeader>

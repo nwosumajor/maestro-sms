@@ -8,6 +8,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
 import { TimetableAdmin } from "@/components/timetable/TimetableAdmin";
 import { TimetableGrid } from "@/components/timetable/TimetableGrid";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -50,19 +51,14 @@ export default async function TimetablePage({
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="timetable" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Timetable</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            The weekly lesson grid.{" "}
+        <PageHeader title={<>Timetable</>} subtitle={<>The weekly lesson grid.{" "}
             {canWrite
               ? "Click a + to add a lesson, or hover a lesson to Edit or Delete it. "
               : ""}
             A <strong>room</strong> is the physical space a lesson occupies (a
             classroom, lab or hall); assigning one lets the system prevent
             double-booking — the same teacher, class, <em>or room</em> can never
-            be scheduled twice in one slot (a clash is refused with the reason).
-          </p>
-        </div>
+            be scheduled twice in one slot (a clash is refused with the reason).</>} />
 
         {canWrite && (
           <TimetableAdmin classes={list} periods={periods ?? []} rooms={rooms ?? []} />

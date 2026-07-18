@@ -6,6 +6,7 @@ import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { ParentOnboard } from "@/components/admin/ParentOnboard";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -22,14 +23,9 @@ export default async function ParentsPage() {
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="admin" permissions={user.permissions}>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Parent onboarding</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Create guardian accounts one at a time or in bulk, generate their sign-in details, and link
+          <PageHeader title={<>Parent onboarding</>} subtitle={<>Create guardian accounts one at a time or in bulk, generate their sign-in details, and link
               them to their children. Bulk batches are reviewed by a second admin (maker-checker) before any
-              account is created.
-            </p>
-          </div>
+              account is created.</>} />
           <Link href="/admin" className="text-sm text-muted-foreground hover:underline">← Admin</Link>
         </div>
         <ParentOnboard batches={batches ?? []} students={students ?? []} currentUserId={user.id} />

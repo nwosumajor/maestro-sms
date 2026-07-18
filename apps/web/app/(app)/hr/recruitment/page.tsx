@@ -6,6 +6,7 @@ import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { RecruitmentManager } from "@/components/hr/RecruitmentManager";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -21,11 +22,7 @@ export default async function RecruitmentPage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="hr" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <Link href="/hr" className="text-sm text-muted-foreground hover:underline">← Back to HR</Link>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">Recruitment</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Job requisitions and the applicant pipeline. Hiring an applicant provisions a staff account.</p>
-        </div>
+        <PageHeader eyebrow={<><Link href="/hr" className="text-sm text-muted-foreground hover:underline">← Back to HR</Link></>} title={<>Recruitment</>} subtitle={<>Job requisitions and the applicant pipeline. Hiring an applicant provisions a staff account.</>} />
         <RecruitmentManager requisitions={requisitions ?? []} applicants={applicants ?? []} />
       </div>
     </AppShell>

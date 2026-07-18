@@ -7,6 +7,7 @@ import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { money } from "@/lib/format";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -31,11 +32,7 @@ export default async function HrAnalyticsPage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="hr" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <Link href="/hr" className="text-sm text-muted-foreground hover:underline">← Back to HR</Link>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">HR analytics</h1>
-          <p className="mt-1 text-sm text-muted-foreground">School-wide HR metrics. No salaries or bank details are shown here.</p>
-        </div>
+        <PageHeader eyebrow={<><Link href="/hr" className="text-sm text-muted-foreground hover:underline">← Back to HR</Link></>} title={<>HR analytics</>} subtitle={<>School-wide HR metrics. No salaries or bank details are shown here.</>} />
 
         {!a ? <p className="text-sm text-muted-foreground">No data.</p> : (
           <>

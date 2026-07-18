@@ -13,6 +13,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { money, shortDate } from "@/lib/format";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -52,20 +53,22 @@ export default async function OperatorSchoolProfilePage({ params }: { params: { 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="operator" permissions={user.permissions}>
       <div className="space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h1 className="font-display text-2xl font-semibold tracking-tight">{s.name}</h1>
-            <p className="text-sm text-muted-foreground">
+        <PageHeader
+          title={<>{s.name}</>}
+          subtitle={
+            <>
               <span className="font-mono">{s.slug}</span> · onboarded {shortDate(s.onboardedAt)}
               {" · "}
               <Badge variant={s.status === "ACTIVE" ? "secondary" : "destructive"}>{s.status}</Badge>
-            </p>
-          </div>
-          <div className="flex items-center gap-3 text-sm">
-            <Link href="/operator/schools" className="text-primary hover:underline">← Directory</Link>
-            <Link href="/operator" className="text-primary hover:underline">Operator console</Link>
-          </div>
-        </div>
+            </>
+          }
+          actions={
+            <div className="flex items-center gap-3 text-sm">
+              <Link href="/operator/schools" className="text-primary hover:underline">← Directory</Link>
+              <Link href="/operator" className="text-primary hover:underline">Operator console</Link>
+            </div>
+          }
+        />
 
         <div className="grid gap-4 lg:grid-cols-2">
           <Card>

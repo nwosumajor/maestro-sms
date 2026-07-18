@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { CertificateIssuer } from "@/components/certificate/CertificateIssuer";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -26,12 +27,7 @@ export default async function CertificatesPage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="certificates" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Certificates &amp; ID cards</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Generate a printable ID card or an award/completion certificate. Each issuance is logged with a serial.
-          </p>
-        </div>
+        <PageHeader title={<>Certificates &amp; ID cards</>} subtitle={<>Generate a printable ID card or an award/completion certificate. Each issuance is logged with a serial.</>} />
         <CertificateIssuer staff={staff} students={students} />
       </div>
     </AppShell>

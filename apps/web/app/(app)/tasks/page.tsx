@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { TaskBoard } from "@/components/task/TaskBoard";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -30,14 +31,9 @@ export default async function TasksPage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="tasks" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Tasks</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {canAssign
+        <PageHeader title={<>Tasks</>} subtitle={<>{canAssign
               ? "Assign tasks to staff or students, track progress, and follow up with comments."
-              : "Your assigned tasks — update your status, attach work, and comment."}
-          </p>
-        </div>
+              : "Your assigned tasks — update your status, attach work, and comment."}</>} />
         <TaskBoard tasks={tasks ?? []} staff={staff} students={students} canAssign={canAssign} />
       </div>
     </AppShell>

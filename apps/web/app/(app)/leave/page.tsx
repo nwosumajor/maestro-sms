@@ -10,6 +10,7 @@ import { MyAppraisals } from "@/components/hr/MyAppraisals";
 import { MyCompensation } from "@/components/hr/MyCompensation";
 import { MyAttendance } from "@/components/hr/MyAttendance";
 import { MyDuties } from "@/components/hr/DutyRoster";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -34,13 +35,8 @@ export default async function LeavePage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="leave" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Leave</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Apply for leave and track your balance. Requests are approved by your head of
-            teaching/administration, then HR, then the principal.
-          </p>
-        </div>
+        <PageHeader title={<>Leave</>} subtitle={<>Apply for leave and track your balance. Requests are approved by your head of
+            teaching/administration, then HR, then the principal.</>} />
         <LeaveSelfService types={types ?? []} balances={balances ?? []} requests={requests ?? []} />
         <MyAttendance initial={attendance ?? []} />
         <MyDuties initial={duties ?? []} />

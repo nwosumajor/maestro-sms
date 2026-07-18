@@ -4,6 +4,7 @@ import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ApprovalQueue } from "@/components/lms/ApprovalQueue";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -24,13 +25,8 @@ export default async function ContentApprovalsPage() {
       permissions={user.permissions}
     >
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Content approvals</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Learning content awaiting your review. Approving publishes it to
-            enrolled students; you can also request a revision or reject it.
-          </p>
-        </div>
+        <PageHeader title={<>Content approvals</>} subtitle={<>Learning content awaiting your review. Approving publishes it to
+            enrolled students; you can also request a revision or reject it.</>} />
 
         {pending === null ? (
           <Alert variant="info">

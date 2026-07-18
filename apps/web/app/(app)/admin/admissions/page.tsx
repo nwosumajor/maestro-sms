@@ -7,6 +7,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AdmissionsReview, type Application } from "@/components/admissions/AdmissionsReview";
 import { FormFeeCard } from "@/components/admissions/FormFeeCard";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -23,14 +24,9 @@ export default async function AdminAdmissionsPage() {
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="admin" permissions={user.permissions}>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Admissions</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Parent enrolment applications, quarantined from student data until accepted. Each is reviewed by
+          <PageHeader title={<>Admissions</>} subtitle={<>Parent enrolment applications, quarantined from student data until accepted. Each is reviewed by
               School admin → HR → Principal (a different person per stage); schedule the entrance exam and the
-              applicant is emailed on acceptance. The public form lives at <code>/enroll</code>.
-            </p>
-          </div>
+              applicant is emailed on acceptance. The public form lives at <code>/enroll</code>.</>} />
           <Link href="/admin" className="text-sm text-muted-foreground hover:underline">← Admin</Link>
         </div>
         {formFee && (

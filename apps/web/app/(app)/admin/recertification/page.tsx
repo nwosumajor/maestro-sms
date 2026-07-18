@@ -7,6 +7,7 @@ import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -27,13 +28,8 @@ export default async function RecertificationPage() {
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="admin" permissions={user.permissions}>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Access recertification</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Periodic "who can do what" review: role definitions, user assignments,
-              live elevations, and anomaly signals.
-            </p>
-          </div>
+          <PageHeader title={<>Access recertification</>} subtitle={<>Periodic "who can do what" review: role definitions, user assignments,
+              live elevations, and anomaly signals.</>} />
           <Link href="/admin" className="text-sm text-muted-foreground hover:underline">← Admin</Link>
         </div>
 

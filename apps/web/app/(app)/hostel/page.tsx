@@ -6,6 +6,7 @@ import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { HostelManager } from "@/components/hostel/HostelManager";
 import { Kpi } from "@/components/charts/charts";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -29,14 +30,9 @@ export default async function HostelPage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="hostel" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Hostel Management</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {isWarden
+        <PageHeader title={<>Hostel Management</>} subtitle={<>{isWarden
               ? "Your assigned hostel — rooms, bed availability, allocations and fees."
-              : "Boarding houses, rooms (with rent & custom fields), bed availability, student allocation, and hostel-fee scheduling — billed alongside academic fees."}
-          </p>
-        </div>
+              : "Boarding houses, rooms (with rent & custom fields), bed availability, student allocation, and hostel-fee scheduling — billed alongside academic fees."}</>} />
 
         {summary && (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">

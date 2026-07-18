@@ -5,6 +5,7 @@ import { hasPermission } from "@/lib/permissions";
 import { AppShell } from "@/components/shell/AppShell";
 import { CbtStaffPanel } from "@/components/cbt/CbtStaffPanel";
 import { CbtStudentList } from "@/components/cbt/CbtStudentList";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -25,14 +26,9 @@ export default async function CbtPage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="cbt" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">CBT Exam Hall</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {isStaff
+        <PageHeader title={<>CBT Exam Hall</>} subtitle={<>{isStaff
               ? "Timed, auto-marked mock exams (WAEC/JAMB style) from your question banks. Publish an exam and every student gets a freshly-sampled paper."
-              : "Your computer-based exams. The timer runs on the school's clock — answers save as you pick them, and your paper submits itself when time is up."}
-          </p>
-        </div>
+              : "Your computer-based exams. The timer runs on the school's clock — answers save as you pick them, and your paper submits itself when time is up."}</>} />
         {isStaff ? <CbtStaffPanel banks={banks} exams={exams} /> : <CbtStudentList exams={exams} />}
       </div>
     </AppShell>

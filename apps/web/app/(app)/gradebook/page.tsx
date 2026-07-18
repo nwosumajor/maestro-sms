@@ -9,6 +9,7 @@ import { ClassBroadsheet } from "@/components/gradebook/ClassBroadsheet";
 import { ReportCard } from "@/components/gradebook/ReportCard";
 import { SubjectPicker } from "@/components/gradebook/SubjectPicker";
 import { SelectionReview } from "@/components/gradebook/SelectionReview";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -55,14 +56,9 @@ export default async function GradebookPage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="gradebook" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Grades</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {canGrade
+        <PageHeader title={<>Grades</>} subtitle={<>{canGrade
               ? "Enter each student's exam, midterm, assignment and class-note scores for a subject and term; the weighted total (exam 60% · midterm 20% · assignment 10% · class note 10%) is calculated automatically. Submitting for publication routes through head-teacher and principal approval before families see the grades."
-              : "Your published results for each subject, term by term, across the session."}
-          </p>
-        </div>
+              : "Your published results for each subject, term by term, across the session."}</>} />
 
         {canPickSubjects && <SubjectPicker />}
         {showReviewPanel && <SelectionReview userId={user.id} canApproveFinal={canApproveSelections} />}

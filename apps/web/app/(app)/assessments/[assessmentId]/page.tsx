@@ -10,6 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { shortDate } from "@/lib/format";
 import { SubmissionFileLink } from "@/components/assessment/SubmissionFileLink";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -27,11 +28,7 @@ export default async function AssessmentSubmissionsPage({ params }: { params: { 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="assessments" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <Link href="/assessments" className="text-sm text-muted-foreground hover:underline">← Back to assessments</Link>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">{title}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Submissions. Open one to review its integrity signals.</p>
-        </div>
+        <PageHeader eyebrow={<><Link href="/assessments" className="text-sm text-muted-foreground hover:underline">← Back to assessments</Link></>} title={<>{title}</>} subtitle={<>Submissions. Open one to review its integrity signals.</>} />
 
         {submissions === null ? (
           <Alert variant="info"><AlertTitle>Not available</AlertTitle><AlertDescription>This assessment isn&apos;t accessible to you.</AlertDescription></Alert>

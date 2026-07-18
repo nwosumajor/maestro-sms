@@ -11,6 +11,7 @@ import { ClassProgress } from "@/components/lms/ClassProgress";
 import { LmsGradebook } from "@/components/lms/LmsGradebook";
 import { LiveSessions } from "@/components/lms/LiveSessions";
 import { Awards } from "@/components/lms/Awards";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -39,14 +40,9 @@ export default async function ClassContentPage({ params }: { params: { id: strin
     >
       <div className="space-y-6">
         <div className="flex items-start justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Learning content</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Materials, lessons, quizzes and forum threads for this class.
+          <PageHeader title={<>Learning content</>} subtitle={<>Materials, lessons, quizzes and forum threads for this class.
               Publication is approval-gated through the principal — only published
-              content reaches enrolled students.
-            </p>
-          </div>
+              content reaches enrolled students.</>} />
           {canAuthor && (
             <Link href={`/classes/${classId}/analytics`} className={buttonVariants({ size: "sm", variant: "outline" })}>
               Analytics

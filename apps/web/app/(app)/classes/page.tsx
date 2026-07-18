@@ -17,6 +17,7 @@ import { ClassAdmin } from "@/components/lms/ClassAdmin";
 import { ClassSubjectsAdmin } from "@/components/lms/ClassSubjectsAdmin";
 import { PromotionManager } from "@/components/lms/PromotionManager";
 import { AcademicCalendar } from "@/components/lms/AcademicCalendar";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -47,14 +48,9 @@ export default async function ClassesPage() {
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="classes" permissions={user.permissions}>
       <div className="space-y-6">
         <div className="flex items-start justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">My classes</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Scoped to you: teachers see classes they teach, students see classes
+          <PageHeader title={<>My classes</>} subtitle={<>Scoped to you: teachers see classes they teach, students see classes
               they are enrolled in. Enforced server-side by relationship checks on
-              top of Row-Level Security.
-            </p>
-          </div>
+              top of Row-Level Security.</>} />
           {canReview && (
             <Link href="/content/approvals" className={buttonVariants({ size: "sm", variant: "outline" })}>
               Content approvals

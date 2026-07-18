@@ -13,6 +13,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { Badge } from "@/components/ui/badge";
 import { DirectoryFilterBar } from "@/components/operator/DirectoryFilterBar";
 import { money, shortDate } from "@/lib/format";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -53,15 +54,11 @@ export default async function OperatorSchoolsPage({
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="operator" permissions={user.permissions}>
       <div className="space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h1 className="font-display text-2xl font-semibold tracking-tight">School directory</h1>
-            <p className="text-sm text-muted-foreground">
-              Every onboarded school — owners, contacts and billing at a glance. Click a school for its full profile.
-            </p>
-          </div>
-          <Link href="/operator" className="text-sm text-primary hover:underline">← Operator console</Link>
-        </div>
+        <PageHeader
+          title={<>School directory</>}
+          subtitle={<>Every onboarded school — owners, contacts and billing at a glance. Click a school for its full profile.</>}
+          actions={<Link href="/operator" className="text-sm text-primary hover:underline">← Operator console</Link>}
+        />
 
         <DirectoryFilterBar
           q={q}

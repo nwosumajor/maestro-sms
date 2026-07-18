@@ -10,6 +10,7 @@ import { ReviewsPanel } from "@/components/hr/ReviewsPanel";
 import { CompensationPanel } from "@/components/hr/CompensationPanel";
 import { EmploymentLifecycle } from "@/components/hr/EmploymentLifecycle";
 import { ExitPanel } from "@/components/hr/ExitPanel";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -38,11 +39,7 @@ export default async function StaffDetailPage({ params }: { params: { userId: st
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="hr" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <Link href="/hr" className="text-sm text-muted-foreground hover:underline">← Back to HR</Link>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">{name}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Onboarding, compliance documents and training for this staff member.</p>
-        </div>
+        <PageHeader eyebrow={<><Link href="/hr" className="text-sm text-muted-foreground hover:underline">← Back to HR</Link></>} title={<>{name}</>} subtitle={<>Onboarding, compliance documents and training for this staff member.</>} />
         {canWrite && <EmploymentLifecycle userId={userId} employee={employee} initial={changes ?? []} canApprove={canApprove} />}
         {canWrite && <CompensationPanel userId={userId} initial={components ?? []} />}
         {canWrite && <ExitPanel userId={userId} initial={exits ?? []} canApprove={canApprove} />}

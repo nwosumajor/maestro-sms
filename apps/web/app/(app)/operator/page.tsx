@@ -21,6 +21,7 @@ import { PlatformFeeManager } from "@/components/operator/PlatformFeeManager";
 import { GrowthManager } from "@/components/operator/GrowthManager";
 import { GroupsManager } from "@/components/operator/GroupsManager";
 import { PlatformStaff } from "@/components/operator/PlatformStaff";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -83,13 +84,8 @@ export default async function OperatorPage({
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="operator" permissions={user.permissions}>
       <div className="space-y-6">
         <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Operator console</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Provision schools, set platform pricing and fees, review onboarding and run growth. Manage each
-              school in the Tenant registry, and platform-sponsored scholarships in Scholarship admin.
-            </p>
-          </div>
+          <PageHeader title={<>Operator console</>} subtitle={<>Provision schools, set platform pricing and fees, review onboarding and run growth. Manage each
+              school in the Tenant registry, and platform-sponsored scholarships in Scholarship admin.</>} />
           <Link href="/dashboard"><Button variant="outline">Platform analytics →</Button></Link>
         </div>
 

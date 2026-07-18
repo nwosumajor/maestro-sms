@@ -7,6 +7,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { LmsAnalytics } from "@/components/lms/LmsAnalytics";
 import { XapiActivity } from "@/components/lms/XapiActivity";
 import { buttonVariants } from "@/components/ui/button";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -27,13 +28,8 @@ export default async function ClassAnalyticsPage({ params }: { params: { id: str
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="classes" permissions={user.permissions}>
       <div className="space-y-6">
         <div className="flex items-center justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Learning analytics</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Engagement and performance across this class’s content. Signals for your review — never an
-              automated judgement of a student.
-            </p>
-          </div>
+          <PageHeader title={<>Learning analytics</>} subtitle={<>Engagement and performance across this class’s content. Signals for your review — never an
+              automated judgement of a student.</>} />
           <Link href={`/classes/${classId}/content`} className={buttonVariants({ size: "sm", variant: "outline" })}>
             Back to content
           </Link>

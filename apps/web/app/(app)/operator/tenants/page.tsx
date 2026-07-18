@@ -21,6 +21,7 @@ import { OperatorStudents } from "@/components/operator/OperatorStudents";
 import { StudentDataExport } from "@/components/operator/StudentDataExport";
 import { GraceEditor } from "@/components/operator/GraceEditor";
 import { TenantFilterBar } from "@/components/operator/TenantFilterBar";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -60,13 +61,8 @@ export default async function OperatorTenantsPage({
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="operatortenants" permissions={user.permissions}>
       <div className="space-y-6">
         <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Tenant registry</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Every onboarded school — set its subscription and grace, toggle its status, manage its accounts,
-              read its students, or export its data. Impersonation is step-up gated and audited.
-            </p>
-          </div>
+          <PageHeader title={<>Tenant registry</>} subtitle={<>Every onboarded school — set its subscription and grace, toggle its status, manage its accounts,
+              read its students, or export its data. Impersonation is step-up gated and audited.</>} />
           <div className="flex items-center gap-3 text-sm">
             <Link href="/operator/schools" className="font-medium text-primary hover:underline">
               School directory (owners, contacts, billing) →

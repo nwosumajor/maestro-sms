@@ -12,6 +12,7 @@ import { ReferralPanel } from "@/components/billing/ReferralPanel";
 import { AutoRenewCard } from "@/components/billing/AutoRenewCard";
 import { TrueUpCard } from "@/components/billing/TrueUpCard";
 import { MessageCreditsCard } from "@/components/billing/MessageCreditsCard";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -41,12 +42,7 @@ export default async function BillingPage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="billing" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Billing &amp; Subscription</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Your platform subscription. Pricing is per active student; paying activates your plan automatically.
-          </p>
-        </div>
+        <PageHeader title={<>Billing &amp; Subscription</>} subtitle={<>Your platform subscription. Pricing is per active student; paying activates your plan automatically.</>} />
 
         {data === null ? (
           <Alert variant="info">

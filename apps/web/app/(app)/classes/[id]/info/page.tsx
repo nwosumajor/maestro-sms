@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -19,12 +20,7 @@ export default async function ClassInfoPage({ params }: { params: { id: string }
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="classes" permissions={user.permissions}>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">{info.name}</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Supervisor: {info.supervisorName ?? "—"}
-            </p>
-          </div>
+          <PageHeader title={<>{info.name}</>} subtitle={<>Supervisor: {info.supervisorName ?? "—"}</>} />
           <Link href="/classes" className="text-sm text-muted-foreground hover:underline">← Classes</Link>
         </div>
 

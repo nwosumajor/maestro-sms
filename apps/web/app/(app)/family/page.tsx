@@ -6,6 +6,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -23,16 +24,11 @@ export default async function FamilyPage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="family" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">My children</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Everything about your linked children in one place — published grades, attendance,
+        <PageHeader title={<>My children</>} subtitle={<>Everything about your linked children in one place — published grades, attendance,
             discipline, tasks and fees. Full detail lives on the{" "}
             <Link className="text-primary hover:underline" href="/gradebook">Grades</Link>,{" "}
             <Link className="text-primary hover:underline" href="/attendance">Attendance</Link> and{" "}
-            <Link className="text-primary hover:underline" href="/fees">Fees</Link> pages.
-          </p>
-        </div>
+            <Link className="text-primary hover:underline" href="/fees">Fees</Link> pages.</>} />
 
         {overview.children.length === 0 ? (
           <Alert variant="info">

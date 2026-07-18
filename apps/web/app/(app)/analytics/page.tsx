@@ -7,6 +7,7 @@ import { Kpi } from "@/components/charts/charts";
 import { RCDonut, RCColumns, RCBars } from "@/components/charts/rc";
 import { RC } from "@/components/charts/colors";
 import { money } from "@/lib/format";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -28,12 +29,7 @@ export default async function AnalyticsPage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="analytics" permissions={user.permissions}>
       <div className="space-y-8">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Analytics</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {o?.scope === "school" ? "School-wide figures, last 30 days." : "Your family's figures, last 30 days."}
-          </p>
-        </div>
+        <PageHeader title={<>Analytics</>} subtitle={<>{o?.scope === "school" ? "School-wide figures, last 30 days." : "Your family's figures, last 30 days."}</>} />
 
         {/* KPI band */}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

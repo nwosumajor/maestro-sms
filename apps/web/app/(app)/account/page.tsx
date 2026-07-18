@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { MfaSetup } from "@/components/security/MfaSetup";
 import { ChangePasswordForm } from "@/components/auth/ChangePasswordForm";
 import { PhoneCard } from "@/components/account/PhoneCard";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -21,10 +22,7 @@ export default async function AccountPage({ searchParams }: { searchParams: { en
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="account" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Account &amp; security</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{user.name} · {user.email}</p>
-        </div>
+        <PageHeader title={<>Account &amp; security</>} subtitle={<>{user.name} · {user.email}</>} />
 
         {mustEnroll && !mfa?.enabled && (
           <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm">

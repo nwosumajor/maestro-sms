@@ -3,6 +3,7 @@ import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { WorkflowInbox, type WorkflowDto } from "@/components/workflow/WorkflowInbox";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -14,14 +15,9 @@ export default async function WorkflowsPage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="workflows" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Approvals</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Requests move through a deterministic state machine. Every transition
+        <PageHeader title={<>Approvals</>} subtitle={<>Requests move through a deterministic state machine. Every transition
             is written to an immutable, append-only audit trail; you cannot review
-            a request you initiated (separation of duties).
-          </p>
-        </div>
+            a request you initiated (separation of duties).</>} />
 
         {requests === null ? (
           <Alert variant="info">

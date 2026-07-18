@@ -6,6 +6,7 @@ import { hasPermission } from "@/lib/permissions";
 import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { RingPlay } from "@/components/game/RingPlay";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -18,12 +19,9 @@ export default async function RingPage({ params }: { params: { id: string } }) {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="games" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <Link href="/games" className="text-sm text-muted-foreground hover:text-foreground">
+        <PageHeader eyebrow={<><Link href="/games" className="text-sm text-muted-foreground hover:text-foreground">
             ← Games
-          </Link>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">Elimination Ring</h1>
-        </div>
+          </Link></>} title={<>Elimination Ring</>} />
         {ring ? (
           <RingPlay initial={ring} canModerate={canModerate} />
         ) : (

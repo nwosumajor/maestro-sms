@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { CreateAssessment } from "@/components/assessment/CreateAssessment";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -29,14 +30,9 @@ export default async function AssessmentsPage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="assessments" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Assessments</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {canReview
+        <PageHeader title={<>Assessments</>} subtitle={<>{canReview
               ? "Assessments you own or teach. Open one to review submissions and integrity signals."
-              : "Your assessments. Open one to work on it."}
-          </p>
-        </div>
+              : "Your assessments. Open one to work on it."}</>} />
 
         {canWrite && <CreateAssessment classes={classes ?? []} />}
 

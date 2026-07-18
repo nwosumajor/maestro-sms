@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { DisciplineRoom } from "@/components/discipline/DisciplineRoom";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -31,13 +32,8 @@ export default async function DisciplinePage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="discipline" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Discipline Room</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            File complaints against students or teachers; staff review, assign resolvers, and record an action. Every
-            decision is made by a person — nothing is automated.
-          </p>
-        </div>
+        <PageHeader title={<>Discipline Room</>} subtitle={<>File complaints against students or teachers; staff review, assign resolvers, and record an action. Every
+            decision is made by a person — nothing is automated.</>} />
         <DisciplineRoom complaints={complaints ?? []} staff={staff} teachers={teachers} students={students} canManage={canManage} />
       </div>
     </AppShell>

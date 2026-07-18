@@ -9,6 +9,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { OpenTypingForm } from "@/components/game/OpenTypingForm";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -25,15 +26,9 @@ export default async function TypingRacePage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="games" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <Link href="/games" className="text-sm text-muted-foreground hover:text-foreground">
+        <PageHeader eyebrow={<><Link href="/games" className="text-sm text-muted-foreground hover:text-foreground">
             ← Games
-          </Link>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">Typing Race</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Type the passage as fast and accurately as you can — highest net WPM wins.
-          </p>
-        </div>
+          </Link></>} title={<>Typing Race</>} subtitle={<>Type the passage as fast and accurately as you can — highest net WPM wins.</>} />
 
         <Card>
           <CardHeader>

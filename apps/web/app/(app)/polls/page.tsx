@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { PollBoard } from "@/components/poll/PollBoard";
+import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -18,14 +19,9 @@ export default async function PollsPage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="polls" permissions={user.permissions}>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Polls</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {canManage
+        <PageHeader title={<>Polls</>} subtitle={<>{canManage
               ? "Collect anonymous opinions from students and staff to inform decisions."
-              : "Cast your anonymous vote. Your choice is never linked to your identity."}
-          </p>
-        </div>
+              : "Cast your anonymous vote. Your choice is never linked to your identity."}</>} />
         <PollBoard polls={polls} canManage={canManage} />
       </div>
     </AppShell>
