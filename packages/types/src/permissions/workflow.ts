@@ -70,6 +70,13 @@ export const GRADE_PUBLISH_CHAIN: WorkflowStage[] = [
   { key: "PRINCIPAL", label: "Principal (final)", permission: WORKFLOW_PERMISSIONS.REVIEW_PRINCIPAL },
 ];
 
+/** CBT answer-key release: the principal alone signs off before students may
+ *  see a closed exam's correct answers (the requesting teacher can never be the
+ *  approver — separation of duties, engine-enforced). */
+export const CBT_ANSWER_RELEASE_CHAIN: WorkflowStage[] = [
+  { key: "PRINCIPAL", label: "Principal (final)", permission: WORKFLOW_PERMISSIONS.REVIEW_PRINCIPAL },
+];
+
 export const WORKFLOW_STATES = [
   "DRAFT",
   "PENDING_REVIEW",
@@ -128,6 +135,8 @@ export const WORKFLOW_TYPES = [
   "LMS_CONTENT_PUBLISH",
   "FEE_SCHEDULE",
   "GRADE_PUBLISH",
+  "CBT_EXAM_PUBLISH",
+  "CBT_ANSWER_RELEASE",
 ] as const;
 export type WorkflowType = (typeof WORKFLOW_TYPES)[number];
 
@@ -180,6 +189,13 @@ export const WORKFLOW_TYPE_META: Record<WorkflowType, WorkflowTypeMeta> = {
   // request (created by TermResultService, never the public endpoint) and the
   // grades reach families ONLY after head teacher + principal approve.
   GRADE_PUBLISH: { label: "Grade publish", selfService: false, systemOnly: true },
+  // Maker-checker on CBT exams: publishing an exam to students is requested by
+  // its author (CbtService, never the public endpoint) and goes live ONLY after
+  // a DIFFERENT workflow.review holder (school_admin/principal) approves.
+  CBT_EXAM_PUBLISH: { label: "CBT exam publish", selfService: false, systemOnly: true },
+  // Releasing a closed CBT exam's answer key to students: the subject teacher
+  // requests it; the key reaches students ONLY after the principal approves.
+  CBT_ANSWER_RELEASE: { label: "CBT answer release", selfService: false, systemOnly: true },
 };
 
 /** Pure: may a user with these permissions initiate this type via the API? */

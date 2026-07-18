@@ -95,7 +95,9 @@ export function CbtExamRoom({ initial }: { initial: Sitting }) {
               Score: <span className="tnum">{s.score} / {s.total}</span>
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
-              Correct answers are shown below. Your teacher reviews and releases official results.
+              {s.answersReleased
+                ? "Correct answers are shown below. Your teacher reviews and releases official results."
+                : "Correct answers will appear here once your teacher releases them and the principal approves."}
             </p>
           </CardContent>
         )}

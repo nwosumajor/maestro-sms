@@ -4,7 +4,7 @@
 
 import { Body, Controller, Get, Param, Post, Put } from "@nestjs/common";
 import { CBT_PERMISSIONS, MODULES } from "@sms/types";
-import type { CbtBankDto, CbtExamDto, CbtExamResultsDto, CbtSittingViewDto } from "@sms/types";
+import type { CbtAuthoringOptionsDto, CbtBankDto, CbtExamDto, CbtExamResultsDto, CbtSittingViewDto } from "@sms/types";
 import { z } from "zod";
 import { RequireModule } from "../auth/require-module.decorator";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -13,7 +13,11 @@ import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { CbtService } from "./cbt.service";
 
-const bankSchema = z.object({ name: z.string().min(1).max(160), subject: z.string().max(80).nullish() });
+const bankSchema = z.object({
+  name: z.string().min(1).max(160),
+  subject: z.string().max(80).nullish(),
+  subjectId: z.string().uuid().nullish(),
+});
 const questionsSchema = z.object({
   questions: z
     .array(
@@ -35,7 +39,9 @@ const examSchema = z.object({
   startAt: z.string().datetime(),
   endAt: z.string().datetime(),
 });
-const statusSchema = z.object({ status: z.enum(["PUBLISHED", "CLOSED"]) });
+// Publishing is maker-checker (POST exams/:id/request-publish) — the only
+// direct status change left is closing a live exam early.
+const statusSchema = z.object({ status: z.enum(["CLOSED"]) });
 const answerSchema = z.object({ questionId: z.string().uuid(), choiceIndex: z.number().int().min(0).max(5) });
 
 @RequireModule(MODULES.CBT)
@@ -44,6 +50,13 @@ export class CbtController {
   constructor(private readonly cbt: CbtService) {}
 
   // --- staff -------------------------------------------------------------------
+  /** The caller's authoring scope: their subjects/classes (teacher) or all (admin). */
+  @Get("authoring-options")
+  @RequirePermission(CBT_PERMISSIONS.CBT_MANAGE)
+  authoringOptions(@CurrentPrincipal() p: Principal): Promise<CbtAuthoringOptionsDto> {
+    return this.cbt.authoringOptions(p);
+  }
+
   @Get("banks")
   @RequirePermission(CBT_PERMISSIONS.CBT_MANAGE)
   listBanks(@CurrentPrincipal() p: Principal): Promise<CbtBankDto[]> {
@@ -80,6 +93,20 @@ export class CbtController {
     @Body(new ZodValidationPipe(statusSchema)) body: z.infer<typeof statusSchema>,
   ) {
     return this.cbt.setExamStatus(p, id, body.status);
+  }
+
+  /** Maker-checker: park the draft PENDING_APPROVAL + raise CBT_EXAM_PUBLISH. */
+  @Post("exams/:id/request-publish")
+  @RequirePermission(CBT_PERMISSIONS.CBT_MANAGE)
+  requestPublish(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.cbt.requestPublish(p, id);
+  }
+
+  /** Maker-checker: request the answer-key release (principal approves). */
+  @Post("exams/:id/request-answer-release")
+  @RequirePermission(CBT_PERMISSIONS.CBT_MANAGE)
+  requestAnswerRelease(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.cbt.requestAnswerRelease(p, id);
   }
 
   @Get("exams/:id/results")

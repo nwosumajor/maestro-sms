@@ -15,6 +15,10 @@ model CbtQuestionBank {
   schoolId    String   @db.Uuid
   name        String
   subject     String?
+  /// Curriculum Subject link. REQUIRED for teacher authors — a teacher may only
+  /// author banks for subjects they teach (classSubjectTeacher); school-wide
+  /// staff may leave it null (free-text subject label only).
+  subjectId   String?  @db.Uuid
   createdById String   @db.Uuid
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -58,8 +62,15 @@ model CbtExam {
   durationMinutes Int
   startAt         DateTime
   endAt           DateTime
-  /// DRAFT | PUBLISHED | CLOSED.
+  /// DRAFT | PENDING_APPROVAL | PUBLISHED | CLOSED. Publishing is maker-checker
+  /// (CBT_EXAM_PUBLISH workflow): the author's request parks it PENDING_APPROVAL
+  /// and only a DIFFERENT workflow.review holder's approval flips it PUBLISHED.
   status          String    @default("DRAFT")
+  /// Answer-key release: HIDDEN | REQUESTED | RELEASED. A closed sitting shows
+  /// its score immediately, but the correct answers reach students ONLY once
+  /// RELEASED — teacher requests, principal approves (CBT_ANSWER_RELEASE).
+  answerRelease     String    @default("HIDDEN")
+  answersReleasedAt DateTime?
   /// Shuffle question order per sitting.
   shuffle         Boolean   @default(true)
   /// When set, this exam is a SCHOLARSHIP qualification exam materialized by the

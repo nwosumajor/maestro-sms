@@ -18,7 +18,9 @@ import {
 } from "@nestjs/common";
 import { Prisma } from "@sms/db";
 import { randomUUID } from "node:crypto";
+import { CBT_ANSWER_RELEASE_CHAIN } from "@sms/types";
 import type {
+  CbtAuthoringOptionsDto,
   CbtBankDto,
   CbtExamDto,
   CbtExamResultsDto,
@@ -33,9 +35,15 @@ import {
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
+import { WorkflowService } from "../workflow/workflow.service";
+import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 
 /** Grace after the duration elapses before a late save/submit is refused. */
 const SUBMIT_GRACE_MS = 30_000;
+
+/** Roles whose CBT authoring is school-wide; every other cbt.manage holder
+ *  (i.e. a teacher) is scoped to the subjects/classes they actually teach. */
+const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal", "super_admin"]);
 
 interface QuestionInput {
   prompt: string;
@@ -48,36 +56,200 @@ export class CbtService {
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
-  ) {}
+    private readonly workflow: WorkflowService,
+    hooks: WorkflowHooksService,
+  ) {
+    // Maker-checker reactors, run in the SAME tenant tx as the workflow
+    // transition (atomic). Both are idempotent: the status-guarded updateMany
+    // only moves a row that is still in the claimed state, so a replay (or a
+    // later board veto re-firing REJECTED) is a no-op.
+    hooks.onFinalized(async (tx, req) => {
+      if (req.type !== "CBT_EXAM_PUBLISH" && req.type !== "CBT_ANSWER_RELEASE") return;
+      const examId = (req.payload as { examId?: string } | null)?.examId;
+      if (!examId) return;
+      const approved = req.state === "APPROVED";
+      if (req.type === "CBT_EXAM_PUBLISH") {
+        // APPROVED → the exam goes live; REJECTED → back to DRAFT for rework.
+        const res = await tx.cbtExam.updateMany({
+          where: { id: examId, status: "PENDING_APPROVAL" },
+          data: { status: approved ? "PUBLISHED" : "DRAFT" },
+        });
+        if (res.count === 0) return;
+        await this.audit.record(
+          {
+            actorId: req.initiatorId,
+            action: approved ? "cbt.exam.publish.approved" : "cbt.exam.publish.rejected",
+            entity: "cbt",
+            entityId: examId,
+            schoolId: req.schoolId,
+            metadata: { requestId: req.id },
+          },
+          tx,
+        );
+      } else {
+        // APPROVED → students may now see the answer key; REJECTED → key stays
+        // hidden and the teacher may re-request.
+        const res = await tx.cbtExam.updateMany({
+          where: { id: examId, answerRelease: "REQUESTED" },
+          data: approved
+            ? { answerRelease: "RELEASED", answersReleasedAt: new Date() }
+            : { answerRelease: "HIDDEN" },
+        });
+        if (res.count === 0) return;
+        await this.audit.record(
+          {
+            actorId: req.initiatorId,
+            action: approved ? "cbt.exam.answers.released" : "cbt.exam.answers.release_rejected",
+            entity: "cbt",
+            entityId: examId,
+            schoolId: req.schoolId,
+            metadata: { requestId: req.id },
+          },
+          tx,
+        );
+      }
+    });
+  }
 
   private ctx(p: Principal): TenantContext {
     return { schoolId: p.schoolId, userId: p.userId };
   }
 
+  private isSchoolWide(p: Principal): boolean {
+    return p.roles.some((r) => SCHOOL_WIDE_ROLES.has(r));
+  }
+
+  /** The distinct curriculum subjects this teacher teaches (classSubjectTeacher). */
+  private async taughtSubjectIds(tx: TenantTx, p: Principal): Promise<Set<string>> {
+    const rows = await tx.classSubjectTeacher.findMany({
+      where: { teacherId: p.userId },
+      select: { subjectId: true },
+    });
+    return new Set(rows.map((r) => r.subjectId));
+  }
+
+  /** May the caller author against this bank? School-wide staff: any bank.
+   *  A teacher: banks they created, or banks for a subject they teach. */
+  private async canTouchBank(
+    tx: TenantTx,
+    p: Principal,
+    bank: { createdById: string; subjectId: string | null },
+  ): Promise<boolean> {
+    if (this.isSchoolWide(p)) return true;
+    if (bank.createdById === p.userId) return true;
+    if (!bank.subjectId) return false;
+    return (await this.taughtSubjectIds(tx, p)).has(bank.subjectId);
+  }
+
   // --- banks & questions (staff) ---------------------------------------------
+
+  /** What the caller may author against. School-wide staff: every subject and
+   *  class; a teacher: only the (subject, class) pairs they teach. Feeds the
+   *  web pickers so the form can only offer what the server will accept. */
+  async authoringOptions(p: Principal): Promise<CbtAuthoringOptionsDto> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      if (this.isSchoolWide(p)) {
+        const [subjects, classes] = await Promise.all([
+          tx.subject.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
+          tx.class.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
+        ]);
+        return {
+          schoolWide: true,
+          subjects,
+          classes: classes.map((c) => ({ id: c.id, name: c.name, subjectIds: null })),
+        };
+      }
+      const rows = await tx.classSubjectTeacher.findMany({
+        where: { teacherId: p.userId },
+        select: {
+          subjectId: true,
+          subject: { select: { name: true } },
+          class: { select: { id: true, name: true } },
+        },
+      });
+      const subjects = new Map<string, { id: string; name: string }>();
+      const classes = new Map<string, { id: string; name: string; subjectIds: string[] }>();
+      for (const r of rows) {
+        subjects.set(r.subjectId, { id: r.subjectId, name: r.subject.name });
+        const c = classes.get(r.class.id) ?? { id: r.class.id, name: r.class.name, subjectIds: [] };
+        if (!c.subjectIds.includes(r.subjectId)) c.subjectIds.push(r.subjectId);
+        classes.set(r.class.id, c);
+      }
+      const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name);
+      return {
+        schoolWide: false,
+        subjects: [...subjects.values()].sort(byName),
+        classes: [...classes.values()].sort(byName),
+      };
+    });
+  }
 
   async listBanks(p: Principal): Promise<CbtBankDto[]> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const banks = await tx.cbtQuestionBank.findMany({ orderBy: { createdAt: "desc" } });
+      // A teacher sees banks for subjects they teach, plus their own; school-wide
+      // staff see every bank in the school.
+      const where = this.isSchoolWide(p)
+        ? {}
+        : {
+            OR: [
+              { createdById: p.userId },
+              { subjectId: { in: [...(await this.taughtSubjectIds(tx, p))] } },
+            ],
+          };
+      const banks = await tx.cbtQuestionBank.findMany({ where, orderBy: { createdAt: "desc" } });
       const counts = await tx.cbtQuestion.groupBy({ by: ["bankId"], _count: { id: true } });
       const countOf = new Map(counts.map((c) => [c.bankId, c._count.id]));
       return banks.map((b) => ({
         id: b.id,
         name: b.name,
         subject: b.subject,
+        subjectId: b.subjectId,
         questionCount: countOf.get(b.id) ?? 0,
         createdAt: b.createdAt,
       }));
     });
   }
 
-  async createBank(p: Principal, input: { name: string; subject?: string | null }): Promise<CbtBankDto> {
+  async createBank(
+    p: Principal,
+    input: { name: string; subject?: string | null; subjectId?: string | null },
+  ): Promise<CbtBankDto> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const subjectId = input.subjectId ?? null;
+      let subjectLabel = input.subject?.trim() || null;
+      if (!this.isSchoolWide(p)) {
+        // SECURITY: a teacher authors banks ONLY for a subject they teach —
+        // relationship-scoped like grading (classSubjectTeacher is authoritative).
+        if (!subjectId) throw new BadRequestException("Pick the subject this bank is for");
+        const teaches = await tx.classSubjectTeacher.findFirst({
+          where: { teacherId: p.userId, subjectId },
+          select: { id: true },
+        });
+        if (!teaches) throw new NotFoundException("Subject not found"); // 404-not-403
+      }
+      if (subjectId) {
+        const subject = await tx.subject.findFirst({ where: { id: subjectId }, select: { name: true } });
+        if (!subject) throw new NotFoundException("Subject not found");
+        subjectLabel = subject.name;
+      }
       const bank = await tx.cbtQuestionBank.create({
-        data: { schoolId: p.schoolId, name: input.name.trim(), subject: input.subject?.trim() || null, createdById: p.userId },
+        data: {
+          schoolId: p.schoolId,
+          name: input.name.trim(),
+          subject: subjectLabel,
+          subjectId,
+          createdById: p.userId,
+        },
       });
-      await this.log(tx, p, "cbt.bank.create", bank.id, { name: bank.name });
-      return { id: bank.id, name: bank.name, subject: bank.subject, questionCount: 0, createdAt: bank.createdAt };
+      await this.log(tx, p, "cbt.bank.create", bank.id, { name: bank.name, subjectId });
+      return {
+        id: bank.id,
+        name: bank.name,
+        subject: bank.subject,
+        subjectId: bank.subjectId,
+        questionCount: 0,
+        createdAt: bank.createdAt,
+      };
     });
   }
 
@@ -92,6 +264,8 @@ export class CbtService {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const bank = await tx.cbtQuestionBank.findFirst({ where: { id: bankId } });
       if (!bank) throw new NotFoundException("Bank not found");
+      // 404-not-403: a bank outside the teacher's subjects doesn't exist to them.
+      if (!(await this.canTouchBank(tx, p, bank))) throw new NotFoundException("Bank not found");
       await tx.cbtQuestion.createMany({
         data: questions.map((q) => ({
           schoolId: p.schoolId,
@@ -129,6 +303,24 @@ export class CbtService {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const bank = await tx.cbtQuestionBank.findFirst({ where: { id: input.bankId } });
       if (!bank) throw new NotFoundException("Bank not found");
+      if (!(await this.canTouchBank(tx, p, bank))) throw new NotFoundException("Bank not found");
+      if (!this.isSchoolWide(p)) {
+        // SECURITY: a teacher's exam is always scoped to a class where they
+        // teach the bank's subject — never school-wide.
+        if (!input.classId) throw new BadRequestException("Pick one of your classes for this exam");
+        const teachesClass = await tx.classSubjectTeacher.findFirst({
+          where: {
+            teacherId: p.userId,
+            classId: input.classId,
+            ...(bank.subjectId ? { subjectId: bank.subjectId } : {}),
+          },
+          select: { id: true },
+        });
+        if (!teachesClass) throw new NotFoundException("Class not found"); // 404-not-403
+      } else if (input.classId) {
+        const klass = await tx.class.findFirst({ where: { id: input.classId }, select: { id: true } });
+        if (!klass) throw new NotFoundException("Class not found");
+      }
       const available = await tx.cbtQuestion.count({ where: { bankId: input.bankId } });
       if (available === 0) throw new ConflictException("The bank has no questions yet");
       const exam = await tx.cbtExam.create({
@@ -149,14 +341,115 @@ export class CbtService {
     });
   }
 
-  async setExamStatus(p: Principal, examId: string, status: "PUBLISHED" | "CLOSED"): Promise<CbtExamDto> {
+  /** Close a live exam early. Publishing is NOT available here — it goes
+   *  through the CBT_EXAM_PUBLISH maker-checker (requestPublish below). */
+  async setExamStatus(p: Principal, examId: string, status: "CLOSED"): Promise<CbtExamDto> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const exam = await tx.cbtExam.findFirst({ where: { id: examId } });
       if (!exam) throw new NotFoundException("Exam not found");
-      await tx.cbtExam.update({ where: { id: examId }, data: { status } });
+      if (!this.isSchoolWide(p) && exam.createdById !== p.userId) {
+        throw new NotFoundException("Exam not found"); // 404-not-403
+      }
+      const res = await tx.cbtExam.updateMany({
+        where: { id: examId, status: "PUBLISHED" },
+        data: { status },
+      });
+      if (res.count === 0) throw new ConflictException("Only a published exam can be closed");
       await this.log(tx, p, "cbt.exam.status", examId, { status });
       return this.toExamDto(tx, { ...exam, status }, p);
     });
+  }
+
+  /** MAKER-CHECKER publish. The author's request parks the exam
+   *  PENDING_APPROVAL and raises a CBT_EXAM_PUBLISH workflow request; only a
+   *  DIFFERENT workflow.review holder's approval (via the finalized reactor)
+   *  flips it PUBLISHED. Rejection returns it to DRAFT. */
+  async requestPublish(p: Principal, examId: string): Promise<{ pendingApproval: true; requestId: string }> {
+    // Step 1 (tenant tx): validate + atomically CLAIM the draft. The status
+    // filter doubles as the concurrency/idempotency guard.
+    const claimed = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const exam = await tx.cbtExam.findFirst({ where: { id: examId } });
+      if (!exam) throw new NotFoundException("Exam not found");
+      if (!this.isSchoolWide(p) && exam.createdById !== p.userId) {
+        throw new NotFoundException("Exam not found"); // 404-not-403
+      }
+      const available = await tx.cbtQuestion.count({ where: { bankId: exam.bankId } });
+      if (available === 0) throw new ConflictException("The bank has no questions yet");
+      const res = await tx.cbtExam.updateMany({
+        where: { id: examId, status: "DRAFT" },
+        data: { status: "PENDING_APPROVAL" },
+      });
+      if (res.count === 0) {
+        throw new ConflictException("Only a draft exam can be submitted for publication approval");
+      }
+      await this.log(tx, p, "cbt.exam.publish.requested", examId, { title: exam.title });
+      return { title: exam.title };
+    });
+
+    // Step 2: raise + submit the approval request. If this fails, RELEASE the
+    // claim (back to DRAFT) so the exam can't strand without a reviewer.
+    try {
+      const req = (await this.workflow.createRequest(p, {
+        type: "CBT_EXAM_PUBLISH",
+        title: `Publish CBT exam: ${claimed.title}`,
+        payload: { examId },
+      })) as { id: string };
+      await this.workflow.submit(p, req.id);
+      return { pendingApproval: true, requestId: req.id };
+    } catch (err) {
+      await this.db.runAsTenant(this.ctx(p), (tx) =>
+        tx.cbtExam.updateMany({
+          where: { id: examId, status: "PENDING_APPROVAL" },
+          data: { status: "DRAFT" },
+        }),
+      );
+      throw err;
+    }
+  }
+
+  /** MAKER-CHECKER answer-key release. Allowed once the exam is closed (or its
+   *  window has ended): the teacher's request parks it REQUESTED and raises a
+   *  CBT_ANSWER_RELEASE workflow request routed to the PRINCIPAL; only that
+   *  approval (via the finalized reactor) lets students see correct answers. */
+  async requestAnswerRelease(p: Principal, examId: string): Promise<{ pendingApproval: true; requestId: string }> {
+    const claimed = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const exam = await tx.cbtExam.findFirst({ where: { id: examId } });
+      if (!exam) throw new NotFoundException("Exam not found");
+      if (!this.isSchoolWide(p) && exam.createdById !== p.userId) {
+        throw new NotFoundException("Exam not found"); // 404-not-403
+      }
+      if (exam.status !== "CLOSED" && exam.endAt > new Date()) {
+        throw new ConflictException("Close the exam (or wait for its window to end) before releasing answers");
+      }
+      const res = await tx.cbtExam.updateMany({
+        where: { id: examId, answerRelease: "HIDDEN" },
+        data: { answerRelease: "REQUESTED" },
+      });
+      if (res.count === 0) {
+        throw new ConflictException("Answer release is already requested or approved");
+      }
+      await this.log(tx, p, "cbt.exam.answers.release_requested", examId, { title: exam.title });
+      return { title: exam.title };
+    });
+
+    try {
+      const req = (await this.workflow.createRequest(p, {
+        type: "CBT_ANSWER_RELEASE",
+        title: `Release CBT answers: ${claimed.title}`,
+        payload: { examId },
+        stages: CBT_ANSWER_RELEASE_CHAIN,
+      })) as { id: string };
+      await this.workflow.submit(p, req.id);
+      return { pendingApproval: true, requestId: req.id };
+    } catch (err) {
+      await this.db.runAsTenant(this.ctx(p), (tx) =>
+        tx.cbtExam.updateMany({
+          where: { id: examId, answerRelease: "REQUESTED" },
+          data: { answerRelease: "HIDDEN" },
+        }),
+      );
+      throw err;
+    }
   }
 
   /** Staff see every exam; students see PUBLISHED exams open to them. */
@@ -372,10 +665,12 @@ export class CbtService {
     }
   }
 
-  /** The student-safe view: answerIndex appears ONLY after the sitting closes. */
+  /** The student-safe view: answerIndex appears ONLY after the sitting closes
+   *  AND the exam's answer key has been RELEASED (teacher requested, principal
+   *  approved). Until then the score alone is visible. */
   private async sittingView(
     tx: TenantTx,
-    exam: { id: string; title: string; durationMinutes: number; endAt: Date },
+    exam: { id: string; title: string; durationMinutes: number; endAt: Date; answerRelease: string },
     sitting: {
       id: string;
       status: string;
@@ -395,6 +690,7 @@ export class CbtService {
     });
     const byId = new Map(rows.map((q) => [q.id, q]));
     const finished = sitting.status !== "IN_PROGRESS";
+    const released = exam.answerRelease === "RELEASED";
     const deadline = Math.min(sitting.startedAt.getTime() + exam.durationMinutes * 60_000, exam.endAt.getTime());
     void p;
     return {
@@ -408,6 +704,7 @@ export class CbtService {
       score: finished ? sitting.score : null,
       total: finished ? sitting.total : null,
       answers: (sitting.answers as Record<string, number> | null) ?? {},
+      answersReleased: released,
       questions: order
         .map((qid) => byId.get(qid))
         .filter((q): q is NonNullable<typeof q> => Boolean(q))
@@ -415,8 +712,9 @@ export class CbtService {
           id: q.id,
           prompt: q.prompt,
           choices: q.choices as unknown as string[],
-          // SERVER AUTHORITY: the key is withheld until the sitting is closed.
-          answerIndex: finished ? q.answerIndex : null,
+          // SERVER AUTHORITY: the key is withheld until the sitting is closed
+          // AND the exam's release was approved by the principal.
+          answerIndex: finished && released ? q.answerIndex : null,
         })),
     };
   }
@@ -433,6 +731,8 @@ export class CbtService {
       startAt: Date;
       endAt: Date;
       status: string;
+      answerRelease: string;
+      answersReleasedAt: Date | null;
     },
     p: Principal,
   ): Promise<CbtExamDto> {
@@ -450,6 +750,8 @@ export class CbtService {
       startAt: exam.startAt,
       endAt: exam.endAt,
       status: exam.status,
+      answerRelease: exam.answerRelease,
+      answersReleasedAt: exam.answersReleasedAt,
       sittings,
       mySittingId: mine?.id ?? null,
       mySittingStatus: mine?.status ?? null,
