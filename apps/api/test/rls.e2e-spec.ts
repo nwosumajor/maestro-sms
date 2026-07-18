@@ -80,6 +80,13 @@ d("RLS cross-tenant isolation", () => {
   const messageCreditA = randomUUID();
   // Legal clickwrap: one acceptance in A.
   const legalAcceptanceA = randomUUID();
+  // Growth: agent (global) → commission attributed to A. Group registry:
+  // school_group (global) → member row for A. BOTH ledgers are DENY-ALL to the
+  // app role (rls/72, rls/74) — proven by the deny-all test, not the deny case.
+  const agentX = randomUUID();
+  const agentCommissionA = randomUUID();
+  const schoolGroupX = randomUUID();
+  const schoolGroupMemberA = randomUUID();
   // CBT: bank → question → exam → sitting in A.
   const cbtBankA = randomUUID();
   const cbtQuestionA = randomUUID();
@@ -416,6 +423,20 @@ d("RLS cross-tenant isolation", () => {
     await a.query(
       `INSERT INTO legal_acceptance (id,"schoolId","userId","docVersion",context) VALUES ($1,$2,$3,'1.0','IN_APP')`,
       [legalAcceptanceA, A, userA],
+    );
+    // Growth agent ledger + group registry (platform-only; app role DENY-ALL).
+    await a.query(
+      `INSERT INTO agent (id,name,email,code,"commissionBp","updatedAt") VALUES ($1,'RLS Agent','agent@rls.test',$2,500,now())`,
+      [agentX, `RLS-${agentX.slice(0, 8)}`],
+    );
+    await a.query(
+      `INSERT INTO agent_commission (id,"agentId","schoolId","paymentRef","amountMinor") VALUES ($1,$2,$3,'rls-ref',100000)`,
+      [agentCommissionA, agentX, A],
+    );
+    await a.query(`INSERT INTO school_group (id,name,"updatedAt") VALUES ($1,'RLS Group',now())`, [schoolGroupX]);
+    await a.query(
+      `INSERT INTO school_group_member (id,"groupId","schoolId") VALUES ($1,$2,$3)`,
+      [schoolGroupMemberA, schoolGroupX, A],
     );
     // CBT: bank → question → exam → sitting chain in A.
     await a.query(
@@ -1039,6 +1060,12 @@ d("RLS cross-tenant isolation", () => {
     }
     // Cross-tenant arena competition has no schoolId — delete by id.
     await a.query(`DELETE FROM ultimate_competition WHERE id = $1`, [ultimateCompA]);
+    // Platform-only ledgers: child rows (schoolId-scoped) before the GLOBAL
+    // agent / school_group parents (no schoolId — delete by id).
+    await a.query(`DELETE FROM agent_commission WHERE id = $1`, [agentCommissionA]);
+    await a.query(`DELETE FROM agent WHERE id = $1`, [agentX]);
+    await a.query(`DELETE FROM school_group_member WHERE id = $1`, [schoolGroupMemberA]);
+    await a.query(`DELETE FROM school_group WHERE id = $1`, [schoolGroupX]);
     await a.query(`DELETE FROM "user" WHERE "schoolId" = ANY($1)`, [[A, B]]);
     await a.query(`DELETE FROM school WHERE id = ANY($1)`, [[A, B]]);
     // Global (RLS-exempt) role row created for the user_role case — delete by id.
@@ -1205,6 +1232,22 @@ d("RLS cross-tenant isolation", () => {
     ["announcement", announcementA],
   ];
 
+  // Platform-only money/governance ledgers (rls/72 agent_commission, rls/74
+  // school_group_member): the app role holds NO grant and NO policy at all, so
+  // even a school's OWN tenant context is refused — stronger than cross-tenant
+  // deny. Only the privileged operator client may touch them.
+  it.each([["agent_commission"], ["school_group_member"]])(
+    "the app role cannot read the platform-only %s ledger at all (deny-all)",
+    async (table) => {
+      await asApp(A, async (c) => {
+        await expect(c.query(`SELECT 1 FROM "${table}"`)).rejects.toThrow(/permission denied/);
+      });
+      await asApp(B, async (c) => {
+        await expect(c.query(`SELECT 1 FROM "${table}"`)).rejects.toThrow(/permission denied/);
+      });
+    },
+  );
+
   it.each(cases)("school B cannot SELECT school A's %s; school A can", async (table, id) => {
     // Quote the table name — `user` is a SQL reserved word.
     await asApp(B, async (c) => {
@@ -1231,6 +1274,8 @@ d("RLS cross-tenant isolation", () => {
       "audit_log", // append-only test below
       "integrity_signal", // append-only test below
       "workflow_audit_log", // append-only test below
+      "agent_commission", // deny-all test above (app role has NO access)
+      "school_group_member", // deny-all test above (app role has NO access)
     ]);
     // Documented RLS-EXEMPT: cross-tenant BY DESIGN (carries no PII). It has a
     // schoolId for grouping but intentionally no RLS (see 21_ultimate_rls.sql),
