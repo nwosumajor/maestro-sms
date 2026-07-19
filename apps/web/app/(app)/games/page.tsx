@@ -86,6 +86,7 @@ export default async function GamesPage() {
   const canQuizHost = hasPermission(user.permissions, "game.quiz.host");
   const canHangmanHost = hasPermission(user.permissions, "game.hangman.host");
   const canTypingHost = hasPermission(user.permissions, "game.typing.host");
+  const canModerate = hasPermission(user.permissions, "game.match.moderate");
 
   const [openGames, classes, races, competitions, people, settings] = await Promise.all([
     canPlay ? apiGet<Serialized<OpenGameDto>[]>("/games/open") : Promise.resolve(null),
@@ -143,40 +144,46 @@ export default async function GamesPage() {
               <StartRingButton />
             </GameTile>
           )}
-          <GameTile
-            icon={<Zap className="h-5 w-5" aria-hidden />}
-            accentBar="bg-violet-500"
-            accentTile="bg-violet-500/12 text-violet-500"
-            name="Live Quiz"
-            blurb="Kahoot-style themed rounds — answer correctly and fast to score."
-          >
-            <Link href="/games/quiz" className={cta}>
-              {canQuizHost ? "Host or join a quiz" : "Join a live quiz"}
-            </Link>
-          </GameTile>
-          <GameTile
-            icon={<SpellCheck className="h-5 w-5" aria-hidden />}
-            accentBar="bg-amber-500"
-            accentTile="bg-amber-500/12 text-amber-600"
-            name="Hangman"
-            blurb="Guess the word letter by letter before the lives run out."
-          >
-            <Link href="/games/hangman" className={cta}>
-              {canHangmanHost ? "Host or join hangman" : "Join a hangman round"}
-            </Link>
-          </GameTile>
-          <GameTile
-            icon={<Keyboard className="h-5 w-5" aria-hidden />}
-            accentBar="bg-sky-500"
-            accentTile="bg-sky-500/12 text-sky-500"
-            name="Typing Race"
-            blurb="Type the passage fast and accurately — highest net WPM wins."
-          >
-            <Link href="/games/typing" className={cta}>
-              {canTypingHost ? "Host or join a race" : "Join a typing race"}
-            </Link>
-          </GameTile>
-          {canPlay && (
+          {(canPlay || canQuizHost) && (
+            <GameTile
+              icon={<Zap className="h-5 w-5" aria-hidden />}
+              accentBar="bg-violet-500"
+              accentTile="bg-violet-500/12 text-violet-500"
+              name="Live Quiz"
+              blurb="Kahoot-style themed rounds — answer correctly and fast to score."
+            >
+              <Link href="/games/quiz" className={cta}>
+                {canQuizHost ? "Host or join a quiz" : "Join a live quiz"}
+              </Link>
+            </GameTile>
+          )}
+          {(canPlay || canHangmanHost) && (
+            <GameTile
+              icon={<SpellCheck className="h-5 w-5" aria-hidden />}
+              accentBar="bg-amber-500"
+              accentTile="bg-amber-500/12 text-amber-600"
+              name="Hangman"
+              blurb="Guess the word letter by letter before the lives run out."
+            >
+              <Link href="/games/hangman" className={cta}>
+                {canHangmanHost ? "Host or join hangman" : "Join a hangman round"}
+              </Link>
+            </GameTile>
+          )}
+          {(canPlay || canTypingHost) && (
+            <GameTile
+              icon={<Keyboard className="h-5 w-5" aria-hidden />}
+              accentBar="bg-sky-500"
+              accentTile="bg-sky-500/12 text-sky-500"
+              name="Typing Race"
+              blurb="Type the passage fast and accurately — highest net WPM wins."
+            >
+              <Link href="/games/typing" className={cta}>
+                {canTypingHost ? "Host or join a race" : "Join a typing race"}
+              </Link>
+            </GameTile>
+          )}
+          {(canPlay || canModerate) && (
             <GameTile
               icon={<CircleDot className="h-5 w-5" aria-hidden />}
               accentBar="bg-rose-600"
@@ -185,11 +192,11 @@ export default async function GamesPage() {
               blurb="Classic 8×8 draughts — challenge a classmate to a timed duel."
             >
               <Link href="/games/checkers" className={cta}>
-                Play checkers
+                {canPlay ? "Play checkers" : "View checkers games"}
               </Link>
             </GameTile>
           )}
-          {canPlay && (
+          {(canPlay || canModerate) && (
             <GameTile
               icon={<Crown className="h-5 w-5" aria-hidden />}
               accentBar="bg-teal-600"
@@ -198,7 +205,7 @@ export default async function GamesPage() {
               blurb="Full-rules chess — castling, en passant, promotion, and the clock."
             >
               <Link href="/games/chess" className={cta}>
-                Play chess
+                {canPlay ? "Play chess" : "View chess games"}
               </Link>
             </GameTile>
           )}

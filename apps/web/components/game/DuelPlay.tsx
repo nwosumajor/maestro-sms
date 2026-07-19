@@ -15,7 +15,16 @@ import { Input } from "@/components/ui/input";
 
 type Game = Serialized<GameDto>;
 
-export function DuelPlay({ initial }: { initial: Game }) {
+export function DuelPlay({
+  initial,
+  canPlay = true,
+  canModerate = false,
+}: {
+  initial: Game;
+  /** Staff overseers (moderate without game.play) get no join affordance. */
+  canPlay?: boolean;
+  canModerate?: boolean;
+}) {
   const { data: game, refresh, live } = useLiveGame<Game>(initial.id, `games/${initial.id}`, initial, {
     stop: (g) => g.status === "FINISHED" || g.status === "ABANDONED",
   });
@@ -64,8 +73,14 @@ export function DuelPlay({ initial }: { initial: Game }) {
             <p className="text-sm text-muted-foreground">Waiting for an opponent to join…</p>
           )}
 
-          {game.status === "LOBBY" && !me && (
+          {game.status === "LOBBY" && !me && canPlay && (
             <Button onClick={() => act(() => postSms(`games/${game.id}/join`))}>Join this duel</Button>
+          )}
+
+          {canModerate && game.status !== "FINISHED" && game.status !== "ABANDONED" && (
+            <Button variant="outline" size="sm" onClick={() => act(() => postSms(`games/${game.id}/end`))}>
+              Force-end (moderator)
+            </Button>
           )}
 
           {game.status === "SETUP" && me && (

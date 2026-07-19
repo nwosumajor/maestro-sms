@@ -175,16 +175,18 @@ export class GameSocketGateway implements OnApplicationShutdown {
     mode: string | null,
   ): void {
     // Per-mode: the coarse permission the HTTP GET enforces + its viewer-redacted
-    // reader. duel/ring gate on game.play; race/league/ultimate views gate on
-    // game.leaderboard.read. `league`/`ultimate` ids are competition ids, not game
+    // reader. ALL modes gate on game.leaderboard.read, mirroring the REST GETs —
+    // duel/ring services still scope non-staff viewers to their own seat
+    // (participant OR school-wide/moderator oversight), 404-not-403.
+    // `league`/`ultimate` ids are competition ids, not game
     // ids; `ultimate` reads the CROSS-SCHOOL leaderboard — pseudonymous handles +
     // school names + scores only, no PII (the leaderboard DTO is the boundary).
     const readers: Record<
       string,
       { permission: string; read: (p: Principal, id: string) => Promise<unknown> }
     > = {
-      duel: { permission: GAME_PERMISSIONS.PLAY, read: (p, id) => this.durableGames.getGame(p, id) },
-      ring: { permission: GAME_PERMISSIONS.PLAY, read: (p, id) => this.durableRings.getRing(p, id) },
+      duel: { permission: GAME_PERMISSIONS.LEADERBOARD_READ, read: (p, id) => this.durableGames.getGame(p, id) },
+      ring: { permission: GAME_PERMISSIONS.LEADERBOARD_READ, read: (p, id) => this.durableRings.getRing(p, id) },
       race: { permission: GAME_PERMISSIONS.LEADERBOARD_READ, read: (p, id) => this.durableRaces.getRace(p, id) },
       league: { permission: GAME_PERMISSIONS.LEADERBOARD_READ, read: (p, id) => this.durableCompetitions.get(p, id) },
       ultimate: { permission: GAME_PERMISSIONS.LEADERBOARD_READ, read: (p, id) => this.durableUltimate.leaderboard(p, id) },

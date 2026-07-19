@@ -102,7 +102,15 @@ export class PermissionGuard implements CanActivate {
       context.getHandler(),
       context.getClass(),
     ]);
-    if (requiredModule && !(await this.modules.isEnabled(principal.schoolId, requiredModule))) {
+    // SECURITY: modules gate what a CUSTOMER school has paid for. The platform
+    // operator is not a customer — their org has no subscription, so resolving
+    // it would fail-closed and 404 the super_admin-only surfaces that happen to
+    // live inside a module (e.g. the cross-school Ultimate arena admin). The
+    // bypass is role-keyed to the real operator: an IMPERSONATION token carries
+    // the TARGET user's roles, so impersonated sessions still see exactly what
+    // that school's plan enables.
+    const isOperator = principal.roles.includes("super_admin");
+    if (requiredModule && !isOperator && !(await this.modules.isEnabled(principal.schoolId, requiredModule))) {
       throw new NotFoundException();
     }
 

@@ -38,7 +38,9 @@ export class RingController {
   }
 
   @Get(":id")
-  @RequirePermission(GAME_PERMISSIONS.PLAY)
+  // Viewing is oversight-grade (players AND the staff who moderate/configure);
+  // the service still scopes non-staff to their own seat, 404-not-403.
+  @RequirePermission(GAME_PERMISSIONS.LEADERBOARD_READ)
   get(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<RingDto> {
     return this.rings.getRing(p, id);
   }

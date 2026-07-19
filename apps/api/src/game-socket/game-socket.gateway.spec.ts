@@ -88,9 +88,11 @@ describe("GameSocketGateway — /ws/watch security dispatch", () => {
     expect(durableGames.getGame).not.toHaveBeenCalled();
   });
 
-  it("forbids duel watch without game.play (4403), never reading", async () => {
+  it("forbids duel watch without game.leaderboard.read (4403), never reading", async () => {
+    // Mirrors the REST GET: viewing is oversight-grade (leaderboard.read); the
+    // service scopes non-staff to their own seat. game.play alone is not enough.
     const { watch, sent, socket, durableGames } = setup();
-    watch(principal([GAME_PERMISSIONS.LEADERBOARD_READ]), "g1", "duel");
+    watch(principal([GAME_PERMISSIONS.PLAY]), "g1", "duel");
     await flush();
     expect(sent[0]?.code).toBe("FORBIDDEN");
     expect(socket.closed?.code).toBe(4403);
@@ -154,7 +156,7 @@ describe("GameSocketGateway — /ws/watch security dispatch", () => {
 
   it("requires a gameId (BAD_REQUEST)", async () => {
     const { watch, sent, socket } = setup();
-    watch(principal([GAME_PERMISSIONS.PLAY]), null, "duel");
+    watch(principal([GAME_PERMISSIONS.LEADERBOARD_READ]), null, "duel");
     await flush();
     expect(sent[0]?.message).toBe("gameId is required");
     expect(socket.closed?.code).toBe(4400);
@@ -163,7 +165,7 @@ describe("GameSocketGateway — /ws/watch security dispatch", () => {
   it("pushes the duel view on connect, projecting identity from the token", async () => {
     const getGame = jest.fn().mockResolvedValue({ id: "g1", status: "ACTIVE" });
     const { watch, sent, durableGames } = setup({ game: getGame });
-    watch(principal([GAME_PERMISSIONS.PLAY]), "g1", "duel");
+    watch(principal([GAME_PERMISSIONS.LEADERBOARD_READ]), "g1", "duel");
     await flush();
     expect(sent).toEqual([{ type: "state", game: { id: "g1", status: "ACTIVE" } }]);
     // SECURITY: identity passed to the durable getter comes from the token only.
@@ -176,7 +178,7 @@ describe("GameSocketGateway — /ws/watch security dispatch", () => {
   it("re-reads and re-pushes only when ITS game changes (filtered subscription)", async () => {
     const getRing = jest.fn().mockResolvedValue({ id: "ring1", status: "ACTIVE" });
     const { watch, sent, events, durableRings } = setup({ ring: getRing });
-    watch(principal([GAME_PERMISSIONS.PLAY]), "ring1", "ring");
+    watch(principal([GAME_PERMISSIONS.LEADERBOARD_READ]), "ring1", "ring");
     await flush();
     expect(durableRings.getRing).toHaveBeenCalledTimes(1); // initial push
 
@@ -193,7 +195,7 @@ describe("GameSocketGateway — /ws/watch security dispatch", () => {
   it("maps a relationship/RLS miss to NOT_FOUND + close (404, never 403)", async () => {
     const getGame = jest.fn().mockRejectedValue(new NotFoundException("Game not found"));
     const { watch, sent, socket } = setup({ game: getGame });
-    watch(principal([GAME_PERMISSIONS.PLAY]), "g1", "duel");
+    watch(principal([GAME_PERMISSIONS.LEADERBOARD_READ]), "g1", "duel");
     await flush();
     expect(sent.at(-1)).toEqual({ type: "error", code: "NOT_FOUND", message: "game not found" });
     expect(socket.closed?.code).toBe(4404);
@@ -202,7 +204,7 @@ describe("GameSocketGateway — /ws/watch security dispatch", () => {
   it("stops re-pushing after the socket closes (unsubscribe on teardown)", async () => {
     const getGame = jest.fn().mockResolvedValue({ id: "g1", status: "ACTIVE" });
     const { watch, events, socket, durableGames } = setup({ game: getGame });
-    watch(principal([GAME_PERMISSIONS.PLAY]), "g1", "duel");
+    watch(principal([GAME_PERMISSIONS.LEADERBOARD_READ]), "g1", "duel");
     await flush();
     expect(durableGames.getGame).toHaveBeenCalledTimes(1);
 
@@ -215,7 +217,7 @@ describe("GameSocketGateway — /ws/watch security dispatch", () => {
   it("defaults an absent mode to duel", async () => {
     const getGame = jest.fn().mockResolvedValue({ id: "g1", status: "LOBBY" });
     const { watch, durableGames } = setup({ game: getGame });
-    watch(principal([GAME_PERMISSIONS.PLAY]), "g1", null);
+    watch(principal([GAME_PERMISSIONS.LEADERBOARD_READ]), "g1", null);
     await flush();
     expect(durableGames.getGame).toHaveBeenCalledTimes(1);
   });

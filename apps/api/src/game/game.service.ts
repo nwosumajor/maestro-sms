@@ -40,6 +40,12 @@ import {
 import { CompetitionService } from "./competition.service";
 import { GameEventsService } from "./game-events.service";
 
+// Oversight viewers (spec §8): school leadership sees any match; teachers reach
+// non-own matches through game.match.moderate. Neither can act as a player —
+// buildGameView serializes no secrets, so viewing leaks nothing.
+const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal", "super_admin"]);
+const MODERATE_PERMISSION = "game.match.moderate";
+
 @Injectable()
 export class GameService {
   constructor(
@@ -261,12 +267,39 @@ export class GameService {
     return view;
   }
 
+  /** Moderator force-end (mirrors RingService.endRing): a stuck or abusive
+   *  duel is closed as ABANDONED — no winner is declared, secrets are cleared
+   *  (retention, §10), and competition standings are NOT touched (the overdue
+   *  sweep owns league forfeits). */
+  async endGame(p: Principal, gameId: string): Promise<GameDto> {
+    const view = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const game = await this.requireGame(tx, gameId);
+      if (game.status === "FINISHED" || game.status === "ABANDONED") {
+        throw new ConflictException("Game is already over");
+      }
+      await tx.gamePlayer.updateMany({ where: { gameId }, data: { secret: null } });
+      await tx.game.update({
+        where: { id: gameId },
+        data: { status: "ABANDONED", currentTurnPlayerId: null, finishedAt: new Date() },
+      });
+      await this.log(tx, p, "game.end", "game", gameId);
+      return this.buildGameView(tx, gameId, p.userId);
+    });
+    this.events.emitChanged(gameId);
+    return view;
+  }
+
   // --- read ---------------------------------------------------------------
-  /** A participant's redacted view of their game (no secrets while live). */
+  /** A redacted view of a game (no secrets while live): participants, plus
+   *  school-wide staff and match moderators for oversight (404 otherwise). */
   async getGame(p: Principal, gameId: string): Promise<GameDto> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.requireGame(tx, gameId);
-      await this.requireSeat(tx, gameId, p.userId); // relationship scope → 404 if not a player
+      const oversight =
+        p.roles.some((r) => SCHOOL_WIDE_ROLES.has(r)) || p.permissions.includes(MODERATE_PERMISSION);
+      if (!oversight) {
+        await this.requireSeat(tx, gameId, p.userId); // relationship scope → 404 if not a player
+      }
       return this.buildGameView(tx, gameId, p.userId);
     });
   }

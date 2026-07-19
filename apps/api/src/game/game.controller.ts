@@ -44,9 +44,18 @@ export class GameController {
   }
 
   @Get(":id")
-  @RequirePermission(GAME_PERMISSIONS.PLAY)
+  // Viewing is oversight-grade (players AND the staff who moderate/configure);
+  // the service still scopes non-staff to their own seat, 404-not-403.
+  @RequirePermission(GAME_PERMISSIONS.LEADERBOARD_READ)
   get(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<GameDto> {
     return this.games.getGame(p, id);
+  }
+
+  /** Moderator force-end of a stuck/abusive duel — ends with no winner. */
+  @Post(":id/end")
+  @RequirePermission(GAME_PERMISSIONS.MATCH_MODERATE)
+  end(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<GameDto> {
+    return this.games.endGame(p, id);
   }
 
   @Post(":id/join")

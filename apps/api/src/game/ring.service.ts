@@ -307,7 +307,10 @@ export class RingService {
   async getRing(p: Principal, ringId: string): Promise<RingDto> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.requireRing(tx, ringId); // 404 if absent / cross-tenant
-      if (!this.isSchoolWide(p)) {
+      // Oversight viewers: school-wide staff, plus match moderators (teachers) —
+      // the force-end power is useless if its holder cannot see the ring.
+      const oversight = this.isSchoolWide(p) || p.permissions.includes("game.match.moderate");
+      if (!oversight) {
         const seat = await tx.gamePlayer.findFirst({ where: { gameId: ringId, userId: p.userId } });
         if (!seat) throw new NotFoundException("Ring not found"); // relationship scope
       }

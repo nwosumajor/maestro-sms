@@ -55,6 +55,28 @@ describe("PermissionGuard — module entitlement gate", () => {
     expect(modules.isEnabled).toHaveBeenCalledWith("s", "fees");
   });
 
+  it("bypasses the module gate for super_admin (the operator is not a customer)", async () => {
+    // The platform org has no subscription; without the bypass every module-
+    // tagged super_admin surface (e.g. Ultimate arena admin) would fail-closed
+    // 404. Impersonation tokens carry the TARGET's roles, so they don't bypass.
+    principal.roles = ["super_admin"] as never;
+    try {
+      const modules = { isEnabled: jest.fn().mockResolvedValue(false) };
+      const guard = new PermissionGuard(
+        makeReflector("games"),
+        {} as never,
+        {} as never,
+        modules as never,
+        { forRoles: jest.fn().mockResolvedValue([]) } as never,
+        allowRate as never,
+      );
+      await expect(guard.canActivate(makeCtx())).resolves.toBe(true);
+      expect(modules.isEnabled).not.toHaveBeenCalled();
+    } finally {
+      principal.roles = [];
+    }
+  });
+
   it("passes when the module IS enabled (and no permission/step-up required)", async () => {
     const modules = { isEnabled: jest.fn().mockResolvedValue(true) };
     const guard = new PermissionGuard(
