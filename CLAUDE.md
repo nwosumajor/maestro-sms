@@ -75,9 +75,19 @@ conflicts with it, flag the conflict before proceeding.
   stage-2 approver), head_teacher / head_admin (stage-1 approvers for the staff-
   request chain), warden (their own hostel), driver (read-only own vehicle),
   head_warden (EVERY hostel), head_driver (whole fleet), librarian (library
-  module) — 17 roles total. All except super_admin are scoped to a single
-  `school_id`.
+  module), junior_admin (day-to-day operational tier under school_admin: records/
+  attendance/timetable/documents + fee RECORDING + admissions review, but NO
+  approval powers — no rbac.manage / fee.approve / workflow.review; split by risk
+  of escalation like platform manager_admin) — 18 school roles. All except
+  super_admin are scoped to a single `school_id`.
   Adding a role/permission is a seed change, not new code.
+- Admin-tier governance guards (AdminService): nobody may remove their OWN
+  school_admin/principal role, and the LAST managing role in a school can't be
+  removed (only the operator can vacate it). Any grant that TOUCHES the
+  junior-admin tier (appointing a junior_admin, or stacking further roles onto
+  one) is maker-checker: it raises an ADMIN_APPOINTMENT workflow request
+  (systemOnly type) that a DIFFERENT workflow.review holder approves; the grant
+  lands in-tx via the finalized hook, audited to the initiator.
 - Permissions are fine-grained strings (e.g. `student.read`, `grade.write`,
   `workflow.review`, `integrity.report.read`) in `packages/types/src/permissions`.
 - Authorization is checked in NestJS via `@RequirePermission('grade.write')` +

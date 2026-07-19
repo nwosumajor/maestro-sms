@@ -137,6 +137,7 @@ export const WORKFLOW_TYPES = [
   "GRADE_PUBLISH",
   "CBT_EXAM_PUBLISH",
   "CBT_ANSWER_RELEASE",
+  "ADMIN_APPOINTMENT",
 ] as const;
 export type WorkflowType = (typeof WORKFLOW_TYPES)[number];
 
@@ -196,6 +197,11 @@ export const WORKFLOW_TYPE_META: Record<WorkflowType, WorkflowTypeMeta> = {
   // Releasing a closed CBT exam's answer key to students: the subject teacher
   // requests it; the key reaches students ONLY after the principal approves.
   CBT_ANSWER_RELEASE: { label: "CBT answer release", selfService: false, systemOnly: true },
+  // Maker-checker on the ADMIN TIER: appointing a junior_admin — or stacking
+  // further roles onto one — is requested by a senior (school_admin/principal
+  // via /admin/roles; AdminService raises it, never the public endpoint) and
+  // lands ONLY after a DIFFERENT workflow.review holder approves.
+  ADMIN_APPOINTMENT: { label: "Admin role assignment", selfService: false, systemOnly: true },
 };
 
 /** Pure: may a user with these permissions initiate this type via the API? */

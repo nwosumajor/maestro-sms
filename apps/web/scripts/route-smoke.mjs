@@ -28,7 +28,7 @@ const ALL_ROLES = [
   "teacher@demo.school", "student@demo.school", "parent@demo.school", "accountant@demo.school",
   "hr@demo.school", "hrmanager@demo.school", "headteacher@demo.school", "headadmin@demo.school",
   "warden@demo.school", "driver@demo.school", "headwarden@demo.school", "headdriver@demo.school",
-  "librarian@demo.school",
+  "librarian@demo.school", "junioradmin@demo.school",
 ];
 const ROLES = (process.env.SMOKE_ROLES?.split(",").map((s) => s.trim()).filter(Boolean)) ?? ALL_ROLES;
 

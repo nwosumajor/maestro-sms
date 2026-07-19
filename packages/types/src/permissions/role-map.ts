@@ -120,6 +120,37 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     "billing.read", "billing.manage",
     "scholarship.read",
   ],
+  // Junior school admin: the DAY-TO-DAY operational tier under school_admin,
+  // split (like platform manager_admin) by RISK OF ESCALATION. Records fees and
+  // reviews admissions, but every APPROVAL power stays senior-only:
+  //   rbac.manage .......... could assign itself school_admin
+  //   fee.approve .......... checker side of the money maker-checker
+  //   workflow.review ...... would make it an approver of its own tier's requests
+  //   hr.* / salary ........ staff pay + records stay with HR/senior
+  //   medical / privacy .... minors' sensitive PII (Golden Rule #5, restrictive)
+  //   billing / branding / game settings / audit ... governance, senior-only
+  // Appointing a junior_admin (or adding roles to one) is itself maker-checker
+  // via the ADMIN_APPOINTMENT workflow. JIT elevation covers the occasional
+  // senior need; NON_ELEVATABLE_PERMISSIONS blocks the dangerous set.
+  junior_admin: [
+    "class.read", "class.write", "enrollment.read", "enrollment.write", "guardian.write", "student.import", "parent.import",
+    "assessment.read", "integrity.report.read", "integrity.exemption.read",
+    "grade.read",
+    "student.profile.read", "student.profile.write", "student.contact.read", "student.contact.write",
+    "attendance.read", "attendance.write",
+    "workflow.create", "workflow.read",
+    "notification.read", "notification.send",
+    "fee.read", "fee.manage",
+    "hostel.read", "transport.read", "library.read",
+    "task.assign", "task.participate", "poll.vote",
+    "discussion.participate", "discipline.file", "form.respond",
+    "document.read", "document.write",
+    "timetable.read", "timetable.write",
+    "security.elevation.request",
+    "message.read", "message.send", "event.read", "event.write", "announcement.read", "announcement.manage",
+    "hr.self", "admission.review", "directory.search",
+    "lms.content.read",
+  ],
   teacher: ["hr.self", "task.assign", "task.participate", "poll.manage", "poll.vote",
     "discussion.participate", "discussion.moderate", "discipline.file", "discipline.manage", "certificate.issue", "cbt.manage", "alumni.manage", "form.manage", "form.respond",
     "assessment.read", "assessment.write", "submission.read",

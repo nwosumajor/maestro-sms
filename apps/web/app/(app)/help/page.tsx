@@ -140,6 +140,20 @@ export default async function HelpPage() {
               { title: "Brand your portal", body: "Admin → Branding: upload your school logo (square, 128–2048px) and pick your brand colour and font — it appears for every member and on generated documents." },
               { title: "Mind the guardrails", body: "Admin → Audit is the searchable log of every sensitive action; Admin → Security handles just-in-time privilege elevation (approved by a DIFFERENT person); Admin → Recertification reviews who still needs their access; Admin → Privacy handles NDPR data-export and erasure requests." },
               { title: "Check your subscription", body: "Billing: your plan, per-student pricing (monthly / per-term −5% / per-year −15%), payment history and renewal — paying activates instantly." },
+              { title: "Delegate with junior admins", body: "Appoint a junior admin for day-to-day work (records, attendance, timetable, fee RECORDING, admissions review) while approvals stay senior-only. Appointing one — or adding roles to one — raises an approval that a DIFFERENT senior (the other admin or the principal) must confirm under Approvals." },
+            ]}
+          />
+        )}
+
+        {can("admission.review") && !can("rbac.manage") && (
+          <Guide
+            title="Junior administrators — day-to-day operations"
+            description="The operational tier: you run the desk; approvals stay with your seniors."
+            steps={[
+              { title: "Records & registers", body: "Students, classes, enrolment, guardians, attendance, timetable and documents are yours to keep current. Every change is audit-logged under your name." },
+              { title: "Record fees, don't approve them", body: "Fees: you can issue invoices and record payments. Large payments and ALL refunds wait for a senior with approval rights — that separation protects you as much as the school." },
+              { title: "Review admissions", body: "Admin → Admissions: triage public applications and their form-fee status." },
+              { title: "Need more for a task?", body: "Request just-in-time elevation under Security — a senior approves a time-boxed grant. Your own role changes also require senior approval, so ask your school admin or principal." },
             ]}
           />
         )}

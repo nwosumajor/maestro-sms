@@ -1,6 +1,6 @@
 # API Reference — School Management System
 
-Complete HTTP endpoint reference for the NestJS API (`apps/api`). **523 endpoints across 70 controllers.**
+Complete HTTP endpoint reference for the NestJS API (`apps/api`). **578 endpoints across 73 controllers.**
 
 ## Conventions
 
@@ -350,6 +350,12 @@ All gated by 🔑 `platform.operate`.
 | POST | `/workflows/:id/veto` | 🔑 `workflow.veto` | Board veto |
 | GET | `/workflows` · `/workflows/:id` | 🔑 `workflow.read` | List / inspect requests |
 
+System-only types (raised by services, never the public create endpoint):
+`LMS_CONTENT_PUBLISH`, `FEE_SCHEDULE`, `GRADE_PUBLISH`, `CBT_EXAM_PUBLISH`
+(exam goes live only after a **different** `workflow.review` holder approves) and
+`CBT_ANSWER_RELEASE` (answer key reaches students only after the **principal**
+approves — single `workflow.review.principal` stage).
+
 ---
 
 ## Engagement & community
@@ -399,8 +405,8 @@ All gated by 🔑 `platform.operate`.
 | Method | Path | Gate | Purpose |
 |---|---|---|---|
 | GET | `/admin/roles` · `/admin/users` | 🔑 `rbac.manage` | Roles + user list |
-| POST | `/admin/users` · `/admin/users/:userId/roles` | 🔑 `rbac.manage` | Create user / assign role |
-| DELETE | `/admin/users/:userId/roles/:roleName` | 🔑 `rbac.manage` | Remove a role |
+| POST | `/admin/users` · `/admin/users/:userId/roles` | 🔑 `rbac.manage` | Create user / assign role. Grants touching the junior-admin tier (role `junior_admin`, or any role for a user holding it) return `{ pendingApproval: true, requestId }` — an ADMIN_APPOINTMENT workflow a DIFFERENT senior must approve |
+| DELETE | `/admin/users/:userId/roles/:roleName` | 🔑 `rbac.manage` | Remove a role. 409 on removing your OWN school_admin/principal role or the school's LAST managing role |
 | POST | `/admin/import/students` | 🔑 `rbac.manage` | Legacy bulk import |
 | GET | `/admin/students/import/template` | 🔑 `student.import` | CSV import template |
 | POST | `/admin/students/import` | 🔑 `student.import` | Upload a PENDING import batch |
@@ -452,6 +458,39 @@ Board games (checkers/chess) carry a **per-player chess clock** — difficulty s
 the time control (Classical 15+10 / Rapid 5+5 / Blitz 3+2); a move deducts the
 turn's elapsed time and adds the increment, a flag-fall loses, and `claim-time`
 lets the opponent claim once the mover's clock hits zero.
+
+---
+
+## CBT exam hall 📦 `cbt`
+
+WAEC/JAMB-style timed, auto-marked mock exams. **Server authority is absolute:**
+a question's `answerIndex` never reaches a student while their sitting is open;
+the exam window and duration are enforced server-side from the sitting's own
+`startedAt`; question sampling/shuffling is server-side. Governance is
+maker-checker end to end: a teacher authors only for subjects they teach
+(`classSubjectTeacher` is authoritative; school_admin/principal are school-wide),
+publishing requires a **different** reviewer's approval (`CBT_EXAM_PUBLISH`), and
+the answer key reaches students only after the teacher requests release **and**
+the principal approves (`CBT_ANSWER_RELEASE`). A closed sitting shows its score
+immediately; correct answers stay withheld until release.
+
+| Method | Path | Gate | Purpose |
+|---|---|---|---|
+| GET | `/cbt/authoring-options` | 🔑 `cbt.manage` | The caller's authoring scope: their taught subjects/classes (teacher) or all (school-wide staff) — feeds the web pickers |
+| GET | `/cbt/banks` | 🔑 `cbt.manage` | List question banks (teacher: own + taught-subject banks; admin: all) |
+| POST | `/cbt/banks` | 🔑 `cbt.manage` | Create a bank — `subjectId` REQUIRED for teachers and must be a subject they teach (404 otherwise) |
+| POST | `/cbt/banks/:id/questions` | 🔑 `cbt.manage` | Add questions (typed rows from the Kahoot-style form or bulk paste; 2–6 choices, server-validated `answerIndex`) |
+| POST | `/cbt/exams` | 🔑 `cbt.manage` | Create an exam (DRAFT) over a bank — a teacher must target a class where they teach the bank's subject |
+| POST | `/cbt/exams/:id/request-publish` | 🔑 `cbt.manage` | Maker-checker: park DRAFT → PENDING_APPROVAL + raise `CBT_EXAM_PUBLISH` (approver ≠ author, engine-enforced) |
+| POST | `/cbt/exams/:id/request-answer-release` | 🔑 `cbt.manage` | Maker-checker: request the answer key (only once CLOSED / window ended) → principal approves `CBT_ANSWER_RELEASE` |
+| PUT | `/cbt/exams/:id/status` | 🔑 `cbt.manage` | Close a live exam early (`CLOSED` only — publishing goes through approval) |
+| GET | `/cbt/exams/all` | 🔑 `cbt.manage` | Staff: every exam, all statuses |
+| GET | `/cbt/exams/:id/results` | 🔑 `cbt.manage` | Per-exam results table (names + scores; audited read) |
+| GET | `/cbt/exams` | 🔑 `cbt.take` | Student: PUBLISHED exams open to them (class-scoped, window-live) |
+| POST | `/cbt/exams/:id/start` | 🔑 `cbt.take` | Start (or resume) the caller's sitting — server samples + fixes the question order |
+| GET | `/cbt/sittings/:id` | 🔑 `cbt.take` | Own sitting view (auto-expires on read past the deadline); `answerIndex` present only when finished AND released |
+| POST | `/cbt/sittings/:id/answer` | 🔑 `cbt.take` | Save one answer (refused after time is up — the clock is server law) |
+| POST | `/cbt/sittings/:id/submit` | 🔑 `cbt.take` | Submit + auto-mark (idempotent) |
 
 ---
 

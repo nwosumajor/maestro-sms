@@ -25,7 +25,18 @@ function makeService(over: { role?: Record<string, unknown> | null; existing?: R
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
-  return { service: new AdminService(db as never, audit as never), userCreate, userRoleCreate, audit };
+  const workflow = {
+    createRequest: jest.fn().mockResolvedValue({ id: "wf-1" }),
+    submit: jest.fn().mockResolvedValue({ id: "wf-1", state: "PENDING_REVIEW" }),
+  };
+  const hooks = { onFinalized: jest.fn() };
+  return {
+    service: new AdminService(db as never, audit as never, workflow as never, hooks as never),
+    userCreate,
+    userRoleCreate,
+    audit,
+    workflow,
+  };
 }
 
 const p: Principal = { schoolId: "A", userId: "admin-1", roles: ["school_admin"], permissions: ["rbac.manage"] };

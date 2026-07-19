@@ -6,7 +6,7 @@
 // holds, and bulk-creating student users. All audited.
 // =============================================================================
 
-import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import bcrypt from "bcryptjs";
 import {
   AUDIT_LOG_SERVICE,
@@ -16,6 +16,8 @@ import {
   type TenantContext,
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
+import { WorkflowService } from "../workflow/workflow.service";
+import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 
 export interface ImportRow {
   name: string;
@@ -28,12 +30,53 @@ export interface ImportRow {
 // cross-tenant super_admin. (All other roles are single-school-scoped by design.)
 const NON_ASSIGNABLE_ROLES = new Set(["super_admin"]);
 
+// The roles that carry `rbac.manage` (see role-map.ts) — the ability to
+// administer role assignments. Removals of these are guarded below so a school
+// can never strip itself of every administrator.
+const RBAC_MANAGING_ROLES = new Set(["school_admin", "principal"]);
+
+// The junior admin tier: any role grant that TOUCHES it (appointing a
+// junior_admin, or stacking further roles onto one) is maker-checker — raised
+// here as an ADMIN_APPOINTMENT workflow request and applied only after a
+// DIFFERENT workflow.review holder (the other senior) approves.
+const JUNIOR_ADMIN_ROLE = "junior_admin";
+
 @Injectable()
 export class AdminService {
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
-  ) {}
+    private readonly workflow: WorkflowService,
+    hooks: WorkflowHooksService,
+  ) {
+    // Maker-checker reactor: when a DIFFERENT senior approves an
+    // ADMIN_APPOINTMENT, the role grant lands in the SAME tenant tx as the
+    // transition (atomic, idempotent via upsert). The initiator is the actor.
+    hooks.onFinalized(async (tx, req) => {
+      if (req.type !== "ADMIN_APPOINTMENT" || req.state !== "APPROVED") return;
+      const pl = req.payload as { userId?: string; roleName?: string } | null;
+      if (!pl?.userId || !pl.roleName || NON_ASSIGNABLE_ROLES.has(pl.roleName)) return;
+      const role = await tx.role.findFirst({ where: { name: pl.roleName }, select: { id: true } });
+      const user = await tx.user.findFirst({ where: { id: pl.userId }, select: { id: true } });
+      if (!role || !user) return; // target vanished since request — no-op, never cross-tenant
+      await tx.userRole.upsert({
+        where: { userId_roleId: { userId: pl.userId, roleId: role.id } },
+        update: {},
+        create: { schoolId: req.schoolId, userId: pl.userId, roleId: role.id },
+      });
+      await this.audit.record(
+        {
+          actorId: req.initiatorId,
+          action: "rbac.role.assign",
+          entity: "user",
+          entityId: pl.userId,
+          schoolId: req.schoolId,
+          metadata: { roleName: pl.roleName, workflowRequestId: req.id, makerChecker: true },
+        },
+        tx,
+      );
+    });
+  }
 
   private ctx(p: Principal): TenantContext {
     return { schoolId: p.schoolId, userId: p.userId };
@@ -81,7 +124,8 @@ export class AdminService {
     }
     const tempPassword = input.password ?? Math.random().toString(36).slice(2, 12);
     const passwordHash = await bcrypt.hash(tempPassword, 10);
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    const pendingRole = roleName === JUNIOR_ADMIN_ROLE;
+    const created = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const role = await tx.role.findFirst({ where: { name: roleName }, select: { id: true } });
       if (!role) throw new NotFoundException("Role not found");
       const existing = await tx.user.findFirst({ where: { email: input.email }, select: { id: true } });
@@ -89,21 +133,50 @@ export class AdminService {
       const user = await tx.user.create({
         data: { schoolId: p.schoolId, email: input.email, name: input.name, passwordHash },
       });
-      await tx.userRole.create({ data: { schoolId: p.schoolId, userId: user.id, roleId: role.id } });
-      await this.log(tx, p, "admin.user.create", user.id, { email: input.email, role: roleName });
-      return { id: user.id, email: input.email, role: roleName, tempPassword };
+      // Maker-checker on the junior-admin tier: the ACCOUNT is created (it can
+      // log in and do nothing — roles:[]) but the role lands only after a
+      // different senior approves the ADMIN_APPOINTMENT raised below.
+      if (!pendingRole) {
+        await tx.userRole.create({ data: { schoolId: p.schoolId, userId: user.id, roleId: role.id } });
+      }
+      await this.log(tx, p, "admin.user.create", user.id, {
+        email: input.email,
+        role: roleName,
+        ...(pendingRole ? { pendingAppointment: true } : {}),
+      });
+      return user;
     });
+    if (pendingRole) {
+      const pending = await this.raiseAppointment(p, created.id, input.name, roleName);
+      return { id: created.id, email: input.email, role: roleName, tempPassword, ...pending };
+    }
+    return { id: created.id, email: input.email, role: roleName, tempPassword };
   }
 
   async assignRole(p: Principal, userId: string, roleName: string) {
     if (NON_ASSIGNABLE_ROLES.has(roleName)) {
       throw new BadRequestException("That role cannot be assigned");
     }
+    const target = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const role = await tx.role.findFirst({ where: { name: roleName }, select: { id: true } });
+      if (!role) throw new NotFoundException("Role not found");
+      const user = await tx.user.findFirst({ where: { id: userId }, select: { id: true, name: true } });
+      if (!user) throw new NotFoundException("User not found");
+      const holdsJunior = await tx.userRole.findFirst({
+        where: { userId, role: { name: JUNIOR_ADMIN_ROLE } },
+        select: { id: true },
+      });
+      return { user, guarded: roleName === JUNIOR_ADMIN_ROLE || Boolean(holdsJunior) };
+    });
+    // Grants touching the junior-admin tier are maker-checker: raise the
+    // request; the grant lands via the finalized hook after a DIFFERENT
+    // senior approves. Everything else stays a direct, audited assignment.
+    if (target.guarded) {
+      return this.raiseAppointment(p, userId, target.user.name, roleName);
+    }
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const role = await tx.role.findFirst({ where: { name: roleName }, select: { id: true } });
       if (!role) throw new NotFoundException("Role not found");
-      const user = await tx.user.findFirst({ where: { id: userId }, select: { id: true } });
-      if (!user) throw new NotFoundException("User not found");
       const assignment = await tx.userRole.upsert({
         where: { userId_roleId: { userId, roleId: role.id } },
         update: {},
@@ -114,10 +187,43 @@ export class AdminService {
     });
   }
 
+  /** Raise + submit the ADMIN_APPOINTMENT request for a junior-tier grant. */
+  private async raiseAppointment(p: Principal, userId: string, userName: string, roleName: string) {
+    const req = (await this.workflow.createRequest(p, {
+      type: "ADMIN_APPOINTMENT",
+      title: `Assign role ${roleName} to ${userName}`,
+      payload: { userId, roleName },
+    })) as { id: string };
+    await this.workflow.submit(p, req.id);
+    await this.db.runAsTenant(this.ctx(p), (tx) =>
+      this.log(tx, p, "rbac.role.assign.requested", userId, { roleName, workflowRequestId: req.id }),
+    );
+    return { pendingApproval: true as const, requestId: req.id, userId, roleName };
+  }
+
   async removeRole(p: Principal, userId: string, roleName: string) {
+    // SECURITY: demoting an administrator must always be a SECOND person's
+    // deliberate act — never a self-inflicted (or accidental) lockout.
+    if (userId === p.userId && RBAC_MANAGING_ROLES.has(roleName)) {
+      throw new ConflictException("You cannot remove your own administrator role — another administrator must do it");
+    }
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const role = await tx.role.findFirst({ where: { name: roleName }, select: { id: true } });
       if (!role) throw new NotFoundException("Role not found");
+      if (RBAC_MANAGING_ROLES.has(roleName)) {
+        // SECURITY: never leave the school with zero role-managing users (only
+        // the operator could then recover it). Count every managing assignment
+        // in this school EXCEPT the one being removed — RLS scopes the count.
+        const remaining = await tx.userRole.count({
+          where: {
+            role: { name: { in: [...RBAC_MANAGING_ROLES] } },
+            NOT: { userId, roleId: role.id },
+          },
+        });
+        if (remaining === 0) {
+          throw new ConflictException("Cannot remove the school's last administrator role");
+        }
+      }
       await tx.userRole.deleteMany({ where: { userId, roleId: role.id } });
       await this.log(tx, p, "rbac.role.remove", userId, { roleName });
       return { userId, roleName, removed: true };

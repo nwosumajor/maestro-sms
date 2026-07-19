@@ -21,14 +21,19 @@ export function CreateUserForm({ roles }: { roles: string[] }) {
     if (!name || !email || !role) return;
     setBusy(true);
     setResult(null);
-    const res = await postSms<{ email: string; role: string; tempPassword: string }>("admin/users", {
-      name,
-      email,
-      role,
-    });
+    const res = await postSms<{ email: string; role: string; tempPassword: string; pendingApproval?: boolean }>(
+      "admin/users",
+      { name, email, role },
+    );
     setBusy(false);
     if (res.ok && res.data) {
-      setResult(`Created ${res.data.role} ${res.data.email} — temporary password: ${res.data.tempPassword}`);
+      // junior_admin is maker-checker: the account exists (role-less) and the
+      // role lands only after a different senior approves under Approvals.
+      setResult(
+        res.data.pendingApproval
+          ? `Created ${res.data.email} — temporary password: ${res.data.tempPassword}. The ${res.data.role} role is AWAITING APPROVAL by a different senior (see Approvals); the account has no access until then.`
+          : `Created ${res.data.role} ${res.data.email} — temporary password: ${res.data.tempPassword}`,
+      );
       setName("");
       setEmail("");
       router.refresh();

@@ -287,6 +287,7 @@ async function main() {
   const headWarden = await mkUser("headwarden@demo.school", "Demo Head Warden");
   const headDriver = await mkUser("headdriver@demo.school", "Demo Head Driver");
   const librarian = await mkUser("librarian@demo.school", "Demo Librarian");
+  const juniorAdmin = await mkUser("junioradmin@demo.school", "Demo Junior Admin");
   // The platform owner lives in the platform org, NOT the demo customer school.
   const owner = await mkUser("owner@sms.platform", "Platform Owner", platformOrg.id);
   // SELF-HEAL: upsert never moves an existing user, so a DB seeded before the
@@ -316,6 +317,7 @@ async function main() {
     [headWarden.id, await roleByName("head_warden")],
     [headDriver.id, await roleByName("head_driver")],
     [librarian.id, await roleByName("librarian")],
+    [juniorAdmin.id, await roleByName("junior_admin")],
     [owner.id, await roleByName("super_admin")],
     [managerAdmin.id, await roleByName("manager_admin")],
   ] as const) {
