@@ -68,6 +68,7 @@ All gated by 🔑 `platform.operate`.
 | GET | `/operator/pricing` | | Effective per-tier pricing + default/override flags |
 | PUT | `/operator/pricing` | ⬆️ | Set per-tier per-seat prices (platform-wide; feeds quotes, checkout and the public page; audited) |
 | GET | `/operator/analytics` | | Graphical platform business metrics (MRR, ARPA, growth, funnel, churn, module adoption, demographics) |
+| GET | `/operator/admin-appointments` | | Cross-tenant junior-admin ADMIN_APPOINTMENT oversight (`?state=` filter; read-only — the school's second senior decides) |
 | GET | `/operator/audit` | | Cross-tenant audit trail, actor-attributed (email + unique id + roles), cursor-paginated |
 | GET | `/operator/audit/export.csv` | | Downloadable CSV audit report (formula-injection safe) |
 | POST | `/operator/impersonate` | ⬆️ | Mint an audited, scoped impersonation token |

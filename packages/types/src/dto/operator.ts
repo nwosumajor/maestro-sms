@@ -137,6 +137,22 @@ export interface OperatorBillingAlertDto {
   downgraded: boolean;
 }
 
+/** A tenant ADMIN_APPOINTMENT (junior-admin maker-checker grant) on the
+ *  operator's cross-tenant oversight list (GET /operator/admin-appointments). */
+export interface OperatorAdminAppointmentDto {
+  requestId: string;
+  schoolId: string;
+  schoolName: string;
+  /** Workflow state: PENDING_REVIEW (awaiting the school's second senior) or terminal. */
+  state: string;
+  roleName: string;
+  targetUserName: string | null;
+  targetUserEmail: string | null;
+  initiatorName: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 /** An enrolled student as seen by the super_admin cross-tenant student view. */
 export interface OperatorStudentDto {
   id: string;

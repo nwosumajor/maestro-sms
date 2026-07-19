@@ -18,6 +18,7 @@ import {
   isPlan,
   isSubscriptionStatus,
   type ModuleOverrides,
+  type OperatorAdminAppointmentDto,
   type OperatorBillingAlertDto,
   type Plan,
   type SubscriptionDto,
@@ -268,6 +269,56 @@ export class OperatorService {
         ];
       })
       .sort((a, b) => b.daysPastDue - a.daysPastDue);
+  }
+
+  /** Cross-tenant oversight of the junior-admin maker-checker: every tenant's
+   *  ADMIN_APPOINTMENT workflow requests (who is appointing whom into the admin
+   *  tier, and whether the school's second senior has decided). Read via the
+   *  PRIVILEGED client like the registry; staff names only — never student data.
+   *  [] without a privileged URL (mirrors billing alerts). */
+  async listAdminAppointments(state?: string): Promise<OperatorAdminAppointmentDto[]> {
+    const client = this.privileged.client;
+    if (!client) return [];
+    const requests = await client.workflowRequest.findMany({
+      where: { type: "ADMIN_APPOINTMENT", ...(state ? { state } : {}) },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+      select: {
+        id: true,
+        schoolId: true,
+        state: true,
+        payload: true,
+        initiatorId: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+    if (requests.length === 0) return [];
+    const payloads = requests.map((r) => (r.payload ?? {}) as { userId?: string; roleName?: string });
+    const userIds = [
+      ...new Set([...requests.map((r) => r.initiatorId), ...payloads.map((pl) => pl.userId).filter((x): x is string => Boolean(x))]),
+    ];
+    const [schools, users] = await Promise.all([
+      client.school.findMany({
+        where: { id: { in: [...new Set(requests.map((r) => r.schoolId))] } },
+        select: { id: true, name: true },
+      }),
+      client.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true, email: true } }),
+    ]);
+    const schoolById = new Map(schools.map((s) => [s.id, s.name]));
+    const userById = new Map(users.map((u) => [u.id, u]));
+    return requests.map((r, i) => ({
+      requestId: r.id,
+      schoolId: r.schoolId,
+      schoolName: schoolById.get(r.schoolId) ?? "(unknown)",
+      state: r.state,
+      roleName: payloads[i].roleName ?? "(unknown)",
+      targetUserName: (payloads[i].userId && userById.get(payloads[i].userId as string)?.name) || null,
+      targetUserEmail: (payloads[i].userId && userById.get(payloads[i].userId as string)?.email) || null,
+      initiatorName: userById.get(r.initiatorId)?.name ?? null,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+    }));
   }
 
   /** Set a school's PER-SCHOOL grace window (days past due before the STANDARD

@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Post, Put, Query, Res, StreamableFile } from "@nestjs/common";
 import type { Response } from "express";
 import type {
+  OperatorAdminAppointmentDto,
   OperatorBillingAlertDto,
   OperatorStudentDto,
   OperatorUserDto,
@@ -315,6 +316,16 @@ export class OperatorController {
   @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
   billingAlerts(): Promise<OperatorBillingAlertDto[]> {
     return this.operator.listBillingAlerts();
+  }
+
+  /** Cross-tenant oversight of junior-admin appointments (ADMIN_APPOINTMENT
+   *  maker-checker requests): who is being appointed into each school's admin
+   *  tier and whether the second senior has decided. ?state= filters (e.g.
+   *  PENDING_REVIEW). Staff names only — never student data. */
+  @Get("admin-appointments")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
+  adminAppointments(@Query("state") state?: string): Promise<OperatorAdminAppointmentDto[]> {
+    return this.operator.listAdminAppointments(state);
   }
 
   /** Platform-owner business dashboard: cross-tenant schools/revenue/plan metrics. */
