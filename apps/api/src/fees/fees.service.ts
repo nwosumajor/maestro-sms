@@ -332,6 +332,12 @@ export class FeesService {
     const needsApproval = kind === "REFUND" || input.amountMinor >= PAYMENT_APPROVAL_THRESHOLD_MINOR;
 
     const result = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      // Serialize concurrent recorders on THIS invoice by locking its row for
+      // the rest of the transaction — the overpayment check below is a
+      // read-then-insert, so two racing recorders could otherwise both pass it
+      // and post more than the outstanding balance. (Mirrors the hostel
+      // capacity lock; RLS still applies.)
+      await tx.$executeRaw`SELECT id FROM "invoice" WHERE id = ${invoiceId}::uuid FOR UPDATE`;
       const inv = await tx.invoice.findFirst({ where: { id: invoiceId } });
       if (!inv) throw new NotFoundException("Invoice not found");
       if (inv.status === "DRAFT") throw new BadRequestException("Issue the invoice before recording payment");
@@ -409,10 +415,16 @@ export class FeesService {
       if (pay.recordedById === p.userId) {
         throw new ForbiddenException("You cannot approve a payment you recorded");
       }
-      await tx.payment.update({
-        where: { id: paymentId },
+      // Same invoice lock as recordPayment — the status recomputation below
+      // reads the posted total, so concurrent decisions must queue.
+      await tx.$executeRaw`SELECT id FROM "invoice" WHERE id = ${pay.invoiceId}::uuid FOR UPDATE`;
+      // Optimistic claim: two staff deciding the same payment at once — only
+      // the first write lands; the loser matches 0 rows and is told so.
+      const claimed = await tx.payment.updateMany({
+        where: { id: paymentId, status: "PENDING_APPROVAL" },
         data: { status: "POSTED", approvedById: p.userId },
       });
+      if (claimed.count === 0) throw new BadRequestException("Payment is not pending");
       const inv = await tx.invoice.findFirst({ where: { id: pay.invoiceId } });
       if (!inv) throw new NotFoundException("Invoice not found");
       const net = await this.paidMinor(tx, pay.invoiceId);
@@ -500,10 +512,13 @@ export class FeesService {
       const pay = await tx.payment.findFirst({ where: { id: paymentId } });
       if (!pay) throw new NotFoundException("Payment not found");
       if (pay.status !== "PENDING_APPROVAL") throw new BadRequestException("Payment is not pending");
-      await tx.payment.update({
-        where: { id: paymentId },
+      // Optimistic claim — a reject racing an approve (or another reject) must
+      // never overwrite a decision that already landed.
+      const claimed = await tx.payment.updateMany({
+        where: { id: paymentId, status: "PENDING_APPROVAL" },
         data: { status: "REJECTED", approvedById: p.userId },
       });
+      if (claimed.count === 0) throw new BadRequestException("Payment is not pending");
       await this.log(tx, p, "fee.payment.reject", "invoice", pay.invoiceId, { paymentId });
       return { id: paymentId, status: "REJECTED" };
     });

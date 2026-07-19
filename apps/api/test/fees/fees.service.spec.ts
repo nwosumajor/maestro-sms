@@ -16,6 +16,8 @@ interface Fakes {
   parentLink?: { id: string } | null;
   parentChildMany?: { studentId: string; parentId: string }[];
   studentUser?: { id: string } | null;
+  /** Rows matched by the optimistic PENDING_APPROVAL claim (default 1). */
+  claimCount?: number;
 }
 
 function makeService(f: Fakes) {
@@ -40,7 +42,9 @@ function makeService(f: Fakes) {
       findFirst: jest.fn().mockResolvedValue(f.pendingPayment ?? null),
       findMany: jest.fn().mockResolvedValue(f.posted ?? []),
       update: jest.fn(({ data }: { data: Record<string, unknown> }) => Promise.resolve({ id: "pay-1", ...data })),
+      updateMany: jest.fn().mockResolvedValue({ count: f.claimCount ?? 1 }),
     },
+    $executeRaw: jest.fn().mockResolvedValue(1),
     parentChild: {
       findFirst: jest.fn().mockResolvedValue(f.parentLink ?? null),
       findMany: jest.fn().mockResolvedValue(f.parentChildMany ?? []),
@@ -153,8 +157,41 @@ describe("FeesService", () => {
     });
     const res = await service.approvePayment(principal(["principal"], "u-1"), "pay-1");
     expect(res.status).toBe("POSTED");
-    expect((tx.payment.update as jest.Mock).mock.calls[0][0].data).toMatchObject({ status: "POSTED", approvedById: "u-1" });
+    // The decision is an optimistic claim on PENDING_APPROVAL, not a blind update.
+    expect((tx.payment.updateMany as jest.Mock).mock.calls[0][0]).toMatchObject({
+      where: { id: "pay-1", status: "PENDING_APPROVAL" },
+      data: { status: "POSTED", approvedById: "u-1" },
+    });
     expect((tx.invoice.update as jest.Mock).mock.calls[0][0].data.status).toBe("PAID");
+  });
+
+  // --- concurrency guards (two staff acting at once) ---
+  it("recordPayment row-locks the invoice before the overpayment check", async () => {
+    const { service, tx } = makeService({
+      invoiceRow: { id: "inv-1", status: "ISSUED", studentId: "stu-1", reference: "INV-X", totalMinor: 10000, currency: "NGN" },
+      posted: [],
+    });
+    await service.recordPayment(principal(["accountant"]), "inv-1", { amountMinor: 1000, method: "CASH" });
+    const sql = ((tx.$executeRaw as jest.Mock).mock.calls[0][0] as string[]).join("?");
+    expect(sql).toContain('"invoice"');
+    expect(sql).toContain("FOR UPDATE");
+  });
+
+  it("the LOSER of a racing approve (claim matches 0 rows) gets 'not pending' and no invoice change", async () => {
+    const { service, tx } = makeService({
+      pendingPayment: { id: "pay-1", status: "PENDING_APPROVAL", recordedById: "u-2", invoiceId: "inv-1", kind: "PAYMENT", amountMinor: 1000 },
+      claimCount: 0,
+    });
+    await expect(service.approvePayment(principal(["principal"], "u-1"), "pay-1")).rejects.toThrow(/not pending/i);
+    expect(tx.invoice.update as jest.Mock).not.toHaveBeenCalled();
+  });
+
+  it("a reject racing an already-landed decision also loses cleanly", async () => {
+    const { service } = makeService({
+      pendingPayment: { id: "pay-1", status: "PENDING_APPROVAL", recordedById: "u-2", invoiceId: "inv-1", kind: "PAYMENT", amountMinor: 1000 },
+      claimCount: 0,
+    });
+    await expect(service.rejectPayment(principal(["principal"], "u-1"), "pay-1")).rejects.toThrow(/not pending/i);
   });
 
   it("a parent reading another family's invoice gets 404", async () => {
