@@ -2,12 +2,18 @@
 // ReportCardService — generate a PDF report card from grades + attendance
 // =============================================================================
 // Pulls a student's graded submissions and attendance summary (RLS-scoped),
-// renders a PDF with pdfkit, and returns the bytes. Relationship-scoped: staff
-// any student, teacher their students, parent their children, student self.
-// Generating one is audit-logged and notifies the guardians.
+// renders a PDF with pdfkit, and returns the bytes to WHOEVER called generate
+// (e.g. the principal, downloading their own copy). It is ALSO persisted into
+// the Document Vault (type REPORT_CARD, already a DocumentsService "notifying"
+// type) so the student/parent get a REAL, independently retrievable copy on
+// their own /documents page — not just a notification promising one exists.
+// Before this, only the caller's browser ever held the bytes: if staff
+// generated it, the family's "report card ready" alert pointed at nothing they
+// could actually open. Generating one is audit-logged; DocumentsService's own
+// upload path notifies the guardians once the vault copy is confirmed live.
 // =============================================================================
 
-import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import PDFDocument from "pdfkit";
 import {
   AUDIT_LOG_SERVICE,
@@ -18,18 +24,20 @@ import {
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
-import { NotificationService } from "../notifications/notification.service";
 import { BrandingService } from "../branding/branding.service";
+import { DocumentsService } from "../documents/documents.service";
 
 const STAFF_WIDE = new Set(["school_admin", "principal", "super_admin"]);
 
 @Injectable()
 export class ReportCardService {
+  private readonly logger = new Logger("ReportCard");
+
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
-    private readonly notifications: NotificationService,
     private readonly branding: BrandingService,
+    private readonly documents: DocumentsService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -59,34 +67,33 @@ export class ReportCardService {
         { actorId: p.userId, action: "reportcard.generate", entity: "user", entityId: studentId, schoolId: p.schoolId },
         tx,
       );
-      const guardians = await tx.parentChild.findMany({ where: { studentId }, select: { parentId: true } });
-      return {
-        studentName: student.name,
-        schoolName: school?.name ?? "",
-        grades,
-        att,
-        guardianIds: (guardians as Array<{ parentId: string }>).map((g) => g.parentId),
-      };
+      return { studentName: student.name, schoolName: school?.name ?? "", grades, att };
     });
 
     const logo = await this.branding.getLogoBytes(p.schoolId).catch(() => null);
     const buffer = await this.renderPdf(data, logo);
+    const filename = `report-card-${data.studentName.replace(/\s+/g, "-").toLowerCase()}.pdf`;
 
-    // Best-effort: tell the guardians a report card is ready.
+    // Persist into the Document Vault so the student/parent have their OWN
+    // retrievable copy regardless of who generated it — best-effort: a vault
+    // write failure must never block the caller from getting their PDF now.
     try {
-      for (const id of data.guardianIds) {
-        await this.notifications.enqueue(this.ctx(p), {
-          recipientId: id,
-          type: "DOCUMENT_AVAILABLE",
-          title: "Report card ready",
-          body: `A new report card for ${data.studentName} has been generated.`,
-        });
-      }
-    } catch {
-      /* non-fatal */
+      const { document } = await this.documents.createDocument(p, {
+        studentId,
+        type: "REPORT_CARD",
+        title: filename,
+        contentType: "application/pdf",
+        sizeBytes: buffer.length,
+      });
+      // uploadBytes notifies the guardians once the vault copy is UPLOADED —
+      // the ONE notify path, so the alert is never sent before there is
+      // something real behind it.
+      await this.documents.uploadBytes(p, document.id, buffer, "application/pdf");
+    } catch (err) {
+      this.logger.warn(`report card vault persist failed for student ${studentId} (non-fatal): ${String(err)}`);
     }
 
-    return { buffer, filename: `report-card-${data.studentName.replace(/\s+/g, "-").toLowerCase()}.pdf` };
+    return { buffer, filename };
   }
 
   private renderPdf(
