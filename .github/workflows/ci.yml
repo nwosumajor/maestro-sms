@@ -68,8 +68,14 @@ jobs:
       - name: Generate Prisma client
         run: pnpm db:generate
 
-      - name: Apply migrations (tables)
-        run: pnpm --filter @sms/db exec prisma migrate deploy
+      # `migrate deploy` replays migrations in filename order, but the ledger has
+      # a known chronological gap (20260713020000_multi_currency_billing ALTERs
+      # plan_price before 20260726000000_plan_pricing CREATEs it — safe only on
+      # a DB whose ledger was repaired in place, never on a truly fresh one).
+      # `db push` builds the CURRENT schema directly, matching how every other
+      # fresh test DB in this repo is built (see CLAUDE.md "Repo workflow").
+      - name: Push schema (fresh test DB — see comment above)
+        run: pnpm --filter @sms/db exec prisma db push --skip-generate
         env:
           DATABASE_URL: ${{ env.ADMIN_URL }}
 
@@ -84,9 +90,17 @@ jobs:
       - name: Test (incl. RLS e2e against Postgres)
         run: pnpm test
         env:
-          # App role for assertions (RLS enforced), admin for cross-FK setup.
+          # App role for assertions (RLS enforced), admin for cross-FK setup —
+          # these two feed the raw-pool RLS e2e (rls.e2e-spec.ts).
           TEST_DATABASE_URL: ${{ env.APP_URL }}
           TEST_ADMIN_URL: ${{ env.ADMIN_URL }}
+          # The Prisma-backed service e2e specs (billing/lms-content/timetable/
+          # game/...) go through @sms/db's shared Prisma client instead of the
+          # raw pool above, so they need these too, or they fail with
+          # PrismaClientInitializationError before ever reaching RLS.
+          DATABASE_URL: ${{ env.APP_URL }}
+          DATABASE_MIGRATE_URL: ${{ env.ADMIN_URL }}
+          DATABASE_RETENTION_URL: ${{ env.ADMIN_URL }}
 
       - name: Build
         run: pnpm build

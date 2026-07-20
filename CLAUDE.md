@@ -459,6 +459,16 @@ unit tests + an `observability.module` DI smoke test.
 - DB setup order: `prisma migrate deploy` → `pnpm --filter @sms/db rls` →
   `prisma db seed` (or `pnpm --filter @sms/db setup`). RLS lives in `prisma/rls/`,
   NOT prisma migrations — Prisma's shadow DB rejects the `major_user` GRANT.
+- **The migration history does NOT replay from scratch**: `20260713020000_
+  multi_currency_billing` ALTERs `plan_price`, a table not CREATEd until the
+  LATER-stamped `20260726000000_plan_pricing` — a real chronological gap in the
+  ledger (fixed in place, historically, on already-migrated DBs; never fix it by
+  reordering/renaming migration folders — that breaks the checksum every
+  already-migrated environment, including the live compose stack, has recorded).
+  A genuinely FRESH database (a new CI run, a new local test DB) must be built
+  with `prisma db push` (+ `pnpm rls` + seed), NOT `migrate deploy`, or it 500s
+  on `relation "plan_price" does not exist`. CI (`.github/workflows/ci.yml`)
+  uses `db push` for exactly this reason.
 - New tenant table: add an `prisma/rls/NN_*.sql` file and a cross-tenant case to
   `apps/api/test/rls.e2e-spec.ts` (and its afterAll cleanup, child rows BEFORE
   parents — FK order matters). Register the new rls file in
