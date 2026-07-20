@@ -301,13 +301,23 @@ key from `DATA_ENCRYPTION_KEY` — ciphertext at rest, decrypted only for
 authorized readers), and an **access-recertification report** + anomaly signals
 (`/admin/recertification`) are BUILT. Cross-cutting BUILT so far: **role-scoped
 analytics** (`/analytics` — attendance %, fee collection, ops counts; school-wide
-for staff, family-scoped for parents/students) and **NDPR data-subject rights**
+for staff, family-scoped for parents/students; the grade-band AND fees stats are
+single Postgres aggregates via `$queryRaw` — FILTER band counts + numeric-exact
+AVG, CTE SUMs over billable invoices/POSTED payments cast `::float8` (int4 can
+overflow a lifetime kobo total; int8 → BigInt breaks JSON) — proven by a
+real-DB e2e in `test/analytics/`) and **NDPR data-subject rights**
 (`privacy.*`: scoped + audited data export bundle, and a governed right-to-erasure
 request → controller review at `/admin/privacy`). **Two-way messaging**
 (participant-scoped threads; non-staff may only message staff/teachers; new
 messages notify via Notifications), a **calendar** (`school_event`, ALL vs STAFF
 audience), and **report-card PDFs** (pdfkit, from grades + attendance, streamed
-through the binary-aware BFF, guardians notified) are BUILT. **Online payments**
+through the binary-aware BFF; `generate()` ALSO persists the PDF into the
+Document Vault (type REPORT_CARD, best-effort — a vault failure never blocks the
+caller's download) so the student/guardians get an independently retrievable
+copy under the vault's own scoping no matter who generated it, and the guardian
+notification rides DocumentsService's upload-confirmed notify path — the alert
+is never sent before real bytes exist; ReportCardModule depends on
+DocumentsModule, not NotificationModule) are BUILT. **Online payments**
 are scaffolded (Paystack via `fetch`: `POST /invoices/:id/pay/init` → hosted
 checkout; `@Public` HMAC-SHA512-verified webhook → records a POSTED payment on
 charge.success; gracefully 503-disabled when `PAYSTACK_SECRET_KEY` is unset —
@@ -495,6 +505,13 @@ unit tests + an `observability.module` DI smoke test.
 - Tests: the RLS e2e needs `TEST_DATABASE_URL` (app role) + `TEST_ADMIN_URL`
   (superuser, to seed across FKs); both are declared in `turbo.json`
   `test.passThroughEnv` — Turbo 2 strict env will otherwise SKIP the suite.
+- EVERY DB-gated e2e suite must `await prisma.$disconnect()` (the `@sms/db`
+  singleton) in `afterAll`, even if it only touched the DB via a service — an
+  undisconnected pool keeps the jest worker alive and HANGS the CI test step
+  indefinitely. `--runInBand` locally masks it (another suite's disconnect in
+  the shared process closes it for everyone), so a suite can look fine locally
+  and still hang CI. Cleanup ordering: `audit_log` rows reference users
+  (`audit_log_actorId_fkey`), so delete them BEFORE the suite's `"user"` rows.
 - Raw SQL in tests must supply `updatedAt` (Prisma `@updatedAt` has no DB
   default) and quote `"user"` (reserved word).
 - Time columns like `Game.turnStartedAt` are `timestamp without time zone`. The
