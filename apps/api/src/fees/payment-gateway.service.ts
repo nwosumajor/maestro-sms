@@ -31,6 +31,7 @@ import { NotificationService } from "../notifications/notification.service";
 import { PlatformFeeService } from "../billing/platform-fee.service";
 import { AdmissionsService } from "../admissions/admissions.service";
 import { MessageCreditsService } from "../notifications/message-credits.service";
+import { DisputesService } from "./disputes.service";
 
 @Injectable()
 export class PaymentGatewayService {
@@ -44,6 +45,7 @@ export class PaymentGatewayService {
     private readonly platformFees: PlatformFeeService,
     private readonly admissions: AdmissionsService,
     private readonly messageCredits: MessageCreditsService,
+    private readonly disputes: DisputesService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -242,6 +244,9 @@ export class PaymentGatewayService {
   async handleWebhook(rawBody: Buffer | undefined, signature: string | undefined): Promise<{ ok: boolean }> {
     const event = this.paystack.verify(rawBody, signature);
     if (!event) return { ok: true }; // disabled / nothing to do
+    // Dispute events first: their `data` is a DISPUTE (no metadata.kind) — the
+    // tenant is resolved from the disputed transaction inside DisputesService.
+    if (event.event.startsWith("charge.dispute.")) return this.disputes.applyDisputeEvent(event);
     const kind = (event.data.metadata as { kind?: string } | undefined)?.kind;
     if (kind === "subscription") return this.billing.applySubscriptionPayment(event);
     if (kind === "admission_form") return this.admissions.applyFormFeePayment(event);

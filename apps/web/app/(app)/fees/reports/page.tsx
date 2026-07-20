@@ -39,7 +39,12 @@ export default async function FinanceReportsPage() {
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <PageHeader title={<>Finance reports</>} subtitle={<>Receivables aging and collection summary.</>} />
-          <Link href="/fees" className="text-sm text-muted-foreground hover:underline">← Fees</Link>
+          <div className="flex items-center gap-4">
+            {canManage && (
+              <Link href="/fees/disputes" className="text-sm text-muted-foreground hover:underline">Disputes</Link>
+            )}
+            <Link href="/fees" className="text-sm text-muted-foreground hover:underline">← Fees</Link>
+          </div>
         </div>
 
         {settlement && <SettlementAccountCard initial={settlement} />}

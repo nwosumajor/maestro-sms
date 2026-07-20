@@ -37,6 +37,12 @@ export const FEES_PERMISSIONS = {
 /** Payments at/above this (minor units) need a second approver. ~₦50,000. */
 export const PAYMENT_APPROVAL_THRESHOLD_MINOR = 5_000_000;
 
+/** Chargeback-rate escalation: this many disputes opened against one school
+ *  within the window escalates an OPERATOR_ALERT to the platform owner (a
+ *  climbing dispute rate risks the gateway suspending the merchant account). */
+export const DISPUTE_ALERT_THRESHOLD = 3;
+export const DISPUTE_ALERT_WINDOW_DAYS = 30;
+
 export type FeesPermission = (typeof FEES_PERMISSIONS)[keyof typeof FEES_PERMISSIONS];
 
 /** Suggested role -> permission additions (spread into the foundation mapping). */

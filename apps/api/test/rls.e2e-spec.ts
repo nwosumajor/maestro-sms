@@ -42,6 +42,7 @@ d("RLS cross-tenant isolation", () => {
   const invoiceA = randomUUID();
   const lineItemA = randomUUID();
   const paymentA = randomUUID();
+  const paymentDisputeA = randomUUID();
   const documentA = randomUUID();
   const periodA = randomUUID();
   const roomA = randomUUID();
@@ -286,6 +287,12 @@ d("RLS cross-tenant isolation", () => {
     await a.query(
       `INSERT INTO payment (id,"schoolId","invoiceId","amountMinor",method,"recordedById") VALUES ($1,$2,$3,50000,'CASH',$4)`,
       [paymentA, A, invoiceA, userA],
+    );
+    // Gateway chargeback/dispute against that payment.
+    await a.query(
+      `INSERT INTO payment_dispute (id,"schoolId","gatewayDisputeId","transactionReference","paymentId","invoiceId","amountMinor","updatedAt")
+       VALUES ($1,$2,$3,'PAY-ref-rls',$4,$5,50000,now())`,
+      [paymentDisputeA, A, "disp-" + paymentDisputeA, paymentA, invoiceA],
     );
     // Document vault: a report card for student userA
     await a.query(
@@ -1053,6 +1060,7 @@ d("RLS cross-tenant isolation", () => {
       "attendance_record",
       "attendance_session",
       "class",
+      "payment_dispute",
       "payment",
       "invoice_line_item",
       "invoice",
@@ -1114,6 +1122,7 @@ d("RLS cross-tenant isolation", () => {
     ["invoice", invoiceA],
     ["invoice_line_item", lineItemA],
     ["payment", paymentA],
+    ["payment_dispute", paymentDisputeA],
     ["document", documentA],
     ["period", periodA],
     ["room", roomA],

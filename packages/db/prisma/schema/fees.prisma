@@ -165,3 +165,62 @@ model Payment {
   @@index([schoolId, invoiceId])
   @@map("payment")
 }
+
+/// Lifecycle of a gateway chargeback/dispute. OPEN -> RESPONDED (staff recorded
+/// their evidence) -> WON/LOST (gateway resolution via webhook).
+enum DisputeStatus {
+  OPEN
+  RESPONDED
+  WON
+  LOST
+}
+
+/// A chargeback/dispute raised at the payment gateway against an online CARD
+/// payment. Created and resolved by the account-wide Paystack webhook
+/// (charge.dispute.* events); staff track their evidence response here — the
+/// actual evidence upload happens on the gateway dashboard, this row is the
+/// in-system record, deadline tracker and alert anchor. Financial record:
+/// never hard-deleted (no DELETE grant in RLS).
+model PaymentDispute {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  /// Gateway's dispute id — the webhook idempotency/update key.
+  gatewayDisputeId     String  @unique
+  /// The disputed charge's gateway reference (how we find the Payment row).
+  transactionReference String
+  /// The disputed POSTED payment, when the reference resolved to one (DB FK
+  /// to payment; audit-style link, no Prisma relation).
+  paymentId String? @db.Uuid
+  invoiceId String? @db.Uuid
+
+  /// Disputed amount in minor units (kobo).
+  amountMinor Int
+  currency    String        @default("NGN")
+  /// Gateway category (e.g. "chargeback", "fraud").
+  category    String?
+  status      DisputeStatus @default(OPEN)
+  /// Raw gateway status string, kept for the record.
+  gatewayStatus String?
+  /// Evidence deadline from the gateway — respond before this or lose by default.
+  dueAt DateTime?
+
+  /// Staff evidence/response tracking (fee.manage).
+  responseNote  String?
+  respondedById String?   @db.Uuid
+  respondedAt   DateTime?
+
+  /// Gateway resolution (e.g. "declined" = dispute rejected, we keep the money).
+  resolution String?
+  resolvedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, status])
+  @@index([schoolId, createdAt])
+  @@map("payment_dispute")
+}

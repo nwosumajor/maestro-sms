@@ -100,3 +100,33 @@ export interface InvoicePayInitDto {
   /** What the payer's card is actually charged. */
   chargedMinor: number;
 }
+
+/** Gateway dispute lifecycle: OPEN -> RESPONDED (staff recorded evidence) ->
+ *  WON/LOST (gateway resolution via webhook). */
+export type DisputeStatus = "OPEN" | "RESPONDED" | "WON" | "LOST";
+
+/** A gateway chargeback/dispute against an online payment (server form —
+ *  the web consumes Serialized<PaymentDisputeDto>). */
+export interface PaymentDisputeDto {
+  id: string;
+  /** Gateway's dispute id (idempotency/update key for webhook events). */
+  gatewayDisputeId: string;
+  /** The disputed charge's gateway reference. */
+  transactionReference: string;
+  /** The disputed POSTED payment / its invoice, when the reference resolved. */
+  paymentId: string | null;
+  invoiceId: string | null;
+  amountMinor: number;
+  currency: string;
+  /** Gateway category (e.g. "chargeback", "fraud"). */
+  category: string | null;
+  status: DisputeStatus;
+  gatewayStatus: string | null;
+  /** Evidence deadline — respond before this or lose by default. */
+  dueAt: Date | null;
+  responseNote: string | null;
+  respondedAt: Date | null;
+  resolution: string | null;
+  resolvedAt: Date | null;
+  createdAt: Date;
+}

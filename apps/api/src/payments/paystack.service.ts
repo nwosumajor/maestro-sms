@@ -27,6 +27,17 @@ export interface PaystackEvent {
      *  with `reusable: true` enables saved-card recurring charges. */
     authorization?: { authorization_code?: string; reusable?: boolean; last4?: string; card_type?: string };
     customer?: { customer_code?: string; email?: string };
+    /** charge.dispute.* events only: `data` is the DISPUTE, not a charge —
+     *  `id` is the gateway dispute id, `transaction` the disputed charge
+     *  (whose metadata carries our schoolId), `due_at` the evidence deadline,
+     *  `resolution` the outcome on charge.dispute.resolve ("declined" = the
+     *  dispute was rejected and the merchant keeps the money). */
+    id?: number | string;
+    status?: string;
+    resolution?: string | null;
+    category?: string | null;
+    due_at?: string | null;
+    transaction?: { reference?: string; amount?: number; metadata?: Record<string, unknown> | null };
   };
 }
 
