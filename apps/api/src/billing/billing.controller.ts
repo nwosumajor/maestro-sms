@@ -25,6 +25,7 @@ import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { StripeService } from "../payments/stripe.service";
+import { DisputesService } from "../fees/disputes.service";
 import { BillingService } from "./billing.service";
 import { ReferralService } from "./referral.service";
 import { MessageCreditsService } from "../notifications/message-credits.service";
@@ -48,6 +49,7 @@ export class BillingController {
     private readonly stripe: StripeService,
     private readonly referrals: ReferralService,
     private readonly messageCredits: MessageCreditsService,
+    private readonly disputes: DisputesService,
   ) {}
 
   /** The billing screen: current subscription + per-tier quotes + history. */
@@ -87,6 +89,9 @@ export class BillingController {
   ): Promise<{ ok: boolean }> {
     const event = this.stripe.verifyWebhook(req.rawBody, signature);
     if (!event) return { ok: true }; // gateway disabled / empty body
+    // Chargebacks route to the shared dispute ingestion (same table/alerts as
+    // Paystack disputes); everything else is subscription settlement.
+    if (event.type.startsWith("charge.dispute.")) return this.disputes.applyStripeDisputeEvent(event);
     return this.billing.applyStripeSubscriptionEvent(event);
   }
 

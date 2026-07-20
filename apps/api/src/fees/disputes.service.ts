@@ -1,28 +1,32 @@
 // =============================================================================
 // DisputesService — gateway chargeback/dispute ingestion, alerts and tracking
 // =============================================================================
-// Before this, the account-wide Paystack webhook silently discarded every
-// charge.dispute.* event — a chargeback would only ever be discovered by
-// someone reading the gateway dashboard, usually after the evidence deadline
-// had passed. Now:
-//   - charge.dispute.create  -> a tenant-scoped payment_dispute row linked to
-//     the disputed payment/invoice + an immediate finance alert (deadline in
-//     the body). Idempotent on the gateway dispute id (webhook retries).
-//   - charge.dispute.remind  -> deadline refreshed + finance re-alerted.
-//   - charge.dispute.resolve -> WON ("declined": the bank rejected the
-//     dispute) or LOST (merchant-accepted / auto-accepted: the gateway claws
-//     the money back) + finance told what to do next.
-//   - THRESHOLD ESCALATION: >= DISPUTE_ALERT_THRESHOLD disputes against one
-//     school inside DISPUTE_ALERT_WINDOW_DAYS raises an OPERATOR_ALERT to the
-//     platform owner — a climbing dispute rate risks Paystack suspending the
-//     whole merchant account, which is a platform problem, not a school one.
+// Before this, BOTH gateway webhooks silently discarded dispute events — a
+// chargeback would only ever be discovered by someone reading a gateway
+// dashboard, usually after the evidence deadline had passed. Now both gateways
+// feed ONE normalized ingestion path into the tenant-scoped payment_dispute
+// table:
+//   - Paystack `charge.dispute.create|remind|resolve` (NGN: parent->school
+//     invoice charges AND school->platform subscription charges) — tenant from
+//     the disputed transaction's own metadata; resolution "declined" => WON.
+//   - Stripe `charge.dispute.created|updated|closed` (USD: platform
+//     subscription charges) — the event carries only a charge id, so the
+//     charge is fetched and its metadata (stamped onto the PaymentIntent at
+//     checkout) identifies the school/kind/reference; status "won"/"lost"
+//     maps directly.
+// Alerts: school finance (accountant/school_admin/principal) on open/remind/
+// resolve with the evidence deadline; when the disputed money is PLATFORM
+// revenue (metadata.kind === "subscription") the platform owner is alerted
+// immediately too — and independently, DISPUTE_ALERT_THRESHOLD disputes per
+// school inside DISPUTE_ALERT_WINDOW_DAYS escalates an OPERATOR_ALERT
+// (a climbing dispute rate risks gateway suspension of the whole account).
 // Staff record their evidence response in-system (respond, fee.manage); the
 // actual evidence upload happens on the gateway dashboard — this row is the
 // record, deadline tracker and alert anchor. Disputes are financial records:
 // the RLS grants no DELETE (rls/78).
-// SECURITY: the webhook path resolves the tenant from the charge's OWN
-// metadata (stamped by us at init) — never from anything the disputing bank
-// controls; an unresolvable event is logged and dropped, never guessed.
+// SECURITY: the webhook path resolves the tenant from metadata WE stamped at
+// charge init — never from anything the disputing bank controls; an
+// unresolvable event is logged and dropped, never guessed.
 // =============================================================================
 
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
@@ -41,9 +45,28 @@ import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
 import { NotificationService } from "../notifications/notification.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import type { PaystackEvent } from "../payments/paystack.service";
+import { StripeService, type StripeEvent } from "../payments/stripe.service";
 
 /** Roles alerted in-school when a dispute opens/updates/resolves. */
 const FINANCE_ROLES = ["accountant", "school_admin", "principal"];
+
+/** One dispute event, gateway-normalized. */
+interface NormalizedDispute {
+  schoolId: string;
+  /** Gateway dispute id — the idempotency/update key. */
+  disputeId: string;
+  /** Our charge reference (or the gateway charge id when unmapped). */
+  reference: string;
+  amountMinor: number;
+  currency: string;
+  category: string | null;
+  gatewayStatus: string | null;
+  dueAt: Date | null;
+  /** Look the reference up in the fees payment ledger (Paystack invoice charges). */
+  linkPayment: boolean;
+  /** The disputed money is PLATFORM revenue (subscription) — owner alerted on open. */
+  platformCharge: boolean;
+}
 
 type DisputeRow = {
   id: string;
@@ -73,6 +96,7 @@ export class DisputesService {
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly notifications: NotificationService,
     private readonly privileged: PrivilegedDatabaseService,
+    private readonly stripe: StripeService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -101,27 +125,48 @@ export class DisputesService {
   }
 
   // ---------------------------------------------------------------------------
-  // Webhook ingestion (system context — dispatched by PaymentGatewayService)
+  // Paystack ingestion (dispatched by PaymentGatewayService.handleWebhook)
   // ---------------------------------------------------------------------------
 
   async applyDisputeEvent(event: PaystackEvent): Promise<{ ok: boolean }> {
     const disputeId = event.data.id != null ? String(event.data.id) : null;
     const reference = event.data.transaction?.reference ?? null;
     if (!disputeId || !reference) return { ok: true }; // malformed — nothing to anchor on
-    const schoolId = await this.resolveSchoolId(event, reference);
+    const meta = event.data.transaction?.metadata as { schoolId?: string; kind?: string } | null | undefined;
+    const schoolId = await this.resolvePaystackSchoolId(meta, reference);
     if (!schoolId) {
       this.logger.warn(`dispute ${disputeId}: could not resolve a school for reference ${reference} — dropped`);
       return { ok: true };
     }
-    if (event.event === "charge.dispute.resolve") return this.applyResolution(event, schoolId, disputeId, reference);
-    return this.applyOpenOrRemind(event, schoolId, disputeId, reference);
+    const amount = event.data.amount ?? event.data.transaction?.amount ?? 0;
+    const n: NormalizedDispute = {
+      schoolId,
+      disputeId,
+      reference,
+      amountMinor: typeof amount === "number" && Number.isFinite(amount) ? amount : 0,
+      currency: event.data.currency ?? "NGN",
+      category: event.data.category ?? null,
+      gatewayStatus: event.data.status ?? null,
+      dueAt: event.data.due_at ? new Date(event.data.due_at) : null,
+      linkPayment: meta?.kind !== "subscription",
+      platformCharge: meta?.kind === "subscription",
+    };
+    if (event.event === "charge.dispute.resolve") {
+      // Paystack resolutions: "declined" = the bank REJECTED the dispute (we
+      // keep the money — WON); merchant-/auto-accepted = clawed back — LOST.
+      const resolution = event.data.resolution ?? null;
+      return this.ingestResolution(n, resolution === "declined", resolution);
+    }
+    return this.ingestOpenOrRefresh(n, { notify: true, remind: event.event === "charge.dispute.remind" });
   }
 
   /** Our charges always stamp schoolId into the transaction metadata at init;
    *  if the gateway omitted the transaction's metadata, fall back to a
    *  privileged cross-tenant lookup of the payment by its unique reference. */
-  private async resolveSchoolId(event: PaystackEvent, reference: string): Promise<string | null> {
-    const meta = event.data.transaction?.metadata as { schoolId?: string } | null | undefined;
+  private async resolvePaystackSchoolId(
+    meta: { schoolId?: string } | null | undefined,
+    reference: string,
+  ): Promise<string | null> {
     if (meta?.schoolId) return meta.schoolId;
     const client = this.privileged.client;
     if (!client) return null;
@@ -129,52 +174,92 @@ export class DisputesService {
     return pay?.schoolId ?? null;
   }
 
-  private disputedAmountMinor(event: PaystackEvent): number {
-    const amount = event.data.amount ?? event.data.transaction?.amount ?? 0;
-    return typeof amount === "number" && Number.isFinite(amount) ? amount : 0;
+  // ---------------------------------------------------------------------------
+  // Stripe ingestion (dispatched by BillingController's stripe webhook)
+  // ---------------------------------------------------------------------------
+
+  async applyStripeDisputeEvent(event: StripeEvent): Promise<{ ok: boolean }> {
+    const obj = event.data.object;
+    const disputeId = obj.id ?? null;
+    if (!disputeId) return { ok: true };
+    // The dispute event carries only the charge id — the charge's metadata
+    // (stamped onto the PaymentIntent at checkout) identifies the school.
+    const charge = obj.charge ? await this.stripe.getCharge(obj.charge) : null;
+    const meta = { ...(charge?.metadata ?? {}), ...(obj.metadata ?? {}) } as {
+      schoolId?: string;
+      kind?: string;
+      reference?: string;
+    };
+    if (!meta.schoolId) {
+      this.logger.warn(`stripe dispute ${disputeId}: no schoolId metadata on charge ${obj.charge ?? "?"} — dropped`);
+      return { ok: true };
+    }
+    const n: NormalizedDispute = {
+      schoolId: meta.schoolId,
+      disputeId,
+      reference: meta.reference ?? obj.charge ?? disputeId,
+      amountMinor: obj.amount ?? charge?.amount ?? 0,
+      currency: (obj.currency ?? charge?.currency ?? "usd").toUpperCase(),
+      category: obj.reason ?? null,
+      gatewayStatus: obj.status ?? null,
+      dueAt: obj.evidence_details?.due_by ? new Date(obj.evidence_details.due_by * 1000) : null,
+      // Stripe serves platform subscriptions only today; keep it metadata-
+      // driven so a future Stripe fees flow inherits the right posture.
+      linkPayment: meta.kind !== "subscription",
+      platformCharge: meta.kind === "subscription",
+    };
+    if (event.type === "charge.dispute.closed") {
+      return this.ingestResolution(n, obj.status === "won", obj.status ?? null);
+    }
+    // created -> notify; updated -> refresh silently (Stripe fires updated on
+    // every evidence/status touch — re-alerting each one would be noise).
+    return this.ingestOpenOrRefresh(n, { notify: event.type === "charge.dispute.created", remind: false });
   }
 
-  private async applyOpenOrRemind(
-    event: PaystackEvent,
-    schoolId: string,
-    disputeId: string,
-    reference: string,
+  // ---------------------------------------------------------------------------
+  // Normalized ingestion (shared by both gateways)
+  // ---------------------------------------------------------------------------
+
+  private async ingestOpenOrRefresh(
+    n: NormalizedDispute,
+    opts: { notify: boolean; remind: boolean },
   ): Promise<{ ok: boolean }> {
-    const dueAt = event.data.due_at ? new Date(event.data.due_at) : null;
-    const outcome = await this.db.runAsTenant({ schoolId, userId: SYSTEM_ACTOR_ID }, async (tx) => {
-      const payment = await tx.payment.findFirst({
-        where: { reference },
-        select: {
-          id: true,
-          invoiceId: true,
-          recordedById: true,
-          invoice: { select: { reference: true, createdById: true } },
-        },
-      });
-      const existing = await tx.paymentDispute.findFirst({ where: { gatewayDisputeId: disputeId } });
+    const outcome = await this.db.runAsTenant({ schoolId: n.schoolId, userId: SYSTEM_ACTOR_ID }, async (tx) => {
+      const payment = n.linkPayment
+        ? await tx.payment.findFirst({
+            where: { reference: n.reference },
+            select: {
+              id: true,
+              invoiceId: true,
+              recordedById: true,
+              invoice: { select: { reference: true, createdById: true } },
+            },
+          })
+        : null;
+      const existing = await tx.paymentDispute.findFirst({ where: { gatewayDisputeId: n.disputeId } });
       let created = false;
       if (!existing) {
         await tx.paymentDispute.create({
           data: {
-            schoolId,
-            gatewayDisputeId: disputeId,
-            transactionReference: reference,
+            schoolId: n.schoolId,
+            gatewayDisputeId: n.disputeId,
+            transactionReference: n.reference,
             paymentId: payment?.id ?? null,
             invoiceId: payment?.invoiceId ?? null,
-            amountMinor: this.disputedAmountMinor(event),
-            currency: event.data.currency ?? "NGN",
-            category: event.data.category ?? null,
-            gatewayStatus: event.data.status ?? null,
-            dueAt,
+            amountMinor: n.amountMinor,
+            currency: n.currency,
+            category: n.category,
+            gatewayStatus: n.gatewayStatus,
+            dueAt: n.dueAt,
           },
         });
         created = true;
       } else {
-        // Webhook retry of create, or a remind: refresh the gateway view of the
+        // Webhook retry / remind / update: refresh the gateway view of the
         // row — never a second row (gatewayDisputeId is the idempotency key).
         await tx.paymentDispute.update({
           where: { id: existing.id },
-          data: { gatewayStatus: event.data.status ?? existing.gatewayStatus, dueAt: dueAt ?? existing.dueAt },
+          data: { gatewayStatus: n.gatewayStatus ?? existing.gatewayStatus, dueAt: n.dueAt ?? existing.dueAt },
         });
       }
       // Audit needs a REAL user as actor (FK): the disputed payment's recorder,
@@ -187,9 +272,9 @@ export class DisputesService {
             actorId,
             action: "fee.dispute.opened",
             entity: "payment_dispute",
-            entityId: disputeId,
-            schoolId,
-            metadata: { reference, amountMinor: this.disputedAmountMinor(event) },
+            entityId: n.disputeId,
+            schoolId: n.schoolId,
+            metadata: { reference: n.reference, amountMinor: n.amountMinor },
           },
           tx,
         );
@@ -207,45 +292,63 @@ export class DisputesService {
     // Alerts AFTER the committed write — a notification failure never loses the
     // dispute record. A retried create (row already there) re-alerts nobody;
     // a remind re-alerts deliberately (the gateway is telling us time is short).
-    const notify = outcome.created || event.event === "charge.dispute.remind";
+    const notify = (outcome.created && opts.notify) || opts.remind;
     if (notify) {
-      const amount = this.formatAmount(this.disputedAmountMinor(event), event.data.currency ?? "NGN");
-      const deadline = dueAt ? ` Evidence deadline: ${dueAt.toISOString().slice(0, 10)}.` : "";
+      const amount = this.formatAmount(n.amountMinor, n.currency);
+      const deadline = n.dueAt ? ` Evidence deadline: ${n.dueAt.toISOString().slice(0, 10)}.` : "";
+      const what = n.platformCharge
+        ? `the school's ${amount} subscription payment`
+        : `a ${amount} card payment${outcome.invoiceRef ? ` on invoice ${outcome.invoiceRef}` : ""}`;
       const title = outcome.created
         ? "Chargeback dispute opened — response required"
         : "Chargeback dispute reminder — deadline approaching";
-      const body = `A ${amount} card payment${outcome.invoiceRef ? ` on invoice ${outcome.invoiceRef}` : ""} (ref ${reference}) is being disputed by the payer's bank.${deadline} Record your response under Fees → Disputes and submit evidence on the Paystack dashboard — an unanswered dispute is lost by default.`;
-      await this.notifyRecipients(schoolId, outcome.recipients, title, body, { disputeId, reference });
+      const body = `The payer's bank is disputing ${what} (ref ${n.reference}).${deadline} Record your response under Fees → Disputes and submit evidence on the gateway dashboard — an unanswered dispute is lost by default.`;
+      await this.notifyRecipients(n.schoolId, outcome.recipients, title, body, {
+        disputeId: n.disputeId,
+        reference: n.reference,
+      });
+    }
+    // Platform revenue disputed: the owner hears about it immediately — this is
+    // the platform's money and the platform's merchant account on the line.
+    if (outcome.created && n.platformCharge) {
+      await this.notifyOwners(
+        `Subscription payment disputed (${this.formatAmount(n.amountMinor, n.currency)})`,
+        `A school's subscription charge (ref ${n.reference}) is being disputed by their bank.${
+          n.dueAt ? ` Evidence deadline: ${n.dueAt.toISOString().slice(0, 10)}.` : ""
+        } Respond on the gateway dashboard; review the school's standing in the operator console.`,
+        { schoolId: n.schoolId, disputeId: n.disputeId, reference: n.reference },
+      );
     }
     if (outcome.created && outcome.recentCount >= DISPUTE_ALERT_THRESHOLD) {
-      await this.alertOperators(schoolId, outcome.recentCount);
+      await this.alertDisputeRate(n.schoolId, outcome.recentCount);
     }
     return { ok: true };
   }
 
-  private async applyResolution(
-    event: PaystackEvent,
-    schoolId: string,
-    disputeId: string,
-    reference: string,
+  private async ingestResolution(
+    n: NormalizedDispute,
+    won: boolean,
+    resolution: string | null,
   ): Promise<{ ok: boolean }> {
-    // Paystack resolutions: "declined" = the bank REJECTED the dispute (we keep
-    // the money — WON); "merchant-accepted" / "auto-accepted" (no response in
-    // time) = the charge is clawed back — LOST.
-    const resolution = event.data.resolution ?? null;
-    const won = resolution === "declined";
-    const outcome = await this.db.runAsTenant({ schoolId, userId: SYSTEM_ACTOR_ID }, async (tx) => {
-      const existing = await tx.paymentDispute.findFirst({ where: { gatewayDisputeId: disputeId } });
-      const payment = await tx.payment.findFirst({
-        where: { reference },
-        select: { id: true, invoiceId: true, recordedById: true, invoice: { select: { reference: true, createdById: true } } },
-      });
+    const outcome = await this.db.runAsTenant({ schoolId: n.schoolId, userId: SYSTEM_ACTOR_ID }, async (tx) => {
+      const existing = await tx.paymentDispute.findFirst({ where: { gatewayDisputeId: n.disputeId } });
+      const payment = n.linkPayment
+        ? await tx.payment.findFirst({
+            where: { reference: n.reference },
+            select: {
+              id: true,
+              invoiceId: true,
+              recordedById: true,
+              invoice: { select: { reference: true, createdById: true } },
+            },
+          })
+        : null;
       if (existing) {
         await tx.paymentDispute.update({
           where: { id: existing.id },
           data: {
             status: won ? "WON" : "LOST",
-            gatewayStatus: event.data.status ?? existing.gatewayStatus,
+            gatewayStatus: n.gatewayStatus ?? existing.gatewayStatus,
             resolution,
             resolvedAt: new Date(),
           },
@@ -255,16 +358,16 @@ export class DisputesService {
         // mid-dispute): record the terminal row anyway — history over silence.
         await tx.paymentDispute.create({
           data: {
-            schoolId,
-            gatewayDisputeId: disputeId,
-            transactionReference: reference,
+            schoolId: n.schoolId,
+            gatewayDisputeId: n.disputeId,
+            transactionReference: n.reference,
             paymentId: payment?.id ?? null,
             invoiceId: payment?.invoiceId ?? null,
-            amountMinor: this.disputedAmountMinor(event),
-            currency: event.data.currency ?? "NGN",
-            category: event.data.category ?? null,
+            amountMinor: n.amountMinor,
+            currency: n.currency,
+            category: n.category,
             status: won ? "WON" : "LOST",
-            gatewayStatus: event.data.status ?? null,
+            gatewayStatus: n.gatewayStatus,
             resolution,
             resolvedAt: new Date(),
           },
@@ -277,9 +380,9 @@ export class DisputesService {
             actorId,
             action: "fee.dispute.resolved",
             entity: "payment_dispute",
-            entityId: disputeId,
-            schoolId,
-            metadata: { reference, resolution, won },
+            entityId: n.disputeId,
+            schoolId: n.schoolId,
+            metadata: { reference: n.reference, resolution, won },
           },
           tx,
         );
@@ -287,12 +390,28 @@ export class DisputesService {
       return { invoiceRef: payment?.invoice?.reference ?? null, recipients: await this.financeRecipients(tx) };
     });
 
-    const amount = this.formatAmount(this.disputedAmountMinor(event), event.data.currency ?? "NGN");
+    const amount = this.formatAmount(n.amountMinor, n.currency);
+    const what = n.platformCharge
+      ? `the ${amount} subscription payment`
+      : `the ${amount} payment${outcome.invoiceRef ? ` (invoice ${outcome.invoiceRef})` : ""}`;
     const title = won ? "Chargeback dispute WON" : "Chargeback dispute LOST — funds clawed back";
     const body = won
-      ? `The dispute on the ${amount} payment${outcome.invoiceRef ? ` (invoice ${outcome.invoiceRef})` : ""} (ref ${reference}) was declined by the bank. The payment stands — no action needed.`
-      : `The dispute on the ${amount} payment${outcome.invoiceRef ? ` (invoice ${outcome.invoiceRef})` : ""} (ref ${reference}) was resolved against the school; the gateway will deduct the amount from settlement. Record a refund against the invoice so the ledger matches the money (Fees → invoice → record refund).`;
-    await this.notifyRecipients(schoolId, outcome.recipients, title, body, { disputeId, reference, won });
+      ? `The dispute on ${what} (ref ${n.reference}) was rejected by the bank. The payment stands — no action needed.`
+      : n.platformCharge
+        ? `The dispute on ${what} (ref ${n.reference}) was resolved against the merchant; the gateway will deduct the amount. The school's subscription standing may need operator review.`
+        : `The dispute on ${what} (ref ${n.reference}) was resolved against the school; the gateway will deduct the amount from settlement. Record a refund against the invoice so the ledger matches the money (Fees → invoice → record refund).`;
+    await this.notifyRecipients(n.schoolId, outcome.recipients, title, body, {
+      disputeId: n.disputeId,
+      reference: n.reference,
+      won,
+    });
+    if (n.platformCharge) {
+      await this.notifyOwners(`Subscription dispute ${won ? "WON" : "LOST"} (${amount})`, body, {
+        schoolId: n.schoolId,
+        disputeId: n.disputeId,
+        won,
+      });
+    }
     return { ok: true };
   }
 
@@ -306,7 +425,11 @@ export class DisputesService {
   }
 
   private formatAmount(minor: number, currency: string): string {
-    return new Intl.NumberFormat("en-NG", { style: "currency", currency }).format(minor / 100);
+    try {
+      return new Intl.NumberFormat("en-NG", { style: "currency", currency }).format(minor / 100);
+    } catch {
+      return `${currency} ${(minor / 100).toFixed(2)}`;
+    }
   }
 
   /** Best-effort per recipient — an alert failure never fails the webhook. */
@@ -329,14 +452,13 @@ export class DisputesService {
     }
   }
 
-  /** Dispute-rate threshold alert to the platform owner (cross-tenant, so it
-   *  needs the privileged client — mirrors the dunning digest; silently skipped
-   *  when unset). Best-effort: never fails the webhook. */
-  private async alertOperators(schoolId: string, recentCount: number): Promise<void> {
+  /** OPERATOR_ALERT to every super_admin (cross-tenant, so it needs the
+   *  privileged client — mirrors the dunning digest; silently skipped when
+   *  unset). Best-effort: never fails the webhook. */
+  private async notifyOwners(title: string, body: string, data: Record<string, unknown>): Promise<void> {
     try {
       const client = this.privileged.client;
       if (!client) return;
-      const school = await client.school.findFirst({ where: { id: schoolId }, select: { name: true } });
       const owners = await client.user.findMany({
         where: { roles: { some: { role: { name: "super_admin" } } } },
         select: { id: true, schoolId: true },
@@ -344,23 +466,27 @@ export class DisputesService {
       for (const owner of owners) {
         await this.notifications.enqueue(
           { schoolId: owner.schoolId, userId: owner.id },
-          {
-            recipientId: owner.id,
-            type: "OPERATOR_ALERT",
-            title: `Chargeback alert: ${school?.name ?? schoolId} hit ${recentCount} disputes in ${DISPUTE_ALERT_WINDOW_DAYS} days`,
-            body: `${school?.name ?? schoolId} has ${recentCount} payment disputes opened in the last ${DISPUTE_ALERT_WINDOW_DAYS} days (threshold ${DISPUTE_ALERT_THRESHOLD}). A climbing dispute rate risks the gateway suspending the merchant account — review the school's collections.`,
-            data: { schoolId, recentCount },
-            channels: ["EMAIL"],
-          },
+          { recipientId: owner.id, type: "OPERATOR_ALERT", title, body, data, channels: ["EMAIL"] },
         );
       }
     } catch (e) {
-      this.logger.warn(`operator dispute alert failed for school ${schoolId}: ${(e as Error).message}`);
+      this.logger.warn(`operator dispute alert failed: ${(e as Error).message}`);
     }
   }
 
+  /** Dispute-rate threshold escalation (gateway-suspension risk). */
+  private async alertDisputeRate(schoolId: string, recentCount: number): Promise<void> {
+    const client = this.privileged.client;
+    const school = client ? await client.school.findFirst({ where: { id: schoolId }, select: { name: true } }).catch(() => null) : null;
+    await this.notifyOwners(
+      `Chargeback alert: ${school?.name ?? schoolId} hit ${recentCount} disputes in ${DISPUTE_ALERT_WINDOW_DAYS} days`,
+      `${school?.name ?? schoolId} has ${recentCount} payment disputes opened in the last ${DISPUTE_ALERT_WINDOW_DAYS} days (threshold ${DISPUTE_ALERT_THRESHOLD}). A climbing dispute rate risks the gateway suspending the merchant account — review the school's collections.`,
+      { schoolId, recentCount },
+    );
+  }
+
   // ---------------------------------------------------------------------------
-  // Staff surface (fee.read / fee.manage)
+  // Staff surface (fee.manage)
   // ---------------------------------------------------------------------------
 
   async list(p: Principal): Promise<PaymentDisputeDto[]> {

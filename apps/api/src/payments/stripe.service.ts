@@ -28,6 +28,16 @@ export interface StripeEvent {
       currency?: string;
       payment_status?: string;
       metadata?: Record<string, string>;
+      /** charge.dispute.* events only: the object is a DISPUTE — `id` is the
+       *  dispute id (dp_…), `charge` the disputed charge (ch_…, fetched via
+       *  getCharge for its metadata), `reason`/`status` Stripe's strings,
+       *  `evidence_details.due_by` the unix-seconds evidence deadline. */
+      id?: string;
+      amount?: number;
+      reason?: string;
+      status?: string;
+      charge?: string;
+      evidence_details?: { due_by?: number };
     };
   };
 }
@@ -68,7 +78,14 @@ export class StripeService {
       success_url: `${base}/billing?paid=1`,
       cancel_url: `${base}/billing?canceled=1`,
     });
-    for (const [k, v] of Object.entries(input.metadata)) params.set(`metadata[${k}]`, v);
+    for (const [k, v] of Object.entries(input.metadata)) {
+      params.set(`metadata[${k}]`, v);
+      // ALSO stamp the PaymentIntent: session metadata never reaches the
+      // Charge, and a chargeback webhook only carries the charge — without
+      // this, a dispute could never be traced back to a school.
+      params.set(`payment_intent_data[metadata][${k}]`, v);
+    }
+    params.set(`payment_intent_data[metadata][reference]`, input.reference);
 
     const res = await fetch(`${STRIPE}/v1/checkout/sessions`, {
       method: "POST",
@@ -81,6 +98,33 @@ export class StripeService {
     }
     const json = (await res.json()) as { url: string };
     return { authorizationUrl: json.url };
+  }
+
+  /**
+   * Fetch a charge (dispute handling: the dispute event carries only the
+   * charge id; the charge's metadata — copied from the PaymentIntent we
+   * stamped at checkout — identifies the school/kind/reference). Best-effort:
+   * null when unconfigured or the fetch fails, never a throw.
+   */
+  async getCharge(
+    chargeId: string,
+  ): Promise<{ metadata: Record<string, string>; amount?: number; currency?: string } | null> {
+    const secret = process.env.STRIPE_SECRET_KEY;
+    if (!secret) return null;
+    try {
+      const res = await fetch(`${STRIPE}/v1/charges/${encodeURIComponent(chargeId)}`, {
+        headers: { Authorization: `Bearer ${secret}` },
+      });
+      if (!res.ok) {
+        this.logger.warn(`Stripe charge fetch failed: ${res.status} (${chargeId})`);
+        return null;
+      }
+      const json = (await res.json()) as { metadata?: Record<string, string>; amount?: number; currency?: string };
+      return { metadata: json.metadata ?? {}, amount: json.amount, currency: json.currency };
+    } catch (err) {
+      this.logger.warn(`Stripe charge fetch error: ${(err as Error).message}`);
+      return null;
+    }
   }
 
   /**

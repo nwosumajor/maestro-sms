@@ -109,8 +109,10 @@ d("DisputesService chargeback lifecycle (real Postgres)", () => {
     const queue = { add: jest.fn().mockResolvedValue(undefined) };
     notifications = new NotificationService(tenant, audit, queue as never);
     // Privileged client unset: the operator escalation is exercised separately
-    // with a stub below; everything else must work without it.
-    svc = new DisputesService(tenant, audit, notifications, { client: null } as never);
+    // with a stub below; everything else must work without it. Stripe stub:
+    // the Paystack path never calls getCharge.
+    const stripeStub = { getCharge: jest.fn().mockResolvedValue(null) };
+    svc = new DisputesService(tenant, audit, notifications, { client: null } as never, stripeStub as never);
   });
 
   afterAll(async () => {
@@ -209,7 +211,8 @@ d("DisputesService chargeback lifecycle (real Postgres)", () => {
     };
     const tenant = new PrismaTenantService() as never;
     const audit = new AuditLogService();
-    const escalating = new DisputesService(tenant, audit, notifications, privileged as never);
+    const stripeStub = { getCharge: jest.fn().mockResolvedValue(null) };
+    const escalating = new DisputesService(tenant, audit, notifications, privileged as never, stripeStub as never);
 
     // Already 2 dispute rows exist (D1 + the LOST one); pushing to the
     // threshold must escalate.
@@ -224,5 +227,78 @@ d("DisputesService chargeback lifecycle (real Postgres)", () => {
     );
     expect(alert.rowCount).toBeGreaterThan(0);
     expect((alert.rows[0] as { title: string }).title).toContain("Chargeback alert");
+  });
+
+  it("STRIPE: a subscription-charge dispute resolves the school from the fetched charge metadata, alerts the owner immediately, and closed:won -> WON", async () => {
+    const DP = "dp_" + randomUUID().slice(0, 8);
+    // The dispute event carries only the charge id; the charge's metadata
+    // (stamped onto the PaymentIntent at checkout) identifies the school.
+    const stripeStub = {
+      getCharge: jest.fn().mockResolvedValue({
+        metadata: { schoolId: SA, kind: "subscription", reference: "SUB-REF-1" },
+        amount: 9_900,
+        currency: "usd",
+      }),
+    };
+    const privileged = {
+      client: {
+        school: { findFirst: jest.fn().mockResolvedValue({ name: "Dispute A" }) },
+        user: { findMany: jest.fn().mockResolvedValue([{ id: STAFF, schoolId: SA }]) },
+      },
+    };
+    const tenant = new PrismaTenantService() as never;
+    const stripeSvc = new DisputesService(tenant, new AuditLogService(), notifications, privileged as never, stripeStub as never);
+
+    await stripeSvc.applyStripeDisputeEvent({
+      type: "charge.dispute.created",
+      data: {
+        object: {
+          id: DP,
+          amount: 9_900,
+          currency: "usd",
+          reason: "fraudulent",
+          status: "needs_response",
+          charge: "ch_test_1",
+          evidence_details: { due_by: Math.floor(Date.now() / 1000) + 5 * 86_400 },
+        },
+      },
+    } as never);
+
+    const row = (await stripeSvc.list(staffA())).find((x) => x.gatewayDisputeId === DP);
+    expect(row).toMatchObject({
+      status: "OPEN",
+      currency: "USD",
+      amountMinor: 9_900,
+      category: "fraudulent",
+      transactionReference: "SUB-REF-1",
+    });
+    expect(stripeStub.getCharge).toHaveBeenCalledWith("ch_test_1");
+
+    // Platform revenue: the owner is alerted on OPEN, not just at the threshold.
+    const ownerAlert = await admin.query(
+      `SELECT title FROM notification WHERE "recipientId" = $1 AND title LIKE 'Subscription payment disputed%'`,
+      [STAFF],
+    );
+    expect(ownerAlert.rowCount).toBeGreaterThan(0);
+
+    await stripeSvc.applyStripeDisputeEvent({
+      type: "charge.dispute.closed",
+      data: { object: { id: DP, amount: 9_900, currency: "usd", status: "won", charge: "ch_test_1" } },
+    } as never);
+    const closed = (await stripeSvc.list(staffA())).find((x) => x.gatewayDisputeId === DP);
+    expect(closed).toMatchObject({ status: "WON", resolution: "won" });
+  });
+
+  it("STRIPE: an unmappable dispute (no schoolId metadata) is dropped, never guessed", async () => {
+    const stripeStub = { getCharge: jest.fn().mockResolvedValue({ metadata: {} }) };
+    const tenant = new PrismaTenantService() as never;
+    const dropSvc = new DisputesService(tenant, new AuditLogService(), notifications, { client: null } as never, stripeStub as never);
+    const before = (await dropSvc.list(staffA())).length;
+    const res = await dropSvc.applyStripeDisputeEvent({
+      type: "charge.dispute.created",
+      data: { object: { id: "dp_unmapped", amount: 100, currency: "usd", charge: "ch_unknown" } },
+    } as never);
+    expect(res).toEqual({ ok: true });
+    expect((await dropSvc.list(staffA())).length).toBe(before);
   });
 });

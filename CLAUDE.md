@@ -322,17 +322,24 @@ are scaffolded (Paystack via `fetch`: `POST /invoices/:id/pay/init` → hosted
 checkout; `@Public` HMAC-SHA512-verified webhook → records a POSTED payment on
 charge.success; gracefully 503-disabled when `PAYSTACK_SECRET_KEY` is unset —
 the disabled/public paths are verified, but live charging needs real creds +
-outbound network). **Chargeback/dispute handling is BUILT**
-(`apps/api/src/fees/disputes.*`, `payment_dispute` table, migration
-`20260913000000`, RLS `78` — no DELETE, financial record): the webhook ingests
-`charge.dispute.create|remind|resolve` (tenant resolved from the charge's OWN
-metadata, idempotent on the gateway dispute id), alerts finance
-(accountant/school_admin/principal) with the evidence deadline, maps
-resolution "declined"→WON else LOST (LOST tells finance to record the
-matching refund), and ESCALATES an OPERATOR_ALERT to the platform owner at
-`DISPUTE_ALERT_THRESHOLD` disputes per school per `DISPUTE_ALERT_WINDOW_DAYS`
-(gateway-suspension risk). Staff track responses at `/fees/disputes`
-(fee.manage everywhere — NOT fee.read, which parents hold). #14 (cross-cutting) is DONE. By-role (#15) so far: **HR module**
+outbound network). **Chargeback/dispute handling is BUILT — BOTH gateways**
+(`apps/api/src/fees/disputes.*` in its own `DisputesModule` — imported by
+FeesModule AND BillingModule, imports neither; `payment_dispute` table,
+migration `20260913000000`, RLS `78` — no DELETE, financial record). ONE
+normalized ingestion: Paystack `charge.dispute.create|remind|resolve` (tenant
+from the disputed transaction's own metadata; "declined"→WON else LOST) and
+Stripe `charge.dispute.created|updated|closed` (the event carries only a
+charge id — `StripeService.getCharge` reads the metadata stamped onto the
+PaymentIntent at checkout; `payment_intent_data[metadata]` is set at session
+create for exactly this, session metadata never reaches the Charge; status
+"won"/"lost" maps directly; `updated` refreshes silently). Idempotent on the
+gateway dispute id. Alerts: finance (accountant/school_admin/principal) with
+the evidence deadline; a `kind === "subscription"` dispute (platform revenue)
+ALSO alerts the owner immediately; and `DISPUTE_ALERT_THRESHOLD` disputes per
+school per `DISPUTE_ALERT_WINDOW_DAYS` escalates an OPERATOR_ALERT
+(gateway-suspension risk). LOST invoice disputes tell finance to record the
+matching refund. Staff track responses at `/fees/disputes` (fee.manage
+everywhere — NOT fee.read, which parents hold). #14 (cross-cutting) is DONE. By-role (#15) so far: **HR module**
 (`/hr` — staff employment records with field-encrypted salaries; the `hr_clerk`
 role's home; `hr.read`/`hr.write`. BOTH reads audited — incl. the list view, which
 decrypts every salary — and an upsert records a `created` boolean in the
