@@ -218,20 +218,47 @@ export class LmsService {
     });
   }
 
-  /** Assign (or re-assign) a teacher to a class's subject offering. */
-  async assignClassSubject(p: Principal, classId: string, subjectId: string, teacherId: string) {
+  /** Assign (or re-assign) a teacher to a class's subject offering, optionally
+   *  with its CSP timetable inputs (weekly lesson quota + fixed room). */
+  async assignClassSubject(
+    p: Principal,
+    classId: string,
+    subjectId: string,
+    teacherId: string,
+    opts?: { lessonsPerWeek?: number; preferredRoomId?: string | null },
+  ) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.requireClass(tx, classId);
       const subj = await tx.subject.findFirst({ where: { id: subjectId }, select: { id: true } });
       if (!subj) throw new NotFoundException("Subject not found");
       const teacher = await tx.user.findFirst({ where: { id: teacherId }, select: { id: true } });
       if (!teacher) throw new NotFoundException("Teacher not found");
+      if (opts?.preferredRoomId) {
+        const room = await tx.room.findFirst({ where: { id: opts.preferredRoomId }, select: { id: true } });
+        if (!room) throw new NotFoundException("Room not found");
+      }
       const row = await tx.classSubjectTeacher.upsert({
         where: { classId_subjectId: { classId, subjectId } },
-        update: { teacherId },
-        create: { schoolId: p.schoolId, classId, subjectId, teacherId },
+        update: {
+          teacherId,
+          lessonsPerWeek: opts?.lessonsPerWeek,
+          preferredRoomId: opts?.preferredRoomId === undefined ? undefined : opts.preferredRoomId,
+        },
+        create: {
+          schoolId: p.schoolId,
+          classId,
+          subjectId,
+          teacherId,
+          lessonsPerWeek: opts?.lessonsPerWeek,
+          preferredRoomId: opts?.preferredRoomId ?? null,
+        },
       });
-      await this.log(tx, p, "lms.class.subject.assign", "class", classId, { subjectId, teacherId });
+      await this.log(tx, p, "lms.class.subject.assign", "class", classId, {
+        subjectId,
+        teacherId,
+        lessonsPerWeek: row.lessonsPerWeek,
+        preferredRoomId: row.preferredRoomId,
+      });
       return row;
     });
   }
@@ -265,6 +292,8 @@ export class LmsService {
         subjectName: r.subject.name,
         teacherId: r.teacher.id,
         teacherName: r.teacher.name,
+        lessonsPerWeek: r.lessonsPerWeek,
+        preferredRoomId: r.preferredRoomId,
       }));
     });
   }

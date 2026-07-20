@@ -58,6 +58,7 @@ export default async function AdminPage() {
     { label: "Parent onboarding", href: "/admin/parents", perm: "parent.import", desc: "Create guardian logins + link children" },
     { label: "Finance reports", href: "/fees/reports", perm: "fee.manage", desc: "Receivables aging + collection" },
     { label: "Admissions", href: "/admin/admissions", perm: "admission.review", desc: "Review public applications" },
+    { label: "School branding", href: "/admin/branding", perm: "school.branding.manage", desc: "Logo + brand colour (login, certificates, ID cards)" },
   ] satisfies { label: string; href: string; perm: Permission; desc: string }[]).filter(
     (a) => user.permissions.includes(a.perm),
   );

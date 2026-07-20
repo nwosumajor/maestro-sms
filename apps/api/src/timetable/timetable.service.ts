@@ -9,7 +9,9 @@
 //   - student -> classes they're enrolled in
 //   - parent  -> their children's classes
 // Everything runs in a tenant transaction (RLS-enforced); mutations audited.
-// Not-visible -> 404 (never 403). (Auto-generation via a CSP solver is future.)
+// Not-visible -> 404 (never 403). Auto-generation runs the pure CSP solver in
+// auto-timetable.ts over per-offering quotas, TeacherUnavailability rows, and
+// preferred rooms, then persists the result as ordinary conflict-free entries.
 // =============================================================================
 
 import {
@@ -20,7 +22,13 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import type { DayOfWeekValue, TimetableEntryDto } from "@sms/types";
+import type {
+  DayOfWeekValue,
+  TeacherUnavailabilityDto,
+  TimetableDiagnosticDto,
+  TimetableEntryDto,
+  TimetableGenerateResultDto,
+} from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -30,7 +38,7 @@ import {
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
-import { generateTimetable, type Offering, type Slot } from "./auto-timetable";
+import { generateTimetable, unavailableKey, type Offering, type Slot } from "./auto-timetable";
 
 const STAFF_WIDE_ROLES = new Set(["school_admin", "principal", "board", "super_admin"]);
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -156,17 +164,19 @@ export class TimetableService {
     });
   }
 
-  // --- auto-generation (CSP greedy solver) ----------------------------------
-  /** Generate a conflict-free weekly grid from class-subject-teacher offerings.
-   *  Uses the pure solver (class + teacher no-double-booking) and persists the
-   *  placements as TimetableEntry rows. Existing entries are respected, not wiped
-   *  (unless `replace` is set, which clears the targeted classes first). Staff only. */
+  // --- auto-generation (CSP solver) -----------------------------------------
+  /** Generate a conflict-free weekly grid from class-subject-teacher offerings
+   *  via the pure CSP solver: per-offering `lessonsPerWeek` quotas, teacher
+   *  unavailability, and preferred rooms are hard inputs. Placements persist as
+   *  TimetableEntry rows; existing entries are respected, not wiped (unless
+   *  `replace` is set, which clears the targeted classes first). Staff only.
+   *  Returns operator-facing evidence: unplaced lessons with the blocking
+   *  constraint + preflight overload diagnostics, all with display names. */
   async generate(
     p: Principal,
     input: { classIds?: string[]; lessonsPerSubject?: number; days?: DayOfWeekValue[]; replace?: boolean },
-  ) {
+  ): Promise<TimetableGenerateResultDto> {
     if (!this.isStaffWide(p)) throw new ForbiddenException();
-    const lessonsPerSubject = Math.min(10, Math.max(1, input.lessonsPerSubject ?? 2));
     const days = input.days?.length ? input.days : WEEKDAYS;
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const periods = await tx.period.findMany({ orderBy: { sequence: "asc" }, select: { id: true } });
@@ -178,15 +188,17 @@ export class TimetableService {
       const cstWhere = input.classIds?.length ? { classId: { in: input.classIds } } : {};
       const cst = await tx.classSubjectTeacher.findMany({ where: cstWhere });
       if (cst.length === 0) throw new BadRequestException("No class-subject-teacher offerings to schedule");
-      const subjectIds = [...new Set(cst.map((c: { subjectId: string }) => c.subjectId))];
+      const subjectIds = [...new Set(cst.map((c) => c.subjectId))];
       const subjects = await tx.subject.findMany({ where: { id: { in: subjectIds } }, select: { id: true, name: true } });
-      const subjectName = new Map(subjects.map((s: { id: string; name: string }) => [s.id, s.name]));
-      const offerings: Offering[] = cst.map((c: { classId: string; subjectId: string; teacherId: string }) => ({
+      const subjectName = new Map(subjects.map((s) => [s.id, s.name]));
+      const offerings: Offering[] = cst.map((c) => ({
         classId: c.classId,
         subjectId: c.subjectId,
         subject: subjectName.get(c.subjectId) ?? "Subject",
         teacherId: c.teacherId,
-        lessonsPerWeek: lessonsPerSubject,
+        // The explicit bulk knob (legacy) overrides per-offering quotas when sent.
+        lessonsPerWeek: input.lessonsPerSubject ?? c.lessonsPerWeek,
+        preferredRoomId: c.preferredRoomId,
       }));
       const targetClassIds = [...new Set(offerings.map((o) => o.classId))];
 
@@ -198,17 +210,24 @@ export class TimetableService {
       // Seed busy-sets from any entries we are KEEPING (other classes / not replaced).
       const keep = await tx.timetableEntry.findMany({
         where: input.replace ? { classId: { notIn: targetClassIds } } : {},
-        select: { classId: true, teacherId: true, dayOfWeek: true, periodId: true },
+        select: { classId: true, teacherId: true, dayOfWeek: true, periodId: true, roomId: true },
       });
       const classBusy: Record<string, Set<string>> = {};
       const teacherBusy: Record<string, Set<string>> = {};
-      for (const e of keep as Array<{ classId: string; teacherId: string; dayOfWeek: string; periodId: string }>) {
+      const roomBusy: Record<string, Set<string>> = {};
+      for (const e of keep) {
         const k = `${e.dayOfWeek}|${e.periodId}`;
         (classBusy[k] ??= new Set()).add(e.classId);
         (teacherBusy[k] ??= new Set()).add(e.teacherId);
+        if (e.roomId) (roomBusy[k] ??= new Set()).add(e.roomId);
       }
 
-      const result = generateTimetable(offerings, slots, { classBusy, teacherBusy });
+      // Teacher availability: unavailable (day, period) slots are hard constraints.
+      const teacherIds = [...new Set(offerings.map((o) => o.teacherId))];
+      const unavailRows = await tx.teacherUnavailability.findMany({ where: { teacherId: { in: teacherIds } } });
+      const unavailable = new Set(unavailRows.map((r) => unavailableKey(r.teacherId, r.dayOfWeek, r.periodId)));
+
+      const result = generateTimetable(offerings, slots, { classBusy, teacherBusy, roomBusy }, unavailable);
       // One bulk insert for all generated lessons (not one INSERT per lesson).
       await tx.timetableEntry.createMany({
         data: result.placed.map((lesson) => ({
@@ -218,16 +237,99 @@ export class TimetableService {
           periodId: lesson.periodId,
           subject: lesson.subject,
           teacherId: lesson.teacherId,
-          roomId: null,
+          roomId: lesson.roomId,
         })),
       });
+
+      // Resolve ids -> display names so unplaced/diagnostics read as evidence.
+      const classRows = await tx.class.findMany({ where: { id: { in: targetClassIds } }, select: { id: true, name: true } });
+      const className = new Map(classRows.map((c) => [c.id, c.name]));
+      const teacherRows = await tx.user.findMany({ where: { id: { in: teacherIds } }, select: { id: true, name: true } });
+      const teacherName = new Map(teacherRows.map((t) => [t.id, t.name]));
+      const roomIds = [...new Set(offerings.flatMap((o) => (o.preferredRoomId ? [o.preferredRoomId] : [])))];
+      const roomRows = roomIds.length
+        ? await tx.room.findMany({ where: { id: { in: roomIds } }, select: { id: true, name: true } })
+        : [];
+      const roomName = new Map(roomRows.map((r) => [r.id, r.name]));
+      const diagnostics: TimetableDiagnosticDto[] = result.diagnostics.map((d) => ({
+        kind: d.kind,
+        name: d.teacherId
+          ? teacherName.get(d.teacherId) ?? d.teacherId
+          : d.classId
+            ? className.get(d.classId) ?? d.classId
+            : roomName.get(d.roomId ?? "") ?? d.roomId ?? "?",
+        demand: d.demand,
+        capacity: d.capacity,
+      }));
+
       await this.log(tx, p, "timetable.generate", "timetable", "auto", {
         classes: targetClassIds.length,
         placed: result.placed.length,
         unplaced: result.unplaced.length,
+        complete: result.complete,
+        diagnostics: diagnostics.length,
         replace: Boolean(input.replace),
       });
-      return { placed: result.placed.length, unplaced: result.unplaced };
+      return {
+        placed: result.placed.length,
+        complete: result.complete,
+        unplaced: result.unplaced.map((u) => ({
+          className: className.get(u.classId) ?? u.classId,
+          subject: u.subject,
+          teacherName: teacherName.get(u.teacherId) ?? u.teacherId,
+          reason: u.reason,
+        })),
+        diagnostics,
+      };
+    });
+  }
+
+  // --- teacher availability (CSP generator input) ----------------------------
+  /** List unavailable slots. School-wide staff see any teacher's (or all);
+   *  teachers see only their OWN — the filter narrows silently (404-not-403
+   *  posture: no existence leak about other teachers). */
+  async listUnavailability(p: Principal, teacherId?: string): Promise<TeacherUnavailabilityDto[]> {
+    const effectiveTeacherId = this.isStaffWide(p) ? teacherId : p.userId;
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const rows = await tx.teacherUnavailability.findMany({
+        where: effectiveTeacherId ? { teacherId: effectiveTeacherId } : {},
+        orderBy: [{ teacherId: "asc" }, { dayOfWeek: "asc" }, { periodId: "asc" }],
+      });
+      return rows.map((r) => ({ teacherId: r.teacherId, dayOfWeek: r.dayOfWeek, periodId: r.periodId }));
+    });
+  }
+
+  /** Replace a teacher's entire unavailability set (idempotent PUT). Staff only. */
+  async setUnavailability(
+    p: Principal,
+    teacherId: string,
+    slots: { dayOfWeek: DayOfWeekValue; periodId: string }[],
+  ) {
+    if (!this.isStaffWide(p)) throw new ForbiddenException();
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const teacher = await tx.user.findFirst({ where: { id: teacherId }, select: { id: true } });
+      if (!teacher) throw new NotFoundException("Teacher not found");
+      const periodIds = [...new Set(slots.map((s) => s.periodId))];
+      if (periodIds.length > 0) {
+        const known = await tx.period.count({ where: { id: { in: periodIds } } });
+        if (known !== periodIds.length) throw new BadRequestException("Unknown period in availability set");
+      }
+      await tx.teacherUnavailability.deleteMany({ where: { teacherId } });
+      if (slots.length > 0) {
+        await tx.teacherUnavailability.createMany({
+          data: slots.map((s) => ({
+            schoolId: p.schoolId,
+            teacherId,
+            dayOfWeek: s.dayOfWeek,
+            periodId: s.periodId,
+          })),
+          skipDuplicates: true,
+        });
+      }
+      await this.log(tx, p, "timetable.availability.set", "teacher_unavailability", teacherId, {
+        slots: slots.length,
+      });
+      return { ok: true, slots: slots.length };
     });
   }
 

@@ -1,7 +1,13 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from "@nestjs/common";
 import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
-import type { IdNameDto, PeriodDto, TimetableEntryDto } from "@sms/types";
+import type {
+  IdNameDto,
+  PeriodDto,
+  TeacherUnavailabilityDto,
+  TimetableEntryDto,
+  TimetableGenerateResultDto,
+} from "@sms/types";
 import { z } from "zod";
 import { DAYS_OF_WEEK, TIMETABLE_PERMISSIONS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -33,6 +39,11 @@ const generateSchema = z.object({
   lessonsPerSubject: z.number().int().min(1).max(10).optional(),
   days: z.array(z.enum(DAYS_OF_WEEK)).optional(),
   replace: z.boolean().optional(),
+});
+const availabilitySchema = z.object({
+  slots: z
+    .array(z.object({ dayOfWeek: z.enum(DAYS_OF_WEEK), periodId: z.string().uuid() }))
+    .max(350), // 7 days x 50 periods — the whole grid
 });
 const entryUpdateSchema = entrySchema.partial();
 
@@ -93,14 +104,36 @@ export class TimetableController {
     return this.timetable.updateRoom(p, id, body);
   }
 
-  /** Auto-generate a conflict-free weekly grid from class-subject-teacher offerings. */
+  /** Auto-generate a conflict-free weekly grid from class-subject-teacher
+   *  offerings via the CSP solver (quotas + teacher availability + rooms). */
   @Post("generate")
   @RequirePermission(TIMETABLE_PERMISSIONS.TIMETABLE_WRITE)
   generate(
     @CurrentPrincipal() p: Principal,
     @Body(new ZodValidationPipe(generateSchema)) body: z.infer<typeof generateSchema>,
-  ) {
+  ): Promise<TimetableGenerateResultDto> {
     return this.timetable.generate(p, body);
+  }
+
+  // --- teacher availability (CSP generator input) ---
+  @Get("availability")
+  @RequirePermission(TIMETABLE_PERMISSIONS.TIMETABLE_READ)
+  listAvailability(
+    @CurrentPrincipal() p: Principal,
+    @Query("teacherId") teacherId?: string,
+  ): Promise<TeacherUnavailabilityDto[]> {
+    return this.timetable.listUnavailability(p, teacherId);
+  }
+
+  /** Replace a teacher's full set of unavailable (day, period) slots. */
+  @Put("availability/:teacherId")
+  @RequirePermission(TIMETABLE_PERMISSIONS.TIMETABLE_WRITE)
+  setAvailability(
+    @CurrentPrincipal() p: Principal,
+    @Param("teacherId") teacherId: string,
+    @Body(new ZodValidationPipe(availabilitySchema)) body: z.infer<typeof availabilitySchema>,
+  ) {
+    return this.timetable.setUnavailability(p, teacherId, body.slots);
   }
 
   // --- entries (conflict-checked) ---

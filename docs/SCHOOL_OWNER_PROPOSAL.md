@@ -232,4 +232,4 @@ Your branding (logo, colours) applies across the portal, report cards, and certi
 Request your school's onboarding from the platform website, or reply to the contact that shared this proposal. Your first 30 days are on us — bring one term's fee collection onto the platform and let the receivables report make the argument for everything else.
 
 **MAESTRO-SMS — powered by MajorGBN Innovations Limited.**
-*One platform. Every role. Your school, run like an institution.*
+*One platform. Every role. Your school, run like a futuristic institution.*

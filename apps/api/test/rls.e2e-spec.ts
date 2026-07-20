@@ -46,6 +46,7 @@ d("RLS cross-tenant isolation", () => {
   const periodA = randomUUID();
   const roomA = randomUUID();
   const ttEntryA = randomUUID();
+  const teacherUnavailA = randomUUID();
   const grantA = randomUUID();
   const erasureA = randomUUID();
   const eventA = randomUUID();
@@ -305,6 +306,11 @@ d("RLS cross-tenant isolation", () => {
       `INSERT INTO timetable_entry (id,"schoolId","classId","dayOfWeek","periodId",subject,"teacherId","roomId","updatedAt")
        VALUES ($1,$2,$3,'MONDAY',$4,'History',$5,$6,now())`,
       [ttEntryA, A, classA, periodA, userA, roomA],
+    );
+    // CSP generator input: one unavailable slot for teacher userA.
+    await a.query(
+      `INSERT INTO teacher_unavailability (id,"schoolId","teacherId","dayOfWeek","periodId") VALUES ($1,$2,$3,'FRIDAY',$4)`,
+      [teacherUnavailA, A, userA, periodA],
     );
     // Security: a privilege grant for userA
     await a.query(
@@ -1027,6 +1033,7 @@ d("RLS cross-tenant isolation", () => {
       "school_event",
       "erasure_request",
       "privilege_grant",
+      "teacher_unavailability",
       "timetable_entry",
       "period",
       "room",
@@ -1111,6 +1118,7 @@ d("RLS cross-tenant isolation", () => {
     ["period", periodA],
     ["room", roomA],
     ["timetable_entry", ttEntryA],
+    ["teacher_unavailability", teacherUnavailA],
     ["privilege_grant", grantA],
     ["erasure_request", erasureA],
     ["school_event", eventA],

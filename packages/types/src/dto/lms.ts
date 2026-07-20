@@ -23,6 +23,10 @@ export interface ClassSubjectDto {
   subjectName: string;
   teacherId: string;
   teacherName: string;
+  /** CSP timetable quota: lessons per week this offering receives. */
+  lessonsPerWeek: number;
+  /** Fixed room for this offering (null = assigned manually / none). */
+  preferredRoomId: string | null;
 }
 
 /** Member-facing class info (parent/student/teacher view). No classmate roster. */

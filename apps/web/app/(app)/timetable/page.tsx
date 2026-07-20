@@ -25,10 +25,13 @@ export default async function TimetablePage({
   const session = await auth();
   const user = session!.user;
   const canWrite = hasPermission(user.permissions, "timetable.write");
-  const [periods, classes, rooms] = await Promise.all([
+  const [periods, classes, rooms, allTeachers] = await Promise.all([
     apiGet<Period[]>("/timetable/periods"),
     apiGet<ClassRow[]>("/classes/mine"),
     canWrite ? apiGet<Room[]>("/timetable/rooms") : Promise.resolve(null),
+    // Teacher directory for the availability editor (class.write accompanies
+    // timetable.write on every writing role).
+    canWrite ? apiGet<{ id: string; name: string }[]>("/users?kind=teacher") : Promise.resolve(null),
   ]);
 
   const list = classes ?? [];
@@ -61,7 +64,12 @@ export default async function TimetablePage({
             be scheduled twice in one slot (a clash is refused with the reason).</>} />
 
         {canWrite && (
-          <TimetableAdmin classes={list} periods={periods ?? []} rooms={rooms ?? []} />
+          <TimetableAdmin
+            classes={list}
+            periods={periods ?? []}
+            rooms={rooms ?? []}
+            teachers={allTeachers ?? []}
+          />
         )}
 
         {list.length === 0 ? (

@@ -113,6 +113,12 @@ model ClassSubjectTeacher {
   classId   String   @db.Uuid
   subjectId String   @db.Uuid
   teacherId String   @db.Uuid
+  /// CSP timetable-generation quota: lessons per week this offering receives.
+  lessonsPerWeek  Int     @default(2)
+  /// Fixed room this offering must be taught in (e.g. Chemistry -> Science Lab);
+  /// the CSP solver treats it as a hard no-double-booking constraint. Scalar
+  /// uuid with a DB-level FK to room (no Prisma relation — keeps models lean).
+  preferredRoomId String? @db.Uuid
   createdAt DateTime @default(now())
 
   school  School  @relation(fields: [schoolId], references: [id])

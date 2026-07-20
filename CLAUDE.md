@@ -244,8 +244,13 @@ presigned upload/download URLs from a pluggable StorageProvider; student /
 guardian / teacher / staff scoping; downloads audited; guardians notified on
 shareable docs), Timetabling (periods / rooms / weekly lesson grid with
 teacher/room/class double-booking conflict detection -> 409; teacher→own /
-student→enrolled / parent→children / staff→all scoping; CSP auto-generation is
-future), the Approval Workflow Engine, the Docker/Compose orchestration, and a
+student→enrolled / parent→children / staff→all scoping; PLUS CSP auto-generation:
+a pure backtracking solver (`auto-timetable.ts` — MRV + step budget + greedy
+fallback, exhaustively unit-tested) over per-offering `lessonsPerWeek` quotas,
+`teacher_unavailability` slots (rls/77), and per-offering `preferredRoomId` hard
+room constraints; preflight over-allocation diagnostics + per-lesson unplaced
+reasons surface as operator evidence; POST /timetable/generate + availability
+GET/PUT on the /timetable console), the Approval Workflow Engine, the Docker/Compose orchestration, and a
 role-filtered web UI (login + AppShell nav gated by permissions; pages for
 Notifications, Students/SIS profile, Classes, Timetable, Attendance incl.
 take-register, Fees incl. record-payment, Documents incl. signed download,
