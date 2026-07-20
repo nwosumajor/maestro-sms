@@ -11,6 +11,10 @@ export const middleware = auth((req) => {
   const { pathname } = req.nextUrl;
   if (!req.auth?.user) {
     const url = new URL("/login", req.nextUrl);
+    // Carry the interrupted destination so re-authentication returns the user
+    // to where they were (relative path only — LoginForm re-validates it).
+    const next = pathname + req.nextUrl.search;
+    if (next && next.startsWith("/") && !next.startsWith("//")) url.searchParams.set("next", next);
     return NextResponse.redirect(url);
   }
   // 30-day reset: the password has expired — hold the user on the change page until

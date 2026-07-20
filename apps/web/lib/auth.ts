@@ -103,7 +103,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   // Rotation window (see AUTH_SECRETS above); [AUTH_SECRET] alone when no
   // rotation is in progress — identical behaviour to the plain-string default.
   ...(AUTH_SECRETS.length > 0 ? { secret: AUTH_SECRETS } : {}),
-  session: { strategy: "jwt" },
+  // Idle timeout: the session cookie lives 11 minutes and ROLLS on server
+  // contact (updateAge 60s re-issues the JWT on any session read — every
+  // middleware-guarded navigation, plus the SessionIdleGuard's keep-alive
+  // pings while the user is active). The CLIENT warns at 9 min idle and signs
+  // out at 10; the 11-min server window is the backstop that outlives the
+  // 60-second warning countdown, so "Continue" still has a live session to
+  // extend, while an abandoned tab's cookie dies server-side soon after.
+  session: { strategy: "jwt", maxAge: 11 * 60, updateAge: 60 },
   pages: { signIn: "/login" },
   providers: [
     Credentials({

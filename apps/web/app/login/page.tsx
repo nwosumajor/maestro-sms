@@ -22,10 +22,16 @@ async function getBranding(slug: string | undefined): Promise<PublicBrandingDto 
   }
 }
 
-export default async function LoginPage({ searchParams }: { searchParams: { school?: string } }) {
-  // Already signed in -> straight to the app.
+/** Relative-path-only guard against open redirects ("//evil.com" is protocol-relative). */
+function safeNext(next: string | undefined): string | null {
+  return next && next.startsWith("/") && !next.startsWith("//") ? next : null;
+}
+
+export default async function LoginPage({ searchParams }: { searchParams: { school?: string; next?: string } }) {
+  const next = safeNext(searchParams.next);
+  // Already signed in -> straight to the app (or the interrupted destination).
   const session = await auth();
-  if (session?.user) redirect("/dashboard");
+  if (session?.user) redirect(next ?? "/dashboard");
 
   const branding = await getBranding(searchParams.school);
 
@@ -99,7 +105,7 @@ export default async function LoginPage({ searchParams }: { searchParams: { scho
             </p>
 
             <div className="mt-7">
-              <LoginForm />
+              <LoginForm next={next} />
             </div>
 
             <p className="mt-6 rounded-lg border border-border/70 bg-muted/50 px-3 py-2.5 text-xs text-muted-foreground">

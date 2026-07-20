@@ -42,6 +42,7 @@ import {
 import { cn } from "@/lib/utils";
 import { auth } from "@/lib/auth";
 import { ImpersonationBanner } from "./ImpersonationBanner";
+import { SessionIdleGuard } from "./SessionIdleGuard";
 import { apiGet } from "@/lib/api";
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
 import { LegalAcceptBanner } from "@/components/legal/LegalAcceptBanner";
@@ -316,6 +317,7 @@ export async function AppShell({
     // (defaulting to the graphite dark console). Public pages pin themselves
     // light via .force-light, so the toggle only ever restyles the app.
     <div data-tenant style={brandStyle(theme, fontFamily)} className="min-h-screen bg-background text-foreground">
+      <SessionIdleGuard />
       {impersonating && <ImpersonationBanner userName={userName} schoolName={schoolName} />}
       {/* Top bar */}
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-border/70 bg-card/80 px-4 backdrop-blur-md supports-[backdrop-filter]:bg-card/65">

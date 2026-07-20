@@ -7,8 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-export function LoginForm() {
+export function LoginForm({ next }: { next?: string | null }) {
   const router = useRouter();
+  // Server-validated relative path (login/page.tsx safeNext) — re-checked here
+  // because a client can mount this component with anything.
+  const dest = next && next.startsWith("/") && !next.startsWith("//") ? next : "/dashboard";
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [code, setCode] = React.useState("");
@@ -27,7 +30,7 @@ export function LoginForm() {
       );
       return;
     }
-    router.push("/dashboard");
+    router.push(dest);
     router.refresh();
   };
 
