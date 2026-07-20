@@ -261,6 +261,46 @@ export interface SchoolProfileDto extends SchoolDirectoryRowDto {
   payments: SchoolProfilePaymentDto[];
 }
 
+// --- Message-credit (SMS/WhatsApp) oversight (operator) ----------------------
+
+/** One school's message-credit position on the operator's cross-tenant
+ *  balance list. Lifetime totals are derived from the append-only ledger
+ *  (purchases + sends + operator comps), never a separate running counter. */
+export interface MessageCreditBalanceDto {
+  schoolId: string;
+  schoolName: string;
+  /** SUM(deltaCredits) — usable balance right now. */
+  balance: number;
+  /** Lifetime credits bought (Paystack checkout). */
+  totalPurchased: number;
+  /** Lifetime credits consumed by SMS/WhatsApp deliveries. */
+  totalSent: number;
+  /** Net of every operator comp/debit adjustment (can be negative). */
+  totalAdjusted: number;
+}
+
+export interface MessageCreditBalancePageDto {
+  rows: MessageCreditBalanceDto[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+/** One row of a school's credit ledger, newest first (operator drill-down). */
+export interface MessageCreditLedgerEntryDto {
+  id: string;
+  /** Positive = credited (purchase/comp), negative = debited (send/comp). */
+  deltaCredits: number;
+  /** PURCHASE | SEND | ADJUST. */
+  reason: string;
+  /** SMS | WHATSAPP for a send; null otherwise. */
+  channel: string | null;
+  /** Gateway reference (purchase), notificationId (send), or the operator's
+   *  note (adjust) — truncated to 200 chars at write time. */
+  reference: string | null;
+  createdAt: Date;
+}
+
 // --- Fleet-wide games analytics (operator) -----------------------------------
 
 /** Activity counters for one game surface. All AGGREGATE and PII-free —

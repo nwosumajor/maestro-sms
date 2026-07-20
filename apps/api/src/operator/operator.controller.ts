@@ -1,6 +1,8 @@
 import { Body, Controller, Get, Param, Post, Put, Query, Res, StreamableFile } from "@nestjs/common";
 import type { Response } from "express";
 import type {
+  MessageCreditBalancePageDto,
+  MessageCreditLedgerEntryDto,
   OperatorAdminAppointmentDto,
   OperatorBillingAlertDto,
   OperatorStudentDto,
@@ -40,6 +42,7 @@ import { PlanPricingService } from "../billing/plan-pricing.service";
 import { PlatformFeeService } from "../billing/platform-fee.service";
 import { GrowthService } from "../billing/growth.service";
 import { GroupService } from "../group/group.service";
+import { OperatorCreditsService } from "./operator-credits.service";
 
 const platformStaffSchema = z.object({
   email: z.string().email(),
@@ -50,6 +53,11 @@ const staffStatusSchema = z.object({ status: z.enum(["ACTIVE", "DISABLED"]) });
 // goodwill); null resets to the platform default. Unbounded comping stays with
 // the owner via the subscription PUT.
 const graceSchema = z.object({ graceDays: z.number().int().min(0).max(GRACE_DAYS_MAX).nullable() });
+const adjustCreditsSchema = z.object({
+  // Positive = comp credits, negative = debit (e.g. correcting a gateway error).
+  delta: z.number().int().refine((v) => v !== 0, "delta must be non-zero"),
+  note: z.string().min(3).max(200),
+});
 
 /** Parse audit query params into a typed filter (all optional). */
 function auditFilter(q: Record<string, string>): PlatformAuditFilter {
@@ -182,6 +190,7 @@ export class OperatorController {
     private readonly platformFees: PlatformFeeService,
     private readonly growth: GrowthService,
     private readonly groups: GroupService,
+    private readonly credits: OperatorCreditsService,
   ) {}
 
   /** Self-serve onboard a NEW school + its first admin (step-up: creates creds). */
@@ -439,6 +448,47 @@ export class OperatorController {
   @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
   getPlatformFees() {
     return this.platformFees.effective();
+  }
+
+  // --- message credits (SMS/WhatsApp) oversight — super_admin ----------------
+  /** Cross-tenant balance list — every school's current SMS/WhatsApp credit
+   *  position, searchable by name. Delegable oversight, like the tenant registry. */
+  @Get("message-credits")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
+  listCreditBalances(
+    @CurrentPrincipal() p: Principal,
+    @Query("q") q?: string,
+    @Query("page") page?: string,
+    @Query("pageSize") pageSize?: string,
+  ): Promise<MessageCreditBalancePageDto> {
+    return this.credits.listBalances(p, {
+      q,
+      page: page ? Number(page) : undefined,
+      pageSize: pageSize ? Number(pageSize) : undefined,
+    });
+  }
+
+  /** One school's credit ledger (purchases, sends, comps), newest first. */
+  @Get("message-credits/:schoolId/ledger")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
+  listCreditLedger(
+    @CurrentPrincipal() p: Principal,
+    @Param("schoolId") schoolId: string,
+  ): Promise<MessageCreditLedgerEntryDto[]> {
+    return this.credits.listLedger(p, schoolId);
+  }
+
+  /** Comp or debit a school's credit balance. Owner-only revenue lever, same
+   *  posture as the subscription comp: step-up + audited. */
+  @Post("message-credits/:schoolId/adjust")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_SUBSCRIPTION_MANAGE)
+  @RequireStepUp()
+  adjustCredits(
+    @CurrentPrincipal() p: Principal,
+    @Param("schoolId") schoolId: string,
+    @Body(new ZodValidationPipe(adjustCreditsSchema)) body: z.infer<typeof adjustCreditsSchema>,
+  ) {
+    return this.credits.adjust(p, schoolId, body.delta, body.note);
   }
 
   /** Set the take-rate. Same posture as pricing: owner-only, step-up, audited. */

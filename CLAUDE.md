@@ -198,9 +198,17 @@ paid sub of an attributed school (onboarding `agentCode` → provisioning stamps
 `subscription.agentId`); operator Growth console manages both + payouts.
 (6) **MESSAGE CREDITS**: append-only `message_credit_entry` (rls/73); bundles
 (`MESSAGE_CREDIT_BUNDLES`) bought via checkout (webhook credits, idempotent);
-each SMS/WHATSAPP delivery debits 1 IN the delivery tx, empty balance fails those
-channels soft; WHATSAPP channel added (enum+types+Twilio `whatsapp:`); `user.phone`
-self-service on /account. (7) **GROUP console** (MODULES.GROUP add-on): global
+each SMS/WHATSAPP delivery debits 1 ONLY after the gateway CONFIRMS the send
+(`hasBalanceInTx` gates the attempt, `debitInTx` fires post-send — a failed
+delivery never spends a paid credit), empty balance fails those channels soft;
+WHATSAPP channel added (enum+types+Twilio `whatsapp:`); `user.phone`
+self-service on /account. **Operator oversight** (`/operator/message-credits`,
+`OperatorCreditsService`): cross-tenant balance list (search + paginate, one
+grouped aggregate over the privileged client, reason-split into purchased/
+sent/adjusted) + a per-school ledger drill-down + a comp/debit lever
+(`platform.subscription.manage`, step-up, audited — writes a normal ADJUST
+ledger row via the ordinary tenant client with the GUC set to the target
+school, same pattern as the subscription comp). (7) **GROUP console** (MODULES.GROUP add-on): global
 `school_group(+member,director)` registry (rls/74 deny-all; operator-managed,
 step-up) — DIRECTORSHIP is the authorization; /group renders cross-campus
 aggregates (never PII) via privileged reads, audited. (8) **CBT exam hall**

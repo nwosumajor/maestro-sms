@@ -11,6 +11,7 @@ import { OperatorExportService } from "./operator-export.service";
 import { OperatorDirectoryService } from "./operator-directory.service";
 import { PlatformAnalyticsService } from "./platform-analytics.service";
 import { PlatformAuditService } from "./platform-audit.service";
+import { OperatorCreditsService } from "./operator-credits.service";
 
 // BillingModule provides PlanPricingService — the operator console reads/sets
 // the platform's per-tier pricing (one-way dep operator -> billing, no cycle).
@@ -20,7 +21,7 @@ import { PlatformAuditService } from "./platform-audit.service";
 @Module({
   imports: [BillingModule, NotificationModule, PrivacyModule, GroupModule],
   controllers: [OperatorController],
-  providers: [OperatorService, OperatorProvisioningService, OperatorUserService, OperatorExportService, OperatorDirectoryService, PlatformAnalyticsService, PlatformAuditService],
+  providers: [OperatorService, OperatorProvisioningService, OperatorUserService, OperatorExportService, OperatorDirectoryService, PlatformAnalyticsService, PlatformAuditService, OperatorCreditsService],
   exports: [OperatorService, OperatorProvisioningService, OperatorUserService],
 })
 export class OperatorModule {}

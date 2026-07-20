@@ -88,7 +88,8 @@ export default async function OperatorPage({
       <div className="space-y-6">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <PageHeader title={<>Operator console</>} subtitle={<>Provision schools, set platform pricing and fees, review onboarding and run growth. Manage each
-              school in the Tenant registry, and platform-sponsored scholarships in Scholarship admin.</>} />
+              school in the Tenant registry, message-credit balances in Message credits, and platform-sponsored
+              scholarships in Scholarship admin.</>} />
           <Link href="/dashboard"><Button variant="outline">Platform analytics →</Button></Link>
         </div>
 
@@ -96,6 +97,7 @@ export default async function OperatorPage({
         <div className="flex flex-wrap gap-2">
           <Link href="/operator/tenants"><Button variant="outline" size="sm">Tenant registry →</Button></Link>
           <Link href="/operator/schools"><Button variant="outline" size="sm">School directory →</Button></Link>
+          <Link href="/operator/message-credits"><Button variant="outline" size="sm">Message credits →</Button></Link>
           {canAdminScholarships && (
             <Link href="/operator/scholarships"><Button variant="outline" size="sm">Scholarship admin →</Button></Link>
           )}
