@@ -17,6 +17,7 @@
 
 import { Pool } from "pg";
 import { randomUUID } from "node:crypto";
+import { prisma } from "@sms/db";
 import { ReportCardService } from "../../src/reportcards/reportcard.service";
 import { DocumentsService } from "../../src/documents/documents.service";
 import { NotificationService } from "../../src/notifications/notification.service";
@@ -82,6 +83,9 @@ d("ReportCardService generate() persists to the Document Vault (real Postgres)",
     await admin.query(`DELETE FROM "user" WHERE "schoolId" = $1`, [SA]);
     await admin.query(`DELETE FROM school WHERE id = $1`, [SA]);
     await admin.end();
+    // The app-role Prisma singleton must be closed or the jest worker hangs
+    // on its open pool (CI runs workers in parallel — nobody else closes it).
+    await prisma.$disconnect();
   });
 
   it("PRINCIPAL generates it -> a REAL Document Vault row exists that the STUDENT can retrieve themselves", async () => {

@@ -23,6 +23,7 @@
 
 import { Pool } from "pg";
 import { randomUUID } from "node:crypto";
+import { prisma } from "@sms/db";
 import { AnalyticsService } from "../../src/analytics/analytics.service";
 import { PrismaTenantService } from "../../src/foundation/prisma-tenant.service";
 import type { Principal } from "../../src/integrity/integrity.foundation";
@@ -130,6 +131,9 @@ d("AnalyticsService.overview grade-band aggregate (real Postgres)", () => {
     await admin.query(`DELETE FROM "user" WHERE "schoolId" = $1`, [SA]);
     await admin.query(`DELETE FROM school WHERE id = $1`, [SA]);
     await admin.end();
+    // The app-role Prisma singleton must be closed or the jest worker hangs
+    // on its open pool (CI runs workers in parallel — nobody else closes it).
+    await prisma.$disconnect();
   });
 
   it("school-wide (staff): buckets every PUBLISHED grade into the right band, excludes DRAFT, folds maxScore=0 into 0%/F", async () => {
