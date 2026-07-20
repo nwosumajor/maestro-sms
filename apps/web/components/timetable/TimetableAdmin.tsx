@@ -1,6 +1,12 @@
 "use client";
 
-import type { IdNameDto, PeriodDto, Serialized } from "@sms/types";
+import type {
+  IdNameDto,
+  PeriodDto,
+  Serialized,
+  TeacherUnavailabilityDto,
+  TimetableGenerateResultDto,
+} from "@sms/types";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -17,10 +23,13 @@ export function TimetableAdmin({
   classes,
   periods,
   rooms,
+  teachers: allTeachers,
 }: {
   classes: Named[];
   periods: Period[];
   rooms: Named[];
+  /** Teacher directory for the availability editor. */
+  teachers: Named[];
 }) {
   const router = useRouter();
   const [msg, setMsg] = React.useState<string | null>(null);
@@ -170,8 +179,193 @@ export function TimetableAdmin({
         </form>
 
         {msg && <p className="text-sm text-muted-foreground">{msg}</p>}
+
+        <TeacherAvailabilityEditor teachers={allTeachers} periods={periods} />
+        <AutoGeneratePanel />
       </CardContent>
     </Card>
+  );
+}
+
+/** Mark the (day, period) slots a teacher CANNOT teach — hard input to the CSP
+ *  generator. Checked = unavailable; Save replaces the teacher's whole set. */
+function TeacherAvailabilityEditor({ teachers, periods }: { teachers: Named[]; periods: Period[] }) {
+  const [teacherId, setTeacherId] = React.useState(teachers[0]?.id ?? "");
+  const [blocked, setBlocked] = React.useState<Set<string>>(new Set());
+  const [busy, setBusy] = React.useState(false);
+  const [note, setNote] = React.useState<string | null>(null);
+  const key = (day: string, periodId: string) => `${day}|${periodId}`;
+
+  React.useEffect(() => {
+    if (!teacherId) return;
+    let cancelled = false;
+    (async () => {
+      const res = await fetch(`/api/sms/timetable/availability?teacherId=${teacherId}`);
+      if (cancelled) return;
+      if (res.ok) {
+        const rows = (await res.json()) as Serialized<TeacherUnavailabilityDto>[];
+        setBlocked(new Set(rows.map((r) => key(r.dayOfWeek, r.periodId))));
+      } else setBlocked(new Set());
+      setNote(null);
+    })();
+    return () => { cancelled = true; };
+  }, [teacherId]);
+
+  const toggle = (day: string, periodId: string) => {
+    setBlocked((prev) => {
+      const next = new Set(prev);
+      const k = key(day, periodId);
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
+      return next;
+    });
+  };
+
+  const save = async () => {
+    setBusy(true); setNote(null);
+    const slots = [...blocked].map((k) => {
+      const [dayOfWeek, periodId] = k.split("|");
+      return { dayOfWeek, periodId };
+    });
+    const res = await fetch(`/api/sms/timetable/availability/${teacherId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ slots }),
+    });
+    setBusy(false);
+    setNote(res.ok ? "Availability saved ✓" : await readApiError(res));
+  };
+
+  if (teachers.length === 0 || periods.length === 0) return null;
+  const ordered = [...periods].sort((a, b) => a.sequence - b.sequence);
+  const sel = "h-9 rounded-md border border-input bg-background px-3 text-sm";
+
+  return (
+    <div className="space-y-3 border-t border-border pt-4">
+      <Label className="w-full">Teacher availability (for auto-generation)</Label>
+      <p className="text-xs text-muted-foreground">
+        Tick the slots this teacher <strong>cannot</strong> teach (part-time days, external
+        commitments). The generator never schedules them there.
+      </p>
+      <select aria-label="Teacher" value={teacherId} onChange={(e) => setTeacherId(e.target.value)} className={sel}>
+        {teachers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+      </select>
+      <div className="overflow-x-auto">
+        <table className="text-sm">
+          <thead>
+            <tr>
+              <th className="pr-3 text-left font-medium text-muted-foreground">Period</th>
+              {DAYS.map((d) => (
+                <th key={d} className="px-2 text-left font-medium text-muted-foreground">{d[0] + d.slice(1, 3).toLowerCase()}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {ordered.map((p) => (
+              <tr key={p.id}>
+                <td className="pr-3 text-muted-foreground">{p.name} ({p.startTime})</td>
+                {DAYS.map((d) => (
+                  <td key={d} className="px-2 py-1 text-center">
+                    <input
+                      type="checkbox"
+                      aria-label={`${p.name} ${d} unavailable`}
+                      checked={blocked.has(key(d, p.id))}
+                      onChange={() => toggle(d, p.id)}
+                    />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="flex items-center gap-2">
+        <Button type="button" size="sm" variant="outline" disabled={busy || !teacherId} onClick={save}>
+          {busy ? "Saving…" : "Save availability"}
+        </Button>
+        {note && <span className="text-xs text-muted-foreground">{note}</span>}
+      </div>
+    </div>
+  );
+}
+
+/** Run the CSP generator and show its evidence: placed count, unplaced lessons
+ *  with the blocking constraint, and over-allocation diagnostics. */
+function AutoGeneratePanel() {
+  const router = useRouter();
+  const [replace, setReplace] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [result, setResult] = React.useState<Serialized<TimetableGenerateResultDto> | null>(null);
+
+  const run = async () => {
+    if (replace && !confirm("Replace ALL existing lessons for every class with subject offerings?")) return;
+    setBusy(true); setError(null); setResult(null);
+    const res = await fetch("/api/sms/timetable/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ replace }),
+    });
+    setBusy(false);
+    if (res.ok) {
+      setResult((await res.json()) as Serialized<TimetableGenerateResultDto>);
+      router.refresh();
+    } else setError(await readApiError(res));
+  };
+
+  return (
+    <div className="space-y-3 border-t border-border pt-4">
+      <Label className="w-full">Auto-generate the weekly grid (CSP solver)</Label>
+      <p className="text-xs text-muted-foreground">
+        Builds a conflict-free timetable from each class&apos;s subject offerings: the lessons-per-week
+        set on each offering, teacher availability above, and each offering&apos;s fixed room are all
+        respected. Review the generated grid below and hand-tweak any lesson as usual.
+      </p>
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} />
+          Replace existing lessons first
+        </label>
+        <Button type="button" size="sm" disabled={busy} onClick={run}>
+          {busy ? "Generating…" : "Generate timetable"}
+        </Button>
+      </div>
+      {error && <p className="text-sm text-destructive">{error}</p>}
+      {result && (
+        <div className="space-y-2 rounded-md border border-border p-3 text-sm">
+          <p>
+            <strong>{result.placed}</strong> lesson{result.placed === 1 ? "" : "s"} placed
+            {result.complete
+              ? " — every quota satisfied."
+              : " (best effort — see what couldn't fit below)."}
+          </p>
+          {result.diagnostics.length > 0 && (
+            <div className="space-y-1">
+              <p className="font-medium text-amber-600 dark:text-amber-400">Impossible demand detected:</p>
+              <ul className="list-disc pl-5 text-muted-foreground">
+                {result.diagnostics.map((d, i) => (
+                  <li key={i}>
+                    {d.kind === "TEACHER_OVERLOAD" && <>Teacher <strong>{d.name}</strong> is over-allocated: {d.demand} lessons into {d.capacity} available slots.</>}
+                    {d.kind === "CLASS_OVERLOAD" && <>Class <strong>{d.name}</strong> is over-quota: {d.demand} lessons into {d.capacity} free slots.</>}
+                    {d.kind === "ROOM_OVERLOAD" && <>Room <strong>{d.name}</strong> is over-booked: {d.demand} lessons into {d.capacity} free slots.</>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {result.unplaced.length > 0 && (
+            <div className="space-y-1">
+              <p className="font-medium">Could not place:</p>
+              <ul className="list-disc pl-5 text-muted-foreground">
+                {result.unplaced.map((u, i) => (
+                  <li key={i}>{u.className} — {u.subject} ({u.teacherName}): {u.reason}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

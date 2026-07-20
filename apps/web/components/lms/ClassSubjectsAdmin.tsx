@@ -17,10 +17,13 @@ export function ClassSubjectsAdmin({
   classes,
   subjects,
   users,
+  rooms,
 }: {
   classes: Cls[];
   subjects: Subj[];
   users: User[];
+  /** Room directory for the offering's fixed-room (CSP) input; [] hides it. */
+  rooms: { id: string; name: string }[];
 }) {
   const router = useRouter();
   const [msg, setMsg] = React.useState<string | null>(null);
@@ -56,6 +59,8 @@ export function ClassSubjectsAdmin({
     classId: classes[0]?.id ?? "",
     subjectId: subjects[0]?.id ?? "",
     teacherId: teachers[0]?.id ?? "",
+    lessonsPerWeek: "",
+    preferredRoomId: "",
   });
   const [sup, setSup] = React.useState({ classId: classes[0]?.id ?? "", supervisorId: staff[0]?.id ?? "" });
   const [prog, setProg] = React.useState({ classId: classes[0]?.id ?? "", level: "", nextClassId: "", capacity: "" });
@@ -88,10 +93,24 @@ export function ClassSubjectsAdmin({
 
         {/* Assign subject + teacher to a class */}
         <form
-          onSubmit={async (e) => { e.preventDefault(); await send("POST", `/classes/${cs.classId}/subjects`, { subjectId: cs.subjectId, teacherId: cs.teacherId }, "Subject teacher assigned."); }}
+          onSubmit={async (e) => {
+            e.preventDefault();
+            await send("POST", `/classes/${cs.classId}/subjects`, {
+              subjectId: cs.subjectId,
+              teacherId: cs.teacherId,
+              // CSP timetable inputs — omitted when blank so re-assigning a
+              // teacher never silently resets a stored quota/room.
+              ...(cs.lessonsPerWeek !== "" ? { lessonsPerWeek: Number(cs.lessonsPerWeek) } : {}),
+              ...(cs.preferredRoomId !== "" ? { preferredRoomId: cs.preferredRoomId } : {}),
+            }, "Subject teacher assigned.");
+          }}
           className="flex flex-wrap items-end gap-2 border-t border-border pt-4"
         >
           <Label className="w-full">Assign subject + teacher to a class</Label>
+          <p className="w-full text-xs text-muted-foreground">
+            Lessons/week and a fixed room feed the timetable auto-generator (leave blank to keep the
+            stored values — the quota defaults to 2).
+          </p>
           <select aria-label="Class" value={cs.classId} onChange={(e) => setCs({ ...cs, classId: e.target.value })} className={sel}>
             {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
@@ -101,6 +120,22 @@ export function ClassSubjectsAdmin({
           <select aria-label="Teacher" value={cs.teacherId} onChange={(e) => setCs({ ...cs, teacherId: e.target.value })} className={sel}>
             {teachers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
+          <Input
+            aria-label="Lessons per week"
+            type="number"
+            min={1}
+            max={15}
+            value={cs.lessonsPerWeek}
+            onChange={(e) => setCs({ ...cs, lessonsPerWeek: e.target.value })}
+            placeholder="Lessons/wk"
+            className="w-28"
+          />
+          {rooms.length > 0 && (
+            <select aria-label="Fixed room" value={cs.preferredRoomId} onChange={(e) => setCs({ ...cs, preferredRoomId: e.target.value })} className={sel}>
+              <option value="">Any room</option>
+              {rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          )}
           <Button type="submit" size="sm" variant="outline" disabled={!cs.subjectId || !cs.teacherId}>Assign</Button>
           <Button
             type="button"
