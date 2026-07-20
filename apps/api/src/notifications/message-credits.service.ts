@@ -106,18 +106,24 @@ export class MessageCreditsService {
     return { ok: true };
   }
 
+  /** Check (without spending) whether the school has any credit available. Call
+   *  BEFORE attempting a gateway send — an empty balance skips the attempt
+   *  entirely so a school never gets billed by the gateway for a send it
+   *  can't pay for. */
+  async hasBalanceInTx(tx: TenantTx, schoolId: string): Promise<boolean> {
+    return (await this.balanceInTx(tx, schoolId)) > 0;
+  }
+
   /**
-   * Debit one credit for an SMS/WhatsApp delivery, in the delivery's OWN tenant
-   * transaction. Returns false (no debit) when the balance is empty — the
-   * caller fails that delivery soft. A rare concurrent race can dip the balance
-   * one or two below zero; the next purchase absorbs it (bounded, self-healing).
+   * Debit one credit for a delivery, in the delivery's OWN tenant transaction.
+   * Call ONLY after the gateway has CONFIRMED the send — a failed delivery
+   * (bad number, gateway error, timeout) must never consume a paid credit. A
+   * rare concurrent race can still dip the balance one or two below zero; the
+   * next purchase absorbs it (bounded, self-healing — unchanged from before).
    */
-  async debitInTx(tx: TenantTx, schoolId: string, channel: string, notificationId: string): Promise<boolean> {
-    const balance = await this.balanceInTx(tx, schoolId);
-    if (balance <= 0) return false;
+  async debitInTx(tx: TenantTx, schoolId: string, channel: string, notificationId: string): Promise<void> {
     await tx.messageCreditEntry.create({
       data: { schoolId, deltaCredits: -1, reason: "SEND", channel, reference: notificationId },
     });
-    return true;
   }
 }

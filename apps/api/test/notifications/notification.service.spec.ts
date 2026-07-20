@@ -18,7 +18,7 @@ interface Fakes {
   notificationRow?: { id: string; recipientId: string; title: string; body: string; data: unknown } | null;
 }
 
-function makeService(f: Fakes, provider?: { deliver: jest.Mock }) {
+function makeService(f: Fakes, provider?: { deliver: jest.Mock }, credits?: { hasBalanceInTx: jest.Mock; debitInTx: jest.Mock }) {
   const created = { id: "notif-1" };
   const tx = {
     notification: {
@@ -51,6 +51,7 @@ function makeService(f: Fakes, provider?: { deliver: jest.Mock }) {
     audit as never,
     queue as never,
     provider as never,
+    credits as never,
   );
   return { service, tx, queue, audit };
 }
@@ -137,5 +138,83 @@ describe("NotificationService", () => {
       status: "SENT",
     });
     expect(res).toEqual({ sent: 1, failed: 0 });
+  });
+
+  it("a CONFIRMED SMS send debits exactly one credit", async () => {
+    const provider = { deliver: jest.fn().mockResolvedValue({ ok: true }) };
+    const credits = { hasBalanceInTx: jest.fn().mockResolvedValue(true), debitInTx: jest.fn().mockResolvedValue(undefined) };
+    const { service } = makeService(
+      {
+        notificationRow: { id: "notif-1", recipientId: "r-1", title: "T", body: "B", data: null },
+        recipientUser: { id: "r-1", phone: "+2348000000000" } as never,
+        pendingDeliveries: [{ id: "del-1", channel: "SMS" }],
+      },
+      provider,
+      credits,
+    );
+    const res = await service.runDeliveries({ schoolId: "school-A", userId: "sys", notificationId: "notif-1" });
+    expect(credits.hasBalanceInTx).toHaveBeenCalledTimes(1);
+    expect(credits.debitInTx).toHaveBeenCalledTimes(1);
+    expect(res).toEqual({ sent: 1, failed: 0 });
+  });
+
+  it("a FAILED SMS send (gateway error) never debits a credit — no charge for no delivery", async () => {
+    const provider = { deliver: jest.fn().mockResolvedValue({ ok: false, error: "twilio 500" }) };
+    const credits = { hasBalanceInTx: jest.fn().mockResolvedValue(true), debitInTx: jest.fn().mockResolvedValue(undefined) };
+    const { service, tx } = makeService(
+      {
+        notificationRow: { id: "notif-1", recipientId: "r-1", title: "T", body: "B", data: null },
+        recipientUser: { id: "r-1", phone: "+2348000000000" } as never,
+        pendingDeliveries: [{ id: "del-1", channel: "SMS" }],
+      },
+      provider,
+      credits,
+    );
+    const res = await service.runDeliveries({ schoolId: "school-A", userId: "sys", notificationId: "notif-1" });
+    expect(credits.debitInTx).not.toHaveBeenCalled();
+    expect((tx.notificationDelivery.update as jest.Mock).mock.calls[0][0].data).toMatchObject({
+      status: "FAILED",
+      error: "twilio 500",
+    });
+    expect(res).toEqual({ sent: 0, failed: 1 });
+  });
+
+  it("an empty credit balance fails the SMS soft WITHOUT calling the gateway at all", async () => {
+    const provider = { deliver: jest.fn().mockResolvedValue({ ok: true }) };
+    const credits = { hasBalanceInTx: jest.fn().mockResolvedValue(false), debitInTx: jest.fn() };
+    const { service, tx } = makeService(
+      {
+        notificationRow: { id: "notif-1", recipientId: "r-1", title: "T", body: "B", data: null },
+        recipientUser: { id: "r-1", phone: "+2348000000000" } as never,
+        pendingDeliveries: [{ id: "del-1", channel: "SMS" }],
+      },
+      provider,
+      credits,
+    );
+    const res = await service.runDeliveries({ schoolId: "school-A", userId: "sys", notificationId: "notif-1" });
+    expect(provider.deliver).not.toHaveBeenCalled(); // never attempted — never billed by the gateway either
+    expect(credits.debitInTx).not.toHaveBeenCalled();
+    expect((tx.notificationDelivery.update as jest.Mock).mock.calls[0][0].data).toMatchObject({
+      status: "FAILED",
+      error: expect.stringMatching(/no message credits/i),
+    });
+    expect(res).toEqual({ sent: 0, failed: 1 });
+  });
+
+  it("EMAIL delivery never touches credits (only SMS/WHATSAPP are metered)", async () => {
+    const provider = { deliver: jest.fn().mockResolvedValue({ ok: true }) };
+    const credits = { hasBalanceInTx: jest.fn(), debitInTx: jest.fn() };
+    const { service } = makeService(
+      {
+        notificationRow: { id: "notif-1", recipientId: "r-1", title: "T", body: "B", data: null },
+        recipientUser: { id: "r-1", email: "kid.parent@demo.school" },
+        pendingDeliveries: [{ id: "del-1", channel: "EMAIL" }],
+      },
+      provider,
+      credits,
+    );
+    await service.runDeliveries({ schoolId: "school-A", userId: "sys", notificationId: "notif-1" });
+    expect(credits.hasBalanceInTx).not.toHaveBeenCalled();
+    expect(credits.debitInTx).not.toHaveBeenCalled();
   });
 });

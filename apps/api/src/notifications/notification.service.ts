@@ -178,19 +178,18 @@ export class NotificationService {
             failed++;
             continue;
           }
-          // SMS/WhatsApp are METERED: debit one prepaid credit before handing
-          // to the gateway; an empty balance fails the delivery soft (email +
-          // in-app still go out — parents are never silently cut off entirely).
-          if (this.credits && (d.channel === "SMS" || d.channel === "WHATSAPP")) {
-            const debited = await this.credits.debitInTx(tx, job.schoolId, d.channel, job.notificationId);
-            if (!debited) {
-              await tx.notificationDelivery.update({
-                where: { id: d.id },
-                data: { status: "FAILED", error: "no message credits — buy a bundle on the Billing page" },
-              });
-              failed++;
-              continue;
-            }
+          // SMS/WhatsApp are METERED: an empty balance skips the gateway call
+          // entirely (email + in-app still go out — parents are never silently
+          // cut off entirely). The credit itself is spent only AFTER a CONFIRMED
+          // send below — a gateway failure must never consume a paid credit.
+          const metered = this.credits && (d.channel === "SMS" || d.channel === "WHATSAPP");
+          if (metered && !(await this.credits!.hasBalanceInTx(tx, job.schoolId))) {
+            await tx.notificationDelivery.update({
+              where: { id: d.id },
+              data: { status: "FAILED", error: "no message credits — buy a bundle on the Billing page" },
+            });
+            failed++;
+            continue;
           }
           const result = this.channels
             ? await this.channels.deliver({
@@ -201,6 +200,9 @@ export class NotificationService {
                 data: (notification.data as Record<string, unknown>) ?? undefined,
               })
             : { ok: false, error: "no channel provider configured" };
+          if (result.ok && metered) {
+            await this.credits!.debitInTx(tx, job.schoolId, d.channel, job.notificationId);
+          }
           await tx.notificationDelivery.update({
             where: { id: d.id },
             data: result.ok
