@@ -6,8 +6,9 @@
 // into a (dayOfWeek, period) cell. The scheduling logic is CONFLICT DETECTION:
 // the same teacher, room, or class can never occupy two lessons in the same
 // day+period (enforced in TimetableService; the class case is also a DB unique
-// constraint). This is conflict-free manual placement, not an auto-generating
-// constraint solver (that — a CSP/ILP solver — is future work).
+// constraint). Manual placement is conflict-checked; POST /timetable/generate
+// additionally runs a pure CSP solver (auto-timetable.ts) over the class
+// offerings' lessonsPerWeek quotas, TeacherUnavailability, and preferred rooms.
 //
 // All tenant-scoped (non-null schoolId), RLS-enforced. Relationship scoping
 // (teacher -> own lessons, student -> enrolled class, parent -> children, staff
@@ -40,8 +41,9 @@ model Period {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  school  School           @relation(fields: [schoolId], references: [id])
-  entries TimetableEntry[]
+  school           School                  @relation(fields: [schoolId], references: [id])
+  entries          TimetableEntry[]
+  unavailabilities TeacherUnavailability[]
 
   @@unique([schoolId, sequence])
   @@index([schoolId])
@@ -65,6 +67,29 @@ model Room {
   @@unique([schoolId, name])
   @@index([schoolId])
   @@map("room")
+}
+
+/// A (day, period) slot a teacher CANNOT teach — availability input to the CSP
+/// timetable generator (e.g. part-time staff, external commitments). Absence of
+/// rows = fully available. teacherId is a scalar uuid with a DB-level FK to
+/// "user" (no Prisma relation — keeps the User model lean).
+model TeacherUnavailability {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  teacherId String    @db.Uuid
+  dayOfWeek DayOfWeek
+  periodId  String    @db.Uuid
+
+  createdAt DateTime @default(now())
+
+  school School @relation(fields: [schoolId], references: [id])
+  period Period @relation(fields: [periodId], references: [id], onDelete: Cascade)
+
+  @@unique([teacherId, dayOfWeek, periodId])
+  @@index([schoolId])
+  @@index([schoolId, teacherId])
+  @@map("teacher_unavailability")
 }
 
 /// One scheduled lesson: a class in a (dayOfWeek, period) cell.

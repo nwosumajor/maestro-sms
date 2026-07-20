@@ -44,7 +44,13 @@ const subjectUpdateSchema = z.object({
   name: z.string().min(1).max(120).optional(),
   code: z.string().max(30).nullish(),
 });
-const classSubjectSchema = z.object({ subjectId: z.string().uuid(), teacherId: z.string().uuid() });
+const classSubjectSchema = z.object({
+  subjectId: z.string().uuid(),
+  teacherId: z.string().uuid(),
+  /** CSP timetable inputs (optional — omitting leaves the stored values alone). */
+  lessonsPerWeek: z.number().int().min(1).max(15).optional(),
+  preferredRoomId: z.string().uuid().nullish(),
+});
 const promotionSchema = z.object({
   sourceClassId: z.string().uuid(),
   targetClassId: z.string().uuid().nullish(),
@@ -129,7 +135,10 @@ export class LmsController {
     @Param("classId") classId: string,
     @Body(new ZodValidationPipe(classSubjectSchema)) body: z.infer<typeof classSubjectSchema>,
   ) {
-    return this.lms.assignClassSubject(p, classId, body.subjectId, body.teacherId);
+    return this.lms.assignClassSubject(p, classId, body.subjectId, body.teacherId, {
+      lessonsPerWeek: body.lessonsPerWeek,
+      preferredRoomId: body.preferredRoomId,
+    });
   }
 
   /** Remove a subject offering from a class (needed before a subject delete). */
