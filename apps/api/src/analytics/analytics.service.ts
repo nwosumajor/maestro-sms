@@ -10,6 +10,8 @@
 import { Inject, Injectable } from "@nestjs/common";
 import type { AnalyticsOverviewDto } from "@sms/types";
 import { ageBand, normalizeGender } from "@sms/types";
+// VALUE import: Prisma.sql only resolves as a value, not a type (CLAUDE.md).
+import { Prisma } from "@sms/db";
 import {
   TENANT_DATABASE,
   type Principal,
@@ -17,6 +19,24 @@ import {
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
+
+/** One row of the fees aggregate — computed entirely in Postgres. */
+interface FeeAggRow {
+  invoicedMinor: number;
+  collectedMinor: number;
+  invoices: number;
+}
+
+/** One row of the grade-band aggregate — computed entirely in Postgres. */
+interface GradeBandRow {
+  a: number;
+  b: number;
+  c: number;
+  d: number;
+  f: number;
+  graded: number;
+  avgPct: number | null;
+}
 
 const STAFF_WIDE = new Set(["school_admin", "principal", "accountant", "board", "super_admin"]);
 
@@ -68,58 +88,82 @@ export class AnalyticsService {
       }
 
       // --- fees ---
+      // Computed ENTIRELY in Postgres (SUMs over the billable invoice set and
+      // its POSTED payments) rather than shipping every invoice + payment row
+      // the school has ever issued into Node just to add them up — same
+      // treatment as the grade aggregate below.
+      // The money SUMs are cast to ::float8, NOT ::int/::bigint: a school's
+      // lifetime kobo total can overflow int4, and Prisma maps int8 to a JS
+      // BigInt (which the JSON layer can't serialize). float8 is exact for
+      // integers up to 2^53 — identical semantics to the old JS reduce.
       if (p.permissions.includes("fee.read")) {
-        const invWhere: Record<string, unknown> = {};
-        if (!staff) invWhere.studentId = studentIds && studentIds.length ? { in: studentIds } : "__none__";
-        const invoices = await tx.invoice.findMany({
-          where: invWhere,
-          select: { id: true, totalMinor: true, status: true },
-        });
-        const billable = invoices.filter((i: { status: string }) => i.status !== "DRAFT" && i.status !== "CANCELLED");
-        const invoicedMinor = billable.reduce((n: number, i: { totalMinor: number }) => n + i.totalMinor, 0);
-        const ids = billable.map((i: { id: string }) => i.id);
-        const payments = ids.length
-          ? await tx.payment.findMany({
-              where: { invoiceId: { in: ids }, status: "POSTED" },
-              select: { amountMinor: true, kind: true },
-            })
-          : [];
-        const collectedMinor = payments.reduce(
-          (n: number, pmt: { amountMinor: number; kind: string }) =>
-            n + (pmt.kind === "REFUND" ? -pmt.amountMinor : pmt.amountMinor),
-          0,
-        );
+        const feesSql = Prisma.sql`
+          WITH billable AS (
+            SELECT id, "totalMinor" FROM "invoice"
+            WHERE status NOT IN ('DRAFT', 'CANCELLED')
+            ${staff ? Prisma.sql`` : Prisma.sql`AND "studentId" = ANY(${studentIds ?? []}::uuid[])`}
+          )
+          SELECT
+            (SELECT COALESCE(SUM("totalMinor"), 0) FROM billable)::float8 AS "invoicedMinor",
+            (SELECT count(*) FROM billable)::int AS invoices,
+            (SELECT COALESCE(SUM(CASE WHEN p.kind = 'REFUND' THEN -p."amountMinor" ELSE p."amountMinor" END), 0)
+               FROM "payment" p
+              WHERE p.status = 'POSTED' AND p."invoiceId" IN (SELECT id FROM billable))::float8 AS "collectedMinor"
+        `;
+        // A family with no scoped students yet: skip the query, zeros are right.
+        const skip = !staff && (!studentIds || studentIds.length === 0);
+        const [row]: FeeAggRow[] = skip
+          ? [{ invoicedMinor: 0, collectedMinor: 0, invoices: 0 }]
+          : await tx.$queryRaw<FeeAggRow[]>(feesSql);
         out.fees = {
-          invoicedMinor,
-          collectedMinor,
-          outstandingMinor: invoicedMinor - collectedMinor,
-          invoices: billable.length,
+          invoicedMinor: row.invoicedMinor,
+          collectedMinor: row.collectedMinor,
+          outstandingMinor: row.invoicedMinor - row.collectedMinor,
+          invoices: row.invoices,
         };
       }
 
       // --- grade distribution (PUBLISHED grades, by percentage band) ---
+      // Computed ENTIRELY in Postgres (band counts + average via FILTER/AVG over
+      // a derived pct column) rather than pulling every published grade the
+      // school has ever recorded into Node just to sum/bucket them — at 1000+
+      // students across years of terms that row count only grows, unbounded.
+      // COALESCE(...,0) on a zero maxScore matches the prior JS fallback
+      // exactly (counted as 0%, not silently dropped from the average).
       if (p.permissions.includes("grade.read")) {
-        const gradeWhere: Record<string, unknown> = { status: "PUBLISHED" };
-        if (!staff) {
-          gradeWhere.submission =
-            studentIds && studentIds.length ? { studentId: { in: studentIds } } : { studentId: "__none__" };
-        }
-        const grades = await tx.grade.findMany({ where: gradeWhere, select: { score: true, maxScore: true } });
-        const band = { A: 0, B: 0, C: 0, D: 0, F: 0 };
-        let sumPct = 0;
-        for (const g of grades) {
-          const pct = g.maxScore > 0 ? (g.score / g.maxScore) * 100 : 0;
-          sumPct += pct;
-          if (pct >= 70) band.A += 1;
-          else if (pct >= 60) band.B += 1;
-          else if (pct >= 50) band.C += 1;
-          else if (pct >= 45) band.D += 1;
-          else band.F += 1;
-        }
+        const bandSql = Prisma.sql`
+          SELECT
+            count(*) FILTER (WHERE pct >= 70)::int AS a,
+            count(*) FILTER (WHERE pct >= 60 AND pct < 70)::int AS b,
+            count(*) FILTER (WHERE pct >= 50 AND pct < 60)::int AS c,
+            count(*) FILTER (WHERE pct >= 45 AND pct < 50)::int AS d,
+            count(*) FILTER (WHERE pct < 45)::int AS f,
+            count(*)::int AS graded,
+            ROUND(AVG(pct))::int AS "avgPct"
+          FROM (
+            -- Cast to numeric BEFORE dividing: score/maxScore as double precision
+            -- can land a half-percent average just off a .5 boundary (IEEE-754
+            -- can't represent e.g. 0.55 exactly), flipping which way it rounds.
+            -- numeric division is exact decimal arithmetic — no such drift.
+            SELECT COALESCE(g.score::numeric / NULLIF(g."maxScore", 0)::numeric * 100, 0) AS pct
+            FROM "grade" g
+            ${staff ? Prisma.sql`` : Prisma.sql`JOIN "submission" s ON s.id = g."submissionId"`}
+            WHERE g.status = 'PUBLISHED'
+            ${staff ? Prisma.sql`` : Prisma.sql`AND s."studentId" = ANY(${studentIds ?? []}::uuid[])`}
+          ) t
+        `;
+        // A family with no scoped students yet: skip the query, same as the
+        // old __none__ short-circuit — the defaults below are already correct.
+        const skip = !staff && (!studentIds || studentIds.length === 0);
+        const [row]: GradeBandRow[] = skip ? [{ a: 0, b: 0, c: 0, d: 0, f: 0, graded: 0, avgPct: null }] : await tx.$queryRaw<GradeBandRow[]>(bandSql);
         out.grades = {
-          ...band,
-          graded: grades.length,
-          averagePct: grades.length ? Math.round(sumPct / grades.length) : null,
+          A: row.a,
+          B: row.b,
+          C: row.c,
+          D: row.d,
+          F: row.f,
+          graded: row.graded,
+          averagePct: row.avgPct,
         };
       }
 
