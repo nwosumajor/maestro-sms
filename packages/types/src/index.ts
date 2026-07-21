@@ -52,6 +52,7 @@ export * from "./dto/lms-content";
 export * from "./dto/attendance";
 export * from "./dto/sis";
 export * from "./dto/timetable";
+export * from "./dto/search";
 export * from "./dto/documents";
 export * from "./dto/hr";
 export * from "./dto/messaging";

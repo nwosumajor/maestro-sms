@@ -19,6 +19,7 @@ import { RequestContextMiddleware } from "./auth/request-context.middleware";
 import { DocumentsModule } from "./documents/documents.module";
 import { BrandingModule } from "./branding/branding.module";
 import { TimetableModule } from "./timetable/timetable.module";
+import { SearchModule } from "./search/search.module";
 import { SecurityModule } from "./security/security.module";
 import { AnalyticsModule } from "./analytics/analytics.module";
 import { PrivacyModule } from "./privacy/privacy.module";
@@ -80,6 +81,7 @@ import { HealthController } from "./health.controller";
     DocumentsModule,
     BrandingModule,
     TimetableModule,
+    SearchModule,
     SecurityModule,
     AnalyticsModule,
     PrivacyModule,

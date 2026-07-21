@@ -45,6 +45,7 @@ import { ImpersonationBanner } from "./ImpersonationBanner";
 import { SessionIdleGuard } from "./SessionIdleGuard";
 import { apiGet } from "@/lib/api";
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
+import { GlobalSearch } from "@/components/shell/GlobalSearch";
 import { LegalAcceptBanner } from "@/components/legal/LegalAcceptBanner";
 import type { TenantTheme } from "@sms/tokens";
 import {
@@ -342,6 +343,7 @@ export async function AppShell({
           </div>
         </div>
         <div className="flex items-center gap-2.5">
+          <GlobalSearch />
           {/* Light / Auto / Dark — the console defaults to the graphite dark theme. */}
           <ThemeToggle />
           <div className="hidden items-center gap-2.5 rounded-full border border-border/70 bg-background/60 py-1 pl-2.5 pr-1 sm:flex">
