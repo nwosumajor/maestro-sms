@@ -147,6 +147,7 @@ apply_rls packages/db/prisma/rls/76_legal_acceptance_rls.sql     legal_acceptanc
 apply_rls packages/db/prisma/rls/77_timetable_csp_rls.sql        teacher_unavailability_delete
 apply_rls packages/db/prisma/rls/78_payment_dispute_rls.sql      payment_dispute_update
 apply_rls packages/db/prisma/rls/79_gateway_event_rls.sql        gateway_event_insert
+apply_rls packages/db/prisma/rls/80_virtual_account_rls.sql      student_virtual_account_update
 
 # Seed on first provision (compose: SEED_ON_START=true; cloud migrate task: always).
 if [ "${SEED_ON_START}" = "true" ] || [ "$MODE" = "migrate" ]; then

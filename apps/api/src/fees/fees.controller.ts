@@ -21,6 +21,7 @@ import type { Principal } from "../integrity/integrity.foundation";
 import { FeesService } from "./fees.service";
 import { PaymentGatewayService } from "./payment-gateway.service";
 import { PaymentReconciliationService } from "./reconciliation.service";
+import { VirtualAccountsService } from "./virtual-accounts.service";
 
 const minor = z.number().int().min(0);
 const feeItemSchema = z.object({
@@ -73,6 +74,7 @@ export class FeesController {
     private readonly fees: FeesService,
     private readonly gateway: PaymentGatewayService,
     private readonly reconciliation: PaymentReconciliationService,
+    private readonly virtualAccounts: VirtualAccountsService,
   ) {}
 
   // --- online payments (Paystack) ---
@@ -81,6 +83,21 @@ export class FeesController {
   @RequirePermission(FEES_PERMISSIONS.FEE_READ)
   payInit(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
     return this.gateway.initInvoicePayment(p, id);
+  }
+
+  // --- dedicated virtual accounts (bank-transfer fees) ---
+  /** A student's dedicated NUBAN — self / guardian / staff (404-not-403). */
+  @Get("students/:id/virtual-account")
+  @RequirePermission(FEES_PERMISSIONS.FEE_READ)
+  virtualAccount(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.virtualAccounts.getForStudent(p, id);
+  }
+
+  /** Provision a student's dedicated NUBAN (idempotent). Finance staff. */
+  @Post("students/:id/virtual-account")
+  @RequirePermission(FEES_PERMISSIONS.FEE_MANAGE)
+  provisionVirtualAccount(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.virtualAccounts.provision(p, id);
   }
 
   /** Verify-on-return: the payer landed back from checkout with ?reference=…;

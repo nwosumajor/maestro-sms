@@ -18,6 +18,8 @@ import { RecordPaymentForm } from "@/components/fees/RecordPaymentForm";
 import { InvoiceActions } from "@/components/fees/InvoiceActions";
 import { PayOnlineButton } from "@/components/fees/PayOnlineButton";
 import { VerifyPaymentBanner } from "@/components/fees/VerifyPaymentBanner";
+import { VirtualAccountCard } from "@/components/fees/VirtualAccountCard";
+import type { VirtualAccountDto } from "@sms/types";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +31,7 @@ export default async function InvoiceDetailPage({ params }: { params: { id: stri
   const inv = await apiGet<InvoiceDetail>(`/invoices/${params.id}`);
   if (!inv) notFound();
   const canManage = hasPermission(user.permissions, "fee.manage");
+  const virtualAccount = await apiGet<Serialized<VirtualAccountDto>>(`/students/${inv.studentId}/virtual-account`);
   // Payments when there's a balance; refunds even on a PAID invoice. Not DRAFT/CANCELLED.
   const payable = canManage && inv.status !== "CANCELLED" && inv.status !== "DRAFT";
 
@@ -40,6 +43,8 @@ export default async function InvoiceDetailPage({ params }: { params: { id: stri
         </Link>
 
         <VerifyPaymentBanner invoiceId={inv.id} />
+
+        <VirtualAccountCard studentId={inv.studentId} initial={virtualAccount} canManage={canManage} />
 
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>

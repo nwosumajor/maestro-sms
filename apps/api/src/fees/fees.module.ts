@@ -8,6 +8,7 @@ import { SettlementModule } from "./settlement.module";
 import { FEE_RECONCILE_QUEUE, PaymentReconciliationService } from "./reconciliation.service";
 import { PaymentReconciliationScheduler } from "./reconciliation.scheduler";
 import { PaymentReconciliationProcessor } from "./reconciliation.processor";
+import { VirtualAccountsService } from "./virtual-accounts.service";
 import { NotificationModule } from "../notifications/notification.module";
 import { PaymentsModule } from "../payments/payments.module";
 import { BillingModule } from "../billing/billing.module";
@@ -31,7 +32,14 @@ import { AdmissionsModule } from "../admissions/admissions.module";
     BullModule.registerQueue({ name: FEE_RECONCILE_QUEUE }),
   ],
   controllers: [FeesController],
-  providers: [FeesService, PaymentGatewayService, PaymentReconciliationService, PaymentReconciliationScheduler, PaymentReconciliationProcessor],
+  providers: [
+    FeesService,
+    PaymentGatewayService,
+    VirtualAccountsService,
+    PaymentReconciliationService,
+    PaymentReconciliationScheduler,
+    PaymentReconciliationProcessor,
+  ],
   exports: [FeesService],
 })
 export class FeesModule {}

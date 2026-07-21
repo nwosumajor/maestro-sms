@@ -26,6 +26,8 @@ export interface InvoicePaymentDto {
 
 export interface InvoiceDetailDto {
   id: string;
+  /** The billed student (drives the virtual-account card on the detail page). */
+  studentId: string;
   reference: string;
   status: string;
   currency: string;
@@ -128,5 +130,14 @@ export interface PaymentDisputeDto {
   respondedAt: Date | null;
   resolution: string | null;
   resolvedAt: Date | null;
+  createdAt: Date;
+}
+
+/** A student's dedicated NUBAN (virtual bank account) for fee transfers. */
+export interface VirtualAccountDto {
+  studentId: string;
+  accountNumber: string;
+  bankName: string;
+  active: boolean;
   createdAt: Date;
 }

@@ -23,6 +23,9 @@ export interface PaystackEvent {
     currency?: string;
     reference: string;
     metadata?: Record<string, unknown>;
+    /** Payment channel — "dedicated_nuban" for virtual-account bank transfers
+     *  (those carry NO metadata; the customer code is the mapping key). */
+    channel?: string;
     /** Card authorization (present on charge.success) — `authorization_code`
      *  with `reusable: true` enables saved-card recurring charges. */
     authorization?: { authorization_code?: string; reusable?: boolean; last4?: string; card_type?: string };
@@ -160,6 +163,49 @@ export class PaystackService {
     }
     const json = (await res.json()) as { data: { subaccount_code: string; settlement_bank: string } };
     return { subaccountCode: json.data.subaccount_code, bankName: json.data.settlement_bank };
+  }
+
+  /**
+   * Create a gateway CUSTOMER (required before a dedicated account can be
+   * assigned). Returns the customer code — our webhook lookup key.
+   */
+  async createCustomer(input: { email: string; firstName: string; lastName: string }): Promise<{ customerCode: string }> {
+    const secret = this.secret();
+    const res = await fetch(`${PAYSTACK}/customer`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ email: input.email, first_name: input.firstName, last_name: input.lastName }),
+    });
+    if (!res.ok) {
+      this.logger.error(`Paystack customer create failed: ${res.status}`);
+      throw new ServiceUnavailableException("Payment provider error");
+    }
+    const json = (await res.json()) as { data: { customer_code: string } };
+    return { customerCode: json.data.customer_code };
+  }
+
+  /**
+   * Assign a DEDICATED NUBAN (virtual bank account) to a customer. Transfers
+   * to it raise ordinary charge.success webhooks carrying the customer code —
+   * no metadata — which is why StudentVirtualAccount maps code -> student.
+   * Bank overridable via PAYSTACK_DEDICATED_BANK (default wema-bank).
+   */
+  async createDedicatedAccount(customerCode: string): Promise<{ accountNumber: string; bankName: string }> {
+    const secret = this.secret();
+    const res = await fetch(`${PAYSTACK}/dedicated_account`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        customer: customerCode,
+        preferred_bank: process.env.PAYSTACK_DEDICATED_BANK ?? "wema-bank",
+      }),
+    });
+    if (!res.ok) {
+      this.logger.error(`Paystack dedicated account create failed: ${res.status}`);
+      throw new ServiceUnavailableException("Payment provider error");
+    }
+    const json = (await res.json()) as { data: { account_number: string; bank: { name: string } } };
+    return { accountNumber: json.data.account_number, bankName: json.data.bank.name };
   }
 
   /**

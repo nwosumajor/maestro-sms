@@ -34,6 +34,7 @@ import { MessageCreditsService } from "../notifications/message-credits.service"
 import { DisputesService } from "./disputes.service";
 import { GatewayEventService } from "../payments/gateway-event.service";
 import { InvoiceSettlementService } from "./settlement.service";
+import { VirtualAccountsService, isDedicatedAccountCredit } from "./virtual-accounts.service";
 
 @Injectable()
 export class PaymentGatewayService {
@@ -50,6 +51,7 @@ export class PaymentGatewayService {
     private readonly disputes: DisputesService,
     private readonly gatewayEvents: GatewayEventService,
     private readonly settlement: InvoiceSettlementService,
+    private readonly virtualAccounts: VirtualAccountsService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -271,6 +273,9 @@ export class PaymentGatewayService {
     if (kind === "admission_form") return this.admissions.applyFormFeePayment(event);
     if (kind === "credits") return this.messageCredits.applyPurchase(event);
     if (event.event !== "charge.success") return { ok: true };
+    // Dedicated-account (virtual NUBAN) transfers carry NO metadata — the
+    // customer code maps back to the student inside VirtualAccountsService.
+    if (isDedicatedAccountCredit(event)) return this.virtualAccounts.applyDedicatedCredit(event);
     return this.handleInvoiceCharge(event);
   }
 

@@ -137,6 +137,7 @@ d("Online settlement, verify-on-return and reconciliation (real Postgres)", () =
       {} as never, // disputes (unused)
       { record: jest.fn() } as never, // gateway events
       settlement,
+      {} as never, // virtual accounts (unused here)
     );
 
     const ok = await gateway.confirmInvoicePayment(parent(), invoiceId, "REC-REF-2");

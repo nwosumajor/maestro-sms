@@ -114,6 +114,7 @@ model School {
   invoiceLineItems InvoiceLineItem[]
   payments         Payment[]
   paymentDisputes  PaymentDispute[]
+  virtualAccounts  StudentVirtualAccount[]
 
   // Document Vault relations
   documents Document[]

@@ -224,3 +224,30 @@ model PaymentDispute {
   @@index([schoolId, createdAt])
   @@map("payment_dispute")
 }
+
+/// A Paystack dedicated NUBAN (virtual bank account) assigned to ONE student.
+/// Parents pay school fees by ordinary bank transfer to this number; the
+/// gateway webhook credits the student's oldest open invoice automatically —
+/// no more staff hand-recording transfers. Payment-routing record: deactivate,
+/// never delete (rls/80 grants no DELETE).
+model StudentVirtualAccount {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  /// The student this account collects for (DB FK to user; no Prisma relation).
+  studentId String @db.Uuid
+  /// Paystack customer code — the webhook's lookup key (globally unique).
+  customerCode  String  @unique
+  accountNumber String
+  bankName      String
+  active        Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@unique([schoolId, studentId])
+  @@index([schoolId])
+  @@map("student_virtual_account")
+}

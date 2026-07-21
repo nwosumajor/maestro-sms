@@ -44,6 +44,7 @@ d("RLS cross-tenant isolation", () => {
   const paymentA = randomUUID();
   const paymentDisputeA = randomUUID();
   const gatewayEventA = randomUUID();
+  const virtualAccountA = randomUUID();
   const documentA = randomUUID();
   const periodA = randomUUID();
   const roomA = randomUUID();
@@ -300,6 +301,12 @@ d("RLS cross-tenant isolation", () => {
       `INSERT INTO gateway_event (id,"schoolId",gateway,"eventType",reference,payload)
        VALUES ($1,$2,'PAYSTACK','charge.success','PAY-ref-rls','{"event":"charge.success"}'::jsonb)`,
       [gatewayEventA, A],
+    );
+    // Dedicated virtual account for student userA.
+    await a.query(
+      `INSERT INTO student_virtual_account (id,"schoolId","studentId","customerCode","accountNumber","bankName","updatedAt")
+       VALUES ($1,$2,$3,$4,'9900112233','Wema Bank',now())`,
+      [virtualAccountA, A, userA, "CUS-rls-" + virtualAccountA],
     );
     // Document vault: a report card for student userA
     await a.query(
@@ -1068,6 +1075,7 @@ d("RLS cross-tenant isolation", () => {
       "attendance_session",
       "class",
       "gateway_event",
+      "student_virtual_account",
       "payment_dispute",
       "payment",
       "invoice_line_item",
@@ -1132,6 +1140,7 @@ d("RLS cross-tenant isolation", () => {
     ["payment", paymentA],
     ["payment_dispute", paymentDisputeA],
     ["gateway_event", gatewayEventA],
+    ["student_virtual_account", virtualAccountA],
     ["document", documentA],
     ["period", periodA],
     ["room", roomA],

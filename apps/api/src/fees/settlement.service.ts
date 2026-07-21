@@ -37,6 +37,9 @@ export interface OnlinePaymentInput {
   platformFeeMinor?: number;
   /** Free-text method note (e.g. 'Online (Paystack)'). */
   note: string;
+  /** Ledger method — CARD for checkout charges (default), BANK_TRANSFER for
+   *  dedicated-account (virtual NUBAN) credits. */
+  method?: "CARD" | "BANK_TRANSFER";
 }
 
 export type SettlementOutcome = "posted" | "duplicate" | "invoice_missing";
@@ -69,7 +72,7 @@ export class InvoiceSettlementService {
           schoolId,
           invoiceId,
           amountMinor: input.creditMinor,
-          method: "CARD",
+          method: input.method ?? "CARD",
           kind: "PAYMENT",
           status: "POSTED",
           reference: input.reference,
