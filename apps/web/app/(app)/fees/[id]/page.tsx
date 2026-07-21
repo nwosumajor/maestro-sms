@@ -19,7 +19,10 @@ import { InvoiceActions } from "@/components/fees/InvoiceActions";
 import { PayOnlineButton } from "@/components/fees/PayOnlineButton";
 import { VerifyPaymentBanner } from "@/components/fees/VerifyPaymentBanner";
 import { VirtualAccountCard } from "@/components/fees/VirtualAccountCard";
-import type { VirtualAccountDto } from "@sms/types";
+import { PaymentPlanCard } from "@/components/fees/PaymentPlanCard";
+import { AdjustmentsPanel } from "@/components/fees/AdjustmentsPanel";
+import { CreditPanel } from "@/components/fees/CreditPanel";
+import type { CreditBalanceDto, InvoiceAdjustmentDto, PaymentPlanDto, VirtualAccountDto } from "@sms/types";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +34,14 @@ export default async function InvoiceDetailPage({ params }: { params: { id: stri
   const inv = await apiGet<InvoiceDetail>(`/invoices/${params.id}`);
   if (!inv) notFound();
   const canManage = hasPermission(user.permissions, "fee.manage");
-  const virtualAccount = await apiGet<Serialized<VirtualAccountDto>>(`/students/${inv.studentId}/virtual-account`);
+  const canApprove = hasPermission(user.permissions, "fee.approve");
+  const [virtualAccount, plan, adjustments, credit] = await Promise.all([
+    apiGet<Serialized<VirtualAccountDto>>(`/students/${inv.studentId}/virtual-account`),
+    apiGet<Serialized<PaymentPlanDto>>(`/invoices/${inv.id}/plan`),
+    canManage ? apiGet<Serialized<InvoiceAdjustmentDto>[]>(`/invoices/${inv.id}/adjustments`) : Promise.resolve(null),
+    apiGet<Serialized<CreditBalanceDto>>(`/students/${inv.studentId}/credit`),
+  ]);
+  const overpaidMinor = Math.max(0, inv.amountPaidMinor - inv.totalMinor);
   // Payments when there's a balance; refunds even on a PAID invoice. Not DRAFT/CANCELLED.
   const payable = canManage && inv.status !== "CANCELLED" && inv.status !== "DRAFT";
 
@@ -45,6 +55,36 @@ export default async function InvoiceDetailPage({ params }: { params: { id: stri
         <VerifyPaymentBanner invoiceId={inv.id} />
 
         <VirtualAccountCard studentId={inv.studentId} initial={virtualAccount} canManage={canManage} />
+
+        {inv.status !== "DRAFT" && inv.status !== "CANCELLED" && (
+          <PaymentPlanCard
+            invoiceId={inv.id}
+            totalMinor={inv.totalMinor}
+            currency={inv.currency}
+            initial={plan}
+            canManage={canManage}
+          />
+        )}
+
+        <CreditPanel
+          invoiceId={inv.id}
+          studentId={inv.studentId}
+          currency={inv.currency}
+          initial={credit}
+          canManage={canManage}
+          overpaidMinor={overpaidMinor}
+          balanceDueMinor={inv.balanceMinor}
+        />
+
+        {canManage && adjustments && inv.status !== "DRAFT" && inv.status !== "CANCELLED" && (
+          <AdjustmentsPanel
+            invoiceId={inv.id}
+            currency={inv.currency}
+            initial={adjustments}
+            canApprove={canApprove}
+            selfId={user.id}
+          />
+        )}
 
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -100,6 +140,17 @@ export default async function InvoiceDetailPage({ params }: { params: { id: stri
                       <td className="px-4 py-2.5">{money(p.amountMinor, inv.currency)}</td>
                       <td className="px-4 py-2.5 text-muted-foreground">{titleCase(p.method)}</td>
                       <td className="px-4 py-2.5 text-right text-muted-foreground">{dateTime(p.paidAt)}</td>
+                      <td className="px-4 py-2.5 text-right">
+                        {p.status === "POSTED" && (
+                          <a
+                            href={`/api/sms/payments/${p.id}/receipt.pdf`}
+                            className="text-sm text-primary hover:underline"
+                            download
+                          >
+                            Receipt
+                          </a>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

@@ -20,6 +20,10 @@ export interface InvoicePaymentDto {
   id: string;
   amountMinor: number;
   method: string;
+  /** POSTED | PENDING_APPROVAL | REJECTED — receipts exist only for POSTED. */
+  status: string;
+  /** PAYMENT | REFUND | SCHOLARSHIP | CREDIT. */
+  kind: string;
   paidAt: Date;
   reference: string | null;
 }

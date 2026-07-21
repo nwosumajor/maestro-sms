@@ -1,5 +1,6 @@
-import type { FeeReportBucketDto, FeeReportDto, Serialized, SettlementAccountDto } from "@sms/types";
+import type { FeeReportBucketDto, FeeReportDto, LateFeeConfigDto, Serialized, SettlementAccountDto } from "@sms/types";
 import { SettlementAccountCard } from "@/components/fees/SettlementAccountCard";
+import { LateFeeConfigCard } from "@/components/fees/LateFeeConfigCard";
 import { hasPermission } from "@/lib/permissions";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -21,9 +22,10 @@ export default async function FinanceReportsPage() {
   const user = session!.user;
   if (!hasPermission(user.permissions, "fee.read")) redirect("/dashboard");
   const canManage = hasPermission(user.permissions, "fee.manage");
-  const [r, settlement] = await Promise.all([
+  const [r, settlement, lateFee] = await Promise.all([
     apiGet<Report>("/fees/reports"),
     canManage ? apiGet<SettlementAccountDto>("/fees/settlement") : Promise.resolve(null),
+    canManage ? apiGet<LateFeeConfigDto>("/fees/late-fee-config") : Promise.resolve(null),
   ]);
   if (!r || r.scope !== "school") redirect("/fees");
 
@@ -48,6 +50,43 @@ export default async function FinanceReportsPage() {
         </div>
 
         {settlement && <SettlementAccountCard initial={settlement} />}
+        {lateFee && <LateFeeConfigCard initial={lateFee} />}
+
+        {canManage && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Journal export</CardTitle>
+              <CardDescription>
+                Every posted payment (incl. refunds and credits, signed) as CSV for your accounting software.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-wrap gap-3 text-sm">
+              {(() => {
+                const now = new Date();
+                const ym = (d: Date) => d.toISOString().slice(0, 10);
+                const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+                const lastMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+                const lastMonthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0));
+                const yearStart = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
+                const links = [
+                  ["This month", ym(monthStart), ym(now)],
+                  ["Last month", ym(lastMonthStart), ym(lastMonthEnd)],
+                  ["Year to date", ym(yearStart), ym(now)],
+                ] as const;
+                return links.map(([label, from, to]) => (
+                  <a
+                    key={label}
+                    href={`/api/sms/fees/export/journal.csv?from=${from}&to=${to}`}
+                    className="text-primary hover:underline"
+                    download
+                  >
+                    {label} ↓
+                  </a>
+                ));
+              })()}
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardHeader>

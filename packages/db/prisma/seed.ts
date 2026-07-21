@@ -188,6 +188,13 @@ const PERMS = [
 // the web derives session permissions from the same map). Edit it THERE.
 const ROLE_PERMS: Record<string, readonly string[]> = ROLE_PERMISSIONS;
 
+// The permission REGISTRY is the union of the hand-listed PERMS and every key
+// ROLE_PERMISSIONS references — so a permission added to the role map in
+// @sms/types can never crash the seed (findUniqueOrThrow) by being missing
+// from the list above. The list still exists for unassigned/elevation-only
+// permissions no role holds by default.
+const ALL_PERMS = [...new Set([...PERMS, ...Object.values(ROLE_PERMS).flat()])];
+
 async function main() {
   const school = await prisma.school.upsert({
     where: { slug: "demo" },
@@ -231,7 +238,7 @@ async function main() {
     },
   });
 
-  for (const key of PERMS) {
+  for (const key of ALL_PERMS) {
     await prisma.permission.upsert({ where: { key }, update: {}, create: { key } });
   }
   for (const [roleName, keys] of Object.entries(ROLE_PERMS)) {
