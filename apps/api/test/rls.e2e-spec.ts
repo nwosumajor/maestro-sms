@@ -47,6 +47,7 @@ d("RLS cross-tenant isolation", () => {
   const virtualAccountA = randomUUID();
   const installmentA = randomUUID();
   const creditEntryA = randomUUID();
+  const adjustmentA = randomUUID();
   const documentA = randomUUID();
   const periodA = randomUUID();
   const roomA = randomUUID();
@@ -318,6 +319,11 @@ d("RLS cross-tenant isolation", () => {
     await a.query(
       `INSERT INTO student_credit_entry (id,"schoolId","studentId","deltaMinor",reason) VALUES ($1,$2,$3,10000,'PREPAYMENT')`,
       [creditEntryA, A, userA],
+    );
+    await a.query(
+      `INSERT INTO invoice_adjustment (id,"schoolId","invoiceId",kind,"amountMinor",reason,"requestedById","updatedAt")
+       VALUES ($1,$2,$3,'DISCOUNT',5000,'rls case',$4,now())`,
+      [adjustmentA, A, invoiceA, userA],
     );
     // Document vault: a report card for student userA
     await a.query(
@@ -1089,6 +1095,7 @@ d("RLS cross-tenant isolation", () => {
       "student_virtual_account",
       "student_credit_entry",
       "invoice_installment",
+      "invoice_adjustment",
       "payment_dispute",
       "payment",
       "invoice_line_item",
@@ -1156,6 +1163,7 @@ d("RLS cross-tenant isolation", () => {
     ["student_virtual_account", virtualAccountA],
     ["invoice_installment", installmentA],
     ["student_credit_entry", creditEntryA],
+    ["invoice_adjustment", adjustmentA],
     ["document", documentA],
     ["period", periodA],
     ["room", roomA],

@@ -103,6 +103,7 @@ model Invoice {
   lineItems    InvoiceLineItem[]
   payments     Payment[]
   installments InvoiceInstallment[]
+  adjustments  InvoiceAdjustment[]
 
   @@unique([schoolId, reference])
   @@index([schoolId])
@@ -308,4 +309,34 @@ model StudentCreditEntry {
   @@index([schoolId, studentId])
   @@index([reference])
   @@map("student_credit_entry")
+}
+
+/// A discount or waiver on an invoice — maker-checker: requested by finance
+/// staff (fee.manage), approved by a DIFFERENT holder of fee.approve; only
+/// then does it post as a negative line item reducing the total. The rows ARE
+/// the discount history (never hard-deleted; rls/82 grants no DELETE).
+model InvoiceAdjustment {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  invoiceId String @db.Uuid
+  /// DISCOUNT | WAIVER
+  kind        String
+  amountMinor Int
+  reason      String
+  /// PENDING_APPROVAL | APPROVED | REJECTED
+  status        String  @default("PENDING_APPROVAL")
+  requestedById String  @db.Uuid
+  approvedById  String? @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school  School  @relation(fields: [schoolId], references: [id])
+  invoice Invoice @relation(fields: [invoiceId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, invoiceId])
+  @@index([schoolId, status])
+  @@map("invoice_adjustment")
 }

@@ -34,6 +34,11 @@ model School {
   /// fee: PARENT | SCHOOL; null → the platform-wide default. Set by the school's
   /// own finance staff (fee.manage + step-up, privileged write like settlement).
   paymentFeeBearer       String?
+  /// Automatic late fee (kobo) added ONCE to an invoice still unpaid past
+  /// dueDate + lateFeeGraceDays; 0 disables. Finance-staff-set (fee.manage +
+  /// step-up, privileged write) like the other school fee columns.
+  lateFeeFlatMinor       Int      @default(0)
+  lateFeeGraceDays       Int      @default(7)
   /// Admission-form fee (kobo) charged to PUBLIC applicants before review;
   /// 0 = free applications. Set by finance staff (fee.manage + step-up,
   /// privileged write). Collected via the school's settlement split with the
@@ -117,6 +122,7 @@ model School {
   virtualAccounts      StudentVirtualAccount[]
   invoiceInstallments  InvoiceInstallment[]
   studentCreditEntries StudentCreditEntry[]
+  invoiceAdjustments   InvoiceAdjustment[]
 
   // Document Vault relations
   documents Document[]

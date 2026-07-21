@@ -1,8 +1,8 @@
-import { Body, Controller, Get, Headers, Param, Patch, Post, Put, Query, Req } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Headers, Param, Patch, Post, Put, Query, Req, Res } from "@nestjs/common";
 import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
 import type { RawBodyRequest } from "@nestjs/common";
-import type { Request } from "express";
+import type { Request, Response } from "express";
 import { z } from "zod";
 import { FEES_PERMISSIONS, INVOICE_STATUSES, PAYMENT_METHODS } from "@sms/types";
 import type {
@@ -23,6 +23,7 @@ import { PaymentGatewayService } from "./payment-gateway.service";
 import { PaymentReconciliationService } from "./reconciliation.service";
 import { VirtualAccountsService } from "./virtual-accounts.service";
 import { PaymentPlansService } from "./payment-plans.service";
+import { FeeOpsService } from "./fee-ops.service";
 
 const minor = z.number().int().min(0);
 const feeItemSchema = z.object({
@@ -68,6 +69,16 @@ const settlementSchema = z.object({
 
 const feeBearerSchema = z.object({ bearer: z.enum(["PARENT", "SCHOOL"]) });
 
+const adjustmentSchema = z.object({
+  kind: z.enum(["DISCOUNT", "WAIVER"]),
+  amountMinor: z.number().int().min(1),
+  reason: z.string().min(3).max(500),
+});
+const lateFeeSchema = z.object({
+  lateFeeFlatMinor: z.number().int().min(0).max(10_000_000),
+  lateFeeGraceDays: z.number().int().min(0).max(90),
+});
+
 const planSchema = z.object({
   tranches: z
     .array(z.object({ dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), amountMinor: z.number().int().min(1) }))
@@ -84,6 +95,7 @@ export class FeesController {
     private readonly reconciliation: PaymentReconciliationService,
     private readonly virtualAccounts: VirtualAccountsService,
     private readonly paymentPlans: PaymentPlansService,
+    private readonly feeOps: FeeOpsService,
   ) {}
 
   // --- online payments (Paystack) ---
@@ -92,6 +104,81 @@ export class FeesController {
   @RequirePermission(FEES_PERMISSIONS.FEE_READ)
   payInit(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
     return this.gateway.initInvoicePayment(p, id);
+  }
+
+  // --- adjustments (maker-checker discounts/waivers) ---
+  @Get("invoices/:id/adjustments")
+  @RequirePermission(FEES_PERMISSIONS.FEE_MANAGE)
+  adjustments(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.feeOps.listAdjustments(p, id);
+  }
+
+  @Post("invoices/:id/adjustments")
+  @RequirePermission(FEES_PERMISSIONS.FEE_MANAGE)
+  requestAdjustment(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(adjustmentSchema)) body: z.infer<typeof adjustmentSchema>,
+  ) {
+    return this.feeOps.requestAdjustment(p, id, body);
+  }
+
+  /** Approve/reject — a DIFFERENT fee.approve holder (separation of duties). */
+  @Post("fees/adjustments/:id/decide")
+  @RequirePermission(FEES_PERMISSIONS.FEE_APPROVE)
+  decideAdjustment(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(z.object({ approve: z.boolean() }))) body: { approve: boolean },
+  ) {
+    return this.feeOps.decideAdjustment(p, id, body.approve);
+  }
+
+  // --- late-fee policy ---
+  @Get("fees/late-fee-config")
+  @RequirePermission(FEES_PERMISSIONS.FEE_MANAGE)
+  lateFeeConfig(@CurrentPrincipal() p: Principal) {
+    return this.feeOps.getLateFeeConfig(p);
+  }
+
+  /** Money-policy write: fee.manage + step-up (matches settlement config). */
+  @Put("fees/late-fee-config")
+  @RequirePermission(FEES_PERMISSIONS.FEE_MANAGE)
+  @RequireStepUp()
+  setLateFeeConfig(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(lateFeeSchema)) body: z.infer<typeof lateFeeSchema>,
+  ) {
+    return this.feeOps.setLateFeeConfig(p, body);
+  }
+
+  // --- receipts + journal export ---
+  /** Numbered receipt PDF for a POSTED payment (family/staff scoped). */
+  @Get("payments/:id/receipt.pdf")
+  @RequirePermission(FEES_PERMISSIONS.FEE_READ)
+  async receipt(@CurrentPrincipal() p: Principal, @Param("id") id: string, @Res() res: Response) {
+    const { buffer, filename } = await this.feeOps.receiptPdf(p, id);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(buffer);
+  }
+
+  /** Posted-payments journal CSV for a date range (fee.manage; audited). */
+  @Get("fees/export/journal.csv")
+  @RequirePermission(FEES_PERMISSIONS.FEE_MANAGE)
+  async journal(
+    @CurrentPrincipal() p: Principal,
+    @Query("from") from: string,
+    @Query("to") to: string,
+    @Res() res: Response,
+  ) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from ?? "") || !/^\d{4}-\d{2}-\d{2}$/.test(to ?? "")) {
+      throw new BadRequestException("from/to must be YYYY-MM-DD");
+    }
+    const { csv, filename } = await this.feeOps.journalCsv(p, from, to);
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(csv);
   }
 
   // --- installment plans + credit ledger ---

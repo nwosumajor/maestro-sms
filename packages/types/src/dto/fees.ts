@@ -170,3 +170,22 @@ export interface CreditBalanceDto {
   balanceMinor: number;
   entries: CreditEntryDto[];
 }
+
+/** A maker-checker discount/waiver on an invoice. */
+export interface InvoiceAdjustmentDto {
+  id: string;
+  invoiceId: string;
+  kind: "DISCOUNT" | "WAIVER";
+  amountMinor: number;
+  reason: string;
+  status: "PENDING_APPROVAL" | "APPROVED" | "REJECTED";
+  requestedById: string;
+  approvedById: string | null;
+  createdAt: Date;
+}
+
+/** Per-school automatic late-fee policy (0 flat = disabled). */
+export interface LateFeeConfigDto {
+  lateFeeFlatMinor: number;
+  lateFeeGraceDays: number;
+}

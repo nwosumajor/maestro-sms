@@ -10,6 +10,9 @@ import { PaymentReconciliationScheduler } from "./reconciliation.scheduler";
 import { PaymentReconciliationProcessor } from "./reconciliation.processor";
 import { VirtualAccountsService } from "./virtual-accounts.service";
 import { PaymentPlansService } from "./payment-plans.service";
+import { FEE_OPS_QUEUE, FeeOpsService } from "./fee-ops.service";
+import { FeeOpsScheduler } from "./fee-ops.scheduler";
+import { FeeOpsProcessor } from "./fee-ops.processor";
 import { NotificationModule } from "../notifications/notification.module";
 import { PaymentsModule } from "../payments/payments.module";
 import { BillingModule } from "../billing/billing.module";
@@ -31,6 +34,7 @@ import { AdmissionsModule } from "../admissions/admissions.module";
     DisputesModule,
     SettlementModule,
     BullModule.registerQueue({ name: FEE_RECONCILE_QUEUE }),
+    BullModule.registerQueue({ name: FEE_OPS_QUEUE }),
   ],
   controllers: [FeesController],
   providers: [
@@ -38,6 +42,9 @@ import { AdmissionsModule } from "../admissions/admissions.module";
     PaymentGatewayService,
     VirtualAccountsService,
     PaymentPlansService,
+    FeeOpsService,
+    FeeOpsScheduler,
+    FeeOpsProcessor,
     PaymentReconciliationService,
     PaymentReconciliationScheduler,
     PaymentReconciliationProcessor,
