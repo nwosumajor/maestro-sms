@@ -372,7 +372,21 @@ reminder sweep (SYSTEM principal per school); maker-checker
 in-service, approval posts a NEGATIVE line item capped at outstanding);
 on-demand numbered receipt PDFs (`GET /payments/:id/receipt.pdf`,
 404-not-403, audited); formula-guarded journal CSV
-(`GET /fees/export/journal.csv`, audited). #14 (cross-cutting) is DONE. By-role (#15) so far: **HR module**
+(`GET /fees/export/journal.csv`, audited). The program's WEB UI lives on the
+invoice page (PaymentPlanCard / CreditPanel — visible to family even at zero
+balance so prepay is startable / AdjustmentsPanel / receipt links via the
+binary-aware BFF) and the finance reports page (LateFeeConfigCard step-up
+save + journal export links); /help covers finance, parent and operator
+flows. LIVE-VERIFIED per role (accountant/principal/parent/student/owner):
+30 API checks + per-role page-render marker checks — incl. that the
+adjustment REQUESTER sees no decide buttons while the principal does.
+**Idle sessions are BUILT** (`apps/web/components/shell/SessionIdleGuard.tsx`,
+`lib/auth.ts`): the session JWT lives 11 min and ROLLS (updateAge 60s; the
+guard pings /api/auth/session every 4 active minutes); 9 min idle → blocking
+60s-countdown dialog ("Continue session" extends — activity alone deliberately
+does NOT dismiss it); 10 min → sign-out to `/login?next=<page+query>`, and the
+middleware's unauth redirect carries the same `next` (relative-path-validated
+both sides), so re-auth resumes exactly where the user was. #14 (cross-cutting) is DONE. By-role (#15) so far: **HR module**
 (`/hr` — staff employment records with field-encrypted salaries; the `hr_clerk`
 role's home; `hr.read`/`hr.write`. BOTH reads audited — incl. the list view, which
 decrypts every salary — and an upsert records a `created` boolean in the
@@ -562,6 +576,13 @@ unit tests + an `observability.module` DI smoke test.
   the shared process closes it for everyone), so a suite can look fine locally
   and still hang CI. Cleanup ordering: `audit_log` rows reference users
   (`audit_log_actorId_fkey`), so delete them BEFORE the suite's `"user"` rows.
+- Seed permission registry: `seed.ts` upserts the UNION of its hand-listed
+  `PERMS` and every key `ROLE_PERMISSIONS` references (`ALL_PERMS`) — a
+  permission added to the role map in `@sms/types` can no longer crash the
+  seed or silently miss the DB. A LIVE DB only gets new permissions when the
+  seed RE-RUNS (compose seeds on first provision only) — after adding a
+  permission, run the seed against the live DB or the new endpoint 403s
+  even for super_admin.
 - Raw SQL in tests must supply `updatedAt` (Prisma `@updatedAt` has no DB
   default) and quote `"user"` (reserved word).
 - Time columns like `Game.turnStartedAt` are `timestamp without time zone`. The

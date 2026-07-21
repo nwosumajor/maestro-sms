@@ -1,6 +1,6 @@
 # API Reference — School Management System
 
-Complete HTTP endpoint reference for the NestJS API (`apps/api`). **578 endpoints across 73 controllers.**
+Complete HTTP endpoint reference for the NestJS API (`apps/api`). **605 endpoints across 74 controllers.**
 
 ## Conventions
 
@@ -213,12 +213,27 @@ All gated by 🔑 `platform.operate`.
 | POST | `/invoices/:id/issue` | 🔑 `fee.read` | Issue a DRAFT invoice |
 | POST | `/invoices/:id/cancel` | 🔑 `fee.manage` | Cancel an invoice |
 | POST · GET | `/invoices/:id/payments` | 🔑 `fee.manage` / `fee.read` | Record / list payments |
-| POST | `/invoices/:id/pay/init` | 🔑 `fee.read` | Start Paystack hosted checkout |
-| POST | `/payments/webhook` | 🌐 | Paystack webhook (HMAC-SHA512 verified) |
+| POST | `/invoices/:id/pay/init` | 🔑 `fee.read` | Start hosted checkout — Paystack (NGN) or Stripe (USD invoices) |
+| POST | `/invoices/:id/pay/confirm` | 🔑 `fee.read` | Verify-on-return: confirm a charge against the gateway if the webhook was lost (idempotent) |
+| POST | `/payments/webhook` | 🌐 | Paystack webhook (HMAC-SHA512 verified; logs to `gateway_event`, dispatches disputes / subscription / admission / credits / prepay / dedicated-NUBAN / invoice) |
 | GET | `/fees/payments/pending` | 🔑 `fee.read` | Payments awaiting maker-checker approval |
 | POST | `/payments/:id/approve` · `/reject` | 🔑 `fee.approve` | Approve/reject large payment or refund |
+| GET | `/payments/:id/receipt.pdf` | 🔑 `fee.read` | Numbered receipt PDF for a POSTED payment (family/staff scoped, audited) |
 | GET | `/fees/reports` | 🔑 `fee.read` | Receivables aging + collection |
-| POST | `/fees/reminders/run` | 🔑 `fee.manage` | Send fee reminders |
+| POST | `/fees/reminders/run` | 🔑 `fee.manage` | Send fee reminders (also runs weekly per school, overdue-only) |
+| POST | `/fees/reconciliation/run` | 🔑 `fee.reconcile.run` | Cross-tenant gateway reconciliation sweep (super_admin; also daily via BullMQ) |
+| GET · PUT | `/invoices/:id/plan` | 🔑 `fee.read` / `fee.manage` | Installment plan (tranches must sum to total; states derived from payments) |
+| GET | `/students/:id/credit` | 🔑 `fee.read` | Student credit balance + append-only ledger (self/guardian/staff) |
+| POST | `/students/:id/prepay/init` | 🔑 `fee.read` | Prepay into the credit balance (hosted checkout) |
+| POST | `/invoices/:id/apply-credit` | 🔑 `fee.manage` | Apply credit balance to an invoice (APPLIED entry + POSTED CREDIT payment) |
+| POST | `/invoices/:id/overpayment-to-credit` | 🔑 `fee.manage` | Move overpaid excess to credit (double-entry: system REFUND + OVERPAYMENT) |
+| GET · POST | `/students/:id/virtual-account` | 🔑 `fee.read` / `fee.manage` | Read / provision a dedicated NUBAN (transfers auto-credit the oldest open invoice) |
+| GET · POST | `/invoices/:id/adjustments` | 🔑 `fee.manage` | List / request a discount-waiver (maker-checker) |
+| POST | `/fees/adjustments/:id/decide` | 🔑 `fee.approve` | Approve/reject an adjustment (must differ from the requester) |
+| GET · PUT | `/fees/late-fee-config` | 🔑 `fee.manage` (PUT ⬆️) | Per-school automatic late-fee policy (flat + grace days) |
+| GET | `/fees/export/journal.csv` | 🔑 `fee.manage` | Posted-payments journal CSV (formula-guarded; audited) |
+| GET | `/fees/disputes` · `/fees/disputes/:id` | 🔑 `fee.manage` | Gateway chargeback/dispute records (both gateways) |
+| POST | `/fees/disputes/:id/respond` | 🔑 `fee.manage` | Record the school's evidence response on an OPEN dispute |
 
 ---
 
