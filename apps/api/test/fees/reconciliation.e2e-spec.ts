@@ -139,6 +139,7 @@ d("Online settlement, verify-on-return and reconciliation (real Postgres)", () =
       settlement,
       {} as never, // virtual accounts (unused here)
       {} as never, // payment plans (unused here)
+      { isConfigured: () => false } as never, // stripe (NGN invoice in this test)
     );
 
     const ok = await gateway.confirmInvoicePayment(parent(), invoiceId, "REC-REF-2");
@@ -158,6 +159,43 @@ d("Online settlement, verify-on-return and reconciliation (real Postgres)", () =
     });
     const refused = await gateway.confirmInvoicePayment(parent(), invoiceId, "REC-REF-EVIL");
     expect(refused.status).toBe("not_settled");
+  });
+
+  it("a USD invoice routes checkout to STRIPE with kind=invoice metadata (Paystack rail untouched)", async () => {
+    const usdInvoice = randomUUID();
+    await admin.query(
+      `INSERT INTO invoice (id,"schoolId","studentId",reference,status,currency,"totalMinor","dueDate","createdById","updatedAt")
+       VALUES ($1,$2,$3,'INV-REC-USD','ISSUED','USD',80000,now(),$4,now())`,
+      [usdInvoice, SA, STUDENT, STAFF],
+    );
+    const stripeStub = {
+      isConfigured: () => true,
+      createCheckoutSession: jest.fn().mockResolvedValue({ authorizationUrl: "https://checkout.stripe.com/x" }),
+    };
+    const tenant = new PrismaTenantService() as never;
+    const gateway = new PaymentGatewayService(
+      tenant,
+      new AuditLogService(),
+      { isConfigured: () => false } as never, // Paystack OFF — USD must not need it
+      {} as never,
+      { client: null } as never,
+      notifications,
+      { effective: jest.fn().mockResolvedValue({ bearer: "PARENT" }) } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      { record: jest.fn() } as never,
+      settlement,
+      {} as never,
+      {} as never,
+      stripeStub as never,
+    );
+    const out = await gateway.initInvoicePayment(parent(), usdInvoice);
+    expect(out.authorizationUrl).toContain("stripe.com");
+    expect(out.chargedMinor).toBe(80_000);
+    const call = stripeStub.createCheckoutSession.mock.calls[0][0];
+    expect(call.metadata).toMatchObject({ kind: "invoice", invoiceId: usdInvoice, schoolId: SA });
+    await admin.query(`DELETE FROM invoice WHERE id = $1`, [usdInvoice]);
   });
 
   it("the reconciliation sweep posts a settled charge with no ledger payment and alerts the owner", async () => {

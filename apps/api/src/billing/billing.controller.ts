@@ -24,9 +24,10 @@ import { RequireStepUp } from "../auth/require-stepup.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
-import { StripeService } from "../payments/stripe.service";
+import { StripeService, type StripeEvent } from "../payments/stripe.service";
 import { DisputesService } from "../fees/disputes.service";
 import { GatewayEventService } from "../payments/gateway-event.service";
+import { InvoiceSettlementService } from "../fees/settlement.service";
 import { BillingService } from "./billing.service";
 import { ReferralService } from "./referral.service";
 import { MessageCreditsService } from "../notifications/message-credits.service";
@@ -52,6 +53,7 @@ export class BillingController {
     private readonly messageCredits: MessageCreditsService,
     private readonly disputes: DisputesService,
     private readonly gatewayEvents: GatewayEventService,
+    private readonly settlement: InvoiceSettlementService,
   ) {}
 
   /** The billing screen: current subscription + per-tier quotes + history. */
@@ -100,9 +102,40 @@ export class BillingController {
       payload: event,
     });
     // Chargebacks route to the shared dispute ingestion (same table/alerts as
-    // Paystack disputes); everything else is subscription settlement.
+    // Paystack disputes); kind=invoice checkouts are USD FEE payments feeding
+    // the shared invoice settlement; everything else is subscription settlement.
     if (event.type.startsWith("charge.dispute.")) return this.disputes.applyStripeDisputeEvent(event);
+    const meta = (event.data.object.metadata ?? {}) as { kind?: string };
+    if (meta.kind === "invoice") return this.applyStripeInvoicePayment(event);
     return this.billing.applyStripeSubscriptionEvent(event);
+  }
+
+  /** checkout.session.completed for a USD invoice: post through the shared,
+   *  idempotent settlement path (same guarantees as the Paystack rail). */
+  private async applyStripeInvoicePayment(event: StripeEvent): Promise<{ ok: boolean }> {
+    if (event.type !== "checkout.session.completed") return { ok: true };
+    const obj = event.data.object;
+    if (obj.payment_status && obj.payment_status !== "paid") return { ok: true };
+    const meta = (obj.metadata ?? {}) as {
+      invoiceId?: string;
+      schoolId?: string;
+      payerId?: string;
+      invoiceAmountMinor?: string;
+    };
+    const reference = obj.client_reference_id;
+    if (!meta.invoiceId || !meta.schoolId || !reference) return { ok: true };
+    const charged = obj.amount_total ?? Number(meta.invoiceAmountMinor ?? 0);
+    const credit = Number(meta.invoiceAmountMinor ?? 0) > 0 ? Number(meta.invoiceAmountMinor) : charged;
+    await this.settlement.applyOnlinePayment({
+      schoolId: meta.schoolId,
+      invoiceId: meta.invoiceId,
+      creditMinor: credit,
+      chargedMinor: charged,
+      reference,
+      payerId: meta.payerId,
+      note: "Online (Stripe, USD)",
+    });
+    return { ok: true };
   }
 
   /** super_admin manual dunning sweep (the scheduled job runs daily). */

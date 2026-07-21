@@ -26,6 +26,7 @@ import {
 import { BillingService } from "../billing/billing.service";
 import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
 import { PaystackService, type PaystackEvent } from "../payments/paystack.service";
+import { StripeService } from "../payments/stripe.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import { NotificationService } from "../notifications/notification.service";
 import { PlatformFeeService } from "../billing/platform-fee.service";
@@ -54,19 +55,18 @@ export class PaymentGatewayService {
     private readonly settlement: InvoiceSettlementService,
     private readonly virtualAccounts: VirtualAccountsService,
     private readonly paymentPlans: PaymentPlansService,
+    private readonly stripe: StripeService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
     return { schoolId: p.schoolId, userId: p.userId };
   }
 
-  /** Start a hosted Paystack checkout for the invoice's outstanding balance,
-   *  plus the platform's convenience fee when one is configured (take-rate). */
+  /** Start a hosted checkout for the invoice's outstanding balance — Paystack
+   *  for NGN invoices (plus the platform take-rate), Stripe for USD ones
+   *  (international schools; flat settlement, no split/take-rate). */
   async initInvoicePayment(p: Principal, invoiceId: string): Promise<InvoicePayInitDto> {
-    if (!this.paystack.isConfigured()) {
-      throw new ServiceUnavailableException("Online payments are not configured");
-    }
-    const { email, balance, reference, subaccount, feeBearerOverride } = await this.db.runAsTenant(
+    const { email, balance, reference, subaccount, feeBearerOverride, currency } = await this.db.runAsTenant(
       this.ctx(p),
       async (tx) => {
         const inv = await tx.invoice.findFirst({ where: { id: invoiceId } });
@@ -91,9 +91,41 @@ export class PaymentGatewayService {
           reference: `PAY-${invoiceId.slice(0, 8)}-${Date.now()}`,
           subaccount: school?.paystackSubaccountCode ?? undefined,
           feeBearerOverride: school?.paymentFeeBearer ?? null,
+          currency: inv.currency,
         };
       },
     );
+
+    // USD invoice -> Stripe (Paystack is NGN-only). No split settlement or
+    // take-rate on the USD rail: the charge lands on the platform account and
+    // settlement to the school is an operator process. metadata.kind =
+    // "invoice" routes the webhook to the SAME shared settlement path.
+    if (currency === "USD") {
+      if (!this.stripe.isConfigured()) {
+        throw new ServiceUnavailableException("USD payments are not configured");
+      }
+      const base = process.env.PUBLIC_WEB_URL ?? "http://localhost:3000";
+      const { authorizationUrl } = await this.stripe.createCheckoutSession({
+        email,
+        amountMinor: balance,
+        reference,
+        description: `School fees invoice`,
+        metadata: {
+          kind: "invoice",
+          invoiceId,
+          schoolId: p.schoolId,
+          payerId: p.userId,
+          invoiceAmountMinor: String(balance),
+        },
+        successUrl: `${base}/fees/${invoiceId}?stripe=1`,
+        cancelUrl: `${base}/fees/${invoiceId}?canceled=1`,
+      });
+      return { authorizationUrl, reference, invoiceAmountMinor: balance, feeMinor: 0, chargedMinor: balance };
+    }
+
+    if (!this.paystack.isConfigured()) {
+      throw new ServiceUnavailableException("Online payments are not configured");
+    }
 
     // Platform take-rate: applies ONLY on split settlements (with no subaccount
     // the whole charge already lands platform-side, so a fee is meaningless).

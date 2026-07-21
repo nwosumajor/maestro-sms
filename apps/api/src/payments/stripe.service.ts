@@ -63,6 +63,10 @@ export class StripeService {
     reference: string;
     description: string;
     metadata: Record<string, string>;
+    /** Where the payer lands after checkout (defaults to the billing page —
+     *  invoice payments pass the invoice page instead). */
+    successUrl?: string;
+    cancelUrl?: string;
   }): Promise<{ authorizationUrl: string }> {
     const secret = this.secret();
     const base = process.env.PUBLIC_WEB_URL ?? "http://localhost:3000";
@@ -75,8 +79,8 @@ export class StripeService {
       "line_items[0][price_data][currency]": "usd",
       "line_items[0][price_data][unit_amount]": String(input.amountMinor),
       "line_items[0][price_data][product_data][name]": input.description,
-      success_url: `${base}/billing?paid=1`,
-      cancel_url: `${base}/billing?canceled=1`,
+      success_url: input.successUrl ?? `${base}/billing?paid=1`,
+      cancel_url: input.cancelUrl ?? `${base}/billing?canceled=1`,
     });
     for (const [k, v] of Object.entries(input.metadata)) {
       params.set(`metadata[${k}]`, v);
