@@ -339,7 +339,40 @@ ALSO alerts the owner immediately; and `DISPUTE_ALERT_THRESHOLD` disputes per
 school per `DISPUTE_ALERT_WINDOW_DAYS` escalates an OPERATOR_ALERT
 (gateway-suspension risk). LOST invoice disputes tell finance to record the
 matching refund. Staff track responses at `/fees/disputes` (fee.manage
-everywhere — NOT fee.read, which parents hold). #14 (cross-cutting) is DONE. By-role (#15) so far: **HR module**
+everywhere — NOT fee.read, which parents hold). **Payments completion program
+(July 2026) — BUILT**, six pieces on the fees rails: (1) **lost-webhook
+recovery** — `gateway_event` append-only verified-webhook log (both gateways,
+written BEFORE dispatch, INSERT-no-GUC + tenant SELECT, rls/79);
+`InvoiceSettlementService` (`SettlementModule` — imported by Fees AND Billing,
+imports neither) is the ONE idempotent-on-reference "post an online payment"
+path; verify-on-return (checkout `callback_url` → `POST /invoices/:id/pay/
+confirm` verifies against the gateway, metadata must match invoice+school);
+daily reconciliation sweep (BullMQ + manual `POST /fees/reconciliation/run`,
+perm `fee.reconcile.run` super_admin-only) lists the gateway's settled charges
+over a 3-day window and posts any missing from the ledger + owner-alerts that
+webhooks are unhealthy. (2) **dedicated NUBAN virtual accounts** — one
+Paystack dedicated account per student (`student_virtual_account`, rls/80, no
+DELETE; idempotent provisioning, guardians notified); transfers arrive as
+charge.success with ONLY a customer code → privileged code→student map →
+oldest open invoice via shared settlement (method BANK_TRANSFER); no open
+invoice → student CREDIT balance + finance told. (3) **installments + credit**
+— `invoice_installment` (tranches must sum EXACTLY to the total; states
+PAID/DUE/OVERDUE/UPCOMING DERIVED from cumulative posted payments — the plan
+never moves money) + `student_credit_entry` APPEND-ONLY ledger (rls/81;
+balance = SUM): prepay checkout (kind=prepay), staff apply-credit (APPLIED
+entry + POSTED CREDIT payment kind, atomic), overpayment→credit as
+DOUBLE-ENTRY (system REFUND on source + OVERPAYMENT entry). (4) **USD
+invoices via Stripe** — initInvoicePayment branches on invoice.currency; USD →
+Stripe Checkout (kind=invoice), webhook → shared settlement; no split/
+take-rate on the USD rail. (5–6) **fee ops** — school registry late-fee
+policy (`lateFeeFlatMinor`/`lateFeeGraceDays`) + daily once-per-invoice
+late-fee sweep (idempotent via marker line item) + weekly overdue-only
+reminder sweep (SYSTEM principal per school); maker-checker
+`invoice_adjustment` discounts/waivers (rls/82, requester ≠ approver enforced
+in-service, approval posts a NEGATIVE line item capped at outstanding);
+on-demand numbered receipt PDFs (`GET /payments/:id/receipt.pdf`,
+404-not-403, audited); formula-guarded journal CSV
+(`GET /fees/export/journal.csv`, audited). #14 (cross-cutting) is DONE. By-role (#15) so far: **HR module**
 (`/hr` — staff employment records with field-encrypted salaries; the `hr_clerk`
 role's home; `hr.read`/`hr.write`. BOTH reads audited — incl. the list view, which
 decrypts every salary — and an upsert records a `created` boolean in the
