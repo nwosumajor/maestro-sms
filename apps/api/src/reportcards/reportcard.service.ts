@@ -26,6 +26,7 @@ import {
 } from "../integrity/integrity.foundation";
 import { BrandingService } from "../branding/branding.service";
 import { DocumentsService } from "../documents/documents.service";
+import { ReportCardRemarkService } from "./report-card-remark.service";
 
 const STAFF_WIDE = new Set(["school_admin", "principal", "super_admin"]);
 
@@ -38,18 +39,21 @@ export class ReportCardService {
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly branding: BrandingService,
     private readonly documents: DocumentsService,
+    private readonly remarks: ReportCardRemarkService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
     return { schoolId: p.schoolId, userId: p.userId };
   }
 
-  async generate(p: Principal, studentId: string): Promise<{ buffer: Buffer; filename: string }> {
+  async generate(p: Principal, studentId: string, termId?: string): Promise<{ buffer: Buffer; filename: string }> {
     const data = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.assertCanAccess(tx, p, studentId);
       const student = await tx.user.findFirst({ where: { id: studentId }, select: { name: true } });
       if (!student) throw new NotFoundException("Student not found");
       const school = await tx.school.findFirst({ where: { id: p.schoolId }, select: { name: true } });
+      // Term remarks (class-teacher + head), when a term is specified.
+      const remarks = termId ? await this.remarks.remarksForPdf(tx, studentId, termId) : { classTeacher: null, head: null };
 
       const subs = await tx.submission.findMany({
         where: { studentId },
@@ -67,7 +71,7 @@ export class ReportCardService {
         { actorId: p.userId, action: "reportcard.generate", entity: "user", entityId: studentId, schoolId: p.schoolId },
         tx,
       );
-      return { studentName: student.name, schoolName: school?.name ?? "", grades, att };
+      return { studentName: student.name, schoolName: school?.name ?? "", grades, att, remarks };
     });
 
     const logo = await this.branding.getLogoBytes(p.schoolId).catch(() => null);
@@ -102,6 +106,7 @@ export class ReportCardService {
       schoolName: string;
       grades: { title: string; score: number; maxScore: number }[];
       att: Record<string, number>;
+      remarks: { classTeacher: string | null; head: string | null };
     },
     logo?: Buffer | null,
   ): Promise<Buffer> {
@@ -145,6 +150,17 @@ export class ReportCardService {
       doc.text(`Present: ${d.att.PRESENT}    Late: ${d.att.LATE}    Absent: ${d.att.ABSENT}    Excused: ${d.att.EXCUSED}`);
       const total = d.att.PRESENT + d.att.LATE + d.att.ABSENT + d.att.EXCUSED;
       if (total) doc.text(`Attendance rate: ${Math.round(((d.att.PRESENT + d.att.LATE) / total) * 100)}%`);
+
+      if (d.remarks.classTeacher || d.remarks.head) {
+        doc.moveDown(1).fontSize(15).text("Remarks");
+        doc.moveDown(0.3).fontSize(11);
+        if (d.remarks.classTeacher) {
+          doc.font("Helvetica-Bold").text("Class teacher: ", { continued: true }).font("Helvetica").text(d.remarks.classTeacher);
+        }
+        if (d.remarks.head) {
+          doc.moveDown(0.2).font("Helvetica-Bold").text("Head: ", { continued: true }).font("Helvetica").text(d.remarks.head);
+        }
+      }
 
       doc.end();
     });

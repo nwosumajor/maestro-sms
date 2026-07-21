@@ -155,6 +155,7 @@ d("RLS cross-tenant isolation", () => {
   const sessionA = randomUUID();
   const termA = randomUUID();
   const subjectResultA = randomUUID();
+  const reportCardRemarkA = randomUUID();
   const subjectSelectionA = randomUUID();
   const scholarshipApplicationA = randomUUID();
   const announcementA = randomUUID();
@@ -623,6 +624,12 @@ d("RLS cross-tenant isolation", () => {
        VALUES ($1,$2,$3,$4,$5,$6,$7,80,48,'D','DRAFT',now())`,
       [subjectResultA, A, sessionA, termA, classA, subjectA, userA],
     );
+    // Report-card remark (student userA, termA).
+    await a.query(
+      `INSERT INTO report_card_remark (id,"schoolId","studentId","termId","classTeacherRemark","updatedAt")
+       VALUES ($1,$2,$3,$4,'Good progress.',now())`,
+      [reportCardRemarkA, A, userA, termA],
+    );
     // Per-term subject selection (student userA picking subjectA).
     await a.query(
       `INSERT INTO subject_selection (id,"schoolId","sessionId","termId","classId","studentId","subjectIds","updatedAt")
@@ -997,6 +1004,7 @@ d("RLS cross-tenant isolation", () => {
       // promotion_batch references class (source/target) AND term -> purge before
       // both; term references academic_session -> term before session.
       "promotion_batch",
+      "report_card_remark",
       "term",
       "academic_session",
       // class_subject_teacher references class + subject + user -> purge first;
@@ -1287,6 +1295,7 @@ d("RLS cross-tenant isolation", () => {
     ["promotion_batch", promotionBatchA],
     ["academic_session", sessionA],
     ["term", termA],
+    ["report_card_remark", reportCardRemarkA],
     ["announcement", announcementA],
   ];
 

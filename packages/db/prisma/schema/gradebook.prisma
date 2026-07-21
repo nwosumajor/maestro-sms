@@ -123,3 +123,32 @@ model SubjectSelection {
   @@index([schoolId, supervisorId, status])
   @@map("subject_selection")
 }
+
+/// Per-student, per-term narrative remarks that print on the report card: the
+/// class teacher's remark and the head's (principal/school_admin) remark, each
+/// stamped with who wrote it. One row per (student, term); upserted. Not a
+/// ledger — remarks are edited in place before the card is issued.
+model ReportCardRemark {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  /// DB FK to user; no Prisma relation (lean User model).
+  studentId String @db.Uuid
+  termId    String @db.Uuid
+
+  classTeacherRemark String?
+  classTeacherId     String? @db.Uuid
+  headRemark         String?
+  headId             String? @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+  term   Term   @relation(fields: [termId], references: [id])
+
+  @@unique([studentId, termId])
+  @@index([schoolId])
+  @@index([schoolId, termId])
+  @@map("report_card_remark")
+}

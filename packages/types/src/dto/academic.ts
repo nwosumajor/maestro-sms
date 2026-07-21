@@ -18,3 +18,12 @@ export interface AcademicSessionDto {
   endDate: Date | null;
   terms: TermDto[];
 }
+
+/** A student's report-card narrative remarks for one term. */
+export interface ReportCardRemarkDto {
+  studentId: string;
+  termId: string;
+  classTeacherRemark: string | null;
+  headRemark: string | null;
+  updatedAt: Date | null;
+}

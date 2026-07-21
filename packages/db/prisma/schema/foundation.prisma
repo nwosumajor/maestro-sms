@@ -81,6 +81,7 @@ model School {
 
   // Gradebook
   grades                  Grade[]
+  reportCardRemarks       ReportCardRemark[]
   subjectResults          SubjectResult[]
   subjectSelections       SubjectSelection[]
   scholarshipApplications ScholarshipApplication[]

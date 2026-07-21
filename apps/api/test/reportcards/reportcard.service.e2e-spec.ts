@@ -19,6 +19,7 @@ import { Pool } from "pg";
 import { randomUUID } from "node:crypto";
 import { prisma } from "@sms/db";
 import { ReportCardService } from "../../src/reportcards/reportcard.service";
+import { ReportCardRemarkService } from "../../src/reportcards/report-card-remark.service";
 import { DocumentsService } from "../../src/documents/documents.service";
 import { NotificationService } from "../../src/notifications/notification.service";
 import { BrandingService } from "../../src/branding/branding.service";
@@ -73,7 +74,8 @@ d("ReportCardService generate() persists to the Document Vault (real Postgres)",
     const notifications = new NotificationService(tenant, audit, queue as never);
     documents = new DocumentsService(tenant, audit, storage, notifications);
     const branding = new BrandingService(tenant, audit, storage);
-    reportCards = new ReportCardService(tenant, audit, branding, documents);
+    const remarks = new ReportCardRemarkService(tenant, audit);
+    reportCards = new ReportCardService(tenant, audit, branding, documents, remarks);
   });
 
   afterAll(async () => {

@@ -16,6 +16,8 @@ import { shortDate } from "@/lib/format";
 import { StudentAdmin } from "@/components/sis/StudentAdmin";
 import { PrivacyPanel } from "@/components/privacy/PrivacyPanel";
 import { ReportCardButton } from "@/components/reportcards/ReportCardButton";
+import { RemarksEditor } from "@/components/reportcards/RemarksEditor";
+import type { AcademicSessionDto } from "@sms/types";
 
 export const dynamic = "force-dynamic";
 
@@ -37,10 +39,12 @@ export default async function StudentProfilePage({ params }: { params: { id: str
   const user = session!.user;
   // Each call returns null if the caller lacks the permission (RBAC) — we hide
   // the section rather than fail the page.
-  const [profile, contacts, medical] = await Promise.all([
+  const canReadGrades = hasPermission(user.permissions, "grade.read");
+  const [profile, contacts, medical, sessions] = await Promise.all([
     apiGet<Profile>(`/students/${params.id}/profile`),
     apiGet<Contact[]>(`/students/${params.id}/contacts`),
     apiGet<Medical>(`/students/${params.id}/medical`),
+    canReadGrades ? apiGet<Serialized<AcademicSessionDto>[]>("/academic/sessions") : Promise.resolve(null),
   ]);
 
   return (
@@ -126,17 +130,25 @@ export default async function StudentProfilePage({ params }: { params: { id: str
           medical={medical}
         />
 
-        {hasPermission(user.permissions, "grade.read") && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Report card</CardTitle>
-              <CardDescription>Generates a PDF from grades + attendance and notifies guardians.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ReportCardButton studentId={params.id} />
-            </CardContent>
-          </Card>
-        )}
+        {canReadGrades &&
+          (sessions && sessions.length > 0 ? (
+            <RemarksEditor
+              studentId={params.id}
+              sessions={sessions}
+              canWrite={hasPermission(user.permissions, "grade.write")}
+              canHead={["principal", "school_admin", "super_admin"].some((r) => user.roles.includes(r))}
+            />
+          ) : (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Report card</CardTitle>
+                <CardDescription>Generates a PDF from grades + attendance and notifies guardians.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ReportCardButton studentId={params.id} />
+              </CardContent>
+            </Card>
+          ))}
 
         <PrivacyPanel studentId={params.id} />
       </div>
