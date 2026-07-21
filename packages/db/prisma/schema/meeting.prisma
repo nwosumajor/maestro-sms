@@ -1,0 +1,58 @@
+// =============================================================================
+// Parent-teacher meetings — bookable appointment slots
+// =============================================================================
+// A teacher (or staff) publishes available time slots; a parent books one for
+// their child. Tenant-scoped; the slot is claimed atomically (capacity guard).
+
+/// An available appointment slot a teacher opens.
+model MeetingSlot {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  /// The teacher the slot is with (DB FK to user; scalar).
+  teacherId String   @db.Uuid
+  startsAt  DateTime
+  endsAt    DateTime
+  /// How many bookings the slot accepts (usually 1).
+  capacity  Int      @default(1)
+  location  String?
+  note      String?
+  /// Set false to withdraw an unbooked slot (kept for history if booked).
+  active    Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school   School           @relation(fields: [schoolId], references: [id])
+  bookings MeetingBooking[]
+
+  @@index([schoolId])
+  @@index([schoolId, teacherId])
+  @@index([schoolId, startsAt])
+  @@map("meeting_slot")
+}
+
+/// A parent's booking of a slot, for one of their children.
+model MeetingBooking {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  slotId    String @db.Uuid
+  /// The booking parent + the child it concerns (DB FKs to user; scalar).
+  parentId  String @db.Uuid
+  studentId String @db.Uuid
+  /// BOOKED | CANCELLED.
+  status    String @default("BOOKED")
+  note      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School      @relation(fields: [schoolId], references: [id])
+  slot   MeetingSlot @relation(fields: [slotId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, slotId])
+  @@index([schoolId, parentId])
+  @@map("meeting_booking")
+}

@@ -141,6 +141,10 @@ model School {
   teacherUnavailabilities TeacherUnavailability[]
   lessonCovers            LessonCover[]
 
+  // Parent-teacher meetings
+  meetingSlots            MeetingSlot[]
+  meetingBookings         MeetingBooking[]
+
   // Security relations
   privilegeGrants PrivilegeGrant[]
 

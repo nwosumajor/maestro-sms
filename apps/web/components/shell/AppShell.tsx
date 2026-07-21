@@ -94,6 +94,7 @@ type NavKey =
   | "analytics"
   | "messages"
   | "calendar"
+  | "meetings"
   | "hr"
   | "leave"
   | "games"
@@ -132,6 +133,7 @@ const NAV: {
   { key: "notifications", label: "Notifications", icon: BellIcon, href: "/notifications", perm: "notification.read" },
   { key: "messages", label: "Messages", icon: MessageSquareIcon, href: "/messages", perm: "message.read", module: MODULES.MESSAGING },
   { key: "calendar", label: "Calendar", icon: CalendarIcon, href: "/calendar", perm: "event.read", module: MODULES.CALENDAR },
+  { key: "meetings", label: "Meetings", icon: CalendarCheckIcon, href: "/meetings", anyPerm: ["meeting.host", "meeting.book"] },
   { key: "students", label: "Students", icon: IdCardIcon, href: "/students", perm: "student.profile.read", module: MODULES.SIS },
   { key: "family", label: "My children", icon: UsersIcon, href: "/family", perm: "family.read", module: MODULES.SIS },
   { key: "classes", label: "Classes", icon: UsersIcon, href: "/classes", perm: "class.read", module: MODULES.LMS },
@@ -205,7 +207,7 @@ const NAV_GROUPS: { key: string; label: string }[] = [
 
 const NAV_GROUP: Record<NavKey, string> = {
   dashboard: "overview", analytics: "overview", reports: "overview", announcements: "overview",
-  notifications: "overview", messages: "overview", calendar: "overview",
+  notifications: "overview", messages: "overview", calendar: "overview", meetings: "overview",
   classes: "teaching", timetable: "teaching", assessments: "teaching", gradebook: "teaching",
   certificates: "teaching", documents: "teaching", library: "teaching",
   students: "people", family: "people", attendance: "people", hr: "people", leave: "people", alumni: "people",

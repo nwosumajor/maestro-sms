@@ -153,6 +153,7 @@ apply_rls packages/db/prisma/rls/82_invoice_adjustment_rls.sql   invoice_adjustm
 apply_rls packages/db/prisma/rls/83_report_card_remark_rls.sql    report_card_remark_delete
 apply_rls packages/db/prisma/rls/84_notification_preference_rls.sql notification_preference_delete
 apply_rls packages/db/prisma/rls/85_lesson_cover_rls.sql          lesson_cover_delete
+apply_rls packages/db/prisma/rls/86_meetings_rls.sql              meeting_booking_delete
 
 # Seed on first provision (compose: SEED_ON_START=true; cloud migrate task: always).
 if [ "${SEED_ON_START}" = "true" ] || [ "$MODE" = "migrate" ]; then
