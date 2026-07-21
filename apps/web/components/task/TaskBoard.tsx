@@ -15,9 +15,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { shortDate } from "@/lib/format";
+import { personLabel } from "@/lib/people";
 
 type Task = Serialized<TaskDto>;
-type Person = { id: string; name: string };
+type Person = { id: string; name: string; roles?: string[] };
 
 export function TaskBoard({
   tasks, staff, students, canAssign,
@@ -78,7 +79,7 @@ export function TaskBoard({
                 {shown.length === 0 && <span className="text-sm text-muted-foreground">No {category === "STAFF" ? "staff" : "students"} found.</span>}
                 {shown.map((u) => (
                   <label key={u.id} className="flex items-center gap-1.5 text-sm">
-                    <input type="checkbox" checked={picked.has(u.id)} onChange={() => togglePick(u.id)} />{u.name}
+                    <input type="checkbox" checked={picked.has(u.id)} onChange={() => togglePick(u.id)} />{personLabel(u)}
                   </label>
                 ))}
               </div>

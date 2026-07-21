@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { personLabel } from "@/lib/people";
 
 type Contact = Serialized<UserSummaryDto>;
 
@@ -43,7 +44,7 @@ export function Composer({ contacts }: { contacts: Contact[] }) {
         <Label htmlFor="m-to">To</Label>
         <select id="m-to" value={recipientId} onChange={(e) => setRecipientId(e.target.value)}
           className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm">
-          {contacts.map((c) => <option key={c.id} value={c.id}>{c.name}{c.roles.length ? ` (${c.roles.join(", ")})` : ""}</option>)}
+          {contacts.map((c) => <option key={c.id} value={c.id}>{personLabel(c)}</option>)}
         </select>
       </div>
       <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject" />

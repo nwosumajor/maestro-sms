@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { personLabel } from "@/lib/people";
 
 type Cls = Serialized<ClassDto>;
 type Subj = Serialized<SubjectDto>;
@@ -118,7 +119,7 @@ export function ClassSubjectsAdmin({
             {subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
           <select aria-label="Teacher" value={cs.teacherId} onChange={(e) => setCs({ ...cs, teacherId: e.target.value })} className={sel}>
-            {teachers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            {teachers.map((t) => <option key={t.id} value={t.id}>{personLabel(t)}</option>)}
           </select>
           <Input
             aria-label="Lessons per week"
@@ -160,7 +161,7 @@ export function ClassSubjectsAdmin({
             {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
           <select aria-label="Supervisor" value={sup.supervisorId} onChange={(e) => setSup({ ...sup, supervisorId: e.target.value })} className={sel}>
-            {staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            {staff.map((s) => <option key={s.id} value={s.id}>{personLabel(s)}</option>)}
           </select>
           <Button type="submit" size="sm" variant="outline" disabled={!sup.supervisorId}>Set supervisor</Button>
         </form>

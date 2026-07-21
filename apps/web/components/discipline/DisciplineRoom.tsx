@@ -15,9 +15,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { personLabel } from "@/lib/people";
 
 type Complaint = Serialized<DisciplineComplaintDto>;
-type Person = { id: string; name: string };
+type Person = { id: string; name: string; roles?: string[] };
 
 const STATUS_VARIANT: Record<string, "secondary" | "outline" | "destructive"> = {
   OPEN: "secondary", IN_REVIEW: "secondary", RESOLVED: "outline", DISMISSED: "outline",
@@ -73,7 +74,7 @@ export function DisciplineRoom({
             <div className="space-y-1.5">
               <Label>Against</Label>
               <select value={against} onChange={(e) => setAgainst(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
-                {againstList.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                {againstList.map((u) => <option key={u.id} value={u.id}>{personLabel(u)}</option>)}
               </select>
             </div>
           </div>
@@ -105,7 +106,7 @@ export function DisciplineRoom({
                     {/* Resolvers are staff — students never appear here. */}
                     <select value={assignee[c.id] ?? ""} onChange={(e) => setAssignee((m) => ({ ...m, [c.id]: e.target.value }))} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
                       <option value="">Select…</option>
-                      {staff.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                      {staff.map((u) => <option key={u.id} value={u.id}>{personLabel(u)}</option>)}
                     </select>
                   </div>
                   <Button size="sm" variant="outline" disabled={busy || !assignee[c.id]} onClick={() => run(() => postSms(`discipline/complaints/${c.id}/assign`, { assigneeId: assignee[c.id] }), "Assigned.")}>Assign</Button>

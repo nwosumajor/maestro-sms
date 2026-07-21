@@ -22,7 +22,7 @@ export default async function TransportPage() {
     apiGet<Serialized<TransportRouteDto>[]>("/transport/routes"),
     apiGet<Serialized<TransportAssignmentDto>[]>("/transport/assignments"),
     canManage ? apiGet<{ id: string; name: string }[]>("/students") : Promise.resolve([]),
-    canManage ? apiGet<{ id: string; name: string }[]>("/users?kind=staff") : Promise.resolve([]),
+    canManage ? apiGet<{ id: string; name: string; roles?: string[] }[]>("/users?kind=staff") : Promise.resolve([]),
     apiGet<Serialized<TransportSummaryDto>>("/transport/summary"),
   ]);
 

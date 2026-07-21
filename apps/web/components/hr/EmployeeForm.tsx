@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { readApiError } from "@/lib/api-error";
+import { personLabel } from "@/lib/people";
 
 type User = Serialized<UserSummaryDto>;
 
@@ -52,7 +53,7 @@ export function EmployeeForm({ users, managers = [] }: { users: User[]; managers
           <div className="space-y-1.5">
             <Label htmlFor="hr-user">Staff member</Label>
             <select id="hr-user" value={userId} onChange={(e) => setUserId(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
-              {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+              {users.map((u) => <option key={u.id} value={u.id}>{personLabel(u)}</option>)}
             </select>
           </div>
           <div className="space-y-1.5"><Label htmlFor="hr-title">Job title</Label><Input id="hr-title" value={jobTitle} onChange={(e) => setJobTitle(e.target.value)} placeholder="Class Teacher" /></div>

@@ -9,8 +9,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { readApiError } from "@/lib/api-error";
+import { personLabel } from "@/lib/people";
 
-type Person = { id: string; name: string };
+type Person = { id: string; name: string; roles?: string[] };
 
 export function CertificateIssuer({ staff, students }: { staff: Person[]; students: Person[] }) {
   const [type, setType] = React.useState("ID_CARD");
@@ -77,7 +78,7 @@ export function CertificateIssuer({ staff, students }: { staff: Person[]; studen
           <div className="space-y-1.5">
             <Label>Person</Label>
             <select value={subjectId} onChange={(e) => setSubjectId(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
-              {people.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+              {people.map((u) => <option key={u.id} value={u.id}>{personLabel(u)}</option>)}
             </select>
           </div>
           <Button disabled={busy || !subjectId} onClick={issue}>{busy ? "Generating…" : "Generate PDF"}</Button>

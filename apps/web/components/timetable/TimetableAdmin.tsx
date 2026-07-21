@@ -14,9 +14,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { readApiError } from "@/lib/api-error";
+import { personLabel } from "@/lib/people";
 
 const DAYS = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"] as const;
-type Named = Serialized<IdNameDto>;
+type Named = Serialized<IdNameDto> & { roles?: string[] };
 type Period = Serialized<PeriodDto>;
 
 export function TimetableAdmin({
@@ -168,7 +169,7 @@ export function TimetableAdmin({
             <Input placeholder="Subject" value={entry.subject} onChange={(e) => setEntry({ ...entry, subject: e.target.value })} className="w-36" required />
             <select aria-label="Teacher" value={entry.teacherId} onChange={(e) => setEntry({ ...entry, teacherId: e.target.value })} className={selCls}>
               {teachers.length === 0 && <option value="">No class teacher</option>}
-              {teachers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              {teachers.map((t) => <option key={t.id} value={t.id}>{personLabel(t)}</option>)}
             </select>
             <select aria-label="Room" value={entry.roomId} onChange={(e) => setEntry({ ...entry, roomId: e.target.value })} className={selCls}>
               <option value="">No room</option>
@@ -248,7 +249,7 @@ function TeacherAvailabilityEditor({ teachers, periods }: { teachers: Named[]; p
         commitments). The generator never schedules them there.
       </p>
       <select aria-label="Teacher" value={teacherId} onChange={(e) => setTeacherId(e.target.value)} className={sel}>
-        {teachers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+        {teachers.map((t) => <option key={t.id} value={t.id}>{personLabel(t)}</option>)}
       </select>
       <div className="overflow-x-auto">
         <table className="text-sm">

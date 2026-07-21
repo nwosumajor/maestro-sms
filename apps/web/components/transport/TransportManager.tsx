@@ -15,11 +15,12 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { money } from "@/lib/format";
+import { personLabel } from "@/lib/people";
 
 type Vehicle = Serialized<VehicleDto>;
 type Route = Serialized<TransportRouteDto>;
 type Assignment = Serialized<TransportAssignmentDto>;
-type Person = { id: string; name: string };
+type Person = { id: string; name: string; roles?: string[] };
 
 export function TransportManager({
   vehicles, routes, assignments, students, staff = [], canManage,
@@ -65,7 +66,7 @@ export function TransportManager({
               <Label>Driver</Label>
               <select value={vDriver} onChange={(e) => setVDriver(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
                 <option value="">— none —</option>
-                {staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                {staff.map((s) => <option key={s.id} value={s.id}>{personLabel(s)}</option>)}
               </select>
             </div>
             <Button disabled={busy || !vName} onClick={() => run(() => postSms("transport/vehicles", { name: vName, capacity: vCap, driverId: vDriver || null }), "Vehicle added.")}>Add</Button>

@@ -14,10 +14,11 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { money } from "@/lib/format";
+import { personLabel } from "@/lib/people";
 
 type Hostel = Serialized<HostelDto>;
 type Allocation = Serialized<HostelAllocationDto>;
-type Student = { id: string; name: string };
+type Student = { id: string; name: string; roles?: string[] };
 
 export function HostelManager({
   hostels,
@@ -90,7 +91,7 @@ export function HostelManager({
               <Label htmlFor="h-warden">Warden</Label>
               <select id="h-warden" value={hWarden} onChange={(e) => setHWarden(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
                 <option value="">— none —</option>
-                {staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                {staff.map((s) => <option key={s.id} value={s.id}>{personLabel(s)}</option>)}
               </select>
             </div>
             <Button disabled={busy || !hName} onClick={() => run(() => postSms("hostels", { name: hName, type: hType, wardenId: hWarden || null }), "Hostel created.")}>Create</Button>

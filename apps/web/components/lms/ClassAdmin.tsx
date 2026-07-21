@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { readApiError } from "@/lib/api-error";
+import { personLabel } from "@/lib/people";
 
 type Named = Serialized<IdNameDto>;
 type User = Serialized<UserSummaryDto>;
@@ -70,7 +71,7 @@ export function ClassAdmin({
             {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
           <select aria-label="Teacher" value={at.teacherId} onChange={(e) => setAt({ ...at, teacherId: e.target.value })} className={sel}>
-            {teachers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            {teachers.map((t) => <option key={t.id} value={t.id}>{personLabel(t)}</option>)}
           </select>
           <Button type="submit" size="sm" variant="outline" disabled={!at.teacherId}>Assign</Button>
         </form>
