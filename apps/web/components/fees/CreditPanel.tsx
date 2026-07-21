@@ -36,8 +36,10 @@ export function CreditPanel({
   const credit = initial?.balanceMinor ?? 0;
   const showApply = canManage && credit > 0 && balanceDueMinor > 0;
   const showMoveOverpay = canManage && overpaidMinor > 0;
+  // Family sees the panel whenever the API let them read the balance (even at
+  // zero — hiding it would make prepaying impossible to START); others only
+  // when they can act on it.
   if (!initial && !canManage) return null;
-  if (credit === 0 && !showMoveOverpay && !canManage) return null;
 
   const run = async (path: string, body?: unknown) => {
     setBusy(true);
