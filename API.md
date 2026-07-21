@@ -1,6 +1,6 @@
 # API Reference — School Management System
 
-Complete HTTP endpoint reference for the NestJS API (`apps/api`). **605 endpoints across 74 controllers.**
+Complete HTTP endpoint reference for the NestJS API (`apps/api`). **634 endpoints across 75 controllers.**
 
 ## Conventions
 
@@ -244,7 +244,10 @@ All gated by 🔑 `platform.operate`.
 | POST | `/documents` · `/documents/:id/confirm` | 🔑 `document.write` 📦 `documents` | Upload a document (presigned) |
 | GET | `/documents` · `/:id` · `/:id/download` | 🔑 `document.read` 📦 `documents` | List / view / signed-download |
 | DELETE | `/documents/:id` | 🔑 `document.read` 📦 `documents` | Remove a document |
-| POST | `/reportcards/:studentId/generate` | 🔑 `grade.read` 📦 `documents` | Generate a report-card PDF (grades + attendance, **school logo embedded**) |
+| POST | `/reportcards/:studentId/generate` | 🔑 `grade.read` 📦 `documents` | Generate a report-card PDF (grades + attendance, **school logo embedded**); `?termId=` folds in that term's remarks |
+| GET | `/reportcards/:studentId/remarks?termId=` | 🔑 `grade.read` 📦 `documents` | A term's class-teacher + head remarks (report-card scope) |
+| PUT | `/reportcards/:studentId/remarks/class-teacher` | 🔑 `grade.write` 📦 `documents` | Class teacher (or staff) writes the class-teacher remark |
+| PUT | `/reportcards/:studentId/remarks/head` | 🔑 `grade.read` 📦 `documents` | Principal / school_admin writes the head remark |
 | POST | `/certificates/issue` | 🔑 `certificate.issue` 📦 `certificate` | Generate an ID card / certificate PDF (**school logo embedded**) |
 | GET | `/certificates/history/:subjectId` | 🔑 `certificate.issue` 📦 `certificate` | Issuance history / reprint |
 | POST · DELETE | `/schools/branding/logo` | 🔑 `school.branding.manage` | Upload / remove the school logo (PNG/JPEG, ≤1 MB) |
@@ -265,6 +268,10 @@ All gated by 🔑 `platform.operate`.
 | GET · POST | `/timetable/entries` | 🔑 `timetable.write` | Lesson grid (double-booking → 409) |
 | PATCH · DELETE | `/timetable/entries/:id` | 🔑 `timetable.write` | Edit / delete a lesson |
 | GET | `/timetable/classes/:classId` | 🔑 `timetable.read` | A class's weekly timetable |
+| GET | `/timetable/cover?from=&to=` | 🔑 `timetable.read` | Lessons whose teacher is on approved leave, with any assigned cover |
+| GET | `/timetable/cover/mine?from=&to=` | 🔑 `timetable.read` | The caller's own cover duties |
+| POST | `/timetable/cover` | 🔑 `timetable.write` | Assign a reliever (self-cover 400, double-booking 409; reliever notified) |
+| DELETE | `/timetable/cover/:id` | 🔑 `timetable.write` | Remove a cover assignment |
 
 ---
 
@@ -413,6 +420,13 @@ approves — single `workflow.review.principal` stage).
 | DELETE | `/announcements/:id` | 🔑 `announcement.manage` | — | Delete an announcement |
 | GET | `/notifications` | 🔑 `notification.read` | — | In-app inbox |
 | POST | `/notifications/:id/read` · `/notifications` | 🔑 `notification.read` | — | Mark read / send |
+| GET · PUT | `/notifications/me/phone` | 🔑 `notification.read` | — | Own SMS/WhatsApp delivery number |
+| GET · PUT | `/notifications/me/preferences` | 🔑 `notification.read` | — | Own external-channel prefs (email/SMS/WhatsApp toggles + per-type mutes). In-app inbox always delivered; essential types ignore mutes |
+| GET · POST | `/meetings/slots/mine` · `/meetings/slots` | 🔑 `meeting.host` | — | A host's own appointment slots / open one |
+| DELETE | `/meetings/slots/:id` | 🔑 `meeting.host` | — | Withdraw an unbooked slot (409 if booked) |
+| GET | `/meetings/slots/open` | 🔑 `meeting.book` | — | Bookable slots (future, not full) |
+| GET · POST | `/meetings/bookings/mine` · `/meetings/bookings` | 🔑 `meeting.book` | — | Own bookings / book for OWN child (403 otherwise; full slot → 409) |
+| DELETE | `/meetings/bookings/:id` | 🔑 `meeting.book` | — | Cancel (booking parent, host teacher or staff-wide); other party notified |
 
 ---
 
@@ -428,7 +442,9 @@ approves — single `workflow.review.principal` stage).
 | POST | `/admin/students/import` | 🔑 `student.import` | Upload a PENDING import batch |
 | GET | `/admin/students/import` · `/:id` | 🔑 `student.import` | List / inspect batches |
 | POST | `/admin/students/import/:id/approve` · `/reject` | 🔑 `student.import` | Approve (approver ≠ uploader) — creates accounts with UNIQUE one-time temp passwords, returned ONCE as `credentials` (forced password change at first login) / reject |
-| GET | `/directory/search` | 🔑 `directory.search` | Cross-role people search |
+| GET | `/directory/search` | 🔑 `directory.search` | Cross-role people search (CROSS-SCHOOL registry) |
+| GET | `/search?q=` | (auth) | **In-tenant** global omnibox — students / staff / classes / invoices. Each category included only if the caller holds its read permission; students relationship-scoped (a parent sees only their own children, never another family) |
+| GET · PUT | `/admin/security/mfa-policy` | 🔑 `rbac.manage` (PUT ⬆️) | Per-school "require MFA for all staff" policy (staff = any role but student/parent; super_admin exempt) |
 | POST | `/public/admissions` | 🌐 📦 `admissions` | Public admissions application |
 | GET | `/admissions` · `/admissions/:id` | 🔑 `admission.review` 📦 `admissions` | Application review queue |
 | POST | `/admissions/:id/review` · `/exam` | 🔑 `admission.review` 📦 `admissions` | Decide / schedule entrance exam |
@@ -436,6 +452,20 @@ approves — single `workflow.review.principal` stage).
 | GET | `/privacy/export/:studentId` | (auth) | NDPR data-subject export bundle |
 | POST · GET | `/privacy/erasure` | (auth) | Request / list right-to-erasure |
 | POST | `/privacy/erasure/:id/review` | 🔑 `privacy.erasure.review` | Controller review of an erasure request |
+
+---
+
+## Exam logistics (physical exams)
+
+| Method | Path | Gate | Purpose |
+|---|---|---|---|
+| GET | `/exams/mine` | 🔑 `timetable.read` | A student's (or their children's) upcoming exams — hall, time, **seat number** |
+| GET | `/exams/invigilations/mine` | 🔑 `timetable.read` | The caller's own invigilation duties |
+| GET · POST | `/exams` | 🔑 `exam.manage` | List / schedule a sitting (hall, date, time, capacity) |
+| DELETE | `/exams/:id` | 🔑 `exam.manage` | Remove a sitting (cascades seats + roster) |
+| GET · POST | `/exams/:id/seats` | 🔑 `exam.manage` | Seating plan / seat a student list or a whole class (seat 1..N; over capacity → 409) |
+| GET · POST | `/exams/:id/invigilators` | 🔑 `exam.manage` | Roster / assign an invigilator (staff only — a student is refused; assignee notified) |
+| DELETE | `/exams/:id/invigilators/:staffId` | 🔑 `exam.manage` | Remove from the roster |
 
 ---
 

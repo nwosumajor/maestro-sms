@@ -145,7 +145,7 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     "task.assign", "task.participate", "poll.vote",
     "discussion.participate", "discipline.file", "form.respond",
     "document.read", "document.write",
-    "timetable.read", "timetable.write", "meeting.host", "exam.manage",
+    "timetable.read", "timetable.write", "exam.manage",
     "security.elevation.request",
     "message.read", "message.send", "event.read", "event.write", "announcement.read", "announcement.manage",
     "hr.self", "admission.review", "directory.search",

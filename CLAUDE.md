@@ -317,7 +317,12 @@ caller's download) so the student/guardians get an independently retrievable
 copy under the vault's own scoping no matter who generated it, and the guardian
 notification rides DocumentsService's upload-confirmed notify path — the alert
 is never sent before real bytes exist; ReportCardModule depends on
-DocumentsModule, not NotificationModule) are BUILT. **Online payments**
+DocumentsModule, not NotificationModule. **Per-term REMARKS** print on the card:
+`report_card_remark` (one row per student+term, upserted, rls/83) carries the
+CLASS-TEACHER remark — writable by staff-wide OR a teacher/supervisor of a class
+the student is enrolled in — and the HEAD remark — staff-wide only; reads use
+report-card scope, `generate(...,termId)` folds them into a Remarks section, and
+`RemarksEditor` on the student page drives both) are BUILT. **Online payments**
 are scaffolded (Paystack via `fetch`: `POST /invoices/:id/pay/init` → hosted
 checkout; `@Public` HMAC-SHA512-verified webhook → records a POSTED payment on
 charge.success; gracefully 503-disabled when `PAYSTACK_SECRET_KEY` is unset —
@@ -386,7 +391,60 @@ guard pings /api/auth/session every 4 active minutes); 9 min idle → blocking
 60s-countdown dialog ("Continue session" extends — activity alone deliberately
 does NOT dismiss it); 10 min → sign-out to `/login?next=<page+query>`, and the
 middleware's unauth redirect carries the same `next` (relative-path-validated
-both sides), so re-auth resumes exactly where the user was. #14 (cross-cutting) is DONE. By-role (#15) so far: **HR module**
+both sides), so re-auth resumes exactly where the user was.
+
+**Cross-cutting batch (July 2026, eight items)** — each with an RLS file + a
+cross-tenant case, a scoping e2e, and role-gated web UI:
+- **Notification preferences** (`notification_preference`, rls/84): per-user
+  EXTERNAL-channel toggles (email/SMS/WhatsApp) + per-type mutes. The in-app
+  inbox is ALWAYS created; the delivery producer filters channels through the
+  pure `allowedChannels()` in `@sms/types` — ESSENTIAL types
+  (PAYMENT_RECEIVED / INVOICE_ISSUED / BILLING / OPERATOR_ALERT /
+  ADMIN_APPOINTMENT / ONBOARDING) ignore per-type mute but still respect channel
+  toggles; NO preference row = deliver all (historical default). `/account` card.
+- **Teacher cover** (`lesson_cover`, rls/85): joins APPROVED leave × the weekly
+  timetable to list each dated lesson whose regular teacher is out (bounded
+  62-day window). Assign a reliever — self-cover 400, double-booking (their own
+  lesson OR another cover that period) 409, reliever notified. `CoverPanel` on
+  /timetable; `GET /timetable/cover/mine` is the teacher's own duty list.
+- **Exam logistics** (`exam_sitting`/`exam_seat`/`exam_invigilator`, rls/87 —
+  seats and rosters are INSERT/DELETE only, so a change reads as a real
+  remove+re-add): dated sittings in halls, auto-seat a class 1..N with capacity
+  enforced (409), invigilator rosters (staff-only; assigning a student is
+  refused; assignee notified). Students/parents see their OWN hall/time/seat;
+  staff see their duties (both on `timetable.read`). New perm `exam.manage`.
+  `/exams` page.
+- **Parent-teacher meetings** (`meeting_slot`/`meeting_booking`, rls/86): hosts
+  open slots (`meeting.host`), parents book for their OWN child only
+  (`meeting.book`, 403 otherwise) with an in-tx capacity claim (full → 409, and
+  the slot drops out of the open list); both parties notified on book/cancel.
+  `/meetings` page.
+- **Global search** (`SearchService`, no new table): in-tenant omnibox over
+  students / staff / classes / invoices at `GET /search?q=`. Each category is
+  included ONLY if the caller holds its read permission, and students are
+  relationship-scoped — whole-school staff see all, a teacher their classes, a
+  parent ONLY their own children and their own invoices. `GlobalSearch` in the
+  AppShell header.
+- **Per-school MFA policy** (`School.requireStaffMfa`): when on, login flags
+  `mfaEnrollRequired` for any STAFF member (any role but student/parent;
+  super_admin exempt) who hasn't enrolled — the same NON-blocking enforcement as
+  the per-user mandate (session granted, web holds them on /account).
+  `GET/PUT /admin/security/mfa-policy` (rbac.manage; PUT step-up + privileged
+  registry write). Card on /admin/roles.
+- **Verified backup/restore** (`infrastructure/scripts/`, `terraform/backup.tf`,
+  `docs/RUNBOOK-BACKUP-RESTORE.md`): `backup.sh` (logical pg_dump + pruning) and
+  `restore-drill.sh`, which restores into a THROWAWAY scratch DB and asserts
+  pg_restore was error-free, tables+rows exist, **RLS is still enabled on every
+  tenant table** (`ultimate_participant` is the one documented exemption), and
+  **tenant isolation still holds** (app role under tenant A's GUC sees zero of
+  B's rows). AWS Backup vault + weekly/monthly plan gives 90/365-day archival
+  BEYOND the 14-day RDS PITR window.
+  // GOTCHA the drill caught: a pg_dump NEWER than the server emits
+  // `SET transaction_timeout`, which an older server REJECTS on restore — the
+  // dump looks healthy and is unrestorable. Both scripts take `PG_CONTAINER`
+  // to run a version-matched client; backup.sh warns on a newer host client.
+
+#14 (cross-cutting) is DONE. By-role (#15) so far: **HR module**
 (`/hr` — staff employment records with field-encrypted salaries; the `hr_clerk`
 role's home; `hr.read`/`hr.write`. BOTH reads audited — incl. the list view, which
 decrypts every salary — and an upsert records a `created` boolean in the
