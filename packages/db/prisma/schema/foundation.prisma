@@ -109,12 +109,14 @@ model School {
   notificationDeliveries NotificationDelivery[]
 
   // Fees / Billing relations
-  feeItems         FeeItem[]
-  invoices         Invoice[]
-  invoiceLineItems InvoiceLineItem[]
-  payments         Payment[]
-  paymentDisputes  PaymentDispute[]
-  virtualAccounts  StudentVirtualAccount[]
+  feeItems             FeeItem[]
+  invoices             Invoice[]
+  invoiceLineItems     InvoiceLineItem[]
+  payments             Payment[]
+  paymentDisputes      PaymentDispute[]
+  virtualAccounts      StudentVirtualAccount[]
+  invoiceInstallments  InvoiceInstallment[]
+  studentCreditEntries StudentCreditEntry[]
 
   // Document Vault relations
   documents Document[]
@@ -174,21 +176,21 @@ model School {
   ultimateEntryLinks   UltimateEntryLink[]
 
   // Subscription / module entitlement (one row per school)
-  subscription     SchoolSubscription?
+  subscription         SchoolSubscription?
   // Platform billing — append-only payment ledger (school -> platform)
-  platformPayments PlatformSubscriptionPayment[]
+  platformPayments     PlatformSubscriptionPayment[]
   // Referral program (this school as the REFERRER)
-  referralCode        SchoolReferralCode?
-  referralConversions SchoolReferralConversion[]
+  referralCode         SchoolReferralCode?
+  referralConversions  SchoolReferralConversion[]
   // Message-credit ledger (SMS/WhatsApp bundles)
   messageCreditEntries MessageCreditEntry[]
   // CBT exam hall
-  cbtQuestionBanks CbtQuestionBank[]
-  cbtQuestions     CbtQuestion[]
-  cbtExams         CbtExam[]
-  cbtSittings      CbtSitting[]
+  cbtQuestionBanks     CbtQuestionBank[]
+  cbtQuestions         CbtQuestion[]
+  cbtExams             CbtExam[]
+  cbtSittings          CbtSitting[]
   // Legal clickwrap ledger
-  legalAcceptances LegalAcceptance[]
+  legalAcceptances     LegalAcceptance[]
 
   // LMS learning content
   lmsContents  LmsContent[]
@@ -204,8 +206,8 @@ model School {
 /// super_admin writes via a per-school GUC (like the rest of the operator console).
 /// A school with NO row falls back to DEFAULT_PLAN (the STANDARD floor — fail-closed).
 model SchoolSubscription {
-  id                   String    @id @default(uuid()) @db.Uuid
-  schoolId             String    @unique @db.Uuid
+  id                       String    @id @default(uuid()) @db.Uuid
+  schoolId                 String    @unique @db.Uuid
   /// STANDARD | PREMIUM | ULTIMATE | ENTERPRISE (validated against @sms/types PLANS).
   /// This is the PURCHASED tier; delinquency NEVER overwrites it — the effective
   /// plan is computed (effectivePlan) from `status` + `currentPeriodEnd` instead.
@@ -213,52 +215,52 @@ model SchoolSubscription {
   /// tier, mirroring DEFAULT_PLAN in @sms/types — a data gap under-provisions,
   /// never silently hands out the premium suite. Every real path (onboarding,
   /// billing, operator, seed) sets the plan explicitly anyway.
-  plan                 String    @default("STANDARD")
+  plan                     String    @default("STANDARD")
   /// { enabled?: string[]; disabled?: string[] } — per-school deviations.
-  overrides            Json      @default("{}")
+  overrides                Json      @default("{}")
   /// ACTIVE | PAST_DUE | CANCELED (validated against @sms/types SUBSCRIPTION_STATUS).
-  status               String    @default("ACTIVE")
+  status                   String    @default("ACTIVE")
   /// Per-school grace window (days past `currentPeriodEnd` before the effective
   /// plan drops to the STANDARD floor). NULL → platform default
   /// (SUBSCRIPTION_GRACE_DAYS). Bounded 0–GRACE_DAYS_MAX at the API — a bounded
   /// customer-service lever (delegable), never an unbounded comp (owner-only).
-  graceDays            Int?
+  graceDays                Int?
   /// MONTH | TERM | YEAR.
-  billingCycle         String    @default("TERM")
+  billingCycle             String    @default("TERM")
   /// End of the currently-paid period; null for never-paid (default/comp).
-  currentPeriodEnd     DateTime?
+  currentPeriodEnd         DateTime?
   /// Seat count (active students) last billed.
-  seats                Int?
+  seats                    Int?
   /// Currency of the last charge (NGN | USD); null when never paid.
-  currency             String?
+  currency                 String?
   /// Amount last charged (minor units, NGN kobo).
-  priceMinor           Int?
+  priceMinor               Int?
   /// Paystack customer code (captured with the saved card).
-  paystackCustomerCode String?
+  paystackCustomerCode     String?
   /// Saved-card recurring: the reusable Paystack authorization_code, field-
   /// encrypted at rest (per-tenant key) — captured from the school's own
   /// successful subscription charge, never entered by hand. cardLast4 is the
   /// display hint. autoRenew arms the pre-dunning renewal charge.
   paystackAuthorizationEnc String?
   cardLast4                String?
-  autoRenew                Boolean @default(false)
+  autoRenew                Boolean   @default(false)
   /// Set at provisioning when this school arrived via a referral code — the
   /// school that referred them. The billing webhook grants BOTH sides one free
   /// term on this school's FIRST paid subscription, then stamps
   /// referralRewardAt so a retry / later renewal can never double-grant.
-  referredBySchoolId   String?   @db.Uuid
-  referralRewardAt     DateTime?
+  referredBySchoolId       String?   @db.Uuid
+  referralRewardAt         DateTime?
   /// Agent (reseller) attribution: set at provisioning from the agent's code;
   /// commission accrues once, on this school's FIRST paid subscription.
-  agentId              String?   @db.Uuid
+  agentId                  String?   @db.Uuid
   /// Metered UNBILLED seat usage (kobo/cents in `currency`): the daily sweep
   /// accrues seat-days for students above the billed `seats` count; settled
   /// (and zeroed by the paid amount) via top-up or the next renewal charge.
-  seatArrearsMinor     Int       @default(0)
+  seatArrearsMinor         Int       @default(0)
   /// Last accrual stamp — the elapsed window the next accrual covers.
-  arrearsAccruedAt     DateTime?
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
+  arrearsAccruedAt         DateTime?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
 
   school School @relation(fields: [schoolId], references: [id])
 

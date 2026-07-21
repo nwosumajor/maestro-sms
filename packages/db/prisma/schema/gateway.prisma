@@ -23,7 +23,7 @@ model GatewayEvent {
   /// Charge/transaction reference when the event carries one.
   reference String?
   /// The verified event body, as received.
-  payload Json
+  payload   Json
 
   receivedAt DateTime @default(now())
 

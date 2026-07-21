@@ -30,6 +30,7 @@ import { NotificationService } from "../notifications/notification.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import { PaystackService, type PaystackEvent } from "../payments/paystack.service";
 import { InvoiceSettlementService } from "./settlement.service";
+import { PaymentPlansService } from "./payment-plans.service";
 
 type VaRow = {
   id: string;
@@ -51,6 +52,7 @@ export class VirtualAccountsService {
     private readonly privileged: PrivilegedDatabaseService,
     private readonly notifications: NotificationService,
     private readonly settlement: InvoiceSettlementService,
+    private readonly paymentPlans: PaymentPlansService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -189,8 +191,16 @@ export class VirtualAccountsService {
       });
       return { ok: true };
     }
-    // No open invoice: don't guess — tell finance (the gateway_event row and
-    // the gateway dashboard hold the money trail).
+    // No open invoice: the money goes to the student's CREDIT balance
+    // (idempotent on the transfer reference) and finance is told — it will be
+    // applied to the next invoice, never guessed onto a closed one.
+    const credited = await this.paymentPlans.addCreditFromTransfer(
+      va.schoolId,
+      va.studentId,
+      event.data.amount,
+      event.data.reference,
+    );
+    if (!credited) return { ok: true }; // gateway retry
     const amount = new Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN" }).format(event.data.amount / 100);
     for (const recipientId of target.finance) {
       try {
@@ -199,8 +209,8 @@ export class VirtualAccountsService {
           {
             recipientId,
             type: "BILLING",
-            title: "Bank transfer received — no open invoice",
-            body: `${amount} arrived on a student's dedicated account (ref ${event.data.reference}) but they have no open invoice. Issue an invoice and record the payment against it, or arrange a refund.`,
+            title: "Bank transfer added to credit balance",
+            body: `${amount} arrived on a student's dedicated account (ref ${event.data.reference}) with no open invoice — it was added to their credit balance. Apply it from the next invoice's page.`,
             data: { studentId: va.studentId, reference: event.data.reference, amountMinor: event.data.amount },
             channels: ["EMAIL"],
           },

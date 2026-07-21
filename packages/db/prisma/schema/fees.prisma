@@ -45,6 +45,10 @@ enum PaymentStatus {
 enum PaymentKind {
   PAYMENT
   REFUND
+  /// Applied from the student's credit-ledger balance (money that already
+  /// entered the school as a prepayment or an overpayment moved to credit —
+  /// the double-entry REFUND on the source invoice keeps collections honest).
+  CREDIT
   /// Platform-sponsored scholarship credit — posted when a ScholarshipApplication
   /// is AWARDED. Positive; reduces the student's balance like a payment, but funded
   /// by the platform owner (not the guardian).
@@ -95,9 +99,10 @@ model Invoice {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  school    School            @relation(fields: [schoolId], references: [id])
-  lineItems InvoiceLineItem[]
-  payments  Payment[]
+  school       School               @relation(fields: [schoolId], references: [id])
+  lineItems    InvoiceLineItem[]
+  payments     Payment[]
+  installments InvoiceInstallment[]
 
   @@unique([schoolId, reference])
   @@index([schoolId])
@@ -134,27 +139,27 @@ model Payment {
   id       String @id @default(uuid()) @db.Uuid
   schoolId String @db.Uuid
 
-  invoiceId    String        @db.Uuid
+  invoiceId        String        @db.Uuid
   /// Amount in minor units (always positive; REFUND kind subtracts on balance).
-  amountMinor  Int
-  method       PaymentMethod
-  kind         PaymentKind   @default(PAYMENT)
+  amountMinor      Int
+  method           PaymentMethod
+  kind             PaymentKind   @default(PAYMENT)
   /// POSTED affects the balance immediately; PENDING_APPROVAL awaits a second
   /// approver (maker-checker); REJECTED never counts.
-  status       PaymentStatus @default(POSTED)
+  status           PaymentStatus @default(POSTED)
   /// Staff who approved a PENDING_APPROVAL payment (≠ recordedById).
-  approvedById String?       @db.Uuid
+  approvedById     String?       @db.Uuid
   /// External transaction reference (bank/gateway), if any.
-  reference    String?
+  reference        String?
   /// Platform convenience fee taken on this ONLINE payment (kobo; 0 for manual
   /// payments / no-fee schools). The fee is NEVER part of amountMinor — the
   /// invoice is credited exactly amountMinor; this column is the reporting record
   /// of the platform's cut on the charge.
-  platformFeeMinor Int @default(0)
-  note         String?
-  paidAt       DateTime      @default(now())
+  platformFeeMinor Int           @default(0)
+  note             String?
+  paidAt           DateTime      @default(now())
   /// Staff who recorded it (DB FK to user; audit field, no Prisma relation).
-  recordedById String        @db.Uuid
+  recordedById     String        @db.Uuid
 
   createdAt DateTime @default(now())
 
@@ -191,19 +196,19 @@ model PaymentDispute {
   transactionReference String
   /// The disputed POSTED payment, when the reference resolved to one (DB FK
   /// to payment; audit-style link, no Prisma relation).
-  paymentId String? @db.Uuid
-  invoiceId String? @db.Uuid
+  paymentId            String? @db.Uuid
+  invoiceId            String? @db.Uuid
 
   /// Disputed amount in minor units (kobo).
-  amountMinor Int
-  currency    String        @default("NGN")
+  amountMinor   Int
+  currency      String        @default("NGN")
   /// Gateway category (e.g. "chargeback", "fraud").
-  category    String?
-  status      DisputeStatus @default(OPEN)
+  category      String?
+  status        DisputeStatus @default(OPEN)
   /// Raw gateway status string, kept for the record.
   gatewayStatus String?
   /// Evidence deadline from the gateway — respond before this or lose by default.
-  dueAt DateTime?
+  dueAt         DateTime?
 
   /// Staff evidence/response tracking (fee.manage).
   responseNote  String?
@@ -235,7 +240,7 @@ model StudentVirtualAccount {
   schoolId String @db.Uuid
 
   /// The student this account collects for (DB FK to user; no Prisma relation).
-  studentId String @db.Uuid
+  studentId     String  @db.Uuid
   /// Paystack customer code — the webhook's lookup key (globally unique).
   customerCode  String  @unique
   accountNumber String
@@ -250,4 +255,57 @@ model StudentVirtualAccount {
   @@unique([schoolId, studentId])
   @@index([schoolId])
   @@map("student_virtual_account")
+}
+
+/// One tranche of an invoice payment plan (installments). The plan is
+/// operational config on an issued invoice: staff replace it wholesale; sum of
+/// tranches always equals the invoice total. Tranche state (paid/due/overdue)
+/// is DERIVED from cumulative posted payments — money never moves here.
+model InvoiceInstallment {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  invoiceId   String   @db.Uuid
+  seq         Int
+  dueDate     DateTime @db.Date
+  amountMinor Int
+
+  createdAt DateTime @default(now())
+
+  school  School  @relation(fields: [schoolId], references: [id])
+  invoice Invoice @relation(fields: [invoiceId], references: [id])
+
+  @@unique([invoiceId, seq])
+  @@index([schoolId])
+  @@index([schoolId, invoiceId])
+  @@map("invoice_installment")
+}
+
+/// APPEND-ONLY student credit ledger: advance payments (prepay / unmatched
+/// dedicated-account transfers) and overpayments moved off an invoice.
+/// Positive delta = credit in; negative = applied to an invoice. The balance
+/// is the SUM — no mutable balance column to drift. Financial record: no
+/// UPDATE/DELETE (rls/81).
+model StudentCreditEntry {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  /// DB FK to user; no Prisma relation (lean User model).
+  studentId   String  @db.Uuid
+  deltaMinor  Int
+  /// PREPAYMENT | OVERPAYMENT | APPLIED | REFUNDED
+  reason      String
+  /// Gateway reference / payment id — the idempotency key for webhook credits.
+  reference   String?
+  note        String?
+  /// Staff actor for manual moves (null for webhook credits).
+  createdById String? @db.Uuid
+
+  createdAt DateTime @default(now())
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId, studentId])
+  @@index([reference])
+  @@map("student_credit_entry")
 }

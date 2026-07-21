@@ -74,39 +74,39 @@ enum ScholarshipApplicationStatus {
 
 /// (A) GLOBAL program — platform-owned, RLS-EXEMPT.
 model ScholarshipProgram {
-  id             String                    @id @default(uuid()) @db.Uuid
-  title          String
-  description    String?
+  id              String                    @id @default(uuid()) @db.Uuid
+  title           String
+  description     String?
   /// Total budget + per-award amounts, integer minor units (kobo). awardMinor is
   /// the FIRST-position prize; 2nd/3rd fall back to it when null.
-  budgetMinor    Int                       @default(0)
-  awardMinor     Int
-  award2Minor    Int?
-  award3Minor    Int?
-  awardKind      ScholarshipAwardKind      @default(FEES_CREDIT)
-  selectionBasis ScholarshipSelectionBasis @default(BOTH)
+  budgetMinor     Int                       @default(0)
+  awardMinor      Int
+  award2Minor     Int?
+  award3Minor     Int?
+  awardKind       ScholarshipAwardKind      @default(FEES_CREDIT)
+  selectionBasis  ScholarshipSelectionBasis @default(BOTH)
   /// Free-form / structured eligibility rules (JSONB) — displayed to applicants.
-  eligibility    Json?
-  opensAt        DateTime
-  closesAt       DateTime
-  status         ScholarshipProgramStatus  @default(DRAFT)
+  eligibility     Json?
+  opensAt         DateTime
+  closesAt        DateTime
+  status          ScholarshipProgramStatus  @default(DRAFT)
   /// Category the owner selects for the program (science/art/community/maths/special).
-  category       ScholarshipCategory       @default(SPECIAL)
+  category        ScholarshipCategory       @default(SPECIAL)
   /// Qualification exam details — set by the owner once candidates qualify;
   /// announce-exam notifies every QUALIFIED student + their guardians.
-  examMode       ScholarshipExamMode?
-  examAt         DateTime?
+  examMode        ScholarshipExamMode?
+  examAt          DateTime?
   /// Venue (PHYSICAL) or platform pointer (ONLINE_CBT / GAMES) — display text.
-  examVenue      String?
+  examVenue       String?
   /// ONLINE_CBT sitting length (minutes).
-  examDurationMin Int                      @default(30)
+  examDurationMin Int                       @default(30)
   /// ONLINE_CBT question set, owner-authored: [{text, options[], answerIndex}].
   /// SECURITY: answerIndex lives here (platform-owned row, app role SELECT-only)
   /// but is NEVER serialized to applicants — announce materializes real CbtQuestion
   /// rows per school, and the CBT module keeps answers server-only mid-sitting.
-  examQuestions  Json?
+  examQuestions   Json?
   /// super_admin userId (scalar audit field; NO cross-tenant user relation).
-  createdById    String                    @db.Uuid
+  createdById     String                    @db.Uuid
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

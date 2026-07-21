@@ -141,3 +141,32 @@ export interface VirtualAccountDto {
   active: boolean;
   createdAt: Date;
 }
+
+/** One tranche of an invoice payment plan; state DERIVED from cumulative paid. */
+export interface InstallmentDto {
+  seq: number;
+  dueDate: Date;
+  amountMinor: number;
+  state: "PAID" | "DUE" | "OVERDUE" | "UPCOMING";
+}
+
+export interface PaymentPlanDto {
+  invoiceId: string;
+  tranches: InstallmentDto[];
+}
+
+/** Append-only credit-ledger entry (positive = credit in, negative = applied). */
+export interface CreditEntryDto {
+  id: string;
+  deltaMinor: number;
+  reason: string;
+  reference: string | null;
+  note: string | null;
+  createdAt: Date;
+}
+
+export interface CreditBalanceDto {
+  studentId: string;
+  balanceMinor: number;
+  entries: CreditEntryDto[];
+}

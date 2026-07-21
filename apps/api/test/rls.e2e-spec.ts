@@ -45,6 +45,8 @@ d("RLS cross-tenant isolation", () => {
   const paymentDisputeA = randomUUID();
   const gatewayEventA = randomUUID();
   const virtualAccountA = randomUUID();
+  const installmentA = randomUUID();
+  const creditEntryA = randomUUID();
   const documentA = randomUUID();
   const periodA = randomUUID();
   const roomA = randomUUID();
@@ -307,6 +309,15 @@ d("RLS cross-tenant isolation", () => {
       `INSERT INTO student_virtual_account (id,"schoolId","studentId","customerCode","accountNumber","bankName","updatedAt")
        VALUES ($1,$2,$3,$4,'9900112233','Wema Bank',now())`,
       [virtualAccountA, A, userA, "CUS-rls-" + virtualAccountA],
+    );
+    // Installment tranche + credit-ledger entry.
+    await a.query(
+      `INSERT INTO invoice_installment (id,"schoolId","invoiceId",seq,"dueDate","amountMinor") VALUES ($1,$2,$3,1,now(),50000)`,
+      [installmentA, A, invoiceA],
+    );
+    await a.query(
+      `INSERT INTO student_credit_entry (id,"schoolId","studentId","deltaMinor",reason) VALUES ($1,$2,$3,10000,'PREPAYMENT')`,
+      [creditEntryA, A, userA],
     );
     // Document vault: a report card for student userA
     await a.query(
@@ -1076,6 +1087,8 @@ d("RLS cross-tenant isolation", () => {
       "class",
       "gateway_event",
       "student_virtual_account",
+      "student_credit_entry",
+      "invoice_installment",
       "payment_dispute",
       "payment",
       "invoice_line_item",
@@ -1141,6 +1154,8 @@ d("RLS cross-tenant isolation", () => {
     ["payment_dispute", paymentDisputeA],
     ["gateway_event", gatewayEventA],
     ["student_virtual_account", virtualAccountA],
+    ["invoice_installment", installmentA],
+    ["student_credit_entry", creditEntryA],
     ["document", documentA],
     ["period", periodA],
     ["room", roomA],

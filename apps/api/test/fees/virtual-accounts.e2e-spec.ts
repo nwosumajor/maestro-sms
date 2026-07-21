@@ -17,6 +17,7 @@ import { randomUUID } from "node:crypto";
 import { prisma } from "@sms/db";
 import { VirtualAccountsService } from "../../src/fees/virtual-accounts.service";
 import { InvoiceSettlementService } from "../../src/fees/settlement.service";
+import { PaymentPlansService } from "../../src/fees/payment-plans.service";
 import { NotificationService } from "../../src/notifications/notification.service";
 import { PrismaTenantService } from "../../src/foundation/prisma-tenant.service";
 import { AuditLogService } from "../../src/foundation/audit-log.service";
@@ -109,11 +110,13 @@ d("VirtualAccountsService dedicated NUBAN (real Postgres)", () => {
         },
       },
     };
-    svc = new VirtualAccountsService(tenant, audit, paystack as never, privileged as never, notifications, settlement);
+    const paymentPlans = new PaymentPlansService(tenant, audit, notifications, paystack as never);
+    svc = new VirtualAccountsService(tenant, audit, paystack as never, privileged as never, notifications, settlement, paymentPlans);
   });
 
   afterAll(async () => {
     for (const t of [
+      "student_credit_entry",
       "student_virtual_account",
       "payment",
       "invoice",
@@ -168,15 +171,22 @@ d("VirtualAccountsService dedicated NUBAN (real Postgres)", () => {
     expect(newPay.rowCount).toBe(0);
   });
 
-  it("a transfer with NO open invoice alerts finance instead of guessing", async () => {
+  it("a transfer with NO open invoice lands on the CREDIT balance (idempotent) and tells finance", async () => {
     // Settle the remaining invoice first.
     await admin.query(`UPDATE invoice SET status = 'PAID' WHERE id = $1`, [newInvoice]);
-    await svc.applyDedicatedCredit({
+    const evt = {
       event: "charge.success",
       data: { amount: 10_000, reference: "VA-TRF-2", channel: "dedicated_nuban", customer: { customer_code: CUS } },
-    } as never);
+    } as never;
+    await svc.applyDedicatedCredit(evt);
+    await svc.applyDedicatedCredit(evt); // gateway retry — must not double-credit
+    const credit = await admin.query(
+      `SELECT "deltaMinor",reason FROM student_credit_entry WHERE reference = 'VA-TRF-2'`,
+    );
+    expect(credit.rowCount).toBe(1);
+    expect(credit.rows[0]).toMatchObject({ deltaMinor: 10_000, reason: "PREPAYMENT" });
     const alert = await admin.query(
-      `SELECT id FROM notification WHERE "recipientId" = $1 AND title = 'Bank transfer received — no open invoice'`,
+      `SELECT id FROM notification WHERE "recipientId" = $1 AND title = 'Bank transfer added to credit balance'`,
       [STAFF],
     );
     expect(alert.rowCount).toBe(1);

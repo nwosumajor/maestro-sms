@@ -32,12 +32,12 @@ model CbtQuestionBank {
 }
 
 model CbtQuestion {
-  id       String @id @default(uuid()) @db.Uuid
-  schoolId String @db.Uuid
-  bankId   String @db.Uuid
-  prompt   String
+  id          String   @id @default(uuid()) @db.Uuid
+  schoolId    String   @db.Uuid
+  bankId      String   @db.Uuid
+  prompt      String
   /// string[] of options (2–6).
-  choices  Json
+  choices     Json
   /// Index into choices — SERVER-ONLY until the sitting is submitted.
   answerIndex Int
   createdAt   DateTime @default(now())
@@ -51,35 +51,35 @@ model CbtQuestion {
 
 /// A scheduled exam over one bank: N sampled questions in a timed window.
 model CbtExam {
-  id              String    @id @default(uuid()) @db.Uuid
-  schoolId        String    @db.Uuid
-  bankId          String    @db.Uuid
-  title           String
+  id                   String    @id @default(uuid()) @db.Uuid
+  schoolId             String    @db.Uuid
+  bankId               String    @db.Uuid
+  title                String
   /// Restrict sitting to one class; null = any cbt.take holder in the school.
-  classId         String?   @db.Uuid
+  classId              String?   @db.Uuid
   /// Questions sampled per sitting (min of this and the bank's size).
-  questionCount   Int
-  durationMinutes Int
-  startAt         DateTime
-  endAt           DateTime
+  questionCount        Int
+  durationMinutes      Int
+  startAt              DateTime
+  endAt                DateTime
   /// DRAFT | PENDING_APPROVAL | PUBLISHED | CLOSED. Publishing is maker-checker
   /// (CBT_EXAM_PUBLISH workflow): the author's request parks it PENDING_APPROVAL
   /// and only a DIFFERENT workflow.review holder's approval flips it PUBLISHED.
-  status          String    @default("DRAFT")
+  status               String    @default("DRAFT")
   /// Answer-key release: HIDDEN | REQUESTED | RELEASED. A closed sitting shows
   /// its score immediately, but the correct answers reach students ONLY once
   /// RELEASED — teacher requests, principal approves (CBT_ANSWER_RELEASE).
-  answerRelease     String    @default("HIDDEN")
-  answersReleasedAt DateTime?
+  answerRelease        String    @default("HIDDEN")
+  answersReleasedAt    DateTime?
   /// Shuffle question order per sitting.
-  shuffle         Boolean   @default(true)
+  shuffle              Boolean   @default(true)
   /// When set, this exam is a SCHOLARSHIP qualification exam materialized by the
   /// platform's announce step: only students holding a QUALIFIED application for
   /// that program may see/sit it (checked in listExams/startSitting).
-  scholarshipProgramId String? @db.Uuid
-  createdById     String    @db.Uuid
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  scholarshipProgramId String?   @db.Uuid
+  createdById          String    @db.Uuid
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
   school   School          @relation(fields: [schoolId], references: [id])
   bank     CbtQuestionBank @relation(fields: [bankId], references: [id])

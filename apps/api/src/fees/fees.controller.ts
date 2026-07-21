@@ -22,6 +22,7 @@ import { FeesService } from "./fees.service";
 import { PaymentGatewayService } from "./payment-gateway.service";
 import { PaymentReconciliationService } from "./reconciliation.service";
 import { VirtualAccountsService } from "./virtual-accounts.service";
+import { PaymentPlansService } from "./payment-plans.service";
 
 const minor = z.number().int().min(0);
 const feeItemSchema = z.object({
@@ -67,6 +68,13 @@ const settlementSchema = z.object({
 
 const feeBearerSchema = z.object({ bearer: z.enum(["PARENT", "SCHOOL"]) });
 
+const planSchema = z.object({
+  tranches: z
+    .array(z.object({ dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), amountMinor: z.number().int().min(1) }))
+    .min(1)
+    .max(24),
+});
+
 @RequireModule(MODULES.FEES)
 @Controller()
 export class FeesController {
@@ -75,6 +83,7 @@ export class FeesController {
     private readonly gateway: PaymentGatewayService,
     private readonly reconciliation: PaymentReconciliationService,
     private readonly virtualAccounts: VirtualAccountsService,
+    private readonly paymentPlans: PaymentPlansService,
   ) {}
 
   // --- online payments (Paystack) ---
@@ -83,6 +92,58 @@ export class FeesController {
   @RequirePermission(FEES_PERMISSIONS.FEE_READ)
   payInit(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
     return this.gateway.initInvoicePayment(p, id);
+  }
+
+  // --- installment plans + credit ledger ---
+  /** The invoice's payment plan with derived tranche states (scoped read). */
+  @Get("invoices/:id/plan")
+  @RequirePermission(FEES_PERMISSIONS.FEE_READ)
+  getPlan(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.paymentPlans.getPlan(p, id);
+  }
+
+  /** Staff replaces the invoice's plan (tranches must sum to the total). */
+  @Put("invoices/:id/plan")
+  @RequirePermission(FEES_PERMISSIONS.FEE_MANAGE)
+  setPlan(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(planSchema)) body: z.infer<typeof planSchema>,
+  ) {
+    return this.paymentPlans.setPlan(p, id, body.tranches);
+  }
+
+  /** A student's credit balance + ledger (self / guardian / staff). */
+  @Get("students/:id/credit")
+  @RequirePermission(FEES_PERMISSIONS.FEE_READ)
+  credit(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.paymentPlans.creditBalance(p, id);
+  }
+
+  /** Parent/student prepays into the credit balance (hosted checkout). */
+  @Post("students/:id/prepay/init")
+  @RequirePermission(FEES_PERMISSIONS.FEE_READ)
+  prepay(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(z.object({ amountMinor: z.number().int().min(10_000) })))
+    body: { amountMinor: number },
+  ) {
+    return this.paymentPlans.initPrepay(p, id, body.amountMinor);
+  }
+
+  /** Staff applies the student's credit balance to this invoice. */
+  @Post("invoices/:id/apply-credit")
+  @RequirePermission(FEES_PERMISSIONS.FEE_MANAGE)
+  applyCredit(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.paymentPlans.applyCreditToInvoice(p, id);
+  }
+
+  /** Staff moves the invoice's overpaid excess to the credit balance. */
+  @Post("invoices/:id/overpayment-to-credit")
+  @RequirePermission(FEES_PERMISSIONS.FEE_MANAGE)
+  overpaymentToCredit(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.paymentPlans.moveOverpaymentToCredit(p, id);
   }
 
   // --- dedicated virtual accounts (bank-transfer fees) ---
