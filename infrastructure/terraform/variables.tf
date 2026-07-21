@@ -284,3 +284,22 @@ variable "log_level" {
   type        = string
   default     = "info"
 }
+
+# --- Backup / archival retention ---------------------------------------------
+variable "backup_weekly_retention_days" {
+  description = "Retention for weekly AWS Backup recovery points."
+  type        = number
+  default     = 90
+}
+
+variable "backup_monthly_retention_days" {
+  description = "Retention for monthly AWS Backup recovery points (archival)."
+  type        = number
+  default     = 365
+}
+
+variable "backup_vault_lock_enabled" {
+  description = "Enable AWS Backup Vault Lock (immutable retention). Irreversible once the changeable window elapses — enable deliberately."
+  type        = bool
+  default     = false
+}
