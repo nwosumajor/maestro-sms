@@ -112,6 +112,7 @@ model TimetableEntry {
   school School @relation(fields: [schoolId], references: [id])
   period Period @relation(fields: [periodId], references: [id])
   room   Room?  @relation(fields: [roomId], references: [id])
+  covers LessonCover[]
 
   /// A class has at most one lesson per (day, period).
   @@unique([schoolId, classId, dayOfWeek, periodId])
@@ -120,4 +121,33 @@ model TimetableEntry {
   @@index([schoolId, teacherId, dayOfWeek, periodId])
   @@index([schoolId, roomId, dayOfWeek, periodId])
   @@map("timetable_entry")
+}
+
+/// A one-off teacher substitution for a specific dated occurrence of a weekly
+/// timetable lesson — used when the regular teacher is on approved leave. The
+/// timetable entry recurs by weekday; cover is per calendar DATE. One cover per
+/// (entry, date). Assigned by timetable managers; the reliever is notified.
+model LessonCover {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  timetableEntryId String   @db.Uuid
+  date             DateTime @db.Date
+  /// The reliever (DB FK to user; scalar, no Prisma relation).
+  coveringTeacherId String  @db.Uuid
+  note              String?
+  /// Who assigned the cover (DB FK to user; audit field).
+  assignedById String @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school         School         @relation(fields: [schoolId], references: [id])
+  timetableEntry TimetableEntry @relation(fields: [timetableEntryId], references: [id])
+
+  @@unique([timetableEntryId, date])
+  @@index([schoolId])
+  @@index([schoolId, date])
+  @@index([schoolId, coveringTeacherId])
+  @@map("lesson_cover")
 }

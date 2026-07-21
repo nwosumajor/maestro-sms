@@ -7,6 +7,8 @@ import type {
   TeacherUnavailabilityDto,
   TimetableEntryDto,
   TimetableGenerateResultDto,
+  CoverLessonDto,
+  MyCoverDutyDto,
 } from "@sms/types";
 import { z } from "zod";
 import { DAYS_OF_WEEK, TIMETABLE_PERMISSIONS } from "@sms/types";
@@ -15,6 +17,7 @@ import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { TimetableService } from "./timetable.service";
+import { LessonCoverService } from "./lesson-cover.service";
 
 const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
 const periodSchema = z.object({
@@ -46,11 +49,61 @@ const availabilitySchema = z.object({
     .max(350), // 7 days x 50 periods — the whole grid
 });
 const entryUpdateSchema = entrySchema.partial();
+const coverSchema = z.object({
+  timetableEntryId: z.string().uuid(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  coveringTeacherId: z.string().uuid(),
+  note: z.string().max(500).optional(),
+});
 
 @RequireModule(MODULES.TIMETABLE)
 @Controller("timetable")
 export class TimetableController {
-  constructor(private readonly timetable: TimetableService) {}
+  constructor(
+    private readonly timetable: TimetableService,
+    private readonly cover: LessonCoverService,
+  ) {}
+
+  // --- teacher cover (substitution for teachers on leave) ---
+  /** Lessons whose regular teacher is on approved leave in [from,to], with any
+   *  assigned cover. Staff-wide read. */
+  @Get("cover")
+  @RequirePermission(TIMETABLE_PERMISSIONS.TIMETABLE_READ)
+  coverList(
+    @CurrentPrincipal() p: Principal,
+    @Query("from") from: string,
+    @Query("to") to: string,
+  ): Promise<CoverLessonDto[]> {
+    return this.cover.lessonsNeedingCover(p, from, to);
+  }
+
+  /** The caller's own cover duties in [from,to]. Any teacher (self-scoped). */
+  @Get("cover/mine")
+  @RequirePermission(TIMETABLE_PERMISSIONS.TIMETABLE_READ)
+  myCover(
+    @CurrentPrincipal() p: Principal,
+    @Query("from") from: string,
+    @Query("to") to: string,
+  ): Promise<MyCoverDutyDto[]> {
+    return this.cover.myDuties(p, from, to);
+  }
+
+  /** Assign a reliever to a dated lesson. Timetable managers. */
+  @Post("cover")
+  @RequirePermission(TIMETABLE_PERMISSIONS.TIMETABLE_WRITE)
+  assignCover(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(coverSchema)) body: z.infer<typeof coverSchema>,
+  ): Promise<CoverLessonDto> {
+    return this.cover.assignCover(p, body);
+  }
+
+  /** Remove a cover assignment. */
+  @Delete("cover/:id")
+  @RequirePermission(TIMETABLE_PERMISSIONS.TIMETABLE_WRITE)
+  removeCover(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.cover.removeCover(p, id);
+  }
 
   // --- periods ---
   @Get("periods")

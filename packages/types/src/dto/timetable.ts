@@ -48,3 +48,30 @@ export interface TimetableGenerateResultDto {
   /** Impossible-demand warnings (over-allocated teacher / class / room). */
   diagnostics: TimetableDiagnosticDto[];
 }
+
+/** A dated lesson occurrence needing (or having) a substitute teacher. */
+export interface CoverLessonDto {
+  timetableEntryId: string;
+  date: string;
+  dayOfWeek: string;
+  periodName: string;
+  periodStart: string;
+  className: string;
+  subject: string;
+  absentTeacherId: string;
+  absentTeacherName: string;
+  coverId: string | null;
+  coveringTeacherId: string | null;
+  coveringTeacherName: string | null;
+  note: string | null;
+}
+
+/** A teacher's own assigned cover duty. */
+export interface MyCoverDutyDto {
+  coverId: string;
+  date: string;
+  className: string;
+  subject: string;
+  periodName: string;
+  note: string | null;
+}

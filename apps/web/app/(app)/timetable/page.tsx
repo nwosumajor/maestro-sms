@@ -7,6 +7,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
 import { TimetableAdmin } from "@/components/timetable/TimetableAdmin";
+import { CoverPanel } from "@/components/timetable/CoverPanel";
 import { TimetableGrid } from "@/components/timetable/TimetableGrid";
 import { PageHeader } from "@/components/shell/PageHeader";
 
@@ -71,6 +72,8 @@ export default async function TimetablePage({
             teachers={allTeachers ?? []}
           />
         )}
+
+        {canWrite && <CoverPanel teachers={allTeachers ?? []} />}
 
         {list.length === 0 ? (
           <Alert variant="info">

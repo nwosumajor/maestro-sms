@@ -134,6 +134,7 @@ model School {
   rooms                   Room[]
   timetableEntries        TimetableEntry[]
   teacherUnavailabilities TeacherUnavailability[]
+  lessonCovers            LessonCover[]
 
   // Security relations
   privilegeGrants PrivilegeGrant[]
