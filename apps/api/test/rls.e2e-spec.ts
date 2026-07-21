@@ -37,6 +37,7 @@ d("RLS cross-tenant isolation", () => {
   const attSessionA = randomUUID();
   const attRecordA = randomUUID();
   const notifA = randomUUID();
+  const notifPrefA = randomUUID();
   const notifDeliveryA = randomUUID();
   const feeItemA = randomUUID();
   const invoiceA = randomUUID();
@@ -271,6 +272,10 @@ d("RLS cross-tenant isolation", () => {
     await a.query(
       `INSERT INTO notification (id,"schoolId","recipientId",type,title,body,"updatedAt") VALUES ($1,$2,$3,'GENERIC','T','B',now())`,
       [notifA, A, userA],
+    );
+    await a.query(
+      `INSERT INTO notification_preference (id,"schoolId","userId","emailEnabled","mutedTypes","updatedAt") VALUES ($1,$2,$3,false,'{}',now())`,
+      [notifPrefA, A, userA],
     );
     await a.query(
       `INSERT INTO notification_delivery (id,"schoolId","notificationId",channel,"updatedAt") VALUES ($1,$2,$3,'EMAIL',now())`,
@@ -1109,6 +1114,7 @@ d("RLS cross-tenant isolation", () => {
       "invoice_line_item",
       "invoice",
       "fee_item",
+      "notification_preference",
       "notification_delivery",
       "notification",
       "emergency_contact",
@@ -1161,6 +1167,7 @@ d("RLS cross-tenant isolation", () => {
     ["attendance_session", attSessionA],
     ["attendance_record", attRecordA],
     ["notification", notifA],
+    ["notification_preference", notifPrefA],
     ["notification_delivery", notifDeliveryA],
     ["fee_item", feeItemA],
     ["invoice", invoiceA],

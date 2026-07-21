@@ -6,6 +6,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { MfaSetup } from "@/components/security/MfaSetup";
 import { ChangePasswordForm } from "@/components/auth/ChangePasswordForm";
 import { PhoneCard } from "@/components/account/PhoneCard";
+import { NotificationPreferences } from "@/components/account/NotificationPreferences";
+import type { NotificationPreferenceDto, Serialized } from "@sms/types";
 import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +19,7 @@ export default async function AccountPage({ searchParams }: { searchParams: { en
     apiGet<{ enabled: boolean }>("/security/mfa/status"),
     apiGet<{ phone: string | null }>("/notifications/me/phone"),
   ]);
+  const notifPref = await apiGet<Serialized<NotificationPreferenceDto>>("/notifications/me/preferences");
   const mustEnroll = user.mfaEnrollRequired || searchParams.enroll2fa === "1";
 
   return (
@@ -60,6 +63,16 @@ export default async function AccountPage({ searchParams }: { searchParams: { en
         </Card>
 
         <PhoneCard initialPhone={myPhone?.phone ?? null} />
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Notification preferences</CardTitle>
+            <CardDescription>Choose which channels reach you and mute categories you don&apos;t need.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {notifPref && <NotificationPreferences initial={notifPref} />}
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader>

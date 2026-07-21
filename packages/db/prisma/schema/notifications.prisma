@@ -107,3 +107,28 @@ model NotificationDelivery {
   @@index([schoolId, status])
   @@map("notification_delivery")
 }
+
+/// Per-user delivery preferences for EXTERNAL notification channels. The in-app
+/// inbox is unaffected (always created). One row per user; absent row => all
+/// channels on (the historical default). Not a ledger — edited in place.
+model NotificationPreference {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  /// DB FK to user; no Prisma relation. Unique — one preference per user.
+  userId String @unique @db.Uuid
+
+  emailEnabled    Boolean @default(true)
+  smsEnabled      Boolean @default(true)
+  whatsappEnabled Boolean @default(true)
+  /// Notification types the user has muted on external channels.
+  mutedTypes      String[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId])
+  @@map("notification_preference")
+}

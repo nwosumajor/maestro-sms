@@ -4,6 +4,7 @@ export * from "./integrity";
 export * from "./integrity-enums";
 export * from "./integrity-report";
 export * from "./modules";
+export * from "./notifications";
 export * from "./pagination";
 export * from "./roles";
 export * from "./grading";

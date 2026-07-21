@@ -35,6 +35,8 @@ function makeService(f: Fakes, provider?: { deliver: jest.Mock }, credits?: { ha
       findMany: jest.fn().mockResolvedValue(f.pendingDeliveries ?? []),
       update: jest.fn().mockResolvedValue({}),
     },
+    // Recipient preferences: null => the producer delivers all requested channels.
+    notificationPreference: { findFirst: jest.fn().mockResolvedValue(null) },
     user: { findFirst: jest.fn().mockResolvedValue(f.recipientUser ?? null) },
     classTeacher: { findMany: jest.fn().mockResolvedValue(f.taughtClasses ?? []) },
     enrollment: { findMany: jest.fn().mockResolvedValue(f.myStudents ?? []) },
@@ -216,5 +218,35 @@ describe("NotificationService", () => {
     await service.runDeliveries({ schoolId: "school-A", userId: "sys", notificationId: "notif-1" });
     expect(credits.hasBalanceInTx).not.toHaveBeenCalled();
     expect(credits.debitInTx).not.toHaveBeenCalled();
+  });
+});
+
+// -----------------------------------------------------------------------------
+// allowedChannels — pure preference-filtering (no DB)
+// -----------------------------------------------------------------------------
+import { allowedChannels } from "@sms/types";
+
+describe("allowedChannels (notification preference filtering)", () => {
+  const ALL = ["EMAIL", "SMS", "WHATSAPP"];
+
+  it("no preference row => deliver all requested channels", () => {
+    expect(allowedChannels(null, "ANNOUNCEMENT", ALL)).toEqual(ALL);
+  });
+
+  it("channel toggles drop the disabled channels", () => {
+    const pref = { emailEnabled: false, smsEnabled: true, whatsappEnabled: false, mutedTypes: [] };
+    expect(allowedChannels(pref, "ANNOUNCEMENT", ALL)).toEqual(["SMS"]);
+  });
+
+  it("a muted type drops ALL external channels", () => {
+    const pref = { emailEnabled: true, smsEnabled: true, whatsappEnabled: true, mutedTypes: ["GRADE_PUBLISH"] };
+    expect(allowedChannels(pref, "GRADE_PUBLISH", ALL)).toEqual([]);
+    expect(allowedChannels(pref, "ANNOUNCEMENT", ALL)).toEqual(ALL);
+  });
+
+  it("an ESSENTIAL type ignores per-type mute but still respects channel toggles", () => {
+    const pref = { emailEnabled: true, smsEnabled: false, whatsappEnabled: true, mutedTypes: ["PAYMENT_RECEIVED"] };
+    // PAYMENT_RECEIVED is essential: mute is ignored, but SMS is still off.
+    expect(allowedChannels(pref, "PAYMENT_RECEIVED", ALL)).toEqual(["EMAIL", "WHATSAPP"]);
   });
 });

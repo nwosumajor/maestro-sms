@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Post, Put, Query } from "@nestjs/common";
-import type { NotificationInboxDto } from "@sms/types";
+import type { NotificationInboxDto, NotificationPreferenceDto } from "@sms/types";
 import { z } from "zod";
 import { NOTIFICATION_CHANNELS, NOTIFICATION_PERMISSIONS, NOTIFICATION_TYPES } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -14,6 +14,13 @@ const phoneSchema = z.object({
     .string()
     .trim()
     .regex(/^(\+?\d{8,15})?$/, "Enter the number in international format, e.g. +2348012345678"),
+});
+
+const preferencesSchema = z.object({
+  emailEnabled: z.boolean(),
+  smsEnabled: z.boolean(),
+  whatsappEnabled: z.boolean(),
+  mutedTypes: z.array(z.string().max(64)).max(100),
 });
 
 const sendSchema = z.object({
@@ -58,6 +65,22 @@ export class NotificationController {
     @Body(new ZodValidationPipe(phoneSchema)) body: z.infer<typeof phoneSchema>,
   ) {
     return this.notifications.setMyPhone(p, body.phone || null);
+  }
+
+  /** The caller's own external-channel delivery preferences (self-scoped). */
+  @Get("me/preferences")
+  @RequirePermission(NOTIFICATION_PERMISSIONS.NOTIFICATION_READ)
+  myPreferences(@CurrentPrincipal() p: Principal): Promise<NotificationPreferenceDto> {
+    return this.notifications.getMyPreferences(p);
+  }
+
+  @Put("me/preferences")
+  @RequirePermission(NOTIFICATION_PERMISSIONS.NOTIFICATION_READ)
+  setMyPreferences(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(preferencesSchema)) body: z.infer<typeof preferencesSchema>,
+  ): Promise<NotificationPreferenceDto> {
+    return this.notifications.setMyPreferences(p, body);
   }
 
   /** Staff send to a user (relationship-scoped in the service). */

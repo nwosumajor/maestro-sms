@@ -19,7 +19,8 @@ import { ForbiddenException, Inject, Injectable, NotFoundException, Optional } f
 import { MessageCreditsService } from "./message-credits.service";
 import { Prisma } from "@sms/db";
 import type { Queue } from "bullmq";
-import type { NotificationChannelValue, NotificationTypeValue } from "@sms/types";
+import type { NotificationChannelValue, NotificationTypeValue, NotificationPreferenceDto } from "@sms/types";
+import { allowedChannels } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -119,6 +120,40 @@ export class NotificationService {
         if (!exists) throw new NotFoundException("Notification not found");
       }
       return { id, read: true };
+    });
+  }
+
+  // --- self-service delivery preferences --------------------------------------
+  /** Read a recipient's preference row inside an existing tenant tx (delivery
+   *  producer). Null when the user has never set one (= deliver all). */
+  private async recipientPreference(tx: TenantTx, userId: string): Promise<NotificationPreferenceDto | null> {
+    const row = await tx.notificationPreference.findFirst({
+      where: { userId },
+      select: { emailEnabled: true, smsEnabled: true, whatsappEnabled: true, mutedTypes: true },
+    });
+    return row
+      ? { emailEnabled: row.emailEnabled, smsEnabled: row.smsEnabled, whatsappEnabled: row.whatsappEnabled, mutedTypes: row.mutedTypes }
+      : null;
+  }
+
+  async getMyPreferences(p: Principal): Promise<NotificationPreferenceDto> {
+    const pref = await this.db.runAsTenantReadOnly(this.ctx(p), (tx) => this.recipientPreference(tx, p.userId));
+    return pref ?? { emailEnabled: true, smsEnabled: true, whatsappEnabled: true, mutedTypes: [] };
+  }
+
+  async setMyPreferences(p: Principal, input: NotificationPreferenceDto): Promise<NotificationPreferenceDto> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const mutedTypes = [...new Set(input.mutedTypes)];
+      await tx.notificationPreference.upsert({
+        where: { userId: p.userId },
+        create: { schoolId: p.schoolId, userId: p.userId, ...input, mutedTypes },
+        update: { emailEnabled: input.emailEnabled, smsEnabled: input.smsEnabled, whatsappEnabled: input.whatsappEnabled, mutedTypes },
+      });
+      await this.audit.record(
+        { actorId: p.userId, action: "notification.preferences.set", entity: "user", entityId: p.userId, schoolId: p.schoolId, metadata: { mutedCount: mutedTypes.length } },
+        tx,
+      );
+      return { ...input, mutedTypes };
     });
   }
 
@@ -236,7 +271,14 @@ export class NotificationService {
         data: (input.data ?? undefined) as Prisma.InputJsonValue | undefined,
       },
     });
-    const channels = [...new Set(input.channels ?? [])];
+    // Respect the RECIPIENT's external-channel preferences (the in-app inbox
+    // row above is always created regardless). Essential types ignore per-type
+    // mute; channel toggles always apply. A missing preference row = deliver all.
+    const requested = [...new Set(input.channels ?? [])];
+    const pref = requested.length
+      ? await this.recipientPreference(tx, input.recipientId)
+      : null;
+    const channels = allowedChannels(pref, input.type, requested) as NotificationChannelValue[];
     for (const channel of channels) {
       await tx.notificationDelivery.create({
         data: { schoolId: actor.schoolId, notificationId: notification.id, channel },

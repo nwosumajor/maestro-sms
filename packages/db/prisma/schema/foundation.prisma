@@ -113,6 +113,7 @@ model School {
   // Notifications relations
   notifications          Notification[]
   notificationDeliveries NotificationDelivery[]
+  notificationPreferences NotificationPreference[]
 
   // Fees / Billing relations
   feeItems             FeeItem[]
