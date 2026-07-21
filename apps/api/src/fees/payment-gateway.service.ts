@@ -32,6 +32,8 @@ import { PlatformFeeService } from "../billing/platform-fee.service";
 import { AdmissionsService } from "../admissions/admissions.service";
 import { MessageCreditsService } from "../notifications/message-credits.service";
 import { DisputesService } from "./disputes.service";
+import { GatewayEventService } from "../payments/gateway-event.service";
+import { InvoiceSettlementService } from "./settlement.service";
 
 @Injectable()
 export class PaymentGatewayService {
@@ -46,6 +48,8 @@ export class PaymentGatewayService {
     private readonly admissions: AdmissionsService,
     private readonly messageCredits: MessageCreditsService,
     private readonly disputes: DisputesService,
+    private readonly gatewayEvents: GatewayEventService,
+    private readonly settlement: InvoiceSettlementService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -103,6 +107,11 @@ export class PaymentGatewayService {
       email,
       amountMinor: chargedMinor,
       reference,
+      // Verify-on-return: Paystack sends the payer back here with ?reference=…
+      // and the invoice page confirms the charge against the gateway directly —
+      // the payment posts even if the webhook never arrives (lost-webhook
+      // recovery, layer 1; the reconciliation sweep is layer 2).
+      callbackUrl: `${process.env.PUBLIC_WEB_URL ?? "http://localhost:3000"}/fees/${invoiceId}?verify=1`,
       // payerId: the signed-in user who clicked pay — the receipt goes to them
       // (plus the guardians and the student) when the webhook confirms.
       // invoiceAmountMinor/platformFeeMinor: the webhook credits the LEDGER with
@@ -244,6 +253,16 @@ export class PaymentGatewayService {
   async handleWebhook(rawBody: Buffer | undefined, signature: string | undefined): Promise<{ ok: boolean }> {
     const event = this.paystack.verify(rawBody, signature);
     if (!event) return { ok: true }; // disabled / nothing to do
+    // Log EVERY verified event before dispatch (append-only evidence — even
+    // events downstream drops). Best-effort; never blocks processing.
+    const evtMeta = (event.data.metadata ?? event.data.transaction?.metadata ?? {}) as { schoolId?: string };
+    await this.gatewayEvents.record({
+      gateway: "PAYSTACK",
+      eventType: event.event,
+      reference: event.data.reference ?? event.data.transaction?.reference ?? null,
+      schoolId: evtMeta.schoolId ?? null,
+      payload: event,
+    });
     // Dispute events first: their `data` is a DISPUTE (no metadata.kind) — the
     // tenant is resolved from the disputed transaction inside DisputesService.
     if (event.event.startsWith("charge.dispute.")) return this.disputes.applyDisputeEvent(event);
@@ -255,8 +274,8 @@ export class PaymentGatewayService {
     return this.handleInvoiceCharge(event);
   }
 
-  /** On charge.success for an invoice, post the payment + advance the status,
-   *  then RECEIPT the payer, the guardians and the student (in-app + email). */
+  /** On charge.success for an invoice: extract the charge facts from OUR
+   *  metadata and delegate to the shared, idempotent settlement path. */
   private async handleInvoiceCharge(event: PaystackEvent): Promise<{ ok: boolean }> {
     const { invoiceId, schoolId, payerId, invoiceAmountMinor, platformFeeMinor, feeBearer } = (event.data.metadata ??
       {}) as {
@@ -276,129 +295,74 @@ export class PaymentGatewayService {
     const creditMinor =
       typeof invoiceAmountMinor === "number" && invoiceAmountMinor > 0 ? invoiceAmountMinor : event.data.amount;
     const feeMinor = typeof platformFeeMinor === "number" && platformFeeMinor > 0 ? platformFeeMinor : 0;
-
-    // System-context write (no user): the actor is the invoice's creator.
-    const receipt = await this.db.runAsTenant({ schoolId, userId: SYSTEM_ACTOR_ID }, async (tx) => {
-      const inv = await tx.invoice.findFirst({ where: { id: invoiceId } });
-      if (!inv) return null;
-      // IDEMPOTENCY: Paystack RETRIES a webhook on any non-2xx / timeout (and can
-      // double-deliver). Without this guard each retry would insert ANOTHER POSTED
-      // payment for the same gateway reference and double-credit the invoice. The
-      // gateway reference is unique per charge, so it's the dedup key.
-      const already = await tx.payment.findFirst({
-        where: { invoiceId, reference: event.data.reference },
-        select: { id: true },
-      });
-      if (already) return null;
-      await tx.payment.create({
-        data: {
-          schoolId,
-          invoiceId,
-          amountMinor: creditMinor,
-          method: "CARD",
-          kind: "PAYMENT",
-          status: "POSTED",
-          reference: event.data.reference,
-          platformFeeMinor: feeMinor,
-          note:
-            feeMinor > 0
-              ? `Online (Paystack) · platform fee ${feeBearer === "SCHOOL" ? "school-borne" : "payer-borne"}`
-              : "Online (Paystack)",
-          recordedById: inv.createdById,
-        },
-      });
-      const posted = await tx.payment.findMany({ where: { invoiceId, status: "POSTED" }, select: { amountMinor: true, kind: true } });
-      const paid = posted.reduce((n: number, x: { amountMinor: number; kind: string }) => n + (x.kind === "REFUND" ? -x.amountMinor : x.amountMinor), 0);
-      const status = paid >= inv.totalMinor ? "PAID" : paid > 0 ? "PARTIALLY_PAID" : "ISSUED";
-      await tx.invoice.update({ where: { id: invoiceId }, data: { status } });
-      await this.audit.record(
-        { actorId: inv.createdById, action: "fee.payment.online", entity: "invoice", entityId: invoiceId, schoolId, metadata: { reference: event.data.reference } },
-        tx,
-      );
-      const guardians = await tx.parentChild.findMany({
-        where: { studentId: inv.studentId },
-        select: { parentId: true },
-      });
-      // OVERPAYMENT detection: two guardians can legitimately race to pay the
-      // same invoice — both charges succeed at the gateway. The ledger records
-      // it honestly; finance must be TOLD so the excess is refunded promptly.
-      let financeRecipients: string[] = [];
-      if (paid > inv.totalMinor) {
-        const finance = await tx.userRole.findMany({
-          where: { role: { name: { in: ["accountant", "school_admin"] } } },
-          select: { userId: true },
-          distinct: ["userId"],
-        });
-        financeRecipients = [...new Set([...finance.map((f: { userId: string }) => f.userId), inv.createdById])];
-      }
-      return {
-        invoiceRef: inv.reference,
-        currency: inv.currency,
-        balanceAfter: inv.totalMinor - paid,
-        overpaidMinor: Math.max(0, paid - inv.totalMinor),
-        financeRecipients,
-        recipients: [
-          ...new Set([
-            ...guardians.map((g: { parentId: string }) => g.parentId),
-            inv.studentId,
-            ...(payerId ? [payerId] : []),
-          ]),
-        ],
-      };
+    await this.settlement.applyOnlinePayment({
+      schoolId,
+      invoiceId,
+      creditMinor,
+      chargedMinor: event.data.amount,
+      reference: event.data.reference,
+      payerId,
+      platformFeeMinor: feeMinor,
+      note:
+        feeMinor > 0
+          ? `Online (Paystack) · platform fee ${feeBearer === "SCHOOL" ? "school-borne" : "payer-borne"}`
+          : "Online (Paystack)",
     });
-
-    // Receipt AFTER the committed write — a notification failure never undoes
-    // a recorded payment. Every online payment gets one, partial or full.
-    if (receipt) {
-      const amount = new Intl.NumberFormat("en-NG", { style: "currency", currency: receipt.currency }).format(
-        event.data.amount / 100,
-      );
-      const balanceLine =
-        receipt.balanceAfter <= 0
-          ? "The invoice is now fully paid. Thank you."
-          : `Outstanding balance: ${new Intl.NumberFormat("en-NG", { style: "currency", currency: receipt.currency }).format(receipt.balanceAfter / 100)}.`;
-      for (const recipientId of receipt.recipients) {
-        try {
-          await this.notifications.enqueue(
-            { schoolId, userId: recipientId },
-            {
-              recipientId,
-              type: "PAYMENT_RECEIVED",
-              title: "Payment receipt — successful",
-              body: `We received ${amount} by card on invoice ${receipt.invoiceRef} (ref ${event.data.reference}). ${balanceLine}`,
-              data: { invoiceId, reference: event.data.reference, amountMinor: event.data.amount },
-              channels: ["EMAIL"],
-            },
-          );
-        } catch {
-          // best-effort per recipient
-        }
-      }
-      // Overpayment alert to finance: the excess is refund-due, not a windfall.
-      if (receipt.overpaidMinor > 0) {
-        const over = new Intl.NumberFormat("en-NG", { style: "currency", currency: receipt.currency }).format(
-          receipt.overpaidMinor / 100,
-        );
-        for (const recipientId of receipt.financeRecipients) {
-          try {
-            await this.notifications.enqueue(
-              { schoolId, userId: recipientId },
-              {
-                recipientId,
-                type: "BILLING",
-                title: "Overpayment on an invoice — refund due",
-                body: `Invoice ${receipt.invoiceRef} is overpaid by ${over} (likely two payers paying at once, ref ${event.data.reference}). Record a refund of the excess from the invoice page.`,
-                data: { invoiceId, overpaidMinor: receipt.overpaidMinor },
-                channels: ["EMAIL"],
-              },
-            );
-          } catch {
-            // best-effort per recipient
-          }
-        }
-      }
-    }
     return { ok: true };
+  }
+
+  /**
+   * Verify-on-return (lost-webhook recovery, layer 1): the payer lands back on
+   * the invoice page with ?reference=…, and we confirm the charge DIRECTLY
+   * against the gateway — if it settled and the webhook never arrived, the
+   * payment posts here, idempotently. The metadata must match the invoice the
+   * caller is looking at AND the caller's own school (the reference is
+   * payer-visible in the redirect URL; nothing here trusts it beyond using it
+   * as a lookup key at the gateway).
+   */
+  async confirmInvoicePayment(
+    p: Principal,
+    invoiceId: string,
+    reference: string,
+  ): Promise<{ status: "posted" | "already_recorded" | "not_settled" }> {
+    if (!this.paystack.isConfigured()) {
+      throw new ServiceUnavailableException("Online payments are not configured");
+    }
+    // The caller must be able to see this invoice (payer/guardian/staff).
+    await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const inv = await tx.invoice.findFirst({ where: { id: invoiceId }, select: { studentId: true } });
+      if (!inv) throw new ForbiddenException("Invoice not found");
+      if (!(await this.canPay(tx, p, inv.studentId))) throw new ForbiddenException("Not your invoice");
+    });
+    const verified = await this.paystack.verifyTransaction(reference);
+    if (!verified || verified.status !== "success") return { status: "not_settled" };
+    const meta = verified.metadata as {
+      kind?: string;
+      invoiceId?: string;
+      schoolId?: string;
+      payerId?: string;
+      invoiceAmountMinor?: number;
+      platformFeeMinor?: number;
+    };
+    // The gateway-confirmed charge must belong to THIS invoice in THIS school.
+    if (meta.kind !== "invoice" || meta.invoiceId !== invoiceId || meta.schoolId !== p.schoolId) {
+      return { status: "not_settled" };
+    }
+    const creditMinor =
+      typeof meta.invoiceAmountMinor === "number" && meta.invoiceAmountMinor > 0
+        ? meta.invoiceAmountMinor
+        : verified.amountMinor;
+    const outcome = await this.settlement.applyOnlinePayment({
+      schoolId: p.schoolId,
+      invoiceId,
+      creditMinor,
+      chargedMinor: verified.amountMinor,
+      reference,
+      payerId: meta.payerId ?? p.userId,
+      platformFeeMinor: typeof meta.platformFeeMinor === "number" ? meta.platformFeeMinor : 0,
+      note: "Online (Paystack) · confirmed on return",
+    });
+    return { status: outcome === "posted" ? "posted" : "already_recorded" };
   }
 
   private async canPay(tx: import("../integrity/integrity.foundation").TenantTx, p: Principal, studentId: string): Promise<boolean> {

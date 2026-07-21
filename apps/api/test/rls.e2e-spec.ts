@@ -43,6 +43,7 @@ d("RLS cross-tenant isolation", () => {
   const lineItemA = randomUUID();
   const paymentA = randomUUID();
   const paymentDisputeA = randomUUID();
+  const gatewayEventA = randomUUID();
   const documentA = randomUUID();
   const periodA = randomUUID();
   const roomA = randomUUID();
@@ -293,6 +294,12 @@ d("RLS cross-tenant isolation", () => {
       `INSERT INTO payment_dispute (id,"schoolId","gatewayDisputeId","transactionReference","paymentId","invoiceId","amountMinor","updatedAt")
        VALUES ($1,$2,$3,'PAY-ref-rls',$4,$5,50000,now())`,
       [paymentDisputeA, A, "disp-" + paymentDisputeA, paymentA, invoiceA],
+    );
+    // Verified-webhook event log row resolved to school A.
+    await a.query(
+      `INSERT INTO gateway_event (id,"schoolId",gateway,"eventType",reference,payload)
+       VALUES ($1,$2,'PAYSTACK','charge.success','PAY-ref-rls','{"event":"charge.success"}'::jsonb)`,
+      [gatewayEventA, A],
     );
     // Document vault: a report card for student userA
     await a.query(
@@ -1060,6 +1067,7 @@ d("RLS cross-tenant isolation", () => {
       "attendance_record",
       "attendance_session",
       "class",
+      "gateway_event",
       "payment_dispute",
       "payment",
       "invoice_line_item",
@@ -1123,6 +1131,7 @@ d("RLS cross-tenant isolation", () => {
     ["invoice_line_item", lineItemA],
     ["payment", paymentA],
     ["payment_dispute", paymentDisputeA],
+    ["gateway_event", gatewayEventA],
     ["document", documentA],
     ["period", periodA],
     ["room", roomA],
@@ -1317,6 +1326,30 @@ d("RLS cross-tenant isolation", () => {
       .map((r) => r.relname)
       .filter((t) => !covered.has(t) && !exempt.has(t));
     expect(uncovered).toEqual([]);
+  });
+
+  it("gateway_event: the app role can INSERT with NO tenant GUC (webhook context), null-school rows are invisible to tenants, and UPDATE is denied", async () => {
+    const id = randomUUID();
+    // System-context INSERT (no GUC set) — the webhook writes before tenant resolution.
+    const raw = await appPool.connect();
+    try {
+      await raw.query(
+        `INSERT INTO gateway_event (id,"schoolId",gateway,"eventType",payload) VALUES ($1,NULL,'STRIPE','test','{}'::jsonb)`,
+        [id],
+      );
+    } finally {
+      raw.release();
+    }
+    // Null-school rows are invisible under ANY tenant context.
+    await asApp(A, async (c) => {
+      const r = await c.query(`SELECT 1 FROM gateway_event WHERE id = $1`, [id]);
+      expect(r.rowCount).toBe(0);
+    });
+    // Immutable: UPDATE privilege revoked.
+    await asApp(A, async (c) => {
+      await expect(c.query(`UPDATE gateway_event SET gateway='tamper' WHERE id = $1`, [id])).rejects.toThrow();
+    });
+    await adminPool.query(`DELETE FROM gateway_event WHERE id = $1`, [id]);
   });
 
   it("audit_log is append-only: INSERT allowed, UPDATE denied", async () => {

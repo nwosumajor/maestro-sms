@@ -32,6 +32,9 @@ export const FEES_PERMISSIONS = {
   /** Approve/reject high-value or refund payments (the "checker"; must differ
    *  from the recorder). principal / school_admin — NOT the accountant. */
   FEE_APPROVE: "fee.approve",
+  /** Trigger the cross-tenant gateway reconciliation sweep (privileged,
+   *  account-wide — super_admin only, like billing.dunning.run). */
+  FEE_RECONCILE_RUN: "fee.reconcile.run",
 } as const;
 
 /** Payments at/above this (minor units) need a second approver. ~₦50,000. */

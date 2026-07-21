@@ -1,8 +1,13 @@
 import { Module } from "@nestjs/common";
+import { BullModule } from "@nestjs/bullmq";
 import { FeesController } from "./fees.controller";
 import { FeesService } from "./fees.service";
 import { PaymentGatewayService } from "./payment-gateway.service";
 import { DisputesModule } from "./disputes.module";
+import { SettlementModule } from "./settlement.module";
+import { FEE_RECONCILE_QUEUE, PaymentReconciliationService } from "./reconciliation.service";
+import { PaymentReconciliationScheduler } from "./reconciliation.scheduler";
+import { PaymentReconciliationProcessor } from "./reconciliation.processor";
 import { NotificationModule } from "../notifications/notification.module";
 import { PaymentsModule } from "../payments/payments.module";
 import { BillingModule } from "../billing/billing.module";
@@ -16,9 +21,17 @@ import { AdmissionsModule } from "../admissions/admissions.module";
 @Module({
   // AdmissionsModule: the single account-wide webhook also dispatches
   // metadata.kind === "admission_form" charges to it (one-way fees -> admissions).
-  imports: [NotificationModule, PaymentsModule, BillingModule, AdmissionsModule, DisputesModule],
+  imports: [
+    NotificationModule,
+    PaymentsModule,
+    BillingModule,
+    AdmissionsModule,
+    DisputesModule,
+    SettlementModule,
+    BullModule.registerQueue({ name: FEE_RECONCILE_QUEUE }),
+  ],
   controllers: [FeesController],
-  providers: [FeesService, PaymentGatewayService],
+  providers: [FeesService, PaymentGatewayService, PaymentReconciliationService, PaymentReconciliationScheduler, PaymentReconciliationProcessor],
   exports: [FeesService],
 })
 export class FeesModule {}

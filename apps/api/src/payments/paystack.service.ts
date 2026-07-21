@@ -70,6 +70,10 @@ export class PaystackService {
     subaccount?: string;
     bearer?: "account" | "subaccount";
     transactionChargeMinor?: number;
+    /** Where Paystack sends the payer after the charge (it appends
+     *  ?reference=… — the verify-on-return hook). Falls back to the
+     *  dashboard-configured URL when unset. */
+    callbackUrl?: string;
   }): Promise<{ authorizationUrl: string }> {
     const secret = this.secret();
     const res = await fetch(`${PAYSTACK}/transaction/initialize`, {
@@ -80,6 +84,7 @@ export class PaystackService {
         amount: input.amountMinor,
         reference: input.reference,
         metadata: input.metadata,
+        ...(input.callbackUrl ? { callback_url: input.callbackUrl } : {}),
         ...(input.subaccount ? { subaccount: input.subaccount, bearer: input.bearer ?? "subaccount" } : {}),
         ...(input.subaccount && input.transactionChargeMinor && input.transactionChargeMinor > 0
           ? { transaction_charge: input.transactionChargeMinor }
@@ -155,6 +160,71 @@ export class PaystackService {
     }
     const json = (await res.json()) as { data: { subaccount_code: string; settlement_bank: string } };
     return { subaccountCode: json.data.subaccount_code, bankName: json.data.settlement_bank };
+  }
+
+  /**
+   * Verify a transaction DIRECTLY against the gateway (the lost-webhook
+   * recovery path: called when a payer returns from checkout, and by the
+   * reconciliation sweep). Returns the settled charge's facts, or null when
+   * unconfigured / not found / not successful — never throws.
+   */
+  async verifyTransaction(reference: string): Promise<{
+    status: string;
+    amountMinor: number;
+    metadata: Record<string, unknown>;
+  } | null> {
+    const secret = process.env.PAYSTACK_SECRET_KEY;
+    if (!secret) return null;
+    try {
+      const res = await fetch(`${PAYSTACK}/transaction/verify/${encodeURIComponent(reference)}`, {
+        headers: { Authorization: `Bearer ${secret}` },
+      });
+      if (!res.ok) return null;
+      const json = (await res.json()) as {
+        data?: { status?: string; amount?: number; metadata?: Record<string, unknown> | null };
+      };
+      if (!json.data?.status) return null;
+      return {
+        status: json.data.status,
+        amountMinor: json.data.amount ?? 0,
+        metadata: json.data.metadata ?? {},
+      };
+    } catch (err) {
+      this.logger.warn(`Paystack verify error (${reference}): ${(err as Error).message}`);
+      return null;
+    }
+  }
+
+  /**
+   * List successful transactions since `from` (reconciliation sweep). Pages
+   * through the gateway's history up to `maxPages` × 100 rows. Best-effort:
+   * returns what it could fetch, never throws.
+   */
+  async listSuccessfulTransactions(
+    from: Date,
+    maxPages = 10,
+  ): Promise<Array<{ reference: string; amountMinor: number; metadata: Record<string, unknown> }>> {
+    const secret = process.env.PAYSTACK_SECRET_KEY;
+    if (!secret) return [];
+    const out: Array<{ reference: string; amountMinor: number; metadata: Record<string, unknown> }> = [];
+    try {
+      for (let page = 1; page <= maxPages; page++) {
+        const url = `${PAYSTACK}/transaction?status=success&perPage=100&page=${page}&from=${encodeURIComponent(from.toISOString())}`;
+        const res = await fetch(url, { headers: { Authorization: `Bearer ${secret}` } });
+        if (!res.ok) break;
+        const json = (await res.json()) as {
+          data?: Array<{ reference?: string; amount?: number; metadata?: Record<string, unknown> | null }>;
+        };
+        const rows = json.data ?? [];
+        for (const r of rows) {
+          if (r.reference) out.push({ reference: r.reference, amountMinor: r.amount ?? 0, metadata: r.metadata ?? {} });
+        }
+        if (rows.length < 100) break;
+      }
+    } catch (err) {
+      this.logger.warn(`Paystack transaction list error: ${(err as Error).message}`);
+    }
+    return out;
   }
 
   /**

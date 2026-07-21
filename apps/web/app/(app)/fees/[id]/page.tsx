@@ -17,6 +17,7 @@ import { money, shortDate, dateTime, titleCase } from "@/lib/format";
 import { RecordPaymentForm } from "@/components/fees/RecordPaymentForm";
 import { InvoiceActions } from "@/components/fees/InvoiceActions";
 import { PayOnlineButton } from "@/components/fees/PayOnlineButton";
+import { VerifyPaymentBanner } from "@/components/fees/VerifyPaymentBanner";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +38,8 @@ export default async function InvoiceDetailPage({ params }: { params: { id: stri
         <Link href="/fees" className="text-sm text-muted-foreground hover:underline">
           ← All invoices
         </Link>
+
+        <VerifyPaymentBanner invoiceId={inv.id} />
 
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>

@@ -1,0 +1,34 @@
+// =============================================================================
+// Gateway event log — every VERIFIED webhook event, both gateways, append-only
+// =============================================================================
+// The raw audit trail behind reconciliation, dispute evidence and "why wasn't
+// this credited?" debugging. Events are recorded BEFORE tenant resolution, so
+// schoolId is nullable (an unmappable event is still evidence). The app role
+// may INSERT (the webhook path writes synchronously, with NO tenant GUC) and
+// SELECT only its own school's rows; UPDATE/DELETE are not granted — the log
+// is immutable (rls/79). Payloads can reference other tenants' charges, which
+// is exactly why null-school rows are invisible to every tenant and full reads
+// happen only through the privileged operator client.
+
+model GatewayEvent {
+  id String @id @default(uuid()) @db.Uuid
+
+  /// Resolved tenant, when the event's metadata identified one. NULLABLE by
+  /// design — recording precedes resolution.
+  schoolId String? @db.Uuid
+
+  /// PAYSTACK | STRIPE
+  gateway   String
+  eventType String
+  /// Charge/transaction reference when the event carries one.
+  reference String?
+  /// The verified event body, as received.
+  payload Json
+
+  receivedAt DateTime @default(now())
+
+  @@index([gateway, eventType])
+  @@index([reference])
+  @@index([schoolId])
+  @@map("gateway_event")
+}

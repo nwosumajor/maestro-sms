@@ -27,7 +27,7 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     "platform.impersonate", "platform.user.credentials", "platform.tenants.status",
     "platform.subscription.manage", "platform.pricing.manage", "platform.student.read",
     "platform.staff.manage",
-    "billing.dunning.run", "security.audit.read", "directory.search",
+    "billing.dunning.run", "fee.reconcile.run", "security.audit.read", "directory.search",
     "game.ultimate.admin", "game.leaderboard.read", "scholarship.admin", "scholarship.read",
     "notification.read",
   ],

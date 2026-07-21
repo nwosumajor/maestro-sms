@@ -20,6 +20,7 @@ import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { FeesService } from "./fees.service";
 import { PaymentGatewayService } from "./payment-gateway.service";
+import { PaymentReconciliationService } from "./reconciliation.service";
 
 const minor = z.number().int().min(0);
 const feeItemSchema = z.object({
@@ -71,6 +72,7 @@ export class FeesController {
   constructor(
     private readonly fees: FeesService,
     private readonly gateway: PaymentGatewayService,
+    private readonly reconciliation: PaymentReconciliationService,
   ) {}
 
   // --- online payments (Paystack) ---
@@ -79,6 +81,28 @@ export class FeesController {
   @RequirePermission(FEES_PERMISSIONS.FEE_READ)
   payInit(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
     return this.gateway.initInvoicePayment(p, id);
+  }
+
+  /** Verify-on-return: the payer landed back from checkout with ?reference=…;
+   *  confirm the charge against the gateway and post it if the webhook was
+   *  lost. Idempotent — safe to race the webhook. */
+  @Post("invoices/:id/pay/confirm")
+  @RequirePermission(FEES_PERMISSIONS.FEE_READ)
+  payConfirm(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(z.object({ reference: z.string().min(1).max(128) })))
+    body: { reference: string },
+  ) {
+    return this.gateway.confirmInvoicePayment(p, id, body.reference);
+  }
+
+  /** Cross-tenant gateway reconciliation sweep (super_admin; the daily BullMQ
+   *  job runs the same sweep). */
+  @Post("fees/reconciliation/run")
+  @RequirePermission(FEES_PERMISSIONS.FEE_RECONCILE_RUN)
+  reconcile(@CurrentPrincipal() p: Principal) {
+    return this.reconciliation.runManual(p);
   }
 
   /** Paystack webhook (HMAC-verified). Public: it carries no session. */
