@@ -6,7 +6,7 @@
 // holds, and bulk-creating student users. All audited.
 // =============================================================================
 
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import bcrypt from "bcryptjs";
 import {
   AUDIT_LOG_SERVICE,
@@ -18,6 +18,7 @@ import {
 } from "../integrity/integrity.foundation";
 import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
+import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 
 export interface ImportRow {
   name: string;
@@ -47,6 +48,7 @@ export class AdminService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly workflow: WorkflowService,
+    private readonly privileged: PrivilegedDatabaseService,
     hooks: WorkflowHooksService,
   ) {
     // Maker-checker reactor: when a DIFFERENT senior approves an
@@ -274,5 +276,30 @@ export class AdminService {
       { actorId: p.userId, action, entity: "user", entityId, schoolId: p.schoolId, metadata },
       tx,
     );
+  }
+
+  // --- school security policy: require MFA for all staff ----------------------
+  async getMfaPolicy(p: Principal): Promise<{ requireStaffMfa: boolean }> {
+    const school = await this.db.runAsTenant(this.ctx(p), (tx) =>
+      tx.school.findFirst({ where: { id: p.schoolId }, select: { requireStaffMfa: true } }),
+    );
+    return { requireStaffMfa: school?.requireStaffMfa ?? false };
+  }
+
+  /** Set the "all staff must enrol MFA" policy. The global `school` registry is
+   *  SELECT-only for the app role, so the write uses the PRIVILEGED client
+   *  (like settlement / late-fee config). Audited; step-up-gated at the
+   *  controller. */
+  async setMfaPolicy(p: Principal, requireStaffMfa: boolean): Promise<{ requireStaffMfa: boolean }> {
+    const client = this.privileged.client;
+    if (!client) throw new ServiceUnavailableException("Security policy requires the privileged database configuration");
+    await client.school.update({ where: { id: p.schoolId }, data: { requireStaffMfa } });
+    await this.db.runAsTenant(this.ctx(p), (tx) =>
+      this.audit.record(
+        { actorId: p.userId, action: "admin.security.require_staff_mfa", entity: "school", entityId: p.schoolId, schoolId: p.schoolId, metadata: { requireStaffMfa } },
+        tx,
+      ),
+    );
+    return { requireStaffMfa };
   }
 }

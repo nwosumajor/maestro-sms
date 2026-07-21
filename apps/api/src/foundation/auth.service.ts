@@ -140,11 +140,14 @@ export class AuthService {
           }
         }
 
-        // Platform-owner mandate: the account must enrol MFA. We do NOT block the
+        // MFA-enrolment mandate: the account must enrol MFA. We do NOT block the
         // password login (the user needs a session to reach the MFA setup page —
         // blocking would lock them out permanently). Instead we flag the claim;
         // the web forces the user to /account until mfaEnabled becomes true.
-        const mfaEnrollRequired = sec?.mfaRequired === true && !sec?.mfaEnabled;
+        // Mandate sources: the per-user mfaRequired flag, OR the school's
+        // requireStaffMfa policy for any STAFF member (computed below once roles
+        // and the school row are known — mfaEnrollRequired is finalized there).
+        let mfaEnrollRequired = sec?.mfaRequired === true && !sec?.mfaEnabled;
 
         // Success: clear the failure counters and resolve the claims.
         await tx.user.update({
@@ -166,6 +169,12 @@ export class AuthService {
         // super_admin is EXEMPT from the 30-day reset policy.
         const passwordExpired = isPasswordExpired(sec?.passwordChangedAt, roles.includes("super_admin"));
         const school = await tx.school.findUnique({ where: { id: user.school_id } });
+        // School policy: staff (any role but student/parent) must enrol MFA.
+        // super_admin is exempt (the owner's lock/exempt posture elsewhere).
+        const isStaff = roles.some((r) => r !== "student" && r !== "parent");
+        if (school?.requireStaffMfa && isStaff && !roles.includes("super_admin") && !sec?.mfaEnabled) {
+          mfaEnrollRequired = true;
+        }
         // A manually-DISABLED school blocks ALL of its members' logins (the hard
         // deactivation lever — distinct from PAST_DUE, which only degrades
         // modules so the school can still reach /billing and pay). Checked AFTER

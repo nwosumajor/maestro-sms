@@ -1,8 +1,9 @@
-import { Body, Controller, Delete, Get, Header, Param, Post } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Header, Param, Post, Put } from "@nestjs/common";
 import { z } from "zod";
 import { ADMIN_PERMISSIONS, LMS_PERMISSIONS, SIS_PERMISSIONS } from "@sms/types";
 import type { StudentImportBatchDto } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
+import { RequireStepUp } from "../auth/require-stepup.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
@@ -79,6 +80,24 @@ export class AdminController {
   @RequirePermission(ADMIN_PERMISSIONS.RBAC_MANAGE)
   remove(@CurrentPrincipal() p: Principal, @Param("userId") userId: string, @Param("roleName") roleName: string) {
     return this.admin.removeRole(p, userId, roleName);
+  }
+
+  // --- school security policy: require MFA for all staff ---
+  @Get("security/mfa-policy")
+  @RequirePermission(ADMIN_PERMISSIONS.RBAC_MANAGE)
+  mfaPolicy(@CurrentPrincipal() p: Principal) {
+    return this.admin.getMfaPolicy(p);
+  }
+
+  /** Toggle the "all staff must enrol MFA" policy. Step-up gated (security). */
+  @Put("security/mfa-policy")
+  @RequirePermission(ADMIN_PERMISSIONS.RBAC_MANAGE)
+  @RequireStepUp()
+  setMfaPolicy(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(z.object({ requireStaffMfa: z.boolean() }))) body: { requireStaffMfa: boolean },
+  ) {
+    return this.admin.setMfaPolicy(p, body.requireStaffMfa);
   }
 
   /** Bulk-create students (CSV parsed client-side into rows). Legacy thin import. */

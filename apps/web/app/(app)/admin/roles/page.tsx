@@ -6,6 +6,7 @@ import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { UserRolesManager } from "@/components/admin/UserRolesManager";
+import { MfaPolicyCard } from "@/components/admin/MfaPolicyCard";
 import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +19,7 @@ export default async function RolesPage() {
     apiGet<{ id: string; name: string; email: string; roles: string[] }[]>("/users"),
     apiGet<{ name: string }[]>("/admin/roles"),
   ]);
+  const mfaPolicy = await apiGet<{ requireStaffMfa: boolean }>("/admin/security/mfa-policy");
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="admin" permissions={user.permissions}>
@@ -27,6 +29,8 @@ export default async function RolesPage() {
               platform-level (see Recertification to review them).</>} />
           <Link href="/admin" className="text-sm text-muted-foreground hover:underline">← Admin</Link>
         </div>
+        {mfaPolicy && <MfaPolicyCard initial={mfaPolicy.requireStaffMfa} />}
+
         {users === null || users.length === 0 ? (
           <Alert variant="info"><AlertTitle>No users</AlertTitle><AlertDescription>None to manage.</AlertDescription></Alert>
         ) : (

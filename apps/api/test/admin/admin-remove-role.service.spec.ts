@@ -25,7 +25,7 @@ function makeService(over: { remainingManaging?: number } = {}) {
   const workflow = { createRequest: jest.fn(), submit: jest.fn() };
   const hooks = { onFinalized: jest.fn() };
   return {
-    service: new AdminService(db as never, audit as never, workflow as never, hooks as never),
+    service: new AdminService(db as never, audit as never, workflow as never, { client: null } as never, hooks as never),
     tx,
     deleteMany,
     audit,

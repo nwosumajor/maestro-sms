@@ -34,6 +34,11 @@ model School {
   /// fee: PARENT | SCHOOL; null → the platform-wide default. Set by the school's
   /// own finance staff (fee.manage + step-up, privileged write like settlement).
   paymentFeeBearer       String?
+  /// When true, EVERY staff member (any role but student/parent) must enrol TOTP
+  /// MFA to use the app — enforced at login like the per-user mfaRequired flag.
+  /// School-policy write (school_admin, step-up; privileged like other registry
+  /// columns).
+  requireStaffMfa        Boolean  @default(false)
   /// Automatic late fee (kobo) added ONCE to an invoice still unpaid past
   /// dueDate + lateFeeGraceDays; 0 disables. Finance-staff-set (fee.manage +
   /// step-up, privileged write) like the other school fee columns.
