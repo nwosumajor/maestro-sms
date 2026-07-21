@@ -56,6 +56,9 @@ d("RLS cross-tenant isolation", () => {
   const lessonCoverA = randomUUID();
   const meetingSlotA = randomUUID();
   const meetingBookingA = randomUUID();
+  const examSittingA = randomUUID();
+  const examSeatA = randomUUID();
+  const examInvigilatorA = randomUUID();
   const teacherUnavailA = randomUUID();
   const grantA = randomUUID();
   const erasureA = randomUUID();
@@ -370,6 +373,20 @@ d("RLS cross-tenant isolation", () => {
       `INSERT INTO meeting_booking (id,"schoolId","slotId","parentId","studentId","updatedAt")
        VALUES ($1,$2,$3,$4,$4,now())`,
       [meetingBookingA, A, meetingSlotA, userA],
+    );
+    // Exam logistics: sitting + one seat + one invigilator.
+    await a.query(
+      `INSERT INTO exam_sitting (id,"schoolId",title,date,"startsAt","endsAt",hall,"createdById","updatedAt")
+       VALUES ($1,$2,'RLS Exam',now(),'09:00','11:00','Hall A',$3,now())`,
+      [examSittingA, A, userA],
+    );
+    await a.query(
+      `INSERT INTO exam_seat (id,"schoolId","sittingId","studentId","seatNo") VALUES ($1,$2,$3,$4,1)`,
+      [examSeatA, A, examSittingA, userA],
+    );
+    await a.query(
+      `INSERT INTO exam_invigilator (id,"schoolId","sittingId","staffId") VALUES ($1,$2,$3,$4)`,
+      [examInvigilatorA, A, examSittingA, userA],
     );
     // CSP generator input: one unavailable slot for teacher userA.
     await a.query(
@@ -1105,6 +1122,9 @@ d("RLS cross-tenant isolation", () => {
       "erasure_request",
       "privilege_grant",
       "teacher_unavailability",
+      "exam_invigilator",
+      "exam_seat",
+      "exam_sitting",
       "meeting_booking",
       "meeting_slot",
       "lesson_cover",
@@ -1209,6 +1229,9 @@ d("RLS cross-tenant isolation", () => {
     ["lesson_cover", lessonCoverA],
     ["meeting_slot", meetingSlotA],
     ["meeting_booking", meetingBookingA],
+    ["exam_sitting", examSittingA],
+    ["exam_seat", examSeatA],
+    ["exam_invigilator", examInvigilatorA],
     ["teacher_unavailability", teacherUnavailA],
     ["privilege_grant", grantA],
     ["erasure_request", erasureA],

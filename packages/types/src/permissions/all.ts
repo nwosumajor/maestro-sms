@@ -40,6 +40,7 @@ import type { SisPermission } from "./sis";
 import type { TaskPermission } from "./task";
 import type { TimetablePermission } from "./timetable";
 import type { MeetingPermission } from "./meeting";
+import type { ExamPermission } from "./exam";
 import type { TransportPermission } from "./transport";
 import type { WorkflowPermission } from "./workflow";
 
@@ -76,5 +77,6 @@ export type Permission =
   | TaskPermission
   | TimetablePermission
   | MeetingPermission
+  | ExamPermission
   | TransportPermission
   | WorkflowPermission;

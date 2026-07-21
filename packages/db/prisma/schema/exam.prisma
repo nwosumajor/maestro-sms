@@ -1,0 +1,76 @@
+// =============================================================================
+// Exam logistics — sittings, seating plans, invigilation
+// =============================================================================
+// Physical exam administration (distinct from the CBT module): a scheduled
+// sitting in a hall, a seat number per student, and an invigilator roster.
+
+/// A scheduled physical exam sitting in a hall.
+model ExamSitting {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  title    String
+  subject  String?
+  date     DateTime @db.Date
+  startsAt String   // "09:00"
+  endsAt   String   // "11:00"
+  hall     String
+  capacity Int      @default(0)
+  note     String?
+  /// Staff who created it (DB FK to user; audit field).
+  createdById String @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school       School            @relation(fields: [schoolId], references: [id])
+  seats        ExamSeat[]
+  invigilators ExamInvigilator[]
+
+  @@index([schoolId])
+  @@index([schoolId, date])
+  @@map("exam_sitting")
+}
+
+/// One student's seat in a sitting.
+model ExamSeat {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  sittingId String @db.Uuid
+  /// Student (DB FK to user; scalar).
+  studentId String @db.Uuid
+  seatNo    Int
+
+  createdAt DateTime @default(now())
+
+  school  School      @relation(fields: [schoolId], references: [id])
+  sitting ExamSitting @relation(fields: [sittingId], references: [id], onDelete: Cascade)
+
+  @@unique([sittingId, studentId])
+  @@unique([sittingId, seatNo])
+  @@index([schoolId])
+  @@index([schoolId, studentId])
+  @@map("exam_seat")
+}
+
+/// A staff invigilator assigned to a sitting.
+model ExamInvigilator {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  sittingId String  @db.Uuid
+  /// Staff (DB FK to user; scalar).
+  staffId   String  @db.Uuid
+  lead      Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  school  School      @relation(fields: [schoolId], references: [id])
+  sitting ExamSitting @relation(fields: [sittingId], references: [id], onDelete: Cascade)
+
+  @@unique([sittingId, staffId])
+  @@index([schoolId])
+  @@index([schoolId, staffId])
+  @@map("exam_invigilator")
+}

@@ -145,6 +145,11 @@ model School {
   meetingSlots            MeetingSlot[]
   meetingBookings         MeetingBooking[]
 
+  // Exam logistics
+  examSittings            ExamSitting[]
+  examSeats               ExamSeat[]
+  examInvigilators        ExamInvigilator[]
+
   // Security relations
   privilegeGrants PrivilegeGrant[]
 
