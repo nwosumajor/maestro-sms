@@ -120,6 +120,16 @@ pnpm --filter @sms/api test       # integrity unit + detector + report specs
 TEST_DATABASE_URL=... pnpm --filter @sms/api test  # includes the RLS e2e suite
 ```
 
+## Documentation
+- **[CLAUDE.md](CLAUDE.md)** — the durable spec: golden rules, stack, multi-tenancy
+  and RBAC models, build status, repo gotchas. Start here.
+- **[API.md](API.md)** — every HTTP endpoint with its permission / module / step-up gate.
+- **[docs/notes/](docs/notes/README.md)** — engineering notes from the build sessions:
+  why designs went the way they did, and the gotchas that cost real time. Point-in-time
+  records, so verify specifics against the code.
+- **[docs/RUNBOOK-BACKUP-RESTORE.md](docs/RUNBOOK-BACKUP-RESTORE.md)** — what is backed
+  up, how to restore for real, and the restore drill that proves a backup is usable.
+
 ## Auth flow (who trusts what)
 - **Auth.js** (web) owns login + session and stamps `school_id`/`roles`/`permissions`.
 - **Server Components** mint a short-lived HS256 service token from the session and
