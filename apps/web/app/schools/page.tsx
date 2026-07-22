@@ -23,10 +23,14 @@ export default async function SchoolsPage() {
 
   return (
     <main className="relative mx-auto min-h-screen max-w-4xl bg-background p-6">
-      <ThemeToggle className="absolute right-4 top-4 z-20" />
-      <header className="flex items-center justify-between py-4">
-        <Link href="/" className="text-lg font-semibold tracking-tight">SMS</Link>
-        <Link href="/login" className="text-sm text-muted-foreground hover:text-foreground">Sign in</Link>
+      {/* The toggle sits IN the header row, not absolutely positioned over it —
+          as `absolute right-4 top-4` it landed on top of the "Sign in" link. */}
+      <header className="flex items-center justify-between gap-4 py-4">
+        <Link href="/" className="whitespace-nowrap text-lg font-semibold tracking-tight">MAESTRO-SMS</Link>
+        <div className="flex shrink-0 items-center gap-3">
+          <ThemeToggle />
+          <Link href="/login" className="whitespace-nowrap text-sm text-muted-foreground hover:text-foreground">Sign in</Link>
+        </div>
       </header>
 
       <div className="mb-6">
