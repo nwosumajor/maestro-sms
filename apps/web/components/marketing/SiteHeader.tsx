@@ -22,7 +22,12 @@ export function SiteHeader() {
           <span className="text-sm font-semibold tracking-tight">School Management System</span>
         </Link>
         <nav className="hidden items-center gap-7 text-sm font-medium text-muted-foreground md:flex">
-          <Link href="/for-owners" className="transition-colors hover:text-foreground">For owners</Link>
+          {/* "For school owners" over "For owners" (owner of what?) and over
+              "For school owners and proprietors" — a proprietor IS a school
+              owner, and the nav's longest sibling is 11 chars, so the fuller
+              phrasing would wrap on mobile. The page's eyebrow does the precise
+              targeting: "For proprietors, owners & boards". */}
+          <Link href="/for-owners" className="transition-colors hover:text-foreground">For school owners</Link>
           <Link href="/#modules" className="transition-colors hover:text-foreground">Modules</Link>
           <Link href="/#security" className="transition-colors hover:text-foreground">Security</Link>
           <Link href="/#plans" className="transition-colors hover:text-foreground">Plans</Link>
