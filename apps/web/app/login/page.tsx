@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import type { PublicBrandingDto } from "@sms/types";
@@ -83,16 +84,37 @@ export default async function LoginPage({ searchParams }: { searchParams: { scho
 
         <ThemeToggle className="absolute right-4 top-4 z-20" />
 
-        {/* TOP zone — brand lockup (shown on desktop too now, so the panel has an
-            anchor instead of dead space; the mobile mark folds into the same row). */}
+        {/* TOP zone — brand lockup (shown on desktop too, so the panel has an
+            anchor instead of dead space; the mobile mark folds into the same row).
+            On the GENERIC login this is the platform's own mark and
+            wordmark, so it behaves the way a wordmark always does on the web — it
+            is the way home. On a SCHOOL-BRANDED login (?school=slug) it shows that
+            school's logo and name, and it is deliberately NOT a link: sending a
+            parent who clicked their child's school name to our sales homepage is
+            the wrong destination, and no per-school public page exists to point at
+            instead. There it stays what it is — a statement of whose sign-in
+            this is. */}
         <header className="relative z-10 flex items-center gap-2.5">
-          {branding?.logoUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element -- remote tenant logo
-            <img src={branding.logoUrl} alt={`${schoolName} logo`} className="h-8 w-8 rounded-lg border border-border/60 bg-white object-contain p-0.5" />
+          {branding ? (
+            <>
+              {branding.logoUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element -- remote tenant logo
+                <img src={branding.logoUrl} alt={`${schoolName} logo`} className="h-8 w-8 rounded-lg border border-border/60 bg-white object-contain p-0.5" />
+              ) : (
+                <img src="/images/platform-mark.png" alt="MajorGBN" width={128} height={128} className="h-8 w-8 object-contain" />
+              )}
+              <span className="text-sm font-semibold tracking-tight">{schoolName}</span>
+            </>
           ) : (
-            <img src="/images/platform-mark.png" alt="MajorGBN" width={128} height={128} className="h-8 w-8 object-contain" />
+            <Link
+              href="/"
+              aria-label="School Management System — back to the homepage"
+              className="flex items-center gap-2.5 rounded-lg transition-opacity hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary"
+            >
+              <img src="/images/platform-mark.png" alt="" width={128} height={128} className="h-8 w-8 object-contain" />
+              <span className="text-sm font-semibold tracking-tight">{schoolName}</span>
+            </Link>
           )}
-          <span className="text-sm font-semibold tracking-tight">{schoolName}</span>
         </header>
 
         {/* CENTER zone — the sign-in card. */}
