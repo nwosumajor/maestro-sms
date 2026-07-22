@@ -13,7 +13,12 @@ import { StudentImportService } from "./student-import.service";
 const roleSchema = z.object({ roleName: z.string().min(1).max(40) });
 const createUserSchema = z.object({
   name: z.string().min(1).max(200),
-  email: z.string().email(),
+  // OPTIONAL: omit it and the service generates a school-scoped login identifier
+  // (first.last@<slug>.majormaestro.com). Supplying one stays supported for
+  // staff who already have a real address they want to sign in with.
+  email: z.string().email().optional(),
+  // The real, deliverable address — where receipts and reset links are sent.
+  contactEmail: z.string().email().optional(),
   role: z.string().min(1).max(40),
   password: z.string().min(8).max(200).optional(),
 });

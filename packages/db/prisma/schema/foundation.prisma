@@ -401,7 +401,15 @@ model PlatformSubscriptionPayment {
 model User {
   id                String    @id @default(uuid()) @db.Uuid
   schoolId          String    @db.Uuid
+  // LOGIN IDENTIFIER — globally unique because login happens before a school is
+  // known. For new users this is GENERATED (`adams.james@<slug>.majormaestro.com`,
+  // see @sms/types/school-email), so two people sharing a name at two different
+  // schools no longer collide. NOT a mailbox: never send here.
   email             String    @unique
+  // Where mail ACTUALLY goes — the person's own real address. Optional, because
+  // students generally have none (their guardians are notified instead). Not
+  // unique: a parent may legitimately use one address for several children.
+  contactEmail      String?
   name              String
   passwordHash      String
   /// Mobile number for SMS/WhatsApp notification delivery (self-service on

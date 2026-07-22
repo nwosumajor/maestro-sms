@@ -29,9 +29,17 @@ function makeService(over: {
   const links = [...(over.existingLinks ?? [])];
   const tx = {
     role: { findFirst: jest.fn().mockResolvedValue({ id: "parent-role" }) },
+    // A new guardian now gets a GENERATED, school-scoped login identifier, so the
+    // service resolves the school's slug for the subdomain.
+    school: { findFirst: jest.fn().mockResolvedValue({ slug: "demo" }) },
     user: {
-      findFirst: jest.fn().mockImplementation(({ where }: { where: { email?: string } }) =>
-        Promise.resolve(where.email ? (over.existingParent ?? null) : null),
+      // TWO different lookups now hit this mock, and they must not be conflated:
+      //   * the GUARDIAN match, `{ OR: [{contactEmail}, {email}] }` -> may find one
+      //   * the login-identifier availability probe, `{ email: candidate }`
+      //     -> must report FREE, or the allocator exhausts every candidate.
+      findFirst: jest.fn().mockImplementation(
+        ({ where }: { where: { email?: string; OR?: Array<Record<string, string>> } }) =>
+          Promise.resolve(where.OR ? (over.existingParent ?? null) : null),
       ),
       findMany: jest.fn().mockImplementation(({ where }: { where: { id?: { in: string[] }; email?: { in: string[] } } }) => {
         if (where.email) return Promise.resolve(over.studentsByEmail ?? []);

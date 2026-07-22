@@ -9,6 +9,7 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import bcrypt from "bcryptjs";
 import { Prisma } from "@sms/db";
+import { allocateLoginEmail, schoolSlugOf } from "../foundation/login-email";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -134,7 +135,10 @@ export class AdminService {
    * create users in their own tenant; the super_admin guard prevents minting a
    * cross-tenant operator. Returns a one-time temporary password.
    */
-  async createUser(p: Principal, input: { name: string; email: string; role: string; password?: string }) {
+  async createUser(
+    p: Principal,
+    input: { name: string; email?: string; contactEmail?: string; role: string; password?: string },
+  ) {
     const roleName = input.role;
     if (isNonAssignableRole(roleName)) {
       // 404-shaped message: a school-level admin should not learn that a
@@ -147,12 +151,28 @@ export class AdminService {
     const created = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const role = await tx.role.findFirst({ where: { name: roleName }, select: { id: true } });
       if (!role) throw new NotFoundException("Role not found");
-      const existing = await tx.user.findFirst({ where: { email: input.email }, select: { id: true } });
-      if (existing) throw new BadRequestException("That email is already in use");
+      // No address supplied => GENERATE a school-scoped login identifier. Because
+      // the school's unique slug is the subdomain, this can never collide with
+      // another school — which is the whole point of the scheme.
+      let loginEmail: string;
+      if (input.email?.trim()) {
+        loginEmail = input.email.trim().toLowerCase();
+        const existing = await tx.user.findFirst({ where: { email: loginEmail }, select: { id: true } });
+        if (existing) throw new BadRequestException("That email is already in use");
+      } else {
+        const slug = await schoolSlugOf(tx, p.schoolId);
+        loginEmail = await allocateLoginEmail(tx, input.name, slug);
+      }
       let user: { id: string };
       try {
         user = await tx.user.create({
-          data: { schoolId: p.schoolId, email: input.email, name: input.name, passwordHash },
+          data: {
+            schoolId: p.schoolId,
+            email: loginEmail,
+            contactEmail: input.contactEmail?.trim() || null,
+            name: input.name,
+            passwordHash,
+          },
         });
       } catch (e) {
         // P2002 = unique violation on the GLOBAL user.email index: the address

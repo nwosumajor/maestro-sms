@@ -20,7 +20,7 @@ import { MessageCreditsService } from "./message-credits.service";
 import { Prisma } from "@sms/db";
 import type { Queue } from "bullmq";
 import type { NotificationChannelValue, NotificationTypeValue, NotificationPreferenceDto } from "@sms/types";
-import { allowedChannels } from "@sms/types";
+import { allowedChannels, deliverableEmail } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -195,7 +195,7 @@ export class NotificationService {
         if (!notification) return { sent: 0, failed: 0 };
         const recipient = await tx.user.findFirst({
           where: { id: notification.recipientId },
-          select: { email: true, phone: true },
+          select: { email: true, contactEmail: true, phone: true },
         });
         const pending = await tx.notificationDelivery.findMany({
           where: { notificationId: job.notificationId, status: "PENDING" },
@@ -204,7 +204,12 @@ export class NotificationService {
         let sent = 0;
         let failed = 0;
         for (const d of pending) {
-          const target = this.resolveTarget(d.channel, recipient?.email ?? null, recipient?.phone ?? null);
+          // SAFETY: never deliver to a GENERATED login identifier — it has no
+          // mailbox, so sending there drops receipts and reset links silently.
+          // deliverableEmail() returns the real contactEmail, or null; the null
+          // is then recorded as a real FAILED delivery the operator can see.
+          const mailTo = recipient ? deliverableEmail(recipient) : null;
+          const target = this.resolveTarget(d.channel, mailTo, recipient?.phone ?? null);
           if (!target) {
             await tx.notificationDelivery.update({
               where: { id: d.id },

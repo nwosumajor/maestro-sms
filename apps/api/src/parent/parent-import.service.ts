@@ -21,6 +21,7 @@ import {
 } from "@nestjs/common";
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
+import { allocateLoginEmail, schoolSlugOf } from "../foundation/login-email";
 import { Prisma } from "@sms/db";
 import type {
   CreateParentResultDto,
@@ -160,11 +161,30 @@ export class ParentImportService {
       }
 
       let created = false;
-      let parent = await tx.user.findFirst({ where: { email }, select: { id: true, name: true } });
+      // Match on the REAL address (contactEmail) — that is what identifies a
+      // guardian now that `email` is a generated, school-scoped login identifier.
+      // The legacy `email` match stays as a fallback so guardians created before
+      // this change are still found rather than duplicated.
+      let parent = await tx.user.findFirst({
+        where: { OR: [{ contactEmail: email }, { email }] },
+        select: { id: true, name: true },
+      });
       if (!parent) {
+        // A guardian with children at ANOTHER school already has an account
+        // there; this school gets its own, with the same real address for mail.
+        // Generated identifier => the two can never collide.
+        const slug = await schoolSlugOf(tx, p.schoolId);
+        const loginEmail = await allocateLoginEmail(tx, input.name.trim(), slug);
         try {
           parent = await tx.user.create({
-            data: { schoolId: p.schoolId, email, name: input.name.trim(), passwordHash, passwordChangedAt: null },
+            data: {
+              schoolId: p.schoolId,
+              email: loginEmail,
+              contactEmail: email,
+              name: input.name.trim(),
+              passwordHash,
+              passwordChangedAt: null,
+            },
             select: { id: true, name: true },
           });
         } catch (e) {
