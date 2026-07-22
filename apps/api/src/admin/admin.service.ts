@@ -18,7 +18,7 @@ import {
   type TenantContext,
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
-import { isPlatformTierRole } from "@sms/types";
+import { isPlatformTierRole, requiresContactEmail } from "@sms/types";
 import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
@@ -151,6 +151,15 @@ export class AdminService {
     const created = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const role = await tx.role.findFirst({ where: { name: roleName }, select: { id: true } });
       if (!role) throw new NotFoundException("Role not found");
+      // Staff and parents MUST have a reachable address: without one they can
+      // never receive a reset link or an invite, and the account is
+      // unrecoverable the first time they forget their password. Students are
+      // exempt — their guardians are the ones notified.
+      if (requiresContactEmail(roleName) && !input.contactEmail?.trim()) {
+        throw new BadRequestException(
+          `A contact email is required for a ${roleName} — it is where their sign-in invite, password resets and notices are sent.`,
+        );
+      }
       // No address supplied => GENERATE a school-scoped login identifier. Because
       // the school's unique slug is the subdomain, this can never collide with
       // another school — which is the whole point of the scheme.
@@ -164,7 +173,7 @@ export class AdminService {
         loginEmail = await allocateLoginEmail(tx, input.name, slug);
       }
       const generated = !input.email?.trim();
-      let user: { id: string };
+      let user: { id: string; email: string };
       try {
         user = await tx.user.create({
           data: {
@@ -196,7 +205,8 @@ export class AdminService {
         await tx.userRole.create({ data: { schoolId: p.schoolId, userId: user.id, roleId: role.id } });
       }
       await this.log(tx, p, "admin.user.create", user.id, {
-        email: input.email,
+        // The identifier actually issued — input.email is undefined when generated.
+        email: user.email,
         role: roleName,
         ...(pendingRole ? { pendingAppointment: true } : {}),
       });
@@ -204,9 +214,9 @@ export class AdminService {
     });
     if (pendingRole) {
       const pending = await this.raiseAppointment(p, created.id, input.name, roleName);
-      return { id: created.id, email: input.email, role: roleName, tempPassword, ...pending };
+      return { id: created.id, email: created.email, role: roleName, tempPassword, ...pending };
     }
-    return { id: created.id, email: input.email, role: roleName, tempPassword };
+    return { id: created.id, email: created.email, role: roleName, tempPassword };
   }
 
   async assignRole(p: Principal, userId: string, roleName: string) {

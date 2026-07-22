@@ -22,6 +22,8 @@ function makeService(over: { role?: Record<string, unknown> | null; existing?: R
       create: userCreate,
     },
     userRole: { create: userRoleCreate },
+    // A generated sign-in identifier resolves the school's slug for its domain.
+    school: { findFirst: jest.fn().mockResolvedValue({ slug: "demo" }) },
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
@@ -57,7 +59,7 @@ describe("AdminService.createUser", () => {
 
   it("creates a user in the caller's school, assigns the role, returns a temp password, and audits", async () => {
     const { service, userCreate, userRoleCreate, audit } = makeService({});
-    const res = await service.createUser(p, { name: "Ada", email: "ada@t", role: "teacher" });
+    const res = await service.createUser(p, { name: "Ada", email: "ada@t", contactEmail: "ada@real.test", role: "teacher" });
     expect(userCreate).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ schoolId: "A", email: "ada@t" }) }),
     );
@@ -74,7 +76,45 @@ describe("AdminService.createUser", () => {
   it("rejects a duplicate email", async () => {
     const { service } = makeService({ existing: { id: "u-existing" } });
     await expect(
-      service.createUser(p, { name: "Ada", email: "ada@t", role: "teacher" }),
+      service.createUser(p, { name: "Ada", email: "ada@t", contactEmail: "ada@real.test", role: "teacher" }),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// Contact email is REQUIRED for anyone who needs to receive mail
+// -----------------------------------------------------------------------------
+// Sign-in identifiers are generated (firstname.lastname@<slug>.com) and are NOT
+// mailboxes. Without a contact address a staff member or parent can never get an
+// invite or a password reset, and the account is unrecoverable the first time
+// they forget their password. Students are exempt: guardians are notified.
+describe("AdminService.createUser — contact email requirement", () => {
+  it("REFUSES a staff account with no contact email", async () => {
+    const { service } = makeService({});
+    await expect(service.createUser(p, { name: "Ngozi Bello", role: "teacher" })).rejects.toMatchObject({
+      status: 400,
+    });
+  });
+
+  it("REFUSES a parent with no contact email", async () => {
+    const { service } = makeService({});
+    await expect(service.createUser(p, { name: "Grace Eze", role: "parent" })).rejects.toMatchObject({
+      status: 400,
+    });
+  });
+
+  it("ALLOWS a student without one — most pupils have no address of their own", async () => {
+    const { service } = makeService({});
+    const res = await service.createUser(p, { name: "Tunde Okoro", role: "student" });
+    // And the identifier it issued is the GENERATED one, not undefined.
+    expect(res.email).toBe("tunde.okoro@demo.com");
+  });
+
+  it("stamps loginEmailGenerated so delivery knows it is not a mailbox", async () => {
+    const { service, userCreate } = makeService({});
+    await service.createUser(p, { name: "Tunde Okoro", role: "student" });
+    expect(userCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ loginEmailGenerated: true }) }),
+    );
   });
 });

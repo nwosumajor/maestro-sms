@@ -141,3 +141,16 @@ export function deliverableEmail(user: {
   const legacy = user.email?.trim();
   return legacy || null;
 }
+
+/**
+ * Does this role need a real, deliverable address?
+ *
+ * Everyone except STUDENTS. A student's login identifier is generated and their
+ * guardians receive the mail, so requiring one would block enrolment for the
+ * many pupils who have no address. Staff and parents DO need one — without it
+ * they can never receive a password reset, an invite, or a receipt, and the
+ * account becomes unrecoverable the moment they forget their password.
+ */
+export function requiresContactEmail(roleName: string): boolean {
+  return roleName !== "student";
+}
