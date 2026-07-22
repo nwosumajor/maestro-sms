@@ -420,6 +420,9 @@ model User {
   /// MFA (mfaEnabled). Set by super_admin per-user or per-role from the operator
   /// console. Distinct from mfaEnabled (the user's own enrolment state).
   mfaRequired       Boolean   @default(false)
+  /// When the account was DISABLED (revoked). Null while active — surfaced in
+  /// the operator console so "who had access, and until when" is answerable.
+  disabledAt        DateTime?
   /// Brute-force protection: consecutive failed logins. On the 3rd miss the account
   /// is LOCKED (permanent — cleared only by a super_admin). lockedUntil records when.
   failedLoginCount  Int       @default(0)

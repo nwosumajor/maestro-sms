@@ -275,3 +275,18 @@ export const PLATFORM_TIER_ROLES: readonly string[] = Object.entries(ROLE_PERMIS
 export function isPlatformTierRole(roleName: string): boolean {
   return PLATFORM_TIER_ROLES.includes(roleName);
 }
+
+// =============================================================================
+// Defence in depth: platform permissions are INERT outside the platform org
+// =============================================================================
+// A `platform.*` permission only means anything for a member of the platform
+// organisation — it is cross-tenant reach, and a customer school's user has no
+// legitimate claim to it. Filtering at claim-resolution means that even if a
+// platform-tier role is somehow attached to a school user (a grant made before
+// the assignment guard existed, a hand-edited row, a restored backup), the
+// permissions simply do not resolve. The guard stops NEW grants; this makes an
+// EXISTING one harmless.
+export function effectivePermissions(permissions: readonly string[], isPlatformOrg: boolean): string[] {
+  if (isPlatformOrg) return [...permissions];
+  return permissions.filter((p) => !p.startsWith("platform."));
+}

@@ -26,7 +26,9 @@ import {
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import { Prisma, type PrismaClient } from "@sms/db";
+import type { MisplacedPlatformRoleDto } from "@sms/types";
 import {
+  PLATFORM_TIER_ROLES,
   DEFAULT_PLAN,
   PLATFORM_STAFF_ROLE,
   SUBSCRIPTION_TRIAL_DAYS,
@@ -483,7 +485,7 @@ export class OperatorProvisioningService {
     const org = await this.platformOrg(db);
     const rows = await db.user.findMany({
       where: { schoolId: org.id, roles: { some: { role: { name: PLATFORM_STAFF_ROLE } } } },
-      select: { id: true, email: true, name: true, status: true, mfaEnabled: true, passwordChangedAt: true, createdAt: true },
+      select: { id: true, email: true, name: true, status: true, mfaEnabled: true, passwordChangedAt: true, createdAt: true, disabledAt: true },
       orderBy: { createdAt: "desc" },
     });
     return rows.map((u) => ({
@@ -496,7 +498,74 @@ export class OperatorProvisioningService {
       // "have they actually activated their invite yet?".
       activated: u.passwordChangedAt !== null,
       createdAt: u.createdAt,
+      disabledAt: u.disabledAt,
     }));
+  }
+
+  /**
+   * AUDIT: platform-tier roles held OUTSIDE the platform organisation.
+   *
+   * Such a grant should be impossible — AdminService refuses it and login
+   * filters `platform.*` to nothing outside the platform org — but a row can
+   * still exist from before those guards, from a hand-edited database, or from
+   * a restored backup. The permissions are inert, yet the grant is a real
+   * finding: it means someone once had, or tried to obtain, cross-tenant reach.
+   * This report makes them findable instead of invisible (the staff console
+   * scopes to the platform org, so these accounts never appear there).
+   */
+  async listMisplacedPlatformRoles(_p: Principal): Promise<MisplacedPlatformRoleDto[]> {
+    const db = this.client();
+    const rows = await db.user.findMany({
+      where: {
+        school: { isPlatform: false },
+        roles: { some: { role: { name: { in: [...PLATFORM_TIER_ROLES] } } } },
+      },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        status: true,
+        createdAt: true,
+        school: { select: { id: true, name: true } },
+        roles: { select: { role: { select: { name: true } } } },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    return rows.map((u) => ({
+      userId: u.id,
+      email: u.email,
+      name: u.name,
+      status: u.status,
+      schoolId: u.school.id,
+      schoolName: u.school.name,
+      platformRoles: u.roles
+        .map((r) => r.role.name)
+        .filter((n) => (PLATFORM_TIER_ROLES as readonly string[]).includes(n)),
+      grantedAt: u.createdAt,
+    }));
+  }
+
+  /** Strip a misplaced platform-tier role. Owner-only, step-up, audited. The
+   *  ACCOUNT is untouched — only the cross-tenant grant is removed. */
+  async revokeMisplacedPlatformRole(p: Principal, userId: string, roleName: string): Promise<{ revoked: boolean }> {
+    if (!(PLATFORM_TIER_ROLES as readonly string[]).includes(roleName)) {
+      throw new BadRequestException("Not a platform-tier role");
+    }
+    const db = this.client();
+    const target = await db.user.findFirst({
+      where: { id: userId, school: { isPlatform: false } },
+      select: { id: true, schoolId: true },
+    });
+    if (!target) throw new NotFoundException("User not found");
+    const role = await db.role.findFirst({ where: { name: roleName }, select: { id: true } });
+    if (!role) throw new NotFoundException("Role not found");
+    const res = await db.userRole.deleteMany({ where: { userId, roleId: role.id } });
+    await this.auditInOperatorTenant(p, "operator.platform.role.revoke_misplaced", "user", userId, {
+      roleName,
+      schoolId: target.schoolId,
+      removed: res.count,
+    });
+    return { revoked: res.count > 0 };
   }
 
   /** Hire a platform manager. Invite-link only — we never hand out a password. */
@@ -544,6 +613,7 @@ export class OperatorProvisioningService {
       status: staff.status,
       mfaEnabled: false,
       activated: false,
+      disabledAt: null,
       createdAt: staff.createdAt,
     };
   }
@@ -562,12 +632,24 @@ export class OperatorProvisioningService {
     });
     if (!target) throw new NotFoundException("Platform staff member not found");
 
+    // LEAVER HYGIENE: revoking clears MFA enrolment as well as blocking login.
+    // The departing person's authenticator entry lives on a device the company
+    // no longer controls, so a later reinstatement must re-enrol rather than
+    // silently trusting that old secret. (The unused-invite case needs nothing
+    // here: acceptInvite already refuses a non-ACTIVE account, so disabling the
+    // account kills any outstanding invite link on its own.)
+    const revoking = status === "DISABLED";
     const updated = await db.user.update({
       where: { id: userId },
-      data: { status },
-      select: { id: true, email: true, name: true, status: true, mfaEnabled: true, passwordChangedAt: true, createdAt: true },
+      data: revoking
+        ? { status, mfaEnabled: false, mfaSecret: null, disabledAt: new Date() }
+        : { status, disabledAt: null },
+      select: { id: true, email: true, name: true, status: true, mfaEnabled: true, passwordChangedAt: true, createdAt: true, disabledAt: true },
     });
-    await this.auditInOperatorTenant(p, "operator.platform.staff.status", "user", userId, { status });
+    await this.auditInOperatorTenant(p, "operator.platform.staff.status", "user", userId, {
+      status,
+      ...(revoking ? { mfaCleared: true } : {}),
+    });
     return {
       id: updated.id,
       email: updated.email,
@@ -576,6 +658,7 @@ export class OperatorProvisioningService {
       mfaEnabled: updated.mfaEnabled,
       activated: updated.passwordChangedAt !== null,
       createdAt: updated.createdAt,
+      disabledAt: updated.disabledAt,
     };
   }
 }

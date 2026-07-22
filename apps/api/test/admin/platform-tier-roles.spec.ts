@@ -88,3 +88,38 @@ describe("platform-tier roles", () => {
     await expect(svc.removeRole(schoolAdmin(), "someone", "manager_admin")).rejects.toMatchObject({ status: 404 });
   });
 });
+
+// -----------------------------------------------------------------------------
+// Defence in depth: a platform-tier grant is INERT outside the platform org
+// -----------------------------------------------------------------------------
+// The assignment guard stops NEW grants. This makes an EXISTING one harmless —
+// a grant made before the guard, a hand-edited row, or a restored backup.
+import { effectivePermissions } from "@sms/types";
+
+describe("effectivePermissions — platform.* only resolves inside the platform org", () => {
+  const managerAdminPerms = ROLE_PERMISSIONS.manager_admin as readonly string[];
+
+  it("keeps every permission for a member of the PLATFORM org", () => {
+    expect(effectivePermissions(managerAdminPerms, true)).toEqual([...managerAdminPerms]);
+  });
+
+  it("strips EVERY platform.* permission for a user in a customer school", () => {
+    const effective = effectivePermissions(managerAdminPerms, false);
+    expect(effective.some((p) => p.startsWith("platform."))).toBe(false);
+    // Non-platform permissions on the same role survive (nothing else changes).
+    expect(effective).toContain("notification.read");
+  });
+
+  it("leaves an ordinary school role completely untouched", () => {
+    const teacher = ROLE_PERMISSIONS.teacher as readonly string[];
+    expect(effectivePermissions(teacher, false)).toEqual([...teacher]);
+  });
+
+  it("neutralises the exact real-world case: manager_admin attached to a school user", () => {
+    // The grant exists, but confers no cross-tenant reach.
+    const effective = effectivePermissions(managerAdminPerms, false);
+    for (const p of ["platform.tenants.read", "platform.tenants.write", "platform.audit.read"]) {
+      expect(effective).not.toContain(p);
+    }
+  });
+});

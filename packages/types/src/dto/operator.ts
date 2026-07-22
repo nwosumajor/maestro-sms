@@ -175,6 +175,9 @@ export interface PlatformStaffDto {
   /** Has the invite actually been used yet (password set)? */
   activated: boolean;
   createdAt: Date;
+  /** When access was revoked — null while active. Kept (not deleted) so
+   *  "who had access, and until when" stays answerable. */
+  disabledAt: Date | null;
 }
 
 // --- School directory (operator) ---------------------------------------------
@@ -343,4 +346,18 @@ export interface GamesAnalyticsDto {
     schoolsEnrolled: number;
     consentedStudents: number;
   };
+}
+
+/** AUDIT finding: a platform-tier role held by a user OUTSIDE the platform org.
+ *  The permissions are inert (login filters `platform.*` outside the platform
+ *  organisation) but the grant itself is worth surfacing and removing. */
+export interface MisplacedPlatformRoleDto {
+  userId: string;
+  email: string;
+  name: string;
+  status: string;
+  schoolId: string;
+  schoolName: string;
+  platformRoles: string[];
+  grantedAt: Date;
 }

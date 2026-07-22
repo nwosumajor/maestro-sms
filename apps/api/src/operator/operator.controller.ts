@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Post, Put, Query, Res, StreamableFile } from "@nestjs/common";
+import {
+  Delete, Body, Controller, Get, Param, Post, Put, Query, Res, StreamableFile } from "@nestjs/common";
 import type { Response } from "express";
 import type {
   MessageCreditBalancePageDto,
@@ -23,6 +24,7 @@ import {
   isSubscriptionStatus,
   type GamesAnalyticsDto,
   type PlatformStaffDto,
+  type MisplacedPlatformRoleDto,
   type SchoolDirectoryPageDto,
   type SchoolProfileDto,
 } from "@sms/types";
@@ -214,6 +216,25 @@ export class OperatorController {
     @Body(new ZodValidationPipe(adminSchema)) body: z.infer<typeof adminSchema>,
   ) {
     return this.provisioning.createAdmin(p, schoolId, body);
+  }
+
+  /** AUDIT: platform-tier roles held outside the platform org (should be none). */
+  @Get("platform-role-audit")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_STAFF_MANAGE)
+  platformRoleAudit(@CurrentPrincipal() p: Principal): Promise<MisplacedPlatformRoleDto[]> {
+    return this.provisioning.listMisplacedPlatformRoles(p);
+  }
+
+  /** Strip a misplaced platform-tier grant. The ACCOUNT is untouched. */
+  @Delete("platform-role-audit/:userId/:roleName")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_STAFF_MANAGE)
+  @RequireStepUp()
+  revokeMisplacedPlatformRole(
+    @CurrentPrincipal() p: Principal,
+    @Param("userId") userId: string,
+    @Param("roleName") roleName: string,
+  ) {
+    return this.provisioning.revokeMisplacedPlatformRole(p, userId, roleName);
   }
 
   // --- platform staff (the owner hiring help) — OWNER-ONLY -----------------

@@ -1,6 +1,7 @@
 import { BadRequestException, Inject, Injectable, UnauthorizedException } from "@nestjs/common";
 import bcrypt from "bcryptjs";
 import { prisma } from "@sms/db";
+import { effectivePermissions } from "@sms/types";
 import { verifyTotp } from "../auth/totp";
 import { ModuleEntitlementService } from "./module-entitlement.service";
 import {
@@ -159,7 +160,7 @@ export class AuthService {
           include: { role: { include: { permissions: { include: { permission: true } } } } },
         });
         const roles: string[] = userRoles.map((ur: { role: { name: string } }) => ur.role.name);
-        const permissions: string[] = [
+        const grantedPermissions: string[] = [
           ...new Set<string>(
             userRoles.flatMap((ur: { role: { permissions: { permission: { key: string } }[] } }) =>
               ur.role.permissions.map((rp) => rp.permission.key),
@@ -169,6 +170,13 @@ export class AuthService {
         // super_admin is EXEMPT from the 30-day reset policy.
         const passwordExpired = isPasswordExpired(sec?.passwordChangedAt, roles.includes("super_admin"));
         const school = await tx.school.findUnique({ where: { id: user.school_id } });
+        // SECURITY (defence in depth): `platform.*` permissions are cross-tenant
+        // reach and mean nothing outside the platform organisation. Filtering
+        // here makes a platform-tier role attached to a SCHOOL user inert —
+        // covering grants made before the assignment guard existed, hand-edited
+        // rows, or a restored backup. AdminService blocks new grants; this
+        // neutralises existing ones.
+        const permissions = effectivePermissions(grantedPermissions, school?.isPlatform === true);
         // School policy: staff (any role but student/parent) must enrol MFA.
         // super_admin is exempt (the owner's lock/exempt posture elsewhere).
         const isStaff = roles.some((r) => r !== "student" && r !== "parent");
@@ -267,13 +275,16 @@ export class AuthService {
         const school = await tx.school.findUnique({ where: { id: p.schoolId } });
         if (school?.status !== "ACTIVE" && !isSuperAdmin) return { revoked: true as const };
 
-        const permissions: string[] = [
+        const grantedPermissions: string[] = [
           ...new Set<string>(
             userRoles.flatMap((ur: { role: { permissions: { permission: { key: string } }[] } }) =>
               ur.role.permissions.map((rp) => rp.permission.key),
             ),
           ),
         ];
+        // Same defence in depth as login: platform.* is inert outside the
+        // platform org, so a stale grant cannot be re-acquired mid-session.
+        const permissions = effectivePermissions(grantedPermissions, school?.isPlatform === true);
         return {
           revoked: false as const,
           claims: {
