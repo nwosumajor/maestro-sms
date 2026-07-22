@@ -53,7 +53,10 @@ describe("Race — Class Race engine (spec §5 / §11.5)", () => {
 
     it("shows a racer ONLY their own guesses, never the target or others' guesses", () => {
       const r = activeRace();
-      r.guess("a", "5678"); // A's wrong guess
+      // FIXED clock: the view serializes timestamps, and a real Date.now() can
+      // itself contain the digits "1234" — which would fail the leak assertion
+      // below for a reason that has nothing to do with leaking the target.
+      r.guess("a", "5678", 1500); // A's wrong guess
       const bView = r.viewFor("b");
       expect(bView.yourGuesses).toHaveLength(0); // B sees none of A's guesses
       // Before anyone cracks it, the target appears in NO view and there is no
@@ -119,9 +122,11 @@ describe("Race — Class Race engine (spec §5 / §11.5)", () => {
 
     it("never serializes the target even after the race is over", () => {
       const r = activeRace(["a", "b"]);
-      r.guess("a", "1234");
-      r.guess("b", "5678"); // B never cracks
-      r.end();
+      // FIXED clock throughout — see the note above: a wall-clock timestamp
+      // that happens to contain "1234" would trip the substring check below.
+      r.guess("a", "1234", 1500);
+      r.guess("b", "5678", 1600); // B never cracks
+      r.end(1700);
       // B's secret-free view: B never guessed 1234, so it appears nowhere for B.
       const json = JSON.stringify(r.viewFor("b"));
       expect(json).not.toContain("1234");
