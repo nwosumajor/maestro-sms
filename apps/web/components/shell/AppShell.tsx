@@ -39,6 +39,7 @@ import {
   CircleHelpIcon,
   type LucideIcon,
 } from "lucide-react";
+import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { auth } from "@/lib/auth";
 import { ImpersonationBanner } from "./ImpersonationBanner";
@@ -46,6 +47,7 @@ import { SessionIdleGuard } from "./SessionIdleGuard";
 import { apiGet } from "@/lib/api";
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
 import { GlobalSearch } from "@/components/shell/GlobalSearch";
+import { SidebarScroll } from "@/components/shell/SidebarScroll";
 import { LegalAcceptBanner } from "@/components/legal/LegalAcceptBanner";
 import type { TenantTheme } from "@sms/tokens";
 import {
@@ -379,7 +381,7 @@ export async function AppShell({
 
       {/* Renewal / past-due banner — the conversion nudge for billing.read staff. */}
       {renewal && (
-        <a
+        <Link
           href="/billing"
           className={cn(
             "block px-4 py-2 text-center text-sm font-medium transition-colors",
@@ -394,15 +396,12 @@ export async function AppShell({
             `Your ${renewal.plan} plan period has ended — renew now to keep all modules →`}
           {renewal.kind === "ENDING" &&
             `Your ${renewal.plan} plan ends in ${renewal.daysLeft} day${renewal.daysLeft === 1 ? "" : "s"} — renew to keep all modules →`}
-        </a>
+        </Link>
       )}
 
       <div className="flex">
         {/* Left nav — grouped "register sections" */}
-        <nav
-          aria-label="Primary"
-          className="sticky top-14 hidden h-[calc(100vh-3.5rem)] w-60 shrink-0 overflow-y-auto border-r border-border/70 bg-sidebar px-3 py-4 md:block"
-        >
+        <SidebarScroll className="sticky top-14 hidden h-[calc(100vh-3.5rem)] w-60 shrink-0 overflow-y-auto border-r border-border/70 bg-sidebar px-3 py-4 md:block">
           <div className="space-y-5">
             {NAV_GROUPS.map((group) => {
               const groupItems = items.filter((it) => NAV_GROUP[it.key] === group.key);
@@ -416,7 +415,7 @@ export async function AppShell({
                       const isActive = item.key === active;
                       return (
                         <li key={item.key}>
-                          <a
+                          <Link
                             href={item.href}
                             aria-current={isActive ? "page" : undefined}
                             className={cn(
@@ -443,7 +442,7 @@ export async function AppShell({
                               aria-hidden
                             />
                             {item.label}
-                          </a>
+                          </Link>
                         </li>
                       );
                     })}
@@ -452,7 +451,7 @@ export async function AppShell({
               );
             })}
           </div>
-        </nav>
+        </SidebarScroll>
 
         {/* Content */}
         <main className="min-w-0 flex-1 bg-brand-wash">
