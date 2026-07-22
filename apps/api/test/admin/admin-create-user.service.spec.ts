@@ -6,7 +6,7 @@
 // super_admin. Also proves the duplicate-email guard and that creation is audited.
 // Tenant isolation itself is covered by the RLS e2e suite.
 
-import { BadRequestException } from "@nestjs/common";
+import { NotFoundException, BadRequestException } from "@nestjs/common";
 import { AdminService } from "../../src/admin/admin.service";
 import type { Principal, TenantContext, TenantTx } from "../../src/integrity/integrity.foundation";
 
@@ -42,11 +42,16 @@ function makeService(over: { role?: Record<string, unknown> | null; existing?: R
 const p: Principal = { schoolId: "A", userId: "admin-1", roles: ["school_admin"], permissions: ["rbac.manage"] };
 
 describe("AdminService.createUser", () => {
-  it("refuses to create a super_admin (no cross-tenant escalation)", async () => {
+  it("refuses to create a platform-tier user (no cross-tenant escalation)", async () => {
     const { service, userCreate } = makeService({});
+    // 404, not 400: a school-level admin must not learn that a platform role
+    // even exists. Covers manager_admin too — see platform-tier-roles.spec.ts.
     await expect(
       service.createUser(p, { name: "Mallory", email: "m@t", role: "super_admin" }),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      service.createUser(p, { name: "Mallory", email: "m@t", role: "manager_admin" }),
+    ).rejects.toBeInstanceOf(NotFoundException);
     expect(userCreate).not.toHaveBeenCalled();
   });
 

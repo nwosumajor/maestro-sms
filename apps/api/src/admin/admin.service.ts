@@ -16,6 +16,7 @@ import {
   type TenantContext,
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
+import { isPlatformTierRole } from "@sms/types";
 import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
@@ -26,10 +27,15 @@ export interface ImportRow {
   classId?: string | null;
 }
 
-// The platform/operator tier — NEVER mintable by a school-level admin. A
-// school_admin/principal creating users must not be able to escalate a profile to
-// cross-tenant super_admin. (All other roles are single-school-scoped by design.)
-const NON_ASSIGNABLE_ROLES = new Set(["super_admin"]);
+// The platform/operator tier — NEVER mintable, modifiable or even VISIBLE to a
+// school-level admin. Derived from the permission map (isPlatformTierRole = the
+// role carries any `platform.*` permission) rather than hand-listed: the old
+// hand-maintained list only named super_admin, so when `manager_admin` was
+// added as a platform role nobody updated it — leaving a principal/school_admin
+// able to grant SEVEN cross-tenant platform permissions. Deriving it means a
+// future platform role is covered automatically.
+// SECURITY: only super_admin administers these roles.
+const isNonAssignableRole = (roleName: string) => isPlatformTierRole(roleName);
 
 // The roles that carry `rbac.manage` (see role-map.ts) — the ability to
 // administer role assignments. Removals of these are guarded below so a school
@@ -57,7 +63,7 @@ export class AdminService {
     hooks.onFinalized(async (tx, req) => {
       if (req.type !== "ADMIN_APPOINTMENT" || req.state !== "APPROVED") return;
       const pl = req.payload as { userId?: string; roleName?: string } | null;
-      if (!pl?.userId || !pl.roleName || NON_ASSIGNABLE_ROLES.has(pl.roleName)) return;
+      if (!pl?.userId || !pl.roleName || isNonAssignableRole(pl.roleName)) return;
       const role = await tx.role.findFirst({ where: { name: pl.roleName }, select: { id: true } });
       const user = await tx.user.findFirst({ where: { id: pl.userId }, select: { id: true } });
       if (!role || !user) return; // target vanished since request — no-op, never cross-tenant
@@ -84,8 +90,16 @@ export class AdminService {
     return { schoolId: p.schoolId, userId: p.userId };
   }
 
+  /** Roles a caller may administer. Platform-tier roles (super_admin,
+   *  manager_admin — anything carrying a `platform.*` permission) are HIDDEN
+   *  from school-level admins: they cannot see them in the picker, and the
+   *  assign/remove paths refuse them independently. */
   async listRoles(p: Principal) {
-    return this.db.runAsTenant(this.ctx(p), (tx) => tx.role.findMany({ select: { name: true }, orderBy: { name: "asc" } }));
+    const rows = await this.db.runAsTenant(this.ctx(p), (tx) =>
+      tx.role.findMany({ select: { name: true }, orderBy: { name: "asc" } }),
+    );
+    if (p.roles.includes("super_admin")) return rows;
+    return rows.filter((r: { name: string }) => !isPlatformTierRole(r.name));
   }
 
   /** List this school's users with their roles (staff picker / directory). */
@@ -121,8 +135,10 @@ export class AdminService {
    */
   async createUser(p: Principal, input: { name: string; email: string; role: string; password?: string }) {
     const roleName = input.role;
-    if (NON_ASSIGNABLE_ROLES.has(roleName)) {
-      throw new BadRequestException("That role cannot be assigned");
+    if (isNonAssignableRole(roleName)) {
+      // 404-shaped message: a school-level admin should not learn that a
+      // platform role exists at all.
+      throw new NotFoundException("Role not found");
     }
     const tempPassword = input.password ?? Math.random().toString(36).slice(2, 12);
     const passwordHash = await bcrypt.hash(tempPassword, 10);
@@ -156,8 +172,10 @@ export class AdminService {
   }
 
   async assignRole(p: Principal, userId: string, roleName: string) {
-    if (NON_ASSIGNABLE_ROLES.has(roleName)) {
-      throw new BadRequestException("That role cannot be assigned");
+    if (isNonAssignableRole(roleName)) {
+      // 404-shaped message: a school-level admin should not learn that a
+      // platform role exists at all.
+      throw new NotFoundException("Role not found");
     }
     const target = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const role = await tx.role.findFirst({ where: { name: roleName }, select: { id: true } });
@@ -204,6 +222,11 @@ export class AdminService {
   }
 
   async removeRole(p: Principal, userId: string, roleName: string) {
+    // SECURITY: platform-tier roles are the platform owner's to administer —
+    // a school-level admin can neither grant NOR revoke them.
+    if (isNonAssignableRole(roleName) && !p.roles.includes("super_admin")) {
+      throw new NotFoundException("Role not found");
+    }
     // SECURITY: demoting an administrator must always be a SECOND person's
     // deliberate act — never a self-inflicted (or accidental) lockout.
     if (userId === p.userId && RBAC_MANAGING_ROLES.has(roleName)) {

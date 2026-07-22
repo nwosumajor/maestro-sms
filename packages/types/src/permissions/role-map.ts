@@ -254,3 +254,24 @@ export function permissionsForRoles(roles: readonly string[]): string[] {
   for (const r of roles) for (const p of ROLE_PERMISSIONS[r] ?? []) out.add(p);
   return [...out];
 }
+
+// =============================================================================
+// PLATFORM-TIER roles — never assignable, modifiable or even VISIBLE at school level
+// =============================================================================
+// A role is platform-tier if it carries ANY `platform.*` permission. Deriving
+// this from the permission map (rather than hand-listing role names) is the
+// point: `manager_admin` was added as a platform role long after the original
+// hand-maintained denylist was written, and nobody updated the list — which
+// left a school_admin/principal able to grant it, and with it seven
+// CROSS-TENANT platform permissions. Any future platform role is now covered
+// automatically, and the check fails safe.
+//
+// Only super_admin (the platform owner) administers these roles.
+export const PLATFORM_TIER_ROLES: readonly string[] = Object.entries(ROLE_PERMISSIONS)
+  .filter(([, perms]) => perms.some((p) => p.startsWith("platform.")))
+  .map(([role]) => role);
+
+/** True when `roleName` may only ever be administered by the platform owner. */
+export function isPlatformTierRole(roleName: string): boolean {
+  return PLATFORM_TIER_ROLES.includes(roleName);
+}
