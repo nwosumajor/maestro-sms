@@ -91,7 +91,8 @@ const adminSchema = z.object({
 const provisionSchema = z
   .object({
     name: z.string().min(1).max(160),
-    slug: z.string().min(2).max(40),
+    // Optional: omitted => derived (short) from the school name, uniqueness checked.
+    slug: z.string().min(2).max(40).optional(),
     plan: z.enum([PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE]).optional(),
     // Extra modules beyond the chosen plan: `enabled` force-on add-ons (the "special
     // modules" a school pays extra for); `disabled` force-off. Same shape as the

@@ -410,6 +410,12 @@ model User {
   // students generally have none (their guardians are notified instead). Not
   // unique: a parent may legitimately use one address for several children.
   contactEmail      String?
+  // TRUE when `email` is a login identifier WE generated (firstname.lastname@
+  // <slug>.com). That domain is not ours, so such an address is a string to type
+  // at a login box — never a mailbox. Authoritative for delivery decisions; see
+  // deliverableEmail() in @sms/types. A flag, not domain string-matching, because
+  // the domain is arbitrary and unguessable from the address alone.
+  loginEmailGenerated Boolean @default(false)
   name              String
   passwordHash      String
   /// Mobile number for SMS/WhatsApp notification delivery (self-service on

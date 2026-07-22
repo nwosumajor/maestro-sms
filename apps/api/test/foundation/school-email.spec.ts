@@ -1,135 +1,166 @@
 // =============================================================================
-// School-scoped login identifiers — the pure generator
+// School-scoped login identifiers — the pure generators
 // =============================================================================
-// These identifiers are how the platform stops a GLOBAL email collision from
-// blocking a legitimate signup: the school's own unique slug is the subdomain,
-// so the same name at two schools produces two different addresses.
+// Login identifiers are firstname.lastname@<slug>.com, where <slug> is the
+// school's own UNIQUE slug. Two properties matter and both are tested here:
 //
-// The most important test in this file is the LAST group: a generated address is
-// never a delivery target. If that regresses, password-reset links and payment
-// receipts get sent to a mailbox that does not exist — silently.
+//   1. The same name at two schools does NOT collide (different domain).
+//   2. A generated identifier is NEVER a delivery target. Its domain is not
+//      ours, so sending there would post student data and password-reset links
+//      to a stranger's mail server — silently. That is the last group, and it is
+//      the most important test in this file.
 // =============================================================================
 import {
-  generateLoginEmail,
-  loginLocalPart,
-  loginEmailCandidates,
+  baseSchoolSlug,
+  schoolSlugCandidates,
   schoolLoginDomain,
-  isGeneratedLoginEmail,
+  loginLocalPart,
+  generateLoginEmail,
   deliverableEmail,
-  LOGIN_EMAIL_DOMAIN,
+  MAX_SCHOOL_SLUG_LENGTH,
 } from "@sms/types";
 
+describe("baseSchoolSlug — short, readable, identity-preserving", () => {
+  it("drops words that carry no identity", () => {
+    expect(baseSchoolSlug("Maestro High School")).toBe("maestro");
+    expect(baseSchoolSlug("St. Andrews Academy")).toBe("standrews");
+    expect(baseSchoolSlug("The International College of Lagos")).toBe("lagos");
+  });
+
+  it("never exceeds the cap — it has to work as a domain label", () => {
+    for (const name of [
+      "Elshaddi British High School",
+      "Our Lady of Perpetual Succour Comprehensive Secondary School",
+      "Federal Government Girls College Sagamu",
+    ]) {
+      expect(baseSchoolSlug(name).length).toBeLessThanOrEqual(MAX_SCHOOL_SLUG_LENGTH);
+    }
+  });
+
+  it("survives a name made entirely of stopwords rather than returning empty", () => {
+    expect(baseSchoolSlug("The School")).toBe("theschool");
+    expect(baseSchoolSlug("!!!")).toBe("school");
+  });
+
+  it("folds accents and punctuation", () => {
+    expect(baseSchoolSlug("Ọláwálé Academy")).toBe("olawale");
+    expect(baseSchoolSlug("St. Mary's")).toBe("stmarys");
+  });
+});
+
+describe("schoolSlugCandidates — uniqueness across schools", () => {
+  it("offers distinct alternatives when the base is taken", () => {
+    const c = schoolSlugCandidates("Maestro High School", 4);
+    expect(c[0]).toBe("maestro");
+    expect(c[1]).toBe("maestro2");
+    expect(new Set(c).size).toBe(4);
+  });
+
+  it("keeps EVERY candidate within the cap — the suffix trims the base, never overflows", () => {
+    for (const c of schoolSlugCandidates("Our Lady of Perpetual Succour College", 30)) {
+      expect(c.length).toBeLessThanOrEqual(MAX_SCHOOL_SLUG_LENGTH);
+    }
+  });
+});
+
 describe("loginLocalPart", () => {
-  it("builds first.last", () => {
+  it("builds firstname.lastname", () => {
     expect(loginLocalPart("Adams James")).toBe("adams.james");
   });
 
-  it("uses the SURNAME when there are middle names — that is what people are known by", () => {
-    expect(loginLocalPart("Adams Chidi James")).toBe("adams.james");
-    expect(loginLocalPart("Ngozi Amaka Chioma Obi")).toBe("ngozi.obi");
+  it("KEEPS middle names — the collision message tells admins to add one, so it must help", () => {
+    expect(loginLocalPart("Adams Chidi James")).toBe("adams.chidi.james");
+    // The whole point: it must NOT collide with the plain two-part name.
+    expect(loginLocalPart("Adams Chidi James")).not.toBe(loginLocalPart("Adams James"));
   });
 
   it("handles a single name", () => {
     expect(loginLocalPart("Madonna")).toBe("madonna");
   });
 
-  it("strips accents, apostrophes and hyphens — real Nigerian and international rolls contain all three", () => {
+  it("strips accents, apostrophes and hyphens — real school rolls contain all three", () => {
     expect(loginLocalPart("Ọláwálé Obi-Eze")).toBe("olawale.obieze");
     expect(loginLocalPart("O'Brien Ngozi")).toBe("obrien.ngozi");
-    expect(loginLocalPart("N'Diaye Aïcha")).toBe("ndiaye.aicha");
   });
 
-  it("collapses whitespace and case", () => {
-    expect(loginLocalPart("  ADAMS   james  ")).toBe("adams.james");
-  });
-
-  it("returns empty when nothing usable survives, rather than throwing", () => {
-    expect(loginLocalPart("!!! ???")).toBe("");
-    expect(loginLocalPart("")).toBe("");
+  it("returns empty rather than throwing when nothing usable survives", () => {
+    expect(loginLocalPart("!!!")).toBe("");
   });
 });
 
 describe("generateLoginEmail", () => {
-  it("puts the school slug in the subdomain", () => {
-    expect(generateLoginEmail("Adams James", "standrews")).toBe(
-      `adams.james@standrews.${LOGIN_EMAIL_DOMAIN}`,
-    );
+  it("is firstname.lastname@<slug>.com", () => {
+    expect(generateLoginEmail("Adams James", "maestro")).toBe("adams.james@maestro.com");
+    expect(schoolLoginDomain("standrews")).toBe("standrews.com");
   });
 
   it("THE POINT: the same name at two schools does NOT collide", () => {
-    const a = generateLoginEmail("Adams James", "standrews");
-    const b = generateLoginEmail("Adams James", "maestro");
-    expect(a).not.toBe(b);
-  });
-
-  it("suffixes a within-school clash, starting at 2 (a human counts 1,2,3 not 0,1,2)", () => {
-    expect(generateLoginEmail("Adams James", "standrews", 0)).toBe(
-      `adams.james@standrews.${LOGIN_EMAIL_DOMAIN}`,
-    );
-    expect(generateLoginEmail("Adams James", "standrews", 1)).toBe(
-      `adams.james2@standrews.${LOGIN_EMAIL_DOMAIN}`,
-    );
-    expect(generateLoginEmail("Adams James", "standrews", 2)).toBe(
-      `adams.james3@standrews.${LOGIN_EMAIL_DOMAIN}`,
+    expect(generateLoginEmail("Adams James", "maestro")).not.toBe(
+      generateLoginEmail("Adams James", "standrews"),
     );
   });
 
-  it("falls back to a usable local part when the name yields nothing", () => {
-    expect(generateLoginEmail("!!!", "standrews")).toBe(`user@standrews.${LOGIN_EMAIL_DOMAIN}`);
-  });
-
-  it("normalises a slug that contains punctuation", () => {
-    expect(schoolLoginDomain("st-andrews")).toBe(`standrews.${LOGIN_EMAIL_DOMAIN}`);
+  it("does NOT silently disambiguate a within-school clash", () => {
+    // Same input must give the same output every time: a clash is a human
+    // decision (the admin is told the name is taken), not a silent adams.james2
+    // that would hand two colleagues near-identical logins.
+    expect(generateLoginEmail("Adams James", "maestro")).toBe(
+      generateLoginEmail("Adams James", "maestro"),
+    );
   });
 
   it("always produces a syntactically valid address", () => {
-    const re = /^[a-z0-9.]+@[a-z0-9.]+\.[a-z]{2,}$/;
-    for (const name of ["Adams James", "Madonna", "Ọláwálé Obi-Eze", "!!!", "N'Diaye Aïcha"]) {
-      expect(generateLoginEmail(name, "st-andrews")).toMatch(re);
+    const re = /^[a-z0-9.]+@[a-z0-9]+\.com$/;
+    for (const n of ["Adams James", "Madonna", "Ọláwálé Obi-Eze", "!!!", "O'Brien Ngozi"]) {
+      expect(generateLoginEmail(n, "maestro")).toMatch(re);
     }
   });
 });
 
-describe("loginEmailCandidates", () => {
-  it("returns distinct candidates in preference order", () => {
-    const c = loginEmailCandidates("Adams James", "standrews", 4);
-    expect(c).toHaveLength(4);
-    expect(new Set(c).size).toBe(4);
-    expect(c[0]).toBe(`adams.james@standrews.${LOGIN_EMAIL_DOMAIN}`);
-    expect(c[1]).toBe(`adams.james2@standrews.${LOGIN_EMAIL_DOMAIN}`);
-  });
-});
-
 // -----------------------------------------------------------------------------
-// The safety property. A generated address has NO mailbox behind it.
+// The safety property.
 // -----------------------------------------------------------------------------
 describe("deliverability — a generated identifier is NEVER a delivery target", () => {
-  const generated = `adams.james@standrews.${LOGIN_EMAIL_DOMAIN}`;
-
-  it("recognises its own generated addresses", () => {
-    expect(isGeneratedLoginEmail(generated)).toBe(true);
-    expect(isGeneratedLoginEmail("ADAMS.JAMES@STANDREWS.MAJORMAESTRO.COM")).toBe(true);
-    expect(isGeneratedLoginEmail("parent@gmail.com")).toBe(false);
-    // A lookalike that is NOT our subdomain must not be mistaken for one.
-    expect(isGeneratedLoginEmail("someone@notmajormaestro.com")).toBe(false);
+  it("returns NULL for a generated identifier with no contact address", () => {
+    // Not a fallback: maestro.com is not ours. Returning the login identifier
+    // here would post student data to whoever owns that domain.
+    expect(
+      deliverableEmail({ email: "adams.james@maestro.com", loginEmailGenerated: true }),
+    ).toBeNull();
   });
 
-  it("returns NULL rather than falling back to the generated address", () => {
-    // The whole point: no contact address means do not send, NOT send to a
-    // mailbox that does not exist.
-    expect(deliverableEmail({ email: generated })).toBeNull();
-    expect(deliverableEmail({ email: generated, contactEmail: null })).toBeNull();
-    expect(deliverableEmail({ email: generated, contactEmail: "   " })).toBeNull();
+  it("prefers contactEmail", () => {
+    expect(
+      deliverableEmail({
+        email: "adams.james@maestro.com",
+        loginEmailGenerated: true,
+        contactEmail: "adams@gmail.com",
+      }),
+    ).toBe("adams@gmail.com");
   });
 
-  it("prefers contactEmail when present", () => {
-    expect(deliverableEmail({ email: generated, contactEmail: "mum@gmail.com" })).toBe("mum@gmail.com");
-  });
-
-  it("keeps working for legacy users whose login IS their real address", () => {
-    expect(deliverableEmail({ email: "parent@gmail.com" })).toBe("parent@gmail.com");
-    expect(deliverableEmail({ email: "parent@gmail.com", contactEmail: "other@gmail.com" })).toBe(
-      "other@gmail.com",
+  it("trusts email ONLY for legacy accounts, whose address really is their own", () => {
+    expect(deliverableEmail({ email: "parent@gmail.com", loginEmailGenerated: false })).toBe(
+      "parent@gmail.com",
     );
+    // Flag absent (older row / partial select) behaves as legacy — matches the
+    // column default, so the migration cannot silently stop mail for anyone.
+    expect(deliverableEmail({ email: "parent@gmail.com" })).toBe("parent@gmail.com");
+  });
+
+  it("is null-safe on partial rows rather than throwing inside the delivery path", () => {
+    expect(deliverableEmail({})).toBeNull();
+    expect(deliverableEmail({ email: null, contactEmail: null })).toBeNull();
+    expect(deliverableEmail({ email: "  ", contactEmail: "  " })).toBeNull();
+  });
+
+  it("REGRESSION: a generated identifier must not leak even if contactEmail is blank", () => {
+    expect(
+      deliverableEmail({
+        email: "adams.james@maestro.com",
+        loginEmailGenerated: true,
+        contactEmail: "   ",
+      }),
+    ).toBeNull();
   });
 });

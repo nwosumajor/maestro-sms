@@ -1,30 +1,32 @@
 // =============================================================================
-// Allocating a login identifier
+// Allocating login identifiers and school slugs
 // =============================================================================
-// Pairs the pure generator in @sms/types with the one thing it cannot do: ask
-// the database whether a candidate is free.
+// Pairs the pure generators in @sms/types with the one thing they cannot do:
+// ask the database whether a candidate is free.
 //
-// WHY THE LOOKUP IS DELIBERATELY UNSCOPED
-// The uniqueness constraint on user.email is GLOBAL, so a same-school-only check
-// would pass and the INSERT would still fail. Callers run inside runAsTenant,
-// where RLS hides other schools — so we cannot see a clash by querying rows.
-// Instead we rely on the generator: the school's own unique slug is the
-// subdomain, so a cross-school clash is impossible BY CONSTRUCTION and the only
-// clash left to resolve is two real people sharing a name in the SAME school —
-// which the tenant-scoped query can see perfectly well.
+// TWO different collisions, deliberately handled in opposite ways:
 //
-// The INSERT is still wrapped by every caller: a race between two concurrent
-// imports can slip past any pre-check, and P2002 is the only real guarantee.
+//   CROSS-school  — impossible by construction. school.slug is UNIQUE, and the
+//                   slug is the domain, so adams.james@maestro.com and
+//                   adams.james@standrews.com simply cannot clash.
+//
+//   WITHIN-school — two real colleagues who share a name. NOT auto-suffixed:
+//                   the administrator is told, and picks a fuller name. Silently
+//                   minting `adams.james2` would give two colleagues near-identical
+//                   logins and invite years of sign-in mistakes and misfiled work.
 // =============================================================================
-import { loginEmailCandidates } from "@sms/types";
+import { ConflictException } from "@nestjs/common";
+import { Prisma } from "@sms/db";
+import { generateLoginEmail, schoolSlugCandidates } from "@sms/types";
 import type { TenantTx } from "../integrity/integrity.foundation";
 
 /**
- * First free `first.last@<slug>.<domain>` for this person in this school.
+ * `firstname.lastname@<slug>.com` for this person, or a 409 telling the
+ * administrator the name is already taken IN THIS SCHOOL.
  *
- * `taken` lets a bulk import pass the addresses it has already allocated inside
- * the same transaction but not yet committed — without it, importing two pupils
- * called Adams James in one file would hand both the same identifier.
+ * `taken` carries identifiers already allocated inside the same transaction but
+ * not yet committed — without it, one CSV containing two pupils called Adams
+ * James would hand both the same identifier.
  */
 export async function allocateLoginEmail(
   tx: TenantTx,
@@ -32,23 +34,57 @@ export async function allocateLoginEmail(
   schoolSlug: string,
   taken: Set<string> = new Set(),
 ): Promise<string> {
-  const candidates = loginEmailCandidates(fullName, schoolSlug, 50);
-  for (const candidate of candidates) {
-    if (taken.has(candidate)) continue;
-    const clash = await tx.user.findFirst({ where: { email: candidate }, select: { id: true } });
-    if (!clash) {
-      taken.add(candidate);
-      return candidate;
-    }
+  const email = generateLoginEmail(fullName, schoolSlug);
+
+  // NOTE: this lookup runs under RLS, so it sees only THIS school. That is
+  // exactly right — a cross-school match cannot happen, and if it somehow did we
+  // must not disclose it. The INSERT is still wrapped by every caller: a race
+  // between two concurrent imports beats any pre-check, and P2002 is the only
+  // real guarantee.
+  const clash = taken.has(email) || (await tx.user.findFirst({ where: { email }, select: { id: true } }));
+  if (clash) {
+    throw new ConflictException(
+      `The name "${fullName}" already exists in this school (${email} is taken). ` +
+        `Use a fuller name — for example include a middle name — or set the sign-in email manually.`,
+    );
   }
-  // 50 people with the same name in one school is not a real roll; it is a bug
-  // or an attack. Fail loudly rather than inventing something unpredictable.
-  throw new Error(`Could not allocate a login identifier for "${fullName}" at "${schoolSlug}"`);
+
+  taken.add(email);
+  return email;
 }
 
-/** The school's slug, needed for the subdomain. Cheap and cached by the caller. */
+/** Translate a racing INSERT into the same message the pre-check would have given. */
+export function asNameTakenConflict(e: unknown, fullName: string): never {
+  if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+    throw new ConflictException(
+      `The name "${fullName}" already exists in this school. ` +
+        `Use a fuller name — for example include a middle name — or set the sign-in email manually.`,
+    );
+  }
+  throw e as Error;
+}
+
+/** The school's slug — the login domain. Callers cache it across a bulk import. */
 export async function schoolSlugOf(tx: TenantTx, schoolId: string): Promise<string> {
   const school = await tx.school.findFirst({ where: { id: schoolId }, select: { slug: true } });
   if (!school) throw new Error("School not found");
   return school.slug;
+}
+
+/**
+ * A SHORT slug not yet used by any school. Requires a client that can see ALL
+ * schools (the privileged one) — `school` is a global, RLS-exempt table and a
+ * tenant-scoped read would happily hand out a slug another school already owns.
+ */
+export async function allocateSchoolSlug(
+  client: { school: { findFirst(args: unknown): Promise<{ id: string } | null> } },
+  schoolName: string,
+): Promise<string> {
+  for (const candidate of schoolSlugCandidates(schoolName)) {
+    const taken = await client.school.findFirst({ where: { slug: candidate }, select: { id: true } });
+    if (!taken) return candidate;
+  }
+  throw new ConflictException(
+    `Could not derive a unique short slug for "${schoolName}". Please supply one explicitly.`,
+  );
 }

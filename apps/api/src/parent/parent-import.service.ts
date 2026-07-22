@@ -181,6 +181,7 @@ export class ParentImportService {
               schoolId: p.schoolId,
               email: loginEmail,
               contactEmail: email,
+              loginEmailGenerated: true,
               name: input.name.trim(),
               passwordHash,
               passwordChangedAt: null,

@@ -9,7 +9,7 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import bcrypt from "bcryptjs";
 import { Prisma } from "@sms/db";
-import { allocateLoginEmail, schoolSlugOf } from "../foundation/login-email";
+import { allocateLoginEmail, asNameTakenConflict, schoolSlugOf } from "../foundation/login-email";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -163,6 +163,7 @@ export class AdminService {
         const slug = await schoolSlugOf(tx, p.schoolId);
         loginEmail = await allocateLoginEmail(tx, input.name, slug);
       }
+      const generated = !input.email?.trim();
       let user: { id: string };
       try {
         user = await tx.user.create({
@@ -170,15 +171,19 @@ export class AdminService {
             schoolId: p.schoolId,
             email: loginEmail,
             contactEmail: input.contactEmail?.trim() || null,
+            // Authoritative "this is not a mailbox" marker — see deliverableEmail().
+            loginEmailGenerated: generated,
             name: input.name,
             passwordHash,
           },
         });
       } catch (e) {
-        // P2002 = unique violation on the GLOBAL user.email index: the address
-        // belongs to a user in ANOTHER school, which the RLS-scoped check above
-        // cannot see. Surface a clean conflict, not a 500. Deliberately does NOT
-        // name the other school — that would leak cross-tenant existence.
+        // A GENERATED identifier can only clash within this school (the slug is
+        // the domain), so say so plainly. A SUPPLIED address may clash with a
+        // user in another school, invisible to the RLS-scoped pre-check — that
+        // one stays deliberately vague so it cannot be used to probe other
+        // tenants for existence.
+        if (generated) asNameTakenConflict(e, input.name);
         if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
           throw new ConflictException("That email is already in use");
         }
