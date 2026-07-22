@@ -1041,6 +1041,31 @@ all audited in the operator's own tenant. Verified: 8 scoping unit tests + the
 end-to-end (create→apply→consent-gate→submit→signals→cross-tenant review→award→
 ₦-credit on the invoice) + web production build (67 routes) + route smoke.
 
+## Owner-facing documents — the PRICING ACCURACY rule
+Three assets quote commercial facts (plan tiers, commitment discounts, cycle
+lengths, trial length, the maker-checker money threshold) to school owners. A
+stale number here is not a cosmetic bug — a proposal quoting a discount you no
+longer offer is a commitment a prospect will hold you to.
+- `apps/web/app/for-owners/page.tsx` — the PUBLIC marketing page. **Derives**
+  `CYCLE_DISCOUNT_PERCENT` and the `PLANS` count from `@sms/types`; never type a
+  pricing number as prose here.
+- `docs/ONBOARDING-MANUAL.html` — the leader's manual, served at `/manual`
+  (signed-in only). Static HTML, so it cannot import constants.
+- `docs/SCHOOL_OWNER_PROPOSAL.md` — the proposal sent to prospects. Same.
+The two static documents are guarded by
+`apps/web/lib/__tests__/pricing-consistency.test.ts`, which reads them from disk
+and asserts they state the CURRENT values from `@sms/types` — so changing a
+pricing constant without updating them fails `pnpm test` with the filename and
+the fix. It also fails if the GENERATED `apps/web/app/manual/manual-html.ts` is
+stale, since `/manual` would otherwise serve outdated pricing after the source
+was corrected.
+**After editing the manual, regenerate the served copy:**
+`pnpm --filter @sms/web build:manual`.
+Contact details (`support@majormaestro.com`, WhatsApp) appear in all three —
+update together. Brand hierarchy: **MAESTRO-SMS** is the product,
+**MajorGBN Innovations Limited** the company, **majormaestro.com** the support
+desk shared across all MajorGBN products.
+
 ## When generating code
 - Explain the multi-tenancy/security implication of each new table or endpoint.
 - After scaffolding, output RLS SQL and migrations SEPARATELY for review before

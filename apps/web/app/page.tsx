@@ -58,7 +58,7 @@ import {
 } from "@sms/types";
 import { Button } from "@/components/ui/button";
 import { HeroCarousel } from "@/components/public/HeroCarousel";
-import { ThemeToggle } from "@/components/shell/ThemeToggle";
+import { SiteHeader } from "@/components/marketing/SiteHeader";
 
 // Auto-sliding hero photos — polished, international education imagery.
 const HERO_IMAGES = [
@@ -350,40 +350,6 @@ const TESTIMONIALS: { quote: string; name: string; role: string }[] = [
 
 // TRUE product claims — safe to show as-is (these are enforced in the codebase).
 const TRUST_CHIPS = ["NDPR-aligned", "Audit-logged end to end", "Row-level tenant isolation", "MFA + step-up re-auth"];
-
-function NavBar() {
-  return (
-    <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur-md">
-      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5 sm:px-8">
-        <Link href="/" className="flex items-center gap-2.5">
-          {/* Platform default mark (MajorGBN) — a school's own logo appears
-              only inside THEIR portal, never here. */}
-          <img src="/images/platform-mark.png" alt="MajorGBN" width={128} height={128} className="h-9 w-9 object-contain" />
-          <span className="text-sm font-semibold tracking-tight">School Management System</span>
-        </Link>
-        <nav className="hidden items-center gap-7 text-sm font-medium text-muted-foreground md:flex">
-          <a href="#modules" className="transition-colors hover:text-foreground">Modules</a>
-          <a href="#security" className="transition-colors hover:text-foreground">Security</a>
-          <a href="#plans" className="transition-colors hover:text-foreground">Plans</a>
-          <Link href="/schools" className="transition-colors hover:text-foreground">For parents</Link>
-          <Link href="/careers" className="transition-colors hover:text-foreground">Careers</Link>
-        </nav>
-        <div className="flex items-center gap-2.5">
-          <ThemeToggle className="hidden sm:inline-flex" />
-          <Link
-            href="/login"
-            className="hidden rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground sm:block"
-          >
-            Sign in
-          </Link>
-          <a href="#onboard">
-            <Button size="sm">Onboard your school</Button>
-          </a>
-        </div>
-      </div>
-    </header>
-  );
-}
 
 // Full-bleed photographic hero: the auto-sliding carousel is the WIDE background,
 // with the headline + CTAs overlaid on a legibility gradient. Reads warm and human.
@@ -1371,7 +1337,7 @@ function Footer() {
 export default function Home() {
   return (
     <main className="min-h-screen bg-background">
-      <NavBar />
+      <SiteHeader />
       <Hero />
       <StatBand />
       <Security />
