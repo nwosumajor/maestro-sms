@@ -1,6 +1,6 @@
 {
-  "name": "School Management System",
-  "short_name": "SMS",
+  "name": "MAESTRO-SMS — School Management System",
+  "short_name": "MAESTRO",
   "description": "Multi-tenant LMS, monitoring, and assessment integrity.",
   "start_url": "/",
   "scope": "/",
@@ -9,6 +9,11 @@
   "background_color": "#ffffff",
   "theme_color": "#0f172a",
   "icons": [
-    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
   ]
 }

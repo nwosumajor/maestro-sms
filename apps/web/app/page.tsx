@@ -111,7 +111,7 @@ const MARQUEE_IMAGES = [
 ];
 
 export const metadata = {
-  title: "School Management System — run your whole school from one secure register",
+  title: "MAESTRO-SMS — run your whole school from one secure register",
   description:
     "Admissions to alumni: classes, attendance, results, fees, HR, transport and approvals for your whole school. Multi-tenant, NDPR-aligned, audit-logged. Onboard your school or apply as a parent.",
 };

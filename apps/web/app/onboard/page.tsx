@@ -17,7 +17,7 @@ export default function OnboardPage({ searchParams }: { searchParams: { ref?: st
       <div className="mx-auto max-w-3xl py-8">
         <Card>
           <CardHeader>
-            <CardTitle>List your school on SMS</CardTitle>
+            <CardTitle>List your school on MAESTRO-SMS</CardTitle>
             <CardDescription>
               Tell us about your school — it takes about five minutes. Our platform team reviews each
               request and provisions your tenant with a school administrator and a principal account; they
