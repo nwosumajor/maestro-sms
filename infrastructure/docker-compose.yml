@@ -92,9 +92,6 @@ services:
       SESSION_CLAIMS_REFRESH_SEC: ${SESSION_CLAIMS_REFRESH_SEC:-}
       # Server-side + BFF calls reach the backend over the internal network.
       API_BASE_URL: http://backend:3001
-      # Mirrors the api flag: ONLY when demo fixtures were actually seeded does
-      # the login page offer the demo credentials. Cloud never sets it.
-      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-false}
     depends_on:
       - backend
     networks: [appnet]

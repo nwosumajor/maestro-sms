@@ -1060,10 +1060,10 @@ convention.
   match) plus a warning. Setting the env var and re-running the seed DOES
   rewrite the hash — that is the documented recovery path — while a run WITHOUT
   it never clobbers a password the owner has since changed.
-- The login page's demo-credentials block is gated on the SAME `SEED_DEMO_DATA`
-  flag (passed to the `frontend` service too), so the hint can never outlive the
-  accounts it describes. It is deliberately NOT also gated on `NODE_ENV`: the
-  local stack is itself a production build, so that would make it dead code.
+- The login page carries NO demo-credentials block at all — not even an
+  env-gated one, since a single mis-set variable would turn it back into a
+  public principal account. Demo logins for local work are listed in this file
+  and in `/help`; a sign-in page never prints working credentials.
 **If a cloud DB was ever seeded before this change, those accounts still exist.**
 Audit with `SELECT email FROM "user" WHERE email LIKE '%@demo.school' OR email
 LIKE '%@sms.platform';` and rotate/disable anything with the old password.

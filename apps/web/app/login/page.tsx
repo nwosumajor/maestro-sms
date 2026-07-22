@@ -38,12 +38,10 @@ export default async function LoginPage({ searchParams }: { searchParams: { scho
 
   const schoolName = branding?.schoolName ?? "School Management System";
 
-  // Tied to the SAME flag that decides whether those accounts exist at all, so the
-  // hint can never outlive the fixtures it describes. Deliberately NOT gated on
-  // NODE_ENV as well: the local stack is itself a production build, so that check
-  // would make this permanently dead code and give false confidence. Cloud simply
-  // never sets the flag, and it defaults to false.
-  const showDemoCredentials = process.env.SEED_DEMO_DATA === "true";
+  // NOTE: no demo-credentials block here, by design. A sign-in page must never
+  // print working credentials — not even gated on an env flag, because one
+  // mis-set variable turns it back into a public principal account. Demo logins
+  // for local work are documented in CLAUDE.md and /help instead.
 
   return (
     <main className="grid min-h-screen lg:grid-cols-[1.05fr_1fr]">
@@ -137,17 +135,6 @@ export default async function LoginPage({ searchParams }: { searchParams: { scho
               <LoginForm next={next} />
             </div>
 
-            {/* SECURITY: printing working credentials on a public page hands
-                anyone a principal account. Shown only when demo data was
-                deliberately seeded AND we are not in a production build — two
-                independent gates, both fail-closed, so a stray env var alone
-                cannot expose it. */}
-            {showDemoCredentials && (
-              <p className="mt-6 rounded-lg border border-border/70 bg-muted/50 px-3 py-2.5 text-xs text-muted-foreground">
-                <span className="font-medium text-foreground/70">Demo accounts</span> · principal@demo.school ·
-                teacher@demo.school — password <span className="tnum font-mono text-foreground/70">password123</span>
-              </p>
-            )}
           </div>
         </div>
 
