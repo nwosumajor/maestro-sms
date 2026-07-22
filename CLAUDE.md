@@ -1041,6 +1041,22 @@ all audited in the operator's own tenant. Verified: 8 scoping unit tests + the
 end-to-end (create→apply→consent-gate→submit→signals→cross-tenant review→award→
 ₦-credit on the invoice) + web production build (67 routes) + route smoke.
 
+## Operating the live system — runbooks
+- **`docs/RUNBOOK-INCIDENT-RESPONSE.md`** — the on-call playbook: severity
+  levels, 5-minute triage, per-symptom playbooks (outage / latency / DB / Redis
+  / bad deploy / payments / auth / **tenant-isolation breach** / data loss /
+  security / scheduled jobs), rollback (incl. why a destructive migration makes
+  rollback the WRONG move), recovery verification, and the blameless post-mortem
+  template. Post-mortems land in `docs/postmortems/`.
+- **`docs/RUNBOOK-BACKUP-RESTORE.md`** — backups, PITR, and the restore drill.
+- GOTCHA the runbook encodes: **`/api/health` is the WEB tier's liveness probe**
+  and answers 200 without touching the API or DB. The API's own `/health` is not
+  internet-reachable (the ALB forwards only `/ws/*` to the API target group; REST
+  flows web→api over Cloud Map). For a real end-to-end probe use a public
+  API-backed read such as `/api/public/plan-pricing`.
+- When a fix changes operational behaviour, update the runbook in the SAME PR —
+  a runbook that lags reality is worse than none, because it is trusted.
+
 ## Demo fixtures are FAIL-CLOSED (never seed a demo account into production)
 The seed runs on EVERY cloud deploy (the one-off `migrate` ECS task calls
 `prisma db seed`), so anything unconditional in `seed.ts` lands in PRODUCTION.
