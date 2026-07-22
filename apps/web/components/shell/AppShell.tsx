@@ -44,6 +44,7 @@ import { cn } from "@/lib/utils";
 import { auth } from "@/lib/auth";
 import { ImpersonationBanner } from "./ImpersonationBanner";
 import { SessionIdleGuard } from "./SessionIdleGuard";
+import { CredentialPromptHost } from "@/components/security/CredentialPrompt";
 import { apiGet } from "@/lib/api";
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
 import { GlobalSearch } from "@/components/shell/GlobalSearch";
@@ -325,6 +326,7 @@ export async function AppShell({
     // light via .force-light, so the toggle only ever restyles the app.
     <div data-tenant style={brandStyle(theme, fontFamily)} className="min-h-screen bg-background text-foreground">
       <SessionIdleGuard />
+      <CredentialPromptHost />
       {impersonating && <ImpersonationBanner userName={userName} schoolName={schoolName} />}
       {/* Top bar */}
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-border/70 bg-card/80 px-4 backdrop-blur-md supports-[backdrop-filter]:bg-card/65">

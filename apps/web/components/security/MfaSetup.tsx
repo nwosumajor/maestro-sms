@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { postWithStepUp } from "@/lib/stepup";
 import { readApiError } from "@/lib/api-error";
+import { requestCredential } from "@/components/security/CredentialPrompt";
 
 export function MfaSetup({ enabled }: { enabled: boolean }) {
   const router = useRouter();
@@ -37,7 +38,7 @@ export function MfaSetup({ enabled }: { enabled: boolean }) {
   };
 
   const disable = async () => {
-    const c = prompt("Enter a current 2FA code to disable:");
+    const c = await requestCredential("Enter a current code from your authenticator app to disable 2FA.", "code");
     if (!c) return;
     // Disabling MFA is step-up gated: the shared sender prompts for the password
     // re-auth (and retries on a wrong one) before retrying the disable with it.

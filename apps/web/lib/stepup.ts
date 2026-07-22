@@ -1,6 +1,12 @@
 // Client helper: POST through the BFF, transparently performing step-up re-auth
 // (password → short-lived token → retry with x-stepup) when the API replies 403.
-// Mirrors the inline pattern in BillingCheckout / StudentAdmin.
+//
+// SECURITY: the password is collected through CredentialPrompt (an in-app
+// MASKED field), never window.prompt() — a native prompt renders plain text, so
+// the password is readable by anyone next to the user, and password managers
+// cannot fill it. If no prompt host is mounted the request fails closed.
+import { requestCredential } from "@/components/security/CredentialPrompt";
+
 export async function postWithStepUp(path: string, body: unknown): Promise<Response> {
   return sendWithStepUp("POST", path, body);
 }
@@ -48,10 +54,10 @@ export async function sendWithStepUp(
   }
 
   for (let attempt = 0; attempt < MAX_PASSWORD_ATTEMPTS; attempt++) {
-    const pw = window.prompt(
+    const pw = await requestCredential(
       attempt === 0
-        ? "Confirm your password to continue:"
-        : "Password incorrect. Confirm your password to continue:",
+        ? "Enter your password to authorise this change."
+        : "That password was not correct. Try again.",
     );
     if (!pw) return jsonResponse("Cancelled — your password is required to continue.", 403);
 
