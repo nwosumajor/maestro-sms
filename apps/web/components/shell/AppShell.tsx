@@ -283,43 +283,48 @@ export async function AppShell({
   // endpoint needs no manage permission, so theme + logo reach EVERY signed-in
   // member of the school, not just admins. Best-effort; falls back to the passed
   // tenantTheme / platform defaults if the fetch returns nothing.
+  //
+  // PERF: these three shell lookups (branding, renewal banner, legal clickwrap)
+  // are INDEPENDENT and run on EVERY page render. Awaiting them in sequence
+  // added up to three serial API round-trips to every navigation — worst for
+  // principals/school_admins, who hold billing.read AND billing.manage and so
+  // triggered all three. Fetched together, the shell costs one round-trip's
+  // latency instead of three. Each still degrades to null on failure.
+  const needsRenewal = !isPlatformOwner && permissions.includes("billing.read");
+  const needsLegal = !isPlatformOwner && permissions.includes("billing.manage");
+  const [branding, sub, legal] = await Promise.all([
+    isPlatformOwner
+      ? Promise.resolve(null)
+      : apiGet<Serialized<MemberBrandingDto>>("/schools/branding/me").catch(() => null),
+    needsRenewal ? apiGet<Serialized<SubscriptionDto>>("/billing/status").catch(() => null) : Promise.resolve(null),
+    needsLegal
+      ? apiGet<{ currentVersion: string; accepted: boolean }>("/legal/acceptance/status").catch(() => null)
+      : Promise.resolve(null),
+  ]);
+
   let theme = tenantTheme;
   let fontFamily: string | null = null;
   let logoUrl: string | null = null;
-  if (!isPlatformOwner) {
-    const branding = await apiGet<Serialized<MemberBrandingDto>>("/schools/branding/me").catch(() => null);
-    if (branding?.brandHue != null && branding.brandSat != null && branding.brandLight != null) {
-      theme = { h: branding.brandHue, s: branding.brandSat, l: branding.brandLight };
-    }
-    fontFamily = branding?.fontFamily ?? null;
-    logoUrl = branding?.logoUrl ?? null;
+  if (branding?.brandHue != null && branding.brandSat != null && branding.brandLight != null) {
+    theme = { h: branding.brandHue, s: branding.brandSat, l: branding.brandLight };
   }
+  fontFamily = branding?.fontFamily ?? null;
+  logoUrl = branding?.logoUrl ?? null;
 
-  // Renewal/past-due banner — the trial and dunning state exist in billing, but a
-  // school that never opens /billing would first notice as "modules vanished".
-  // Surface it to billing.read holders (principal/school_admin) shell-wide; the
-  // API call is cheap (cached entitlement resolution, no payments/quotes).
+  // Renewal/past-due banner — a school that never opens /billing would first
+  // notice a lapse as "modules vanished".
   let renewal: { kind: "PAST_DUE" | "ENDING" | "EXPIRED"; plan: string; daysLeft: number } | null = null;
-  if (!isPlatformOwner && permissions.includes("billing.read")) {
-    const sub = await apiGet<Serialized<SubscriptionDto>>("/billing/status").catch(() => null);
-    if (sub?.currentPeriodEnd) {
-      const daysLeft = Math.ceil((new Date(sub.currentPeriodEnd).getTime() - Date.now()) / 86_400_000);
-      if (sub.status === "PAST_DUE") renewal = { kind: "PAST_DUE", plan: sub.plan, daysLeft };
-      else if (sub.status === "ACTIVE" && daysLeft <= 0) renewal = { kind: "EXPIRED", plan: sub.plan, daysLeft };
-      else if (sub.status === "ACTIVE" && daysLeft <= 14) renewal = { kind: "ENDING", plan: sub.plan, daysLeft };
-    }
+  if (sub?.currentPeriodEnd) {
+    const daysLeft = Math.ceil((new Date(sub.currentPeriodEnd).getTime() - Date.now()) / 86_400_000);
+    if (sub.status === "PAST_DUE") renewal = { kind: "PAST_DUE", plan: sub.plan, daysLeft };
+    else if (sub.status === "ACTIVE" && daysLeft <= 0) renewal = { kind: "EXPIRED", plan: sub.plan, daysLeft };
+    else if (sub.status === "ACTIVE" && daysLeft <= 14) renewal = { kind: "ENDING", plan: sub.plan, daysLeft };
   }
 
   // Clickwrap banner: a billing MANAGER whose school hasn't accepted the
-  // current legal-pack version (provisioned admins never saw the public form;
-  // material terms changes bump the version and re-raise it).
+  // current legal-pack version.
   let legalPrompt: { version: string } | null = null;
-  if (!isPlatformOwner && permissions.includes("billing.manage")) {
-    const legal = await apiGet<{ currentVersion: string; accepted: boolean }>("/legal/acceptance/status").catch(
-      () => null,
-    );
-    if (legal && !legal.accepted) legalPrompt = { version: legal.currentVersion };
-  }
+  if (legal && !legal.accepted) legalPrompt = { version: legal.currentVersion };
   return (
     // Theme is owned by the html-level ThemeScript + the topbar ThemeToggle
     // (defaulting to the graphite dark console). Public pages pin themselves
