@@ -195,22 +195,34 @@ const ROLE_PERMS: Record<string, readonly string[]> = ROLE_PERMISSIONS;
 // permissions no role holds by default.
 const ALL_PERMS = [...new Set([...PERMS, ...Object.values(ROLE_PERMS).flat()])];
 
+// SECURITY: demo fixtures are FAIL-CLOSED. The seed runs on every cloud deploy
+// (the one-off `migrate` ECS task), so anything unconditional here lands in
+// PRODUCTION. It previously created St. Andrews plus 17 @demo.school logins AND
+// the platform super_admin, all on the public password "password123" — a total
+// platform compromise for anyone who guessed the convention.
+//
+// Demo data now requires SEED_DEMO_DATA=true (set for local compose / CI only).
+// Production seeds ONLY what it genuinely needs: the platform org, the SYSTEM
+// audit actor, and the role/permission registry — which must keep re-running so
+// new permissions reach a live DB.
+const SEED_DEMO_DATA = process.env.SEED_DEMO_DATA === "true";
+
+// The platform owner exists in every environment, but must NEVER carry a known
+// password. Production supplies PLATFORM_OWNER_PASSWORD; without it the account
+// is created UNUSABLE (bcrypt can never match a "!" literal) and an operator has
+// to set the password deliberately. Demo mode keeps the convenient default.
+async function ownerPasswordHash(): Promise<{ hash: string; explicit: boolean }> {
+  const explicit = process.env.PLATFORM_OWNER_PASSWORD;
+  if (explicit) return { hash: await bcrypt.hash(explicit, 10), explicit: true };
+  if (SEED_DEMO_DATA) return { hash: await bcrypt.hash("password123", 10), explicit: false };
+  console.warn(
+    "[seed] PLATFORM_OWNER_PASSWORD unset -> owner@sms.platform created with an " +
+      "UNUSABLE password. Set PLATFORM_OWNER_PASSWORD and re-run the seed to enable sign-in.",
+  );
+  return { hash: "!no-password-set", explicit: false };
+}
+
 async function main() {
-  const school = await prisma.school.upsert({
-    where: { slug: "demo" },
-    update: {},
-    create: { name: "St. Andrews Academy", slug: "demo" },
-  });
-
-  // Explicit subscription so the demo does NOT rely on the entitlement default
-  // (which is now fail-closed to the entry tier) — the demo runs the full suite.
-  // Idempotent: won't overwrite a plan already set for this school.
-  await prisma.schoolSubscription.upsert({
-    where: { schoolId: school.id },
-    update: {},
-    create: { schoolId: school.id, plan: "ENTERPRISE", status: "ACTIVE" },
-  });
-
   // The platform-owner organization. NOT a customer tenant — it only hosts the
   // super_admin (the platform owner who sells the SMS to schools). Excluded from
   // the public directory, operator tenant list, directory search and billing. The
@@ -259,6 +271,62 @@ async function main() {
     }
   }
 
+  // ---- Platform accounts: REQUIRED in every environment -------------------
+  const { hash: ownerHash, explicit: ownerPasswordExplicit } = await ownerPasswordHash();
+  // Only an EXPLICIT PLATFORM_OWNER_PASSWORD rewrites an existing hash — that is
+  // the documented recovery path. Without it we never touch a password the owner
+  // may have already changed themselves.
+  const ownerPasswordUpdate = ownerPasswordExplicit ? { passwordHash: ownerHash } : {};
+  const owner = await prisma.user.upsert({
+    where: { email: "owner@sms.platform" },
+    update: ownerPasswordUpdate,
+    create: { schoolId: platformOrg.id, email: "owner@sms.platform", name: "Platform Owner", passwordHash: ownerHash },
+  });
+  // SELF-HEAL: upsert never moves an existing user, so a DB seeded before the
+  // platform-org model leaves the owner parked in the demo school (their console
+  // then reads "St. Andrews Academy"). Relocate explicitly on every seed.
+  await prisma.user.update({ where: { id: owner.id }, data: { schoolId: platformOrg.id } });
+  // Platform STAFF employed by the owner: same org, deliberately fewer powers.
+  const managerAdmin = await prisma.user.upsert({
+    where: { email: "manager@sms.platform" },
+    update: ownerPasswordUpdate,
+    create: { schoolId: platformOrg.id, email: "manager@sms.platform", name: "Platform Manager", passwordHash: ownerHash },
+  });
+  await prisma.user.update({ where: { id: managerAdmin.id }, data: { schoolId: platformOrg.id } });
+
+  const roleByName = async (name: string) =>
+    (await prisma.role.findUniqueOrThrow({ where: { name } })).id;
+  for (const [userId, roleId] of [
+    [owner.id, await roleByName("super_admin")],
+    [managerAdmin.id, await roleByName("manager_admin")],
+  ] as const) {
+    await prisma.userRole.upsert({
+      where: { userId_roleId: { userId, roleId } },
+      update: { schoolId: platformOrg.id },
+      create: { schoolId: platformOrg.id, userId, roleId },
+    });
+  }
+
+  // ---- Everything below is DEMO fixture data ------------------------------
+  if (!SEED_DEMO_DATA) {
+    console.log("Seeded platform essentials (org, system actor, RBAC registry). Demo data skipped — set SEED_DEMO_DATA=true to include it.");
+    return;
+  }
+
+  const school = await prisma.school.upsert({
+    where: { slug: "demo" },
+    update: {},
+    create: { name: "St. Andrews Academy", slug: "demo" },
+  });
+
+  // Explicit subscription so the demo does NOT rely on the entitlement default
+  // (which is now fail-closed to the entry tier) — the demo runs the full suite.
+  await prisma.schoolSubscription.upsert({
+    where: { schoolId: school.id },
+    update: {},
+    create: { schoolId: school.id, plan: "ENTERPRISE", status: "ACTIVE" },
+  });
+
   const passwordHash = await bcrypt.hash("password123", 10);
   const teacher = await prisma.user.upsert({
     where: { email: "teacher@demo.school" },
@@ -295,18 +363,8 @@ async function main() {
   const headDriver = await mkUser("headdriver@demo.school", "Demo Head Driver");
   const librarian = await mkUser("librarian@demo.school", "Demo Librarian");
   const juniorAdmin = await mkUser("junioradmin@demo.school", "Demo Junior Admin");
-  // The platform owner lives in the platform org, NOT the demo customer school.
-  const owner = await mkUser("owner@sms.platform", "Platform Owner", platformOrg.id);
-  // SELF-HEAL: upsert never moves an existing user, so a DB seeded before the
-  // platform-org model leaves the owner parked in the demo school (their console
-  // then reads "St. Andrews Academy"). Relocate explicitly on every seed.
-  await prisma.user.update({ where: { id: owner.id }, data: { schoolId: platformOrg.id } });
-  // Platform STAFF employed by the owner: same org, deliberately fewer powers.
-  const managerAdmin = await mkUser("manager@sms.platform", "Platform Manager", platformOrg.id);
-  await prisma.user.update({ where: { id: managerAdmin.id }, data: { schoolId: platformOrg.id } });
-
-  const roleByName = async (name: string) =>
-    (await prisma.role.findUniqueOrThrow({ where: { name } })).id;
+  // owner/managerAdmin are created in the PLATFORM section above (they exist in
+  // production too); only school-scoped demo roles are assigned here.
   for (const [userId, roleId] of [
     [teacher.id, await roleByName("teacher")],
     [student.id, await roleByName("student")],
@@ -325,17 +383,13 @@ async function main() {
     [headDriver.id, await roleByName("head_driver")],
     [librarian.id, await roleByName("librarian")],
     [juniorAdmin.id, await roleByName("junior_admin")],
-    [owner.id, await roleByName("super_admin")],
-    [managerAdmin.id, await roleByName("manager_admin")],
   ] as const) {
     // A role row must be scoped to the org the user actually BELONGS to — login
     // resolves roles for the user's own school, so a mismatch silently yields
-    // roles:[] / permissions:[] (the account logs in and can do nothing).
-    // Keyed on platform MEMBERSHIP, not on one hard-coded id: super_admin was
-    // special-cased here, so manager_admin — also a platform-org member — landed
-    // in the demo school and was invisible to its own login.
-    const platformMembers = new Set<string>([owner.id, managerAdmin.id]);
-    const roleSchoolId = platformMembers.has(userId) ? platformOrg.id : school.id;
+    // roles:[] / permissions:[] (the account logs in and can do nothing). Every
+    // user in THIS loop is a demo-school member; platform members are scoped to
+    // platformOrg in the platform section above.
+    const roleSchoolId = school.id;
     await prisma.userRole.upsert({
       where: { userId_roleId: { userId, roleId } },
       // Self-healing: corrects rows created before the platform-org model.

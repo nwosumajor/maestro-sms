@@ -1041,6 +1041,33 @@ all audited in the operator's own tenant. Verified: 8 scoping unit tests + the
 end-to-end (create→apply→consent-gate→submit→signals→cross-tenant review→award→
 ₦-credit on the invoice) + web production build (67 routes) + route smoke.
 
+## Demo fixtures are FAIL-CLOSED (never seed a demo account into production)
+The seed runs on EVERY cloud deploy (the one-off `migrate` ECS task calls
+`prisma db seed`), so anything unconditional in `seed.ts` lands in PRODUCTION.
+It previously created the demo school, 17 `@demo.school` logins AND the platform
+`super_admin` — all on the public password `password123`, which the login page
+also printed. That is a full platform compromise for anyone who guesses the
+convention.
+- `SEED_DEMO_DATA=true` (default FALSE) is now required for ANY demo fixture:
+  the demo school, its users and its content. Set it in `infrastructure/.env`
+  for local compose; NEVER set it in cloud.
+- Production still seeds what it genuinely needs: the platform org, the SYSTEM
+  audit actor, and the role/permission registry — the last must keep re-running
+  so new permissions reach a live DB.
+- `owner@sms.platform` / `manager@sms.platform` exist in every environment but
+  take their password from `PLATFORM_OWNER_PASSWORD`. Unset in a non-demo run ⇒
+  created with an UNUSABLE hash (`!no-password-set`, which bcrypt can never
+  match) plus a warning. Setting the env var and re-running the seed DOES
+  rewrite the hash — that is the documented recovery path — while a run WITHOUT
+  it never clobbers a password the owner has since changed.
+- The login page's demo-credentials block is gated on the SAME `SEED_DEMO_DATA`
+  flag (passed to the `frontend` service too), so the hint can never outlive the
+  accounts it describes. It is deliberately NOT also gated on `NODE_ENV`: the
+  local stack is itself a production build, so that would make it dead code.
+**If a cloud DB was ever seeded before this change, those accounts still exist.**
+Audit with `SELECT email FROM "user" WHERE email LIKE '%@demo.school' OR email
+LIKE '%@sms.platform';` and rotate/disable anything with the old password.
+
 ## Owner-facing documents — the PRICING ACCURACY rule
 Three assets quote commercial facts (plan tiers, commitment discounts, cycle
 lengths, trial length, the maker-checker money threshold) to school owners. A
