@@ -162,10 +162,25 @@ export class ParentImportService {
       let created = false;
       let parent = await tx.user.findFirst({ where: { email }, select: { id: true, name: true } });
       if (!parent) {
-        parent = await tx.user.create({
-          data: { schoolId: p.schoolId, email, name: input.name.trim(), passwordHash, passwordChangedAt: null },
-          select: { id: true, name: true },
-        });
+        try {
+          parent = await tx.user.create({
+            data: { schoolId: p.schoolId, email, name: input.name.trim(), passwordHash, passwordChangedAt: null },
+            select: { id: true, name: true },
+          });
+        } catch (e) {
+        // P2002 = unique violation on the GLOBAL user.email index: the address
+        // belongs to a user in ANOTHER school, which the RLS-scoped check above
+        // cannot see. Surface a clean conflict, not a 500. Deliberately does NOT
+        // name the other school — that would leak cross-tenant existence.
+          // Most likely collision in the whole system: one parent with children at
+          // two different schools on the platform.
+          if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+            throw new ConflictException(
+              "That email already belongs to an account on the platform. A guardian can only hold one account; ask them to use a different address for this school.",
+            );
+          }
+          throw e;
+        }
         await tx.userRole.create({ data: { schoolId: p.schoolId, userId: parent.id, roleId: parentRole.id } });
         created = true;
       } else {

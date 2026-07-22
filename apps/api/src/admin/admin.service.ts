@@ -8,6 +8,7 @@
 
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import bcrypt from "bcryptjs";
+import { Prisma } from "@sms/db";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -148,9 +149,21 @@ export class AdminService {
       if (!role) throw new NotFoundException("Role not found");
       const existing = await tx.user.findFirst({ where: { email: input.email }, select: { id: true } });
       if (existing) throw new BadRequestException("That email is already in use");
-      const user = await tx.user.create({
-        data: { schoolId: p.schoolId, email: input.email, name: input.name, passwordHash },
-      });
+      let user: { id: string };
+      try {
+        user = await tx.user.create({
+          data: { schoolId: p.schoolId, email: input.email, name: input.name, passwordHash },
+        });
+      } catch (e) {
+        // P2002 = unique violation on the GLOBAL user.email index: the address
+        // belongs to a user in ANOTHER school, which the RLS-scoped check above
+        // cannot see. Surface a clean conflict, not a 500. Deliberately does NOT
+        // name the other school — that would leak cross-tenant existence.
+        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+          throw new ConflictException("That email is already in use");
+        }
+        throw e;
+      }
       // Maker-checker on the junior-admin tier: the ACCOUNT is created (it can
       // log in and do nothing — roles:[]) but the role lands only after a
       // different senior approves the ADMIN_APPOINTMENT raised below.
@@ -280,7 +293,14 @@ export class AdminService {
           }
           created++;
         } catch (err) {
-          errors.push(`${row.email}: ${String(err).slice(0, 80)}`);
+          // A cross-school email collision surfaces here as a raw P2002. Translate
+          // it — "Unique constraint failed on the fields: (`email`)" tells the
+          // school administrator nothing they can act on.
+          const msg =
+            err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002"
+              ? "that email already belongs to an account on the platform"
+              : String(err).slice(0, 80);
+          errors.push(`${row.email}: ${msg}`);
         }
       }
       await this.log(tx, p, "admin.import.students", p.schoolId, { created, skipped, errors: errors.length });

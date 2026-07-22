@@ -223,7 +223,14 @@ export class StudentImportService {
           if (row.admissionNumber) usedAdmNo.add(row.admissionNumber);
           created++;
         } catch (err) {
-          errors.push(`${row.email}: ${String(err).slice(0, 80)}`);
+          // A cross-school email collision surfaces here as a raw P2002. Translate
+          // it — "Unique constraint failed on the fields: (`email`)" tells the
+          // school administrator nothing they can act on.
+          const msg =
+            err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002"
+              ? "that email already belongs to an account on the platform"
+              : String(err).slice(0, 80);
+          errors.push(`${row.email}: ${msg}`);
         }
       }
       const summary: StudentImportSummary = {
