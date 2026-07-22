@@ -3,7 +3,12 @@
 /** One row of the SIS import template (parsed from CSV client-side). */
 export interface StudentImportRow {
   name: string;
-  email: string;
+  /**
+   * OPTIONAL. Omit it and a sign-in identifier is generated from the name and
+   * the school's domain (firstname.lastname@<slug>.com) — most pupils have no
+   * address of their own, so requiring one made schools invent fake ones.
+   */
+  email?: string | null;
   admissionNumber?: string | null;
   dateOfBirth?: string | null; // YYYY-MM-DD
   gender?: string | null;
@@ -16,9 +21,9 @@ export interface StudentImportRow {
 /** Dry-run / result summary for a batch. */
 export interface StudentImportSummary {
   total: number;
-  /** Emails not already in use (will be created on approval). */
+  /** Rows that will create a new student on approval. */
   newCount: number;
-  /** Emails already present (skipped on approval). */
+  /** Rows whose sign-in identifier is already taken (skipped on approval). */
   duplicateCount: number;
   /** Populated after approval. */
   created?: number;

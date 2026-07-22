@@ -64,10 +64,11 @@ export function SisImport({ batches, currentUserId }: { batches: Batch[]; curren
     e.preventDefault();
     const parsed = parseCsv(csv);
     const rows = parsed
-      .filter((r) => r.name && r.email)
+      // Only NAME is required — the sign-in identifier is generated from it.
+      .filter((r) => r.name)
       .map((r) => ({
         name: r.name,
-        email: r.email,
+        email: r.email || null,
         admissionNumber: r.admissionNumber || null,
         dateOfBirth: r.dateOfBirth || null,
         gender: r.gender || null,
@@ -75,7 +76,7 @@ export function SisImport({ batches, currentUserId }: { batches: Batch[]; curren
         address: r.address || null,
         classId: r.classId || null,
       }));
-    if (rows.length === 0) { setMsg("No valid rows (need at least name + email)."); return; }
+    if (rows.length === 0) { setMsg("No valid rows — every row needs at least a name."); return; }
     setBusy(true); setMsg(null);
     const res = await fetch("/api/sms/admin/students/import", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rows }),
@@ -112,7 +113,9 @@ export function SisImport({ batches, currentUserId }: { batches: Batch[]; curren
       if (/^[=+\-@\t\r]/.test(t)) t = `'${t}`; // formula-injection guard
       return `"${t.replace(/"/g, '""')}"`;
     };
-    const csvText = ["name,email,temporaryPassword", ...creds.map((c) => [c.name, c.email, c.tempPassword].map(cell).join(","))].join("\n");
+    // Header says "signInId", not "email": these identifiers do not receive mail,
+    // and a slip labelled "email" is exactly how that gets misunderstood.
+    const csvText = ["name,signInId,temporaryPassword", ...creds.map((c) => [c.name, c.email, c.tempPassword].map(cell).join(","))].join("\n");
     const url = URL.createObjectURL(new Blob([csvText], { type: "text/csv" }));
     const a = document.createElement("a");
     a.href = url; a.download = "student-login-slips.csv"; a.click();

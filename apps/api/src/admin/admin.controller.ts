@@ -24,13 +24,15 @@ const createUserSchema = z.object({
 });
 const importSchema = z.object({
   rows: z
-    .array(z.object({ name: z.string().min(1).max(200), email: z.string().email(), classId: z.string().uuid().nullish() }))
+    .array(z.object({ name: z.string().min(1).max(200), email: z.string().email().nullish(), classId: z.string().uuid().nullish() }))
     .min(1)
     .max(500),
 });
 const sisRowSchema = z.object({
   name: z.string().min(1).max(200),
-  email: z.string().email(),
+  // Optional: omitted => a sign-in identifier is generated from the name and the
+  // school's domain. Most pupils have no address of their own.
+  email: z.string().email().nullish(),
   admissionNumber: z.string().max(60).nullish(),
   dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
   gender: z.string().max(20).nullish(),

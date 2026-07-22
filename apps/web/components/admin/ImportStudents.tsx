@@ -9,7 +9,7 @@ import { readApiError } from "@/lib/api-error";
 
 export function ImportStudents({ classes }: { classes: { id: string; name: string }[] }) {
   const router = useRouter();
-  const [csv, setCsv] = React.useState("Ada Obi, ada@demo.school\nBolu Eze, bolu@demo.school");
+  const [csv, setCsv] = React.useState("Ada Obi\nBolu Eze, bolu@demo.school");
   const [classId, setClassId] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
@@ -19,7 +19,8 @@ export function ImportStudents({ classes }: { classes: { id: string; name: strin
     const rows = csv.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => {
       const [name, email] = l.split(",").map((s) => s.trim());
       return { name, email, classId: classId || null };
-    }).filter((r) => r.name && r.email);
+    // Only the NAME is required now — a sign-in identifier is generated from it.
+    }).filter((r) => r.name);
     if (rows.length === 0) { setMsg("No valid rows."); return; }
     setBusy(true); setMsg(null);
     const res = await fetch("/api/sms/admin/import/students", {
@@ -36,7 +37,9 @@ export function ImportStudents({ classes }: { classes: { id: string; name: strin
   return (
     <form onSubmit={submit} className="space-y-3">
       <div className="space-y-1.5">
-        <Label htmlFor="imp-csv">Students (one per line: <code>Name, email</code>)</Label>
+        <Label htmlFor="imp-csv">
+          Students (one per line: <code>Name</code>, or <code>Name, email</code>)
+        </Label>
         <Textarea id="imp-csv" value={csv} onChange={(e) => setCsv(e.target.value)} rows={5} className="font-mono text-xs" />
       </div>
       <div className="flex items-end gap-3">

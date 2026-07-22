@@ -18,14 +18,15 @@ import {
   type TenantContext,
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
-import { isPlatformTierRole, requiresContactEmail } from "@sms/types";
+import { generateLoginEmail, isPlatformTierRole, requiresContactEmail } from "@sms/types";
 import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 
 export interface ImportRow {
   name: string;
-  email: string;
+  /** Optional — omitted => generated from the name and the school's domain. */
+  email?: string | null;
   classId?: string | null;
 }
 
@@ -315,13 +316,30 @@ export class AdminService {
       let created = 0;
       let skipped = 0;
       const errors: string[] = [];
+      const slug = await schoolSlugOf(tx, p.schoolId);
+      const issued = new Set<string>();
       for (const row of rows) {
         try {
-          const existing = await tx.user.findFirst({ where: { email: row.email }, select: { id: true } });
+          const loginEmail = row.email?.trim()
+            ? row.email.trim().toLowerCase()
+            : generateLoginEmail(row.name, slug);
+          if (issued.has(loginEmail)) {
+            errors.push(`${row.name}: another row already uses ${loginEmail} — give one a fuller name`);
+            skipped++;
+            continue;
+          }
+          const existing = await tx.user.findFirst({ where: { email: loginEmail }, select: { id: true } });
           if (existing) { skipped++; continue; }
           const u = await tx.user.create({
-            data: { schoolId: p.schoolId, email: row.email, name: row.name, passwordHash },
+            data: {
+              schoolId: p.schoolId,
+              email: loginEmail,
+              loginEmailGenerated: !row.email?.trim(),
+              name: row.name,
+              passwordHash,
+            },
           });
+          issued.add(loginEmail);
           await tx.userRole.create({ data: { schoolId: p.schoolId, userId: u.id, roleId: studentRole.id } });
           if (row.classId) {
             await tx.enrollment.create({ data: { schoolId: p.schoolId, classId: row.classId, studentId: u.id } });
@@ -333,9 +351,9 @@ export class AdminService {
           // school administrator nothing they can act on.
           const msg =
             err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002"
-              ? "that email already belongs to an account on the platform"
+              ? "that sign-in identifier is already taken — give this person a fuller name"
               : String(err).slice(0, 80);
-          errors.push(`${row.email}: ${msg}`);
+          errors.push(`${row.name}: ${msg}`);
         }
       }
       await this.log(tx, p, "admin.import.students", p.schoolId, { created, skipped, errors: errors.length });

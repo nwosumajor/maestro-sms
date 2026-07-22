@@ -21,6 +21,8 @@ import {
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import { Prisma } from "@sms/db";
+import { generateLoginEmail } from "@sms/types";
+import { schoolSlugOf } from "../foundation/login-email";
 import type {
   StudentImportBatchDto,
   StudentImportRow,
@@ -69,23 +71,42 @@ export class StudentImportService {
     return { schoolId: p.schoolId, userId: p.userId };
   }
 
-  /** A blank CSV template with the SIS header row + one example row. */
+  /**
+   * A blank CSV template with the SIS header row + two example rows.
+   * The `email` column is OPTIONAL — the second example leaves it empty to show
+   * that, since most pupils have no address and a sign-in identifier is
+   * generated from the name.
+   */
   csvTemplate(): string {
-    const example = ["Ada Lovelace", "ada@example.com", "ADM-001", "2012-05-01", "F", "08000000000", "12 Main St", ""];
-    return `${TEMPLATE_HEADERS.join(",")}\n${example.join(",")}\n`;
+    const withEmail = ["Ada Lovelace", "ada@example.com", "ADM-001", "2012-05-01", "F", "08000000000", "12 Main St", ""];
+    const noEmail = ["Bolu Eze", "", "ADM-002", "2012-09-14", "M", "", "", ""];
+    return `${TEMPLATE_HEADERS.join(",")}\n${withEmail.join(",")}\n${noEmail.join(",")}\n`;
   }
 
   /** Stage a PENDING batch and compute a dry-run summary (new vs duplicate email). */
   async stage(p: Principal, rows: StudentImportRow[]) {
     if (!rows.length) throw new BadRequestException("No rows to import");
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const emails = rows.map((r) => r.email.toLowerCase());
+      // The dry run must preview the identifier each row will ACTUALLY get, so a
+      // clash is visible BEFORE the approver commits — otherwise duplicates only
+      // surface as skipped rows after the fact.
+      const slug = await schoolSlugOf(tx, p.schoolId);
+      const identifiers = rows.map((r) =>
+        r.email?.trim() ? r.email.trim().toLowerCase() : generateLoginEmail(r.name, slug),
+      );
       const existing = await tx.user.findMany({
-        where: { email: { in: emails } },
+        where: { email: { in: identifiers } },
         select: { email: true },
       });
       const dup = new Set(existing.map((e) => e.email.toLowerCase()));
-      const duplicateCount = emails.filter((e) => dup.has(e)).length;
+      // Count a within-FILE clash as a duplicate too: two rows resolving to one
+      // identifier means only the first can be created.
+      const seen = new Set<string>();
+      const duplicateCount = identifiers.filter((e) => {
+        const clash = dup.has(e) || seen.has(e);
+        seen.add(e);
+        return clash;
+      }).length;
       const summary: StudentImportSummary = {
         total: rows.length,
         newCount: rows.length - duplicateCount,
@@ -170,9 +191,31 @@ export class StudentImportService {
       let created = 0;
       let skipped = 0;
       const errors: string[] = [];
+      // The school's domain, resolved once for the whole batch.
+      const slug = await schoolSlugOf(tx, p.schoolId);
+      // Identifiers issued EARLIER IN THIS TRANSACTION but not yet committed —
+      // without this, one CSV containing two pupils called Adams James would
+      // hand both the same identifier and the second INSERT would fail.
+      const issued = new Set<string>();
+
       for (const { row, tempPassword, passwordHash } of prepared) {
         try {
-          const existing = await tx.user.findFirst({ where: { email: row.email }, select: { id: true } });
+          // A supplied address is honoured; otherwise generate one from the name.
+          const loginEmail = row.email?.trim()
+            ? row.email.trim().toLowerCase()
+            : generateLoginEmail(row.name, slug);
+          const generated = !row.email?.trim();
+
+          if (issued.has(loginEmail)) {
+            // Two rows in this same file resolve to one identifier — a real
+            // ambiguity the uploader must fix, not something to paper over.
+            errors.push(
+              `${row.name}: another row in this file already uses ${loginEmail} — give one of them a fuller name`,
+            );
+            skipped++;
+            continue;
+          }
+          const existing = await tx.user.findFirst({ where: { email: loginEmail }, select: { id: true } });
           if (existing) {
             skipped++;
             continue;
@@ -200,9 +243,20 @@ export class StudentImportService {
           const u = await tx.user.create({
             // passwordChangedAt: null => the login flow treats the password as
             // expired, forcing the student to set their own at first sign-in.
-            data: { schoolId: p.schoolId, email: row.email, name: row.name, passwordHash, passwordChangedAt: null },
+            data: {
+              schoolId: p.schoolId,
+              email: loginEmail,
+              // Students are exempt from a contact address — guardians are notified.
+              loginEmailGenerated: generated,
+              name: row.name,
+              passwordHash,
+              passwordChangedAt: null,
+            },
           });
-          credentials.push({ name: row.name, email: row.email, tempPassword });
+          issued.add(loginEmail);
+          // The login slip must carry the identifier ACTUALLY issued, or the
+          // student cannot sign in with what they were handed.
+          credentials.push({ name: row.name, email: loginEmail, tempPassword });
           await tx.userRole.create({ data: { schoolId: p.schoolId, userId: u.id, roleId: studentRole.id } });
           await tx.studentProfile.create({
             data: {
@@ -228,9 +282,9 @@ export class StudentImportService {
           // school administrator nothing they can act on.
           const msg =
             err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002"
-              ? "that email already belongs to an account on the platform"
+              ? "that sign-in identifier is already taken — give this person a fuller name"
               : String(err).slice(0, 80);
-          errors.push(`${row.email}: ${msg}`);
+          errors.push(`${row.name}: ${msg}`);
         }
       }
       const summary: StudentImportSummary = {

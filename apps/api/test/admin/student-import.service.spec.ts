@@ -34,6 +34,9 @@ function makeService(opts: { batch?: Row | null; existingEmails?: string[] }) {
     studentProfile: { create: profileCreate, findMany: jest.fn().mockResolvedValue([]) },
     enrollment: { create: enrollCreate, count: jest.fn().mockResolvedValue(0) },
     role: { findFirst: jest.fn().mockResolvedValue({ id: "student-role" }) },
+    // Both stage() and approve() now resolve the school's slug: it is the domain
+    // of every generated sign-in identifier.
+    school: { findFirst: jest.fn().mockResolvedValue({ slug: "demo" }) },
     studentImportBatch: {
       create: jest.fn((a: { data: Row }) => Promise.resolve({ id: "b1", ...a.data })),
       findFirst: jest.fn(() => Promise.resolve(state.batch)),
@@ -89,5 +92,56 @@ describe("StudentImportService maker-checker", () => {
   it("refuses to approve an already-decided batch", async () => {
     const { service } = makeService({ batch: pendingBatch({ status: "APPROVED" }) });
     await expect(service.approve(p("approver"), "b1")).rejects.toBeInstanceOf(ConflictException);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// Generated sign-in identifiers in bulk import
+// -----------------------------------------------------------------------------
+// Most pupils have no email, so schools were inventing fake ones. A row now needs
+// only a NAME; the identifier is generated from it and the school's domain.
+describe("StudentImportService — generated identifiers", () => {
+  it("creates a student from a name ALONE and stamps it as generated", async () => {
+    const { service, userCreate } = makeService({
+      batch: pendingBatch({ rows: [{ name: "Chika Nwosu" }] }),
+    });
+    await service.approve(p("approver"), "b1");
+    expect(userCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          email: "chika.nwosu@demo.com",
+          loginEmailGenerated: true,
+        }),
+      }),
+    );
+  });
+
+  it("honours a supplied address and does NOT mark it generated", async () => {
+    const { service, userCreate } = makeService({
+      batch: pendingBatch({ rows: [{ name: "Chika Nwosu", email: "Chika@Real.test" }] }),
+    });
+    await service.approve(p("approver"), "b1");
+    expect(userCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ email: "chika@real.test", loginEmailGenerated: false }),
+      }),
+    );
+  });
+
+  it("REFUSES a second row resolving to the same identifier rather than failing the INSERT", async () => {
+    // Two pupils sharing a name in ONE file is a real ambiguity the uploader must
+    // resolve — not something to paper over with a silent suffix.
+    const { service, userCreate } = makeService({
+      batch: pendingBatch({ rows: [{ name: "Chika Nwosu" }, { name: "Chika Nwosu" }] }),
+    });
+    const res = await service.approve(p("approver"), "b1");
+    expect(userCreate).toHaveBeenCalledTimes(1);
+    expect(res.summary).toMatchObject({ created: 1, skipped: 1 });
+  });
+
+  it("previews the GENERATED identifier at stage, so a clash is visible before approval", async () => {
+    const { service } = makeService({ existingEmails: ["chika.nwosu@demo.com"] });
+    const res = await service.stage(p("uploader"), [{ name: "Chika Nwosu" }, { name: "Femi Adeleke" }]);
+    expect(res.summary).toMatchObject({ total: 2, newCount: 1, duplicateCount: 1 });
   });
 });
