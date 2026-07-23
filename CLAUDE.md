@@ -1041,6 +1041,21 @@ all audited in the operator's own tenant. Verified: 8 scoping unit tests + the
 end-to-end (create→apply→consent-gate→submit→signals→cross-tenant review→award→
 ₦-credit on the invoice) + web production build (67 routes) + route smoke.
 
+## ID-card QR scan — BUILT (`apps/api/src/certificate`)
+Student/staff ID cards now carry a REAL scannable QR (pdfkit vector squares via
+the `qrcode` lib) encoding the member's global `uniqueId` — replacing the old
+decorative barcode. A tenant-scoped lookup resolves a scanned code to a member
+of the SCANNER's OWN school for library / attendance / exam-hall / gate desks:
+`GET /members/scan/:code` (`member.scan`, seeded to principal/school_admin/
+junior_admin/head_teacher/teacher/librarian/warden/head_warden). SECURITY: runs
+in `runAsTenant` so RLS confines it — a foreign `uniqueId` returns **404, not
+403** (no cross-tenant existence disclosure); returns ROSTER-level fields only
+(name/role/admission#/class/status), never medical/PII; every scan audited
+(`member.scan`). Web desk at `/scan` (`ScanConsole` — always-focused input for a
+handheld scanner). `member.scan` is a NEW permission: run the seed against a live
+DB (or it 403s even for staff) — the runtime guard reads role→perms from the DB
+(`role-permissions.service`, static `@sms/types` map is only the fallback).
+
 ## Operating the live system — runbooks
 - **`docs/RUNBOOK-INCIDENT-RESPONSE.md`** — the on-call playbook: severity
   levels, 5-minute triage, per-symptom playbooks (outage / latency / DB / Redis

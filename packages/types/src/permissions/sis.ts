@@ -35,6 +35,12 @@ export const SIS_PERMISSIONS = {
    *  tasks / fees for LINKED children only — ParentChild-scoped). parent. */
   FAMILY_READ: "family.read",
 
+  /** Resolve a SCANNED ID-card code (the member's uniqueId QR) to a member of
+   *  the SCANNER's OWN school — for library, attendance, exam-hall and gate
+   *  desks. Tenant-scoped (404 across tenants), audited. Returns roster-level
+   *  info only, never medical/PII. */
+  MEMBER_SCAN: "member.scan",
+
   /** Onboard PARENT/guardian accounts — single create or bulk upload (maker-
    *  checker: a DIFFERENT person approves a bulk batch). Generated logins +
    *  ParentChild links. principal, school_admin, hr_manager, hr_clerk. */

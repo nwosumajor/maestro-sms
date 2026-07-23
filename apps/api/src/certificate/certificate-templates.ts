@@ -13,6 +13,7 @@
 // =============================================================================
 
 import PDFDocument from "pdfkit";
+import { drawQrCode } from "./qr";
 
 type Doc = InstanceType<typeof PDFDocument>;
 
@@ -410,16 +411,19 @@ export function renderIdCard(d: IdCardData, logo?: Buffer | null): Promise<Buffe
       .fillColor(MUTED)
       .text(`Issued ${formatLongDate(d.issuedOn)}`, bx, chipY + 46);
 
-    // Serial barcode strip (decorative bars derived from the serial characters).
-    let x = bx;
-    const barY = 168;
-    for (const ch of d.serial) {
-      const bw = 0.8 + (ch.charCodeAt(0) % 3) * 0.7;
-      doc.rect(x, barY, bw, 20).fill("#20242c");
-      x += bw + 1.3;
-      if (x > W - 20) break;
-    }
-    doc.font("Courier").fontSize(5.5).fillColor(MUTED).text(d.serial, bx, barY + 23);
+    // REAL scannable QR encoding the member's global uniqueId (opaque, non-PII).
+    // A library / attendance / gate scanner reads it, and the tenant-scoped
+    // /members/scan lookup resolves it to a member of the scanner's own school.
+    const qrSize = 58;
+    const qrX = W - qrSize - 16;
+    const qrY = 138;
+    drawQrCode(doc, d.uniqueId, qrX, qrY, qrSize);
+    doc
+      .font("Helvetica")
+      .fontSize(5)
+      .fillColor(MUTED)
+      .text("SCAN TO VERIFY", qrX - 2, qrY + qrSize + 3, { width: qrSize + 8, align: "center", characterSpacing: 0.5 });
+    doc.font("Courier").fontSize(5.5).fillColor(MUTED).text(d.serial, bx, 196);
     doc
       .font("Helvetica")
       .fontSize(5.5)

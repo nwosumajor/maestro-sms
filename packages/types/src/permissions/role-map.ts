@@ -57,7 +57,7 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
   board: ["poll.vote", "discussion.participate", "discipline.file", "form.respond", "class.read", "grade.read", "integrity.report.read", "workflow.read", "workflow.veto", "notification.read", "fee.read", "document.read", "timetable.read", "message.read", "message.send", "event.read", "announcement.read", "billing.read", "scholarship.read",
   ],
   // Principal: full operational view of their school (can grade, review workflows).
-  principal: [
+  principal: ["member.scan", 
     "assessment.read", "assessment.write", "submission.read",
     "integrity.report.read", "integrity.exemption.read", "integrity.exemption.write",
     "integrity.retention.run",
@@ -88,7 +88,7 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     "scholarship.read", "scholarship.apply",
   ],
   // School Administrator: SIS / enrollment / workflows — but NOT grade books, NOT veto.
-  school_admin: [
+  school_admin: ["member.scan", 
     "class.read", "class.write", "enrollment.read", "enrollment.write", "guardian.write", "subject.manage", "subject.selection.approve", "student.import", "parent.import", "class.promote", "academic.manage",
     "assessment.read", "integrity.report.read", "integrity.exemption.read", "integrity.exemption.write",
     "integrity.retention.run",
@@ -132,7 +132,7 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
   // Appointing a junior_admin (or adding roles to one) is itself maker-checker
   // via the ADMIN_APPOINTMENT workflow. JIT elevation covers the occasional
   // senior need; NON_ELEVATABLE_PERMISSIONS blocks the dangerous set.
-  junior_admin: [
+  junior_admin: ["member.scan", 
     "class.read", "class.write", "enrollment.read", "enrollment.write", "guardian.write", "student.import", "parent.import",
     "assessment.read", "integrity.report.read", "integrity.exemption.read",
     "grade.read",
@@ -151,7 +151,7 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     "hr.self", "admission.review", "directory.search",
     "lms.content.read",
   ],
-  teacher: ["hr.self", "task.assign", "task.participate", "poll.manage", "poll.vote",
+  teacher: ["member.scan", "hr.self", "task.assign", "task.participate", "poll.manage", "poll.vote",
     "discussion.participate", "discussion.moderate", "discipline.file", "discipline.manage", "certificate.issue", "cbt.manage", "alumni.manage", "form.manage", "form.respond",
     "assessment.read", "assessment.write", "submission.read",
     "integrity.report.read", "integrity.exemption.read", "integrity.exemption.write",
@@ -210,7 +210,7 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     "message.read", "message.send", "event.read", "announcement.read",
   ],
   // Head of teaching: stage-1 approver for teaching staff requests.
-  head_teacher: ["hr.self", "task.assign", "task.participate", "poll.vote", "discussion.participate", "discipline.file", "form.respond",
+  head_teacher: ["member.scan", "hr.self", "task.assign", "task.participate", "poll.vote", "discussion.participate", "discipline.file", "form.respond",
     "class.read", "enrollment.read", "attendance.read", "grade.read", "subject.selection.approve",
     "workflow.create", "workflow.read", "workflow.review", "workflow.review.head",
     "notification.read", "notification.send", "security.elevation.request",
@@ -224,12 +224,12 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
   ],
   // Hostel warden — manages ONLY the hostel(s) they are assigned to (scoped in the
   // service by Hostel.wardenId). Basic staff comms + self-service.
-  warden: ["hr.self", "hostel.read", "hostel.manage", "notification.read",
+  warden: ["member.scan", "hr.self", "hostel.read", "hostel.manage", "notification.read",
     "message.read", "message.send", "event.read", "announcement.read", "task.participate",
   ],
   // Head warden — supervises EVERY hostel (module-wide scoping in HostelService);
   // fee runs they schedule are maker-checker (FEE_SCHEDULE workflow -> admin approves).
-  head_warden: ["hr.self", "hostel.read", "hostel.manage", "workflow.create", "workflow.read",
+  head_warden: ["member.scan", "hr.self", "hostel.read", "hostel.manage", "workflow.create", "workflow.read",
     "notification.read", "message.read", "message.send", "event.read", "announcement.read", "task.participate",
   ],
   // Transport driver — reads ONLY their own vehicle / route / passengers (scoped in
@@ -243,7 +243,7 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     "notification.read", "message.read", "message.send", "event.read", "announcement.read", "task.participate",
   ],
   // Librarian — owns the library module (catalogue, loans, fines, exports).
-  librarian: ["hr.self", "library.read", "library.borrow", "library.manage", "workflow.create", "workflow.read",
+  librarian: ["member.scan", "hr.self", "library.read", "library.borrow", "library.manage", "workflow.create", "workflow.read",
     "notification.read", "message.read", "message.send", "event.read", "announcement.read", "task.participate",
   ],
 };
