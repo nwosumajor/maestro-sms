@@ -9,7 +9,7 @@ function makeService(over: {
   batch?: Record<string, unknown> | null;
   existingParent?: { id: string; name: string; email?: string } | null;
   profiles?: { studentId: string; admissionNumber: string }[];
-  studentsByEmail?: { id: string; email: string }[];
+  studentsByEmail?: { id: string; email: string; contactEmail?: string | null }[];
   onUserCreate?: (data: Record<string, unknown>) => void;
   studentsById?: { id: string }[];
   existingLinks?: { parentId: string; studentId: string }[];
@@ -43,10 +43,14 @@ function makeService(over: {
         ({ where }: { where: { email?: string; OR?: Array<Record<string, string>> } }) =>
           Promise.resolve(where.OR ? (over.existingParent ?? null) : null),
       ),
-      findMany: jest.fn().mockImplementation(({ where }: { where: { id?: { in: string[] }; email?: { in: string[] } } }) => {
-        if (where.email) return Promise.resolve(over.studentsByEmail ?? []);
-        return Promise.resolve(over.studentsById ?? []);
-      }),
+      findMany: jest.fn().mockImplementation(
+        ({ where }: { where: { id?: { in: string[] }; email?: { in: string[] }; OR?: unknown[] } }) => {
+          // Child-by-email resolution uses OR:[{email},{contactEmail}]; student
+          // validation uses id:{in}.
+          if (where.OR || where.email) return Promise.resolve(over.studentsByEmail ?? []);
+          return Promise.resolve(over.studentsById ?? []);
+        },
+      ),
       create: userCreate,
     },
     userRole: { findFirst: jest.fn().mockResolvedValue(null), create: userRoleCreate },
@@ -146,6 +150,24 @@ describe("ParentImportService — bulk maker-checker", () => {
     // NOT the guardian\'s real address — that is stored as contactEmail. This is
     // what lets a parent with children at two schools be imported at both.
     expect(res.credentials?.[0].email).toBe("grace@demo.com");
+  });
+
+  it("links a child referenced by studentEmails — matched on the student's CONTACT email, not just the generated login", async () => {
+    const { service, parentChildCreate } = makeService({
+      batch: {
+        id: "batch1",
+        status: "PENDING",
+        uploadedById: "uploader",
+        // The school types the child's real (contact) address, not the generated login.
+        rows: [{ name: "Grace", contactEmail: "grace@x.com", studentAdmissionNumbers: null, studentEmails: "kid@home.test", relationship: null }],
+      },
+      existingParent: null,
+      // The student's login is generated (kid.one@demo.com); their contact is kid@home.test.
+      studentsByEmail: [{ id: "stu-kid", email: "kid.one@demo.com", contactEmail: "kid@home.test" }],
+    });
+    const res = await service.approve(p("approver"), "batch1");
+    expect(res.summary?.linked).toBe(1);
+    expect(parentChildCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ studentId: "stu-kid" }) });
   });
 
   it("AUTO-SUFFIXES two unrelated families sharing a name — both import, distinct logins", async () => {

@@ -29,7 +29,7 @@ function parseCsv(text: string): Record<string, string>[] {
 
 export function SisImport({ batches, currentUserId }: { batches: Batch[]; currentUserId: string }) {
   const router = useRouter();
-  const [csv, setCsv] = React.useState(`${COLS.join(",")}\nAda Lovelace,ada@example.com,ADM-001,2012-05-01,F,08000000000,12 Main St,`);
+  const [csv, setCsv] = React.useState(`${COLS.join(",")}\nAda Lovelace,ada@example.com,ADM-001,2012-05-01,F,08000000000,12 Main St,\nBolu Eze,,ADM-002,2012-09-14,M,,,`);
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
   // One-time credentials from the LAST approval — shown once, never persisted.
