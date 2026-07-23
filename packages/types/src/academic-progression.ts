@@ -56,7 +56,12 @@ export function pickNextTerm(
   // 2. First term of the next session.
   const currentSession = sessions.find((s) => s.id === current.sessionId);
   if (!currentSession) return null;
-  const key = (s: ProgressionSession): number => ord(s.startDate ?? s.createdAt);
+  // Pick the ordering key ONCE for the whole set: comparing one session's
+  // startDate against another's createdAt is not a consistent order. Use
+  // startDate only when EVERY session has one; otherwise fall back to
+  // creation order for all of them.
+  const allDated = sessions.every((s) => !!s.startDate);
+  const key = (s: ProgressionSession): number => ord(allDated ? (s.startDate as string | Date) : s.createdAt);
   const nextSession = sessions
     .filter((s) => key(s) > key(currentSession))
     .sort((a, b) => key(a) - key(b))[0];

@@ -337,7 +337,9 @@ export class PromotionService {
         skipDuplicates: true,
       });
     }
-    // Re-approval of an already-applied batch must not double-count.
+    // Report students LANDED here, not rows inserted: someone already enrolled
+    // in the destination still ends the batch in it. (Approve refuses a
+    // non-PENDING batch, so this never runs twice for the same students.)
     return studentIds.length;
   }
 

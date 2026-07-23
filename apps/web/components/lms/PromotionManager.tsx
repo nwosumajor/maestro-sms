@@ -40,6 +40,15 @@ export function PromotionManager({
   // so "one click" still promotes the whole class untouched.
   const [outcomes, setOutcomes] = React.useState<Record<string, { outcome: PromotionOutcome; targetClassId?: string; note?: string }>>({});
 
+  // Switching class MUST drop the previous class's roster and any per-student
+  // overrides — otherwise a staged decision would name a student who isn't in
+  // the new batch, which the server rejects (400).
+  React.useEffect(() => {
+    setEligibility(null);
+    setOutcomes({});
+    setMsg(null);
+  }, [sourceClassId]);
+
   const loadEligibility = async () => {
     setEligibility(null);
     setOutcomes({});

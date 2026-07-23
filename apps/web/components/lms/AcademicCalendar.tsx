@@ -118,13 +118,28 @@ export function AcademicCalendar({ sessions }: { sessions: Session[] }) {
                         <Badge variant={tm.isCurrent ? "secondary" : "outline"}>{tm.sequence}. {tm.name}{tm.isCurrent ? " ✓" : ""}</Badge>
                       </button>
                       {/* End date drives AUTOMATIC advance: once it passes, the
-                          nightly sweep rolls this school to the next term. */}
+                          nightly sweep rolls this school to the next term.
+                          Saved on blur, not on change — a date input reads ""
+                          until it is complete, so saving per keystroke would
+                          fire spurious "clear" writes while typing one. */}
                       <label className="flex items-center gap-1 text-xs text-muted-foreground">
                         ends
                         <Input
                           type="date"
                           defaultValue={tm.endDate ? String(tm.endDate).slice(0, 10) : ""}
-                          onChange={(e) => send("PUT", `/academic/terms/${tm.id}`, { endDate: e.target.value || null }, e.target.value ? "Term end date saved — it will auto-advance after this date." : "Term end date cleared.")}
+                          onBlur={(e) => {
+                            const next = e.target.value || null;
+                            const before = tm.endDate ? String(tm.endDate).slice(0, 10) : null;
+                            if (next === before) return; // nothing actually changed
+                            send(
+                              "PUT",
+                              `/academic/terms/${tm.id}`,
+                              { endDate: next },
+                              next
+                                ? `${tm.name} ends ${next} — it will advance automatically after that date.`
+                                : `${tm.name} end date cleared — it will only advance manually.`,
+                            );
+                          }}
                           className="h-7 w-36 py-0"
                         />
                       </label>

@@ -37,6 +37,14 @@ describe("pickNextTerm", () => {
     expect(pickNextTerm(terms("none"), SESSIONS, "t1")).toEqual({ termId: "t2", sessionId: "s1", newSession: false });
   });
 
+  it("falls back to creation order when NOT every session has a startDate", () => {
+    // Mixing one session's startDate with another's createdAt is not a
+    // consistent order, so the whole set must fall back to createdAt.
+    const s1 = { id: "s1", createdAt: "2025-09-01", startDate: "2025-09-01" };
+    const s2 = { id: "s2", createdAt: "2026-09-01" }; // no startDate
+    expect(pickNextTerm(terms("t3"), [s2, s1])).toEqual({ termId: "u1", sessionId: "s2", newSession: true });
+  });
+
   it("orders the next session by startDate even when createdAt disagrees", () => {
     const s1 = { id: "s1", createdAt: "2026-01-01", startDate: "2025-09-01" };
     const s2 = { id: "s2", createdAt: "2025-01-01", startDate: "2026-09-01" };
