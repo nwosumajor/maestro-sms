@@ -30,7 +30,7 @@ export function CreateUserForm({ roles }: { roles: string[] }) {
     }
     setBusy(true);
     setResult(null);
-    const res = await postSms<{ email: string; role: string; tempPassword: string; pendingApproval?: boolean }>(
+    const res = await postSms<{ email: string; role: string; tempPassword: string; admissionNumber?: string | null; pendingApproval?: boolean }>(
       "admin/users",
       { name, role, ...(contactEmail.trim() ? { contactEmail: contactEmail.trim() } : {}) },
     );
@@ -41,7 +41,9 @@ export function CreateUserForm({ roles }: { roles: string[] }) {
       setResult(
         res.data.pendingApproval
           ? `Created. Sign-in ID: ${res.data.email} — temporary password: ${res.data.tempPassword}. The ${res.data.role} role is AWAITING APPROVAL by a different senior (see Approvals); the account has no access until then.`
-          : `Created ${res.data.role}. Sign-in ID: ${res.data.email} — temporary password: ${res.data.tempPassword}. This ID is for signing in only; it does not receive mail.`,
+          : `Created ${res.data.role}. Sign-in ID: ${res.data.email} — temporary password: ${res.data.tempPassword}.${
+              res.data.admissionNumber ? ` Admission no.: ${res.data.admissionNumber}.` : ""
+            } This ID is for signing in only; it does not receive mail.`,
       );
       setName("");
       setContactEmail("");

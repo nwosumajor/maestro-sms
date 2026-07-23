@@ -16,7 +16,12 @@ export interface ParentImportRow {
   phone?: string | null;
   /** Children by admission number, ";"-separated (e.g. "ADM-001;ADM-014"). */
   studentAdmissionNumbers?: string | null;
-  /** Children by student email, ";"-separated. Merged with the admission numbers. */
+  /**
+   * Children by student email, ";"-separated, merged with the admission numbers.
+   * A student's own email is now a GENERATED sign-in id the school rarely knows,
+   * so **admission number is the reliable way to reference a child**; this column
+   * matches either the sign-in id or a student's contact email where one was set.
+   */
   studentEmails?: string | null;
   /** Optional relationship label stamped on each link (e.g. "Mother"). */
   relationship?: string | null;

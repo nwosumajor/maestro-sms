@@ -35,7 +35,21 @@ const sessionSchema = z.object({
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
   endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
 });
-const termSchema = z.object({ name: z.string().min(1).max(60), sequence: z.number().int().min(1).max(6) });
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish();
+const termSchema = z.object({
+  name: z.string().min(1).max(60),
+  sequence: z.number().int().min(1).max(6),
+  startDate: isoDate,
+  endDate: isoDate,
+});
+// Term edit — all fields optional; a null date CLEARS it. endDate is what the
+// automatic end-of-term progression sweep keys on.
+const termUpdateSchema = z.object({
+  name: z.string().min(1).max(60).optional(),
+  sequence: z.number().int().min(1).max(6).optional(),
+  startDate: isoDate,
+  endDate: isoDate,
+});
 const teacherSchema = z.object({ teacherId: z.string().uuid() });
 const studentSchema = z.object({ studentId: z.string().uuid() });
 const guardianSchema = z.object({ parentId: z.string().uuid(), studentId: z.string().uuid() });
@@ -55,6 +69,19 @@ const promotionSchema = z.object({
   sourceClassId: z.string().uuid(),
   targetClassId: z.string().uuid().nullish(),
   studentIds: z.array(z.string().uuid()).max(2000).optional(),
+  // Per-student overrides. Anyone not named here is PROMOTEd. A DEMOTE must
+  // name the lower class; the service rejects one that doesn't.
+  decisions: z
+    .array(
+      z.object({
+        studentId: z.string().uuid(),
+        outcome: z.enum(["PROMOTE", "RETAIN", "DEMOTE"]),
+        targetClassId: z.string().uuid().nullish(),
+        note: z.string().max(500).nullish(),
+      }),
+    )
+    .max(2000)
+    .optional(),
 });
 const promoteRejectSchema = z.object({ note: z.string().max(1000).optional() });
 
@@ -298,6 +325,24 @@ export class LmsController {
   @RequirePermission(LMS_PERMISSIONS.ACADEMIC_MANAGE)
   setCurrentTerm(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
     return this.academic.setCurrentTerm(p, id);
+  }
+
+  /** Edit a term's name/sequence/dates. Setting endDate enables auto-advance. */
+  @Put("academic/terms/:id")
+  @RequirePermission(LMS_PERMISSIONS.ACADEMIC_MANAGE)
+  updateTerm(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(termUpdateSchema)) body: z.infer<typeof termUpdateSchema>,
+  ) {
+    return this.academic.updateTerm(p, id, body);
+  }
+
+  /** One-click advance to the next term (or the next session's first term). */
+  @Post("academic/advance-term")
+  @RequirePermission(LMS_PERMISSIONS.ACADEMIC_MANAGE)
+  advanceTerm(@CurrentPrincipal() p: Principal) {
+    return this.academic.advanceToNextTerm(p);
   }
 
   // --- end-of-session promotion (maker-checker) ------------------------------

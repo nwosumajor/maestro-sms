@@ -29,11 +29,11 @@ function parseCsv(text: string): Record<string, string>[] {
 
 export function SisImport({ batches, currentUserId }: { batches: Batch[]; currentUserId: string }) {
   const router = useRouter();
-  const [csv, setCsv] = React.useState(`${COLS.join(",")}\nAda Lovelace,ada@example.com,ADM-001,2012-05-01,F,08000000000,12 Main St,`);
+  const [csv, setCsv] = React.useState(`${COLS.join(",")}\nAda Lovelace,ada@example.com,ADM-001,2012-05-01,F,08000000000,12 Main St,\nBolu Eze,,ADM-002,2012-09-14,M,,,`);
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
   // One-time credentials from the LAST approval — shown once, never persisted.
-  const [creds, setCreds] = React.useState<{ name: string; email: string; tempPassword: string }[] | null>(null);
+  const [creds, setCreds] = React.useState<{ name: string; email: string; tempPassword: string; admissionNumber: string }[] | null>(null);
 
   const downloadTemplate = async () => {
     const res = await fetch("/api/sms/admin/students/import/template");
@@ -115,7 +115,7 @@ export function SisImport({ batches, currentUserId }: { batches: Batch[]; curren
     };
     // Header says "signInId", not "email": these identifiers do not receive mail,
     // and a slip labelled "email" is exactly how that gets misunderstood.
-    const csvText = ["name,signInId,temporaryPassword", ...creds.map((c) => [c.name, c.email, c.tempPassword].map(cell).join(","))].join("\n");
+    const csvText = ["name,admissionNumber,signInId,temporaryPassword", ...creds.map((c) => [c.name, c.admissionNumber, c.email, c.tempPassword].map(cell).join(","))].join("\n");
     const url = URL.createObjectURL(new Blob([csvText], { type: "text/csv" }));
     const a = document.createElement("a");
     a.href = url; a.download = "student-login-slips.csv"; a.click();
@@ -173,12 +173,12 @@ export function SisImport({ batches, currentUserId }: { batches: Batch[]; curren
             <div className="max-h-48 overflow-y-auto rounded-md border border-border">
               <table className="w-full text-xs">
                 <thead><tr className="border-b border-border text-left text-muted-foreground">
-                  <th className="px-2 py-1 font-medium">Name</th><th className="px-2 py-1 font-medium">Email</th><th className="px-2 py-1 font-medium">Temporary password</th>
+                  <th className="px-2 py-1 font-medium">Name</th><th className="px-2 py-1 font-medium">Admission no.</th><th className="px-2 py-1 font-medium">Sign-in ID</th><th className="px-2 py-1 font-medium">Temporary password</th>
                 </tr></thead>
                 <tbody>
                   {creds.map((c) => (
                     <tr key={c.email} className="border-b border-border/50 last:border-0">
-                      <td className="px-2 py-1">{c.name}</td><td className="px-2 py-1">{c.email}</td>
+                      <td className="px-2 py-1">{c.name}</td><td className="px-2 py-1 font-mono">{c.admissionNumber}</td><td className="px-2 py-1">{c.email}</td>
                       <td className="px-2 py-1 font-mono">{c.tempPassword}</td>
                     </tr>
                   ))}

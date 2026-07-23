@@ -98,11 +98,19 @@ export class ParentImportService {
       }
     }
     if (emails.length > 0) {
+      // A student's `email` is now a GENERATED login the school does not know, so
+      // also match on `contactEmail` (a real address, where one was set). Admission
+      // number stays the reliable key — see the template.
+      const wanted = emails.map((e) => e.toLowerCase());
       const users = await tx.user.findMany({
-        where: { email: { in: emails.map((e) => e.toLowerCase()) } },
-        select: { id: true, email: true },
+        where: { OR: [{ email: { in: wanted } }, { contactEmail: { in: wanted } }] },
+        select: { id: true, email: true, contactEmail: true },
       });
-      const byEmail = new Map(users.map((u) => [u.email.toLowerCase(), u.id]));
+      const byEmail = new Map<string, string>();
+      for (const u of users) {
+        byEmail.set(u.email.toLowerCase(), u.id);
+        if (u.contactEmail) byEmail.set(u.contactEmail.toLowerCase(), u.id);
+      }
       for (const em of emails) {
         const uid = byEmail.get(em.toLowerCase());
         if (uid) { ids.add(uid); matched++; }

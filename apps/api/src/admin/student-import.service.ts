@@ -22,6 +22,7 @@ import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import { Prisma } from "@sms/db";
 import { allocateLoginEmail, schoolSlugOf } from "../foundation/login-email";
+import { allocateAdmissionNumber } from "../foundation/admission-number";
 import type {
   StudentImportBatchDto,
   StudentImportRow,
@@ -164,7 +165,7 @@ export class StudentImportService {
         return { row, tempPassword, passwordHash: await bcrypt.hash(tempPassword, 10) };
       }),
     );
-    const credentials: { name: string; email: string; tempPassword: string }[] = [];
+    const credentials: { name: string; email: string; tempPassword: string; admissionNumber: string }[] = [];
 
     // PHASE 3 (write tx): CLAIM the batch (guarded flip — a concurrent approver
     // matches 0 rows), then create accounts with the precomputed hashes.
@@ -183,6 +184,9 @@ export class StudentImportService {
         select: { admissionNumber: true },
       });
       const usedAdmNo = new Set(existingProfiles.map((pr) => pr.admissionNumber).filter(Boolean) as string[]);
+      // AUTO-GENERATE for any blank row, via the SHARED allocator that manual
+      // single-student creation also uses — so the two paths cannot diverge.
+      const admissionYear = new Date().getFullYear();
       // Per-target-class capacity headroom, computed lazily.
       const headroom = new Map<string, number | null>(); // classId -> remaining (null = unlimited)
       let created = 0;
@@ -218,10 +222,14 @@ export class StudentImportService {
             }
             issued.add(loginEmail);
           }
-          if (row.admissionNumber && usedAdmNo.has(row.admissionNumber)) {
-            skipped++; // duplicate admission number
+          const providedAdm = row.admissionNumber?.trim() || null;
+          if (providedAdm && usedAdmNo.has(providedAdm)) {
+            skipped++; // a SUPPLIED admission number that is already taken
             continue;
           }
+          // Blank => generate; supplied => honour it. Either way, reserve it.
+          const admissionNumber = providedAdm ?? allocateAdmissionNumber(usedAdmNo, admissionYear);
+          usedAdmNo.add(admissionNumber);
           // Capacity guard for an enrolled row.
           if (row.classId) {
             if (!headroom.has(row.classId)) {
@@ -253,13 +261,13 @@ export class StudentImportService {
           });
           // The login slip must carry the identifier ACTUALLY issued, or the
           // student cannot sign in with what they were handed.
-          credentials.push({ name: row.name, email: loginEmail, tempPassword });
+          credentials.push({ name: row.name, email: loginEmail, tempPassword, admissionNumber });
           await tx.userRole.create({ data: { schoolId: p.schoolId, userId: u.id, roleId: studentRole.id } });
           await tx.studentProfile.create({
             data: {
               schoolId: p.schoolId,
               studentId: u.id,
-              admissionNumber: row.admissionNumber ?? null,
+              admissionNumber,
               dateOfBirth: row.dateOfBirth ? new Date(row.dateOfBirth) : null,
               gender: row.gender ?? null,
               phone: row.phone ?? null,
@@ -271,7 +279,6 @@ export class StudentImportService {
             const left = headroom.get(row.classId);
             if (left != null) headroom.set(row.classId, left - 1);
           }
-          if (row.admissionNumber) usedAdmNo.add(row.admissionNumber);
           created++;
         } catch (err) {
           // A cross-school email collision surfaces here as a raw P2002. Translate

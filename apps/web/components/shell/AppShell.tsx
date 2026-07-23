@@ -32,6 +32,7 @@ import {
   ShieldAlertIcon,
   AwardIcon,
   ClipboardListIcon,
+  ScanLineIcon,
   GraduationCapIcon,
   FileBarChartIcon,
   WalletIcon,
@@ -99,6 +100,7 @@ type NavKey =
   | "calendar"
   | "meetings"
   | "exams"
+  | "scan"
   | "hr"
   | "leave"
   | "games"
@@ -139,6 +141,7 @@ const NAV: {
   { key: "calendar", label: "Calendar", icon: CalendarIcon, href: "/calendar", perm: "event.read", module: MODULES.CALENDAR },
   { key: "meetings", label: "Meetings", icon: CalendarCheckIcon, href: "/meetings", anyPerm: ["meeting.host", "meeting.book"] },
   { key: "exams", label: "Exams", icon: ClipboardListIcon, href: "/exams", perm: "timetable.read" },
+  { key: "scan", label: "Scan ID", icon: ScanLineIcon, href: "/scan", perm: "member.scan" },
   { key: "students", label: "Students", icon: IdCardIcon, href: "/students", perm: "student.profile.read", module: MODULES.SIS },
   { key: "family", label: "My children", icon: UsersIcon, href: "/family", perm: "family.read", module: MODULES.SIS },
   { key: "classes", label: "Classes", icon: UsersIcon, href: "/classes", perm: "class.read", module: MODULES.LMS },
@@ -212,7 +215,7 @@ const NAV_GROUPS: { key: string; label: string }[] = [
 
 const NAV_GROUP: Record<NavKey, string> = {
   dashboard: "overview", analytics: "overview", reports: "overview", announcements: "overview",
-  notifications: "overview", messages: "overview", calendar: "overview", meetings: "overview", exams: "overview",
+  notifications: "overview", messages: "overview", calendar: "overview", meetings: "overview", exams: "overview", scan: "overview",
   classes: "teaching", timetable: "teaching", assessments: "teaching", gradebook: "teaching",
   certificates: "teaching", documents: "teaching", library: "teaching",
   students: "people", family: "people", attendance: "people", hr: "people", leave: "people", alumni: "people",

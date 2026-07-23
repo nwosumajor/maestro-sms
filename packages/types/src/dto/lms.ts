@@ -47,6 +47,32 @@ export interface ClassEligibilityDto {
   attendancePercent: number | null;
 }
 
+/**
+ * Per-student end-of-session outcome. The decision is ALWAYS a human's — the
+ * eligibility figures are signals for the reviewer, never an automatic verdict
+ * (Golden Rule #8). PROMOTE moves the student to the batch target (or graduates
+ * them when there is none); RETAIN leaves them in the present class untouched;
+ * DEMOTE moves them to an explicitly chosen lower class.
+ */
+export const PROMOTION_OUTCOMES = {
+  PROMOTE: "PROMOTE",
+  RETAIN: "RETAIN",
+  DEMOTE: "DEMOTE",
+} as const;
+export type PromotionOutcome = (typeof PROMOTION_OUTCOMES)[keyof typeof PROMOTION_OUTCOMES];
+
+/** One student's staged outcome within a promotion batch. */
+export interface PromotionDecisionDto {
+  studentId: string;
+  outcome: PromotionOutcome;
+  /** Required for DEMOTE — the class the student moves down into. */
+  targetClassId?: string | null;
+  /** Resolved on read for display; ignored on write. */
+  targetClassName?: string | null;
+  /** Free-text justification captured at stage time (shown to the approver). */
+  note?: string | null;
+}
+
 /** A staged end-of-session promotion batch (maker-checker). */
 export interface PromotionBatchDto {
   id: string;
@@ -60,6 +86,12 @@ export interface PromotionBatchDto {
   reviewedById: string | null;
   reviewNote: string | null;
   createdAt: Date;
+  /** Per-student outcomes. Empty for legacy batches (all students promoted). */
+  decisions: PromotionDecisionDto[];
+  /** Counts by outcome, so a reviewer sees the shape of the batch at a glance. */
+  promoteCount: number;
+  retainCount: number;
+  demoteCount: number;
 }
 
 /** Compact workflow row used on the dashboard. */

@@ -13,6 +13,7 @@ interface Fakes {
   guardianLinks?: { parentId: string; studentId: string }[];
   classTeacherMany?: { classId: string }[];
   enrollmentForStudent?: { id: string } | null;
+  currentTerm?: { startDate: Date | null } | null;
 }
 
 function makeService(f: Fakes) {
@@ -39,6 +40,7 @@ function makeService(f: Fakes) {
     attendanceRecord: {
       findMany: jest.fn().mockResolvedValue([]),
     },
+    term: { findFirst: jest.fn().mockResolvedValue(f.currentTerm ?? null) },
     // The register is written as ONE bulk upsert (INSERT … ON CONFLICT), not a
     // per-student upsert loop — see AttendanceService.markAttendance.
     $executeRaw: jest.fn().mockResolvedValue(1),
@@ -47,8 +49,10 @@ function makeService(f: Fakes) {
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const notifications = { enqueue: jest.fn().mockResolvedValue({ id: "n-1" }) };
-  const service = new AttendanceService(db as never, audit as never, notifications as never);
-  return { service, tx, audit, notifications };
+  const workflow = { createRequest: jest.fn().mockResolvedValue({ id: "wf-1" }), submit: jest.fn().mockResolvedValue({ id: "wf-1" }) };
+  const hooks = { onFinalized: jest.fn() };
+  const service = new AttendanceService(db as never, audit as never, notifications as never, workflow as never, hooks as never);
+  return { service, tx, audit, notifications, workflow, hooks };
 }
 
 const principal = (roles: string[], userId = "u-1"): Principal => ({
@@ -58,6 +62,8 @@ const principal = (roles: string[], userId = "u-1"): Principal => ({
   permissions: [],
 });
 
+const recent = () => new Date().toISOString().slice(0, 10);
+
 describe("AttendanceService scoping", () => {
   it("a teacher of the class can mark enrolled students", async () => {
     const { service, audit } = makeService({
@@ -66,7 +72,7 @@ describe("AttendanceService scoping", () => {
       enrollmentRows: [{ studentId: "stu-1" }],
     });
     await service.markAttendance(principal(["teacher"]), "c-1", {
-      date: "2026-06-20",
+      date: recent(),
       records: [{ studentId: "stu-1", status: "PRESENT" }],
     });
     expect(audit.record).toHaveBeenCalledWith(
@@ -83,7 +89,7 @@ describe("AttendanceService scoping", () => {
       guardianLinks: [{ parentId: "dad-1", studentId: "stu-1" }],
     });
     await service.markAttendance(principal(["teacher"]), "c-1", {
-      date: "2026-06-20",
+      date: recent(),
       records: [{ studentId: "stu-1", status: "ABSENT" }],
     });
     expect(notifications.enqueue).toHaveBeenCalledWith(
@@ -100,7 +106,7 @@ describe("AttendanceService scoping", () => {
       guardianLinks: [{ parentId: "dad-1", studentId: "stu-1" }],
     });
     await service.markAttendance(principal(["teacher"]), "c-1", {
-      date: "2026-06-20",
+      date: recent(),
       records: [{ studentId: "stu-1", status: "PRESENT" }],
     });
     expect(notifications.enqueue).not.toHaveBeenCalled();
@@ -110,7 +116,7 @@ describe("AttendanceService scoping", () => {
     const { service } = makeService({ classRow: { id: "c-1" }, classTeacher: null });
     await expect(
       service.markAttendance(principal(["teacher"]), "c-1", {
-        date: "2026-06-20",
+        date: recent(),
         records: [{ studentId: "stu-1", status: "PRESENT" }],
       }),
     ).rejects.toThrow(/not found/i);
@@ -124,7 +130,7 @@ describe("AttendanceService scoping", () => {
     });
     await expect(
       service.markAttendance(principal(["teacher"]), "c-1", {
-        date: "2026-06-20",
+        date: recent(),
         records: [{ studentId: "intruder", status: "ABSENT" }],
       }),
     ).rejects.toThrow(/not enrolled/i);
@@ -150,5 +156,101 @@ describe("AttendanceService scoping", () => {
     await expect(
       service.getStudentAttendance(principal(["teacher"]), "stranger"),
     ).rejects.toThrow(/not found/i);
+  });
+});
+
+describe("AttendanceService — term lock", () => {
+  const teacher = principal(["teacher"], "u-1");
+  const rec = { date: "2026-03-10", records: [{ studentId: "s-1", status: "PRESENT" as const }] };
+
+  it("REJECTS marking a register dated before the current term's start", async () => {
+    const { service } = makeService({
+      classRow: { id: "c-1" },
+      classTeacher: { id: "ct-1" },
+      enrollmentRows: [{ studentId: "s-1" }],
+      currentTerm: { startDate: new Date("2026-05-01") }, // term starts AFTER the register date
+    });
+    await expect(service.markAttendance(teacher, "c-1", rec)).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("ALLOWS marking a register within the current term", async () => {
+    const { service } = makeService({
+      classRow: { id: "c-1" },
+      classTeacher: { id: "ct-1" },
+      enrollmentRows: [{ studentId: "s-1" }],
+      currentTerm: { startDate: new Date("2026-01-01") }, // register date is within the term
+    });
+    await expect(service.markAttendance(teacher, "c-1", rec)).resolves.toBeDefined();
+  });
+
+  it("FAIL-OPEN: no term configured -> no lock, marking allowed", async () => {
+    const { service } = makeService({
+      classRow: { id: "c-1" },
+      classTeacher: { id: "ct-1" },
+      enrollmentRows: [{ studentId: "s-1" }],
+      currentTerm: null,
+    });
+    await expect(service.markAttendance(teacher, "c-1", rec)).resolves.toBeDefined();
+  });
+
+  it("getTermLock reports the boundary date", async () => {
+    const { service } = makeService({ currentTerm: { startDate: new Date("2026-05-01") } });
+    expect(await service.getTermLock(teacher)).toEqual({ lockBeforeDate: "2026-05-01" });
+  });
+});
+
+describe("AttendanceService — stale-register maker-checker (>7 days)", () => {
+  const staleDate = () => {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() - 30); // 30 days ago
+    return d.toISOString().slice(0, 10);
+  };
+  const rec = (date: string) => ({ date, records: [{ studentId: "s-1", status: "PRESENT" as const }] });
+
+  it("a TEACHER editing a >7-day register RAISES an amendment (not applied directly)", async () => {
+    const { service, workflow, audit } = makeService({
+      classRow: { id: "c-1" },
+      classTeacher: { id: "ct-1" },
+      enrollmentRows: [{ studentId: "s-1" }],
+      currentTerm: { startDate: null }, // no term lock
+    });
+    const res = await service.markAttendance(principal(["teacher"]), "c-1", rec(staleDate()));
+    expect(res).toMatchObject({ pendingApproval: true, requestId: "wf-1" });
+    expect(workflow.createRequest).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ type: "ATTENDANCE_AMENDMENT" }),
+    );
+    // NOT applied directly — no attendance.mark audit.
+    expect(audit.record).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: "attendance.mark" }),
+      expect.anything(),
+    );
+  });
+
+  it("an APPROVER (attendance.amend.review) edits a >7-day register DIRECTLY", async () => {
+    const { service, workflow, audit } = makeService({
+      classRow: { id: "c-1" },
+      classTeacher: { id: "ct-1" },
+      enrollmentRows: [{ studentId: "s-1" }],
+      currentTerm: { startDate: null },
+    });
+    const approver: Principal = { schoolId: "school-A", userId: "u-2", roles: ["school_admin"], permissions: ["attendance.amend.review"] };
+    await service.markAttendance(approver, "c-1", rec(staleDate()));
+    expect(workflow.createRequest).not.toHaveBeenCalled();
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "attendance.mark" }),
+      expect.anything(),
+    );
+  });
+
+  it("a TEACHER editing a RECENT (<=7 day) register applies DIRECTLY", async () => {
+    const { service, workflow } = makeService({
+      classRow: { id: "c-1" },
+      classTeacher: { id: "ct-1" },
+      enrollmentRows: [{ studentId: "s-1" }],
+      currentTerm: { startDate: null },
+    });
+    await service.markAttendance(principal(["teacher"]), "c-1", rec(new Date().toISOString().slice(0, 10)));
+    expect(workflow.createRequest).not.toHaveBeenCalled();
   });
 });

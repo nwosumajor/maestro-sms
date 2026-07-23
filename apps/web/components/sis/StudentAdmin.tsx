@@ -123,7 +123,7 @@ export function StudentAdmin({
           <CardContent>
             <form onSubmit={saveProfile} className="space-y-3">
               <div className="grid gap-3 sm:grid-cols-3">
-                <Text id="p-adm" label="Admission #" value={pf.admissionNumber ?? ""} onChange={(v) => setPf({ ...pf, admissionNumber: v })} />
+                <Text id="p-adm" label="Admission # (auto — blank keeps current)" value={pf.admissionNumber ?? ""} onChange={(v) => setPf({ ...pf, admissionNumber: v })} />
                 <Text id="p-dob" label="Date of birth" type="date" value={pf.dateOfBirth ?? ""} onChange={(v) => setPf({ ...pf, dateOfBirth: v })} />
                 <Text id="p-gender" label="Gender" value={pf.gender ?? ""} onChange={(v) => setPf({ ...pf, gender: v })} />
                 <Text id="p-phone" label="Phone" value={pf.phone ?? ""} onChange={(v) => setPf({ ...pf, phone: v })} />

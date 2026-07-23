@@ -17,6 +17,8 @@ export function AcademicCalendar({ sessions }: { sessions: Session[] }) {
   const [name, setName] = React.useState("");
   const [term, setTerm] = React.useState<Record<string, { name: string; sequence: string }>>({});
 
+  const [advancing, setAdvancing] = React.useState(false);
+
   const send = async (method: "POST" | "PUT", path: string, body?: unknown, ok?: string) => {
     const res = await fetch(`/api/sms${path}`, {
       method,
@@ -25,6 +27,32 @@ export function AcademicCalendar({ sessions }: { sessions: Session[] }) {
     });
     setMsg(res.ok ? (ok ?? "Saved.") : await readApiError(res));
     if (res.ok) router.refresh();
+  };
+
+  const currentSession = sessions.find((s) => s.isCurrent);
+  const currentTerm = currentSession?.terms.find((t) => t.isCurrent) ?? sessions.flatMap((s) => s.terms).find((t) => t.isCurrent);
+
+  const advance = async () => {
+    if (
+      !window.confirm(
+        "Advance to the next term? This moves the current-term pointer forward (to the next session's first term at year end). Past terms keep all their grades, attendance and report cards.",
+      )
+    )
+      return;
+    setAdvancing(true);
+    const res = await fetch("/api/sms/academic/advance-term", { method: "POST" });
+    setAdvancing(false);
+    if (res.ok) {
+      const r = (await res.json()) as { termName?: string; sessionName?: string; newSession?: boolean };
+      setMsg(
+        r.newSession
+          ? `New session started — ${r.sessionName ?? ""} · ${r.termName ?? "first term"} is now current.`
+          : `Advanced — ${r.termName ?? "next term"} is now the current term.`,
+      );
+      router.refresh();
+    } else {
+      setMsg(await readApiError(res));
+    }
   };
 
   return (
@@ -37,6 +65,25 @@ export function AcademicCalendar({ sessions }: { sessions: Session[] }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        {/* Current position + one-click advance. The system also auto-advances a
+            school whose current term has a past end date (see term end dates). */}
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/40 p-3">
+          <p className="text-sm">
+            {currentTerm ? (
+              <>
+                Currently: <span className="font-medium">{currentSession?.name}</span>
+                {" · "}
+                <span className="font-medium">{currentTerm.name}</span>
+              </>
+            ) : (
+              <span className="text-muted-foreground">No current term set yet.</span>
+            )}
+          </p>
+          <Button size="sm" onClick={advance} disabled={advancing || !currentTerm}>
+            {advancing ? "Advancing…" : "Advance to next term →"}
+          </Button>
+        </div>
+
         <form
           onSubmit={async (e) => { e.preventDefault(); if (name) { await send("POST", "/academic/sessions", { name }, "Session created."); setName(""); } }}
           className="flex flex-wrap items-end gap-2"
@@ -61,15 +108,42 @@ export function AcademicCalendar({ sessions }: { sessions: Session[] }) {
                     </Button>
                   )}
                 </div>
-                <div className="mt-2 flex flex-wrap gap-1">
+                <div className="mt-2 space-y-1.5">
                   {s.terms.map((tm) => (
-                    <button
-                      key={tm.id}
-                      onClick={() => send("PUT", `/academic/terms/${tm.id}/current`, undefined, "Current term set.")}
-                      title="Set current term"
-                    >
-                      <Badge variant={tm.isCurrent ? "secondary" : "outline"}>{tm.sequence}. {tm.name}{tm.isCurrent ? " ✓" : ""}</Badge>
-                    </button>
+                    <div key={tm.id} className="flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={() => send("PUT", `/academic/terms/${tm.id}/current`, undefined, "Current term set.")}
+                        title="Set current term"
+                      >
+                        <Badge variant={tm.isCurrent ? "secondary" : "outline"}>{tm.sequence}. {tm.name}{tm.isCurrent ? " ✓" : ""}</Badge>
+                      </button>
+                      {/* End date drives AUTOMATIC advance: once it passes, the
+                          nightly sweep rolls this school to the next term.
+                          Saved on blur, not on change — a date input reads ""
+                          until it is complete, so saving per keystroke would
+                          fire spurious "clear" writes while typing one. */}
+                      <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                        ends
+                        <Input
+                          type="date"
+                          defaultValue={tm.endDate ? String(tm.endDate).slice(0, 10) : ""}
+                          onBlur={(e) => {
+                            const next = e.target.value || null;
+                            const before = tm.endDate ? String(tm.endDate).slice(0, 10) : null;
+                            if (next === before) return; // nothing actually changed
+                            send(
+                              "PUT",
+                              `/academic/terms/${tm.id}`,
+                              { endDate: next },
+                              next
+                                ? `${tm.name} ends ${next} — it will advance automatically after that date.`
+                                : `${tm.name} end date cleared — it will only advance manually.`,
+                            );
+                          }}
+                          className="h-7 w-36 py-0"
+                        />
+                      </label>
+                    </div>
                   ))}
                 </div>
                 <form

@@ -22,6 +22,8 @@ export const WORKFLOW_PERMISSIONS = {
   REVIEW_HR: "workflow.review.hr",
   /** Stage-3 (final) approver: the principal. */
   REVIEW_PRINCIPAL: "workflow.review.principal",
+  /** Approve a stale (>7-day) attendance amendment. head_teacher/school_admin/principal. */
+  ATTENDANCE_AMEND_REVIEW: "attendance.amend.review",
 } as const;
 
 export type WorkflowPermission =
@@ -75,6 +77,14 @@ export const GRADE_PUBLISH_CHAIN: WorkflowStage[] = [
  *  approver — separation of duties, engine-enforced). */
 export const CBT_ANSWER_RELEASE_CHAIN: WorkflowStage[] = [
   { key: "PRINCIPAL", label: "Principal (final)", permission: WORKFLOW_PERMISSIONS.REVIEW_PRINCIPAL },
+];
+
+/** Attendance amendment: a teacher's edit to a register older than 7 days needs
+ *  ONE senior approver — a head teacher, school admin or principal (a DIFFERENT
+ *  person from the teacher, engine-enforced). Leadership edits such registers
+ *  directly and never raise this. */
+export const ATTENDANCE_AMENDMENT_CHAIN: WorkflowStage[] = [
+  { key: "SENIOR", label: "Head teacher / school admin", permission: WORKFLOW_PERMISSIONS.ATTENDANCE_AMEND_REVIEW },
 ];
 
 export const WORKFLOW_STATES = [
@@ -138,6 +148,7 @@ export const WORKFLOW_TYPES = [
   "CBT_EXAM_PUBLISH",
   "CBT_ANSWER_RELEASE",
   "ADMIN_APPOINTMENT",
+  "ATTENDANCE_AMENDMENT",
 ] as const;
 export type WorkflowType = (typeof WORKFLOW_TYPES)[number];
 
@@ -202,6 +213,11 @@ export const WORKFLOW_TYPE_META: Record<WorkflowType, WorkflowTypeMeta> = {
   // via /admin/roles; AdminService raises it, never the public endpoint) and
   // lands ONLY after a DIFFERENT workflow.review holder approves.
   ADMIN_APPOINTMENT: { label: "Admin role assignment", selfService: false, systemOnly: true },
+  // Maker-checker on a STALE attendance register: a teacher editing a register
+  // older than 7 days raises this (AttendanceService, never the public endpoint);
+  // the change applies ONLY after a head teacher / school admin / principal
+  // (a different person) approves. Leadership edits such registers directly.
+  ATTENDANCE_AMENDMENT: { label: "Attendance amendment", selfService: false, systemOnly: true },
 };
 
 /** Pure: may a user with these permissions initiate this type via the API? */

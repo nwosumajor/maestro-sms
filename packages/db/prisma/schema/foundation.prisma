@@ -220,6 +220,8 @@ model School {
   quizAttempts QuizAttempt[]
   forumPosts   ForumPost[]
 
+  scanEvents   ScanEvent[]
+
   @@map("school")
 }
 
@@ -487,6 +489,8 @@ model User {
 
   // SIS
   studentProfile StudentProfile? @relation("StudentProfileUser")
+  scanEventsAsMember  ScanEvent[] @relation("ScanEventMember")
+  scanEventsAsScanner ScanEvent[] @relation("ScanEventScanner")
 
   // Attendance
   attendanceTaken   AttendanceSession[] @relation("AttendanceTakenBy")

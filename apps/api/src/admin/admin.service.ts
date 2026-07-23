@@ -10,6 +10,7 @@ import { BadRequestException, ConflictException, Inject, Injectable, NotFoundExc
 import bcrypt from "bcryptjs";
 import { Prisma } from "@sms/db";
 import { allocateLoginEmail, asNameTakenConflict, schoolSlugOf } from "../foundation/login-email";
+import { allocateAdmissionNumber, loadUsedAdmissionNumbers } from "../foundation/admission-number";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -209,19 +210,38 @@ export class AdminService {
       if (!pendingRole) {
         await tx.userRole.create({ data: { schoolId: p.schoolId, userId: user.id, roleId: role.id } });
       }
+      // A STUDENT gets a profile + an auto-generated admission number, exactly as
+      // bulk import does — otherwise a manually-created pupil has no admission
+      // number and cannot be referenced (e.g. for parent linking). Same shared
+      // allocator; a rare cross-tx race is caught by the DB unique constraint.
+      let admissionNumber: string | null = null;
+      if (roleName === "student") {
+        const used = await loadUsedAdmissionNumbers(tx, new Date().getFullYear());
+        admissionNumber = allocateAdmissionNumber(used, new Date().getFullYear());
+        try {
+          await tx.studentProfile.create({
+            data: { schoolId: p.schoolId, studentId: user.id, admissionNumber },
+          });
+        } catch (e) {
+          if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+            throw new ConflictException("That admission number was just taken — please try again.");
+          }
+          throw e;
+        }
+      }
       await this.log(tx, p, "admin.user.create", user.id, {
         // The identifier actually issued — input.email is undefined when generated.
         email: user.email,
         role: roleName,
         ...(pendingRole ? { pendingAppointment: true } : {}),
       });
-      return user;
+      return { ...user, admissionNumber };
     });
     if (pendingRole) {
       const pending = await this.raiseAppointment(p, created.id, input.name, roleName);
-      return { id: created.id, email: created.email, role: roleName, tempPassword, ...pending };
+      return { id: created.id, email: created.email, role: roleName, tempPassword, admissionNumber: created.admissionNumber, ...pending };
     }
-    return { id: created.id, email: created.email, role: roleName, tempPassword };
+    return { id: created.id, email: created.email, role: roleName, tempPassword, admissionNumber: created.admissionNumber };
   }
 
   async assignRole(p: Principal, userId: string, roleName: string) {

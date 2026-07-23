@@ -55,6 +55,7 @@ export const config = {
     "/forms/:path*",
     "/alumni/:path*",
     "/reports/:path*",
+    "/scan",
     "/billing/:path*",
     "/documents/:path*",
     "/account/:path*",

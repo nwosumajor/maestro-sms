@@ -69,6 +69,12 @@ model PromotionBatch {
   targetClassId String?         @db.Uuid
   /// Student user ids included in this promotion (snapshot at stage time).
   studentIds    Json
+  /// Per-student outcomes: [{studentId, outcome: PROMOTE|RETAIN|DEMOTE,
+  /// targetClassId?, note?}]. Null/absent = legacy batch (every student in
+  /// `studentIds` is promoted to `targetClassId`). A poor performer is RETAINed
+  /// in the present class or DEMOTEd into an explicitly chosen lower class —
+  /// always a human decision recorded here, never computed (Golden Rule #8).
+  decisions     Json?
   status        PromotionStatus @default(PENDING)
   /// The academic term this promotion runs at the end of (e.g. third term). Scalar
   /// ref to term(id); the DB FK is added in the migration. Optional.

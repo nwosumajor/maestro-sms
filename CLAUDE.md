@@ -1041,6 +1041,67 @@ all audited in the operator's own tenant. Verified: 8 scoping unit tests + the
 end-to-end (create→apply→consent-gate→submit→signals→cross-tenant review→award→
 ₦-credit on the invoice) + web production build (67 routes) + route smoke.
 
+## ID-card QR scan — BUILT (`apps/api/src/certificate`)
+Student/staff ID cards now carry a REAL scannable QR (pdfkit vector squares via
+the `qrcode` lib) encoding the member's global `uniqueId` — replacing the old
+decorative barcode. A tenant-scoped lookup resolves a scanned code to a member
+of the SCANNER's OWN school for library / attendance / exam-hall / gate desks:
+`GET /members/scan/:code` (`member.scan`, seeded to principal/school_admin/
+junior_admin/head_teacher/teacher/librarian/warden/head_warden). SECURITY: runs
+in `runAsTenant` so RLS confines it — a foreign `uniqueId` returns **404, not
+403** (no cross-tenant existence disclosure); returns ROSTER-level fields only
+(name/role/admission#/class/status), never medical/PII; every scan audited
+(`member.scan`). Web desk at `/scan` (`ScanConsole` — always-focused input for a
+handheld scanner + a purpose selector). The desk also RECORDS actions:
+`POST /members/scan/:code {purpose}` writes an append-only `scan_event`
+(rls/88, INSERT+SELECT only, migration `20261003000000`) — CHECK_IN of a
+student ALSO marks them PRESENT in today's class register (a deliberate
+central check-in that bypasses the per-class teacher restriction, `takenById`
+= scanner); CHECK_OUT/LIBRARY/EXAM log the movement only. GET stays a pure
+side-effect-free lookup. `member.scan` is a NEW permission: run the seed against a live
+DB (or it 403s even for staff) — the runtime guard reads role→perms from the DB
+(`role-permissions.service`, static `@sms/types` map is only the fallback).
+
+## Grade reports — term-weighted + session-weighted (consistency pass, BUILT)
+Both weightings share the pure grading policy in `@sms/types/grading`
+(GRADE_COMPONENTS exam60/mid20/assn10/note10 = 100; `computeTermSubjectGrade`,
+`averageOf`). `TermResultService` computes per-term `subjectResult` and the
+cumulative `getStudentSessionReport` (each subject's per-term totals + session
+average + overall session average). Downloadables: per-term scoresheet
+(`.../:termId/pdf`) AND the new whole-session cumulative report
+(`GET /term-results/report/:studentId/:sessionId/session-pdf`,
+`generateSessionReportPdf`; web `SessionReportButton` on the ReportCard).
+Accuracy fixes: **report-card ATTENDANCE and GRADES are now term-scoped** — the
+attendance summary filters to the term's `session.date` window and grades filter
+to `assessment.termId` (new nullable column, migration `20261004000000`; a new
+assessment is stamped with the CURRENT term at creation; existing/untagged rows
+read all-time — fail-open). UNIFIED: the OFFICIAL report card (`reportcards/`, persisted to the Document
+Vault + guardian-notified) now renders the TERM-WEIGHTED subject grades from the
+SAME `TermResultService.getStudentSessionReport` the scoresheet/broadsheet use
+(no divergence) — subject table (exam/mid/assn/note/total/grade), term average +
+overall grade + CLASS POSITION (competition rank of the student's term average
+among classmates, PUBLISHED-only, no other pupil's marks shown), term-scoped
+attendance, remarks, cumulative session average, branding. The gradebook
+scoresheet (one term) + session PDF (cumulative) remain as lightweight
+downloads off the same data. The old raw-LMS-submission report card is GONE. Workflow reactors are
+type-isolated, so GRADE_PUBLISH and ATTENDANCE_AMENDMENT never interfere.
+
+## Attendance register — write windows (BUILT)
+Three tiers gate a register write (`AttendanceService.markAttendance`):
+- **≤7 days old**: applied directly.
+- **>7 days old (STALE), current term**: a plain teacher's edit raises an
+  `ATTENDANCE_AMENDMENT` workflow (systemOnly; single-stage
+  `ATTENDANCE_AMENDMENT_CHAIN`, perm `attendance.amend.review` held by
+  head_teacher/school_admin/principal) — a DIFFERENT senior approves (SoD,
+  engine-enforced) and a WorkflowHooks reactor applies the marks in-tx. Holders
+  of `attendance.amend.review` edit stale registers DIRECTLY (they're the
+  approvers). Scan CHECK_IN is always today → never stale.
+- **Past/ended term**: fully LOCKED (409), no edit even with approval — boundary
+  is the `isCurrent` term's startDate (fail-open when unconfigured);
+  `GET /attendance/term-lock` exposes it. `STALE_REGISTER_DAYS = 7`.
+`attendance.amend.review` is a NEW permission → re-run the seed on a live DB (the
+guard reads role→perms from the DB).
+
 ## Operating the live system — runbooks
 - **`docs/RUNBOOK-INCIDENT-RESPONSE.md`** — the on-call playbook: severity
   levels, 5-minute triage, per-symptom playbooks (outage / latency / DB / Redis

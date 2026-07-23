@@ -6,6 +6,7 @@ import type { StudentSessionReportDto, Serialized } from "@sms/types";
 import { GRADE_COMPONENTS } from "@sms/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TermScoresheetButton } from "@/components/gradebook/TermScoresheetButton";
+import { SessionReportButton } from "@/components/gradebook/SessionReportButton";
 
 type Report = Serialized<StudentSessionReportDto>;
 
@@ -28,6 +29,11 @@ export function ReportCard({ report }: { report: Report }) {
             <span className="ml-2 font-medium text-foreground">Session average: {report.sessionAverage}</span>
           )}
         </p>
+        {hasAny && (
+          <div className="pt-1">
+            <SessionReportButton studentId={report.studentId} sessionId={report.sessionId} sessionName={report.sessionName} />
+          </div>
+        )}
       </CardHeader>
       <CardContent className="space-y-6">
         {!hasAny && <p className="text-sm text-muted-foreground">No published results for this session yet.</p>}

@@ -20,6 +20,7 @@ import { randomUUID } from "node:crypto";
 import { prisma } from "@sms/db";
 import { ReportCardService } from "../../src/reportcards/reportcard.service";
 import { ReportCardRemarkService } from "../../src/reportcards/report-card-remark.service";
+import { TermResultService } from "../../src/gradebook/term-result.service";
 import { DocumentsService } from "../../src/documents/documents.service";
 import { NotificationService } from "../../src/notifications/notification.service";
 import { BrandingService } from "../../src/branding/branding.service";
@@ -75,7 +76,10 @@ d("ReportCardService generate() persists to the Document Vault (real Postgres)",
     documents = new DocumentsService(tenant, audit, storage, notifications);
     const branding = new BrandingService(tenant, audit, storage);
     const remarks = new ReportCardRemarkService(tenant, audit);
-    reportCards = new ReportCardService(tenant, audit, branding, documents, remarks);
+    const workflow = { createRequest: jest.fn(), submit: jest.fn() } as never;
+    const hooks = { onFinalized: jest.fn() } as never;
+    const termResults = new TermResultService(tenant, audit, workflow, hooks);
+    reportCards = new ReportCardService(tenant, audit, branding, documents, remarks, termResults);
   });
 
   afterAll(async () => {

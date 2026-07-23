@@ -24,3 +24,15 @@ BEGIN
     EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON %I TO major_user', t);
   END LOOP;
 END $$;
+
+-- Single "current" per school — enforced at the DB, not just the app. Many
+-- features resolve the isCurrent term/session (attendance term-lock, assessment
+-- term tagging, report-card term default); two current rows would make those
+-- nondeterministic. setCurrentTerm/Session clear the old before setting the new,
+-- so the invariant holds at every statement boundary; this makes a stray direct
+-- write or a future missed-clear fail loudly instead of corrupting silently.
+-- Partial index (WHERE isCurrent) — not expressible in the Prisma schema.
+CREATE UNIQUE INDEX IF NOT EXISTS "term_one_current_per_school"
+  ON "term" ("schoolId") WHERE "isCurrent";
+CREATE UNIQUE INDEX IF NOT EXISTS "academic_session_one_current_per_school"
+  ON "academic_session" ("schoolId") WHERE "isCurrent";
