@@ -167,14 +167,16 @@ export class ParentImportService {
       // this change are still found rather than duplicated.
       let parent = await tx.user.findFirst({
         where: { OR: [{ contactEmail: email }, { email }] },
-        select: { id: true, name: true },
+        select: { id: true, name: true, email: true },
       });
       if (!parent) {
         // A guardian with children at ANOTHER school already has an account
         // there; this school gets its own, with the same real address for mail.
-        // Generated identifier => the two can never collide.
+        // Generated identifier => the two can never collide across schools.
+        // Auto-suffix a same-name clash (adams.james2) like the bulk path — every
+        // parent path behaves the same.
         const slug = await schoolSlugOf(tx, p.schoolId);
-        const loginEmail = await allocateLoginEmail(tx, input.name.trim(), slug);
+        const loginEmail = await allocateLoginEmail(tx, input.name.trim(), slug, { autoSuffix: true });
         try {
           parent = await tx.user.create({
             data: {
@@ -186,7 +188,7 @@ export class ParentImportService {
               passwordHash,
               passwordChangedAt: null,
             },
-            select: { id: true, name: true },
+            select: { id: true, name: true, email: true },
           });
         } catch (e) {
         // P2002 = unique violation on the GLOBAL user.email index: the address
@@ -236,7 +238,9 @@ export class ParentImportService {
       return {
         parentId: parent.id,
         name: parent.name,
-        email,
+        // The generated SIGN-IN identifier — what the guardian logs in with and
+        // what the slip shows. NOT `email` (their contact address, matched above).
+        email: parent.email,
         tempPassword: created ? tempPassword : null,
         created,
         linkedStudentIds,

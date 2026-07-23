@@ -7,7 +7,7 @@ import type { Principal, TenantContext, TenantTx } from "../../src/integrity/int
 
 function makeService(over: {
   batch?: Record<string, unknown> | null;
-  existingParent?: { id: string; name: string } | null;
+  existingParent?: { id: string; name: string; email?: string } | null;
   profiles?: { studentId: string; admissionNumber: string }[];
   studentsByEmail?: { id: string; email: string }[];
   onUserCreate?: (data: Record<string, unknown>) => void;
@@ -86,6 +86,9 @@ describe("ParentImportService — single onboarding", () => {
     });
     expect(res.created).toBe(true);
     expect(res.tempPassword).toBeTruthy();
+    // Returns the GENERATED sign-in id (grace -> grace@demo.com), not the contact
+    // email the guardian was matched on — the slip must show what they log in with.
+    expect(res.email).toBe("grace@demo.com");
     expect(res.linkedStudentIds).toEqual(["stu1", "stu2"]);
     expect(userCreate).toHaveBeenCalled();
     expect(parentChildCreate).toHaveBeenCalledTimes(2);
@@ -93,7 +96,7 @@ describe("ParentImportService — single onboarding", () => {
 
   it("reuses an EXISTING email (no new credential) and still links", async () => {
     const { service, userCreate } = makeService({
-      existingParent: { id: "p-existing", name: "Grace" },
+      existingParent: { id: "p-existing", name: "Grace", email: "grace@demo.com" },
       studentsById: [{ id: "stu1" }],
     });
     const res = await service.createSingle(p(), { name: "Grace", email: "grace@x.com", studentIds: ["stu1"] });

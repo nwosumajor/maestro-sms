@@ -159,3 +159,18 @@ export function deliverableEmail(user: {
 export function requiresContactEmail(roleName: string): boolean {
   return roleName !== "student";
 }
+
+/**
+ * On a within-school NAME clash, should the login identifier auto-number
+ * (adams.james -> adams.james2) instead of refusing?
+ *
+ * YES for STUDENTS and PARENTS — high-volume, onboarded from lists, and they
+ * receive a printed slip / invite rather than typing a memorised address, so a
+ * numbered login is fine and blocking the row would just force a re-upload.
+ * NO for STAFF — few, individually managed, and they type their login daily, so
+ * a near-identical adams.james2 invites years of sign-in mistakes; the admin is
+ * asked for a fuller name instead.
+ */
+export function autoSuffixLoginOnClash(roleName: string): boolean {
+  return roleName === "student" || roleName === "parent";
+}

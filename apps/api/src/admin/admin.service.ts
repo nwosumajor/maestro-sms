@@ -18,7 +18,7 @@ import {
   type TenantContext,
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
-import { isPlatformTierRole, requiresContactEmail } from "@sms/types";
+import { autoSuffixLoginOnClash, isPlatformTierRole, requiresContactEmail } from "@sms/types";
 import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
@@ -171,11 +171,10 @@ export class AdminService {
         if (existing) throw new BadRequestException("That email is already in use");
       } else {
         const slug = await schoolSlugOf(tx, p.schoolId);
-        // Students auto-suffix a name clash; staff are refused so a colleague
-        // never gets a near-identical login. requiresContactEmail is false only
-        // for students, so it doubles as the "is a student" test here.
+        // Students and parents auto-suffix a name clash; staff are refused so a
+        // colleague never gets a near-identical login. One rule in @sms/types.
         loginEmail = await allocateLoginEmail(tx, input.name, slug, {
-          autoSuffix: !requiresContactEmail(roleName),
+          autoSuffix: autoSuffixLoginOnClash(roleName),
         });
       }
       const generated = !input.email?.trim();

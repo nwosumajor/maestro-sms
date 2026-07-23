@@ -18,6 +18,8 @@ import {
   generateLoginEmail,
   deliverableEmail,
   MAX_SCHOOL_SLUG_LENGTH,
+  autoSuffixLoginOnClash,
+  requiresContactEmail,
 } from "@sms/types";
 
 describe("baseSchoolSlug — short, readable, identity-preserving", () => {
@@ -165,5 +167,21 @@ describe("deliverability — a generated identifier is NEVER a delivery target",
         contactEmail: "   ",
       }),
     ).toBeNull();
+  });
+});
+
+describe("role rules — who auto-suffixes, who needs a contact email", () => {
+  it("students and parents auto-suffix a login clash; staff do not", () => {
+    expect(autoSuffixLoginOnClash("student")).toBe(true);
+    expect(autoSuffixLoginOnClash("parent")).toBe(true);
+    for (const staff of ["teacher", "principal", "school_admin", "accountant", "hr_clerk"]) {
+      expect(autoSuffixLoginOnClash(staff)).toBe(false);
+    }
+  });
+
+  it("everyone except students needs a contact email", () => {
+    expect(requiresContactEmail("student")).toBe(false);
+    expect(requiresContactEmail("parent")).toBe(true);
+    expect(requiresContactEmail("teacher")).toBe(true);
   });
 });
