@@ -1075,9 +1075,15 @@ Accuracy fixes: **report-card ATTENDANCE and GRADES are now term-scoped** — th
 attendance summary filters to the term's `session.date` window and grades filter
 to `assessment.termId` (new nullable column, migration `20261004000000`; a new
 assessment is stamped with the CURRENT term at creation; existing/untagged rows
-read all-time — fail-open). NB: the Document-Vault report card
-(`reportcards/`, raw LMS submission grades + attendance) is DISTINCT from the
-term-weighted scoresheet (`gradebook`, subject_result). Workflow reactors are
+read all-time — fail-open). UNIFIED: the OFFICIAL report card (`reportcards/`, persisted to the Document
+Vault + guardian-notified) now renders the TERM-WEIGHTED subject grades from the
+SAME `TermResultService.getStudentSessionReport` the scoresheet/broadsheet use
+(no divergence) — subject table (exam/mid/assn/note/total/grade), term average +
+overall grade + CLASS POSITION (competition rank of the student's term average
+among classmates, PUBLISHED-only, no other pupil's marks shown), term-scoped
+attendance, remarks, cumulative session average, branding. The gradebook
+scoresheet (one term) + session PDF (cumulative) remain as lightweight
+downloads off the same data. The old raw-LMS-submission report card is GONE. Workflow reactors are
 type-isolated, so GRADE_PUBLISH and ATTENDANCE_AMENDMENT never interfere.
 
 ## Attendance register — write windows (BUILT)
