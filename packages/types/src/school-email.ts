@@ -110,17 +110,22 @@ export function loginLocalPart(fullName: string): string {
 }
 
 /**
- * `firstname.lastname@<slug>.com`.
+ * `firstname.lastname@<slug>.com`, optionally numbered.
  *
- * There is deliberately NO numeric disambiguation. Two staff sharing a name in
- * ONE school is a real-world ambiguity a human should resolve — the school
- * administrator is told the name is taken and picks a fuller name. A silent
- * `adams.james2` would hand two colleagues near-identical logins and invite
- * sign-in mistakes for years.
+ * `suffix` 0 => no number (the base), 1 => `...2`, 2 => `...3`, ... A human
+ * counts from 2, not from 0. The PURE function is deterministic; whether to walk
+ * suffixes on a clash is the ALLOCATOR's decision, and differs by role:
+ *   - STAFF: no walk. Two colleagues sharing a name is an ambiguity a human
+ *     resolves (the admin is told to use a fuller name) — a silent adams.james2
+ *     would give them near-identical logins they type daily.
+ *   - STUDENTS: walk. Shared names are the norm on a large roll, pupils receive
+ *     a printed login slip (the ID need not be memorable), and blocking the
+ *     import would force endless CSV edits. See the allocator.
  */
-export function generateLoginEmail(fullName: string, schoolSlug: string): string {
+export function generateLoginEmail(fullName: string, schoolSlug: string, suffix = 0): string {
   const local = loginLocalPart(fullName) || "user";
-  return `${local}@${schoolLoginDomain(schoolSlug)}`;
+  const n = suffix > 0 ? String(suffix + 1) : "";
+  return `${local}${n}@${schoolLoginDomain(schoolSlug)}`;
 }
 
 /**

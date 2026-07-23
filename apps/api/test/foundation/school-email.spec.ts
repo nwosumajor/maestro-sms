@@ -100,13 +100,16 @@ describe("generateLoginEmail", () => {
     );
   });
 
-  it("does NOT silently disambiguate a within-school clash", () => {
-    // Same input must give the same output every time: a clash is a human
-    // decision (the admin is told the name is taken), not a silent adams.james2
-    // that would hand two colleagues near-identical logins.
+  it("is deterministic — the same (name, slug, suffix) always gives the same address", () => {
     expect(generateLoginEmail("Adams James", "maestro")).toBe(
       generateLoginEmail("Adams James", "maestro"),
     );
+  });
+
+  it("numbers a suffix from 2 (a human counts 2, 3 — not 0, 1)", () => {
+    expect(generateLoginEmail("Adams James", "maestro", 0)).toBe("adams.james@maestro.com");
+    expect(generateLoginEmail("Adams James", "maestro", 1)).toBe("adams.james2@maestro.com");
+    expect(generateLoginEmail("Adams James", "maestro", 2)).toBe("adams.james3@maestro.com");
   });
 
   it("always produces a syntactically valid address", () => {

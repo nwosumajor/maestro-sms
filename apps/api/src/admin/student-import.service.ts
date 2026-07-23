@@ -21,8 +21,7 @@ import {
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import { Prisma } from "@sms/db";
-import { generateLoginEmail } from "@sms/types";
-import { schoolSlugOf } from "../foundation/login-email";
+import { allocateLoginEmail, schoolSlugOf } from "../foundation/login-email";
 import type {
   StudentImportBatchDto,
   StudentImportRow,
@@ -87,26 +86,24 @@ export class StudentImportService {
   async stage(p: Principal, rows: StudentImportRow[]) {
     if (!rows.length) throw new BadRequestException("No rows to import");
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      // The dry run must preview the identifier each row will ACTUALLY get, so a
-      // clash is visible BEFORE the approver commits — otherwise duplicates only
-      // surface as skipped rows after the fact.
-      const slug = await schoolSlugOf(tx, p.schoolId);
-      const identifiers = rows.map((r) =>
-        r.email?.trim() ? r.email.trim().toLowerCase() : generateLoginEmail(r.name, slug),
-      );
+      // Only a SUPPLIED address can be a true duplicate now: a generated
+      // identifier auto-suffixes, so a same-name row is always created. The dry
+      // run therefore counts duplicates among supplied emails only (DB + repeats
+      // within the file); generated rows are all "new".
+      const suppliedEmails = rows
+        .map((r) => r.email?.trim()?.toLowerCase())
+        .filter((e): e is string => Boolean(e));
       const existing = await tx.user.findMany({
-        where: { email: { in: identifiers } },
+        where: { email: { in: suppliedEmails } },
         select: { email: true },
       });
       const dup = new Set(existing.map((e) => e.email.toLowerCase()));
-      // Count a within-FILE clash as a duplicate too: two rows resolving to one
-      // identifier means only the first can be created.
       const seen = new Set<string>();
-      const duplicateCount = identifiers.filter((e) => {
-        const clash = dup.has(e) || seen.has(e);
+      let duplicateCount = 0;
+      for (const e of suppliedEmails) {
+        if (dup.has(e) || seen.has(e)) duplicateCount++;
         seen.add(e);
-        return clash;
-      }).length;
+      }
       const summary: StudentImportSummary = {
         total: rows.length,
         newCount: rows.length - duplicateCount,
@@ -200,25 +197,26 @@ export class StudentImportService {
 
       for (const { row, tempPassword, passwordHash } of prepared) {
         try {
-          // A supplied address is honoured; otherwise generate one from the name.
-          const loginEmail = row.email?.trim()
-            ? row.email.trim().toLowerCase()
-            : generateLoginEmail(row.name, slug);
           const generated = !row.email?.trim();
-
-          if (issued.has(loginEmail)) {
-            // Two rows in this same file resolve to one identifier — a real
-            // ambiguity the uploader must fix, not something to paper over.
-            errors.push(
-              `${row.name}: another row in this file already uses ${loginEmail} — give one of them a fuller name`,
-            );
-            skipped++;
-            continue;
-          }
-          const existing = await tx.user.findFirst({ where: { email: loginEmail }, select: { id: true } });
-          if (existing) {
-            skipped++;
-            continue;
+          let loginEmail: string;
+          if (generated) {
+            // Students auto-suffix a shared name (adams.james, adams.james2, ...),
+            // checking BOTH the DB and identifiers issued earlier in this same tx,
+            // so two "Adams James" in one file both import.
+            loginEmail = await allocateLoginEmail(tx, row.name, slug, { taken: issued, autoSuffix: true });
+          } else {
+            loginEmail = row.email!.trim().toLowerCase();
+            if (issued.has(loginEmail)) {
+              errors.push(`${row.name}: another row in this file already uses ${loginEmail}`);
+              skipped++;
+              continue;
+            }
+            const existing = await tx.user.findFirst({ where: { email: loginEmail }, select: { id: true } });
+            if (existing) {
+              skipped++;
+              continue;
+            }
+            issued.add(loginEmail);
           }
           if (row.admissionNumber && usedAdmNo.has(row.admissionNumber)) {
             skipped++; // duplicate admission number
@@ -253,7 +251,6 @@ export class StudentImportService {
               passwordChangedAt: null,
             },
           });
-          issued.add(loginEmail);
           // The login slip must carry the identifier ACTUALLY issued, or the
           // student cannot sign in with what they were handed.
           credentials.push({ name: row.name, email: loginEmail, tempPassword });

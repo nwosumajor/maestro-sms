@@ -10,37 +10,58 @@
 //                   slug is the domain, so adams.james@maestro.com and
 //                   adams.james@standrews.com simply cannot clash.
 //
-//   WITHIN-school — two real colleagues who share a name. NOT auto-suffixed:
-//                   the administrator is told, and picks a fuller name. Silently
-//                   minting `adams.james2` would give two colleagues near-identical
-//                   logins and invite years of sign-in mistakes and misfiled work.
+//   WITHIN-school — two people who share a name. Handled by ROLE:
+//                   * STAFF refuse-and-ask — a colleague typing their login daily
+//                     should not get a near-identical adams.james2; the admin uses
+//                     a fuller name.
+//                   * STUDENTS auto-suffix (adams.james2, ...) — shared names are
+//                     the norm on a large roll, pupils get a printed slip, and
+//                     blocking the import would force endless CSV edits.
 // =============================================================================
 import { ConflictException } from "@nestjs/common";
 import { Prisma } from "@sms/db";
 import { generateLoginEmail, schoolSlugCandidates } from "@sms/types";
 import type { TenantTx } from "../integrity/integrity.foundation";
 
-/**
- * `firstname.lastname@<slug>.com` for this person, or a 409 telling the
- * administrator the name is already taken IN THIS SCHOOL.
- *
- * `taken` carries identifiers already allocated inside the same transaction but
- * not yet committed — without it, one CSV containing two pupils called Adams
- * James would hand both the same identifier.
- */
+export interface AllocateLoginEmailOptions {
+  /** Identifiers already allocated in this uncommitted tx (bulk imports). */
+  taken?: Set<string>;
+  /**
+   * STUDENTS: walk adams.james -> adams.james2 -> ... until one is free, so a
+   * shared name never blocks the import. STAFF (default): refuse a clash with a
+   * 409 telling the admin to use a fuller name — a colleague should not get a
+   * near-identical login they type daily.
+   */
+  autoSuffix?: boolean;
+}
+
 export async function allocateLoginEmail(
   tx: TenantTx,
   fullName: string,
   schoolSlug: string,
-  taken: Set<string> = new Set(),
+  opts: AllocateLoginEmailOptions = {},
 ): Promise<string> {
-  const email = generateLoginEmail(fullName, schoolSlug);
+  const taken = opts.taken ?? new Set<string>();
 
-  // NOTE: this lookup runs under RLS, so it sees only THIS school. That is
-  // exactly right — a cross-school match cannot happen, and if it somehow did we
-  // must not disclose it. The INSERT is still wrapped by every caller: a race
-  // between two concurrent imports beats any pre-check, and P2002 is the only
-  // real guarantee.
+  // NOTE: the lookup runs under RLS, so it sees only THIS school — exactly right,
+  // since a cross-school match cannot happen and must not be disclosed. The
+  // INSERT is still wrapped by every caller: a race between two concurrent
+  // imports beats any pre-check, and P2002 is the final guarantee.
+  if (opts.autoSuffix) {
+    for (let suffix = 0; suffix <= 500; suffix++) {
+      const candidate = generateLoginEmail(fullName, schoolSlug, suffix);
+      if (taken.has(candidate)) continue;
+      const clash = await tx.user.findFirst({ where: { email: candidate }, select: { id: true } });
+      if (!clash) {
+        taken.add(candidate);
+        return candidate;
+      }
+    }
+    // 500 identically-named pupils in one school is not a roll; it is a bug.
+    throw new ConflictException(`Could not allocate a login identifier for "${fullName}".`);
+  }
+
+  const email = generateLoginEmail(fullName, schoolSlug);
   const clash = taken.has(email) || (await tx.user.findFirst({ where: { email }, select: { id: true } }));
   if (clash) {
     throw new ConflictException(
@@ -48,7 +69,6 @@ export async function allocateLoginEmail(
         `Use a fuller name — for example include a middle name — or set the sign-in email manually.`,
     );
   }
-
   taken.add(email);
   return email;
 }

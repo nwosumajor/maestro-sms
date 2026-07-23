@@ -18,7 +18,7 @@ import {
   type TenantContext,
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
-import { generateLoginEmail, isPlatformTierRole, requiresContactEmail } from "@sms/types";
+import { isPlatformTierRole, requiresContactEmail } from "@sms/types";
 import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
@@ -171,7 +171,12 @@ export class AdminService {
         if (existing) throw new BadRequestException("That email is already in use");
       } else {
         const slug = await schoolSlugOf(tx, p.schoolId);
-        loginEmail = await allocateLoginEmail(tx, input.name, slug);
+        // Students auto-suffix a name clash; staff are refused so a colleague
+        // never gets a near-identical login. requiresContactEmail is false only
+        // for students, so it doubles as the "is a student" test here.
+        loginEmail = await allocateLoginEmail(tx, input.name, slug, {
+          autoSuffix: !requiresContactEmail(roleName),
+        });
       }
       const generated = !input.email?.trim();
       let user: { id: string; email: string };
@@ -320,26 +325,32 @@ export class AdminService {
       const issued = new Set<string>();
       for (const row of rows) {
         try {
-          const loginEmail = row.email?.trim()
-            ? row.email.trim().toLowerCase()
-            : generateLoginEmail(row.name, slug);
-          if (issued.has(loginEmail)) {
-            errors.push(`${row.name}: another row already uses ${loginEmail} — give one a fuller name`);
-            skipped++;
-            continue;
+          const generated = !row.email?.trim();
+          let loginEmail: string;
+          if (generated) {
+            // Students auto-suffix a shared name (adams.james2), so the import
+            // never blocks on a common name.
+            loginEmail = await allocateLoginEmail(tx, row.name, slug, { taken: issued, autoSuffix: true });
+          } else {
+            loginEmail = row.email!.trim().toLowerCase();
+            if (issued.has(loginEmail)) {
+              errors.push(`${row.name}: another row already uses ${loginEmail}`);
+              skipped++;
+              continue;
+            }
+            const existing = await tx.user.findFirst({ where: { email: loginEmail }, select: { id: true } });
+            if (existing) { skipped++; continue; }
+            issued.add(loginEmail);
           }
-          const existing = await tx.user.findFirst({ where: { email: loginEmail }, select: { id: true } });
-          if (existing) { skipped++; continue; }
           const u = await tx.user.create({
             data: {
               schoolId: p.schoolId,
               email: loginEmail,
-              loginEmailGenerated: !row.email?.trim(),
+              loginEmailGenerated: generated,
               name: row.name,
               passwordHash,
             },
           });
-          issued.add(loginEmail);
           await tx.userRole.create({ data: { schoolId: p.schoolId, userId: u.id, roleId: studentRole.id } });
           if (row.classId) {
             await tx.enrollment.create({ data: { schoolId: p.schoolId, classId: row.classId, studentId: u.id } });
