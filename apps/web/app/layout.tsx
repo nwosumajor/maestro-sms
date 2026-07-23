@@ -33,10 +33,10 @@ const spectral = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "School Management System",
+  title: "MAESTRO-SMS — School Management System",
   description: "Multi-tenant LMS, monitoring, and assessment integrity.",
   manifest: "/manifest.webmanifest",
-  appleWebApp: { capable: true, statusBarStyle: "default", title: "SMS" },
+  appleWebApp: { capable: true, statusBarStyle: "default", title: "MAESTRO-SMS" },
   icons: { icon: "/icon.svg", apple: "/icon.svg" },
 };
 

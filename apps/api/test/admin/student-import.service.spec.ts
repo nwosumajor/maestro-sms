@@ -34,6 +34,9 @@ function makeService(opts: { batch?: Row | null; existingEmails?: string[] }) {
     studentProfile: { create: profileCreate, findMany: jest.fn().mockResolvedValue([]) },
     enrollment: { create: enrollCreate, count: jest.fn().mockResolvedValue(0) },
     role: { findFirst: jest.fn().mockResolvedValue({ id: "student-role" }) },
+    // Both stage() and approve() now resolve the school's slug: it is the domain
+    // of every generated sign-in identifier.
+    school: { findFirst: jest.fn().mockResolvedValue({ slug: "demo" }) },
     studentImportBatch: {
       create: jest.fn((a: { data: Row }) => Promise.resolve({ id: "b1", ...a.data })),
       findFirst: jest.fn(() => Promise.resolve(state.batch)),
@@ -89,5 +92,77 @@ describe("StudentImportService maker-checker", () => {
   it("refuses to approve an already-decided batch", async () => {
     const { service } = makeService({ batch: pendingBatch({ status: "APPROVED" }) });
     await expect(service.approve(p("approver"), "b1")).rejects.toBeInstanceOf(ConflictException);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// Generated sign-in identifiers in bulk import
+// -----------------------------------------------------------------------------
+// Most pupils have no email, so schools were inventing fake ones. A row now needs
+// only a NAME; the identifier is generated from it and the school's domain.
+describe("StudentImportService — generated identifiers", () => {
+  it("creates a student from a name ALONE and stamps it as generated", async () => {
+    const { service, userCreate } = makeService({
+      batch: pendingBatch({ rows: [{ name: "Chika Nwosu" }] }),
+    });
+    await service.approve(p("approver"), "b1");
+    expect(userCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          email: "chika.nwosu@demo.com",
+          loginEmailGenerated: true,
+        }),
+      }),
+    );
+  });
+
+  it("honours a supplied address and does NOT mark it generated", async () => {
+    const { service, userCreate } = makeService({
+      batch: pendingBatch({ rows: [{ name: "Chika Nwosu", email: "Chika@Real.test" }] }),
+    });
+    await service.approve(p("approver"), "b1");
+    expect(userCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ email: "chika@real.test", loginEmailGenerated: false }),
+      }),
+    );
+  });
+
+  it("AUTO-SUFFIXES two pupils sharing a name — both are created, no CSV re-edit", async () => {
+    // The uploader\'s chosen behaviour: adams.james, then adams.james2.
+    const { service, userCreate } = makeService({
+      batch: pendingBatch({ rows: [{ name: "Chika Nwosu" }, { name: "Chika Nwosu" }] }),
+    });
+    const res = await service.approve(p("approver"), "b1");
+    expect(userCreate).toHaveBeenCalledTimes(2);
+    expect(res.summary).toMatchObject({ created: 2, skipped: 0 });
+    const issued = userCreate.mock.calls.map((c) => (c[0] as { data: { email: string } }).data.email);
+    expect(issued).toEqual(["chika.nwosu@demo.com", "chika.nwosu2@demo.com"]);
+  });
+
+  it("suffixes around an EXISTING same-name student too (clash vs the DB, not just the file)", async () => {
+    const { service, userCreate } = makeService({
+      batch: pendingBatch({ rows: [{ name: "Chika Nwosu" }] }),
+      existingEmails: ["chika.nwosu@demo.com"],
+    });
+    await service.approve(p("approver"), "b1");
+    expect((userCreate.mock.calls[0]![0] as { data: { email: string } }).data.email).toBe(
+      "chika.nwosu2@demo.com",
+    );
+  });
+
+  it("stage counts a generated-name row as NEW, not a duplicate — it will auto-suffix", async () => {
+    const { service } = makeService({ existingEmails: ["chika.nwosu@demo.com"] });
+    const res = await service.stage(p("uploader"), [{ name: "Chika Nwosu" }, { name: "Femi Adeleke" }]);
+    expect(res.summary).toMatchObject({ total: 2, newCount: 2, duplicateCount: 0 });
+  });
+
+  it("stage still flags a SUPPLIED email that is already taken", async () => {
+    const { service } = makeService({ existingEmails: ["dup@t"] });
+    const res = await service.stage(p("uploader"), [
+      { name: "A", email: "new@t" },
+      { name: "B", email: "dup@t" },
+    ]);
+    expect(res.summary).toMatchObject({ total: 2, newCount: 1, duplicateCount: 1 });
   });
 });

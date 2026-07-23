@@ -3,6 +3,10 @@
 > **A backup you have never restored is not a backup.** This runbook exists to
 > be *rehearsed*, not just read. The drill in §4 is the part that matters.
 
+> Handling a live incident? Start with
+> [`RUNBOOK-INCIDENT-RESPONSE.md`](RUNBOOK-INCIDENT-RESPONSE.md) — it triages the
+> symptom and sends you back here only if a restore is genuinely the answer.
+
 ## 1. What is protected, and how
 
 | Asset | Mechanism | Window | Where |

@@ -127,7 +127,7 @@ describe("AdminService ADMIN_APPOINTMENT maker-checker", () => {
     const hooks = { onFinalized: jest.fn() };
     const service = new AdminService(db as never, audit as never, workflow as never, { client: null } as never, hooks as never);
 
-    const res = await service.createUser(senior, { name: "Junior", email: "jr@t", role: "junior_admin" });
+    const res = await service.createUser(senior, { name: "Junior", email: "jr@t", contactEmail: "jr@real.test", role: "junior_admin" });
     expect(res).toMatchObject({ pendingApproval: true, requestId: "wf-9", role: "junior_admin" });
     expect(userRoleCreate).not.toHaveBeenCalled(); // no role until the checker approves
     expect(workflow.createRequest).toHaveBeenCalledWith(

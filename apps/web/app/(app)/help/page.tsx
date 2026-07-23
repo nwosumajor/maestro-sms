@@ -64,6 +64,35 @@ export default async function HelpPage() {
       <div className="space-y-6">
         <PageHeader title={<>Help &amp; user guide</>} subtitle={<>The application manual, tailored to your role. Every action below lives in the left navigation.</>} />
 
+        {/* Leadership-only: the long-form School Leader's Manual. Served from
+            /manual behind the session gate — it documents real lockout and
+            approval policy, so it is deliberately not public. */}
+        {isLeadership && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">The School Leader&apos;s Manual</CardTitle>
+              <CardDescription>
+                The complete owner and principal handbook — your first 30 days, delegating roles, the
+                approval rules behind every control, fees and subscription, and a term-by-term operating
+                rhythm. Written to be read once and then kept for reference.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <a
+                href="/manual"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+              >
+                Open the manual
+              </a>
+              <p className="mt-3 text-xs text-muted-foreground">
+                Opens in a new tab. Printable — most principals keep a copy on the desk for the first term.
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
         <Guide
           title="The basics (everyone)"
           description="How the portal works, whatever your role."

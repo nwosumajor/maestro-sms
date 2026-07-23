@@ -229,7 +229,21 @@ Your branding (logo, colours) applies across the portal, report cards, and certi
 
 ## Next step
 
-Request your school's onboarding from the platform website, or reply to the contact that shared this proposal. Your first 30 days are on us — bring one term's fee collection onto the platform and let the receivables report make the argument for everything else.
+Request your school's onboarding from the platform website, or reach us directly using the details below. Your first 30 days are on us — bring one term's fee collection onto the platform and let the receivables report make the argument for everything else.
+
+### Talk to us
+
+| | |
+|---|---|
+| **Email** | [support@majormaestro.com](mailto:support@majormaestro.com) |
+| **WhatsApp** | [+234 903 958 6647](https://wa.me/2349039586647) |
+| **Online** | Request onboarding at our website, or read more for owners at `/for-owners` |
+
+Our desk covers every MajorGBN product, so please **mention MAESTRO-SMS** in your first line and it reaches the school-platform team directly. Tell us your school's name and roughly how many students you have, and we can quote your per-student price on the spot.
 
 **MAESTRO-SMS — powered by MajorGBN Innovations Limited.**
 *One platform. Every role. Your school, run like a futuristic institution.*
+
+---
+
+*MAESTRO-SMS is the school management system. MajorGBN Innovations Limited is the company behind it. majormaestro.com is the shared support desk for all MajorGBN products.*

@@ -1,0 +1,11 @@
+-- user.loginEmailGenerated — is `email` an identifier WE minted?
+--
+-- Login identifiers are now firstname.lastname@<slug>.com. Those domains are not
+-- ours, so such an address must never be used as a delivery target. Detection is
+-- a stored flag rather than string-matching the domain, because the domain is
+-- arbitrary (it is the school's slug) and cannot be recognised from the address.
+--
+-- Default FALSE is the safe backfill: every EXISTING user signed up with their
+-- own real address, so `email` remains deliverable for them and nothing that was
+-- working stops working.
+ALTER TABLE "user" ADD COLUMN "loginEmailGenerated" BOOLEAN NOT NULL DEFAULT false;

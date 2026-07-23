@@ -24,10 +24,14 @@ export default async function EnrollPage({ searchParams }: { searchParams: { sch
 
   return (
     <main className="relative mx-auto min-h-screen max-w-2xl bg-background p-6">
-      <ThemeToggle className="absolute right-4 top-4 z-20" />
-      <header className="flex items-center justify-between py-4">
-        <Link href="/" className="text-lg font-semibold tracking-tight">SMS</Link>
-        <Link href="/schools" className="text-sm text-muted-foreground hover:text-foreground">All schools</Link>
+      {/* Toggle sits IN the header row: as `absolute right-4 top-4` it landed on
+          top of the "All schools" link. Same fix as /schools. */}
+      <header className="flex items-center justify-between gap-4 py-4">
+        <Link href="/" className="whitespace-nowrap text-lg font-semibold tracking-tight">MAESTRO-SMS</Link>
+        <div className="flex shrink-0 items-center gap-3">
+          <ThemeToggle />
+          <Link href="/schools" className="whitespace-nowrap text-sm text-muted-foreground hover:text-foreground">All schools</Link>
+        </div>
       </header>
 
       <Card>

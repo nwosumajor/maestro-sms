@@ -8,6 +8,8 @@
 
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import bcrypt from "bcryptjs";
+import { Prisma } from "@sms/db";
+import { allocateLoginEmail, asNameTakenConflict, schoolSlugOf } from "../foundation/login-email";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -16,14 +18,15 @@ import {
   type TenantContext,
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
-import { isPlatformTierRole } from "@sms/types";
+import { autoSuffixLoginOnClash, isPlatformTierRole, requiresContactEmail } from "@sms/types";
 import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 
 export interface ImportRow {
   name: string;
-  email: string;
+  /** Optional — omitted => generated from the name and the school's domain. */
+  email?: string | null;
   classId?: string | null;
 }
 
@@ -133,7 +136,10 @@ export class AdminService {
    * create users in their own tenant; the super_admin guard prevents minting a
    * cross-tenant operator. Returns a one-time temporary password.
    */
-  async createUser(p: Principal, input: { name: string; email: string; role: string; password?: string }) {
+  async createUser(
+    p: Principal,
+    input: { name: string; email?: string; contactEmail?: string; role: string; password?: string },
+  ) {
     const roleName = input.role;
     if (isNonAssignableRole(roleName)) {
       // 404-shaped message: a school-level admin should not learn that a
@@ -146,11 +152,57 @@ export class AdminService {
     const created = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const role = await tx.role.findFirst({ where: { name: roleName }, select: { id: true } });
       if (!role) throw new NotFoundException("Role not found");
-      const existing = await tx.user.findFirst({ where: { email: input.email }, select: { id: true } });
-      if (existing) throw new BadRequestException("That email is already in use");
-      const user = await tx.user.create({
-        data: { schoolId: p.schoolId, email: input.email, name: input.name, passwordHash },
-      });
+      // Staff and parents MUST have a reachable address: without one they can
+      // never receive a reset link or an invite, and the account is
+      // unrecoverable the first time they forget their password. Students are
+      // exempt — their guardians are the ones notified.
+      if (requiresContactEmail(roleName) && !input.contactEmail?.trim()) {
+        throw new BadRequestException(
+          `A contact email is required for a ${roleName} — it is where their sign-in invite, password resets and notices are sent.`,
+        );
+      }
+      // No address supplied => GENERATE a school-scoped login identifier. Because
+      // the school's unique slug is the subdomain, this can never collide with
+      // another school — which is the whole point of the scheme.
+      let loginEmail: string;
+      if (input.email?.trim()) {
+        loginEmail = input.email.trim().toLowerCase();
+        const existing = await tx.user.findFirst({ where: { email: loginEmail }, select: { id: true } });
+        if (existing) throw new BadRequestException("That email is already in use");
+      } else {
+        const slug = await schoolSlugOf(tx, p.schoolId);
+        // Students and parents auto-suffix a name clash; staff are refused so a
+        // colleague never gets a near-identical login. One rule in @sms/types.
+        loginEmail = await allocateLoginEmail(tx, input.name, slug, {
+          autoSuffix: autoSuffixLoginOnClash(roleName),
+        });
+      }
+      const generated = !input.email?.trim();
+      let user: { id: string; email: string };
+      try {
+        user = await tx.user.create({
+          data: {
+            schoolId: p.schoolId,
+            email: loginEmail,
+            contactEmail: input.contactEmail?.trim() || null,
+            // Authoritative "this is not a mailbox" marker — see deliverableEmail().
+            loginEmailGenerated: generated,
+            name: input.name,
+            passwordHash,
+          },
+        });
+      } catch (e) {
+        // A GENERATED identifier can only clash within this school (the slug is
+        // the domain), so say so plainly. A SUPPLIED address may clash with a
+        // user in another school, invisible to the RLS-scoped pre-check — that
+        // one stays deliberately vague so it cannot be used to probe other
+        // tenants for existence.
+        if (generated) asNameTakenConflict(e, input.name);
+        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+          throw new ConflictException("That email is already in use");
+        }
+        throw e;
+      }
       // Maker-checker on the junior-admin tier: the ACCOUNT is created (it can
       // log in and do nothing — roles:[]) but the role lands only after a
       // different senior approves the ADMIN_APPOINTMENT raised below.
@@ -158,7 +210,8 @@ export class AdminService {
         await tx.userRole.create({ data: { schoolId: p.schoolId, userId: user.id, roleId: role.id } });
       }
       await this.log(tx, p, "admin.user.create", user.id, {
-        email: input.email,
+        // The identifier actually issued — input.email is undefined when generated.
+        email: user.email,
         role: roleName,
         ...(pendingRole ? { pendingAppointment: true } : {}),
       });
@@ -166,9 +219,9 @@ export class AdminService {
     });
     if (pendingRole) {
       const pending = await this.raiseAppointment(p, created.id, input.name, roleName);
-      return { id: created.id, email: input.email, role: roleName, tempPassword, ...pending };
+      return { id: created.id, email: created.email, role: roleName, tempPassword, ...pending };
     }
-    return { id: created.id, email: input.email, role: roleName, tempPassword };
+    return { id: created.id, email: created.email, role: roleName, tempPassword };
   }
 
   async assignRole(p: Principal, userId: string, roleName: string) {
@@ -267,12 +320,35 @@ export class AdminService {
       let created = 0;
       let skipped = 0;
       const errors: string[] = [];
+      const slug = await schoolSlugOf(tx, p.schoolId);
+      const issued = new Set<string>();
       for (const row of rows) {
         try {
-          const existing = await tx.user.findFirst({ where: { email: row.email }, select: { id: true } });
-          if (existing) { skipped++; continue; }
+          const generated = !row.email?.trim();
+          let loginEmail: string;
+          if (generated) {
+            // Students auto-suffix a shared name (adams.james2), so the import
+            // never blocks on a common name.
+            loginEmail = await allocateLoginEmail(tx, row.name, slug, { taken: issued, autoSuffix: true });
+          } else {
+            loginEmail = row.email!.trim().toLowerCase();
+            if (issued.has(loginEmail)) {
+              errors.push(`${row.name}: another row already uses ${loginEmail}`);
+              skipped++;
+              continue;
+            }
+            const existing = await tx.user.findFirst({ where: { email: loginEmail }, select: { id: true } });
+            if (existing) { skipped++; continue; }
+            issued.add(loginEmail);
+          }
           const u = await tx.user.create({
-            data: { schoolId: p.schoolId, email: row.email, name: row.name, passwordHash },
+            data: {
+              schoolId: p.schoolId,
+              email: loginEmail,
+              loginEmailGenerated: generated,
+              name: row.name,
+              passwordHash,
+            },
           });
           await tx.userRole.create({ data: { schoolId: p.schoolId, userId: u.id, roleId: studentRole.id } });
           if (row.classId) {
@@ -280,7 +356,14 @@ export class AdminService {
           }
           created++;
         } catch (err) {
-          errors.push(`${row.email}: ${String(err).slice(0, 80)}`);
+          // A cross-school email collision surfaces here as a raw P2002. Translate
+          // it — "Unique constraint failed on the fields: (`email`)" tells the
+          // school administrator nothing they can act on.
+          const msg =
+            err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002"
+              ? "that sign-in identifier is already taken — give this person a fuller name"
+              : String(err).slice(0, 80);
+          errors.push(`${row.name}: ${msg}`);
         }
       }
       await this.log(tx, p, "admin.import.students", p.schoolId, { created, skipped, errors: errors.length });

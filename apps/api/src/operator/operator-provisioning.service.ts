@@ -27,6 +27,8 @@ import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import { Prisma, type PrismaClient } from "@sms/db";
 import type { MisplacedPlatformRoleDto } from "@sms/types";
+import { MAX_SCHOOL_SLUG_LENGTH } from "@sms/types";
+import { allocateSchoolSlug } from "../foundation/login-email";
 import {
   PLATFORM_TIER_ROLES,
   DEFAULT_PLAN,
@@ -91,7 +93,8 @@ export class OperatorProvisioningService {
     p: Principal,
     input: {
       name: string;
-      slug: string;
+      /** Optional — derived (short, unique) from `name` when omitted. */
+      slug?: string;
       plan?: string;
       overrides?: { enabled?: string[]; disabled?: string[] };
       admin?: AdminInput;
@@ -112,9 +115,21 @@ export class OperatorProvisioningService {
     },
   ) {
     const db = this.client();
-    const slug = input.slug.trim().toLowerCase();
+    // The slug IS the login domain for every member of this school
+    // (firstname.lastname@<slug>.com), so it must be SHORT and unique across all
+    // schools. Omit it and one is derived from the school name; allocation runs
+    // on the PRIVILEGED client because `school` is global and a tenant-scoped
+    // read would happily hand out a slug another school already owns.
+    const slug = input.slug?.trim()
+      ? input.slug.trim().toLowerCase()
+      : await allocateSchoolSlug(db as never, input.name);
     if (!/^[a-z0-9-]{2,40}$/.test(slug)) {
       throw new BadRequestException("slug must be 2–40 chars, [a-z0-9-]");
+    }
+    if (slug.length > MAX_SCHOOL_SLUG_LENGTH) {
+      throw new BadRequestException(
+        `slug must be at most ${MAX_SCHOOL_SLUG_LENGTH} characters — it becomes the sign-in domain (name@<slug>.com)`,
+      );
     }
     const plan = input.plan && isPlan(input.plan) ? input.plan : DEFAULT_PLAN;
     // Extra modules beyond the plan — same model the subscription PUT uses. Only

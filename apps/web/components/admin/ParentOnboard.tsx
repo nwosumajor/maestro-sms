@@ -19,7 +19,7 @@ type Batch = Serialized<ParentImportBatchDto>;
 type Student = Serialized<IdNameDto>;
 type Cred = { name: string; email: string; tempPassword: string };
 
-const COLS = ["name", "email", "phone", "studentAdmissionNumbers", "studentEmails", "relationship"] as const;
+const COLS = ["name", "contactEmail", "phone", "studentAdmissionNumbers", "studentEmails", "relationship"] as const;
 
 function parseCsv(text: string): Record<string, string>[] {
   const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
@@ -39,7 +39,7 @@ function credsCsv(creds: Cred[]): string {
     if (/^[=+\-@\t\r]/.test(t)) t = `'${t}`; // formula-injection guard
     return `"${t.replace(/"/g, '""')}"`;
   };
-  return ["name,email,temporaryPassword", ...creds.map((c) => [c.name, c.email, c.tempPassword].map(cell).join(","))].join("\n");
+  return ["name,signInId,temporaryPassword", ...creds.map((c) => [c.name, c.email, c.tempPassword].map(cell).join(","))].join("\n");
 }
 
 function download(name: string, text: string) {
@@ -98,13 +98,14 @@ export function ParentOnboard({ batches, students, currentUserId }: { batches: B
   };
   const stage = async (e: React.FormEvent) => {
     e.preventDefault();
-    const rows = parseCsv(csv).filter((r) => r.name && r.email).map((r) => ({
-      name: r.name, email: r.email, phone: r.phone || null,
+    const rows = parseCsv(csv).filter((r) => r.name && r.contactEmail).map((r) => ({
+      // contactEmail = the guardian's REAL address; their sign-in ID is generated.
+      name: r.name, contactEmail: r.contactEmail, phone: r.phone || null,
       studentAdmissionNumbers: r.studentAdmissionNumbers || null,
       studentEmails: r.studentEmails || null,
       relationship: r.relationship || null,
     }));
-    if (rows.length === 0) { setMsg("No valid rows (need at least name + email)."); return; }
+    if (rows.length === 0) { setMsg("No valid rows — each guardian needs a name and a contact email."); return; }
     setBusy(true); setMsg(null);
     const res = await sendSms("POST", "admin/parents/import", { rows });
     setBusy(false);

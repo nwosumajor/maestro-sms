@@ -7,6 +7,7 @@ export * from "./modules";
 export * from "./notifications";
 export * from "./pagination";
 export * from "./roles";
+export * from "./school-email";
 export * from "./grading";
 export * from "./lms-badges";
 export * from "./dto/subscription";

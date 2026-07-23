@@ -1041,6 +1041,74 @@ all audited in the operator's own tenant. Verified: 8 scoping unit tests + the
 end-to-end (create→apply→consent-gate→submit→signals→cross-tenant review→award→
 ₦-credit on the invoice) + web production build (67 routes) + route smoke.
 
+## Operating the live system — runbooks
+- **`docs/RUNBOOK-INCIDENT-RESPONSE.md`** — the on-call playbook: severity
+  levels, 5-minute triage, per-symptom playbooks (outage / latency / DB / Redis
+  / bad deploy / payments / auth / **tenant-isolation breach** / data loss /
+  security / scheduled jobs), rollback (incl. why a destructive migration makes
+  rollback the WRONG move), recovery verification, and the blameless post-mortem
+  template. Post-mortems land in `docs/postmortems/`.
+- **`docs/RUNBOOK-BACKUP-RESTORE.md`** — backups, PITR, and the restore drill.
+- GOTCHA the runbook encodes: **`/api/health` is the WEB tier's liveness probe**
+  and answers 200 without touching the API or DB. The API's own `/health` is not
+  internet-reachable (the ALB forwards only `/ws/*` to the API target group; REST
+  flows web→api over Cloud Map). For a real end-to-end probe use a public
+  API-backed read such as `/api/public/plan-pricing`.
+- When a fix changes operational behaviour, update the runbook in the SAME PR —
+  a runbook that lags reality is worse than none, because it is trusted.
+
+## Demo fixtures are FAIL-CLOSED (never seed a demo account into production)
+The seed runs on EVERY cloud deploy (the one-off `migrate` ECS task calls
+`prisma db seed`), so anything unconditional in `seed.ts` lands in PRODUCTION.
+It previously created the demo school, 17 `@demo.school` logins AND the platform
+`super_admin` — all on the public password `password123`, which the login page
+also printed. That is a full platform compromise for anyone who guesses the
+convention.
+- `SEED_DEMO_DATA=true` (default FALSE) is now required for ANY demo fixture:
+  the demo school, its users and its content. Set it in `infrastructure/.env`
+  for local compose; NEVER set it in cloud.
+- Production still seeds what it genuinely needs: the platform org, the SYSTEM
+  audit actor, and the role/permission registry — the last must keep re-running
+  so new permissions reach a live DB.
+- `owner@sms.platform` / `manager@sms.platform` exist in every environment but
+  take their password from `PLATFORM_OWNER_PASSWORD`. Unset in a non-demo run ⇒
+  created with an UNUSABLE hash (`!no-password-set`, which bcrypt can never
+  match) plus a warning. Setting the env var and re-running the seed DOES
+  rewrite the hash — that is the documented recovery path — while a run WITHOUT
+  it never clobbers a password the owner has since changed.
+- The login page carries NO demo-credentials block at all — not even an
+  env-gated one, since a single mis-set variable would turn it back into a
+  public principal account. Demo logins for local work are listed in this file
+  and in `/help`; a sign-in page never prints working credentials.
+**If a cloud DB was ever seeded before this change, those accounts still exist.**
+Audit with `SELECT email FROM "user" WHERE email LIKE '%@demo.school' OR email
+LIKE '%@sms.platform';` and rotate/disable anything with the old password.
+
+## Owner-facing documents — the PRICING ACCURACY rule
+Three assets quote commercial facts (plan tiers, commitment discounts, cycle
+lengths, trial length, the maker-checker money threshold) to school owners. A
+stale number here is not a cosmetic bug — a proposal quoting a discount you no
+longer offer is a commitment a prospect will hold you to.
+- `apps/web/app/for-owners/page.tsx` — the PUBLIC marketing page. **Derives**
+  `CYCLE_DISCOUNT_PERCENT` and the `PLANS` count from `@sms/types`; never type a
+  pricing number as prose here.
+- `docs/ONBOARDING-MANUAL.html` — the leader's manual, served at `/manual`
+  (signed-in only). Static HTML, so it cannot import constants.
+- `docs/SCHOOL_OWNER_PROPOSAL.md` — the proposal sent to prospects. Same.
+The two static documents are guarded by
+`apps/web/lib/__tests__/pricing-consistency.test.ts`, which reads them from disk
+and asserts they state the CURRENT values from `@sms/types` — so changing a
+pricing constant without updating them fails `pnpm test` with the filename and
+the fix. It also fails if the GENERATED `apps/web/app/manual/manual-html.ts` is
+stale, since `/manual` would otherwise serve outdated pricing after the source
+was corrected.
+**After editing the manual, regenerate the served copy:**
+`pnpm --filter @sms/web build:manual`.
+Contact details (`support@majormaestro.com`, WhatsApp) appear in all three —
+update together. Brand hierarchy: **MAESTRO-SMS** is the product,
+**MajorGBN Innovations Limited** the company, **majormaestro.com** the support
+desk shared across all MajorGBN products.
+
 ## When generating code
 - Explain the multi-tenancy/security implication of each new table or endpoint.
 - After scaffolding, output RLS SQL and migrations SEPARATELY for review before

@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { postSms } from "@/components/game/play-ui";
+import { requiresContactEmail } from "@sms/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,19 +12,27 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 export function CreateUserForm({ roles }: { roles: string[] }) {
   const router = useRouter();
   const [name, setName] = React.useState("");
-  const [email, setEmail] = React.useState("");
+  const [contactEmail, setContactEmail] = React.useState("");
   const [role, setRole] = React.useState(roles[0] ?? "teacher");
+  // Sign-in identifiers are generated from the name and the school's own domain,
+  // so the only address we ask for is the REAL one mail goes to. Students are
+  // exempt: their guardians are notified, and most pupils have no address.
+  const contactRequired = requiresContactEmail(role);
   const [busy, setBusy] = React.useState(false);
   const [result, setResult] = React.useState<string | null>(null);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name || !email || !role) return;
+    if (!name || !role) return;
+    if (contactRequired && !contactEmail.trim()) {
+      setResult(`A contact email is required for a ${role} — it is where their sign-in invite and password resets are sent.`);
+      return;
+    }
     setBusy(true);
     setResult(null);
     const res = await postSms<{ email: string; role: string; tempPassword: string; pendingApproval?: boolean }>(
       "admin/users",
-      { name, email, role },
+      { name, role, ...(contactEmail.trim() ? { contactEmail: contactEmail.trim() } : {}) },
     );
     setBusy(false);
     if (res.ok && res.data) {
@@ -31,11 +40,11 @@ export function CreateUserForm({ roles }: { roles: string[] }) {
       // role lands only after a different senior approves under Approvals.
       setResult(
         res.data.pendingApproval
-          ? `Created ${res.data.email} — temporary password: ${res.data.tempPassword}. The ${res.data.role} role is AWAITING APPROVAL by a different senior (see Approvals); the account has no access until then.`
-          : `Created ${res.data.role} ${res.data.email} — temporary password: ${res.data.tempPassword}`,
+          ? `Created. Sign-in ID: ${res.data.email} — temporary password: ${res.data.tempPassword}. The ${res.data.role} role is AWAITING APPROVAL by a different senior (see Approvals); the account has no access until then.`
+          : `Created ${res.data.role}. Sign-in ID: ${res.data.email} — temporary password: ${res.data.tempPassword}. This ID is for signing in only; it does not receive mail.`,
       );
       setName("");
-      setEmail("");
+      setContactEmail("");
       router.refresh();
     } else {
       setResult(`Failed (${res.status}). ${res.error ?? ""}`);
@@ -47,8 +56,9 @@ export function CreateUserForm({ roles }: { roles: string[] }) {
       <CardHeader>
         <CardTitle className="text-base">Create a profile</CardTitle>
         <CardDescription>
-          Add a teacher, accountant, parent, student or other staff member to your school. They receive a
-          one-time temporary password. Roles are platform-defined; use Roles &amp; access to change them later.
+          Add a teacher, accountant, parent, student or other staff member. Their sign-in ID is generated
+          from their name and your school&apos;s domain — you don&apos;t enter it. Staff and parents must have a
+          contact email: that is where the invite, password resets and notices actually go.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -58,8 +68,17 @@ export function CreateUserForm({ roles }: { roles: string[] }) {
             <Input id="cu-name" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="cu-email">Email</Label>
-            <Input id="cu-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <Label htmlFor="cu-contact">
+              Contact email{contactRequired ? <span className="text-destructive"> *</span> : " (optional)"}
+            </Label>
+            <Input
+              id="cu-contact"
+              type="email"
+              value={contactEmail}
+              required={contactRequired}
+              placeholder={contactRequired ? "where invites & resets are sent" : "students: optional"}
+              onChange={(e) => setContactEmail(e.target.value)}
+            />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="cu-role">Role</Label>

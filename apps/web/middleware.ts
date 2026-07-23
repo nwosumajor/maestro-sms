@@ -69,5 +69,6 @@ export const config = {
     "/family/:path*",
     "/scholarships/:path*",
     "/help/:path*",
+    "/manual",
   ],
 };

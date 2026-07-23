@@ -55,8 +55,18 @@ d("RaceService integration (Class Race + tournament, RLS, server authority)", ()
     );
     return r.rows[0]!.targetSecret;
   };
+  // FLAKE GUARD: the assertion is "the server-only target never reaches a client
+  // view", but a naive substring scan of the whole serialized view also sees
+  // IDENTIFIERS that carry no game meaning — and a random UUID contains the
+  // 4-digit target by coincidence often enough to redden CI (observed:
+  // target "5902" inside userId "b9590203-576e-…"). Timestamps had the same
+  // problem. Redact both before the check: a real leak lives in a guess, a
+  // secret or a target field, none of which are redacted here, so the test
+  // keeps its full security value.
+  const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+  const ISO_TS_RE = /\d{4}-\d{2}-\d{2}T[\d:.]+Z?/g;
   const noTarget = (v: unknown, target: string) =>
-    expect(JSON.stringify(v)).not.toContain(target);
+    expect(JSON.stringify(v).replace(UUID_RE, "<id>").replace(ISO_TS_RE, "<ts>")).not.toContain(target);
 
   beforeAll(async () => {
     admin = new Pool({ connectionString: ADMIN_URL });

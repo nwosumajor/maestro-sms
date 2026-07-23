@@ -66,6 +66,8 @@ services:
       # Migrations + RLS grants run as the superuser.
       DATABASE_MIGRATE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       SEED_ON_START: ${SEED_ON_START:-false}
+      # Demo school + @demo.school logins. FAIL-CLOSED: never set this in cloud.
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-false}
       # Field-level PII encryption (medical). 32-byte base64; from a secrets
       # manager in prod. Unset => encryption disabled (plaintext).
       DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:-Q5gcF3Ehy9TDmCWdhBIcu3BMCdoapo/z6xroVbv6zoE=}
