@@ -12,7 +12,7 @@
 // =============================================================================
 
 import { randomUUID } from "node:crypto";
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 // VALUE import: Prisma.sql/join only resolve as values, not types (CLAUDE.md).
 import { Prisma } from "@sms/db";
 import type { AttendanceStatusValue } from "@sms/types";
@@ -60,6 +60,14 @@ export class AttendanceService {
     const { session, alerts } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.assertTeacherOfClass(tx, p, classId);
       const date = new Date(input.date);
+      // TERM LOCK: a register in a term that has ENDED is read-only for everyone,
+      // including leadership — the authoritative check (the UI also greys it out).
+      const lockBefore = await this.currentTermStart(tx);
+      if (lockBefore && date < lockBefore) {
+        throw new ConflictException(
+          "This register is locked: it falls in a term that has ended. Past-term registers are read-only.",
+        );
+      }
 
       // Only students actually enrolled in this class may be marked.
       const enrolled = await tx.enrollment.findMany({
@@ -200,6 +208,34 @@ export class AttendanceService {
   }
 
   /** school-wide staff, or a teacher assigned to THIS class. 404 otherwise. */
+  /**
+   * The start of the CURRENT term — the lock boundary. A register dated BEFORE
+   * this is in a term that has ended and is READ-ONLY. Prefers the explicitly
+   * `isCurrent` term; falls back to the term whose date range contains today.
+   * Returns null when terms/dates are not configured (fail-open — an unset-up
+   * school must never have attendance blocked).
+   */
+  private async currentTermStart(tx: TenantTx): Promise<Date | null> {
+    const marked = await tx.term.findFirst({ where: { isCurrent: true }, select: { startDate: true } });
+    if (marked?.startDate) return marked.startDate;
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const containing = await tx.term.findFirst({
+      where: { startDate: { lte: today }, endDate: { gte: today } },
+      orderBy: { startDate: "desc" },
+      select: { startDate: true },
+    });
+    return containing?.startDate ?? null;
+  }
+
+  /** The lock boundary for the UI: dates before this are read-only. */
+  async getTermLock(p: Principal): Promise<{ lockBeforeDate: string | null }> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const start = await this.currentTermStart(tx);
+      return { lockBeforeDate: start ? start.toISOString().slice(0, 10) : null };
+    });
+  }
+
   private async assertTeacherOfClass(tx: TenantTx, p: Principal, classId: string) {
     const cls = await tx.class.findFirst({ where: { id: classId }, select: { id: true } });
     if (!cls) throw new NotFoundException("Class not found");

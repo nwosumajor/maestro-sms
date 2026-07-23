@@ -13,6 +13,7 @@ interface Fakes {
   guardianLinks?: { parentId: string; studentId: string }[];
   classTeacherMany?: { classId: string }[];
   enrollmentForStudent?: { id: string } | null;
+  currentTerm?: { startDate: Date | null } | null;
 }
 
 function makeService(f: Fakes) {
@@ -39,6 +40,7 @@ function makeService(f: Fakes) {
     attendanceRecord: {
       findMany: jest.fn().mockResolvedValue([]),
     },
+    term: { findFirst: jest.fn().mockResolvedValue(f.currentTerm ?? null) },
     // The register is written as ONE bulk upsert (INSERT … ON CONFLICT), not a
     // per-student upsert loop — see AttendanceService.markAttendance.
     $executeRaw: jest.fn().mockResolvedValue(1),
@@ -150,5 +152,45 @@ describe("AttendanceService scoping", () => {
     await expect(
       service.getStudentAttendance(principal(["teacher"]), "stranger"),
     ).rejects.toThrow(/not found/i);
+  });
+});
+
+describe("AttendanceService — term lock", () => {
+  const teacher = principal(["teacher"], "u-1");
+  const rec = { date: "2026-03-10", records: [{ studentId: "s-1", status: "PRESENT" as const }] };
+
+  it("REJECTS marking a register dated before the current term's start", async () => {
+    const { service } = makeService({
+      classRow: { id: "c-1" },
+      classTeacher: { id: "ct-1" },
+      enrollmentRows: [{ studentId: "s-1" }],
+      currentTerm: { startDate: new Date("2026-05-01") }, // term starts AFTER the register date
+    });
+    await expect(service.markAttendance(teacher, "c-1", rec)).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("ALLOWS marking a register within the current term", async () => {
+    const { service } = makeService({
+      classRow: { id: "c-1" },
+      classTeacher: { id: "ct-1" },
+      enrollmentRows: [{ studentId: "s-1" }],
+      currentTerm: { startDate: new Date("2026-01-01") }, // register date is within the term
+    });
+    await expect(service.markAttendance(teacher, "c-1", rec)).resolves.toBeDefined();
+  });
+
+  it("FAIL-OPEN: no term configured -> no lock, marking allowed", async () => {
+    const { service } = makeService({
+      classRow: { id: "c-1" },
+      classTeacher: { id: "ct-1" },
+      enrollmentRows: [{ studentId: "s-1" }],
+      currentTerm: null,
+    });
+    await expect(service.markAttendance(teacher, "c-1", rec)).resolves.toBeDefined();
+  });
+
+  it("getTermLock reports the boundary date", async () => {
+    const { service } = makeService({ currentTerm: { startDate: new Date("2026-05-01") } });
+    expect(await service.getTermLock(teacher)).toEqual({ lockBeforeDate: "2026-05-01" });
   });
 });

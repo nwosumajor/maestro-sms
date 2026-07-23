@@ -34,9 +34,10 @@ export default async function AttendancePage({
   const user = session!.user;
   const canWrite = hasPermission(user.permissions, "attendance.write");
 
-  const [students, classes] = await Promise.all([
+  const [students, classes, termLock] = await Promise.all([
     apiGet<Student[]>("/students"),
     canWrite ? apiGet<ClassRow[]>("/classes/mine") : Promise.resolve(null),
+    canWrite ? apiGet<{ lockBeforeDate: string | null }>("/attendance/term-lock") : Promise.resolve(null),
   ]);
 
   const list = students ?? [];
@@ -57,7 +58,7 @@ export default async function AttendancePage({
               <CardDescription>Pick a class and date. Today defaults everyone Present — mark the exceptions and save. Pick a past date (or a register below) to view or correct any day&apos;s register.</CardDescription>
             </CardHeader>
             <CardContent>
-              <TakeRegister classes={classes} />
+              <TakeRegister classes={classes} lockBeforeDate={termLock?.lockBeforeDate ?? null} />
             </CardContent>
           </Card>
         )}

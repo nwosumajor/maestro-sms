@@ -39,6 +39,12 @@ export class AttendanceController {
   }
 
   /** A class register for ?date=YYYY-MM-DD, or recent sessions if omitted. */
+  @Get("attendance/term-lock")
+  @RequirePermission(ATTENDANCE_PERMISSIONS.ATTENDANCE_READ)
+  termLock(@CurrentPrincipal() p: Principal) {
+    return this.attendance.getTermLock(p);
+  }
+
   @Get("classes/:classId/attendance")
   @RequirePermission(ATTENDANCE_PERMISSIONS.ATTENDANCE_READ)
   classAttendance(

@@ -32,7 +32,14 @@ type SessionSummary = {
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-export function TakeRegister({ classes }: { classes: { id: string; name: string }[] }) {
+export function TakeRegister({
+  classes,
+  lockBeforeDate,
+}: {
+  classes: { id: string; name: string }[];
+  /** Dates before this (the current term's start) are read-only. */
+  lockBeforeDate: string | null;
+}) {
   const [classId, setClassId] = React.useState(classes[0]?.id ?? "");
   const [date, setDate] = React.useState(today());
   const [roster, setRoster] = React.useState<Student[] | null>(null);
@@ -100,6 +107,8 @@ export function TakeRegister({ classes }: { classes: { id: string; name: string 
     setMarks(Object.fromEntries(roster.map((s) => [s.id, status])));
   };
 
+  const locked = Boolean(lockBeforeDate && date < lockBeforeDate);
+
   const tally = React.useMemo(() => {
     const t: Record<Status, number> = { PRESENT: 0, ABSENT: 0, LATE: 0, EXCUSED: 0 };
     for (const st of Object.values(marks)) t[st] += 1;
@@ -162,13 +171,20 @@ export function TakeRegister({ classes }: { classes: { id: string; name: string 
       </div>
 
       {/* Status of this register */}
-      <p className="text-xs text-muted-foreground">
-        {loading
-          ? "Loading…"
-          : savedSession
-            ? `Saved${savedSession.takenBy ? ` by ${savedSession.takenBy.name}` : ""}. Editing updates it.`
-            : "Not yet taken — everyone starts Present; mark the exceptions."}
-      </p>
+      {locked ? (
+        <p className="rounded-md bg-slate-100 px-3 py-2 text-xs font-medium text-slate-700">
+          🔒 Locked — this register is in a term that has ended. It is read-only.
+          {savedSession?.takenBy ? ` Taken by ${savedSession.takenBy.name}.` : ""}
+        </p>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          {loading
+            ? "Loading…"
+            : savedSession
+              ? `Saved${savedSession.takenBy ? ` by ${savedSession.takenBy.name}` : ""}. Editing updates it.`
+              : "Not yet taken — everyone starts Present; mark the exceptions."}
+        </p>
+      )}
 
       {roster && roster.length > 0 && (
         <div className="space-y-3">
@@ -178,14 +194,16 @@ export function TakeRegister({ classes }: { classes: { id: string; name: string 
             <span className="rounded bg-red-100 px-2 py-1 font-medium text-red-800">{tally.ABSENT} absent</span>
             <span className="rounded bg-amber-100 px-2 py-1 font-medium text-amber-800">{tally.LATE} late</span>
             <span className="rounded bg-slate-100 px-2 py-1 font-medium text-slate-700">{tally.EXCUSED} excused</span>
-            <span className="ml-auto flex gap-1">
-              <Button type="button" variant="outline" size="sm" onClick={() => setAll("PRESENT")}>
-                All present
-              </Button>
-              <Button type="button" variant="outline" size="sm" onClick={() => setAll("ABSENT")}>
-                All absent
-              </Button>
-            </span>
+            {!locked && (
+              <span className="ml-auto flex gap-1">
+                <Button type="button" variant="outline" size="sm" onClick={() => setAll("PRESENT")}>
+                  All present
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={() => setAll("ABSENT")}>
+                  All absent
+                </Button>
+              </span>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -200,12 +218,14 @@ export function TakeRegister({ classes }: { classes: { id: string; name: string 
                     <button
                       key={st}
                       type="button"
+                      disabled={locked}
                       onClick={() => setMarks((m) => ({ ...m, [s.id]: st }))}
                       className={
                         "rounded px-2 py-1 text-xs font-medium transition-colors " +
                         (marks[s.id] === st
                           ? "bg-primary text-primary-foreground"
-                          : "bg-muted text-muted-foreground hover:bg-accent")
+                          : "bg-muted text-muted-foreground hover:bg-accent") +
+                        (locked ? " cursor-not-allowed opacity-60" : "")
                       }
                     >
                       {st[0] + st.slice(1).toLowerCase()}
@@ -215,9 +235,11 @@ export function TakeRegister({ classes }: { classes: { id: string; name: string 
               </div>
             ))}
           </div>
-          <Button onClick={submit} disabled={busy}>
-            {busy ? "Saving…" : savedSession ? "Update register" : "Save register"}
-          </Button>
+          {!locked && (
+            <Button onClick={submit} disabled={busy}>
+              {busy ? "Saving…" : savedSession ? "Update register" : "Save register"}
+            </Button>
+          )}
         </div>
       )}
 
