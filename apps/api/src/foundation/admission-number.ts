@@ -9,10 +9,19 @@
 import { formatAdmissionNumber, nextAdmissionSeq } from "@sms/types";
 import type { TenantTx } from "../integrity/integrity.foundation";
 
-/** Every admission number already in use in this school (RLS-scoped). */
-export async function loadUsedAdmissionNumbers(tx: TenantTx): Promise<Set<string>> {
+/**
+ * Admission numbers already in use in this school (RLS-scoped).
+ *
+ * `forYear` scopes the load to that year's numbers via the indexed
+ * `(schoolId, admissionNumber)` prefix — enough for GENERATION (which only ever
+ * sequences and collides within the current year), and it keeps a single-student
+ * create O(this-year's-intake) instead of O(all-students-ever). Omit it (bulk
+ * import) to load every number, which is also needed to dedupe a school's own
+ * custom, non-year-format numbers.
+ */
+export async function loadUsedAdmissionNumbers(tx: TenantTx, forYear?: number): Promise<Set<string>> {
   const rows = await tx.studentProfile.findMany({
-    where: { admissionNumber: { not: null } },
+    where: forYear ? { admissionNumber: { startsWith: `${forYear}/` } } : { admissionNumber: { not: null } },
     select: { admissionNumber: true },
   });
   return new Set(rows.map((r) => r.admissionNumber).filter(Boolean) as string[]);

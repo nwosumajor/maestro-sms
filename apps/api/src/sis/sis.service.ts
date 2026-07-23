@@ -107,7 +107,7 @@ export class SisService {
       } else if (existing?.admissionNumber) {
         admissionNumber = existing.admissionNumber;
       } else {
-        const used = await loadUsedAdmissionNumbers(tx);
+        const used = await loadUsedAdmissionNumbers(tx, new Date().getFullYear());
         admissionNumber = allocateAdmissionNumber(used, new Date().getFullYear());
       }
       const data = {

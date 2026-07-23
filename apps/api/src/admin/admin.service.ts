@@ -216,7 +216,7 @@ export class AdminService {
       // allocator; a rare cross-tx race is caught by the DB unique constraint.
       let admissionNumber: string | null = null;
       if (roleName === "student") {
-        const used = await loadUsedAdmissionNumbers(tx);
+        const used = await loadUsedAdmissionNumbers(tx, new Date().getFullYear());
         admissionNumber = allocateAdmissionNumber(used, new Date().getFullYear());
         try {
           await tx.studentProfile.create({
