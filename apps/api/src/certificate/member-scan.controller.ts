@@ -1,5 +1,6 @@
-import { Controller, Get, Param } from "@nestjs/common";
-import type { MemberScanDto } from "@sms/types";
+import { BadRequestException, Body, Controller, Get, Param, Post } from "@nestjs/common";
+import type { MemberScanDto, ScanRecordResultDto } from "@sms/types";
+import { isScanPurpose } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import type { Principal } from "../integrity/integrity.foundation";
@@ -18,5 +19,24 @@ export class MemberScanController {
   @RequirePermission("member.scan")
   resolve(@CurrentPrincipal() p: Principal, @Param("code") code: string): Promise<MemberScanDto> {
     return this.scan.resolve(p, code);
+  }
+
+  /**
+   * RECORD an action for a scanned member (check-in / check-out / library /
+   * exam). CHECK_IN of a student marks them present in today's register.
+   * Same tenant-scoping, permission and audit as the lookup.
+   */
+  @Post("scan/:code")
+  @RequirePermission("member.scan")
+  record(
+    @CurrentPrincipal() p: Principal,
+    @Param("code") code: string,
+    @Body() body: { purpose?: string; note?: string },
+  ): Promise<ScanRecordResultDto> {
+    const purpose = body?.purpose;
+    if (!purpose || !isScanPurpose(purpose)) {
+      throw new BadRequestException("Unknown scan purpose");
+    }
+    return this.scan.record(p, code, purpose, body.note ?? null);
   }
 }

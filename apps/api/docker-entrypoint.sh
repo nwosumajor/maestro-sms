@@ -155,6 +155,7 @@ apply_rls packages/db/prisma/rls/84_notification_preference_rls.sql notification
 apply_rls packages/db/prisma/rls/85_lesson_cover_rls.sql          lesson_cover_delete
 apply_rls packages/db/prisma/rls/86_meetings_rls.sql              meeting_booking_delete
 apply_rls packages/db/prisma/rls/87_exam_logistics_rls.sql        exam_invigilator_delete
+apply_rls packages/db/prisma/rls/88_scan_event_rls.sql          scan_event_insert
 
 # Seed on first provision (compose: SEED_ON_START=true; cloud migrate task: always).
 if [ "${SEED_ON_START}" = "true" ] || [ "$MODE" = "migrate" ]; then

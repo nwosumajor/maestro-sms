@@ -59,6 +59,7 @@ d("RLS cross-tenant isolation", () => {
   const examSittingA = randomUUID();
   const examSeatA = randomUUID();
   const examInvigilatorA = randomUUID();
+  const scanEventA = randomUUID();
   const teacherUnavailA = randomUUID();
   const grantA = randomUUID();
   const erasureA = randomUUID();
@@ -387,6 +388,11 @@ d("RLS cross-tenant isolation", () => {
     await a.query(
       `INSERT INTO exam_invigilator (id,"schoolId","sittingId","staffId") VALUES ($1,$2,$3,$4)`,
       [examInvigilatorA, A, examSittingA, userA],
+    );
+    // Scan event (append-only movement log).
+    await a.query(
+      `INSERT INTO scan_event (id,"schoolId","memberId","scannedById",purpose,"createdAt") VALUES ($1,$2,$3,$3,'CHECK_IN',now())`,
+      [scanEventA, A, userA],
     );
     // CSP generator input: one unavailable slot for teacher userA.
     await a.query(
@@ -1122,6 +1128,7 @@ d("RLS cross-tenant isolation", () => {
       "erasure_request",
       "privilege_grant",
       "teacher_unavailability",
+      "scan_event",
       "exam_invigilator",
       "exam_seat",
       "exam_sitting",
@@ -1232,6 +1239,7 @@ d("RLS cross-tenant isolation", () => {
     ["exam_sitting", examSittingA],
     ["exam_seat", examSeatA],
     ["exam_invigilator", examInvigilatorA],
+    ["scan_event", scanEventA],
     ["teacher_unavailability", teacherUnavailA],
     ["privilege_grant", grantA],
     ["erasure_request", erasureA],

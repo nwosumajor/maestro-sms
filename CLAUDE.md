@@ -1052,7 +1052,13 @@ in `runAsTenant` so RLS confines it — a foreign `uniqueId` returns **404, not
 403** (no cross-tenant existence disclosure); returns ROSTER-level fields only
 (name/role/admission#/class/status), never medical/PII; every scan audited
 (`member.scan`). Web desk at `/scan` (`ScanConsole` — always-focused input for a
-handheld scanner). `member.scan` is a NEW permission: run the seed against a live
+handheld scanner + a purpose selector). The desk also RECORDS actions:
+`POST /members/scan/:code {purpose}` writes an append-only `scan_event`
+(rls/88, INSERT+SELECT only, migration `20261003000000`) — CHECK_IN of a
+student ALSO marks them PRESENT in today's class register (a deliberate
+central check-in that bypasses the per-class teacher restriction, `takenById`
+= scanner); CHECK_OUT/LIBRARY/EXAM log the movement only. GET stays a pure
+side-effect-free lookup. `member.scan` is a NEW permission: run the seed against a live
 DB (or it 403s even for staff) — the runtime guard reads role→perms from the DB
 (`role-permissions.service`, static `@sms/types` map is only the fallback).
 

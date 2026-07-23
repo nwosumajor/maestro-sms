@@ -12,3 +12,15 @@ export interface MemberScanDto {
   /** ACTIVE / DISABLED etc — so a gate desk sees a revoked card. */
   status: string;
 }
+
+// Result of RECORDING a scan action (POST). Carries the resolved member plus
+// what the scan did, so the desk shows immediate confirmation.
+export interface ScanRecordResultDto {
+  member: MemberScanDto;
+  purpose: string;
+  recorded: true;
+  /** For CHECK_IN of a student: the class they were marked present in, or a
+   *  reason it could not be marked (e.g. not enrolled). Null for other purposes. */
+  attendanceMarkedClass: string | null;
+  attendanceNote: string | null;
+}

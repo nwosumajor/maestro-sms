@@ -1,0 +1,24 @@
+// Scan events — append-only movement/activity log written by the ID-card scan
+// desk (library / attendance / exam-hall / gate). Tenant-scoped, RLS. No update
+// or delete grant: a scan is a fact that happened.
+model ScanEvent {
+  id          String   @id @default(uuid()) @db.Uuid
+  schoolId    String   @db.Uuid
+  /// The member who was scanned.
+  memberId    String   @db.Uuid
+  /// The staff member who performed the scan.
+  scannedById String   @db.Uuid
+  /// CHECK_IN | CHECK_OUT | LIBRARY | EXAM (see @sms/types SCAN_PURPOSES).
+  purpose     String
+  note        String?
+  createdAt   DateTime @default(now())
+
+  school    School @relation(fields: [schoolId], references: [id])
+  member    User   @relation("ScanEventMember", fields: [memberId], references: [id])
+  scannedBy User   @relation("ScanEventScanner", fields: [scannedById], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, memberId])
+  @@index([schoolId, createdAt])
+  @@map("scan_event")
+}

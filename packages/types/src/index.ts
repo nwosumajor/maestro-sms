@@ -8,6 +8,7 @@ export * from "./notifications";
 export * from "./pagination";
 export * from "./roles";
 export * from "./school-email";
+export * from "./scan";
 export * from "./dto/member-scan";
 export * from "./admission-number";
 export * from "./grading";
