@@ -15,6 +15,7 @@ function makeService(over: { role?: Record<string, unknown> | null; existing?: R
     Promise.resolve({ id: "new-user", ...args.data }),
   );
   const userRoleCreate = jest.fn().mockResolvedValue({ id: "ur1" });
+  const profileCreate = jest.fn().mockResolvedValue({ id: "sp1" });
   const tx = {
     role: { findFirst: jest.fn().mockResolvedValue(over.role === undefined ? { id: "r1" } : over.role) },
     user: {
@@ -22,6 +23,8 @@ function makeService(over: { role?: Record<string, unknown> | null; existing?: R
       create: userCreate,
     },
     userRole: { create: userRoleCreate },
+    // A student now gets a profile + auto admission number.
+    studentProfile: { create: profileCreate, findMany: jest.fn().mockResolvedValue([]) },
     // A generated sign-in identifier resolves the school's slug for its domain.
     school: { findFirst: jest.fn().mockResolvedValue({ slug: "demo" }) },
   } as unknown as TenantTx;
@@ -36,6 +39,7 @@ function makeService(over: { role?: Record<string, unknown> | null; existing?: R
     service: new AdminService(db as never, audit as never, workflow as never, { client: null } as never, hooks as never),
     userCreate,
     userRoleCreate,
+    profileCreate,
     audit,
     workflow,
   };
@@ -116,5 +120,23 @@ describe("AdminService.createUser — contact email requirement", () => {
     expect(userCreate).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ loginEmailGenerated: true }) }),
     );
+  });
+});
+
+describe("AdminService.createUser — student profile + admission number", () => {
+  it("creates a StudentProfile with a GENERATED admission number and returns it", async () => {
+    const { service, profileCreate } = makeService({});
+    const res = await service.createUser(p, { name: "Amara Uche", role: "student" });
+    expect(profileCreate).toHaveBeenCalledTimes(1);
+    const stored = (profileCreate.mock.calls[0]![0] as { data: { admissionNumber: string } }).data.admissionNumber;
+    expect(stored).toMatch(/^\d{4}\/\d{4}$/);
+    expect(res.admissionNumber).toBe(stored);
+  });
+
+  it("does NOT create a profile for a non-student role", async () => {
+    const { service, profileCreate } = makeService({});
+    const res = await service.createUser(p, { name: "Tara Bello", role: "teacher", contactEmail: "tara@x.test" });
+    expect(profileCreate).not.toHaveBeenCalled();
+    expect(res.admissionNumber).toBeNull();
   });
 });

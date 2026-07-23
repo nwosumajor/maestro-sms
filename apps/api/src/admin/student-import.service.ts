@@ -22,7 +22,7 @@ import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import { Prisma } from "@sms/db";
 import { allocateLoginEmail, schoolSlugOf } from "../foundation/login-email";
-import { formatAdmissionNumber, nextAdmissionSeq } from "@sms/types";
+import { allocateAdmissionNumber } from "../foundation/admission-number";
 import type {
   StudentImportBatchDto,
   StudentImportRow,
@@ -184,21 +184,9 @@ export class StudentImportService {
         select: { admissionNumber: true },
       });
       const usedAdmNo = new Set(existingProfiles.map((pr) => pr.admissionNumber).filter(Boolean) as string[]);
-      // AUTO-GENERATE an admission number for any row that leaves it blank, so
-      // every onboarded student has the reliable key used for parent linking.
-      // Sequential within the school as <year>/NNNN; a school's own numbers are
-      // honoured and just occupy the used-set.
+      // AUTO-GENERATE for any blank row, via the SHARED allocator that manual
+      // single-student creation also uses — so the two paths cannot diverge.
       const admissionYear = new Date().getFullYear();
-      let nextAdmSeq = nextAdmissionSeq(usedAdmNo, admissionYear);
-      const allocateAdmissionNumber = (): string => {
-        let candidate = formatAdmissionNumber(admissionYear, nextAdmSeq);
-        while (usedAdmNo.has(candidate)) {
-          nextAdmSeq += 1;
-          candidate = formatAdmissionNumber(admissionYear, nextAdmSeq);
-        }
-        nextAdmSeq += 1;
-        return candidate;
-      };
       // Per-target-class capacity headroom, computed lazily.
       const headroom = new Map<string, number | null>(); // classId -> remaining (null = unlimited)
       let created = 0;
@@ -240,7 +228,7 @@ export class StudentImportService {
             continue;
           }
           // Blank => generate; supplied => honour it. Either way, reserve it.
-          const admissionNumber = providedAdm ?? allocateAdmissionNumber();
+          const admissionNumber = providedAdm ?? allocateAdmissionNumber(usedAdmNo, admissionYear);
           usedAdmNo.add(admissionNumber);
           // Capacity guard for an enrolled row.
           if (row.classId) {
