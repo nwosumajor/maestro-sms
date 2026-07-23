@@ -1062,6 +1062,24 @@ side-effect-free lookup. `member.scan` is a NEW permission: run the seed against
 DB (or it 403s even for staff) — the runtime guard reads role→perms from the DB
 (`role-permissions.service`, static `@sms/types` map is only the fallback).
 
+## Grade reports — term-weighted + session-weighted (consistency pass, BUILT)
+Both weightings share the pure grading policy in `@sms/types/grading`
+(GRADE_COMPONENTS exam60/mid20/assn10/note10 = 100; `computeTermSubjectGrade`,
+`averageOf`). `TermResultService` computes per-term `subjectResult` and the
+cumulative `getStudentSessionReport` (each subject's per-term totals + session
+average + overall session average). Downloadables: per-term scoresheet
+(`.../:termId/pdf`) AND the new whole-session cumulative report
+(`GET /term-results/report/:studentId/:sessionId/session-pdf`,
+`generateSessionReportPdf`; web `SessionReportButton` on the ReportCard).
+Accuracy fixes: **report-card ATTENDANCE and GRADES are now term-scoped** — the
+attendance summary filters to the term's `session.date` window and grades filter
+to `assessment.termId` (new nullable column, migration `20261004000000`; a new
+assessment is stamped with the CURRENT term at creation; existing/untagged rows
+read all-time — fail-open). NB: the Document-Vault report card
+(`reportcards/`, raw LMS submission grades + attendance) is DISTINCT from the
+term-weighted scoresheet (`gradebook`, subject_result). Workflow reactors are
+type-isolated, so GRADE_PUBLISH and ATTENDANCE_AMENDMENT never interfere.
+
 ## Attendance register — write windows (BUILT)
 Three tiers gate a register write (`AttendanceService.markAttendance`):
 - **≤7 days old**: applied directly.

@@ -55,8 +55,11 @@ export class ReportCardService {
       // Term remarks (class-teacher + head), when a term is specified.
       const remarks = termId ? await this.remarks.remarksForPdf(tx, studentId, termId) : { classTeacher: null, head: null };
 
+      // Grades SCOPED to the report's term (via assessment.termId) when a term is
+      // given; all-time otherwise (unconfigured — fail-open), same posture as the
+      // attendance summary below. A term report shows that term's grades only.
       const subs = await tx.submission.findMany({
-        where: { studentId },
+        where: { studentId, ...(termId ? { assessment: { termId } } : {}) },
         include: { assessment: { select: { title: true } }, grade: true },
       });
       const grades = (subs as Array<{ assessment: { title: string }; grade: { score: number; maxScore: number } | null }>)

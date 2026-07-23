@@ -800,6 +800,104 @@ export class TermResultService {
   }
 
   // ---------------------------------------------------------------------------
+  // Session (CUMULATIVE) report PDF — every term + the per-subject session average
+  // ---------------------------------------------------------------------------
+  /** The whole session on one sheet: each term's subject grades, plus the
+   *  cumulative summary (each subject's per-term totals and its session average,
+   *  and the overall session average). Same scoping as the on-screen session
+   *  report — a student/parent sees PUBLISHED only. Audited. */
+  async generateSessionReportPdf(
+    p: Principal,
+    args: { studentId: string; sessionId: string },
+  ): Promise<{ buffer: Buffer; filename: string }> {
+    const report = await this.getStudentSessionReport(p, args);
+    await this.db.runAsTenant(this.ctx(p), (tx) =>
+      this.audit.record(
+        {
+          actorId: p.userId,
+          action: "gradebook.session-report.download",
+          entity: "user",
+          entityId: args.studentId,
+          schoolId: p.schoolId,
+          metadata: { sessionId: args.sessionId },
+        },
+        tx,
+      ),
+    );
+    const buffer = await this.renderSessionReportPdf(report);
+    const slug = (x: string) => x.replace(/\s+/g, "-").replace(/[^a-z0-9-]/gi, "").toLowerCase();
+    return { buffer, filename: `session-report-${slug(report.studentName)}-${slug(report.sessionName)}.pdf` };
+  }
+
+  private renderSessionReportPdf(report: StudentSessionReportDto): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+      const doc = new PDFDocument({ margin: 50, size: "A4" });
+      const chunks: Buffer[] = [];
+      doc.on("data", (c: Buffer) => chunks.push(c));
+      doc.on("end", () => resolve(Buffer.concat(chunks)));
+      doc.on("error", reject);
+      const startX = 50;
+      const fmt = (n: number | null): string => (n === null || n === undefined ? "—" : String(n));
+
+      doc.fontSize(20).text(report.sessionName || "Session report", { align: "center" });
+      doc.moveDown(0.2).fontSize(13).fillColor("#666").text("Cumulative Session Report", { align: "center" });
+      doc.fillColor("#000").moveDown(0.8);
+      doc.fontSize(11).text(`Student: ${report.studentName}`);
+      if (report.className) doc.text(`Class: ${report.className}`);
+      doc.text(`Generated: ${new Date().toLocaleString()}`);
+      doc.moveDown(0.6);
+
+      // Per-term blocks.
+      const colX = [startX, 210, 265, 330, 395, 450, 510];
+      const drawRow = (cells: string[], bold = false) => {
+        const y = doc.y;
+        doc.fontSize(9.5).font(bold ? "Helvetica-Bold" : "Helvetica");
+        cells.forEach((c, i) => doc.text(c, colX[i], y, { width: (colX[i + 1] ?? 545) - colX[i] - 4, lineBreak: false }));
+        doc.moveDown(0.55);
+      };
+      for (const term of report.terms) {
+        doc.moveDown(0.3).fontSize(12).font("Helvetica-Bold").fillColor("#111")
+          .text(`${term.termName}  (average ${fmt(term.average)})`, startX);
+        doc.fillColor("#000").moveDown(0.2);
+        drawRow(["Subject", "Exam/60", "Mid/20", "Assn/10", "Note/10", "Total", "Grade"], true);
+        doc.moveTo(startX, doc.y).lineTo(545, doc.y).strokeColor("#ddd").stroke();
+        doc.moveDown(0.2);
+        if (term.subjects.length === 0) {
+          doc.fontSize(9).fillColor("#888").text("No published results for this term.", startX).fillColor("#000");
+        } else {
+          for (const sub of term.subjects) {
+            drawRow([sub.subjectName, fmt(sub.exam), fmt(sub.midterm), fmt(sub.assignment), fmt(sub.classNote), fmt(sub.total), sub.grade ?? "—"]);
+          }
+        }
+      }
+
+      // Cumulative summary: each subject across the session's terms + its average.
+      doc.moveDown(0.6).fontSize(13).font("Helvetica-Bold").fillColor("#111").text("Cumulative summary", startX);
+      doc.fillColor("#000").moveDown(0.2);
+      const termCols = report.terms.map((_, i) => 210 + i * 70);
+      const sumColX = [startX, ...termCols, 210 + report.terms.length * 70];
+      const sumHeader = ["Subject", ...report.terms.map((t) => t.termName.replace(/term/i, "T").slice(0, 8)), "Session avg"];
+      const drawSum = (cells: string[], bold = false) => {
+        const y = doc.y;
+        doc.fontSize(9.5).font(bold ? "Helvetica-Bold" : "Helvetica");
+        cells.forEach((c, i) => doc.text(c, sumColX[i] ?? startX, y, { width: (sumColX[i + 1] ?? 545) - (sumColX[i] ?? startX) - 4, lineBreak: false }));
+        doc.moveDown(0.55);
+      };
+      drawSum(sumHeader, true);
+      doc.moveTo(startX, doc.y).lineTo(545, doc.y).strokeColor("#ddd").stroke();
+      doc.moveDown(0.2);
+      for (const row of report.summary) {
+        drawSum([row.subjectName, ...row.termTotals.map(fmt), fmt(row.average)]);
+      }
+      doc.moveDown(0.5).fontSize(12).font("Helvetica-Bold")
+        .text(`Overall session average: ${fmt(report.sessionAverage)}`, startX);
+      doc.font("Helvetica").fontSize(8).fillColor("#999").moveDown(0.8)
+        .text("Term weighting: Exam 60 · Midterm 20 · Assignment 10 · Class note 10 = 100. Session average = mean of the term averages.", startX);
+      doc.end();
+    });
+  }
+
+  // ---------------------------------------------------------------------------
   // Class broadsheet — the supervisor's whole-class score sheet for one term
   // ---------------------------------------------------------------------------
   /** Whether the caller may view a whole class's broadsheet: the class's named

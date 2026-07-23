@@ -210,4 +210,22 @@ export class GradebookController {
     });
     return new StreamableFile(buffer);
   }
+
+  /** Download the whole SESSION (cumulative) report as a PDF — every term plus
+   *  the per-subject session average. Same scoping as the term scoresheet. */
+  @Get("term-results/report/:studentId/:sessionId/session-pdf")
+  @RequirePermission(GRADEBOOK_PERMISSIONS.GRADE_READ)
+  async sessionReportPdf(
+    @CurrentPrincipal() p: Principal,
+    @Param("studentId") studentId: string,
+    @Param("sessionId") sessionId: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const { buffer, filename } = await this.termResults.generateSessionReportPdf(p, { studentId, sessionId });
+    res.set({
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `attachment; filename="${filename}"`,
+    });
+    return new StreamableFile(buffer);
+  }
 }

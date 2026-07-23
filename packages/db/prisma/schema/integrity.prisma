@@ -81,6 +81,8 @@ model Assessment {
   /// created before the LMS link; when set, it scopes integrity reports to the
   /// teachers of that class.
   classId String? @db.Uuid
+  /// The term this assessment belongs to (set to the current term at creation).
+  termId    String? @db.Uuid
 
   // --- Integrity toggles (all default OFF; opt-in only) ---
   /// Capture (NOT silently block) paste events into answer fields.
@@ -112,12 +114,14 @@ model Assessment {
   school    School @relation(fields: [schoolId], references: [id])
   createdBy User   @relation("AssessmentCreatedBy", fields: [createdById], references: [id])
   class     Class? @relation(fields: [classId], references: [id])
+  term      Term?  @relation(fields: [termId], references: [id])
 
   submissions Submission[]
   exemptions  StudentIntegrityExemption[]
 
   @@index([schoolId])
   @@index([schoolId, createdById])
+  @@index([schoolId, termId])
   @@map("assessment")
 }
 

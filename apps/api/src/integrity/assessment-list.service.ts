@@ -129,9 +129,13 @@ export class AssessmentListService {
   ): Promise<AssessmentSummaryDto> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       if (input.classId) await this.assertTeacherOfClass(tx, p, input.classId);
+      // Tag to the CURRENT term so graded submissions scope to it on the report
+      // card. Null when no current term is set (reads as all-time — fail-open).
+      const currentTerm = await tx.term.findFirst({ where: { isCurrent: true }, select: { id: true } });
       const a = await tx.assessment.create({
         data: {
           schoolId: p.schoolId,
+          termId: currentTerm?.id ?? null,
           title: input.title,
           description: input.description ?? null,
           classId: input.classId ?? null,
