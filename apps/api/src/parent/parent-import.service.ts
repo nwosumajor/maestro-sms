@@ -40,7 +40,7 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 
-const TEMPLATE_HEADERS = ["name", "email", "phone", "studentAdmissionNumbers", "studentEmails", "relationship"];
+const TEMPLATE_HEADERS = ["name", "contactEmail", "phone", "studentAdmissionNumbers", "studentEmails", "relationship"];
 
 interface BatchRow {
   id: string;
@@ -255,10 +255,29 @@ export class ParentImportService {
   async stage(p: Principal, rows: ParentImportRow[]): Promise<ParentImportBatchDto> {
     if (!rows.length) throw new BadRequestException("No rows to import");
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const emails = rows.map((r) => r.email.toLowerCase());
-      const existing = await tx.user.findMany({ where: { email: { in: emails } }, select: { email: true } });
-      const dup = new Set(existing.map((e) => e.email.toLowerCase()));
-      const duplicateCount = emails.filter((e) => dup.has(e)).length;
+      const addresses = rows.map((r) => r.contactEmail.toLowerCase());
+      // A guardian already on the platform is matched by their REAL address —
+      // stored as contactEmail now, or as the legacy login email for accounts
+      // created before generated identifiers. Those rows REUSE the account.
+      const existing = await tx.user.findMany({
+        where: { OR: [{ contactEmail: { in: addresses } }, { email: { in: addresses } }] },
+        select: { email: true, contactEmail: true },
+      });
+      const known = new Set<string>();
+      for (const u of existing) {
+        if (u.contactEmail) known.add(u.contactEmail.toLowerCase());
+        known.add(u.email.toLowerCase());
+      }
+      // A "duplicate" here = a guardian who ALREADY exists (matched by their real
+      // address) OR the same address repeated within this file — both REUSE the
+      // one account rather than creating a second. Track within-file repeats too,
+      // or the preview over-counts "new".
+      const seen = new Set<string>();
+      let duplicateCount = 0;
+      for (const e of addresses) {
+        if (known.has(e) || seen.has(e)) duplicateCount++;
+        seen.add(e);
+      }
       const summary: ParentImportSummary = {
         total: rows.length,
         newCount: rows.length - duplicateCount,
@@ -329,17 +348,43 @@ export class ParentImportService {
       let unmatchedStudents = 0;
       const errors: string[] = [];
 
+      const slug = await schoolSlugOf(tx, p.schoolId);
+      const issued = new Set<string>();
       for (const { row, tempPassword, passwordHash } of prepared) {
         try {
-          const email = row.email.trim().toLowerCase();
-          let parent = await tx.user.findFirst({ where: { email }, select: { id: true } });
+          const contactEmail = row.contactEmail.trim().toLowerCase();
+          // Match an existing guardian by their REAL address (contactEmail), with
+          // the legacy login email as a fallback for pre-model accounts.
+          let parent = await tx.user.findFirst({
+            where: { OR: [{ contactEmail }, { email: contactEmail }] },
+            select: { id: true },
+          });
           if (!parent) {
+            // New guardian: GENERATED login identifier, real address in
+            // contactEmail. AUTO-SUFFIX like bulk student import — two unrelated
+            // families sharing a name (different contactEmail, so no match above)
+            // is common on a roll, and refusing one row would force a re-upload.
+            // A guardian appearing twice with the SAME address was already matched
+            // and reused above, so this only ever suffixes genuinely different
+            // people. So a parent with children at two schools imports at both.
+            const loginEmail = await allocateLoginEmail(tx, row.name.trim(), slug, {
+              taken: issued,
+              autoSuffix: true,
+            });
             parent = await tx.user.create({
-              data: { schoolId: p.schoolId, email, name: row.name.trim(), passwordHash, passwordChangedAt: null },
+              data: {
+                schoolId: p.schoolId,
+                email: loginEmail,
+                contactEmail,
+                loginEmailGenerated: true,
+                name: row.name.trim(),
+                passwordHash,
+                passwordChangedAt: null,
+              },
               select: { id: true },
             });
             await tx.userRole.create({ data: { schoolId: p.schoolId, userId: parent.id, roleId: parentRole.id } });
-            credentials.push({ name: row.name.trim(), email, tempPassword });
+            credentials.push({ name: row.name.trim(), email: loginEmail, tempPassword });
             created++;
           } else {
             const hasRole = await tx.userRole.findFirst({
@@ -360,7 +405,15 @@ export class ParentImportService {
             if (await this.link(tx, p.schoolId, parent.id, sid, row.relationship ?? null)) linked++;
           }
         } catch (err) {
-          errors.push(`${row.email}: ${String(err).slice(0, 80)}`);
+          // A same-name clash (ConflictException) or a cross-school address
+          // collision (P2002) surfaces here as an actionable per-row error.
+          const msg =
+            err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002"
+              ? "that email already belongs to an account on the platform — use a different address for this school"
+              : err instanceof ConflictException
+                ? err.message
+                : String(err).slice(0, 80);
+          errors.push(`${row.name}: ${msg}`);
         }
       }
 

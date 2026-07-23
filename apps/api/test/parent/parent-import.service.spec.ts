@@ -10,13 +10,15 @@ function makeService(over: {
   existingParent?: { id: string; name: string } | null;
   profiles?: { studentId: string; admissionNumber: string }[];
   studentsByEmail?: { id: string; email: string }[];
+  onUserCreate?: (data: Record<string, unknown>) => void;
   studentsById?: { id: string }[];
   existingLinks?: { parentId: string; studentId: string }[];
   updateManyCount?: number;
 }) {
-  const userCreate = jest.fn(({ data }: { data: { email: string; name: string } }) =>
-    Promise.resolve({ id: `new-${data.email}`, name: data.name, email: data.email }),
-  );
+  const userCreate = jest.fn(({ data }: { data: { email: string; name: string } }) => {
+    over.onUserCreate?.(data as unknown as Record<string, unknown>);
+    return Promise.resolve({ id: `new-${data.email}`, name: data.name, email: data.email });
+  });
   const userRoleCreate = jest.fn().mockResolvedValue({});
   const parentChildCreate = jest.fn().mockResolvedValue({});
   const batchCreate = jest.fn(({ data }: { data: Record<string, unknown> }) =>
@@ -122,7 +124,7 @@ describe("ParentImportService — bulk maker-checker", () => {
 
   it("approve creates accounts, links children by admission number, returns credentials once", async () => {
     const rows = [
-      { name: "Grace", email: "grace@x.com", studentAdmissionNumbers: "ADM-001;ADM-014", studentEmails: null, relationship: "Mother" },
+      { name: "Grace", contactEmail: "grace@x.com", studentAdmissionNumbers: "ADM-001;ADM-014", studentEmails: null, relationship: "Mother" },
     ];
     const { service } = makeService({
       batch: { id: "batch1", status: "PENDING", uploadedById: "uploader", rows },
@@ -137,12 +139,56 @@ describe("ParentImportService — bulk maker-checker", () => {
     expect(res.summary?.linked).toBe(2);
     expect(res.summary?.unmatchedStudents).toBe(0);
     expect(res.credentials).toHaveLength(1);
-    expect(res.credentials?.[0].email).toBe("grace@x.com");
+    // The login slip carries the GENERATED sign-in ID (grace -> grace@demo.com),
+    // NOT the guardian\'s real address — that is stored as contactEmail. This is
+    // what lets a parent with children at two schools be imported at both.
+    expect(res.credentials?.[0].email).toBe("grace@demo.com");
+  });
+
+  it("AUTO-SUFFIXES two unrelated families sharing a name — both import, distinct logins", async () => {
+    const emails: string[] = [];
+    const { service } = makeService({
+      batch: {
+        id: "batch1",
+        status: "PENDING",
+        uploadedById: "uploader",
+        rows: [
+          { name: "Blessing Okafor", contactEmail: "one@x.com", studentAdmissionNumbers: null, studentEmails: null, relationship: null },
+          { name: "Blessing Okafor", contactEmail: "two@x.com", studentAdmissionNumbers: null, studentEmails: null, relationship: null },
+        ],
+      },
+      existingParent: null,
+      onUserCreate: (d) => emails.push(d.email as string),
+    });
+    const res = await service.approve(p("approver"), "batch1");
+    expect(res.summary?.created).toBe(2);
+    expect(res.summary?.errors).toBe(0);
+    expect(emails).toEqual(["blessing.okafor@demo.com", "blessing.okafor2@demo.com"]);
+  });
+
+  it("stores the real address as contactEmail and GENERATES the login identifier", async () => {
+    const created: Record<string, unknown>[] = [];
+    const { service } = makeService({
+      batch: {
+        id: "batch1",
+        status: "PENDING",
+        uploadedById: "uploader",
+        rows: [{ name: "Grace", contactEmail: "grace@x.com", studentAdmissionNumbers: null, studentEmails: null, relationship: null }],
+      },
+      existingParent: null,
+      onUserCreate: (data) => created.push(data),
+    });
+    await service.approve(p("approver"), "batch1");
+    expect(created[0]).toMatchObject({
+      email: "grace@demo.com",
+      contactEmail: "grace@x.com",
+      loginEmailGenerated: true,
+    });
   });
 
   it("counts unmatched child references without failing the row", async () => {
     const rows = [
-      { name: "Grace", email: "grace@x.com", studentAdmissionNumbers: "ADM-001;ADM-999", studentEmails: null, relationship: null },
+      { name: "Grace", contactEmail: "grace@x.com", studentAdmissionNumbers: "ADM-001;ADM-999", studentEmails: null, relationship: null },
     ];
     const { service } = makeService({
       batch: { id: "batch1", status: "PENDING", uploadedById: "uploader", rows },

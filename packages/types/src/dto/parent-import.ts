@@ -6,7 +6,13 @@
 /** One row of the parent-import template (parsed from CSV client-side). */
 export interface ParentImportRow {
   name: string;
-  email: string;
+  /**
+   * The guardian's REAL, deliverable address — stored as `contactEmail`. Their
+   * sign-in identifier is GENERATED (firstname.lastname@<slug>.com), so this is
+   * never the login. Required: a guardian with no reachable address can never
+   * get a password reset or a receipt.
+   */
+  contactEmail: string;
   phone?: string | null;
   /** Children by admission number, ";"-separated (e.g. "ADM-001;ADM-014"). */
   studentAdmissionNumbers?: string | null;

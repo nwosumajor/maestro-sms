@@ -19,7 +19,7 @@ const createSchema = z.object({
 
 const rowSchema = z.object({
   name: z.string().min(1).max(200),
-  email: z.string().email().max(200),
+  contactEmail: z.string().email().max(200),
   phone: z.string().max(40).nullish(),
   studentAdmissionNumbers: z.string().max(500).nullish(),
   studentEmails: z.string().max(1000).nullish(),
