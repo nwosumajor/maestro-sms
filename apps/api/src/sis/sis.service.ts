@@ -16,7 +16,9 @@
 // automated judgement; no scores or flags are derived.
 // =============================================================================
 
-import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { Inject, Injectable, NotFoundException, ConflictException } from "@nestjs/common";
+import { allocateAdmissionNumber, loadUsedAdmissionNumbers } from "../foundation/admission-number";
+import { Prisma } from "@sms/db";
 import type { MedicalRecordDto } from "@sms/types";
 import { decryptField, encryptField } from "../foundation/field-crypto";
 import {
@@ -91,8 +93,25 @@ export class SisService {
   async upsertProfile(p: Principal, studentId: string, input: ProfileInput) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.assertCanAccessStudent(tx, p, studentId);
+      const existing = await tx.studentProfile.findFirst({
+        where: { studentId },
+        select: { admissionNumber: true },
+      });
+      // The admission number is a STABLE, auto-generated key. Protect it:
+      //   * an explicit non-blank value SETS/CORRECTS it (uniqueness enforced),
+      //   * a blank field NEVER nulls an existing number (no accidental wipe),
+      //   * a legacy/new profile with none GETS one, so every profile has a key.
+      let admissionNumber: string | null;
+      if (input.admissionNumber?.trim()) {
+        admissionNumber = input.admissionNumber.trim();
+      } else if (existing?.admissionNumber) {
+        admissionNumber = existing.admissionNumber;
+      } else {
+        const used = await loadUsedAdmissionNumbers(tx);
+        admissionNumber = allocateAdmissionNumber(used, new Date().getFullYear());
+      }
       const data = {
-        admissionNumber: input.admissionNumber ?? null,
+        admissionNumber,
         dateOfBirth: input.dateOfBirth ? new Date(input.dateOfBirth) : null,
         gender: input.gender ?? null,
         phone: input.phone ?? null,
@@ -105,11 +124,21 @@ export class SisService {
         postalCode: input.postalCode ?? null,
         notes: input.notes ?? null,
       };
-      const profile = await tx.studentProfile.upsert({
-        where: { studentId },
-        update: data,
-        create: { schoolId: p.schoolId, studentId, ...data },
-      });
+      let profile;
+      try {
+        profile = await tx.studentProfile.upsert({
+          where: { studentId },
+          update: data,
+          create: { schoolId: p.schoolId, studentId, ...data },
+        });
+      } catch (e) {
+        // The new @@unique([schoolId, admissionNumber]): a typed number already
+        // belongs to another pupil. Clean 409, not a 500.
+        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+          throw new ConflictException("That admission number is already used by another student in this school.");
+        }
+        throw e;
+      }
       await this.log(tx, p, "sis.profile.upsert", "student_profile", profile.id, { studentId });
       return profile;
     });

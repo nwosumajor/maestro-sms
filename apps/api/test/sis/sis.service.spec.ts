@@ -6,21 +6,25 @@
 // =============================================================================
 
 import { SisService } from "../../src/sis/sis.service";
+import { Prisma } from "@sms/db";
 import type { Principal, TenantContext, TenantTx } from "../../src/integrity/integrity.foundation";
 
 interface Fakes {
   parentChild?: { id: string }[]; // parent->student link present?
   classTeacher?: { classId: string }[];
   enrollment?: { id: string } | null; // student enrolled in a taught class?
-  profile?: { id: string } | null;
+  profile?: { id: string; admissionNumber?: string | null } | null;
   medical?: { id: string } | null;
+  usedProfiles?: { admissionNumber: string | null }[];
+  upsert?: jest.Mock;
 }
 
 function makeService(f: Fakes) {
   const tx = {
     studentProfile: {
       findFirst: jest.fn().mockResolvedValue(f.profile ?? null),
-      upsert: jest.fn().mockResolvedValue({ id: "prof-1" }),
+      findMany: jest.fn().mockResolvedValue(f.usedProfiles ?? []),
+      upsert: f.upsert ?? jest.fn().mockResolvedValue({ id: "prof-1" }),
     },
     emergencyContact: { findMany: jest.fn().mockResolvedValue([]) },
     medicalRecord: {
@@ -101,5 +105,40 @@ describe("SisService relationship scoping", () => {
     const { service, audit } = makeService({ classTeacher: [{ classId: "c-1" }], enrollment: null });
     await expect(service.getMedical(principal(["teacher"]), "stranger")).rejects.toThrow(/not found/i);
     expect(audit.record).not.toHaveBeenCalled();
+  });
+});
+
+describe("SisService.upsertProfile — admission number is protected", () => {
+  const admin = principal(["school_admin"]);
+
+  it("PRESERVES an existing admission number when the field is left blank", async () => {
+    const upsert = jest.fn().mockResolvedValue({ id: "prof-1" });
+    const { service } = makeService({ profile: { id: "prof-1", admissionNumber: "2026/0007" }, upsert });
+    await service.upsertProfile(admin, "stu-1", { admissionNumber: null });
+    expect(upsert.mock.calls[0][0].update.admissionNumber).toBe("2026/0007");
+  });
+
+  it("SETS an explicit new admission number", async () => {
+    const upsert = jest.fn().mockResolvedValue({ id: "prof-1" });
+    const { service } = makeService({ profile: { id: "prof-1", admissionNumber: "2026/0007" }, upsert });
+    await service.upsertProfile(admin, "stu-1", { admissionNumber: "2026/0099" });
+    expect(upsert.mock.calls[0][0].update.admissionNumber).toBe("2026/0099");
+  });
+
+  it("GENERATES a number for a profile that has none (legacy / first edit)", async () => {
+    const upsert = jest.fn().mockResolvedValue({ id: "prof-new" });
+    const { service } = makeService({ profile: null, upsert, usedProfiles: [{ admissionNumber: "2026/0003" }] });
+    await service.upsertProfile(admin, "stu-1", { admissionNumber: null });
+    expect(upsert.mock.calls[0][0].create.admissionNumber).toBe("2026/0004");
+  });
+
+  it("returns a clean 409 when the typed number belongs to another student", async () => {
+    const upsert = jest.fn().mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError("dup", { code: "P2002", clientVersion: "x" }),
+    );
+    const { service } = makeService({ profile: { id: "prof-1", admissionNumber: "2026/0007" }, upsert });
+    await expect(service.upsertProfile(admin, "stu-1", { admissionNumber: "2026/0001" })).rejects.toMatchObject({
+      status: 409,
+    });
   });
 });
