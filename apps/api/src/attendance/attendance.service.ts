@@ -16,6 +16,7 @@ import { BadRequestException, ConflictException, Inject, Injectable, Logger, Not
 // VALUE import: Prisma.sql/join only resolve as values, not types (CLAUDE.md).
 import { Prisma } from "@sms/db";
 import type { AttendanceStatusValue } from "@sms/types";
+import { ATTENDANCE_AMENDMENT_CHAIN, WORKFLOW_PERMISSIONS } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -26,8 +27,12 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 import { NotificationService } from "../notifications/notification.service";
+import { WorkflowService } from "../workflow/workflow.service";
+import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 
 const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal", "super_admin"]);
+/** Edits to a register older than this (days) need maker-checker approval. */
+const STALE_REGISTER_DAYS = 7;
 /** Statuses that notify the student's guardians. */
 const ALERTING_STATUSES = new Set<AttendanceStatusValue>(["ABSENT", "LATE"]);
 
@@ -44,7 +49,23 @@ export class AttendanceService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly notifications: NotificationService,
-  ) {}
+    private readonly workflow: WorkflowService,
+    hooks: WorkflowHooksService,
+  ) {
+    // Maker-checker reactor: when a head teacher / school admin / principal (a
+    // DIFFERENT person than the teacher) approves a stale-register amendment, the
+    // marks are applied in the SAME tenant tx as the transition. Old-date
+    // guardian alerts are deliberately NOT sent (not time-sensitive).
+    hooks.onFinalized(async (tx, req) => {
+      if (req.type !== "ATTENDANCE_AMENDMENT" || req.state !== "APPROVED") return;
+      const pl = req.payload as { classId?: string; date?: string; records?: MarkInput["records"] } | null;
+      if (!pl?.classId || !pl.date || !pl.records) return;
+      await this.applyRegister(tx, req.schoolId, req.initiatorId, pl.classId, new Date(pl.date), pl.records, {
+        makerChecker: true,
+        requestId: req.id,
+      });
+    });
+  }
 
   private ctx(p: Principal): TenantContext {
     return { schoolId: p.schoolId, userId: p.userId };
@@ -57,9 +78,37 @@ export class AttendanceService {
   /** Take or correct attendance for a class on a date. Upserts the session and
    *  one record per student. Only enrolled students may be marked. */
   async markAttendance(p: Principal, classId: string, input: MarkInput) {
+    const date = new Date(input.date);
+    const isApprover = p.permissions.includes(WORKFLOW_PERMISSIONS.ATTENDANCE_AMEND_REVIEW);
+    const stale = this.daysSince(date) > STALE_REGISTER_DAYS;
+
+    // MAKER-CHECKER on a STALE register (>7 days old): a plain teacher's edit is
+    // not applied directly — it raises an ATTENDANCE_AMENDMENT a head teacher /
+    // school admin / principal must approve. Leadership (holders of
+    // attendance.amend.review) edit stale registers directly.
+    if (stale && !isApprover) {
+      await this.db.runAsTenant(this.ctx(p), async (tx) => {
+        await this.assertTeacherOfClass(tx, p, classId);
+        const lockBefore = await this.currentTermStart(tx);
+        if (lockBefore && date < lockBefore) {
+          throw new ConflictException(
+            "This register is locked: it falls in a term that has ended. Past-term registers are read-only.",
+          );
+        }
+        await this.assertAllEnrolled(tx, classId, input.records);
+      });
+      const req = (await this.workflow.createRequest(p, {
+        type: "ATTENDANCE_AMENDMENT",
+        title: `Attendance amendment — ${input.date}`,
+        payload: { classId, date: input.date, records: input.records },
+        stages: [...ATTENDANCE_AMENDMENT_CHAIN],
+      })) as { id: string };
+      await this.workflow.submit(p, req.id);
+      return { pendingApproval: true as const, requestId: req.id, date: input.date };
+    }
+
     const { session, alerts } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.assertTeacherOfClass(tx, p, classId);
-      const date = new Date(input.date);
       // TERM LOCK: a register in a term that has ENDED is read-only for everyone,
       // including leadership — the authoritative check (the UI also greys it out).
       const lockBefore = await this.currentTermStart(tx);
@@ -68,72 +117,8 @@ export class AttendanceService {
           "This register is locked: it falls in a term that has ended. Past-term registers are read-only.",
         );
       }
-
-      // Only students actually enrolled in this class may be marked.
-      const enrolled = await tx.enrollment.findMany({
-        where: { classId },
-        select: { studentId: true },
-      });
-      const enrolledIds = new Set(enrolled.map((e: { studentId: string }) => e.studentId));
-      for (const r of input.records) {
-        if (!enrolledIds.has(r.studentId)) {
-          throw new BadRequestException(`Student ${r.studentId} is not enrolled in this class`);
-        }
-      }
-
-      const session = await tx.attendanceSession.upsert({
-        where: { classId_date: { classId, date } },
-        update: { takenById: p.userId },
-        create: { schoolId: p.schoolId, classId, date, takenById: p.userId },
-      });
-
-      // ONE statement for the whole register. This used to be a per-student
-      // `upsert` in a loop — i.e. a round-trip per student (a 40-pupil class =
-      // 40 sequential round-trips) with the tenant transaction held open the
-      // whole time, on the highest-volume write in the product (every class,
-      // every day). Load-testing made it the slowest endpoint we have. The
-      // @@unique([sessionId, studentId]) constraint lets ON CONFLICT express the
-      // exact same upsert semantics in a single round-trip.
-      // RLS still applies: the INSERT is checked against the school's WITH CHECK
-      // policy and the DO UPDATE against the UPDATE policy, same as before.
-      const now = new Date();
-      const values = input.records.map(
-        (r) => Prisma.sql`(${randomUUID()}::uuid, ${p.schoolId}::uuid, ${session.id}::uuid, ${r.studentId}::uuid,
-             ${r.status}::"AttendanceStatus", ${r.note ?? null}, ${now}, ${now})`,
-      );
-      await tx.$executeRaw`
-        INSERT INTO "attendance_record" ("id", "schoolId", "sessionId", "studentId", "status", "note", "createdAt", "updatedAt")
-        VALUES ${Prisma.join(values)}
-        ON CONFLICT ("sessionId", "studentId")
-        DO UPDATE SET "status" = EXCLUDED."status", "note" = EXCLUDED."note", "updatedAt" = EXCLUDED."updatedAt"
-      `;
-
-      await this.log(tx, p, "attendance.mark", "attendance_session", session.id, {
-        classId,
-        date: input.date,
-        count: input.records.length,
-      });
-
-      // Resolve guardians of absent/late students (while we hold the tenant tx),
-      // to notify them after this transaction commits.
-      const alertStudents = input.records
-        .filter((r) => ALERTING_STATUSES.has(r.status))
-        .map((r) => ({ studentId: r.studentId, status: r.status }));
-      const alerts: { guardianId: string; studentId: string; status: AttendanceStatusValue }[] = [];
-      if (alertStudents.length > 0) {
-        const links = await tx.parentChild.findMany({
-          where: { studentId: { in: alertStudents.map((s) => s.studentId) } },
-          select: { parentId: true, studentId: true },
-        });
-        for (const s of alertStudents) {
-          for (const l of links.filter((x: { studentId: string }) => x.studentId === s.studentId)) {
-            alerts.push({ guardianId: l.parentId, studentId: s.studentId, status: s.status });
-          }
-        }
-      }
-
-      const loaded = await this.loadSession(tx, session.id);
-      return { session: loaded, alerts };
+      await this.assertAllEnrolled(tx, classId, input.records);
+      return this.applyRegister(tx, p.schoolId, p.userId, classId, date, input.records, { makerChecker: false });
     });
 
     // Best-effort, post-commit: notify each guardian (in-app + email). A failure
@@ -208,6 +193,86 @@ export class AttendanceService {
   }
 
   /** school-wide staff, or a teacher assigned to THIS class. 404 otherwise. */
+  /** Whole days between a register date and today (both at UTC midnight). */
+  private daysSince(date: Date): number {
+    const d = new Date(date);
+    d.setUTCHours(0, 0, 0, 0);
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    return Math.floor((today.getTime() - d.getTime()) / 86_400_000);
+  }
+
+  /** Every marked student must be enrolled in the class. */
+  private async assertAllEnrolled(tx: TenantTx, classId: string, records: MarkInput["records"]) {
+    const enrolled = await tx.enrollment.findMany({ where: { classId }, select: { studentId: true } });
+    const ids = new Set(enrolled.map((e: { studentId: string }) => e.studentId));
+    for (const r of records) {
+      if (!ids.has(r.studentId)) {
+        throw new BadRequestException(`Student ${r.studentId} is not enrolled in this class`);
+      }
+    }
+  }
+
+  /**
+   * Write the register (session + records) as ONE bulk upsert. Shared by the
+   * direct mark and the maker-checker reactor, so both apply identically. Does
+   * NOT re-check the term lock or the 7-day rule — the callers gate that.
+   */
+  private async applyRegister(
+    tx: TenantTx,
+    schoolId: string,
+    actorId: string,
+    classId: string,
+    date: Date,
+    records: MarkInput["records"],
+    meta: { makerChecker: boolean; requestId?: string },
+  ) {
+    const session = await tx.attendanceSession.upsert({
+      where: { classId_date: { classId, date } },
+      update: { takenById: actorId },
+      create: { schoolId, classId, date, takenById: actorId },
+    });
+    const now = new Date();
+    const values = records.map(
+      (r) => Prisma.sql`(${randomUUID()}::uuid, ${schoolId}::uuid, ${session.id}::uuid, ${r.studentId}::uuid,
+           ${r.status}::"AttendanceStatus", ${r.note ?? null}, ${now}, ${now})`,
+    );
+    await tx.$executeRaw`
+      INSERT INTO "attendance_record" ("id", "schoolId", "sessionId", "studentId", "status", "note", "createdAt", "updatedAt")
+      VALUES ${Prisma.join(values)}
+      ON CONFLICT ("sessionId", "studentId")
+      DO UPDATE SET "status" = EXCLUDED."status", "note" = EXCLUDED."note", "updatedAt" = EXCLUDED."updatedAt"
+    `;
+    await this.audit.record(
+      {
+        actorId,
+        action: meta.makerChecker ? "attendance.amend.apply" : "attendance.mark",
+        entity: "attendance_session",
+        entityId: session.id,
+        schoolId,
+        metadata: { classId, count: records.length, ...(meta.requestId ? { workflowRequestId: meta.requestId, makerChecker: true } : {}) },
+      },
+      tx,
+    );
+    const alertStudents = records
+      .filter((r) => ALERTING_STATUSES.has(r.status))
+      .map((r) => ({ studentId: r.studentId, status: r.status }));
+    const alerts: { guardianId: string; studentId: string; status: AttendanceStatusValue }[] = [];
+    if (alertStudents.length > 0) {
+      const links = await tx.parentChild.findMany({
+        where: { studentId: { in: alertStudents.map((sx) => sx.studentId) } },
+        select: { parentId: true, studentId: true },
+      });
+      for (const sx of alertStudents) {
+        for (const l of links.filter((x: { studentId: string }) => x.studentId === sx.studentId)) {
+          alerts.push({ guardianId: l.parentId, studentId: sx.studentId, status: sx.status });
+        }
+      }
+    }
+    const loaded = await this.loadSession(tx, session.id);
+    return { session: loaded, alerts };
+  }
+
   /**
    * The start of the CURRENT term — the lock boundary. A register dated BEFORE
    * this is in a term that has ended and is READ-ONLY. Prefers the explicitly

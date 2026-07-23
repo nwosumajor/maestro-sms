@@ -1062,6 +1062,22 @@ side-effect-free lookup. `member.scan` is a NEW permission: run the seed against
 DB (or it 403s even for staff) — the runtime guard reads role→perms from the DB
 (`role-permissions.service`, static `@sms/types` map is only the fallback).
 
+## Attendance register — write windows (BUILT)
+Three tiers gate a register write (`AttendanceService.markAttendance`):
+- **≤7 days old**: applied directly.
+- **>7 days old (STALE), current term**: a plain teacher's edit raises an
+  `ATTENDANCE_AMENDMENT` workflow (systemOnly; single-stage
+  `ATTENDANCE_AMENDMENT_CHAIN`, perm `attendance.amend.review` held by
+  head_teacher/school_admin/principal) — a DIFFERENT senior approves (SoD,
+  engine-enforced) and a WorkflowHooks reactor applies the marks in-tx. Holders
+  of `attendance.amend.review` edit stale registers DIRECTLY (they're the
+  approvers). Scan CHECK_IN is always today → never stale.
+- **Past/ended term**: fully LOCKED (409), no edit even with approval — boundary
+  is the `isCurrent` term's startDate (fail-open when unconfigured);
+  `GET /attendance/term-lock` exposes it. `STALE_REGISTER_DAYS = 7`.
+`attendance.amend.review` is a NEW permission → re-run the seed on a live DB (the
+guard reads role→perms from the DB).
+
 ## Operating the live system — runbooks
 - **`docs/RUNBOOK-INCIDENT-RESPONSE.md`** — the on-call playbook: severity
   levels, 5-minute triage, per-symptom playbooks (outage / latency / DB / Redis

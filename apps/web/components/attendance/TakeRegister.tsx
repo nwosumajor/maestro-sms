@@ -127,8 +127,14 @@ export function TakeRegister({
     });
     setBusy(false);
     if (res.ok) {
-      setSavedSession((await res.json()) as Session); // refresh "saved by / when"
-      setMsg("Register saved. Guardians of absent/late students were notified.");
+      const data = (await res.json()) as Session | { pendingApproval: true };
+      if (data && "pendingApproval" in data) {
+        // A >7-day edit is not applied directly — it awaits a senior's approval.
+        setMsg("This register is over 7 days old, so your change was submitted for approval by a head teacher, school admin or principal. It applies once approved (see Approvals).");
+      } else {
+        setSavedSession(data as Session); // refresh "saved by / when"
+        setMsg("Register saved. Guardians of absent/late students were notified.");
+      }
     } else {
       setMsg(await readApiError(res));
     }

@@ -57,7 +57,7 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
   board: ["poll.vote", "discussion.participate", "discipline.file", "form.respond", "class.read", "grade.read", "integrity.report.read", "workflow.read", "workflow.veto", "notification.read", "fee.read", "document.read", "timetable.read", "message.read", "message.send", "event.read", "announcement.read", "billing.read", "scholarship.read",
   ],
   // Principal: full operational view of their school (can grade, review workflows).
-  principal: ["member.scan", 
+  principal: ["attendance.amend.review", "member.scan", 
     "assessment.read", "assessment.write", "submission.read",
     "integrity.report.read", "integrity.exemption.read", "integrity.exemption.write",
     "integrity.retention.run",
@@ -88,7 +88,7 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     "scholarship.read", "scholarship.apply",
   ],
   // School Administrator: SIS / enrollment / workflows — but NOT grade books, NOT veto.
-  school_admin: ["member.scan", 
+  school_admin: ["attendance.amend.review", "member.scan", 
     "class.read", "class.write", "enrollment.read", "enrollment.write", "guardian.write", "subject.manage", "subject.selection.approve", "student.import", "parent.import", "class.promote", "academic.manage",
     "assessment.read", "integrity.report.read", "integrity.exemption.read", "integrity.exemption.write",
     "integrity.retention.run",
@@ -210,7 +210,7 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     "message.read", "message.send", "event.read", "announcement.read",
   ],
   // Head of teaching: stage-1 approver for teaching staff requests.
-  head_teacher: ["member.scan", "hr.self", "task.assign", "task.participate", "poll.vote", "discussion.participate", "discipline.file", "form.respond",
+  head_teacher: ["attendance.amend.review", "member.scan", "hr.self", "task.assign", "task.participate", "poll.vote", "discussion.participate", "discipline.file", "form.respond",
     "class.read", "enrollment.read", "attendance.read", "grade.read", "subject.selection.approve",
     "workflow.create", "workflow.read", "workflow.review", "workflow.review.head",
     "notification.read", "notification.send", "security.elevation.request",
