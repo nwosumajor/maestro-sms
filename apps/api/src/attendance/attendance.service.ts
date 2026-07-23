@@ -163,7 +163,11 @@ export class AttendanceService {
       return tx.attendanceSession.findMany({
         where: { classId },
         orderBy: { date: "desc" },
-        take: 30,
+        take: 60,
+        include: {
+          takenBy: { select: { id: true, name: true } },
+          _count: { select: { records: true } },
+        },
       });
     });
   }
@@ -186,6 +190,7 @@ export class AttendanceService {
     return tx.attendanceSession.findFirst({
       where: { id: sessionId },
       include: {
+        takenBy: { select: { id: true, name: true } },
         records: {
           include: { student: { select: { id: true, name: true } } },
           orderBy: { createdAt: "asc" },

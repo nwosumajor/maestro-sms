@@ -53,8 +53,8 @@ export default async function AttendancePage({
         {canWrite && classes && classes.length > 0 && (
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Take a register</CardTitle>
-              <CardDescription>Pick a class and date, mark each student, and submit.</CardDescription>
+              <CardTitle className="text-base">Register</CardTitle>
+              <CardDescription>Pick a class and date. Today defaults everyone Present — mark the exceptions and save. Pick a past date (or a register below) to view or correct any day&apos;s register.</CardDescription>
             </CardHeader>
             <CardContent>
               <TakeRegister classes={classes} />
