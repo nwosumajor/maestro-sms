@@ -49,6 +49,8 @@ model StudentProfile {
   medicalRecord     MedicalRecord?
 
   @@unique([studentId])
+  // Admission number is unique WITHIN a school (nulls allowed for legacy rows).
+  @@unique([schoolId, admissionNumber])
   @@index([schoolId])
   @@index([schoolId, studentId])
   @@map("student_profile")

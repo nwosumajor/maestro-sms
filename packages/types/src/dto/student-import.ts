@@ -43,5 +43,5 @@ export interface StudentImportBatchDto {
   /** ONLY on the approve response: each newly created student's one-time
    *  temporary password (never persisted; the student must change it at first
    *  login). Download/print immediately — it cannot be retrieved again. */
-  credentials?: { name: string; email: string; tempPassword: string }[];
+  credentials?: { name: string; email: string; tempPassword: string; admissionNumber: string }[];
 }

@@ -151,6 +151,35 @@ describe("StudentImportService — generated identifiers", () => {
     );
   });
 
+  it("GENERATES an admission number for a row that leaves it blank, and puts it on the slip", async () => {
+    const { service, profileCreate } = makeService({
+      batch: pendingBatch({ rows: [{ name: "No Number Kid" }] }),
+    });
+    const res = await service.approve(p("approver"), "b1");
+    const stored = (profileCreate.mock.calls[0]![0] as { data: { admissionNumber: string } }).data.admissionNumber;
+    expect(stored).toMatch(/^\d{4}\/\d{4}$/); // <year>/NNNN
+    // the same number rides the login slip so the admin can reference the pupil
+    expect(res.credentials?.[0]?.admissionNumber).toBe(stored);
+  });
+
+  it("HONOURS a supplied admission number rather than generating one", async () => {
+    const { service, profileCreate } = makeService({
+      batch: pendingBatch({ rows: [{ name: "Has Number Kid", admissionNumber: "STA-42" }] }),
+    });
+    await service.approve(p("approver"), "b1");
+    expect((profileCreate.mock.calls[0]![0] as { data: { admissionNumber: string } }).data.admissionNumber).toBe("STA-42");
+  });
+
+  it("gives two blank-number rows DISTINCT sequential admission numbers", async () => {
+    const { service, profileCreate } = makeService({
+      batch: pendingBatch({ rows: [{ name: "Kid One" }, { name: "Kid Two" }] }),
+    });
+    await service.approve(p("approver"), "b1");
+    const a = (profileCreate.mock.calls[0]![0] as { data: { admissionNumber: string } }).data.admissionNumber;
+    const b = (profileCreate.mock.calls[1]![0] as { data: { admissionNumber: string } }).data.admissionNumber;
+    expect(a).not.toBe(b);
+  });
+
   it("stage counts a generated-name row as NEW, not a duplicate — it will auto-suffix", async () => {
     const { service } = makeService({ existingEmails: ["chika.nwosu@demo.com"] });
     const res = await service.stage(p("uploader"), [{ name: "Chika Nwosu" }, { name: "Femi Adeleke" }]);
