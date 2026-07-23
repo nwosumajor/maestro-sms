@@ -63,7 +63,22 @@ export class ReportCardService {
         .filter((s) => s.grade)
         .map((s) => ({ title: s.assessment.title, score: s.grade!.score, maxScore: s.grade!.maxScore }));
 
-      const recs = await tx.attendanceRecord.findMany({ where: { studentId }, select: { status: true } });
+      // Attendance summary — SCOPED to the report card's term when one is given
+      // and it has dates (via the session date). Otherwise all-time (the term is
+      // unconfigured). A TERM report card must count that term only, not the
+      // student's lifetime attendance, and the scope also bounds the query.
+      const termDates = termId
+        ? await tx.term.findFirst({ where: { id: termId }, select: { startDate: true, endDate: true } })
+        : null;
+      const recs = await tx.attendanceRecord.findMany({
+        where: {
+          studentId,
+          ...(termDates?.startDate && termDates?.endDate
+            ? { session: { date: { gte: termDates.startDate, lte: termDates.endDate } } }
+            : {}),
+        },
+        select: { status: true },
+      });
       const att = { PRESENT: 0, ABSENT: 0, LATE: 0, EXCUSED: 0 } as Record<string, number>;
       for (const r of recs as Array<{ status: string }>) att[r.status] = (att[r.status] ?? 0) + 1;
 
