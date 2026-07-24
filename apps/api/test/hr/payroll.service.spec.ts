@@ -18,6 +18,8 @@ function makeService(over: {
   dup?: Record<string, unknown> | null;
   employees?: Array<Record<string, unknown>>;
   run?: Record<string, unknown> | null;
+  components?: Array<Record<string, unknown>>;
+  users?: Array<{ id: string; name: string }>;
 } = {}) {
   const payslipCreate = jest.fn().mockResolvedValue({});
   const runUpdate = jest.fn((args: { data: Record<string, unknown> }) => Promise.resolve({ id: "run1", periodYear: 2026, periodMonth: 1, status: "DRAFT", totalGrossMinor: 0, totalNetMinor: 0, createdAt: new Date(), finalizedAt: null, ...args.data }));
@@ -33,8 +35,8 @@ function makeService(over: {
     },
     payslip: { create: payslipCreate, findMany: jest.fn().mockResolvedValue([]), count: jest.fn().mockResolvedValue(0) },
     employee: { findMany: jest.fn().mockResolvedValue(over.employees ?? []) },
-    user: { findMany: jest.fn().mockResolvedValue([]) },
-    payComponent: { findMany: jest.fn().mockResolvedValue([]) },
+    user: { findMany: jest.fn().mockResolvedValue(over.users ?? []) },
+    payComponent: { findMany: jest.fn().mockResolvedValue(over.components ?? []) },
     staffLoan: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn().mockResolvedValue(null), update: jest.fn().mockResolvedValue({}) },
     loanRepayment: { create: jest.fn().mockResolvedValue({}) },
   } as unknown as TenantTx;
@@ -62,6 +64,20 @@ describe("PayrollService", () => {
     expect(runUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: { totalGrossMinor: 800000, totalNetMinor: expectedNet } }));
     expect(run.totalGrossMinor).toBe(800000);
     expect(expectedNet).toBeLessThan(800000); // statutory deductions applied
+  });
+
+  it("createRun REFUSES the whole run when a deduction exceeds an employee's pay (names them, persists nothing)", async () => {
+    const { service, payslipCreate } = makeService({
+      dup: null,
+      employees: [
+        { id: "e1", userId: "u1", salaryEnc: encryptField("10000000", "A") }, // ₦100k/mo
+      ],
+      // A ₦200k deduction against ₦100k pay → net would be negative.
+      components: [{ id: "c1", userId: "u1", kind: "DEDUCTION", name: "Damages", amountMinor: 20000000, active: true }],
+      users: [{ id: "u1", name: "Ada Staff" }],
+    });
+    await expect(service.createRun(p(), 2026, 1)).rejects.toThrow(/deductions exceed pay.*Ada Staff/i);
+    expect(payslipCreate).not.toHaveBeenCalled(); // nothing persisted
   });
 
   it("createRun refuses a duplicate period (409)", async () => {
