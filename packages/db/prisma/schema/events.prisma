@@ -23,6 +23,17 @@ model SchoolEvent {
   audience    EventAudience @default(ALL)
   createdById String        @db.Uuid
 
+  /// Recurrence. ONE row describes the whole series — occurrences are EXPANDED
+  /// in memory for the requested window, never materialised as rows, so a weekly
+  /// assembly costs one row instead of forty.
+  /// NONE | DAILY | WEEKLY | MONTHLY
+  recurrence      String    @default("NONE")
+  /// Last date the series repeats (inclusive). Null = no natural end; reads still
+  /// bound it by the requested window, so it can never expand without limit.
+  recurrenceUntil DateTime?
+  /// WEEKLY only: which weekdays, e.g. ["MON","WED"]. Empty = the start's weekday.
+  recurrenceDays  Json      @default("[]")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

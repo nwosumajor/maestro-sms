@@ -1,4 +1,4 @@
-import type { MessageDto, ThreadSummaryDto, ThreadViewDto, UserSummaryDto, Serialized } from "@sms/types";
+import type { MessageDto, PageDto, ThreadSummaryDto, ThreadViewDto, UserSummaryDto, Serialized } from "@sms/types";
 import { hasPermission } from "@/lib/permissions";
 import Link from "next/link";
 import { auth } from "@/lib/auth";
@@ -24,7 +24,8 @@ export default async function MessagesPage({ searchParams }: { searchParams: { t
   const user = session!.user;
   const canSend = hasPermission(user.permissions, "message.send");
   const [threads, contacts] = await Promise.all([
-    apiGet<Thread[]>("/messages/threads"),
+    // Keyset-paginated: the first page is enough for the inbox list.
+    apiGet<Serialized<PageDto<ThreadSummaryDto>>>("/messages/threads"),
     canSend ? apiGet<Contact[]>("/messages/contacts") : Promise.resolve(null),
   ]);
   const selected = searchParams.thread ? await apiGet<ThreadView>(`/messages/threads/${searchParams.thread}`) : null;
@@ -39,10 +40,10 @@ export default async function MessagesPage({ searchParams }: { searchParams: { t
 
         <div className="grid gap-4 md:grid-cols-[18rem_1fr]">
           <div className="space-y-2">
-            {(threads ?? []).length === 0 ? (
+            {(threads?.items ?? []).length === 0 ? (
               <p className="text-sm text-muted-foreground">No conversations yet.</p>
             ) : (
-              (threads ?? []).map((t) => (
+              (threads?.items ?? []).map((t) => (
                 <Link key={t.id} href={`/messages?thread=${t.id}`}>
                   <Card className={cn("transition-colors hover:border-primary/40", t.id === searchParams.thread && "border-primary")}>
                     <CardContent className="p-3">

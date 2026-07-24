@@ -1,5 +1,5 @@
 import { RequireModule } from "../auth/require-module.decorator";
-import { Body, Controller, Delete, Get, Param, Post } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Query } from "@nestjs/common";
 import { DISCUSSION_PERMISSIONS, MODULES } from "@sms/types";
 import type { DiscussionGroupDto, DiscussionPostDto } from "@sms/types";
 import { z } from "zod";
@@ -31,6 +31,13 @@ export class DiscussionController {
   @RequirePermission(DISCUSSION_PERMISSIONS.DISCUSSION_MODERATE)
   createGroup(@CurrentPrincipal() p: Principal, @Body(new ZodValidationPipe(groupSchema)) b: z.infer<typeof groupSchema>): Promise<DiscussionGroupDto> {
     return this.discussion.createGroup(p, b);
+  }
+
+  /** Full-text search over posts in groups the caller may see (GIN-indexed). */
+  @Get("search")
+  @RequirePermission(DISCUSSION_PERMISSIONS.DISCUSSION_PARTICIPATE)
+  search(@CurrentPrincipal() p: Principal, @Query("q") q: string, @Query("limit") limit?: string) {
+    return this.discussion.searchPosts(p, q ?? "", limit ? Number(limit) : undefined);
   }
 
   @Get("groups/:id/posts")

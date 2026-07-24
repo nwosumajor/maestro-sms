@@ -62,6 +62,37 @@ export class DiscussionService {
 
   // --- posts + comments -----------------------------------------------------
 
+  /**
+   * Full-text search over posts in groups the caller may see. Postgres FTS
+   * (GIN-indexed on to_tsvector(body)) rather than ILIKE '%x%', which cannot use
+   * an index and degrades linearly as the forum grows. Moderated (soft-deleted)
+   * posts are excluded so a tombstoned body can never surface via search.
+   */
+  async searchPosts(p: Principal, q: string, limit = 30) {
+    const term = (q ?? "").trim();
+    if (term.length < 2) return [];
+    const capped = Math.min(Math.max(1, limit), 50);
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const groups = await tx.discussionGroup.findMany({
+        where: this.canModerate(p) ? {} : { audience: { in: this.audiences(p) } },
+        select: { id: true },
+        take: 500,
+      });
+      const ids = groups.map((g: { id: string }) => g.id);
+      if (ids.length === 0) return [];
+      return tx.$queryRaw<Array<{ id: string; groupId: string; authorId: string; body: string; createdAt: Date; groupName: string }>>`
+        SELECT dp.id, dp."groupId", dp."authorId", dp.body, dp."createdAt", dg.name AS "groupName"
+        FROM "discussion_post" dp
+        JOIN "discussion_group" dg ON dg.id = dp."groupId"
+        WHERE dp."groupId" = ANY(${ids}::uuid[])
+          AND dp.deleted = false
+          AND to_tsvector('english', dp.body) @@ plainto_tsquery('english', ${term})
+        ORDER BY dp."createdAt" DESC
+        LIMIT ${capped}
+      `;
+    });
+  }
+
   async listPosts(p: Principal, groupId: string): Promise<DiscussionPostDto[]> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const group = await tx.discussionGroup.findFirst({ where: { id: groupId } });

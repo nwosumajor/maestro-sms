@@ -9,6 +9,7 @@ export * from "./pagination";
 export * from "./roles";
 export * from "./school-email";
 export * from "./academic-progression";
+export * from "./recurrence";
 export * from "./scan";
 export * from "./dto/member-scan";
 export * from "./admission-number";

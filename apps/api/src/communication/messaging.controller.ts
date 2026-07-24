@@ -1,7 +1,7 @@
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
 import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
-import type { ThreadSummaryDto, ThreadViewDto, UserSummaryDto } from "@sms/types";
+import type { PageDto, ThreadSummaryDto, ThreadViewDto, UserSummaryDto } from "@sms/types";
 import { z } from "zod";
 import { COMMUNICATION_PERMISSIONS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -24,14 +24,26 @@ export class MessagingController {
 
   @Get("contacts")
   @RequirePermission(COMMUNICATION_PERMISSIONS.MESSAGE_SEND)
-  contacts(@CurrentPrincipal() p: Principal): Promise<UserSummaryDto[]> {
-    return this.messaging.contacts(p);
+  contacts(@CurrentPrincipal() p: Principal, @Query("q") q?: string): Promise<UserSummaryDto[]> {
+    return this.messaging.contacts(p, q);
   }
 
+  /** Keyset-paginated: pass the previous response's `nextCursor` as `?cursor=`. */
   @Get("threads")
   @RequirePermission(COMMUNICATION_PERMISSIONS.MESSAGE_READ)
-  threads(@CurrentPrincipal() p: Principal): Promise<ThreadSummaryDto[]> {
-    return this.messaging.listThreads(p);
+  threads(
+    @CurrentPrincipal() p: Principal,
+    @Query("cursor") cursor?: string,
+    @Query("limit") limit?: string,
+  ): Promise<PageDto<ThreadSummaryDto>> {
+    return this.messaging.listThreads(p, { cursor, limit: limit ? Number(limit) : undefined });
+  }
+
+  /** Full-text search across the caller's own messages (GIN-indexed). */
+  @Get("search")
+  @RequirePermission(COMMUNICATION_PERMISSIONS.MESSAGE_READ)
+  search(@CurrentPrincipal() p: Principal, @Query("q") q: string, @Query("limit") limit?: string) {
+    return this.messaging.searchMessages(p, q ?? "", limit ? Number(limit) : undefined);
   }
 
   @Get("threads/:id")
