@@ -67,8 +67,21 @@ export class DiscussionService {
       const group = await tx.discussionGroup.findFirst({ where: { id: groupId } });
       if (!group) throw new NotFoundException("Group not found");
       if (!this.canModerate(p) && !this.audiences(p).includes(group.audience)) throw new NotFoundException("Group not found");
-      const posts = await tx.discussionPost.findMany({ where: { groupId }, orderBy: { createdAt: "desc" }, take: 200 });
-      return Promise.all(posts.map((post: { id: string }) => this.postDto(tx, post.id)));
+      const posts = (await tx.discussionPost.findMany({ where: { groupId }, orderBy: { createdAt: "desc" }, take: 200 })) as PostRow[];
+      if (posts.length === 0) return [];
+      // Batch comments + author names into ONE query each (was 3 queries per post
+      // via postDto — ~600 for a busy 200-post group).
+      const postIds = posts.map((x) => x.id);
+      const comments = (await tx.discussionComment.findMany({
+        where: { postId: { in: postIds } },
+        orderBy: { createdAt: "asc" },
+      })) as CommentRow[];
+      const ids = [...new Set([...posts.map((x) => x.authorId), ...comments.map((c) => c.authorId)])];
+      const users = await tx.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } });
+      const nameOf = new Map(users.map((u: { id: string; name: string }) => [u.id, u.name]));
+      const byPost = new Map<string, CommentRow[]>();
+      for (const c of comments) byPost.set(c.postId, [...(byPost.get(c.postId) ?? []), c]);
+      return posts.map((post) => mapPostDto(post, byPost.get(post.id) ?? [], nameOf));
     });
   }
 
@@ -135,23 +148,7 @@ export class DiscussionService {
     const ids = [...new Set([post.authorId, ...comments.map((c: { authorId: string }) => c.authorId)])];
     const users = await tx.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } });
     const nameOf = new Map(users.map((u: { id: string; name: string }) => [u.id, u.name]));
-    return {
-      id: post.id,
-      groupId: post.groupId,
-      authorId: post.authorId,
-      authorName: nameOf.get(post.authorId) ?? "",
-      body: post.deleted ? TOMBSTONE : post.body,
-      deleted: post.deleted,
-      comments: comments.map((c: { id: string; authorId: string; body: string; deleted: boolean; createdAt: Date }) => ({
-        id: c.id,
-        authorId: c.authorId,
-        authorName: nameOf.get(c.authorId) ?? "",
-        body: c.deleted ? TOMBSTONE : c.body,
-        deleted: c.deleted,
-        createdAt: c.createdAt,
-      })),
-      createdAt: post.createdAt,
-    };
+    return mapPostDto(post as PostRow, comments as CommentRow[], nameOf);
   }
 
   private log(tx: TenantTx, p: Principal, action: string, entityId: string, metadata: Record<string, unknown>) {
@@ -160,4 +157,33 @@ export class DiscussionService {
       tx,
     );
   }
+}
+
+type PostRow = { id: string; groupId: string; authorId: string; body: string; deleted: boolean; createdAt: Date };
+type CommentRow = { id: string; postId: string; authorId: string; body: string; deleted: boolean; createdAt: Date };
+
+/**
+ * Pure post-row → DTO. Comments and author names are supplied by the caller —
+ * fetched once for a single post or batched across the group — so listing never
+ * fans out into a per-post query storm. A moderated post/comment keeps its row
+ * but shows the tombstone instead of its body.
+ */
+function mapPostDto(post: PostRow, comments: CommentRow[], nameOf: Map<string, string>): DiscussionPostDto {
+  return {
+    id: post.id,
+    groupId: post.groupId,
+    authorId: post.authorId,
+    authorName: nameOf.get(post.authorId) ?? "",
+    body: post.deleted ? TOMBSTONE : post.body,
+    deleted: post.deleted,
+    comments: comments.map((c) => ({
+      id: c.id,
+      authorId: c.authorId,
+      authorName: nameOf.get(c.authorId) ?? "",
+      body: c.deleted ? TOMBSTONE : c.body,
+      deleted: c.deleted,
+      createdAt: c.createdAt,
+    })),
+    createdAt: post.createdAt,
+  };
 }

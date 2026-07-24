@@ -159,7 +159,37 @@ export class TaskService {
         orderBy: { createdAt: "desc" },
         take: 200,
       });
-      return Promise.all(tasks.map((t: { id: string }) => this.taskDto(tx, t.id, p.userId)));
+      if (tasks.length === 0) return [];
+      // Batch assignments/comments/names into ONE query each (was 4 queries per
+      // task via taskDto — ~800 for a full 200-task board).
+      const taskIds = tasks.map((t: { id: string }) => t.id);
+      const assignments = (await tx.taskAssignment.findMany({
+        where: { taskId: { in: taskIds } },
+        orderBy: { createdAt: "asc" },
+      })) as AssignmentRow[];
+      const comments = (await tx.taskComment.findMany({
+        where: { taskId: { in: taskIds } },
+        orderBy: { createdAt: "asc" },
+      })) as CommentRow[];
+      const userIds = [
+        ...new Set([
+          ...tasks.map((t: { createdById: string }) => t.createdById),
+          ...assignments.map((a) => a.assigneeId),
+          ...comments.map((c) => c.authorId),
+        ]),
+      ];
+      const users = await tx.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } });
+      const nameOf = new Map(users.map((u: { id: string; name: string }) => [u.id, u.name]));
+      const byTask = <T extends { taskId: string }>(rows: T[]) => {
+        const m = new Map<string, T[]>();
+        for (const r of rows) m.set(r.taskId, [...(m.get(r.taskId) ?? []), r]);
+        return m;
+      };
+      const aByTask = byTask(assignments);
+      const cByTask = byTask(comments);
+      return (tasks as TaskRow[]).map((t) =>
+        mapTaskDto(t, aByTask.get(t.id) ?? [], cByTask.get(t.id) ?? [], nameOf, p.userId),
+      );
     });
   }
 
@@ -186,34 +216,7 @@ export class TaskService {
     ];
     const users = await tx.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } });
     const nameOf = new Map(users.map((u: { id: string; name: string }) => [u.id, u.name]));
-    const myAssignment = assignments.find((a: { assigneeId: string }) => a.assigneeId === viewerId);
-    return {
-      id: t.id,
-      title: t.title,
-      description: t.description,
-      createdById: t.createdById,
-      createdByName: nameOf.get(t.createdById) ?? "",
-      status: t.status,
-      dueAt: t.dueAt,
-      assignees: assignments.map((a: { id: string; assigneeId: string; status: string; note: string | null; attachmentName: string | null; attachmentKey: string | null }) => ({
-        id: a.id,
-        assigneeId: a.assigneeId,
-        assigneeName: nameOf.get(a.assigneeId) ?? "",
-        status: a.status,
-        note: a.note,
-        attachmentName: a.attachmentName,
-        hasAttachment: Boolean(a.attachmentKey),
-      })),
-      comments: comments.map((c: { id: string; authorId: string; body: string; createdAt: Date }) => ({
-        id: c.id,
-        authorId: c.authorId,
-        authorName: nameOf.get(c.authorId) ?? "",
-        body: c.body,
-        createdAt: c.createdAt,
-      })),
-      myStatus: myAssignment?.status ?? null,
-      createdAt: t.createdAt,
-    };
+    return mapTaskDto(t as TaskRow, assignments as AssignmentRow[], comments as CommentRow[], nameOf, viewerId);
   }
 
   private log(tx: TenantTx, p: Principal, action: string, entityId: string, metadata: Record<string, unknown>) {
@@ -222,4 +225,66 @@ export class TaskService {
       tx,
     );
   }
+}
+
+type TaskRow = {
+  id: string;
+  title: string;
+  description: string | null;
+  createdById: string;
+  status: string;
+  dueAt: Date | null;
+  createdAt: Date;
+};
+type AssignmentRow = {
+  id: string;
+  taskId: string;
+  assigneeId: string;
+  status: string;
+  note: string | null;
+  attachmentName: string | null;
+  attachmentKey: string | null;
+};
+type CommentRow = { id: string; taskId: string; authorId: string; body: string; createdAt: Date };
+
+/**
+ * Pure task-row → DTO. Assignments, comments and display names are supplied by
+ * the caller — fetched once for a single task (taskDto) or batched across the
+ * board (listTasks) — so listing never fans out into a per-task query storm.
+ */
+function mapTaskDto(
+  t: TaskRow,
+  assignments: AssignmentRow[],
+  comments: CommentRow[],
+  nameOf: Map<string, string>,
+  viewerId: string,
+): TaskDto {
+  const myAssignment = assignments.find((a) => a.assigneeId === viewerId);
+  return {
+    id: t.id,
+    title: t.title,
+    description: t.description,
+    createdById: t.createdById,
+    createdByName: nameOf.get(t.createdById) ?? "",
+    status: t.status,
+    dueAt: t.dueAt,
+    assignees: assignments.map((a) => ({
+      id: a.id,
+      assigneeId: a.assigneeId,
+      assigneeName: nameOf.get(a.assigneeId) ?? "",
+      status: a.status,
+      note: a.note,
+      attachmentName: a.attachmentName,
+      hasAttachment: Boolean(a.attachmentKey),
+    })),
+    comments: comments.map((c) => ({
+      id: c.id,
+      authorId: c.authorId,
+      authorName: nameOf.get(c.authorId) ?? "",
+      body: c.body,
+      createdAt: c.createdAt,
+    })),
+    myStatus: myAssignment?.status ?? null,
+    createdAt: t.createdAt,
+  };
 }

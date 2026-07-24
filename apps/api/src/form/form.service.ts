@@ -104,8 +104,31 @@ export class FormService {
   async listForms(p: Principal): Promise<FormDto[]> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const where = this.canManage(p) ? {} : { status: "OPEN", audience: { in: this.audiences(p) } };
-      const forms = await tx.form.findMany({ where, orderBy: { createdAt: "desc" }, take: 200 });
-      return Promise.all(forms.map((f: { id: string }) => this.formDto(tx, f.id, p)));
+      const forms = (await tx.form.findMany({ where, orderBy: { createdAt: "desc" }, take: 200 })) as FormRow[];
+      if (forms.length === 0) return [];
+      // Batch counts / own-response / creator names (was 4 queries per form via
+      // formDto — ~800 for a full page).
+      const formIds = forms.map((f) => f.id);
+      const counts = (await tx.formResponse.groupBy({
+        by: ["formId"],
+        where: { formId: { in: formIds } },
+        _count: { _all: true },
+      } as never)) as unknown as Array<{ formId: string; _count: { _all: number } }>;
+      const countOf = new Map(counts.map((c) => [c.formId, c._count._all]));
+      // The caller's OWN responses only — never anyone else's identity.
+      const mine = await tx.formResponse.findMany({
+        where: { formId: { in: formIds }, respondentId: p.userId },
+        select: { formId: true },
+      });
+      const responded = new Set(mine.map((r: { formId: string }) => r.formId));
+      const creators = await tx.user.findMany({
+        where: { id: { in: [...new Set(forms.map((f) => f.createdById))] } },
+        select: { id: true, name: true },
+      });
+      const nameOf = new Map(creators.map((u: { id: string; name: string }) => [u.id, u.name]));
+      return forms.map((f) =>
+        mapFormDto(f, countOf.get(f.id) ?? 0, responded.has(f.id), nameOf.get(f.createdById) ?? ""),
+      );
     });
   }
 
@@ -138,19 +161,7 @@ export class FormService {
     const responseCount = await tx.formResponse.count({ where: { formId } });
     const hasResponded = Boolean(await tx.formResponse.findFirst({ where: { formId, respondentId: p.userId }, select: { id: true } }));
     const creator = await tx.user.findFirst({ where: { id: form.createdById }, select: { name: true } });
-    return {
-      id: form.id,
-      title: form.title,
-      description: form.description,
-      fields: (form.fields as unknown as FormFieldDef[]) ?? [],
-      audience: form.audience,
-      anonymous: form.anonymous,
-      status: form.status,
-      createdByName: creator?.name ?? "",
-      responseCount,
-      hasResponded,
-      createdAt: form.createdAt,
-    };
+    return mapFormDto(form as FormRow, responseCount, hasResponded, creator?.name ?? "");
   }
 
   private log(tx: TenantTx, p: Principal, action: string, entityId: string, metadata: Record<string, unknown>) {
@@ -159,4 +170,39 @@ export class FormService {
       tx,
     );
   }
+}
+
+type FormRow = {
+  id: string;
+  title: string;
+  description: string | null;
+  fields: unknown;
+  audience: string;
+  anonymous: boolean;
+  status: string;
+  createdById: string;
+  createdAt: Date;
+};
+
+/**
+ * Pure form-row → DTO. The response count, the caller's own has-responded flag
+ * and the creator's name are supplied by the caller — fetched once for a single
+ * form or batched across the page — so listing never fans out. `hasResponded`
+ * only ever reflects the CALLER's own response, never another respondent's
+ * identity (which anonymous forms must not leak).
+ */
+function mapFormDto(form: FormRow, responseCount: number, hasResponded: boolean, createdByName: string): FormDto {
+  return {
+    id: form.id,
+    title: form.title,
+    description: form.description,
+    fields: (form.fields as unknown as FormFieldDef[]) ?? [],
+    audience: form.audience,
+    anonymous: form.anonymous,
+    status: form.status,
+    createdByName,
+    responseCount,
+    hasResponded,
+    createdAt: form.createdAt,
+  };
 }
