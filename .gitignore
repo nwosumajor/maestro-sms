@@ -10,3 +10,6 @@ coverage/
 .DS_Store
 # Prisma generated client
 packages/db/generated/
+# TypeScript incremental build cache — machine-local, rewritten by every build.
+# Tracking it produces spurious diffs and blocks branch switches mid-merge.
+*.tsbuildinfo
