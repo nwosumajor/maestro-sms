@@ -488,6 +488,13 @@ export class TransportService {
       });
       if (!assignment) throw new BadRequestException("That passenger is not assigned to this route");
       const status = input.status === "ABSENT" ? "ABSENT" : "BOARDED";
+      // Alert the guardians only on a FRESH boarding — a re-scan of an already
+      // BOARDED passenger is idempotent and must not send a second alert.
+      const prior = await tx.transportBoarding.findFirst({
+        where: { passengerId: input.passengerId, date: day, direction },
+        select: { status: true },
+      });
+      const alreadyBoarded = prior?.status === "BOARDED";
       const row = await tx.transportBoarding.upsert({
         where: { passengerId_date_direction: { passengerId: input.passengerId, date: day, direction } },
         update: { status, method: input.method === "SCAN" ? "SCAN" : "MANUAL", routeId: input.routeId, recordedById: p.userId, recordedAt: new Date() },
@@ -503,7 +510,11 @@ export class TransportService {
         },
       });
       await this.log(tx, p, "transport.boarding.record", row.id, { routeId: input.routeId, passengerId: input.passengerId, direction, status });
-      return { dto: await this.boardingDto(tx, row.id), notify: status === "BOARDED", passengerType: assignment.passengerType };
+      return {
+        dto: await this.boardingDto(tx, row.id),
+        notify: status === "BOARDED" && !alreadyBoarded,
+        passengerType: assignment.passengerType,
+      };
     });
     // Only STUDENT boardings alert guardians; a PICKUP is the safety-critical event.
     if (notify && direction === "PICKUP" && passengerType === "STUDENT") {
