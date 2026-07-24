@@ -124,4 +124,31 @@ describe("DocumentsService", () => {
       }),
     ).rejects.toThrow(/cannot create/i);
   });
+
+  it("junior_admin (vault tier) CAN create a school-level document", async () => {
+    // Regression: junior_admin holds document.write but was neither staff-wide
+    // nor related to a student, so both school-level and student uploads failed.
+    const { service, audit } = makeService({});
+    const res = await service.createDocument(principal(["junior_admin"]), {
+      type: "OTHER",
+      title: "Policy",
+      contentType: "application/pdf",
+    });
+    expect(res.upload.url).toBe("https://up");
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "document.create" }),
+      expect.anything(),
+    );
+  });
+
+  it("junior_admin can create a document for any student (no relationship needed)", async () => {
+    const { service } = makeService({});
+    const res = await service.createDocument(principal(["junior_admin"]), {
+      studentId: "stu-9",
+      type: "REPORT_CARD",
+      title: "Term 1 Report",
+      contentType: "application/pdf",
+    });
+    expect(res.upload.url).toBe("https://up");
+  });
 });
