@@ -120,4 +120,20 @@ describe("HostelService", () => {
     expect(userFindMany).toHaveBeenCalledTimes(1);
     expect(allocFindFirstOrThrow).not.toHaveBeenCalled();
   });
+
+  it("junior_admin (hostel.read) gets module-wide READ scope but no structural write power", async () => {
+    const ja: Principal = { schoolId: "A", userId: "ja", roles: ["junior_admin"], permissions: ["hostel.read"] };
+    const roomFindMany = jest.fn().mockResolvedValueOnce([]); // scope query -> no rooms -> empty page
+    const tx = {
+      hostelRoom: { findMany: roomFindMany },
+      hostelAllocation: { findMany: jest.fn().mockResolvedValue([]) },
+      hostel: { findMany: jest.fn() },
+      user: { findMany: jest.fn() },
+    } as unknown as TenantTx;
+    await svc(tx).listAllocations(ja);
+    // Module-wide read: the room scope is {} (ALL hostels), not warden-confined.
+    expect(roomFindMany).toHaveBeenCalledWith(expect.objectContaining({ where: {} }));
+    // ...but a structural act (wide()-only) is refused at the service.
+    await expect(svc(tx).deleteHostel(ja, "h1")).rejects.toThrow(/administrator/i);
+  });
 });

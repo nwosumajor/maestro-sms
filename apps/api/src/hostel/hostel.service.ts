@@ -65,10 +65,14 @@ export class HostelService {
     return p.roles.some((r) => r === "school_admin" || r === "principal" || r === "super_admin");
   }
   /** Module-wide scoping: admins AND the head warden see/manage EVERY hostel.
-   *  Structural acts (create/delete hostel, reassign warden) stay wide()-only,
-   *  and money (fee runs) is maker-checker for everyone below wide(). */
+   *  junior_admin (the operational records tier) holds hostel.read and is
+   *  included here for READ visibility across all hostels — it never gains write
+   *  power, since every mutating endpoint is @RequirePermission(hostel.manage),
+   *  which junior_admin does not hold. Structural acts (create/delete hostel,
+   *  reassign warden) stay wide()-only, and money (fee runs) is maker-checker for
+   *  everyone below wide(). */
   private moduleWide(p: Principal): boolean {
-    return this.wide(p) || p.roles.includes("head_warden");
+    return this.wide(p) || p.roles.includes("head_warden") || p.roles.includes("junior_admin");
   }
   /** A warden may only act on their own hostel (404-not-403 for anything else). */
   private async assertHostelInScope(tx: TenantTx, p: Principal, hostelId: string): Promise<void> {

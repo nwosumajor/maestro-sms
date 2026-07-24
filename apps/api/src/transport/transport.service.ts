@@ -71,10 +71,13 @@ export class TransportService {
     return p.roles.some((r) => r === "school_admin" || r === "principal" || r === "super_admin");
   }
   /** Module-wide scoping: admins AND the head driver see/manage the whole fleet.
-   *  Structural acts (delete vehicle) stay wide()-only; fee runs are
-   *  maker-checker for everyone below wide(). */
+   *  junior_admin (operational records tier) holds transport.read and is included
+   *  here for READ visibility across the fleet — it never gains write power, since
+   *  every mutating endpoint is @RequirePermission(transport.manage), which
+   *  junior_admin does not hold. Structural acts (delete vehicle) stay
+   *  wide()-only; fee runs are maker-checker for everyone below wide(). */
   private moduleWide(p: Principal): boolean {
-    return this.wide(p) || p.roles.includes("head_driver");
+    return this.wide(p) || p.roles.includes("head_driver") || p.roles.includes("junior_admin");
   }
 
   // --- vehicles -------------------------------------------------------------

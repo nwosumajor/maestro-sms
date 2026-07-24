@@ -104,4 +104,22 @@ describe("TransportService", () => {
     expect(userFindMany).toHaveBeenCalledTimes(1);
     expect(assignmentFindFirstOrThrow).not.toHaveBeenCalled();
   });
+
+  it("junior_admin (transport.read) gets fleet-wide READ scope but no structural write power", async () => {
+    const ja: Principal = { schoolId: "A", userId: "ja", roles: ["junior_admin"], permissions: ["transport.read"] };
+    const assignFindMany = jest.fn().mockResolvedValue([]);
+    const tx = {
+      transportAssignment: { findMany: assignFindMany },
+      transportRoute: { findMany: jest.fn() },
+      routeStop: { findMany: jest.fn() },
+      user: { findMany: jest.fn() },
+    } as unknown as TenantTx;
+    await svc(tx).listAssignments(ja);
+    // Fleet-wide read: no driver/route/vehicle filter, just ACTIVE.
+    const where = assignFindMany.mock.calls[0][0].where as Record<string, unknown>;
+    expect(where.route).toBeUndefined();
+    expect(where.status).toBe("ACTIVE");
+    // ...but a structural act (wide()-only) is refused at the service.
+    await expect(svc(tx).deleteVehicle(ja, "v1")).rejects.toThrow(/administrator/i);
+  });
 });
