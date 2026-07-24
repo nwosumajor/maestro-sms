@@ -8,7 +8,8 @@
 // =============================================================================
 
 import { ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import type { DiscussionGroupDto, DiscussionPostDto } from "@sms/types";
+import type { DiscussionGroupDto, DiscussionPostDto, PageDto } from "@sms/types";
+import { decodeCursor, pageLimit, seekWhere, toPage } from "../common/keyset-cursor";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -93,13 +94,21 @@ export class DiscussionService {
     });
   }
 
-  async listPosts(p: Principal, groupId: string): Promise<DiscussionPostDto[]> {
+  async listPosts(p: Principal, groupId: string, opts: { cursor?: string; limit?: number } = {}): Promise<PageDto<DiscussionPostDto>> {
+    const limit = pageLimit(opts.limit);
+    const cursor = decodeCursor(opts.cursor);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const group = await tx.discussionGroup.findFirst({ where: { id: groupId } });
       if (!group) throw new NotFoundException("Group not found");
       if (!this.canModerate(p) && !this.audiences(p).includes(group.audience)) throw new NotFoundException("Group not found");
-      const posts = (await tx.discussionPost.findMany({ where: { groupId }, orderBy: { createdAt: "desc" }, take: 200 })) as PostRow[];
-      if (posts.length === 0) return [];
+      const rows = (await tx.discussionPost.findMany({
+        where: { groupId, ...seekWhere(cursor) },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: limit + 1,
+      })) as PostRow[];
+      const page = toPage(rows, limit);
+      const posts = page.items;
+      if (posts.length === 0) return { items: [], nextCursor: null };
       // Batch comments + author names into ONE query each (was 3 queries per post
       // via postDto — ~600 for a busy 200-post group).
       const postIds = posts.map((x) => x.id);
@@ -112,7 +121,10 @@ export class DiscussionService {
       const nameOf = new Map(users.map((u: { id: string; name: string }) => [u.id, u.name]));
       const byPost = new Map<string, CommentRow[]>();
       for (const c of comments) byPost.set(c.postId, [...(byPost.get(c.postId) ?? []), c]);
-      return posts.map((post) => mapPostDto(post, byPost.get(post.id) ?? [], nameOf));
+      return {
+        items: posts.map((post) => mapPostDto(post, byPost.get(post.id) ?? [], nameOf)),
+        nextCursor: page.nextCursor,
+      };
     });
   }
 

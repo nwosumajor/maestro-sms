@@ -1,7 +1,7 @@
 import { RequireModule } from "../auth/require-module.decorator";
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post , Query } from "@nestjs/common";
 import { POLL_PERMISSIONS, MODULES } from "@sms/types";
-import type { PollDto } from "@sms/types";
+import type { PageDto, PollDto } from "@sms/types";
 import { z } from "zod";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -24,8 +24,8 @@ export class PollController {
 
   @Get()
   @RequirePermission(POLL_PERMISSIONS.POLL_VOTE)
-  list(@CurrentPrincipal() p: Principal): Promise<PollDto[]> {
-    return this.polls.listPolls(p);
+  list(@CurrentPrincipal() p: Principal, @Query("cursor") cursor?: string, @Query("limit") limit?: string): Promise<PageDto<PollDto>> {
+    return this.polls.listPolls(p, { cursor, limit: limit ? Number(limit) : undefined });
   }
 
   @Post()

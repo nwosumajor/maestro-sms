@@ -110,7 +110,7 @@ describe("PollService", () => {
       user: { findMany: jest.fn().mockResolvedValue([{ id: "teach", name: "Teacher" }]) },
     } as unknown as TenantTx;
 
-    const dtos = await svc(tx).listPolls(student);
+    const dtos = (await svc(tx).listPolls(student)).items;
     const open = dtos.find((d) => d.id === "p-open");
     const closed = dtos.find((d) => d.id === "p-closed");
     // OPEN poll: student sees NO per-option tallies (blind voting preserved)...

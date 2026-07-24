@@ -1,7 +1,7 @@
 import { RequireModule } from "../auth/require-module.decorator";
 import { Body, Controller, Delete, Get, Param, Post, Query } from "@nestjs/common";
 import { DISCUSSION_PERMISSIONS, MODULES } from "@sms/types";
-import type { DiscussionGroupDto, DiscussionPostDto } from "@sms/types";
+import type { DiscussionGroupDto, DiscussionPostDto, PageDto } from "@sms/types";
 import { z } from "zod";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -42,8 +42,13 @@ export class DiscussionController {
 
   @Get("groups/:id/posts")
   @RequirePermission(DISCUSSION_PERMISSIONS.DISCUSSION_PARTICIPATE)
-  posts(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<DiscussionPostDto[]> {
-    return this.discussion.listPosts(p, id);
+  posts(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Query("cursor") cursor?: string,
+    @Query("limit") limit?: string,
+  ): Promise<PageDto<DiscussionPostDto>> {
+    return this.discussion.listPosts(p, id, { cursor, limit: limit ? Number(limit) : undefined });
   }
 
   @Post("groups/:id/posts")

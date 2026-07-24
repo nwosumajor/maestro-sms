@@ -8,7 +8,8 @@
 // =============================================================================
 
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import type { TaskAttachmentPresignDto, TaskDto } from "@sms/types";
+import type { PageDto, TaskAttachmentPresignDto, TaskDto } from "@sms/types";
+import { decodeCursor, pageLimit, seekWhere, toPage } from "../common/keyset-cursor";
 import { STORAGE_PROVIDER, type StorageProvider } from "../documents/storage.provider";
 import {
   AUDIT_LOG_SERVICE,
@@ -149,17 +150,23 @@ export class TaskService {
 
   // --- reads ----------------------------------------------------------------
 
-  /** Tasks the caller created or is assigned to. */
-  async listTasks(p: Principal): Promise<TaskDto[]> {
+  /** Tasks the caller created or is assigned to, keyset-paginated. */
+  async listTasks(p: Principal, opts: { cursor?: string; limit?: number } = {}): Promise<PageDto<TaskDto>> {
+    const limit = pageLimit(opts.limit);
+    const cursor = decodeCursor(opts.cursor);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const mine = await tx.taskAssignment.findMany({ where: { assigneeId: p.userId }, select: { taskId: true } });
       const assignedTaskIds = mine.map((a: { taskId: string }) => a.taskId);
-      const tasks = await tx.task.findMany({
-        where: { OR: [{ createdById: p.userId }, { id: { in: assignedTaskIds } }] },
-        orderBy: { createdAt: "desc" },
-        take: 200,
+      // The visibility rule is itself an OR, so the cursor's OR must be AND-ed
+      // alongside it rather than spread (which would widen visibility).
+      const rows = await tx.task.findMany({
+        where: { AND: [{ OR: [{ createdById: p.userId }, { id: { in: assignedTaskIds } }] }, seekWhere(cursor)] },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: limit + 1,
       });
-      if (tasks.length === 0) return [];
+      const page = toPage(rows as Array<{ id: string; createdAt: Date }>, limit);
+      const tasks = page.items as unknown as TaskRow[];
+      if (tasks.length === 0) return { items: [], nextCursor: null };
       // Batch assignments/comments/names into ONE query each (was 4 queries per
       // task via taskDto — ~800 for a full 200-task board).
       const taskIds = tasks.map((t: { id: string }) => t.id);
@@ -187,9 +194,10 @@ export class TaskService {
       };
       const aByTask = byTask(assignments);
       const cByTask = byTask(comments);
-      return (tasks as TaskRow[]).map((t) =>
-        mapTaskDto(t, aByTask.get(t.id) ?? [], cByTask.get(t.id) ?? [], nameOf, p.userId),
-      );
+      return {
+        items: tasks.map((t) => mapTaskDto(t, aByTask.get(t.id) ?? [], cByTask.get(t.id) ?? [], nameOf, p.userId)),
+        nextCursor: page.nextCursor,
+      };
     });
   }
 

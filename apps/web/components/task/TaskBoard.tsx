@@ -5,6 +5,8 @@
 // and either side posts follow-up comments.
 
 import type { TaskDto, Serialized } from "@sms/types";
+import { usePaged, type Paged } from "@/lib/paged";
+import { LoadMore } from "@/components/shell/LoadMore";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { postSms } from "@/components/game/play-ui";
@@ -21,11 +23,12 @@ type Task = Serialized<TaskDto>;
 type Person = { id: string; name: string; roles?: string[] };
 
 export function TaskBoard({
-  tasks, staff, students, canAssign,
+  page, staff, students, canAssign,
 }: {
-  tasks: Task[]; staff: Person[]; students: Person[]; canAssign: boolean;
+  page: Paged<Task>; staff: Person[]; students: Person[]; canAssign: boolean;
 }) {
   const router = useRouter();
+  const { items: tasks, hasMore, loading, loadMore } = usePaged<Task>(page, "tasks");
   const [msg, setMsg] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [title, setTitle] = React.useState("");
@@ -142,6 +145,8 @@ export function TaskBoard({
           </CardContent>
         </Card>
       ))}
+
+      <LoadMore hasMore={hasMore} loading={loading} onClick={loadMore} />
     </div>
   );
 }

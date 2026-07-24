@@ -10,7 +10,8 @@
 
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@sms/db";
-import type { FormDto, FormFieldDef, FormResponseDto } from "@sms/types";
+import type { PageDto, FormDto, FormFieldDef, FormResponseDto } from "@sms/types";
+import { decodeCursor, pageLimit, seekWhere, toPage } from "../common/keyset-cursor";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -101,11 +102,19 @@ export class FormService {
     });
   }
 
-  async listForms(p: Principal): Promise<FormDto[]> {
+  async listForms(p: Principal, opts: { cursor?: string; limit?: number } = {}): Promise<PageDto<FormDto>> {
+    const limit = pageLimit(opts.limit);
+    const cursor = decodeCursor(opts.cursor);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const where = this.canManage(p) ? {} : { status: "OPEN", audience: { in: this.audiences(p) } };
-      const forms = (await tx.form.findMany({ where, orderBy: { createdAt: "desc" }, take: 200 })) as FormRow[];
-      if (forms.length === 0) return [];
+      const rows = (await tx.form.findMany({
+        where: { ...where, ...seekWhere(cursor) },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: limit + 1,
+      })) as FormRow[];
+      const page = toPage(rows, limit);
+      const forms = page.items;
+      if (forms.length === 0) return { items: [], nextCursor: null };
       // Batch counts / own-response / creator names (was 4 queries per form via
       // formDto — ~800 for a full page).
       const formIds = forms.map((f) => f.id);
@@ -126,9 +135,10 @@ export class FormService {
         select: { id: true, name: true },
       });
       const nameOf = new Map(creators.map((u: { id: string; name: string }) => [u.id, u.name]));
-      return forms.map((f) =>
-        mapFormDto(f, countOf.get(f.id) ?? 0, responded.has(f.id), nameOf.get(f.createdById) ?? ""),
-      );
+      return {
+        items: forms.map((f) => mapFormDto(f, countOf.get(f.id) ?? 0, responded.has(f.id), nameOf.get(f.createdById) ?? "")),
+        nextCursor: page.nextCursor,
+      };
     });
   }
 

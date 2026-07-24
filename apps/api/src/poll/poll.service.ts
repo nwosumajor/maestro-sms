@@ -14,7 +14,8 @@
 // =============================================================================
 
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import type { PollDto } from "@sms/types";
+import type { PageDto, PollDto } from "@sms/types";
+import { decodeCursor, pageLimit, seekWhere, toPage } from "../common/keyset-cursor";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -109,13 +110,21 @@ export class PollService {
   // --- reads ----------------------------------------------------------------
 
   /** Polls visible to the caller (their audience), newest first. */
-  async listPolls(p: Principal): Promise<PollDto[]> {
+  async listPolls(p: Principal, opts: { cursor?: string; limit?: number } = {}): Promise<PageDto<PollDto>> {
+    const limit = pageLimit(opts.limit);
+    const cursor = decodeCursor(opts.cursor);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const audiences = [...this.callerAudiences(p)];
       // Staff/creator see all polls; others see only polls for their audience.
       const where = this.canManage(p) ? {} : { audience: { in: audiences } };
-      const polls = (await tx.poll.findMany({ where, orderBy: { createdAt: "desc" }, take: 200 })) as PollRow[];
-      if (polls.length === 0) return [];
+      const rows = (await tx.poll.findMany({
+        where: { ...where, ...seekWhere(cursor) },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: limit + 1,
+      })) as PollRow[];
+      const page = toPage(rows, limit);
+      const polls = page.items;
+      if (polls.length === 0) return { items: [], nextCursor: null };
       // Batch every lookup (was 6 queries per poll via pollDto — up to ~1200 for
       // a full page). ANONYMITY is preserved: the tally groups by
       // (pollId, optionId) only; voterId is never read into a tally.
@@ -149,7 +158,7 @@ export class PollService {
       const optsByPoll = new Map<string, OptionRow[]>();
       for (const o of options) optsByPoll.set(o.pollId, [...(optsByPoll.get(o.pollId) ?? []), o]);
       const manage = this.canManage(p);
-      return polls.map((poll) =>
+      const items = polls.map((poll) =>
         mapPollDto(
           poll,
           optsByPoll.get(poll.id) ?? [],
@@ -160,6 +169,7 @@ export class PollService {
           manage || poll.createdById === p.userId,
         ),
       );
+      return { items, nextCursor: page.nextCursor };
     });
   }
 
