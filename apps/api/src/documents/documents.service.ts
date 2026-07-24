@@ -27,12 +27,17 @@ import {
 import { NotificationService } from "../notifications/notification.service";
 import { STORAGE_PROVIDER, type StorageProvider } from "./storage.provider";
 
+// junior_admin is the operational tier that owns the document vault (CLAUDE.md)
+// and holds document.write; without it here, both student-doc and school-level
+// uploads were blocked (a dead grant). It gains vault access across the school —
+// like accountant/board already have. Mirrors the SIS fix.
 const STAFF_WIDE_ROLES = new Set([
   "school_admin",
   "principal",
   "accountant",
   "board",
   "super_admin",
+  "junior_admin",
 ]);
 /** Document types whose upload notifies the student's guardians. */
 const NOTIFYING_TYPES = new Set<DocumentTypeValue>(["REPORT_CARD", "CERTIFICATE", "TRANSCRIPT"]);

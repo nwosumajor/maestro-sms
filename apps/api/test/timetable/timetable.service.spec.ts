@@ -18,12 +18,20 @@ function makeService(f: Fakes) {
   const entryFindFirst = jest.fn(() => Promise.resolve(conflicts.shift() ?? null));
   const tx = {
     class: { findFirst: jest.fn().mockResolvedValue(f.classRow ?? { id: "c-1" }) },
-    period: { findFirst: jest.fn().mockResolvedValue({ id: "per-1" }) },
+    period: {
+      findFirst: jest.fn().mockResolvedValue({ id: "per-1" }),
+      findMany: jest.fn().mockResolvedValue([]),
+      count: jest.fn().mockResolvedValue(0),
+    },
     room: { findFirst: jest.fn().mockResolvedValue({ id: "room-1" }) },
     user: { findFirst: jest.fn().mockResolvedValue({ id: "t-1" }) },
     enrollment: { findMany: jest.fn().mockResolvedValue(f.enrollment ?? []) },
     parentChild: { findMany: jest.fn().mockResolvedValue([]) },
     classTeacher: { findFirst: jest.fn().mockResolvedValue(f.classTeacher ?? null), findMany: jest.fn().mockResolvedValue([]) },
+    teacherUnavailability: {
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
     timetableEntry: {
       findFirst: entryFindFirst,
       findMany: jest.fn().mockResolvedValue([]),
@@ -81,6 +89,23 @@ describe("TimetableService conflict detection", () => {
     await expect(
       service.createPeriod(principal(["school_admin"]), { name: "P1", sequence: 1, startTime: "09:00", endTime: "08:00" }),
     ).rejects.toThrow(/before/i);
+  });
+});
+
+describe("TimetableService — junior_admin (timetabling tier) is staff-wide", () => {
+  it("junior_admin can set teacher availability (staff-only op); a teacher cannot", async () => {
+    const { service } = makeService({});
+    // Regression: the availability + generator paths gate on staff-wide, which
+    // omitted junior_admin despite its timetable.write grant.
+    await expect(service.setUnavailability(principal(["junior_admin"]), "t-1", [])).resolves.toBeDefined();
+    await expect(service.setUnavailability(principal(["teacher"]), "t-1", [])).rejects.toThrow();
+  });
+
+  it("junior_admin passes the generate() staff-wide gate (no ForbiddenException)", async () => {
+    const { service } = makeService({});
+    // With no periods defined it fails with BadRequest, NOT Forbidden — proving
+    // it got PAST the staff-wide gate.
+    await expect(service.generate(principal(["junior_admin"]), {})).rejects.toThrow(/period/i);
   });
 });
 

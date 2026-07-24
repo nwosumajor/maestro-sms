@@ -30,7 +30,12 @@ import { NotificationService } from "../notifications/notification.service";
 import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 
-const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal", "super_admin"]);
+// junior_admin is the operational tier that owns attendance (CLAUDE.md) and holds
+// attendance.write; without a class relationship to fall back on it would be
+// 404'd on every register, so it belongs in the school-wide set. It lacks
+// attendance.amend.review, so stale (>7-day) edits still route through
+// maker-checker like any non-approver. Mirrors the SIS fix.
+const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal", "super_admin", "junior_admin"]);
 /** Edits to a register older than this (days) need maker-checker approval. */
 const STALE_REGISTER_DAYS = 7;
 /** Statuses that notify the student's guardians. */

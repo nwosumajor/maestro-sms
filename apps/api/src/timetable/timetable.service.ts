@@ -40,7 +40,12 @@ import {
 } from "../integrity/integrity.foundation";
 import { generateTimetable, unavailableKey, type Offering, type Slot } from "./auto-timetable";
 
-const STAFF_WIDE_ROLES = new Set(["school_admin", "principal", "board", "super_admin"]);
+// junior_admin owns timetabling (CLAUDE.md) and holds timetable.write. It could
+// already create periods/rooms/entries (those gate on the permission only), but
+// the auto-generator (generate) and teacher-availability (setUnavailability)
+// gate on staff-wide — so those were dead for it. Add it for consistency.
+// Mirrors the SIS fix.
+const STAFF_WIDE_ROLES = new Set(["school_admin", "principal", "board", "super_admin", "junior_admin"]);
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 const WEEKDAYS: DayOfWeekValue[] = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"];
 

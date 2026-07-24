@@ -81,6 +81,24 @@ describe("AttendanceService scoping", () => {
     );
   });
 
+  it("junior_admin (records tier) can mark a register for a class it does NOT teach", async () => {
+    // No classTeacher row: only the school-wide short-circuit lets junior_admin
+    // through. Regression for the dead attendance.write grant.
+    const { service, audit } = makeService({
+      classRow: { id: "c-1" },
+      classTeacher: null,
+      enrollmentRows: [{ studentId: "stu-1" }],
+    });
+    await service.markAttendance(principal(["junior_admin"]), "c-1", {
+      date: recent(),
+      records: [{ studentId: "stu-1", status: "PRESENT" }],
+    });
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "attendance.mark" }),
+      expect.anything(),
+    );
+  });
+
   it("marking ABSENT notifies the student's guardians", async () => {
     const { service, notifications } = makeService({
       classRow: { id: "c-1" },
