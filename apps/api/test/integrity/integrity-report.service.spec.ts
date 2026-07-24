@@ -67,4 +67,17 @@ describe("IntegrityReportService", () => {
     const report = await service.getSubmissionReport(admin, "sub-1");
     expect(report.submissionId).toBe("sub-1");
   });
+
+  it("allows a principal (oversight tier) to read any submission it did not create", async () => {
+    // principal holds integrity.report.read but never creates assessments; the
+    // school-wide short-circuit must let it through (else the grant is dead).
+    const tx = makeTx(SUB, { id: "a-1", title: "T", createdById: "teacher-1" });
+    const { service } = makeService(tx);
+    const principal: Principal = {
+      schoolId: "A", userId: "principal-1", roles: ["principal"],
+      permissions: [INTEGRITY_PERMISSIONS.REPORT_READ],
+    };
+    const report = await service.getSubmissionReport(principal, "sub-1");
+    expect(report.submissionId).toBe("sub-1");
+  });
 });
