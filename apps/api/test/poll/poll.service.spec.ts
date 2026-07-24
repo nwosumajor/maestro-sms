@@ -80,4 +80,53 @@ describe("PollService", () => {
     expect(dto.resultsVisible).toBe(false);
     expect(dto.options.every((o) => o.votes === 0)).toBe(true); // blinded
   });
+
+  it("listPolls BATCHES its lookups and still blinds an open poll from a student", async () => {
+    // Two polls: one OPEN (must stay blinded for a student), one CLOSED (results
+    // visible to anyone). Proves the batched path keeps the per-poll visibility
+    // rule and never leaks a voter identity.
+    const optionFindMany = jest.fn().mockResolvedValue([
+      { id: "o1", pollId: "p-open", label: "Yes" },
+      { id: "o2", pollId: "p-open", label: "No" },
+      { id: "o3", pollId: "p-closed", label: "A" },
+    ]);
+    const groupBy = jest.fn().mockResolvedValue([
+      { pollId: "p-open", optionId: "o1", _count: { _all: 5 } },
+      { pollId: "p-open", optionId: "o2", _count: { _all: 2 } },
+      { pollId: "p-closed", optionId: "o3", _count: { _all: 9 } },
+    ]);
+    const voteFindMany = jest.fn().mockResolvedValue([{ pollId: "p-open" }]); // student voted in the open one
+    const pollFindFirstOrThrow = jest.fn(); // must NOT be used (that was the N+1)
+    const tx = {
+      poll: {
+        findMany: jest.fn().mockResolvedValue([
+          { id: "p-open", question: "Open?", audience: "ALL", status: "OPEN", createdById: "teach", closesAt: null, createdAt: new Date() },
+          { id: "p-closed", question: "Closed?", audience: "ALL", status: "CLOSED", createdById: "teach", closesAt: null, createdAt: new Date() },
+        ]),
+        findFirstOrThrow: pollFindFirstOrThrow,
+      },
+      pollOption: { findMany: optionFindMany },
+      pollVote: { findMany: voteFindMany, groupBy },
+      user: { findMany: jest.fn().mockResolvedValue([{ id: "teach", name: "Teacher" }]) },
+    } as unknown as TenantTx;
+
+    const dtos = (await svc(tx).listPolls(student)).items;
+    const open = dtos.find((d) => d.id === "p-open");
+    const closed = dtos.find((d) => d.id === "p-closed");
+    // OPEN poll: student sees NO per-option tallies (blind voting preserved)...
+    expect(open?.resultsVisible).toBe(false);
+    expect(open?.options.every((o) => o.votes === 0)).toBe(true);
+    expect(open?.totalVotes).toBe(7); // total is fine, the split is not
+    expect(open?.hasVoted).toBe(true); // their OWN vote flag
+    // ...CLOSED poll: results are open to everyone.
+    expect(closed?.resultsVisible).toBe(true);
+    expect(closed?.options[0]?.votes).toBe(9);
+    expect(closed?.hasVoted).toBe(false);
+    // Batched: ONE options query, ONE tally groupBy, and no per-poll re-fetch.
+    expect(optionFindMany).toHaveBeenCalledTimes(1);
+    expect(groupBy).toHaveBeenCalledTimes(1);
+    expect(pollFindFirstOrThrow).not.toHaveBeenCalled();
+    // The only voterId filter is the CALLER's own.
+    expect(voteFindMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ voterId: "stu1" }) }));
+  });
 });

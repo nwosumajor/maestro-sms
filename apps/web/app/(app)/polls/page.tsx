@@ -1,4 +1,4 @@
-import type { PollDto, Serialized } from "@sms/types";
+import type { PageDto, PollDto, Serialized } from "@sms/types";
 import { hasPermission } from "@/lib/permissions";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
@@ -14,7 +14,7 @@ export default async function PollsPage() {
   const user = session!.user;
   if (!hasPermission(user.permissions, "poll.vote")) redirect("/dashboard");
   const canManage = hasPermission(user.permissions, "poll.manage");
-  const polls = (await apiGet<Serialized<PollDto>[]>("/polls")) ?? [];
+  const page = (await apiGet<PageDto<Serialized<PollDto>>>("/polls")) ?? { items: [], nextCursor: null };
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="polls" permissions={user.permissions}>
@@ -22,7 +22,7 @@ export default async function PollsPage() {
         <PageHeader title={<>Polls</>} subtitle={<>{canManage
               ? "Collect anonymous opinions from students and staff to inform decisions."
               : "Cast your anonymous vote. Your choice is never linked to your identity."}</>} />
-        <PollBoard polls={polls} canManage={canManage} />
+        <PollBoard page={page} canManage={canManage} />
       </div>
     </AppShell>
   );

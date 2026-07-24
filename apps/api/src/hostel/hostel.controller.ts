@@ -1,7 +1,16 @@
 import { RequireModule } from "../auth/require-module.decorator";
 import { Body, Controller, Delete, Get, Param, Post, Put, Query } from "@nestjs/common";
 import { HOSTEL_PERMISSIONS, MODULES } from "@sms/types";
-import type { HostelAllocationDto, HostelDto, HostelFeeRunDto, HostelRoomDto, HostelSummaryDto } from "@sms/types";
+import type {
+  HostelAllocationDto,
+  HostelAttendanceDto,
+  HostelDto,
+  HostelExeatDto,
+  HostelFeeRunDto,
+  HostelIncidentDto,
+  HostelRoomDto,
+  HostelSummaryDto,
+} from "@sms/types";
 import { z } from "zod";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -37,10 +46,43 @@ const roomUpdateSchema = z.object({
   customFields,
 });
 const allocateSchema = z.object({ roomId: z.string().uuid(), studentId: z.string().uuid() });
+const transferSchema = z.object({ studentId: z.string().uuid(), toRoomId: z.string().uuid(), reason: z.string().max(300).optional() });
 const feeSchema = z.object({
   hostelId: z.string().uuid().optional(),
   dueDate: z.string(),
   description: z.string().max(200).optional(),
+});
+const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const rollCallSchema = z.object({
+  date: isoDay,
+  records: z
+    .array(
+      z.object({
+        studentId: z.string().uuid(),
+        status: z.enum(["PRESENT", "ABSENT", "EXEAT", "SICK", "LATE"]),
+        note: z.string().max(300).nullish(),
+      }),
+    )
+    .max(1000),
+});
+const exeatSchema = z.object({
+  studentId: z.string().uuid(),
+  reason: z.string().min(1).max(300),
+  destination: z.string().max(200).nullish(),
+  departAt: z.string(),
+  expectedReturnAt: z.string(),
+});
+const exeatDecideSchema = z.object({ approve: z.boolean(), note: z.string().max(300).optional() });
+const incidentSchema = z.object({
+  hostelId: z.string().uuid(),
+  roomId: z.string().uuid().nullish(),
+  category: z.enum(["MAINTENANCE", "DISCIPLINE", "HEALTH", "SECURITY", "OTHER"]).default("MAINTENANCE"),
+  title: z.string().min(1).max(200),
+  description: z.string().max(2000).nullish(),
+});
+const incidentUpdateSchema = z.object({
+  status: z.enum(["OPEN", "IN_PROGRESS", "RESOLVED"]).optional(),
+  resolutionNote: z.string().max(2000).nullish(),
 });
 
 @RequireModule(MODULES.HOSTEL)
@@ -136,6 +178,109 @@ export class HostelController {
   @RequirePermission(HOSTEL_PERMISSIONS.HOSTEL_MANAGE)
   vacate(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<HostelAllocationDto> {
     return this.hostel.vacate(p, id);
+  }
+
+  /** Move a student to another room (vacate + re-allocate, atomically). */
+  @Post("allocations/transfer")
+  @RequirePermission(HOSTEL_PERMISSIONS.HOSTEL_MANAGE)
+  transfer(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(transferSchema)) body: z.infer<typeof transferSchema>,
+  ): Promise<HostelAllocationDto> {
+    return this.hostel.transferAllocation(p, body.studentId, body.toRoomId, body.reason);
+  }
+
+  // --- roll-call / boarding attendance ---
+  @Get(":hostelId/attendance")
+  @RequirePermission(HOSTEL_PERMISSIONS.HOSTEL_READ)
+  attendance(
+    @CurrentPrincipal() p: Principal,
+    @Param("hostelId") hostelId: string,
+    @Query("date") date: string,
+  ): Promise<HostelAttendanceDto[]> {
+    return this.hostel.listAttendance(p, hostelId, date);
+  }
+
+  @Post(":hostelId/attendance")
+  @RequirePermission(HOSTEL_PERMISSIONS.HOSTEL_MANAGE)
+  rollCall(
+    @CurrentPrincipal() p: Principal,
+    @Param("hostelId") hostelId: string,
+    @Body(new ZodValidationPipe(rollCallSchema)) body: z.infer<typeof rollCallSchema>,
+  ) {
+    return this.hostel.rollCall(p, hostelId, body.date, body.records);
+  }
+
+  // --- exeat / gate-pass ---
+  @Get("exeats")
+  @RequirePermission(HOSTEL_PERMISSIONS.HOSTEL_READ)
+  exeats(
+    @CurrentPrincipal() p: Principal,
+    @Query("hostelId") hostelId?: string,
+    @Query("status") status?: string,
+  ): Promise<HostelExeatDto[]> {
+    return this.hostel.listExeats(p, { hostelId, status });
+  }
+
+  @Post("exeats")
+  @RequirePermission(HOSTEL_PERMISSIONS.HOSTEL_MANAGE)
+  requestExeat(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(exeatSchema)) body: z.infer<typeof exeatSchema>,
+  ): Promise<HostelExeatDto> {
+    return this.hostel.requestExeat(p, body);
+  }
+
+  @Post("exeats/:id/decide")
+  @RequirePermission(HOSTEL_PERMISSIONS.HOSTEL_MANAGE)
+  decideExeat(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(exeatDecideSchema)) body: z.infer<typeof exeatDecideSchema>,
+  ): Promise<HostelExeatDto> {
+    return this.hostel.decideExeat(p, id, body.approve, body.note);
+  }
+
+  @Post("exeats/:id/depart")
+  @RequirePermission(HOSTEL_PERMISSIONS.HOSTEL_MANAGE)
+  departExeat(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<HostelExeatDto> {
+    return this.hostel.setExeatMovement(p, id, "DEPARTED");
+  }
+
+  @Post("exeats/:id/return")
+  @RequirePermission(HOSTEL_PERMISSIONS.HOSTEL_MANAGE)
+  returnExeat(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<HostelExeatDto> {
+    return this.hostel.setExeatMovement(p, id, "RETURNED");
+  }
+
+  // --- maintenance / incident log ---
+  @Get("incidents")
+  @RequirePermission(HOSTEL_PERMISSIONS.HOSTEL_READ)
+  incidents(
+    @CurrentPrincipal() p: Principal,
+    @Query("hostelId") hostelId?: string,
+    @Query("status") status?: string,
+  ): Promise<HostelIncidentDto[]> {
+    return this.hostel.listIncidents(p, { hostelId, status });
+  }
+
+  @Post("incidents")
+  @RequirePermission(HOSTEL_PERMISSIONS.HOSTEL_MANAGE)
+  reportIncident(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(incidentSchema)) body: z.infer<typeof incidentSchema>,
+  ): Promise<HostelIncidentDto> {
+    return this.hostel.reportIncident(p, body);
+  }
+
+  @Put("incidents/:id")
+  @RequirePermission(HOSTEL_PERMISSIONS.HOSTEL_MANAGE)
+  updateIncident(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(incidentUpdateSchema)) body: z.infer<typeof incidentUpdateSchema>,
+  ): Promise<HostelIncidentDto> {
+    return this.hostel.updateIncident(p, id, body);
   }
 
   /** Schedule hostel rent as invoice line items (collects alongside academic fees). */

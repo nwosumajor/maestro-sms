@@ -14,7 +14,8 @@
 // =============================================================================
 
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import type { PollDto } from "@sms/types";
+import type { PageDto, PollDto } from "@sms/types";
+import { decodeCursor, pageLimit, seekWhere, toPage } from "../common/keyset-cursor";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -109,13 +110,66 @@ export class PollService {
   // --- reads ----------------------------------------------------------------
 
   /** Polls visible to the caller (their audience), newest first. */
-  async listPolls(p: Principal): Promise<PollDto[]> {
+  async listPolls(p: Principal, opts: { cursor?: string; limit?: number } = {}): Promise<PageDto<PollDto>> {
+    const limit = pageLimit(opts.limit);
+    const cursor = decodeCursor(opts.cursor);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const audiences = [...this.callerAudiences(p)];
       // Staff/creator see all polls; others see only polls for their audience.
       const where = this.canManage(p) ? {} : { audience: { in: audiences } };
-      const polls = await tx.poll.findMany({ where, orderBy: { createdAt: "desc" }, take: 200 });
-      return Promise.all(polls.map((poll: { id: string }) => this.pollDto(tx, poll.id, p)));
+      const rows = (await tx.poll.findMany({
+        where: { ...where, ...seekWhere(cursor) },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: limit + 1,
+      })) as PollRow[];
+      const page = toPage(rows, limit);
+      const polls = page.items;
+      if (polls.length === 0) return { items: [], nextCursor: null };
+      // Batch every lookup (was 6 queries per poll via pollDto — up to ~1200 for
+      // a full page). ANONYMITY is preserved: the tally groups by
+      // (pollId, optionId) only; voterId is never read into a tally.
+      const pollIds = polls.map((x) => x.id);
+      const options = (await tx.pollOption.findMany({
+        where: { pollId: { in: pollIds } },
+        orderBy: { sequence: "asc" },
+      })) as OptionRow[];
+      const creators = await tx.user.findMany({
+        where: { id: { in: [...new Set(polls.map((x) => x.createdById))] } },
+        select: { id: true, name: true },
+      });
+      const nameOf = new Map(creators.map((u: { id: string; name: string }) => [u.id, u.name]));
+      // The caller's OWN votes only — this is the one place voterId is used, and
+      // it reveals nothing about anyone else.
+      const mine = await tx.pollVote.findMany({ where: { pollId: { in: pollIds }, voterId: p.userId }, select: { pollId: true } });
+      const voted = new Set(mine.map((v: { pollId: string }) => v.pollId));
+      const grouped = (await tx.pollVote.groupBy({
+        by: ["pollId", "optionId"],
+        where: { pollId: { in: pollIds } },
+        _count: { _all: true },
+      } as never)) as unknown as Array<{ pollId: string; optionId: string; _count: { _all: number } }>;
+      const tallies = new Map<string, Map<string, number>>();
+      const totals = new Map<string, number>();
+      for (const g of grouped) {
+        const m = tallies.get(g.pollId) ?? new Map<string, number>();
+        m.set(g.optionId, g._count._all);
+        tallies.set(g.pollId, m);
+        totals.set(g.pollId, (totals.get(g.pollId) ?? 0) + g._count._all);
+      }
+      const optsByPoll = new Map<string, OptionRow[]>();
+      for (const o of options) optsByPoll.set(o.pollId, [...(optsByPoll.get(o.pollId) ?? []), o]);
+      const manage = this.canManage(p);
+      const items = polls.map((poll) =>
+        mapPollDto(
+          poll,
+          optsByPoll.get(poll.id) ?? [],
+          nameOf.get(poll.createdById) ?? "",
+          voted.has(poll.id),
+          tallies.get(poll.id) ?? new Map(),
+          totals.get(poll.id) ?? 0,
+          manage || poll.createdById === p.userId,
+        ),
+      );
+      return { items, nextCursor: page.nextCursor };
     });
   }
 
@@ -147,24 +201,16 @@ export class PollService {
       totalVotes = await tx.pollVote.count({ where: { pollId } });
     }
 
-    return {
-      id: poll.id,
-      question: poll.question,
-      audience: poll.audience,
-      status: isClosed ? "CLOSED" : poll.status,
-      createdById: poll.createdById,
-      createdByName: creator?.name ?? "",
-      closesAt: poll.closesAt,
-      options: options.map((o: { id: string; label: string }) => ({
-        id: o.id,
-        label: o.label,
-        votes: resultsVisible ? (tallyByOption.get(o.id) ?? 0) : 0,
-      })),
-      totalVotes,
+    void resultsVisible; // recomputed identically inside the shared mapper
+    return mapPollDto(
+      poll as PollRow,
+      options as OptionRow[],
+      creator?.name ?? "",
       hasVoted,
-      resultsVisible,
-      createdAt: poll.createdAt,
-    };
+      tallyByOption,
+      totalVotes,
+      this.canManage(p) || poll.createdById === p.userId,
+    );
   }
 
   private log(tx: TenantTx, p: Principal, action: string, entityId: string, metadata: Record<string, unknown>) {
@@ -173,4 +219,55 @@ export class PollService {
       tx,
     );
   }
+}
+
+type PollRow = {
+  id: string;
+  question: string;
+  audience: string;
+  status: string;
+  createdById: string;
+  closesAt: Date | null;
+  createdAt: Date;
+};
+type OptionRow = { id: string; pollId: string; label: string };
+
+/**
+ * Pure poll-row → DTO. Options, the creator's name, the caller's own has-voted
+ * flag and the (pollId, optionId) tally are supplied by the caller — fetched once
+ * for a single poll or batched across the page — so listing never fans out.
+ *
+ * `privileged` = staff/creator, who may see results at any time; everyone else
+ * only once the poll has closed. A live voter never sees tallies, which keeps
+ * in-progress voting blind, and per-option counts are zeroed when hidden.
+ */
+function mapPollDto(
+  poll: PollRow,
+  options: OptionRow[],
+  createdByName: string,
+  hasVoted: boolean,
+  tallyByOption: Map<string, number>,
+  totalVotes: number,
+  privileged: boolean,
+): PollDto {
+  const isClosed = poll.status === "CLOSED" || (poll.closesAt ? poll.closesAt.getTime() < Date.now() : false);
+  const resultsVisible = privileged || isClosed;
+  return {
+    id: poll.id,
+    question: poll.question,
+    audience: poll.audience,
+    status: isClosed ? "CLOSED" : poll.status,
+    createdById: poll.createdById,
+    createdByName,
+    closesAt: poll.closesAt,
+    options: options.map((o) => ({
+      id: o.id,
+      label: o.label,
+      votes: resultsVisible ? (tallyByOption.get(o.id) ?? 0) : 0,
+    })),
+    totalVotes,
+    hasVoted,
+    resultsVisible,
+    createdAt: poll.createdAt,
+  };
 }

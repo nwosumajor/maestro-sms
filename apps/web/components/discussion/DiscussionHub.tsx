@@ -7,6 +7,7 @@ import type { DiscussionGroupDto, DiscussionPostDto, Serialized } from "@sms/typ
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { postSms } from "@/components/game/play-ui";
+import { LoadMore } from "@/components/shell/LoadMore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,6 +25,7 @@ export function DiscussionHub({ groups, canModerate }: { groups: Group[]; canMod
   const [gAudience, setGAudience] = React.useState("ALL");
   const [openId, setOpenId] = React.useState<string | null>(null);
   const [posts, setPosts] = React.useState<Post[]>([]);
+  const [postCursor, setPostCursor] = React.useState<string | null>(null);
   const [newPost, setNewPost] = React.useState("");
   const [comment, setComment] = React.useState<Record<string, string>>({});
 
@@ -34,10 +36,17 @@ export function DiscussionHub({ groups, canModerate }: { groups: Group[]; canMod
     if (res.ok) { setMsg(ok); if (reload) await loadPosts(reload); else router.refresh(); } else setMsg(res.error ?? `Failed (${res.status}).`);
   };
 
-  const loadPosts = async (groupId: string) => {
+  // Posts arrive one keyset page at a time. Without `cursor` this is a fresh open
+  // (or a reload after a mutation) and REPLACES the list; with one it appends the
+  // next page, so a long-running group loads on demand instead of all at once.
+  const loadPosts = async (groupId: string, cursor?: string) => {
     setOpenId(groupId);
-    const res = await fetch(`/api/sms/discussion/groups/${groupId}/posts`, { cache: "no-store" });
-    if (res.ok) setPosts((await res.json()) as Post[]);
+    const qs = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+    const res = await fetch(`/api/sms/discussion/groups/${groupId}/posts${qs}`, { cache: "no-store" });
+    if (!res.ok) return;
+    const page = (await res.json()) as { items: Post[]; nextCursor: string | null };
+    setPosts((prev) => (cursor ? [...prev, ...(page.items ?? [])] : (page.items ?? [])));
+    setPostCursor(page.nextCursor ?? null);
   };
 
   return (
@@ -89,6 +98,7 @@ export function DiscussionHub({ groups, canModerate }: { groups: Group[]; canMod
                   )}
                 </div>
               ))}
+              <LoadMore hasMore={postCursor !== null} loading={busy} onClick={() => loadPosts(g.id, postCursor ?? undefined)} />
             </CardContent>
           )}
         </Card>

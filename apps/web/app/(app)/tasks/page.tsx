@@ -1,4 +1,4 @@
-import type { TaskDto, Serialized } from "@sms/types";
+import type { PageDto, TaskDto, Serialized } from "@sms/types";
 import { hasPermission } from "@/lib/permissions";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
@@ -19,8 +19,8 @@ export default async function TasksPage() {
 
   // Managers assign to staff OR students — two server-filtered lists, kept
   // separate so the picker is categorised instead of one mixed directory.
-  const [tasks, staffList, studentList] = await Promise.all([
-    apiGet<Serialized<TaskDto>[]>("/tasks"),
+  const [taskPage, staffList, studentList] = await Promise.all([
+    apiGet<PageDto<Serialized<TaskDto>>>("/tasks"),
     canAssign ? apiGet<Person[]>("/users?kind=staff") : Promise.resolve([]),
     canAssign ? apiGet<Person[]>("/students") : Promise.resolve([]),
   ]);
@@ -34,7 +34,7 @@ export default async function TasksPage() {
         <PageHeader title={<>Tasks</>} subtitle={<>{canAssign
               ? "Assign tasks to staff or students, track progress, and follow up with comments."
               : "Your assigned tasks — update your status, attach work, and comment."}</>} />
-        <TaskBoard tasks={tasks ?? []} staff={staff} students={students} canAssign={canAssign} />
+        <TaskBoard page={taskPage ?? { items: [], nextCursor: null }} staff={staff} students={students} canAssign={canAssign} />
       </div>
     </AppShell>
   );

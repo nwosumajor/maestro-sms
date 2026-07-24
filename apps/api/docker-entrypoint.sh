@@ -156,6 +156,11 @@ apply_rls packages/db/prisma/rls/85_lesson_cover_rls.sql          lesson_cover_d
 apply_rls packages/db/prisma/rls/86_meetings_rls.sql              meeting_booking_delete
 apply_rls packages/db/prisma/rls/87_exam_logistics_rls.sql        exam_invigilator_delete
 apply_rls packages/db/prisma/rls/88_scan_event_rls.sql          scan_event_insert
+apply_rls packages/db/prisma/rls/89_hostel_expansion_rls.sql    hostel_incident_delete
+apply_rls packages/db/prisma/rls/90_transport_expansion_rls.sql vehicle_location_delete
+# No policies in this one (indexes only) -> the sentinel never matches and it
+# re-runs each boot; every statement is IF NOT EXISTS, so that is a no-op.
+apply_rls packages/db/prisma/rls/91_fulltext_indexes.sql   __fts_indexes_no_policy__
 
 # Seed on first provision (compose: SEED_ON_START=true; cloud migrate task: always).
 if [ "${SEED_ON_START}" = "true" ] || [ "$MODE" = "migrate" ]; then

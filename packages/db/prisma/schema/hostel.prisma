@@ -66,3 +66,77 @@ model HostelAllocation {
   @@index([roomId, status])
   @@map("hostel_allocation")
 }
+
+/// Nightly roll-call / boarding attendance. One row per (hostel, student, date).
+model HostelAttendance {
+  id         String   @id @default(uuid()) @db.Uuid
+  schoolId   String   @db.Uuid
+  hostelId   String   @db.Uuid
+  studentId  String   @db.Uuid
+  /// The roll-call date (day granularity).
+  date       DateTime @db.Date
+  /// PRESENT | ABSENT | EXEAT | SICK | LATE
+  status     String   @default("PRESENT")
+  note       String?
+  takenById  String   @db.Uuid
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([hostelId, studentId, date])
+  @@index([schoolId])
+  @@index([schoolId, hostelId, date])
+  @@map("hostel_attendance")
+}
+
+/// Exeat / gate-pass: a boarder's approved leave to go out (and return). Maker-
+/// checker — a warden/admin approves; the student's guardians are notified.
+model HostelExeat {
+  id               String    @id @default(uuid()) @db.Uuid
+  schoolId         String    @db.Uuid
+  hostelId         String    @db.Uuid
+  studentId        String    @db.Uuid
+  reason           String
+  destination      String?
+  departAt         DateTime
+  expectedReturnAt DateTime
+  actualReturnAt   DateTime?
+  /// REQUESTED | APPROVED | REJECTED | DEPARTED | RETURNED | CANCELLED
+  status           String    @default("REQUESTED")
+  requestedById    String    @db.Uuid
+  decidedById      String?   @db.Uuid
+  decidedAt        DateTime?
+  note             String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([schoolId])
+  @@index([schoolId, hostelId, status])
+  @@index([schoolId, studentId])
+  @@map("hostel_exeat")
+}
+
+/// Hostel maintenance / incident log (broken facility, discipline, health, etc.).
+/// Append-first with a status lifecycle; resolution is recorded, rows are kept.
+model HostelIncident {
+  id            String    @id @default(uuid()) @db.Uuid
+  schoolId      String    @db.Uuid
+  hostelId      String    @db.Uuid
+  /// Optional room the incident concerns.
+  roomId        String?   @db.Uuid
+  /// MAINTENANCE | DISCIPLINE | HEALTH | SECURITY | OTHER
+  category      String    @default("MAINTENANCE")
+  title         String
+  description   String?
+  /// OPEN | IN_PROGRESS | RESOLVED
+  status        String    @default("OPEN")
+  reportedById  String    @db.Uuid
+  resolvedById  String?   @db.Uuid
+  resolvedAt    DateTime?
+  resolutionNote String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([schoolId])
+  @@index([schoolId, hostelId, status])
+  @@map("hostel_incident")
+}

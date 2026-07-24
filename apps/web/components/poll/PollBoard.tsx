@@ -5,6 +5,8 @@
 // closes (or immediately if staff). No voter identity is ever shown.
 
 import type { PollDto, Serialized } from "@sms/types";
+import { usePaged, type Paged } from "@/lib/paged";
+import { LoadMore } from "@/components/shell/LoadMore";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { postSms } from "@/components/game/play-ui";
@@ -16,8 +18,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 
 type Poll = Serialized<PollDto>;
 
-export function PollBoard({ polls, canManage }: { polls: Poll[]; canManage: boolean }) {
+export function PollBoard({ page, canManage }: { page: Paged<Poll>; canManage: boolean }) {
   const router = useRouter();
+  const { items: polls, hasMore, loading, loadMore } = usePaged<Poll>(page, "polls");
   const [msg, setMsg] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [q, setQ] = React.useState("");
@@ -97,6 +100,8 @@ export function PollBoard({ polls, canManage }: { polls: Poll[]; canManage: bool
           </CardContent>
         </Card>
       ))}
+
+      <LoadMore hasMore={hasMore} loading={loading} onClick={loadMore} />
     </div>
   );
 }

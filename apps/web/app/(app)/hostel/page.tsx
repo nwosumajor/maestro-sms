@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { HostelManager } from "@/components/hostel/HostelManager";
+import { HostelOps } from "@/components/hostel/HostelOps";
 import { Kpi } from "@/components/charts/charts";
 import { PageHeader } from "@/components/shell/PageHeader";
 
@@ -50,6 +51,13 @@ export default async function HostelPage() {
           staff={staff ?? []}
           canManage={canManage}
           canCreate={canCreate}
+        />
+
+        <HostelOps
+          hostels={hostels ?? []}
+          allocations={allocations ?? []}
+          students={students ?? []}
+          canManage={canManage}
         />
       </div>
     </AppShell>

@@ -10,11 +10,18 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 import { NotificationService } from "../notifications/notification.service";
+import { Prisma } from "@sms/db";
+import { decodeCursor, pageLimit, seekWhere, toPage } from "../common/keyset-cursor";
 
 const STAFF = new Set(["school_admin", "principal", "super_admin"]);
 const STAFF_OR_TEACHER = new Set(["teacher", "school_admin", "principal", "accountant", "hr_clerk", "board"]);
 /** Safety cap on messages returned for a single thread (most-recent-first). */
 const MESSAGE_PAGE = 500;
+/** Upper bound on the participant rows scanned to find a caller's threads. A
+ *  member with more threads than this pages through the newest ones. */
+const THREAD_SCAN_CAP = 2000;
+/** Cap on the contact picker; `q` narrows it in a large school. */
+const CONTACT_PAGE = 200;
 
 @Injectable()
 export class MessagingService {
@@ -27,41 +34,123 @@ export class MessagingService {
     return { schoolId: p.schoolId, userId: p.userId };
   }
 
-  /** Users the caller may start a thread with (staff: everyone; else staff/teachers). */
-  async contacts(p: Principal) {
+  /**
+   * Users the caller may start a thread with (staff: everyone; else only
+   * staff/teachers). The eligibility rule is applied IN SQL and the result is
+   * capped — this used to load every user in the school with their roles and
+   * then throw most of them away in memory, which grows linearly with the roll
+   * and is the kind of query that makes a big school's compose box crawl.
+   * `q` narrows by name so a large school stays usable.
+   */
+  async contacts(p: Principal, q?: string) {
+    const staff = p.roles.some((r) => STAFF.has(r));
+    const term = (q ?? "").trim();
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const [users, roles] = await Promise.all([
-        tx.user.findMany({ select: { id: true, name: true, roles: { select: { roleId: true } } }, orderBy: { name: "asc" } }),
-        tx.role.findMany({ select: { id: true, name: true } }),
-      ]);
-      const roleName = new Map(roles.map((r: { id: string; name: string }) => [r.id, r.name]));
-      const staff = p.roles.some((r) => STAFF.has(r));
-      return (users as Array<{ id: string; name: string; roles: { roleId: string }[] }>)
-        .map((u) => ({ id: u.id, name: u.name, roles: u.roles.map((r) => roleName.get(r.roleId)).filter(Boolean) as string[] }))
-        .filter((u) => u.id !== p.userId && (staff || u.roles.some((n) => STAFF_OR_TEACHER.has(n))));
+      const users = await tx.user.findMany({
+        where: {
+          id: { not: p.userId },
+          ...(staff ? {} : { roles: { some: { role: { name: { in: [...STAFF_OR_TEACHER] } } } } }),
+          ...(term ? { name: { contains: term, mode: Prisma.QueryMode.insensitive } } : {}),
+        },
+        select: { id: true, name: true, roles: { select: { role: { select: { name: true } } } } },
+        orderBy: { name: "asc" },
+        take: CONTACT_PAGE,
+      });
+      return (users as Array<{ id: string; name: string; roles: { role: { name: string } }[] }>).map((u) => ({
+        id: u.id,
+        name: u.name,
+        roles: u.roles.map((r) => r.role.name),
+      }));
     });
   }
 
-  async listThreads(p: Principal) {
+  /** The caller's threads, newest activity first, keyset-paginated. */
+  async listThreads(p: Principal, opts: { cursor?: string; limit?: number } = {}) {
+    const limit = pageLimit(opts.limit);
+    const cursor = decodeCursor(opts.cursor);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const parts = await tx.threadParticipant.findMany({
         where: { userId: p.userId },
         select: { threadId: true, lastReadAt: true },
+        take: THREAD_SCAN_CAP,
+      });
+      const ids = parts.map((x: { threadId: string }) => x.threadId);
+      if (ids.length === 0) return { items: [], nextCursor: null };
+      const lastRead = new Map(parts.map((x: { threadId: string; lastReadAt: Date | null }) => [x.threadId, x.lastReadAt]));
+      const rows = (await tx.messageThread.findMany({
+        where: { id: { in: ids }, ...seekWhere(cursor) },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: limit + 1,
+      })) as Array<{ id: string; subject: string; updatedAt: Date; createdAt: Date }>;
+      const page = toPage(rows, limit);
+      if (page.items.length === 0) return { items: [], nextCursor: null };
+
+      // Batch the per-thread work that used to be 2 queries EACH (a findFirst for
+      // the last message + a count for unread) — that is what made a busy inbox
+      // crawl. Newest message per thread comes from one DISTINCT ON; unread
+      // counts from one groupBy.
+      const pageIds = page.items.map((t) => t.id);
+      const lastMsgs = await tx.$queryRaw<
+        Array<{ threadId: string; id: string; senderId: string; body: string; createdAt: Date }>
+      >`
+        SELECT DISTINCT ON ("threadId") "threadId", id, "senderId", body, "createdAt"
+        FROM "message"
+        WHERE "threadId" = ANY(${pageIds}::uuid[])
+        ORDER BY "threadId", "createdAt" DESC
+      `;
+      const lastOf = new Map(lastMsgs.map((m) => [m.threadId, m]));
+      // Unread = messages from OTHERS newer than this participant's own
+      // lastReadAt. Each thread has a different cutoff, so those cutoffs are
+      // folded into a single OR'd predicate — one grouped count for the whole
+      // page instead of a count per thread.
+      const unreadRows = (await tx.message.groupBy({
+        by: ["threadId"],
+        where: {
+          senderId: { not: p.userId },
+          OR: pageIds.map((tid) => {
+            const lr = lastRead.get(tid);
+            return lr ? { threadId: tid, createdAt: { gt: lr } } : { threadId: tid };
+          }),
+        },
+        _count: { _all: true },
+      } as never)) as unknown as Array<{ threadId: string; _count: { _all: number } }>;
+      const unreadOf = new Map(unreadRows.map((u) => [u.threadId, u._count._all]));
+
+      return {
+        items: page.items.map((t) => ({ ...t, lastMessage: lastOf.get(t.id) ?? null, unread: unreadOf.get(t.id) ?? 0 })),
+        nextCursor: page.nextCursor,
+      };
+    });
+  }
+
+  /**
+   * Full-text search across the messages in the caller's OWN threads.
+   * Postgres FTS (GIN-indexed on to_tsvector(body)) rather than ILIKE '%x%',
+   * which cannot use an index and degrades linearly as history accumulates.
+   * Participation is enforced by restricting to the caller's thread ids, and RLS
+   * scopes the tenant underneath.
+   */
+  async searchMessages(p: Principal, q: string, limit = 30) {
+    const term = (q ?? "").trim();
+    if (term.length < 2) return [];
+    const capped = Math.min(Math.max(1, limit), 50);
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const parts = await tx.threadParticipant.findMany({
+        where: { userId: p.userId },
+        select: { threadId: true },
+        take: THREAD_SCAN_CAP,
       });
       const ids = parts.map((x: { threadId: string }) => x.threadId);
       if (ids.length === 0) return [];
-      const lastRead = new Map(parts.map((x: { threadId: string; lastReadAt: Date | null }) => [x.threadId, x.lastReadAt]));
-      const threads = await tx.messageThread.findMany({ where: { id: { in: ids } }, orderBy: { updatedAt: "desc" } });
-      const out = [];
-      for (const t of threads as Array<{ id: string; subject: string; updatedAt: Date }>) {
-        const last = await tx.message.findFirst({ where: { threadId: t.id }, orderBy: { createdAt: "desc" } });
-        const lr = lastRead.get(t.id);
-        const unread = await tx.message.count({
-          where: { threadId: t.id, senderId: { not: p.userId }, ...(lr ? { createdAt: { gt: lr } } : {}) },
-        });
-        out.push({ ...t, lastMessage: last, unread });
-      }
-      return out;
+      return tx.$queryRaw<Array<{ id: string; threadId: string; senderId: string; body: string; createdAt: Date; subject: string }>>`
+        SELECT m.id, m."threadId", m."senderId", m.body, m."createdAt", t.subject
+        FROM "message" m
+        JOIN "message_thread" t ON t.id = m."threadId"
+        WHERE m."threadId" = ANY(${ids}::uuid[])
+          AND to_tsvector('english', m.body) @@ plainto_tsquery('english', ${term})
+        ORDER BY m."createdAt" DESC
+        LIMIT ${capped}
+      `;
     });
   }
 

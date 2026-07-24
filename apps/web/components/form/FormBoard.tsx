@@ -4,6 +4,8 @@
 // anonymity, and view responses. Members fill in open forms in their audience.
 
 import type { FormDto, FormFieldDef, Serialized } from "@sms/types";
+import { usePaged, type Paged } from "@/lib/paged";
+import { LoadMore } from "@/components/shell/LoadMore";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { postSms } from "@/components/game/play-ui";
@@ -15,8 +17,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 
 type Form = Serialized<FormDto>;
 
-export function FormBoard({ forms, canManage }: { forms: Form[]; canManage: boolean }) {
+export function FormBoard({ page, canManage }: { page: Paged<Form>; canManage: boolean }) {
   const router = useRouter();
+  const { items: forms, hasMore, loading, loadMore } = usePaged<Form>(page, "forms");
   const [msg, setMsg] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [title, setTitle] = React.useState("");
@@ -110,6 +113,8 @@ export function FormBoard({ forms, canManage }: { forms: Form[]; canManage: bool
           </CardContent>
         </Card>
       ))}
+
+      <LoadMore hasMore={hasMore} loading={loading} onClick={loadMore} />
     </div>
   );
 }

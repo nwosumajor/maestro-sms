@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Query } from "@nestjs/common";
 import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
 import type { CalendarEventDto } from "@sms/types";
@@ -17,6 +17,10 @@ const eventSchema = z.object({
   endsAt: z.string().datetime().nullish(),
   allDay: z.boolean().optional(),
   audience: z.enum(["ALL", "STAFF"]).optional(),
+  // Recurrence: ONE row describes the series; occurrences are expanded on read.
+  recurrence: z.enum(["NONE", "DAILY", "WEEKLY", "MONTHLY"]).optional(),
+  recurrenceUntil: z.string().datetime().nullish(),
+  recurrenceDays: z.array(z.enum(["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"])).max(7).optional(),
 });
 
 @RequireModule(MODULES.CALENDAR)
@@ -24,10 +28,16 @@ const eventSchema = z.object({
 export class EventsController {
   constructor(private readonly events: EventsService) {}
 
+  /** Events in a window (defaults to a sensible range). Recurring series are
+   *  expanded to their occurrences inside the window. */
   @Get()
   @RequirePermission(COMMUNICATION_PERMISSIONS.EVENT_READ)
-  list(@CurrentPrincipal() p: Principal): Promise<CalendarEventDto[]> {
-    return this.events.listEvents(p);
+  list(
+    @CurrentPrincipal() p: Principal,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+  ): Promise<CalendarEventDto[]> {
+    return this.events.listEvents(p, { from, to });
   }
 
   @Post()

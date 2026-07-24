@@ -38,3 +38,13 @@ export interface UserSummaryDto extends IdNameDto {
 export interface UserWithEmailDto extends UserSummaryDto {
   email: string;
 }
+
+/**
+ * A keyset-paginated page. `nextCursor` is an OPAQUE token — pass it back as
+ * `?cursor=` to fetch the following page; `null` means the end. Keyset (not
+ * offset) so deep pages cost the same as the first.
+ */
+export interface PageDto<T> {
+  items: T[];
+  nextCursor: string | null;
+}

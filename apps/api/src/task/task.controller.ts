@@ -1,7 +1,7 @@
 import { RequireModule } from "../auth/require-module.decorator";
-import { Body, Controller, Get, Param, Post, Put } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Put , Query } from "@nestjs/common";
 import { TASK_PERMISSIONS, MODULES } from "@sms/types";
-import type { TaskAttachmentPresignDto, TaskDto } from "@sms/types";
+import type { PageDto, TaskAttachmentPresignDto, TaskDto } from "@sms/types";
 import { z } from "zod";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -31,8 +31,8 @@ export class TaskController {
 
   @Get()
   @RequirePermission(TASK_PERMISSIONS.TASK_PARTICIPATE)
-  list(@CurrentPrincipal() p: Principal): Promise<TaskDto[]> {
-    return this.tasks.listTasks(p);
+  list(@CurrentPrincipal() p: Principal, @Query("cursor") cursor?: string, @Query("limit") limit?: string): Promise<PageDto<TaskDto>> {
+    return this.tasks.listTasks(p, { cursor, limit: limit ? Number(limit) : undefined });
   }
 
   @Post()
