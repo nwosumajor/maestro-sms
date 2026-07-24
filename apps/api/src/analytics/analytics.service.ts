@@ -9,7 +9,7 @@
 
 import { Inject, Injectable } from "@nestjs/common";
 import type { AnalyticsOverviewDto } from "@sms/types";
-import { ageBand, normalizeGender } from "@sms/types";
+import { normalizeGender } from "@sms/types";
 // VALUE import: Prisma.sql only resolves as a value, not a type (CLAUDE.md).
 import { Prisma } from "@sms/db";
 import {
@@ -27,6 +27,18 @@ interface FeeAggRow {
   invoices: number;
 }
 
+/** The age-band aggregate — completed-year buckets computed in Postgres. */
+interface AgeBandRow {
+  profiled: number;
+  unknown: number;
+  b0: number;
+  b1: number;
+  b2: number;
+  b3: number;
+  b4: number;
+  b5: number;
+}
+
 /** One row of the grade-band aggregate — computed entirely in Postgres. */
 interface GradeBandRow {
   a: number;
@@ -38,7 +50,12 @@ interface GradeBandRow {
   avgPct: number | null;
 }
 
-const STAFF_WIDE = new Set(["school_admin", "principal", "accountant", "board", "super_admin"]);
+// School-wide analytics viewers. junior_admin is the day-to-day operational admin
+// and already holds the underlying read grants (attendance/grade/fee.read) — it
+// belongs here so it sees the school aggregate instead of an empty "family" view
+// (mirrors attendance's SCHOOL_WIDE_ROLES, and closes the same dead-grant gap the
+// SIS pass fixed). Roles NOT here (teacher, HR, warden…) get no analytics nav.
+const STAFF_WIDE = new Set(["school_admin", "principal", "accountant", "board", "super_admin", "junior_admin"]);
 
 @Injectable()
 export class AnalyticsService {
@@ -168,20 +185,59 @@ export class AnalyticsService {
       }
 
       // --- student-body demographics (staff, school-wide; needs profile read) ---
+      // Bucketed ENTIRELY in Postgres (GROUP BY gender/state + FILTER age bands)
+      // rather than shipping every student_profile row into Node just to tally —
+      // same treatment as the grade/fee aggregates. Gender and state are grouped
+      // by RAW value and then folded through normalizeGender / trim in JS over the
+      // small grouped result (a handful of rows), so the normalisation stays a
+      // single source of truth and two spellings of one gender still merge. The
+      // age band uses Postgres age(), whose completed-year count matches the pure
+      // ageYears() the DTO used before (NULL / out-of-range DOB → "Unknown").
       if (staff && p.permissions.includes("student.profile.read")) {
-        const profiles = await tx.studentProfile.findMany({ select: { gender: true, dateOfBirth: true, state: true } });
+        const [genderRows, stateRows, [bandRow]] = await Promise.all([
+          tx.$queryRaw<Array<{ gender: string | null; n: number }>>(Prisma.sql`
+            SELECT gender, count(*)::int AS n FROM "student_profile" GROUP BY gender
+          `),
+          tx.$queryRaw<Array<{ state: string | null; n: number }>>(Prisma.sql`
+            SELECT state, count(*)::int AS n FROM "student_profile" GROUP BY state
+          `),
+          tx.$queryRaw<Array<AgeBandRow>>(Prisma.sql`
+            SELECT
+              count(*)::int AS profiled,
+              count(*) FILTER (WHERE age IS NULL)::int AS unknown,
+              count(*) FILTER (WHERE age <= 5)::int AS b0,
+              count(*) FILTER (WHERE age BETWEEN 6 AND 10)::int AS b1,
+              count(*) FILTER (WHERE age BETWEEN 11 AND 13)::int AS b2,
+              count(*) FILTER (WHERE age BETWEEN 14 AND 16)::int AS b3,
+              count(*) FILTER (WHERE age BETWEEN 17 AND 18)::int AS b4,
+              count(*) FILTER (WHERE age >= 19)::int AS b5
+            FROM (
+              SELECT (CASE WHEN a >= 0 AND a < 130 THEN a ELSE NULL END) AS age FROM (
+                SELECT date_part('year', age("dateOfBirth"))::int AS a FROM "student_profile"
+              ) x
+            ) t
+          `),
+        ]);
         const gender: Record<string, number> = {};
-        const band: Record<string, number> = {};
-        const state: Record<string, number> = {};
-        for (const pr of profiles) {
-          const g = normalizeGender(pr.gender);
-          gender[g] = (gender[g] ?? 0) + 1;
-          const b = ageBand(pr.dateOfBirth);
-          band[b] = (band[b] ?? 0) + 1;
-          const st = (pr.state ?? "").trim() || "Unknown";
-          state[st] = (state[st] ?? 0) + 1;
+        for (const r of genderRows) {
+          const g = normalizeGender(r.gender);
+          gender[g] = (gender[g] ?? 0) + r.n;
         }
-        out.demographics = { profiled: profiles.length, gender, ageBand: band, state };
+        const state: Record<string, number> = {};
+        for (const r of stateRows) {
+          const st = (r.state ?? "").trim() || "Unknown";
+          state[st] = (state[st] ?? 0) + r.n;
+        }
+        const band: Record<string, number> = {};
+        const setBand = (label: string, n: number) => { if (n > 0) band[label] = n; };
+        setBand("5 & under", bandRow.b0);
+        setBand("6–10", bandRow.b1);
+        setBand("11–13", bandRow.b2);
+        setBand("14–16", bandRow.b3);
+        setBand("17–18", bandRow.b4);
+        setBand("19+", bandRow.b5);
+        setBand("Unknown", bandRow.unknown);
+        out.demographics = { profiled: bandRow.profiled, gender, ageBand: band, state };
       }
 
       // --- school operations (staff) ---

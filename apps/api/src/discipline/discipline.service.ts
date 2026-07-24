@@ -10,7 +10,8 @@
 // =============================================================================
 
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import type { DisciplineComplaintDto, DisciplineEvidencePresignDto } from "@sms/types";
+import type { DisciplineComplaintDto, DisciplineEvidencePresignDto, IdNameDto, PageDto } from "@sms/types";
+import { decodeCursor, pageLimit, seekWhere, toPage } from "../common/keyset-cursor";
 import { STORAGE_PROVIDER, type StorageProvider } from "../documents/storage.provider";
 import {
   AUDIT_LOG_SERVICE,
@@ -23,6 +24,8 @@ import {
 } from "../integrity/integrity.foundation";
 
 const STATUSES = ["OPEN", "IN_REVIEW", "RESOLVED", "DISMISSED"];
+// Picker/typeahead cap — a target list never ships a whole large-school roster.
+const TARGET_CAP = 500;
 
 @Injectable()
 export class DisciplineService {
@@ -48,6 +51,14 @@ export class DisciplineService {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const against = await tx.user.findFirst({ where: { id: input.againstId }, select: { id: true } });
       if (!against) throw new NotFoundException("The named person is not in this school");
+      // SECURITY: a non-manager may only file against someone in their own
+      // relationship scope (a classmate, or a teacher who teaches them / their
+      // child). This is the server-side backstop for the scoped picker — a filer
+      // can't name an arbitrary in-school user by guessing an id. 404-not-403 so
+      // an out-of-scope target is indistinguishable from a non-existent one.
+      if (!this.canManage(p) && !(await this.isAllowedTarget(tx, p, input.againstId, input.againstType))) {
+        throw new NotFoundException("The named person is not in this school");
+      }
       const c = await tx.disciplineComplaint.create({
         data: {
           schoolId: p.schoolId,
@@ -143,14 +154,94 @@ export class DisciplineService {
 
   // --- reads ----------------------------------------------------------------
 
-  /** Staff see all complaints; a filer sees only the ones they filed. */
-  async list(p: Principal): Promise<DisciplineComplaintDto[]> {
+  /** Staff see all complaints; a filer sees only the ones they filed. Keyset-paged. */
+  async list(p: Principal, opts: { cursor?: string; limit?: number } = {}): Promise<PageDto<DisciplineComplaintDto>> {
+    const limit = pageLimit(opts.limit);
+    const cursor = decodeCursor(opts.cursor);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const where = this.canManage(p) ? {} : { complainantId: p.userId };
-      const rows = await tx.disciplineComplaint.findMany({ where, orderBy: { createdAt: "desc" }, take: 200 });
+      const rows = (await tx.disciplineComplaint.findMany({
+        where: { ...where, ...seekWhere(cursor) },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: limit + 1,
+      })) as ComplaintRow[];
+      const page = toPage(rows, limit);
+      const complaints = page.items;
       // Audit-log the listing of complaints (evidence on minors is sensitive).
-      await this.log(tx, p, "discipline.list", "list", { count: rows.length, scope: this.canManage(p) ? "all" : "own" });
-      return Promise.all(rows.map((c: { id: string }) => this.complaintDto(tx, c.id)));
+      await this.log(tx, p, "discipline.list", "list", { count: complaints.length, scope: this.canManage(p) ? "all" : "own" });
+      if (complaints.length === 0) return { items: [], nextCursor: null };
+      // Batch every child + name lookup into ONE query each (was 5 queries per
+      // complaint via complaintDto — up to ~1000 for a full 200-row page).
+      const ids = complaints.map((c) => c.id);
+      const [assignees, evidence, entries] = await Promise.all([
+        tx.disciplineAssignee.findMany({ where: { complaintId: { in: ids } }, orderBy: { createdAt: "asc" } }) as Promise<AssigneeRow[]>,
+        tx.disciplineEvidence.findMany({ where: { complaintId: { in: ids } }, orderBy: { createdAt: "asc" } }) as Promise<EvidenceRow[]>,
+        tx.disciplineEntry.findMany({ where: { complaintId: { in: ids } }, orderBy: { createdAt: "asc" } }) as Promise<EntryRow[]>,
+      ]);
+      const userIds = [
+        ...new Set([
+          ...complaints.flatMap((c) => [c.complainantId, c.againstId]),
+          ...assignees.map((a) => a.assigneeId),
+          ...evidence.map((e) => e.uploadedById),
+          ...entries.map((e) => e.authorId),
+        ]),
+      ];
+      const users = await tx.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } });
+      const nameOf = new Map(users.map((u: { id: string; name: string }) => [u.id, u.name]));
+      const group = <T extends { complaintId: string }>(rows: T[]): Map<string, T[]> => {
+        const m = new Map<string, T[]>();
+        for (const r of rows) m.set(r.complaintId, [...(m.get(r.complaintId) ?? []), r]);
+        return m;
+      };
+      const aByC = group(assignees);
+      const eByC = group(evidence);
+      const enByC = group(entries);
+      return {
+        items: complaints.map((c) => mapComplaintDto(c, aByC.get(c.id) ?? [], eByC.get(c.id) ?? [], enByC.get(c.id) ?? [], nameOf)),
+        nextCursor: page.nextCursor,
+      };
+    });
+  }
+
+  /**
+   * Relationship-scoped list of people this caller may file AGAINST, for the UI
+   * picker. Managers get the whole school (students OR teachers by role). A
+   * non-manager (student/parent) gets only their classmates (STUDENT) or the
+   * teachers who teach their classes (TEACHER); a filer with no class
+   * relationship (e.g. board/accountant/HR) may still name any teacher — staff,
+   * not a minor — but no student. Names only, never sensitive fields.
+   */
+  async listFileTargets(p: Principal, type: "STUDENT" | "TEACHER"): Promise<IdNameDto[]> {
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      if (this.canManage(p)) {
+        return tx.user.findMany({
+          where: { roles: { some: { role: { name: type === "STUDENT" ? "student" : "teacher" } } } },
+          select: { id: true, name: true },
+          orderBy: { name: "asc" },
+          take: TARGET_CAP,
+        });
+      }
+      const classIds = await this.relatedClassIds(tx, p);
+      if (type === "TEACHER") {
+        // No class relationship: allow naming any teacher (non-minor staff).
+        if (classIds.length === 0) {
+          return tx.user.findMany({
+            where: { roles: { some: { role: { name: "teacher" } } } },
+            select: { id: true, name: true },
+            orderBy: { name: "asc" },
+            take: TARGET_CAP,
+          });
+        }
+        const ids = await this.teacherIdsOfClasses(tx, classIds);
+        if (ids.length === 0) return [];
+        return tx.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true }, orderBy: { name: "asc" } });
+      }
+      // STUDENT targets = classmates in the caller's related classes, minus self.
+      if (classIds.length === 0) return [];
+      const enr = await tx.enrollment.findMany({ where: { classId: { in: classIds } }, select: { studentId: true }, distinct: ["studentId"] });
+      const ids = enr.map((e: { studentId: string }) => e.studentId).filter((id: string) => id !== p.userId);
+      if (ids.length === 0) return [];
+      return tx.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true }, orderBy: { name: "asc" }, take: TARGET_CAP });
     });
   }
 
@@ -169,43 +260,71 @@ export class DisciplineService {
   private requireManage(p: Principal): void {
     if (!this.canManage(p)) throw new ForbiddenException("Staff only");
   }
+
+  /** Classes the caller relates to: their own enrolments + their children's. */
+  private async relatedClassIds(tx: TenantTx, p: Principal): Promise<string[]> {
+    const ids = new Set<string>();
+    const own = await tx.enrollment.findMany({ where: { studentId: p.userId }, select: { classId: true } });
+    own.forEach((e: { classId: string }) => ids.add(e.classId));
+    const children = await tx.parentChild.findMany({ where: { parentId: p.userId }, select: { studentId: true } });
+    if (children.length > 0) {
+      const childEnr = await tx.enrollment.findMany({
+        where: { studentId: { in: children.map((c: { studentId: string }) => c.studentId) } },
+        select: { classId: true },
+      });
+      childEnr.forEach((e: { classId: string }) => ids.add(e.classId));
+    }
+    return [...ids];
+  }
+
+  /** Every teacher tied to a set of classes: form teacher, subject teacher, supervisor. */
+  private async teacherIdsOfClasses(tx: TenantTx, classIds: string[]): Promise<string[]> {
+    const ids = new Set<string>();
+    const ct = await tx.classTeacher.findMany({ where: { classId: { in: classIds } }, select: { teacherId: true } });
+    ct.forEach((t: { teacherId: string }) => ids.add(t.teacherId));
+    const cst = await tx.classSubjectTeacher.findMany({ where: { classId: { in: classIds } }, select: { teacherId: true } });
+    cst.forEach((t: { teacherId: string }) => ids.add(t.teacherId));
+    const sup = await tx.class.findMany({ where: { id: { in: classIds }, supervisorId: { not: null } }, select: { supervisorId: true } });
+    sup.forEach((c: { supervisorId: string | null }) => c.supervisorId && ids.add(c.supervisorId));
+    return [...ids];
+  }
+
+  /** Server-side membership check mirroring listFileTargets (see file()). */
+  private async isAllowedTarget(tx: TenantTx, p: Principal, againstId: string, type: "STUDENT" | "TEACHER"): Promise<boolean> {
+    const classIds = await this.relatedClassIds(tx, p);
+    if (type === "TEACHER") {
+      if (classIds.length === 0) {
+        const t = await tx.user.findFirst({ where: { id: againstId, roles: { some: { role: { name: "teacher" } } } }, select: { id: true } });
+        return Boolean(t);
+      }
+      return (await this.teacherIdsOfClasses(tx, classIds)).includes(againstId);
+    }
+    if (classIds.length === 0 || againstId === p.userId) return false;
+    const en = await tx.enrollment.findFirst({ where: { classId: { in: classIds }, studentId: againstId }, select: { id: true } });
+    return Boolean(en);
+  }
   private async requireComplaint(tx: TenantTx, id: string): Promise<void> {
     const c = await tx.disciplineComplaint.findFirst({ where: { id }, select: { id: true } });
     if (!c) throw new NotFoundException("Complaint not found");
   }
 
   private async complaintDto(tx: TenantTx, id: string): Promise<DisciplineComplaintDto> {
-    const c = await tx.disciplineComplaint.findFirstOrThrow({ where: { id } });
-    const assignees = await tx.disciplineAssignee.findMany({ where: { complaintId: id }, orderBy: { createdAt: "asc" } });
-    const evidence = await tx.disciplineEvidence.findMany({ where: { complaintId: id }, orderBy: { createdAt: "asc" } });
-    const entries = await tx.disciplineEntry.findMany({ where: { complaintId: id }, orderBy: { createdAt: "asc" } });
+    const c = (await tx.disciplineComplaint.findFirstOrThrow({ where: { id } })) as ComplaintRow;
+    const assignees = (await tx.disciplineAssignee.findMany({ where: { complaintId: id }, orderBy: { createdAt: "asc" } })) as AssigneeRow[];
+    const evidence = (await tx.disciplineEvidence.findMany({ where: { complaintId: id }, orderBy: { createdAt: "asc" } })) as EvidenceRow[];
+    const entries = (await tx.disciplineEntry.findMany({ where: { complaintId: id }, orderBy: { createdAt: "asc" } })) as EntryRow[];
     const ids = [
       ...new Set([
         c.complainantId,
         c.againstId,
-        ...assignees.map((a: { assigneeId: string }) => a.assigneeId),
-        ...evidence.map((e: { uploadedById: string }) => e.uploadedById),
-        ...entries.map((e: { authorId: string }) => e.authorId),
+        ...assignees.map((a) => a.assigneeId),
+        ...evidence.map((e) => e.uploadedById),
+        ...entries.map((e) => e.authorId),
       ]),
     ];
     const users = await tx.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } });
     const nameOf = new Map(users.map((u: { id: string; name: string }) => [u.id, u.name]));
-    return {
-      id: c.id,
-      subject: c.subject,
-      details: c.details,
-      complainantId: c.complainantId,
-      complainantName: nameOf.get(c.complainantId) ?? "",
-      againstId: c.againstId,
-      againstName: nameOf.get(c.againstId) ?? "",
-      againstType: c.againstType,
-      status: c.status,
-      resolution: c.resolution,
-      assignees: assignees.map((a: { id: string; assigneeId: string }) => ({ id: a.id, assigneeId: a.assigneeId, assigneeName: nameOf.get(a.assigneeId) ?? "" })),
-      evidence: evidence.map((e: { id: string; uploadedById: string; fileName: string; createdAt: Date }) => ({ id: e.id, uploadedById: e.uploadedById, uploadedByName: nameOf.get(e.uploadedById) ?? "", fileName: e.fileName, createdAt: e.createdAt })),
-      entries: entries.map((e: { id: string; authorId: string; body: string; createdAt: Date }) => ({ id: e.id, authorId: e.authorId, authorName: nameOf.get(e.authorId) ?? "", body: e.body, createdAt: e.createdAt })),
-      createdAt: c.createdAt,
-    };
+    return mapComplaintDto(c, assignees, evidence, entries, nameOf);
   }
 
   private log(tx: TenantTx, p: Principal, action: string, entityId: string, metadata: Record<string, unknown>) {
@@ -214,4 +333,50 @@ export class DisciplineService {
       tx,
     );
   }
+}
+
+type ComplaintRow = {
+  id: string;
+  subject: string;
+  details: string | null;
+  complainantId: string;
+  againstId: string;
+  againstType: string;
+  status: string;
+  resolution: string | null;
+  createdAt: Date;
+};
+type AssigneeRow = { id: string; complaintId: string; assigneeId: string; createdAt: Date };
+type EvidenceRow = { id: string; complaintId: string; uploadedById: string; fileName: string; createdAt: Date };
+type EntryRow = { id: string; complaintId: string; authorId: string; body: string; createdAt: Date };
+
+/**
+ * Pure complaint-row → DTO. Child rows (assignees/evidence/entries) and the
+ * user-name map are supplied by the caller — fetched once for a single complaint
+ * or batched across a page — so listing never fans out into a per-complaint query
+ * storm. Names are looked up, never the sensitive complaint body.
+ */
+function mapComplaintDto(
+  c: ComplaintRow,
+  assignees: AssigneeRow[],
+  evidence: EvidenceRow[],
+  entries: EntryRow[],
+  nameOf: Map<string, string>,
+): DisciplineComplaintDto {
+  return {
+    id: c.id,
+    subject: c.subject,
+    details: c.details,
+    complainantId: c.complainantId,
+    complainantName: nameOf.get(c.complainantId) ?? "",
+    againstId: c.againstId,
+    againstName: nameOf.get(c.againstId) ?? "",
+    againstType: c.againstType,
+    status: c.status,
+    resolution: c.resolution,
+    assignees: assignees.map((a) => ({ id: a.id, assigneeId: a.assigneeId, assigneeName: nameOf.get(a.assigneeId) ?? "" })),
+    evidence: evidence.map((e) => ({ id: e.id, uploadedById: e.uploadedById, uploadedByName: nameOf.get(e.uploadedById) ?? "", fileName: e.fileName, createdAt: e.createdAt })),
+    entries: entries.map((e) => ({ id: e.id, authorId: e.authorId, authorName: nameOf.get(e.authorId) ?? "", body: e.body, createdAt: e.createdAt })),
+    createdAt: c.createdAt,
+  };
 }

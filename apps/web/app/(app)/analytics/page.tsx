@@ -1,4 +1,6 @@
 import type { AnalyticsOverviewDto, Serialized } from "@sms/types";
+import { redirect } from "next/navigation";
+import { hasPermission } from "@/lib/permissions";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
@@ -16,6 +18,10 @@ type Overview = Serialized<AnalyticsOverviewDto>;
 export default async function AnalyticsPage() {
   const session = await auth();
   const user = session!.user;
+  // Analytics serves fee.read holders only — school-wide staff + families. Other
+  // roles (teacher, HR, warden…) get an empty family scope, so send them to the
+  // dashboard instead of a page of zeros (matches the nav gate in AppShell).
+  if (!hasPermission(user.permissions, "fee.read")) redirect("/dashboard");
   const o = await apiGet<Overview>("/analytics/overview");
 
   const att = o?.attendance;

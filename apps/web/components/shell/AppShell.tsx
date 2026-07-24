@@ -128,7 +128,12 @@ const NAV: {
   module?: ModuleKey;
 }[] = [
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboardIcon, href: "/dashboard" },
-  { key: "analytics", label: "Analytics", icon: BarChart3Icon, href: "/analytics", module: MODULES.ANALYTICS },
+  // `fee.read` is exactly the set of roles the analytics view actually serves:
+  // school-wide staff (school_admin/principal/accountant/board/junior_admin) get
+  // the school aggregate, parents/students get their family view. Roles WITHOUT
+  // it (teacher, HR, warden, driver, librarian) would only ever see an empty
+  // "family" scope, so the link is hidden from them rather than showing zeros.
+  { key: "analytics", label: "Analytics", icon: BarChart3Icon, href: "/analytics", perm: "fee.read", module: MODULES.ANALYTICS },
   { key: "operator", label: "Operator", icon: Building2Icon, href: "/operator", perm: "platform.tenants.read" },
   { key: "operatortenants", label: "Tenant registry", icon: ServerIcon, href: "/operator/tenants", perm: "platform.tenants.read" },
   { key: "operatorscholarships", label: "Scholarship admin", icon: AwardIcon, href: "/operator/scholarships", perm: "scholarship.admin" },

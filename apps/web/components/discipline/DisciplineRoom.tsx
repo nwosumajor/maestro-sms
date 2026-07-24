@@ -9,6 +9,8 @@ import type { DisciplineComplaintDto, Serialized } from "@sms/types";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { postSms } from "@/components/game/play-ui";
+import { usePaged, type Paged } from "@/lib/paged";
+import { LoadMore } from "@/components/shell/LoadMore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,11 +27,12 @@ const STATUS_VARIANT: Record<string, "secondary" | "outline" | "destructive"> = 
 };
 
 export function DisciplineRoom({
-  complaints, staff, teachers, students, canManage,
+  page, staff, teachers, students, canManage,
 }: {
-  complaints: Complaint[]; staff: Person[]; teachers: Person[]; students: Person[]; canManage: boolean;
+  page: Paged<Complaint>; staff: Person[]; teachers: Person[]; students: Person[]; canManage: boolean;
 }) {
   const router = useRouter();
+  const { items: complaints, hasMore, loading, loadMore } = usePaged<Complaint>(page, "discipline/complaints");
   const [msg, setMsg] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [subject, setSubject] = React.useState("");
@@ -124,6 +127,8 @@ export function DisciplineRoom({
           </CardContent>
         </Card>
       ))}
+
+      <LoadMore hasMore={hasMore} loading={loading} onClick={loadMore} />
     </div>
   );
 }

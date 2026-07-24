@@ -1,7 +1,7 @@
 import { RequireModule } from "../auth/require-module.decorator";
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
 import { DISCIPLINE_PERMISSIONS, MODULES } from "@sms/types";
-import type { DisciplineComplaintDto, DisciplineEvidencePresignDto } from "@sms/types";
+import type { DisciplineComplaintDto, DisciplineEvidencePresignDto, IdNameDto, PageDto } from "@sms/types";
 import { z } from "zod";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -28,8 +28,22 @@ export class DisciplineController {
 
   @Get("complaints")
   @RequirePermission(DISCIPLINE_PERMISSIONS.DISCIPLINE_FILE)
-  list(@CurrentPrincipal() p: Principal): Promise<DisciplineComplaintDto[]> {
-    return this.discipline.list(p);
+  list(
+    @CurrentPrincipal() p: Principal,
+    @Query("cursor") cursor?: string,
+    @Query("limit") limit?: string,
+  ): Promise<PageDto<DisciplineComplaintDto>> {
+    return this.discipline.list(p, { cursor, limit: limit ? Number(limit) : undefined });
+  }
+
+  /** Relationship-scoped people the caller may file against, for the picker. */
+  @Get("file-targets")
+  @RequirePermission(DISCIPLINE_PERMISSIONS.DISCIPLINE_FILE)
+  fileTargets(
+    @CurrentPrincipal() p: Principal,
+    @Query("type", new ZodValidationPipe(z.enum(["STUDENT", "TEACHER"]))) type: "STUDENT" | "TEACHER",
+  ): Promise<IdNameDto[]> {
+    return this.discipline.listFileTargets(p, type);
   }
 
   @Get("complaints/:id")

@@ -63,17 +63,38 @@ d("AnalyticsService.overview grade-band aggregate (real Postgres)", () => {
     { ref: "INV-4", student: S1, total: 888_888, status: "CANCELLED" }, // excluded
   ];
 
-  const perms = ["grade.read", "fee.read"];
+  // Two extra students exist ONLY to give the demographics aggregate variety
+  // (raw-gender spellings that must merge, a blank state, a NULL DOB).
+  const S3 = randomUUID();
+  const S4 = randomUUID();
+
+  const perms = ["grade.read", "fee.read", "student.profile.read"];
   const staff = (): Principal => ({ userId: STAFF, schoolId: SA, roles: ["principal"], permissions: perms });
   const parent = (): Principal => ({ userId: PARENT, schoolId: SA, roles: ["parent"], permissions: perms });
 
   beforeAll(async () => {
     admin = new Pool({ connectionString: ADMIN_URL });
     await admin.query(`INSERT INTO school (id,name,slug,"updatedAt") VALUES ($1,'AN',$2,now())`, [SA, "an-" + SA]);
-    for (const [u, name] of [[STAFF, "Principal"], [PARENT, "Parent"], [S1, "Child One"], [S2, "Child Two"]] as const) {
+    for (const [u, name] of [[STAFF, "Principal"], [PARENT, "Parent"], [S1, "Child One"], [S2, "Child Two"], [S3, "Child Three"], [S4, "Child Four"]] as const) {
       await admin.query(
         `INSERT INTO "user" (id,"schoolId",email,name,"passwordHash","updatedAt") VALUES ($1,$2,$3,$4,'x',now())`,
         [u, SA, u + "@an", name],
+      );
+    }
+    // Student profiles for the demographics aggregate (bucketed in Postgres).
+    // Ages are chosen well INSIDE each band so a birthday can't flip the bucket.
+    const profiles = [
+      { student: S1, gender: "male", state: "Lagos", ageYears: 12 }, // 11–13
+      { student: S2, gender: "F", state: "Lagos", ageYears: 8 }, //     6–10
+      { student: S3, gender: "boy", state: "   ", ageYears: null }, //  Male + Unknown state + Unknown age
+      { student: S4, gender: "girl", state: "Oyo", ageYears: 20 }, //   Female + 19+
+    ];
+    for (const pr of profiles) {
+      const dob = pr.ageYears === null ? null : `now() - interval '${pr.ageYears} years 2 months'`;
+      await admin.query(
+        `INSERT INTO student_profile (id,"schoolId","studentId",gender,state,"dateOfBirth","updatedAt")
+         VALUES ($1,$2,$3,$4,$5,${dob === null ? "NULL" : dob},now())`,
+        [randomUUID(), SA, pr.student, pr.gender, pr.state],
       );
     }
     await admin.query(
@@ -125,7 +146,7 @@ d("AnalyticsService.overview grade-band aggregate (real Postgres)", () => {
   });
 
   afterAll(async () => {
-    for (const t of ["payment", "invoice", "grade", "submission", "assessment", "parent_child"]) {
+    for (const t of ["payment", "invoice", "grade", "submission", "assessment", "parent_child", "student_profile"]) {
       await admin.query(`DELETE FROM ${t} WHERE "schoolId" = $1`, [SA]);
     }
     await admin.query(`DELETE FROM "user" WHERE "schoolId" = $1`, [SA]);
@@ -158,5 +179,21 @@ d("AnalyticsService.overview grade-band aggregate (real Postgres)", () => {
     const out = await svc.overview(parent());
     // S1 only: INV-1 (50k billable; CANCELLED INV-4 excluded). Collected: 20k - 5k.
     expect(out.fees).toEqual({ invoicedMinor: 50_000, collectedMinor: 15_000, outstandingMinor: 35_000, invoices: 1 });
+  });
+
+  it("demographics (staff): buckets in Postgres — merges raw genders, blank state → Unknown, NULL DOB → Unknown age band", async () => {
+    const out = await svc.overview(staff());
+    expect(out.demographics?.profiled).toBe(4);
+    // "male"+"boy" → Male:2, "F"+"girl" → Female:2 (normalizeGender over grouped rows).
+    expect(out.demographics?.gender).toEqual({ Male: 2, Female: 2 });
+    // Blank state collapses to "Unknown"; the rest stand.
+    expect(out.demographics?.state).toEqual({ Lagos: 2, Oyo: 1, Unknown: 1 });
+    // age() completed-year bands: 12→11–13, 8→6–10, 20→19+, NULL→Unknown.
+    expect(out.demographics?.ageBand).toEqual({ "11–13": 1, "6–10": 1, "19+": 1, Unknown: 1 });
+  });
+
+  it("demographics: hidden without student.profile.read", async () => {
+    const out = await svc.overview({ userId: STAFF, schoolId: SA, roles: ["principal"], permissions: ["grade.read", "fee.read"] });
+    expect(out.demographics).toBeUndefined();
   });
 });
