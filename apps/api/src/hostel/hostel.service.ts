@@ -65,10 +65,14 @@ export class HostelService {
     return p.roles.some((r) => r === "school_admin" || r === "principal" || r === "super_admin");
   }
   /** Module-wide scoping: admins AND the head warden see/manage EVERY hostel.
-   *  Structural acts (create/delete hostel, reassign warden) stay wide()-only,
-   *  and money (fee runs) is maker-checker for everyone below wide(). */
+   *  junior_admin (the operational records tier) holds hostel.read and is
+   *  included here for READ visibility across all hostels — it never gains write
+   *  power, since every mutating endpoint is @RequirePermission(hostel.manage),
+   *  which junior_admin does not hold. Structural acts (create/delete hostel,
+   *  reassign warden) stay wide()-only, and money (fee runs) is maker-checker for
+   *  everyone below wide(). */
   private moduleWide(p: Principal): boolean {
-    return this.wide(p) || p.roles.includes("head_warden");
+    return this.wide(p) || p.roles.includes("head_warden") || p.roles.includes("junior_admin");
   }
   /** A warden may only act on their own hostel (404-not-403 for anything else). */
   private async assertHostelInScope(tx: TenantTx, p: Principal, hostelId: string): Promise<void> {
@@ -317,7 +321,33 @@ export class HostelService {
       const rooms = await tx.hostelRoom.findMany({ where: roomWhere, select: { id: true } });
       const where = { roomId: { in: rooms.map((r: { id: string }) => r.id) }, status: "ACTIVE" };
       const allocs = await tx.hostelAllocation.findMany({ where, orderBy: { allocatedAt: "desc" } });
-      return Promise.all(allocs.map((a: { id: string }) => this.allocationDto(tx, a.id)));
+      if (allocs.length === 0) return [];
+      // Batch room/hostel/student lookups (was 4 queries per allocation via
+      // allocationDto — hundreds for a full dorm).
+      const roomRows = await tx.hostelRoom.findMany({
+        where: { id: { in: [...new Set(allocs.map((a) => a.roomId))] } },
+        select: { id: true, roomNumber: true, rentMinor: true, hostelId: true },
+      });
+      const roomById = new Map(roomRows.map((r) => [r.id, r]));
+      const hostelRows = await tx.hostel.findMany({
+        where: { id: { in: [...new Set(roomRows.map((r) => r.hostelId))] } },
+        select: { id: true, name: true },
+      });
+      const hostelName = new Map(hostelRows.map((h) => [h.id, h.name]));
+      const students = await tx.user.findMany({
+        where: { id: { in: [...new Set(allocs.map((a) => a.studentId))] } },
+        select: { id: true, name: true },
+      });
+      const studentName = new Map(students.map((u) => [u.id, u.name]));
+      return allocs.map((a) => {
+        const room = roomById.get(a.roomId);
+        return mapAllocationDto(
+          a,
+          { roomNumber: room?.roomNumber ?? "", rentMinor: room?.rentMinor ?? 0 },
+          room ? (hostelName.get(room.hostelId) ?? "") : "",
+          studentName.get(a.studentId) ?? "",
+        );
+      });
     });
   }
 
@@ -472,18 +502,7 @@ export class HostelService {
     const room = await tx.hostelRoom.findFirstOrThrow({ where: { id: a.roomId } });
     const hostel = await tx.hostel.findFirstOrThrow({ where: { id: room.hostelId }, select: { name: true } });
     const student = await tx.user.findFirst({ where: { id: a.studentId }, select: { name: true } });
-    return {
-      id: a.id,
-      roomId: a.roomId,
-      hostelName: hostel.name,
-      roomNumber: room.roomNumber,
-      studentId: a.studentId,
-      studentName: student?.name ?? "",
-      status: a.status,
-      rentMinor: room.rentMinor,
-      allocatedAt: a.allocatedAt,
-      vacatedAt: a.vacatedAt,
-    };
+    return mapAllocationDto(a, room, hostel.name, student?.name ?? "");
   }
 
   private log(tx: TenantTx, p: Principal, action: string, entityId: string, metadata: Record<string, unknown>) {
@@ -492,4 +511,27 @@ export class HostelService {
       tx,
     );
   }
+}
+
+/** Pure allocation-row → DTO. Room/hostel/student are supplied by the caller —
+ *  fetched once for a single allocation (allocationDto) or batched across a page
+ *  (listAllocations) — so listing never fans into a per-row query storm. */
+function mapAllocationDto(
+  a: { id: string; roomId: string; studentId: string; status: string; allocatedAt: Date; vacatedAt: Date | null },
+  room: { roomNumber: string; rentMinor: number },
+  hostelName: string,
+  studentName: string,
+): HostelAllocationDto {
+  return {
+    id: a.id,
+    roomId: a.roomId,
+    hostelName,
+    roomNumber: room.roomNumber,
+    studentId: a.studentId,
+    studentName,
+    status: a.status,
+    rentMinor: room.rentMinor,
+    allocatedAt: a.allocatedAt,
+    vacatedAt: a.vacatedAt,
+  };
 }

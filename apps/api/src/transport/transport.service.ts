@@ -71,10 +71,13 @@ export class TransportService {
     return p.roles.some((r) => r === "school_admin" || r === "principal" || r === "super_admin");
   }
   /** Module-wide scoping: admins AND the head driver see/manage the whole fleet.
-   *  Structural acts (delete vehicle) stay wide()-only; fee runs are
-   *  maker-checker for everyone below wide(). */
+   *  junior_admin (operational records tier) holds transport.read and is included
+   *  here for READ visibility across the fleet — it never gains write power, since
+   *  every mutating endpoint is @RequirePermission(transport.manage), which
+   *  junior_admin does not hold. Structural acts (delete vehicle) stay
+   *  wide()-only; fee runs are maker-checker for everyone below wide(). */
   private moduleWide(p: Principal): boolean {
-    return this.wide(p) || p.roles.includes("head_driver");
+    return this.wide(p) || p.roles.includes("head_driver") || p.roles.includes("junior_admin");
   }
 
   // --- vehicles -------------------------------------------------------------
@@ -346,7 +349,33 @@ export class TransportService {
       const scope = this.moduleWide(p) ? {} : { route: { vehicle: { driverId: p.userId } } };
       const where = { ...(routeId ? { routeId } : {}), status: "ACTIVE", ...scope };
       const rows = await tx.transportAssignment.findMany({ where, orderBy: { createdAt: "desc" } });
-      return Promise.all(rows.map((a: { id: string }) => this.assignmentDto(tx, a.id)));
+      if (rows.length === 0) return [];
+      // Batch route/stop/passenger lookups (was up to 6 queries per assignment
+      // via assignmentDto+fareFor — hundreds for a full route). Route + stop rows
+      // carry the fare fields, so fare is computed in-memory by the mapper.
+      const routes = await tx.transportRoute.findMany({
+        where: { id: { in: [...new Set(rows.map((r) => r.routeId))] } },
+        select: { id: true, name: true, fareMode: true, flatFareMinor: true },
+      });
+      const routeById = new Map(routes.map((r) => [r.id, r]));
+      const stopIds = [...new Set(rows.map((r) => r.stopId).filter((s): s is string => !!s))];
+      const stops = stopIds.length
+        ? await tx.routeStop.findMany({ where: { id: { in: stopIds } }, select: { id: true, name: true, fareMinor: true } })
+        : [];
+      const stopById = new Map(stops.map((s) => [s.id, s]));
+      const passengers = await tx.user.findMany({
+        where: { id: { in: [...new Set(rows.map((r) => r.passengerId))] } },
+        select: { id: true, name: true },
+      });
+      const nameById = new Map(passengers.map((u) => [u.id, u.name]));
+      return rows.map((a) =>
+        mapAssignmentDto(
+          a,
+          routeById.get(a.routeId) ?? null,
+          a.stopId ? (stopById.get(a.stopId) ?? null) : null,
+          nameById.get(a.passengerId) ?? "",
+        ),
+      );
     });
   }
 
@@ -486,22 +515,10 @@ export class TransportService {
 
   private async assignmentDto(tx: TenantTx, id: string): Promise<TransportAssignmentDto> {
     const a = await tx.transportAssignment.findFirstOrThrow({ where: { id } });
-    const route = await tx.transportRoute.findFirstOrThrow({ where: { id: a.routeId }, select: { name: true } });
-    const stop = a.stopId ? await tx.routeStop.findFirst({ where: { id: a.stopId }, select: { name: true } }) : null;
+    const route = await tx.transportRoute.findFirst({ where: { id: a.routeId }, select: { name: true, fareMode: true, flatFareMinor: true } });
+    const stop = a.stopId ? await tx.routeStop.findFirst({ where: { id: a.stopId }, select: { name: true, fareMinor: true } }) : null;
     const passenger = await tx.user.findFirst({ where: { id: a.passengerId }, select: { name: true } });
-    const fareMinor = await this.fareFor(tx, a.routeId, a.stopId);
-    return {
-      id: a.id,
-      routeId: a.routeId,
-      routeName: route.name,
-      stopId: a.stopId,
-      stopName: stop?.name ?? null,
-      passengerId: a.passengerId,
-      passengerName: passenger?.name ?? "",
-      passengerType: a.passengerType,
-      status: a.status,
-      fareMinor,
-    };
+    return mapAssignmentDto(a, route, stop, passenger?.name ?? "");
   }
 
   private log(tx: TenantTx, p: Principal, action: string, entityId: string, metadata: Record<string, unknown>) {
@@ -510,4 +527,29 @@ export class TransportService {
       tx,
     );
   }
+}
+
+/** Pure assignment-row → DTO. Route/stop rows carry the fare fields, so the
+ *  passenger's fare (flat route fare, or their stop's fare) is computed here with
+ *  no extra query — supporting both the single (assignmentDto) and batched
+ *  (listAssignments) paths without a per-row fan-out. */
+function mapAssignmentDto(
+  a: { id: string; routeId: string; stopId: string | null; passengerId: string; passengerType: string; status: string },
+  route: { name: string; fareMode: string; flatFareMinor: number } | null,
+  stop: { name: string; fareMinor: number } | null,
+  passengerName: string,
+): TransportAssignmentDto {
+  const fareMinor = !route ? 0 : route.fareMode === "FLAT" ? route.flatFareMinor : (stop?.fareMinor ?? 0);
+  return {
+    id: a.id,
+    routeId: a.routeId,
+    routeName: route?.name ?? "",
+    stopId: a.stopId,
+    stopName: stop?.name ?? null,
+    passengerId: a.passengerId,
+    passengerName,
+    passengerType: a.passengerType,
+    status: a.status,
+    fareMinor,
+  };
 }

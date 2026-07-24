@@ -72,4 +72,54 @@ describe("TransportService", () => {
     expect(run.totalBilledMinor).toBe(30000); // flat fare
     expect(calls.lineCreate).toBe(1);
   });
+
+  it("listAssignments batches route/stop/passenger lookups and computes fare in-memory (no N+1)", async () => {
+    const rows = [
+      { id: "a1", routeId: "r1", stopId: "s1", passengerId: "u1", passengerType: "STUDENT", status: "ACTIVE" },
+      { id: "a2", routeId: "r2", stopId: null, passengerId: "u2", passengerType: "STUDENT", status: "ACTIVE" },
+    ];
+    const routeFindMany = jest.fn().mockResolvedValue([
+      { id: "r1", name: "North Line", fareMode: "PER_STOP", flatFareMinor: 0 },
+      { id: "r2", name: "Flat Line", fareMode: "FLAT", flatFareMinor: 7000 },
+    ]);
+    const stopFindMany = jest.fn().mockResolvedValue([{ id: "s1", name: "Stop A", fareMinor: 3000 }]);
+    const userFindMany = jest.fn().mockResolvedValue([
+      { id: "u1", name: "Ada" },
+      { id: "u2", name: "Bola" },
+    ]);
+    const assignmentFindFirstOrThrow = jest.fn(); // must NOT be called
+    const tx = {
+      transportAssignment: { findMany: jest.fn().mockResolvedValue(rows), findFirstOrThrow: assignmentFindFirstOrThrow },
+      transportRoute: { findMany: routeFindMany },
+      routeStop: { findMany: stopFindMany },
+      user: { findMany: userFindMany },
+    } as unknown as TenantTx;
+
+    const dtos = await svc(tx).listAssignments(staff);
+    expect(dtos.map((d) => d.routeName)).toEqual(["North Line", "Flat Line"]);
+    expect(dtos.map((d) => d.passengerName)).toEqual(["Ada", "Bola"]);
+    // Fare: per-stop route uses the stop fare (3000); flat route uses its flat fare (7000).
+    expect(dtos.map((d) => d.fareMinor)).toEqual([3000, 7000]);
+    expect(routeFindMany).toHaveBeenCalledTimes(1);
+    expect(userFindMany).toHaveBeenCalledTimes(1);
+    expect(assignmentFindFirstOrThrow).not.toHaveBeenCalled();
+  });
+
+  it("junior_admin (transport.read) gets fleet-wide READ scope but no structural write power", async () => {
+    const ja: Principal = { schoolId: "A", userId: "ja", roles: ["junior_admin"], permissions: ["transport.read"] };
+    const assignFindMany = jest.fn().mockResolvedValue([]);
+    const tx = {
+      transportAssignment: { findMany: assignFindMany },
+      transportRoute: { findMany: jest.fn() },
+      routeStop: { findMany: jest.fn() },
+      user: { findMany: jest.fn() },
+    } as unknown as TenantTx;
+    await svc(tx).listAssignments(ja);
+    // Fleet-wide read: no driver/route/vehicle filter, just ACTIVE.
+    const where = assignFindMany.mock.calls[0][0].where as Record<string, unknown>;
+    expect(where.route).toBeUndefined();
+    expect(where.status).toBe("ACTIVE");
+    // ...but a structural act (wide()-only) is refused at the service.
+    await expect(svc(tx).deleteVehicle(ja, "v1")).rejects.toThrow(/administrator/i);
+  });
 });

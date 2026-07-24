@@ -83,4 +83,57 @@ describe("HostelService", () => {
     expect(calls.invoiceCreate).toBe(0); // reused, not created
     expect(calls.lineCreate).toBe(1); // line still added
   });
+
+  it("listAllocations batches room/hostel/student lookups (no per-allocation N+1)", async () => {
+    const allocs = [
+      { id: "a1", roomId: "r1", studentId: "u1", status: "ACTIVE", allocatedAt: new Date(), vacatedAt: null },
+      { id: "a2", roomId: "r2", studentId: "u2", status: "ACTIVE", allocatedAt: new Date(), vacatedAt: null },
+      { id: "a3", roomId: "r1", studentId: "u3", status: "ACTIVE", allocatedAt: new Date(), vacatedAt: null },
+    ];
+    const roomFindMany = jest
+      .fn()
+      .mockResolvedValueOnce([{ id: "r1" }, { id: "r2" }]) // roomWhere scope pass
+      .mockResolvedValueOnce([
+        { id: "r1", roomNumber: "101", rentMinor: 5000, hostelId: "h1" },
+        { id: "r2", roomNumber: "102", rentMinor: 6000, hostelId: "h1" },
+      ]);
+    const hostelFindMany = jest.fn().mockResolvedValue([{ id: "h1", name: "Blue House" }]);
+    const userFindMany = jest.fn().mockResolvedValue([
+      { id: "u1", name: "Ada" },
+      { id: "u2", name: "Bola" },
+      { id: "u3", name: "Chidi" },
+    ]);
+    const allocFindFirstOrThrow = jest.fn(); // must NOT be called (that was the N+1)
+    const tx = {
+      hostelRoom: { findMany: roomFindMany },
+      hostel: { findMany: hostelFindMany },
+      hostelAllocation: { findMany: jest.fn().mockResolvedValue(allocs), findFirstOrThrow: allocFindFirstOrThrow },
+      user: { findMany: userFindMany },
+    } as unknown as TenantTx;
+
+    const dtos = await svc(tx).listAllocations(staff);
+    expect(dtos.map((d) => d.studentName)).toEqual(["Ada", "Bola", "Chidi"]);
+    expect(dtos.map((d) => d.roomNumber)).toEqual(["101", "102", "101"]);
+    expect(dtos.map((d) => d.hostelName)).toEqual(["Blue House", "Blue House", "Blue House"]);
+    expect(dtos.map((d) => d.rentMinor)).toEqual([5000, 6000, 5000]);
+    expect(hostelFindMany).toHaveBeenCalledTimes(1);
+    expect(userFindMany).toHaveBeenCalledTimes(1);
+    expect(allocFindFirstOrThrow).not.toHaveBeenCalled();
+  });
+
+  it("junior_admin (hostel.read) gets module-wide READ scope but no structural write power", async () => {
+    const ja: Principal = { schoolId: "A", userId: "ja", roles: ["junior_admin"], permissions: ["hostel.read"] };
+    const roomFindMany = jest.fn().mockResolvedValueOnce([]); // scope query -> no rooms -> empty page
+    const tx = {
+      hostelRoom: { findMany: roomFindMany },
+      hostelAllocation: { findMany: jest.fn().mockResolvedValue([]) },
+      hostel: { findMany: jest.fn() },
+      user: { findMany: jest.fn() },
+    } as unknown as TenantTx;
+    await svc(tx).listAllocations(ja);
+    // Module-wide read: the room scope is {} (ALL hostels), not warden-confined.
+    expect(roomFindMany).toHaveBeenCalledWith(expect.objectContaining({ where: {} }));
+    // ...but a structural act (wide()-only) is refused at the service.
+    await expect(svc(tx).deleteHostel(ja, "h1")).rejects.toThrow(/administrator/i);
+  });
 });
