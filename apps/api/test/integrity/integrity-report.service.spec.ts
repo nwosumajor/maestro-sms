@@ -10,10 +10,11 @@ import { IntegrityReportService } from "../../src/integrity/integrity-report.ser
 import type { Principal, TenantTx } from "../../src/integrity/integrity.foundation";
 import { INTEGRITY_PERMISSIONS } from "@sms/types";
 
-function makeTx(submission: unknown, assessment: unknown) {
+function makeTx(submission: unknown, assessment: unknown, classTeacher: unknown = null) {
   return {
     submission: { findFirst: jest.fn().mockResolvedValue(submission) },
     assessment: { findFirst: jest.fn().mockResolvedValue(assessment) },
+    classTeacher: { findFirst: jest.fn().mockResolvedValue(classTeacher) },
     integritySignal: { findMany: jest.fn().mockResolvedValue([]) },
   } as unknown as TenantTx;
 }
@@ -55,6 +56,24 @@ describe("IntegrityReportService", () => {
     const tx = makeTx(SUB, { id: "a-1", title: "T", createdById: "teacher-1" });
     const { service } = makeService(tx);
     await expect(service.getSubmissionReport(teacher("teacher-2"), "sub-1")).rejects.toThrow(/not found/i);
+  });
+
+  it("allows a co-teacher of the assessment's class (not the creator) to read the report", async () => {
+    // teacher-2 didn't CREATE a-1 but teaches its class — matches the file rule.
+    const tx = makeTx(
+      SUB,
+      { id: "a-1", title: "T", createdById: "teacher-1", classId: "c-1" },
+      { id: "ct-1" }, // teacher-2 teaches class c-1
+    );
+    const { service } = makeService(tx);
+    const report = await service.getSubmissionReport(teacher("teacher-2"), "sub-1");
+    expect(report.submissionId).toBe("sub-1");
+  });
+
+  it("still 404s a teacher who neither created the assessment NOR teaches its class", async () => {
+    const tx = makeTx(SUB, { id: "a-1", title: "T", createdById: "teacher-1", classId: "c-1" }, null);
+    const { service } = makeService(tx);
+    await expect(service.getSubmissionReport(teacher("stranger"), "sub-1")).rejects.toThrow(/not found/i);
   });
 
   it("allows a school_admin to read any submission in the tenant", async () => {
