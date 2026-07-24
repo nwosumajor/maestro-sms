@@ -31,7 +31,15 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 
-const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal", "super_admin"]);
+// Staff who may reach ANY student in their tenant (row-scope short-circuit).
+// junior_admin is the operational records tier (CLAUDE.md) and holds
+// student.profile.write / student.contact.write — it belongs here so those
+// grants aren't dead (it has no class/parent relationship to fall back on).
+// Medical stays protected regardless: junior_admin lacks student.medical.*, so
+// the PermissionGuard blocks the medical endpoints before this check runs.
+// Matches SearchService.ROSTER_WIDE, which already treats junior_admin as
+// whole-school.
+const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal", "super_admin", "junior_admin"]);
 
 export interface ProfileInput {
   admissionNumber?: string | null;
@@ -193,7 +201,9 @@ export class SisService {
           name: input.name,
           relationship: input.relationship,
           phone: input.phone,
-          email: input.email ?? undefined,
+          // Distinguish "absent" (leave as-is) from an explicit null (clear it):
+          // `?? undefined` would swallow a null and make the email un-clearable.
+          email: input.email === undefined ? undefined : input.email,
           priority: input.priority,
         },
       });

@@ -88,6 +88,29 @@ describe("SisService relationship scoping", () => {
     await expect(service.getProfile(principal(["parent"]), "not-my-kid")).rejects.toThrow(/not found/i);
   });
 
+  it("junior_admin (records tier) can read any student's profile — matches its student.profile.write grant", async () => {
+    const { service } = makeService({ profile: { id: "prof-1" } });
+    // No parent/teacher relationship supplied: only the school-wide short-circuit
+    // can let junior_admin through. Regression for the dead-grant conflict where
+    // junior_admin held student.profile.* but was 404'd on every student.
+    await expect(service.getProfile(principal(["junior_admin"]), "stu-9")).resolves.toEqual({ id: "prof-1" });
+  });
+
+  it("junior_admin can add an emergency contact for any student", async () => {
+    const tx = {
+      studentProfile: { findFirst: jest.fn().mockResolvedValue({ id: "prof-1" }) },
+      emergencyContact: { create: jest.fn().mockResolvedValue({ id: "ec-1" }) },
+      parentChild: { findFirst: jest.fn().mockResolvedValue(null) },
+      classTeacher: { findMany: jest.fn().mockResolvedValue([]) },
+      enrollment: { findFirst: jest.fn().mockResolvedValue(null) },
+    } as unknown as TenantTx;
+    const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
+    const service = new SisService(db as never, { record: jest.fn() } as never);
+    await expect(
+      service.addContact(principal(["junior_admin"]), "stu-9", { name: "Aunt", relationship: "aunt", phone: "080" }),
+    ).resolves.toEqual({ id: "ec-1" });
+  });
+
   it("logs the medical READ with the actor (Golden Rule #5)", async () => {
     const { service, audit } = makeService({ profile: { id: "prof-1" }, medical: { id: "med-1" } });
     await service.getMedical(principal(["school_admin"], "admin-1"), "stu-9");
