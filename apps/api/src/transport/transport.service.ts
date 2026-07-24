@@ -38,6 +38,11 @@ import { NotificationService } from "../notifications/notification.service";
 
 type Json = Record<string, string>;
 
+/** How long a GPS breadcrumb is kept. A live feed is high-volume (a bus pinging
+ *  every 10s is ~3k rows/day/vehicle), and only the recent trail has value, so
+ *  the stream is pruned on write and can never grow without bound. */
+const LOCATION_RETENTION_DAYS = 7;
+
 @Injectable()
 export class TransportService {
   private readonly logger = new Logger("Transport");
@@ -596,6 +601,16 @@ export class TransportService {
           headingDeg: input.headingDeg ?? null,
         },
       });
+      // Bound the stream on write: drop this vehicle's pings older than the
+      // window. Index-backed on (schoolId, vehicleId, recordedAt), so it is a
+      // cheap constant cost per ping and the table stays a fixed size instead of
+      // growing to millions of rows and dragging the DB down.
+      await tx.vehicleLocation.deleteMany({
+        where: {
+          vehicleId: input.vehicleId,
+          recordedAt: { lt: new Date(Date.now() - LOCATION_RETENTION_DAYS * 86_400_000) },
+        },
+      });
       // High-volume stream — deliberately NOT audited per-ping.
       return { ok: true as const };
     });
@@ -608,12 +623,30 @@ export class TransportService {
         where: this.moduleWide(p) ? {} : { driverId: p.userId },
         select: { id: true, name: true },
       });
-      const out: VehicleLocationDto[] = [];
-      for (const v of vehicles) {
-        const loc = await tx.vehicleLocation.findFirst({ where: { vehicleId: v.id }, orderBy: { recordedAt: "desc" } });
-        if (loc) out.push({ vehicleId: v.id, vehicleName: v.name, lat: loc.lat, lng: loc.lng, speedKph: loc.speedKph, headingDeg: loc.headingDeg, recordedAt: loc.recordedAt });
-      }
-      return out;
+      if (vehicles.length === 0) return [];
+      // ONE query for the newest ping per vehicle. The fleet map polls this every
+      // few seconds from every open console, so a findFirst-per-vehicle would
+      // multiply into constant load; DISTINCT ON rides the
+      // (schoolId, vehicleId, recordedAt) index. RLS still scopes the raw read.
+      const ids = vehicles.map((v) => v.id);
+      const rows = await tx.$queryRaw<
+        Array<{ vehicleId: string; lat: number; lng: number; speedKph: number | null; headingDeg: number | null; recordedAt: Date }>
+      >`
+        SELECT DISTINCT ON ("vehicleId") "vehicleId", lat, lng, "speedKph", "headingDeg", "recordedAt"
+        FROM "vehicle_location"
+        WHERE "vehicleId" = ANY(${ids}::uuid[])
+        ORDER BY "vehicleId", "recordedAt" DESC
+      `;
+      const nameById = new Map(vehicles.map((v) => [v.id, v.name]));
+      return rows.map((r) => ({
+        vehicleId: r.vehicleId,
+        vehicleName: nameById.get(r.vehicleId) ?? "",
+        lat: r.lat,
+        lng: r.lng,
+        speedKph: r.speedKph,
+        headingDeg: r.headingDeg,
+        recordedAt: r.recordedAt,
+      }));
     });
   }
 

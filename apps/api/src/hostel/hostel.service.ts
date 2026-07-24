@@ -450,16 +450,26 @@ export class HostelService {
           (a) => a.studentId,
         ),
       );
-      let marked = 0;
-      for (const rec of records) {
-        if (!boarders.has(rec.studentId)) continue; // only current boarders
-        await tx.hostelAttendance.upsert({
-          where: { hostelId_studentId_date: { hostelId, studentId: rec.studentId, date: day } },
-          update: { status: rec.status, note: rec.note ?? null, takenById: p.userId },
-          create: { schoolId: p.schoolId, hostelId, studentId: rec.studentId, date: day, status: rec.status, note: rec.note ?? null, takenById: p.userId },
+      // Roll-call for a date is a FULL replacement, so write it as two set-based
+      // statements instead of one upsert per boarder — a large house (the API
+      // accepts up to 1000) would otherwise fire 1000 round-trips inside one
+      // interactive transaction and risk its time cap.
+      const wanted = records.filter((rec) => boarders.has(rec.studentId)); // only current boarders
+      await tx.hostelAttendance.deleteMany({ where: { hostelId, date: day } });
+      if (wanted.length > 0) {
+        await tx.hostelAttendance.createMany({
+          data: wanted.map((rec) => ({
+            schoolId: p.schoolId,
+            hostelId,
+            studentId: rec.studentId,
+            date: day,
+            status: rec.status,
+            note: rec.note ?? null,
+            takenById: p.userId,
+          })),
         });
-        marked += 1;
       }
+      const marked = wanted.length;
       await this.log(tx, p, "hostel.rollcall", hostelId, { date, marked });
       return { marked };
     });
