@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { TransportManager } from "@/components/transport/TransportManager";
+import { TransportOps } from "@/components/transport/TransportOps";
 import { Kpi } from "@/components/charts/charts";
 import { PageHeader } from "@/components/shell/PageHeader";
 
@@ -48,6 +49,13 @@ export default async function TransportPage() {
           assignments={assignments ?? []}
           students={students ?? []}
           staff={staff ?? []}
+          canManage={canManage}
+        />
+
+        <TransportOps
+          routes={routes ?? []}
+          vehicles={vehicles ?? []}
+          assignments={assignments ?? []}
           canManage={canManage}
         />
       </div>

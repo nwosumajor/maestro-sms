@@ -171,11 +171,18 @@ d("RLS cross-tenant isolation", () => {
   const hostelA = randomUUID();
   const hostelRoomA = randomUUID();
   const hostelAllocationA = randomUUID();
+  const hostelAttendanceA = randomUUID();
+  const hostelExeatA = randomUUID();
+  const hostelIncidentA = randomUUID();
   // Transport
   const vehicleA = randomUUID();
   const transportRouteA = randomUUID();
   const routeStopA = randomUUID();
   const transportAssignmentA = randomUUID();
+  const transportTripA = randomUUID();
+  const transportBoardingA = randomUUID();
+  const vehicleMaintenanceA = randomUUID();
+  const vehicleLocationA = randomUUID();
   // Library
   const libraryBookA = randomUUID();
   const bookLoanA = randomUUID();
@@ -726,6 +733,37 @@ d("RLS cross-tenant isolation", () => {
       `INSERT INTO transport_assignment (id,"schoolId","routeId","stopId","passengerId","passengerType","updatedAt") VALUES ($1,$2,$3,$4,$5,'STUDENT',now())`,
       [transportAssignmentA, A, transportRouteA, routeStopA, userA],
     );
+    // Hostel expansion: roll-call attendance, exeat, incident (school A).
+    await a.query(
+      `INSERT INTO hostel_attendance (id,"schoolId","hostelId","studentId",date,"takenById","updatedAt") VALUES ($1,$2,$3,$4,now(),$5,now())`,
+      [hostelAttendanceA, A, hostelA, userA, userA],
+    );
+    await a.query(
+      `INSERT INTO hostel_exeat (id,"schoolId","hostelId","studentId",reason,"departAt","expectedReturnAt","requestedById","updatedAt")
+       VALUES ($1,$2,$3,$4,'Weekend',now(),now() + interval '2 days',$5,now())`,
+      [hostelExeatA, A, hostelA, userA, userA],
+    );
+    await a.query(
+      `INSERT INTO hostel_incident (id,"schoolId","hostelId",title,"reportedById","updatedAt") VALUES ($1,$2,$3,'Broken bed',$4,now())`,
+      [hostelIncidentA, A, hostelA, userA],
+    );
+    // Transport expansion: trip, boarding, maintenance, location (school A).
+    await a.query(
+      `INSERT INTO transport_trip (id,"schoolId","routeId","departTime","updatedAt") VALUES ($1,$2,$3,'07:30',now())`,
+      [transportTripA, A, transportRouteA],
+    );
+    await a.query(
+      `INSERT INTO transport_boarding (id,"schoolId","routeId","passengerId",date,"recordedById") VALUES ($1,$2,$3,$4,now(),$5)`,
+      [transportBoardingA, A, transportRouteA, userA, userA],
+    );
+    await a.query(
+      `INSERT INTO vehicle_maintenance (id,"schoolId","vehicleId",type,date,"recordedById") VALUES ($1,$2,$3,'SERVICE',now(),$4)`,
+      [vehicleMaintenanceA, A, vehicleA, userA],
+    );
+    await a.query(
+      `INSERT INTO vehicle_location (id,"schoolId","vehicleId",lat,lng) VALUES ($1,$2,$3,6.5,3.4)`,
+      [vehicleLocationA, A, vehicleA],
+    );
     // Library: book + loan (borrower userA).
     await a.query(
       `INSERT INTO library_book (id,"schoolId",title,barcode,"totalCopies","availableCopies","updatedAt") VALUES ($1,$2,'Book A','BC-A',3,2,now())`,
@@ -978,11 +1016,18 @@ d("RLS cross-tenant isolation", () => {
     for (const t of [
       "audit_log",
       "school_branding",
-      // Hostel — allocation before room before hostel (FK order).
+      // Hostel — child rows before room before hostel (FK order).
+      "hostel_attendance",
+      "hostel_exeat",
+      "hostel_incident",
       "hostel_allocation",
       "hostel_room",
       "hostel",
-      // Transport — assignment before stop/route, stop before route, route before vehicle.
+      // Transport — child rows before assignment/stop/route/vehicle.
+      "transport_boarding",
+      "transport_trip",
+      "vehicle_maintenance",
+      "vehicle_location",
       "transport_assignment",
       "route_stop",
       "transport_route",
@@ -1329,10 +1374,17 @@ d("RLS cross-tenant isolation", () => {
     ["hostel", hostelA],
     ["hostel_room", hostelRoomA],
     ["hostel_allocation", hostelAllocationA],
+    ["hostel_attendance", hostelAttendanceA],
+    ["hostel_exeat", hostelExeatA],
+    ["hostel_incident", hostelIncidentA],
     ["vehicle", vehicleA],
     ["transport_route", transportRouteA],
     ["route_stop", routeStopA],
     ["transport_assignment", transportAssignmentA],
+    ["transport_trip", transportTripA],
+    ["transport_boarding", transportBoardingA],
+    ["vehicle_maintenance", vehicleMaintenanceA],
+    ["vehicle_location", vehicleLocationA],
     ["library_book", libraryBookA],
     ["book_loan", bookLoanA],
     ["task", taskA],

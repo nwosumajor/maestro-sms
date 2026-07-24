@@ -45,7 +45,8 @@ function svc(tx: TenantTx) {
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const workflow = { createRequest: jest.fn().mockResolvedValue({ id: "wf1" }), submit: jest.fn().mockResolvedValue({}) };
   const hooks = { onFinalized: jest.fn() };
-  return new HostelService(db as never, audit as never, workflow as never, hooks as never);
+  const notifications = { enqueue: jest.fn().mockResolvedValue({ id: "n-1" }) };
+  return new HostelService(db as never, audit as never, workflow as never, hooks as never, notifications as never);
 }
 
 describe("HostelService", () => {
@@ -119,6 +120,42 @@ describe("HostelService", () => {
     expect(hostelFindMany).toHaveBeenCalledTimes(1);
     expect(userFindMany).toHaveBeenCalledTimes(1);
     expect(allocFindFirstOrThrow).not.toHaveBeenCalled();
+  });
+
+  it("a BOYS hostel REJECTS a female student (gender match)", async () => {
+    const tx = {
+      hostelRoom: { findFirst: jest.fn().mockResolvedValue({ id: "r1", hostelId: "hb", capacity: 2 }) },
+      hostel: { findFirst: jest.fn().mockResolvedValue({ type: "BOYS", name: "Boys House" }) },
+      user: { findFirst: jest.fn().mockResolvedValue({ id: "girl" }) },
+      studentProfile: { findFirst: jest.fn().mockResolvedValue({ gender: "F" }) },
+      hostelAllocation: { count: jest.fn(), findFirst: jest.fn() },
+      $executeRaw: jest.fn(),
+    } as unknown as TenantTx;
+    await expect(svc(tx).allocate(staff, "r1", "girl")).rejects.toThrow(/boys hostel/i);
+  });
+
+  it("a BOYS hostel ADMITS a male student", async () => {
+    const tx = {
+      hostelRoom: { findFirst: jest.fn().mockResolvedValue({ id: "r1", hostelId: "hb", capacity: 2 }), findFirstOrThrow: jest.fn().mockResolvedValue({ id: "r1", hostelId: "hb", roomNumber: "1", rentMinor: 0 }) },
+      hostel: { findFirst: jest.fn().mockResolvedValue({ type: "BOYS", name: "Boys House" }), findFirstOrThrow: jest.fn().mockResolvedValue({ name: "Boys House" }) },
+      user: { findFirst: jest.fn().mockResolvedValue({ id: "boy", name: "Boy" }) },
+      studentProfile: { findFirst: jest.fn().mockResolvedValue({ gender: "M" }) },
+      hostelAllocation: { count: jest.fn().mockResolvedValue(0), findFirst: jest.fn().mockResolvedValue(null), create: jest.fn().mockResolvedValue({ id: "a1" }), findFirstOrThrow: jest.fn().mockResolvedValue({ id: "a1", roomId: "r1", studentId: "boy", status: "ACTIVE", allocatedAt: new Date(), vacatedAt: null }) },
+      $executeRaw: jest.fn().mockResolvedValue(0),
+    } as unknown as TenantTx;
+    const dto = await svc(tx).allocate(staff, "r1", "boy");
+    expect(dto.id).toBe("a1");
+  });
+
+  it("exeat is maker-checker: the requester cannot decide their own request", async () => {
+    const tx = {
+      hostelExeat: {
+        findFirst: jest.fn().mockResolvedValue({ id: "e1", hostelId: "h1", studentId: "stu1", status: "REQUESTED", requestedById: "warden-1" }),
+      },
+      hostel: { findFirst: jest.fn().mockResolvedValue({ wardenId: null }) },
+    } as unknown as TenantTx;
+    const warden: Principal = { schoolId: "A", userId: "warden-1", roles: ["school_admin"], permissions: ["hostel.manage"] };
+    await expect(svc(tx).decideExeat(warden, "e1", true)).rejects.toThrow(/different person/i);
   });
 
   it("junior_admin (hostel.read) gets module-wide READ scope but no structural write power", async () => {

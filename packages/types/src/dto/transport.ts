@@ -67,3 +67,63 @@ export interface TransportSummaryDto {
   seats: number;      // total vehicle capacity
   seatsUsed: number;
 }
+
+export const TRIP_DIRECTIONS = ["AM_PICKUP", "PM_DROPOFF"] as const;
+export type TripDirection = (typeof TRIP_DIRECTIONS)[number];
+export const WEEKDAYS_SHORT = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"] as const;
+
+export interface TransportTripDto {
+  id: string;
+  routeId: string;
+  routeName: string;
+  direction: string;
+  name: string | null;
+  departTime: string;
+  daysOfWeek: string[];
+  status: string;
+}
+
+export const BOARDING_DIRECTIONS = ["PICKUP", "DROPOFF"] as const;
+export type BoardingDirection = (typeof BOARDING_DIRECTIONS)[number];
+
+export interface TransportBoardingDto {
+  id: string;
+  tripId: string | null;
+  routeId: string;
+  passengerId: string;
+  passengerName: string;
+  date: Date;
+  direction: string;
+  status: string;
+  method: string;
+  recordedById: string;
+  recordedAt: Date;
+}
+
+export const MAINTENANCE_TYPES = ["SERVICE", "REPAIR", "FUEL", "INSPECTION", "INSURANCE"] as const;
+export type MaintenanceType = (typeof MAINTENANCE_TYPES)[number];
+
+export interface VehicleMaintenanceDto {
+  id: string;
+  vehicleId: string;
+  vehicleName: string;
+  type: string;
+  date: Date;
+  costMinor: number;
+  odometerKm: number | null;
+  litres: number | null;
+  vendor: string | null;
+  notes: string | null;
+  recordedById: string;
+  createdAt: Date;
+}
+
+export interface VehicleLocationDto {
+  vehicleId: string;
+  vehicleName: string;
+  lat: number;
+  lng: number;
+  speedKph: number | null;
+  headingDeg: number | null;
+  recordedAt: Date;
+}

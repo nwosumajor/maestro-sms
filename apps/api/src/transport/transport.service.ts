@@ -14,10 +14,14 @@ import { Prisma } from "@sms/db";
 import type {
   RouteStopDto,
   TransportAssignmentDto,
+  TransportBoardingDto,
   TransportFeeRunDto,
   TransportRouteDto,
   TransportSummaryDto,
+  TransportTripDto,
   VehicleDto,
+  VehicleLocationDto,
+  VehicleMaintenanceDto,
 } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -379,6 +383,229 @@ export class TransportService {
     });
   }
 
+  // --- driver relationship scoping (route / vehicle) ------------------------
+
+  /** A driver may only touch their OWN vehicle's routes (404 otherwise). */
+  private async assertRouteInScope(tx: TenantTx, p: Principal, routeId: string): Promise<{ vehicleId: string | null }> {
+    const route = await tx.transportRoute.findFirst({ where: { id: routeId }, select: { id: true, vehicleId: true } });
+    if (!route) throw new NotFoundException("Route not found");
+    if (this.moduleWide(p)) return { vehicleId: route.vehicleId };
+    const owns = route.vehicleId
+      ? await tx.vehicle.findFirst({ where: { id: route.vehicleId, driverId: p.userId }, select: { id: true } })
+      : null;
+    if (!owns) throw new NotFoundException("Route not found");
+    return { vehicleId: route.vehicleId };
+  }
+
+  private async assertVehicleInScope(tx: TenantTx, p: Principal, vehicleId: string): Promise<void> {
+    const v = await tx.vehicle.findFirst({ where: { id: vehicleId }, select: { driverId: true } });
+    if (!v) throw new NotFoundException("Vehicle not found");
+    if (this.moduleWide(p)) return;
+    if (v.driverId !== p.userId) throw new NotFoundException("Vehicle not found");
+  }
+
+  // --- trips (AM pickup / PM drop-off schedules) ----------------------------
+
+  async createTrip(
+    p: Principal,
+    input: { routeId: string; direction: string; name?: string | null; departTime: string; daysOfWeek?: string[] },
+  ): Promise<TransportTripDto> {
+    if (!/^\d{2}:\d{2}$/.test(input.departTime)) throw new BadRequestException("departTime must be HH:MM");
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      await this.assertRouteInScope(tx, p, input.routeId);
+      const row = await tx.transportTrip.create({
+        data: {
+          schoolId: p.schoolId,
+          routeId: input.routeId,
+          direction: input.direction,
+          name: input.name?.trim() || null,
+          departTime: input.departTime,
+          daysOfWeek: (input.daysOfWeek ?? ["MON", "TUE", "WED", "THU", "FRI"]) as unknown as Prisma.InputJsonValue,
+          status: "ACTIVE",
+        },
+      });
+      await this.log(tx, p, "transport.trip.create", row.id, { routeId: input.routeId, direction: input.direction });
+      return this.tripDto(tx, row.id);
+    });
+  }
+
+  async updateTrip(
+    p: Principal,
+    id: string,
+    input: { name?: string | null; departTime?: string; daysOfWeek?: string[]; status?: string },
+  ): Promise<TransportTripDto> {
+    if (input.departTime && !/^\d{2}:\d{2}$/.test(input.departTime)) throw new BadRequestException("departTime must be HH:MM");
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const row = await tx.transportTrip.findFirst({ where: { id } });
+      if (!row) throw new NotFoundException("Trip not found");
+      await this.assertRouteInScope(tx, p, row.routeId);
+      const updated = await tx.transportTrip.update({
+        where: { id },
+        data: {
+          ...(input.name !== undefined ? { name: input.name?.trim() || null } : {}),
+          ...(input.departTime !== undefined ? { departTime: input.departTime } : {}),
+          ...(input.daysOfWeek !== undefined ? { daysOfWeek: input.daysOfWeek as unknown as Prisma.InputJsonValue } : {}),
+          ...(input.status !== undefined ? { status: input.status } : {}),
+        },
+      });
+      await this.log(tx, p, "transport.trip.update", id, {});
+      return this.tripDto(tx, updated.id);
+    });
+  }
+
+  async listTrips(p: Principal, routeId?: string): Promise<TransportTripDto[]> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      if (routeId) await this.assertRouteInScope(tx, p, routeId);
+      const where: Record<string, unknown> = {};
+      if (routeId) where.routeId = routeId;
+      else if (!this.moduleWide(p)) {
+        const mine = await tx.transportRoute.findMany({ where: { vehicle: { driverId: p.userId } }, select: { id: true } });
+        where.routeId = { in: mine.map((r) => r.id) };
+      }
+      const rows = await tx.transportTrip.findMany({ where, orderBy: [{ direction: "asc" }, { departTime: "asc" }] });
+      return this.mapTrips(tx, rows);
+    });
+  }
+
+  // --- boarding confirmation (child-safety; guardians alerted on pickup) -----
+
+  /** Record a passenger boarding (or alighting). PICKUP notifies the student's
+   *  guardians. Idempotent per (passenger, date, direction). A driver may only
+   *  record for their own routes; admins/head-driver for any. */
+  async recordBoarding(
+    p: Principal,
+    input: { routeId: string; passengerId: string; direction?: string; date?: string; method?: string; status?: string },
+  ): Promise<TransportBoardingDto> {
+    const day = input.date ? new Date(`${input.date}T00:00:00.000Z`) : new Date(new Date().toISOString().slice(0, 10) + "T00:00:00.000Z");
+    if (Number.isNaN(day.getTime())) throw new BadRequestException("Invalid date");
+    const direction = input.direction === "DROPOFF" ? "DROPOFF" : "PICKUP";
+    const { dto, notify, passengerType } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      await this.assertRouteInScope(tx, p, input.routeId);
+      // The passenger must be assigned to this route.
+      const assignment = await tx.transportAssignment.findFirst({
+        where: { routeId: input.routeId, passengerId: input.passengerId, status: "ACTIVE" },
+        select: { id: true, passengerType: true },
+      });
+      if (!assignment) throw new BadRequestException("That passenger is not assigned to this route");
+      const status = input.status === "ABSENT" ? "ABSENT" : "BOARDED";
+      const row = await tx.transportBoarding.upsert({
+        where: { passengerId_date_direction: { passengerId: input.passengerId, date: day, direction } },
+        update: { status, method: input.method === "SCAN" ? "SCAN" : "MANUAL", routeId: input.routeId, recordedById: p.userId, recordedAt: new Date() },
+        create: {
+          schoolId: p.schoolId,
+          routeId: input.routeId,
+          passengerId: input.passengerId,
+          date: day,
+          direction,
+          status,
+          method: input.method === "SCAN" ? "SCAN" : "MANUAL",
+          recordedById: p.userId,
+        },
+      });
+      await this.log(tx, p, "transport.boarding.record", row.id, { routeId: input.routeId, passengerId: input.passengerId, direction, status });
+      return { dto: await this.boardingDto(tx, row.id), notify: status === "BOARDED", passengerType: assignment.passengerType };
+    });
+    // Only STUDENT boardings alert guardians; a PICKUP is the safety-critical event.
+    if (notify && direction === "PICKUP" && passengerType === "STUDENT") {
+      await this.notifyGuardians(p, input.passengerId, "Your child boarded the bus", "Your child has boarded the school bus for pickup.");
+    }
+    return dto;
+  }
+
+  async listBoardings(p: Principal, routeId: string, date: string): Promise<TransportBoardingDto[]> {
+    const day = new Date(`${date}T00:00:00.000Z`);
+    if (Number.isNaN(day.getTime())) throw new BadRequestException("Invalid date");
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      await this.assertRouteInScope(tx, p, routeId);
+      const rows = await tx.transportBoarding.findMany({ where: { routeId, date: day }, orderBy: { recordedAt: "asc" } });
+      return this.mapBoardings(tx, rows);
+    });
+  }
+
+  // --- maintenance / fuel log -----------------------------------------------
+
+  async addMaintenance(
+    p: Principal,
+    input: { vehicleId: string; type: string; date: string; costMinor?: number; odometerKm?: number | null; litres?: number | null; vendor?: string | null; notes?: string | null },
+  ): Promise<VehicleMaintenanceDto> {
+    const day = new Date(`${input.date}T00:00:00.000Z`);
+    if (Number.isNaN(day.getTime())) throw new BadRequestException("Invalid date");
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      await this.assertVehicleInScope(tx, p, input.vehicleId);
+      const row = await tx.vehicleMaintenance.create({
+        data: {
+          schoolId: p.schoolId,
+          vehicleId: input.vehicleId,
+          type: input.type,
+          date: day,
+          costMinor: Math.max(0, Math.round(input.costMinor ?? 0)),
+          odometerKm: input.odometerKm ?? null,
+          litres: input.litres ?? null,
+          vendor: input.vendor?.trim() || null,
+          notes: input.notes?.trim() || null,
+          recordedById: p.userId,
+        },
+      });
+      await this.log(tx, p, "transport.maintenance.add", row.id, { vehicleId: input.vehicleId, type: input.type, costMinor: row.costMinor });
+      return this.maintenanceDto(tx, row.id);
+    });
+  }
+
+  async listMaintenance(p: Principal, vehicleId?: string): Promise<VehicleMaintenanceDto[]> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      if (vehicleId) await this.assertVehicleInScope(tx, p, vehicleId);
+      const where: Record<string, unknown> = {};
+      if (vehicleId) where.vehicleId = vehicleId;
+      else if (!this.moduleWide(p)) {
+        const mine = await tx.vehicle.findMany({ where: { driverId: p.userId }, select: { id: true } });
+        where.vehicleId = { in: mine.map((v) => v.id) };
+      }
+      const rows = await tx.vehicleMaintenance.findMany({ where, orderBy: { date: "desc" }, take: 300 });
+      return this.mapMaintenance(tx, rows);
+    });
+  }
+
+  // --- live GPS -------------------------------------------------------------
+
+  /** Ingest a GPS breadcrumb. A driver posts only for their own vehicle. */
+  async ingestLocation(
+    p: Principal,
+    input: { vehicleId: string; lat: number; lng: number; speedKph?: number | null; headingDeg?: number | null },
+  ): Promise<{ ok: true }> {
+    if (input.lat < -90 || input.lat > 90 || input.lng < -180 || input.lng > 180) throw new BadRequestException("Invalid coordinates");
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      await this.assertVehicleInScope(tx, p, input.vehicleId);
+      await tx.vehicleLocation.create({
+        data: {
+          schoolId: p.schoolId,
+          vehicleId: input.vehicleId,
+          lat: input.lat,
+          lng: input.lng,
+          speedKph: input.speedKph ?? null,
+          headingDeg: input.headingDeg ?? null,
+        },
+      });
+      // High-volume stream — deliberately NOT audited per-ping.
+      return { ok: true as const };
+    });
+  }
+
+  /** Latest known position per vehicle (fleet map). Driver-scoped to own vehicle. */
+  async latestLocations(p: Principal): Promise<VehicleLocationDto[]> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const vehicles = await tx.vehicle.findMany({
+        where: this.moduleWide(p) ? {} : { driverId: p.userId },
+        select: { id: true, name: true },
+      });
+      const out: VehicleLocationDto[] = [];
+      for (const v of vehicles) {
+        const loc = await tx.vehicleLocation.findFirst({ where: { vehicleId: v.id }, orderBy: { recordedAt: "desc" } });
+        if (loc) out.push({ vehicleId: v.id, vehicleName: v.name, lat: loc.lat, lng: loc.lng, speedKph: loc.speedKph, headingDeg: loc.headingDeg, recordedAt: loc.recordedAt });
+      }
+      return out;
+    });
+  }
+
   // --- fee scheduling (bills through the shared Fees invoice tables) --------
 
   async scheduleFees(
@@ -519,6 +746,97 @@ export class TransportService {
     const stop = a.stopId ? await tx.routeStop.findFirst({ where: { id: a.stopId }, select: { name: true, fareMinor: true } }) : null;
     const passenger = await tx.user.findFirst({ where: { id: a.passengerId }, select: { name: true } });
     return mapAssignmentDto(a, route, stop, passenger?.name ?? "");
+  }
+
+  private async tripDto(tx: TenantTx, id: string): Promise<TransportTripDto> {
+    const row = await tx.transportTrip.findFirstOrThrow({ where: { id } });
+    return (await this.mapTrips(tx, [row]))[0];
+  }
+  private async mapTrips(tx: TenantTx, rows: Array<Record<string, unknown>>): Promise<TransportTripDto[]> {
+    if (rows.length === 0) return [];
+    const r = rows as unknown as Array<{ id: string; routeId: string; direction: string; name: string | null; departTime: string; daysOfWeek: unknown; status: string }>;
+    const routes = await tx.transportRoute.findMany({ where: { id: { in: [...new Set(r.map((x) => x.routeId))] } }, select: { id: true, name: true } });
+    const rName = new Map(routes.map((x) => [x.id, x.name]));
+    return r.map((x) => ({
+      id: x.id,
+      routeId: x.routeId,
+      routeName: rName.get(x.routeId) ?? "",
+      direction: x.direction,
+      name: x.name,
+      departTime: x.departTime,
+      daysOfWeek: Array.isArray(x.daysOfWeek) ? (x.daysOfWeek as string[]) : [],
+      status: x.status,
+    }));
+  }
+
+  private async boardingDto(tx: TenantTx, id: string): Promise<TransportBoardingDto> {
+    const row = await tx.transportBoarding.findFirstOrThrow({ where: { id } });
+    return (await this.mapBoardings(tx, [row]))[0];
+  }
+  private async mapBoardings(tx: TenantTx, rows: Array<Record<string, unknown>>): Promise<TransportBoardingDto[]> {
+    if (rows.length === 0) return [];
+    const r = rows as unknown as Array<{ id: string; tripId: string | null; routeId: string; passengerId: string; date: Date; direction: string; status: string; method: string; recordedById: string; recordedAt: Date }>;
+    const users = await tx.user.findMany({ where: { id: { in: [...new Set(r.map((x) => x.passengerId))] } }, select: { id: true, name: true } });
+    const uName = new Map(users.map((u) => [u.id, u.name]));
+    return r.map((x) => ({
+      id: x.id,
+      tripId: x.tripId,
+      routeId: x.routeId,
+      passengerId: x.passengerId,
+      passengerName: uName.get(x.passengerId) ?? "",
+      date: x.date,
+      direction: x.direction,
+      status: x.status,
+      method: x.method,
+      recordedById: x.recordedById,
+      recordedAt: x.recordedAt,
+    }));
+  }
+
+  private async maintenanceDto(tx: TenantTx, id: string): Promise<VehicleMaintenanceDto> {
+    const row = await tx.vehicleMaintenance.findFirstOrThrow({ where: { id } });
+    return (await this.mapMaintenance(tx, [row]))[0];
+  }
+  private async mapMaintenance(tx: TenantTx, rows: Array<Record<string, unknown>>): Promise<VehicleMaintenanceDto[]> {
+    if (rows.length === 0) return [];
+    const r = rows as unknown as Array<{ id: string; vehicleId: string; type: string; date: Date; costMinor: number; odometerKm: number | null; litres: number | null; vendor: string | null; notes: string | null; recordedById: string; createdAt: Date }>;
+    const vehicles = await tx.vehicle.findMany({ where: { id: { in: [...new Set(r.map((x) => x.vehicleId))] } }, select: { id: true, name: true } });
+    const vName = new Map(vehicles.map((v) => [v.id, v.name]));
+    return r.map((x) => ({
+      id: x.id,
+      vehicleId: x.vehicleId,
+      vehicleName: vName.get(x.vehicleId) ?? "",
+      type: x.type,
+      date: x.date,
+      costMinor: x.costMinor,
+      odometerKm: x.odometerKm,
+      litres: x.litres,
+      vendor: x.vendor,
+      notes: x.notes,
+      recordedById: x.recordedById,
+      createdAt: x.createdAt,
+    }));
+  }
+
+  /** Best-effort guardian notification (never blocks the caller's action). */
+  private async notifyGuardians(p: Principal, studentId: string, title: string, body: string): Promise<void> {
+    try {
+      const links = await this.db.runAsTenant(this.ctx(p), (tx) =>
+        tx.parentChild.findMany({ where: { studentId }, select: { parentId: true } }),
+      );
+      for (const l of links as { parentId: string }[]) {
+        await this.notifications.enqueue(this.ctx(p), {
+          recipientId: l.parentId,
+          type: "TRANSPORT",
+          title,
+          body,
+          data: { studentId },
+          channels: ["EMAIL"],
+        });
+      }
+    } catch (err) {
+      this.logger.error(`Transport guardian notification failed for ${studentId}: ${String(err)}`);
+    }
   }
 
   private log(tx: TenantTx, p: Principal, action: string, entityId: string, metadata: Record<string, unknown>) {

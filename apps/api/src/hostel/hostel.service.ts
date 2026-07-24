@@ -9,9 +9,18 @@
 // changes are audited too so finance can analyse them.
 // =============================================================================
 
-import { ConflictException, BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@sms/db";
-import type { HostelAllocationDto, HostelDto, HostelFeeRunDto, HostelRoomDto, HostelSummaryDto } from "@sms/types";
+import type {
+  HostelAllocationDto,
+  HostelAttendanceDto,
+  HostelDto,
+  HostelExeatDto,
+  HostelFeeRunDto,
+  HostelIncidentDto,
+  HostelRoomDto,
+  HostelSummaryDto,
+} from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -23,16 +32,32 @@ import {
 } from "../integrity/integrity.foundation";
 import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
+import { NotificationService } from "../notifications/notification.service";
 
 type Json = Record<string, string>;
 
+/** A hostel's gender policy must admit the student. MIXED admits anyone; a BOYS /
+ *  GIRLS house admits only that gender. An UNSET student gender can't be verified,
+ *  so a gendered house rejects it (fail-closed) — set the profile gender first. */
+function genderAdmits(hostelType: string, studentGender: string | null): boolean {
+  const t = (hostelType ?? "MIXED").toUpperCase();
+  if (t === "MIXED") return true;
+  const g = (studentGender ?? "").trim().toUpperCase();
+  if (t === "BOYS") return g === "M" || g === "MALE" || g === "BOY";
+  if (t === "GIRLS") return g === "F" || g === "FEMALE" || g === "GIRL";
+  return true; // unknown hostel type → don't block
+}
+
 @Injectable()
 export class HostelService {
+  private readonly logger = new Logger("Hostel");
+
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly workflow: WorkflowService,
     hooks: WorkflowHooksService,
+    private readonly notifications: NotificationService,
   ) {
     // Maker-checker reactor: when an admin APPROVES a FEE_SCHEDULE request that a
     // (head-)warden raised, post the fee run in the SAME tenant tx as the
@@ -277,6 +302,19 @@ export class HostelService {
       if (!room) throw new NotFoundException("Room not found");
       await this.assertHostelInScope(tx, p, room.hostelId);
       await this.assertUserInSchool(tx, studentId);
+      // GENDER MATCH: a BOYS/GIRLS hostel must not admit the wrong gender. The
+      // student's gender comes from the SIS profile; an unset gender fails-closed
+      // against a gendered house (set the profile first). MIXED admits anyone.
+      const hostel = await tx.hostel.findFirst({ where: { id: room.hostelId }, select: { type: true, name: true } });
+      if (hostel && (hostel.type ?? "MIXED").toUpperCase() !== "MIXED") {
+        const profile = await tx.studentProfile.findFirst({ where: { studentId }, select: { gender: true } });
+        if (!genderAdmits(hostel.type, profile?.gender ?? null)) {
+          throw new BadRequestException(
+            `${hostel.name} is a ${hostel.type.toLowerCase()} hostel and can't admit this student` +
+              `${profile?.gender ? "" : " (no gender on the student's profile — set it first)"}.`,
+          );
+        }
+      }
       // Serialize concurrent allocations to THIS room by locking its row for the
       // rest of the transaction, so the capacity count-then-insert is atomic —
       // two racers can't both read `occupied < capacity` for the last bed and
@@ -348,6 +386,268 @@ export class HostelService {
           studentName.get(a.studentId) ?? "",
         );
       });
+    });
+  }
+
+  // --- room transfer --------------------------------------------------------
+
+  /** Move a student to another room in ONE transaction: vacate the current
+   *  active allocation and allocate the new room (gender + capacity re-checked).
+   *  The reason is audited; history is retained (the old allocation stays VACATED). */
+  async transferAllocation(
+    p: Principal,
+    studentId: string,
+    toRoomId: string,
+    reason?: string,
+  ): Promise<HostelAllocationDto> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const current = await tx.hostelAllocation.findFirst({ where: { studentId, status: "ACTIVE" } });
+      if (!current) throw new BadRequestException("Student has no active hostel allocation to transfer");
+      const fromRoom = await tx.hostelRoom.findFirst({ where: { id: current.roomId }, select: { hostelId: true } });
+      if (fromRoom) await this.assertHostelInScope(tx, p, fromRoom.hostelId);
+      const toRoom = await tx.hostelRoom.findFirst({ where: { id: toRoomId } });
+      if (!toRoom) throw new NotFoundException("Target room not found");
+      if (toRoomId === current.roomId) throw new BadRequestException("Student is already in that room");
+      await this.assertHostelInScope(tx, p, toRoom.hostelId);
+      // Gender match on the destination hostel.
+      const toHostel = await tx.hostel.findFirst({ where: { id: toRoom.hostelId }, select: { type: true, name: true } });
+      if (toHostel && (toHostel.type ?? "MIXED").toUpperCase() !== "MIXED") {
+        const profile = await tx.studentProfile.findFirst({ where: { studentId }, select: { gender: true } });
+        if (!genderAdmits(toHostel.type, profile?.gender ?? null)) {
+          throw new BadRequestException(`${toHostel.name} is a ${toHostel.type.toLowerCase()} hostel and can't admit this student.`);
+        }
+      }
+      // Capacity claim on the destination (row-lock, mirrors allocate()).
+      await tx.$executeRaw`SELECT id FROM "hostel_room" WHERE id = ${toRoomId}::uuid FOR UPDATE`;
+      const occupied = await tx.hostelAllocation.count({ where: { roomId: toRoomId, status: "ACTIVE" } });
+      if (occupied >= toRoom.capacity) throw new BadRequestException("Target room is at full capacity");
+      await tx.hostelAllocation.update({ where: { id: current.id }, data: { status: "VACATED", vacatedAt: new Date() } });
+      const a = await tx.hostelAllocation.create({ data: { schoolId: p.schoolId, roomId: toRoomId, studentId, status: "ACTIVE" } });
+      await this.log(tx, p, "hostel.transfer", a.id, { studentId, fromRoomId: current.roomId, toRoomId, reason: reason ?? null });
+      return this.allocationDto(tx, a.id);
+    });
+  }
+
+  // --- roll-call / boarding attendance --------------------------------------
+
+  /** Record nightly roll-call for a hostel on a date (upsert one row per student).
+   *  Only ACTIVE-allocated students of the hostel may be marked. */
+  async rollCall(
+    p: Principal,
+    hostelId: string,
+    date: string,
+    records: { studentId: string; status: string; note?: string | null }[],
+  ): Promise<{ marked: number }> {
+    const day = new Date(`${date}T00:00:00.000Z`);
+    if (Number.isNaN(day.getTime())) throw new BadRequestException("Invalid date");
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      await this.assertHostelInScope(tx, p, hostelId);
+      // The set of students currently boarding in this hostel.
+      const rooms = await tx.hostelRoom.findMany({ where: { hostelId }, select: { id: true } });
+      const roomIds = rooms.map((r) => r.id);
+      const boarders = new Set(
+        (await tx.hostelAllocation.findMany({ where: { roomId: { in: roomIds }, status: "ACTIVE" }, select: { studentId: true } })).map(
+          (a) => a.studentId,
+        ),
+      );
+      let marked = 0;
+      for (const rec of records) {
+        if (!boarders.has(rec.studentId)) continue; // only current boarders
+        await tx.hostelAttendance.upsert({
+          where: { hostelId_studentId_date: { hostelId, studentId: rec.studentId, date: day } },
+          update: { status: rec.status, note: rec.note ?? null, takenById: p.userId },
+          create: { schoolId: p.schoolId, hostelId, studentId: rec.studentId, date: day, status: rec.status, note: rec.note ?? null, takenById: p.userId },
+        });
+        marked += 1;
+      }
+      await this.log(tx, p, "hostel.rollcall", hostelId, { date, marked });
+      return { marked };
+    });
+  }
+
+  async listAttendance(p: Principal, hostelId: string, date: string): Promise<HostelAttendanceDto[]> {
+    const day = new Date(`${date}T00:00:00.000Z`);
+    if (Number.isNaN(day.getTime())) throw new BadRequestException("Invalid date");
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      await this.assertHostelInScope(tx, p, hostelId);
+      const rows = await tx.hostelAttendance.findMany({ where: { hostelId, date: day }, orderBy: { createdAt: "asc" } });
+      const names = await tx.user.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.studentId))] } }, select: { id: true, name: true } });
+      const nameById = new Map(names.map((u) => [u.id, u.name]));
+      return rows.map((r) => ({
+        id: r.id,
+        hostelId: r.hostelId,
+        studentId: r.studentId,
+        studentName: nameById.get(r.studentId) ?? "",
+        date: r.date,
+        status: r.status,
+        note: r.note,
+        takenById: r.takenById,
+      }));
+    });
+  }
+
+  // --- exeat / gate-pass (maker-checker; guardians notified) -----------------
+
+  /** Raise an exeat request for a boarder (REQUESTED). Moves no one. */
+  async requestExeat(
+    p: Principal,
+    input: { studentId: string; reason: string; destination?: string | null; departAt: string; expectedReturnAt: string },
+  ): Promise<HostelExeatDto> {
+    const departAt = new Date(input.departAt);
+    const expectedReturnAt = new Date(input.expectedReturnAt);
+    if (Number.isNaN(departAt.getTime()) || Number.isNaN(expectedReturnAt.getTime())) throw new BadRequestException("Invalid dates");
+    if (expectedReturnAt <= departAt) throw new BadRequestException("Expected return must be after departure");
+    if (!input.reason?.trim()) throw new BadRequestException("A reason is required");
+    const dto = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const alloc = await tx.hostelAllocation.findFirst({ where: { studentId: input.studentId, status: "ACTIVE" } });
+      if (!alloc) throw new BadRequestException("Only a current boarder can be granted an exeat");
+      const room = await tx.hostelRoom.findFirst({ where: { id: alloc.roomId }, select: { hostelId: true } });
+      const hostelId = room?.hostelId ?? "";
+      await this.assertHostelInScope(tx, p, hostelId);
+      const row = await tx.hostelExeat.create({
+        data: {
+          schoolId: p.schoolId,
+          hostelId,
+          studentId: input.studentId,
+          reason: input.reason.trim(),
+          destination: input.destination?.trim() || null,
+          departAt,
+          expectedReturnAt,
+          status: "REQUESTED",
+          requestedById: p.userId,
+        },
+      });
+      await this.log(tx, p, "hostel.exeat.request", row.id, { studentId: input.studentId });
+      return this.exeatDto(tx, row.id);
+    });
+    return dto;
+  }
+
+  /** Approve/reject an exeat (a DIFFERENT person than the requester — SoD). */
+  async decideExeat(p: Principal, id: string, approve: boolean, note?: string): Promise<HostelExeatDto> {
+    const { dto, studentId } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const row = await tx.hostelExeat.findFirst({ where: { id } });
+      if (!row) throw new NotFoundException("Exeat not found");
+      await this.assertHostelInScope(tx, p, row.hostelId);
+      if (row.status !== "REQUESTED") throw new BadRequestException("This exeat has already been decided");
+      if (row.requestedById === p.userId) throw new ForbiddenException("An exeat must be decided by a different person");
+      const updated = await tx.hostelExeat.update({
+        where: { id },
+        data: { status: approve ? "APPROVED" : "REJECTED", decidedById: p.userId, decidedAt: new Date(), note: note?.trim() || null },
+      });
+      await this.log(tx, p, approve ? "hostel.exeat.approve" : "hostel.exeat.reject", id, { studentId: row.studentId });
+      return { dto: await this.exeatDto(tx, updated.id), studentId: row.studentId };
+    });
+    if (approve) {
+      await this.notifyGuardians(p, studentId, "Exeat approved", `An exeat has been approved for your child: ${dto.reason}. Expected back ${dto.expectedReturnAt.toISOString().slice(0, 16).replace("T", " ")}.`);
+    }
+    return dto;
+  }
+
+  /** Mark a boarder as departed (gate check-out) or returned (check-in). */
+  async setExeatMovement(p: Principal, id: string, movement: "DEPARTED" | "RETURNED"): Promise<HostelExeatDto> {
+    const { dto, studentId } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const row = await tx.hostelExeat.findFirst({ where: { id } });
+      if (!row) throw new NotFoundException("Exeat not found");
+      await this.assertHostelInScope(tx, p, row.hostelId);
+      if (movement === "DEPARTED" && row.status !== "APPROVED") throw new BadRequestException("Only an approved exeat can depart");
+      if (movement === "RETURNED" && row.status !== "DEPARTED") throw new BadRequestException("Only a departed boarder can be marked returned");
+      const updated = await tx.hostelExeat.update({
+        where: { id },
+        data: { status: movement, ...(movement === "RETURNED" ? { actualReturnAt: new Date() } : {}) },
+      });
+      await this.log(tx, p, `hostel.exeat.${movement.toLowerCase()}`, id, { studentId: row.studentId });
+      return { dto: await this.exeatDto(tx, updated.id), studentId: row.studentId };
+    });
+    await this.notifyGuardians(
+      p,
+      studentId,
+      movement === "DEPARTED" ? "Your child left on exeat" : "Your child is back from exeat",
+      movement === "DEPARTED" ? "Your child has checked out of the hostel on their approved exeat." : "Your child has returned to the hostel and checked in.",
+    );
+    return dto;
+  }
+
+  async listExeats(p: Principal, opts: { hostelId?: string; status?: string } = {}): Promise<HostelExeatDto[]> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      if (opts.hostelId) await this.assertHostelInScope(tx, p, opts.hostelId);
+      const where: Record<string, unknown> = {};
+      if (opts.hostelId) where.hostelId = opts.hostelId;
+      else if (!this.moduleWide(p)) {
+        const mine = await tx.hostel.findMany({ where: { wardenId: p.userId }, select: { id: true } });
+        where.hostelId = { in: mine.map((h) => h.id) };
+      }
+      if (opts.status) where.status = opts.status;
+      const rows = await tx.hostelExeat.findMany({ where, orderBy: { createdAt: "desc" }, take: 300 });
+      return this.mapExeats(tx, rows);
+    });
+  }
+
+  // --- maintenance / incident log -------------------------------------------
+
+  async reportIncident(
+    p: Principal,
+    input: { hostelId: string; roomId?: string | null; category: string; title: string; description?: string | null },
+  ): Promise<HostelIncidentDto> {
+    if (!input.title?.trim()) throw new BadRequestException("A title is required");
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      await this.assertHostelInScope(tx, p, input.hostelId);
+      if (input.roomId) {
+        const room = await tx.hostelRoom.findFirst({ where: { id: input.roomId, hostelId: input.hostelId }, select: { id: true } });
+        if (!room) throw new NotFoundException("Room not found in this hostel");
+      }
+      const row = await tx.hostelIncident.create({
+        data: {
+          schoolId: p.schoolId,
+          hostelId: input.hostelId,
+          roomId: input.roomId ?? null,
+          category: input.category,
+          title: input.title.trim(),
+          description: input.description?.trim() || null,
+          status: "OPEN",
+          reportedById: p.userId,
+        },
+      });
+      await this.log(tx, p, "hostel.incident.report", row.id, { hostelId: input.hostelId, category: input.category });
+      return this.incidentDto(tx, row.id);
+    });
+  }
+
+  async updateIncident(
+    p: Principal,
+    id: string,
+    input: { status?: string; resolutionNote?: string | null },
+  ): Promise<HostelIncidentDto> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const row = await tx.hostelIncident.findFirst({ where: { id } });
+      if (!row) throw new NotFoundException("Incident not found");
+      await this.assertHostelInScope(tx, p, row.hostelId);
+      const resolving = input.status === "RESOLVED" && row.status !== "RESOLVED";
+      const updated = await tx.hostelIncident.update({
+        where: { id },
+        data: {
+          ...(input.status !== undefined ? { status: input.status } : {}),
+          ...(input.resolutionNote !== undefined ? { resolutionNote: input.resolutionNote?.trim() || null } : {}),
+          ...(resolving ? { resolvedById: p.userId, resolvedAt: new Date() } : {}),
+        },
+      });
+      await this.log(tx, p, "hostel.incident.update", id, { status: updated.status });
+      return this.incidentDto(tx, id);
+    });
+  }
+
+  async listIncidents(p: Principal, opts: { hostelId?: string; status?: string } = {}): Promise<HostelIncidentDto[]> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      if (opts.hostelId) await this.assertHostelInScope(tx, p, opts.hostelId);
+      const where: Record<string, unknown> = {};
+      if (opts.hostelId) where.hostelId = opts.hostelId;
+      else if (!this.moduleWide(p)) {
+        const mine = await tx.hostel.findMany({ where: { wardenId: p.userId }, select: { id: true } });
+        where.hostelId = { in: mine.map((h) => h.id) };
+      }
+      if (opts.status) where.status = opts.status;
+      const rows = await tx.hostelIncident.findMany({ where, orderBy: { createdAt: "desc" }, take: 300 });
+      return this.mapIncidents(tx, rows);
     });
   }
 
@@ -503,6 +803,93 @@ export class HostelService {
     const hostel = await tx.hostel.findFirstOrThrow({ where: { id: room.hostelId }, select: { name: true } });
     const student = await tx.user.findFirst({ where: { id: a.studentId }, select: { name: true } });
     return mapAllocationDto(a, room, hostel.name, student?.name ?? "");
+  }
+
+  private async exeatDto(tx: TenantTx, id: string): Promise<HostelExeatDto> {
+    const row = await tx.hostelExeat.findFirstOrThrow({ where: { id } });
+    return (await this.mapExeats(tx, [row]))[0];
+  }
+
+  private async mapExeats(tx: TenantTx, rows: Array<Record<string, unknown>>): Promise<HostelExeatDto[]> {
+    if (rows.length === 0) return [];
+    const r = rows as unknown as Array<{ id: string; hostelId: string; studentId: string; reason: string; destination: string | null; departAt: Date; expectedReturnAt: Date; actualReturnAt: Date | null; status: string; requestedById: string; decidedById: string | null; decidedAt: Date | null; note: string | null; createdAt: Date }>;
+    const hostels = await tx.hostel.findMany({ where: { id: { in: [...new Set(r.map((x) => x.hostelId))] } }, select: { id: true, name: true } });
+    const hName = new Map(hostels.map((h) => [h.id, h.name]));
+    const users = await tx.user.findMany({ where: { id: { in: [...new Set(r.map((x) => x.studentId))] } }, select: { id: true, name: true } });
+    const sName = new Map(users.map((u) => [u.id, u.name]));
+    return r.map((x) => ({
+      id: x.id,
+      hostelId: x.hostelId,
+      hostelName: hName.get(x.hostelId) ?? "",
+      studentId: x.studentId,
+      studentName: sName.get(x.studentId) ?? "",
+      reason: x.reason,
+      destination: x.destination,
+      departAt: x.departAt,
+      expectedReturnAt: x.expectedReturnAt,
+      actualReturnAt: x.actualReturnAt,
+      status: x.status,
+      requestedById: x.requestedById,
+      decidedById: x.decidedById,
+      decidedAt: x.decidedAt,
+      note: x.note,
+      createdAt: x.createdAt,
+    }));
+  }
+
+  private async incidentDto(tx: TenantTx, id: string): Promise<HostelIncidentDto> {
+    const row = await tx.hostelIncident.findFirstOrThrow({ where: { id } });
+    return (await this.mapIncidents(tx, [row]))[0];
+  }
+
+  private async mapIncidents(tx: TenantTx, rows: Array<Record<string, unknown>>): Promise<HostelIncidentDto[]> {
+    if (rows.length === 0) return [];
+    const r = rows as unknown as Array<{ id: string; hostelId: string; roomId: string | null; category: string; title: string; description: string | null; status: string; reportedById: string; resolvedById: string | null; resolvedAt: Date | null; resolutionNote: string | null; createdAt: Date }>;
+    const hostels = await tx.hostel.findMany({ where: { id: { in: [...new Set(r.map((x) => x.hostelId))] } }, select: { id: true, name: true } });
+    const hName = new Map(hostels.map((h) => [h.id, h.name]));
+    const roomIds = [...new Set(r.map((x) => x.roomId).filter((x): x is string => !!x))];
+    const rooms = roomIds.length ? await tx.hostelRoom.findMany({ where: { id: { in: roomIds } }, select: { id: true, roomNumber: true } }) : [];
+    const rNum = new Map(rooms.map((x) => [x.id, x.roomNumber]));
+    const users = await tx.user.findMany({ where: { id: { in: [...new Set(r.map((x) => x.reportedById))] } }, select: { id: true, name: true } });
+    const uName = new Map(users.map((u) => [u.id, u.name]));
+    return r.map((x) => ({
+      id: x.id,
+      hostelId: x.hostelId,
+      hostelName: hName.get(x.hostelId) ?? "",
+      roomId: x.roomId,
+      roomNumber: x.roomId ? (rNum.get(x.roomId) ?? null) : null,
+      category: x.category,
+      title: x.title,
+      description: x.description,
+      status: x.status,
+      reportedById: x.reportedById,
+      reportedByName: uName.get(x.reportedById) ?? null,
+      resolvedById: x.resolvedById,
+      resolvedAt: x.resolvedAt,
+      resolutionNote: x.resolutionNote,
+      createdAt: x.createdAt,
+    }));
+  }
+
+  /** Best-effort guardian notification (never blocks the caller's action). */
+  private async notifyGuardians(p: Principal, studentId: string, title: string, body: string): Promise<void> {
+    try {
+      const links = await this.db.runAsTenant(this.ctx(p), (tx) =>
+        tx.parentChild.findMany({ where: { studentId }, select: { parentId: true } }),
+      );
+      for (const l of links as { parentId: string }[]) {
+        await this.notifications.enqueue(this.ctx(p), {
+          recipientId: l.parentId,
+          type: "HOSTEL",
+          title,
+          body,
+          data: { studentId },
+          channels: ["EMAIL"],
+        });
+      }
+    } catch (err) {
+      this.logger.error(`Hostel guardian notification failed for ${studentId}: ${String(err)}`);
+    }
   }
 
   private log(tx: TenantTx, p: Principal, action: string, entityId: string, metadata: Record<string, unknown>) {

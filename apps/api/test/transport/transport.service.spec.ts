@@ -105,6 +105,33 @@ describe("TransportService", () => {
     expect(assignmentFindFirstOrThrow).not.toHaveBeenCalled();
   });
 
+  it("recordBoarding on a PICKUP notifies the student's guardians", async () => {
+    const enqueue = jest.fn().mockResolvedValue({ id: "n-1" });
+    const tx = {
+      transportRoute: { findFirst: jest.fn().mockResolvedValue({ id: "r1", vehicleId: "v1" }) },
+      transportAssignment: { findFirst: jest.fn().mockResolvedValue({ id: "as1", passengerType: "STUDENT" }) },
+      transportBoarding: {
+        upsert: jest.fn().mockResolvedValue({ id: "b1" }),
+        findFirstOrThrow: jest.fn().mockResolvedValue({ id: "b1", tripId: null, routeId: "r1", passengerId: "stu1", date: new Date(), direction: "PICKUP", status: "BOARDED", method: "MANUAL", recordedById: "admin", recordedAt: new Date() }),
+      },
+      parentChild: { findMany: jest.fn().mockResolvedValue([{ parentId: "dad-1" }]) },
+      user: { findMany: jest.fn().mockResolvedValue([{ id: "stu1", name: "Ada" }]) },
+    } as unknown as TenantTx;
+    const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
+    const audit = { record: jest.fn().mockResolvedValue(undefined) };
+    const service = new TransportService(db as never, audit as never, { enqueue } as never, {} as never, { onFinalized: jest.fn() } as never);
+    await service.recordBoarding(staff, { routeId: "r1", passengerId: "stu1", direction: "PICKUP" });
+    expect(enqueue).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ recipientId: "dad-1", type: "TRANSPORT" }));
+  });
+
+  it("recordBoarding rejects a passenger not assigned to the route", async () => {
+    const tx = {
+      transportRoute: { findFirst: jest.fn().mockResolvedValue({ id: "r1", vehicleId: "v1" }) },
+      transportAssignment: { findFirst: jest.fn().mockResolvedValue(null) }, // not assigned
+    } as unknown as TenantTx;
+    await expect(svc(tx).recordBoarding(staff, { routeId: "r1", passengerId: "stranger", direction: "PICKUP" })).rejects.toThrow(/not assigned/i);
+  });
+
   it("junior_admin (transport.read) gets fleet-wide READ scope but no structural write power", async () => {
     const ja: Principal = { schoolId: "A", userId: "ja", roles: ["junior_admin"], permissions: ["transport.read"] };
     const assignFindMany = jest.fn().mockResolvedValue([]);

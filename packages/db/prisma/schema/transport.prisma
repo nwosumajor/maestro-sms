@@ -92,3 +92,97 @@ model TransportAssignment {
   @@index([routeId, status])
   @@map("transport_assignment")
 }
+
+/// A scheduled trip on a route: the morning pickup or afternoon drop-off, with a
+/// depart time and the weekdays it runs. Boardings are recorded against a trip.
+model TransportTrip {
+  id           String   @id @default(uuid()) @db.Uuid
+  schoolId     String   @db.Uuid
+  routeId      String   @db.Uuid
+  /// AM_PICKUP | PM_DROPOFF
+  direction    String   @default("AM_PICKUP")
+  name         String?
+  /// HH:MM local depart time.
+  departTime   String
+  /// Weekdays it runs, e.g. ["MON","TUE","WED","THU","FRI"].
+  daysOfWeek   Json     @default("[\"MON\",\"TUE\",\"WED\",\"THU\",\"FRI\"]")
+  status       String   @default("ACTIVE")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([schoolId])
+  @@index([schoolId, routeId])
+  @@map("transport_trip")
+}
+
+/// Boarding confirmation: a passenger boarded (or alighted) on a dated trip.
+/// Recording a PICKUP notifies the student's guardians (child-safety). Append-only
+/// (one row per boarding event); a re-scan of the same passenger+trip+date+direction
+/// is idempotent via the unique index.
+model TransportBoarding {
+  id            String   @id @default(uuid()) @db.Uuid
+  schoolId      String   @db.Uuid
+  tripId        String?  @db.Uuid
+  routeId       String   @db.Uuid
+  passengerId   String   @db.Uuid
+  /// The boarding date (day granularity).
+  date          DateTime @db.Date
+  /// PICKUP | DROPOFF
+  direction     String   @default("PICKUP")
+  /// BOARDED | ABSENT
+  status        String   @default("BOARDED")
+  /// SCAN | MANUAL
+  method        String   @default("MANUAL")
+  stopId        String?  @db.Uuid
+  recordedById  String   @db.Uuid
+  recordedAt    DateTime @default(now())
+
+  @@unique([passengerId, date, direction])
+  @@index([schoolId])
+  @@index([schoolId, routeId, date])
+  @@map("transport_boarding")
+}
+
+/// Vehicle maintenance + fuel log. One row per service/repair/fuel/inspection event.
+model VehicleMaintenance {
+  id           String   @id @default(uuid()) @db.Uuid
+  schoolId     String   @db.Uuid
+  vehicleId    String   @db.Uuid
+  /// SERVICE | REPAIR | FUEL | INSPECTION | INSURANCE
+  type         String   @default("SERVICE")
+  /// Event date.
+  date         DateTime @db.Date
+  /// Cost in MINOR units (kobo).
+  costMinor    Int      @default(0)
+  /// Odometer reading (km) at the event, if recorded.
+  odometerKm   Int?
+  /// Litres for a FUEL event, if recorded.
+  litres       Float?
+  vendor       String?
+  notes        String?
+  recordedById String   @db.Uuid
+  createdAt    DateTime @default(now())
+
+  @@index([schoolId])
+  @@index([schoolId, vehicleId, date])
+  @@map("vehicle_maintenance")
+}
+
+/// Live GPS breadcrumb for a vehicle. High-volume append-only ping stream; the
+/// console reads the LATEST row per vehicle. Ingested by a device/driver app.
+model VehicleLocation {
+  id         String   @id @default(uuid()) @db.Uuid
+  schoolId   String   @db.Uuid
+  vehicleId  String   @db.Uuid
+  lat        Float
+  lng        Float
+  /// Ground speed in km/h, if known.
+  speedKph   Float?
+  /// Heading in degrees (0–359), if known.
+  headingDeg Float?
+  recordedAt DateTime @default(now())
+
+  @@index([schoolId])
+  @@index([schoolId, vehicleId, recordedAt])
+  @@map("vehicle_location")
+}
