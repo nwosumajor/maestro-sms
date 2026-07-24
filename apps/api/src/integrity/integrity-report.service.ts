@@ -36,7 +36,11 @@ const SEVERITY_ORDER: IntegritySignalSeverity[] = [
   IntegritySignalSeverity.HIGH,
 ];
 
-const SCHOOL_WIDE_ROLES = new Set(["school_admin", "super_admin"]);
+// principal is the school-head oversight tier and holds integrity.report.read +
+// integrity.exemption.write, so it sees integrity reports school-wide like
+// school_admin — otherwise the grant is dead (it reviews only assessments it
+// personally created, which is ~none). teacher stays relationship-scoped.
+const SCHOOL_WIDE_ROLES = new Set(["school_admin", "super_admin", "principal"]);
 
 @Injectable()
 export class IntegrityReportService {
@@ -69,13 +73,22 @@ export class IntegrityReportService {
         });
         if (!assessment) throw new NotFoundException("Submission not found");
 
-        // Relationship scoping: a teacher may only see reports for assessments
-        // they own. school_admin/super_admin see any in their tenant.
+        // Relationship scoping: a teacher may see reports for an assessment they
+        // CREATED or for one set on a class they TEACH (matching the
+        // submission-file access rule, so a co-teacher of the class isn't able to
+        // download the file yet blocked from its report). school-wide roles see
+        // any in their tenant.
         const schoolWide = principal.roles.some((r) => SCHOOL_WIDE_ROLES.has(r));
         if (!schoolWide && assessment.createdById !== principal.userId) {
+          const teaches = (assessment as { classId?: string | null }).classId
+            ? await tx.classTeacher.findFirst({
+                where: { classId: (assessment as { classId: string }).classId, teacherId: principal.userId },
+                select: { id: true },
+              })
+            : null;
           // SECURITY: 404 not 403 — don't reveal that another teacher's
           // submission exists.
-          throw new NotFoundException("Submission not found");
+          if (!teaches) throw new NotFoundException("Submission not found");
         }
 
         const signals = await tx.integritySignal.findMany({

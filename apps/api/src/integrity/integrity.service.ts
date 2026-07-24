@@ -209,7 +209,9 @@ export class IntegrityService {
       if (submission.studentId !== p.userId) {
         // Not the owner → must be an authorised reviewer of this assessment.
         const assessment = await tx.assessment.findFirst({ where: { id: submission.assessmentId }, select: { createdById: true, classId: true } });
-        const schoolWide = p.roles.some((r) => r === "school_admin" || r === "super_admin");
+        // principal is the school-head oversight tier (holds integrity.report.read
+        // + integrity.exemption.write), so it reviews school-wide like school_admin.
+        const schoolWide = p.roles.some((r) => r === "school_admin" || r === "super_admin" || r === "principal");
         const teaches = assessment?.classId
           ? await tx.classTeacher.findFirst({ where: { classId: assessment.classId, teacherId: p.userId }, select: { id: true } })
           : null;
