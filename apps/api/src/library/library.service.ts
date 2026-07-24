@@ -233,7 +233,23 @@ export class LibraryService {
       if (borrowerId) where.borrowerId = borrowerId;
       if (opts.status) where.status = opts.status;
       const loans = await tx.bookLoan.findMany({ where, orderBy: { issuedAt: "desc" }, take: 300 });
-      return Promise.all(loans.map((l: { id: string }) => this.loanDto(tx, l.id)));
+      if (loans.length === 0) return [];
+      // Batch the book + borrower lookups into ONE query each (was 3 queries per
+      // loan via loanDto — up to ~900 for a full page).
+      const books = await tx.libraryBook.findMany({
+        where: { id: { in: [...new Set(loans.map((l) => l.bookId))] } },
+        select: { id: true, title: true, barcode: true },
+      });
+      const borrowers = await tx.user.findMany({
+        where: { id: { in: [...new Set(loans.map((l) => l.borrowerId))] } },
+        select: { id: true, name: true },
+      });
+      const bookById = new Map(books.map((b) => [b.id, b]));
+      const nameById = new Map(borrowers.map((u) => [u.id, u.name]));
+      return loans.map((l) => {
+        const b = bookById.get(l.bookId);
+        return mapLoanDto(l, b?.title ?? "", b?.barcode ?? "", nameById.get(l.borrowerId) ?? "");
+      });
     });
   }
 
@@ -296,22 +312,7 @@ export class LibraryService {
     const l = await tx.bookLoan.findFirstOrThrow({ where: { id } });
     const book = await tx.libraryBook.findFirstOrThrow({ where: { id: l.bookId }, select: { title: true, barcode: true } });
     const borrower = await tx.user.findFirst({ where: { id: l.borrowerId }, select: { name: true } });
-    return {
-      id: l.id,
-      bookId: l.bookId,
-      bookTitle: book.title,
-      barcode: book.barcode,
-      borrowerId: l.borrowerId,
-      borrowerName: borrower?.name ?? "",
-      status: l.status,
-      issuedAt: l.issuedAt,
-      dueAt: l.dueAt,
-      returnedAt: l.returnedAt,
-      renewedCount: l.renewedCount,
-      fineMinor: l.fineMinor,
-      finePaid: l.finePaid,
-      overdue: l.status === "ISSUED" && l.dueAt.getTime() < Date.now(),
-    };
+    return mapLoanDto(l, book.title, book.barcode, borrower?.name ?? "");
   }
 
   private log(tx: TenantTx, p: Principal, action: string, entityId: string, metadata: Record<string, unknown>) {
@@ -320,4 +321,44 @@ export class LibraryService {
       tx,
     );
   }
+}
+
+/**
+ * Pure loan-row → DTO. The book title/barcode and borrower name are supplied by
+ * the caller — fetched once for a single loan (loanDto) or batched across a page
+ * (listLoans) — so listing never fans out into a per-row query storm.
+ */
+function mapLoanDto(
+  l: {
+    id: string;
+    bookId: string;
+    borrowerId: string;
+    status: string;
+    issuedAt: Date;
+    dueAt: Date;
+    returnedAt: Date | null;
+    renewedCount: number;
+    fineMinor: number;
+    finePaid: boolean;
+  },
+  bookTitle: string,
+  barcode: string,
+  borrowerName: string,
+): BookLoanDto {
+  return {
+    id: l.id,
+    bookId: l.bookId,
+    bookTitle,
+    barcode,
+    borrowerId: l.borrowerId,
+    borrowerName,
+    status: l.status,
+    issuedAt: l.issuedAt,
+    dueAt: l.dueAt,
+    returnedAt: l.returnedAt,
+    renewedCount: l.renewedCount,
+    fineMinor: l.fineMinor,
+    finePaid: l.finePaid,
+    overdue: l.status === "ISSUED" && l.dueAt.getTime() < Date.now(),
+  };
 }

@@ -87,4 +87,50 @@ describe("LibraryService", () => {
     const { tx } = makeTx({ loan: { id: "l1", bookId: "b1", borrowerId: "someone-else", status: "ISSUED", dueAt: new Date() } });
     await expect(svc(tx).returnLoan(student, "l1")).rejects.toThrow(/not found/i);
   });
+
+  it("listLoans batches book + borrower lookups (no per-loan N+1) and maps them", async () => {
+    const now = Date.now();
+    const loans = [
+      { id: "l1", bookId: "b1", borrowerId: "u1", status: "ISSUED", issuedAt: new Date(now), dueAt: new Date(now - DAY), returnedAt: null, renewedCount: 0, fineMinor: 0, finePaid: false },
+      { id: "l2", bookId: "b2", borrowerId: "u2", status: "RETURNED", issuedAt: new Date(now), dueAt: new Date(now + DAY), returnedAt: new Date(now), renewedCount: 1, fineMinor: 0, finePaid: false },
+      { id: "l3", bookId: "b1", borrowerId: "u1", status: "ISSUED", issuedAt: new Date(now), dueAt: new Date(now + DAY), returnedAt: null, renewedCount: 0, fineMinor: 0, finePaid: false },
+    ];
+    const bookFindMany = jest.fn().mockResolvedValue([
+      { id: "b1", title: "Algebra", barcode: "BC1" },
+      { id: "b2", title: "History", barcode: "BC2" },
+    ]);
+    const userFindMany = jest.fn().mockResolvedValue([
+      { id: "u1", name: "Ada" },
+      { id: "u2", name: "Bola" },
+    ]);
+    const loanFindFirstOrThrow = jest.fn(); // must NOT be used (that was the N+1)
+    const tx = {
+      bookLoan: { findMany: jest.fn().mockResolvedValue(loans), findFirstOrThrow: loanFindFirstOrThrow },
+      libraryBook: { findMany: bookFindMany },
+      user: { findMany: userFindMany },
+    } as unknown as TenantTx;
+
+    const dtos = await svc(tx).listLoans(librarian, {});
+    expect(dtos.map((d) => d.bookTitle)).toEqual(["Algebra", "History", "Algebra"]);
+    expect(dtos.map((d) => d.borrowerName)).toEqual(["Ada", "Bola", "Ada"]);
+    expect(dtos[0].overdue).toBe(true); // l1 is issued + past due
+    expect(dtos[1].overdue).toBe(false); // returned
+    // Batched: exactly ONE query for books and ONE for borrowers, regardless of
+    // loan count — and the per-loan re-fetch path (loanDto) is never taken.
+    expect(bookFindMany).toHaveBeenCalledTimes(1);
+    expect(userFindMany).toHaveBeenCalledTimes(1);
+    expect(loanFindFirstOrThrow).not.toHaveBeenCalled();
+  });
+
+  it("listLoans forces a non-librarian to their OWN loans (no cross-borrower leak)", async () => {
+    const findMany = jest.fn().mockResolvedValue([]);
+    const tx = {
+      bookLoan: { findMany },
+      libraryBook: { findMany: jest.fn() },
+      user: { findMany: jest.fn() },
+    } as unknown as TenantTx;
+    await svc(tx).listLoans(student, { borrowerId: "someone-else" });
+    // The requested borrowerId is ignored; scoped to the caller.
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { borrowerId: "stu1" } }));
+  });
 });
