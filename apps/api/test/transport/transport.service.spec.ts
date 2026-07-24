@@ -72,4 +72,36 @@ describe("TransportService", () => {
     expect(run.totalBilledMinor).toBe(30000); // flat fare
     expect(calls.lineCreate).toBe(1);
   });
+
+  it("listAssignments batches route/stop/passenger lookups and computes fare in-memory (no N+1)", async () => {
+    const rows = [
+      { id: "a1", routeId: "r1", stopId: "s1", passengerId: "u1", passengerType: "STUDENT", status: "ACTIVE" },
+      { id: "a2", routeId: "r2", stopId: null, passengerId: "u2", passengerType: "STUDENT", status: "ACTIVE" },
+    ];
+    const routeFindMany = jest.fn().mockResolvedValue([
+      { id: "r1", name: "North Line", fareMode: "PER_STOP", flatFareMinor: 0 },
+      { id: "r2", name: "Flat Line", fareMode: "FLAT", flatFareMinor: 7000 },
+    ]);
+    const stopFindMany = jest.fn().mockResolvedValue([{ id: "s1", name: "Stop A", fareMinor: 3000 }]);
+    const userFindMany = jest.fn().mockResolvedValue([
+      { id: "u1", name: "Ada" },
+      { id: "u2", name: "Bola" },
+    ]);
+    const assignmentFindFirstOrThrow = jest.fn(); // must NOT be called
+    const tx = {
+      transportAssignment: { findMany: jest.fn().mockResolvedValue(rows), findFirstOrThrow: assignmentFindFirstOrThrow },
+      transportRoute: { findMany: routeFindMany },
+      routeStop: { findMany: stopFindMany },
+      user: { findMany: userFindMany },
+    } as unknown as TenantTx;
+
+    const dtos = await svc(tx).listAssignments(staff);
+    expect(dtos.map((d) => d.routeName)).toEqual(["North Line", "Flat Line"]);
+    expect(dtos.map((d) => d.passengerName)).toEqual(["Ada", "Bola"]);
+    // Fare: per-stop route uses the stop fare (3000); flat route uses its flat fare (7000).
+    expect(dtos.map((d) => d.fareMinor)).toEqual([3000, 7000]);
+    expect(routeFindMany).toHaveBeenCalledTimes(1);
+    expect(userFindMany).toHaveBeenCalledTimes(1);
+    expect(assignmentFindFirstOrThrow).not.toHaveBeenCalled();
+  });
 });

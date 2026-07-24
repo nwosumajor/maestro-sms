@@ -317,7 +317,33 @@ export class HostelService {
       const rooms = await tx.hostelRoom.findMany({ where: roomWhere, select: { id: true } });
       const where = { roomId: { in: rooms.map((r: { id: string }) => r.id) }, status: "ACTIVE" };
       const allocs = await tx.hostelAllocation.findMany({ where, orderBy: { allocatedAt: "desc" } });
-      return Promise.all(allocs.map((a: { id: string }) => this.allocationDto(tx, a.id)));
+      if (allocs.length === 0) return [];
+      // Batch room/hostel/student lookups (was 4 queries per allocation via
+      // allocationDto — hundreds for a full dorm).
+      const roomRows = await tx.hostelRoom.findMany({
+        where: { id: { in: [...new Set(allocs.map((a) => a.roomId))] } },
+        select: { id: true, roomNumber: true, rentMinor: true, hostelId: true },
+      });
+      const roomById = new Map(roomRows.map((r) => [r.id, r]));
+      const hostelRows = await tx.hostel.findMany({
+        where: { id: { in: [...new Set(roomRows.map((r) => r.hostelId))] } },
+        select: { id: true, name: true },
+      });
+      const hostelName = new Map(hostelRows.map((h) => [h.id, h.name]));
+      const students = await tx.user.findMany({
+        where: { id: { in: [...new Set(allocs.map((a) => a.studentId))] } },
+        select: { id: true, name: true },
+      });
+      const studentName = new Map(students.map((u) => [u.id, u.name]));
+      return allocs.map((a) => {
+        const room = roomById.get(a.roomId);
+        return mapAllocationDto(
+          a,
+          { roomNumber: room?.roomNumber ?? "", rentMinor: room?.rentMinor ?? 0 },
+          room ? (hostelName.get(room.hostelId) ?? "") : "",
+          studentName.get(a.studentId) ?? "",
+        );
+      });
     });
   }
 
@@ -472,18 +498,7 @@ export class HostelService {
     const room = await tx.hostelRoom.findFirstOrThrow({ where: { id: a.roomId } });
     const hostel = await tx.hostel.findFirstOrThrow({ where: { id: room.hostelId }, select: { name: true } });
     const student = await tx.user.findFirst({ where: { id: a.studentId }, select: { name: true } });
-    return {
-      id: a.id,
-      roomId: a.roomId,
-      hostelName: hostel.name,
-      roomNumber: room.roomNumber,
-      studentId: a.studentId,
-      studentName: student?.name ?? "",
-      status: a.status,
-      rentMinor: room.rentMinor,
-      allocatedAt: a.allocatedAt,
-      vacatedAt: a.vacatedAt,
-    };
+    return mapAllocationDto(a, room, hostel.name, student?.name ?? "");
   }
 
   private log(tx: TenantTx, p: Principal, action: string, entityId: string, metadata: Record<string, unknown>) {
@@ -492,4 +507,27 @@ export class HostelService {
       tx,
     );
   }
+}
+
+/** Pure allocation-row → DTO. Room/hostel/student are supplied by the caller —
+ *  fetched once for a single allocation (allocationDto) or batched across a page
+ *  (listAllocations) — so listing never fans into a per-row query storm. */
+function mapAllocationDto(
+  a: { id: string; roomId: string; studentId: string; status: string; allocatedAt: Date; vacatedAt: Date | null },
+  room: { roomNumber: string; rentMinor: number },
+  hostelName: string,
+  studentName: string,
+): HostelAllocationDto {
+  return {
+    id: a.id,
+    roomId: a.roomId,
+    hostelName,
+    roomNumber: room.roomNumber,
+    studentId: a.studentId,
+    studentName,
+    status: a.status,
+    rentMinor: room.rentMinor,
+    allocatedAt: a.allocatedAt,
+    vacatedAt: a.vacatedAt,
+  };
 }
