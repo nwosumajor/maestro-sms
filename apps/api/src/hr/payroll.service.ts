@@ -85,12 +85,13 @@ export class PayrollService {
         (loansByUser.get(l.userId) ?? loansByUser.set(l.userId, []).get(l.userId)!).push(l);
       }
 
-      let totalGross = 0;
-      let totalNet = 0;
-      const run = await tx.payrollRun.create({
-        data: { schoolId: p.schoolId, periodYear, periodMonth, runType, bonusPercent, status: "DRAFT", runById: p.userId },
-      });
-      for (const e of employees) {
+      // Compute EVERY breakdown first, so the run can be refused wholesale if any
+      // employee's net would be negative — i.e. their statutory + deduction
+      // components exceed their pay. Loans are already clamped (they never push
+      // net below zero); a negative net can only come from over-large DEDUCTION
+      // components, which is an admin data-entry error, not a pay instruction.
+      // Nothing is persisted until this passes (the tx rolls back on throw).
+      const computed = employees.map((e) => {
         const base = e.salaryEnc ? Number(decryptField(e.salaryEnc, p.schoolId)) : 0;
         const mine = compsByUser.get(e.userId) ?? [];
         const myLoans = loansByUser.get(e.userId) ?? [];
@@ -111,6 +112,32 @@ export class PayrollService {
               })),
             })
           : computeBonusPayslip(base, bonusPercent ?? 100);
+        return { e, bd };
+      });
+
+      const overdrawn = computed.filter(({ bd }) => bd.netMinor < 0);
+      if (overdrawn.length > 0) {
+        const names = await tx.user.findMany({
+          where: { id: { in: overdrawn.map((o) => o.e.userId) } },
+          select: { id: true, name: true },
+        });
+        const nameById = new Map(names.map((u) => [u.id, u.name]));
+        const naira = (m: number) => `₦${(m / 100).toLocaleString("en-NG", { minimumFractionDigits: 2 })}`;
+        const list = overdrawn
+          .map((o) => `${nameById.get(o.e.userId) ?? o.e.userId} (deductions exceed pay by ${naira(-o.bd.netMinor)})`)
+          .join("; ");
+        throw new BadRequestException(
+          `Cannot generate payroll — deductions exceed pay for ${overdrawn.length} employee(s): ${list}. ` +
+            `Reduce their deduction components, then generate the run again.`,
+        );
+      }
+
+      let totalGross = 0;
+      let totalNet = 0;
+      const run = await tx.payrollRun.create({
+        data: { schoolId: p.schoolId, periodYear, periodMonth, runType, bonusPercent, status: "DRAFT", runById: p.userId },
+      });
+      for (const { e, bd } of computed) {
         totalGross += bd.grossMinor;
         totalNet += bd.netMinor;
         await tx.payslip.create({
