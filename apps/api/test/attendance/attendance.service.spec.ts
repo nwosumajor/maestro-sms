@@ -42,7 +42,7 @@ function makeService(f: Fakes) {
       findMany: jest.fn().mockResolvedValue([]),
     },
     term: { findFirst: jest.fn().mockResolvedValue(f.currentTerm ?? null) },
-    schoolHoliday: { findMany: jest.fn().mockResolvedValue(f.holidays ?? []) },
+    schoolHoliday: { findFirst: jest.fn().mockResolvedValue(f.holidays?.[0] ?? null) },
     // The register is written as ONE bulk upsert (INSERT … ON CONFLICT), not a
     // per-student upsert loop — see AttendanceService.markAttendance.
     $executeRaw: jest.fn().mockResolvedValue(1),

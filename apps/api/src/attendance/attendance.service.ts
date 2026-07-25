@@ -281,31 +281,34 @@ export class AttendanceService {
   }
 
   /**
+   * Reject taking a register on a school-declared holiday. Only EXPLICIT holidays
+   * block — weekends are left alone so a school that runs Saturday classes is not
+   * broken (weekend handling belongs to the teaching-day helpers used in
+   * reporting, not to a hard write guard). Fail-open when none are configured.
+   *
+   * The check is a single INDEXED lookup for a span covering THIS day (uses the
+   * (schoolId, startDate) index) — it never loads the whole holiday table. `date`
+   * is normalised to midnight UTC so a same-day afternoon still matches a DATE
+   * column's midnight endDate.
+   */
+  private async assertNotHoliday(tx: TenantTx, date: Date): Promise<void> {
+    const d = new Date(dayUtc(date));
+    const hit = await tx.schoolHoliday.findFirst({
+      where: { startDate: { lte: d }, endDate: { gte: d } },
+      select: { name: true },
+    });
+    if (hit) {
+      throw new BadRequestException(`This date is a school holiday (${hit.name}) — no register is taken. Remove the holiday if this is a school day.`);
+    }
+  }
+
+  /**
    * The start of the CURRENT term — the lock boundary. A register dated BEFORE
    * this is in a term that has ended and is READ-ONLY. Prefers the explicitly
    * `isCurrent` term; falls back to the term whose date range contains today.
    * Returns null when terms/dates are not configured (fail-open — an unset-up
    * school must never have attendance blocked).
    */
-  /**
-   * Reject taking a register on a school-declared holiday. Only EXPLICIT holidays
-   * block — weekends are left alone so a school that runs Saturday classes is not
-   * broken (weekend handling belongs to the teaching-day helpers used in
-   * reporting, not to a hard write guard). Fail-open when none are configured.
-   */
-  private async assertNotHoliday(tx: TenantTx, date: Date): Promise<void> {
-    const d = dayUtc(date);
-    const holidays = (await tx.schoolHoliday.findMany({ select: { name: true, startDate: true, endDate: true } })) as Array<{
-      name: string;
-      startDate: Date;
-      endDate: Date;
-    }>;
-    const hit = holidays.find((h) => d >= dayUtc(h.startDate) && d <= dayUtc(h.endDate));
-    if (hit) {
-      throw new BadRequestException(`This date is a school holiday (${hit.name}) — no register is taken. Remove the holiday if this is a school day.`);
-    }
-  }
-
   private async currentTermStart(tx: TenantTx): Promise<Date | null> {
     const marked = await tx.term.findFirst({ where: { isCurrent: true }, select: { startDate: true } });
     if (marked?.startDate) return marked.startDate;
