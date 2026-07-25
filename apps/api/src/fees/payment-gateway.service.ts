@@ -117,7 +117,9 @@ export class PaymentGatewayService {
           payerId: p.userId,
           invoiceAmountMinor: String(balance),
         },
-        successUrl: `${base}/fees/${invoiceId}?stripe=1`,
+        // {CHECKOUT_SESSION_ID} is substituted by Stripe — the return page
+        // confirms the session directly (USD verify-on-return, layer 1).
+        successUrl: `${base}/fees/${invoiceId}?stripe=1&session_id={CHECKOUT_SESSION_ID}`,
         cancelUrl: `${base}/fees/${invoiceId}?canceled=1`,
       });
       return { authorizationUrl, reference, invoiceAmountMinor: balance, feeMinor: 0, chargedMinor: balance };
@@ -365,15 +367,41 @@ export class PaymentGatewayService {
     invoiceId: string,
     reference: string,
   ): Promise<{ status: "posted" | "already_recorded" | "not_settled" }> {
+    // The caller must be able to see this invoice (payer/guardian/staff); we also
+    // read its currency to pick the gateway to verify against.
+    const currency = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const inv = await tx.invoice.findFirst({ where: { id: invoiceId }, select: { studentId: true, currency: true } });
+      if (!inv) throw new ForbiddenException("Invoice not found");
+      if (!(await this.canPay(tx, p, inv.studentId))) throw new ForbiddenException("Not your invoice");
+      return inv.currency;
+    });
+
+    // USD → verify the Stripe Checkout session (the `reference` here is the
+    // session id from ?session_id=…). We settle on the session's
+    // client_reference_id — the SAME key the webhook uses — so confirm and
+    // webhook can never double-post (settlement is idempotent on it).
+    if (currency === "USD") {
+      if (!this.stripe.isConfigured()) throw new ServiceUnavailableException("USD payments are not configured");
+      const session = await this.stripe.retrieveCheckoutSession(reference);
+      if (!session || session.paymentStatus !== "paid" || !session.clientReferenceId) return { status: "not_settled" };
+      const meta = session.metadata as { kind?: string; invoiceId?: string; schoolId?: string; payerId?: string; invoiceAmountMinor?: string };
+      if (meta.kind !== "invoice" || meta.invoiceId !== invoiceId || meta.schoolId !== p.schoolId) return { status: "not_settled" };
+      const credit = Number(meta.invoiceAmountMinor ?? 0) > 0 ? Number(meta.invoiceAmountMinor) : session.amountTotal;
+      const outcome = await this.settlement.applyOnlinePayment({
+        schoolId: p.schoolId,
+        invoiceId,
+        creditMinor: credit,
+        chargedMinor: session.amountTotal,
+        reference: session.clientReferenceId,
+        payerId: meta.payerId ?? p.userId,
+        note: "Online (Stripe, USD) · confirmed on return",
+      });
+      return { status: outcome === "posted" ? "posted" : "already_recorded" };
+    }
+
     if (!this.paystack.isConfigured()) {
       throw new ServiceUnavailableException("Online payments are not configured");
     }
-    // The caller must be able to see this invoice (payer/guardian/staff).
-    await this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const inv = await tx.invoice.findFirst({ where: { id: invoiceId }, select: { studentId: true } });
-      if (!inv) throw new ForbiddenException("Invoice not found");
-      if (!(await this.canPay(tx, p, inv.studentId))) throw new ForbiddenException("Not your invoice");
-    });
     const verified = await this.paystack.verifyTransaction(reference);
     if (!verified || verified.status !== "success") return { status: "not_settled" };
     const meta = verified.metadata as {

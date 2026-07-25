@@ -23,6 +23,8 @@ export function FeesAdmin({ students, items }: { students: Student[]; items: Fee
   // --- new invoice ---
   const [studentId, setStudentId] = React.useState(students[0]?.id ?? "");
   const [dueDate, setDueDate] = React.useState("");
+  // Currency: NGN settles via Paystack, USD via Stripe (international schools).
+  const [currency, setCurrency] = React.useState("NGN");
   const [lines, setLines] = React.useState<Line[]>([{ description: "", amountMajor: "", quantity: 1 }]);
   const [invBusy, setInvBusy] = React.useState(false);
   const [invMsg, setInvMsg] = React.useState<string | null>(null);
@@ -45,6 +47,7 @@ export function FeesAdmin({ students, items }: { students: Student[]; items: Fee
       body: JSON.stringify({
         studentId,
         dueDate,
+        currency,
         lines: lines
           .filter((l) => l.description && toMinor(l.amountMajor) > 0)
           .map((l) => ({ description: l.description, amountMinor: toMinor(l.amountMajor), quantity: l.quantity })),
@@ -100,6 +103,16 @@ export function FeesAdmin({ students, items }: { students: Student[]; items: Fee
                 <Label htmlFor="inv-due">Due date</Label>
                 <Input id="inv-due" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="w-44" />
               </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="inv-ccy">Currency</Label>
+                {/* NGN → Paystack, USD → Stripe. Amounts are entered in the major
+                    unit of the chosen currency (₦ / $). */}
+                <select id="inv-ccy" value={currency} onChange={(e) => setCurrency(e.target.value)}
+                  className="h-9 rounded-md border border-input bg-background px-2 text-sm">
+                  <option value="NGN">₦ NGN</option>
+                  <option value="USD">$ USD</option>
+                </select>
+              </div>
             </div>
 
             <div className="space-y-2">
@@ -127,7 +140,7 @@ export function FeesAdmin({ students, items }: { students: Student[]; items: Fee
             </div>
 
             <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Total: <strong>{money(total)}</strong></span>
+              <span className="text-sm text-muted-foreground">Total: <strong>{money(total, currency)}</strong></span>
               <Button type="submit" disabled={invBusy}>{invBusy ? "Creating…" : "Create invoice"}</Button>
             </div>
             {invMsg && <p className="text-sm text-muted-foreground">{invMsg}</p>}

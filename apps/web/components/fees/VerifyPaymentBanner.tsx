@@ -4,14 +4,16 @@ import * as React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { postSms } from "@/components/game/play-ui";
 
-// Verify-on-return (lost-webhook recovery): Paystack redirects the payer back
-// to the invoice page with ?reference=… — confirm the charge against the
-// gateway so the payment posts even if the webhook never arrives. Idempotent
-// server-side, so racing the webhook is safe.
+// Verify-on-return (lost-webhook recovery): the gateway redirects the payer back
+// to the invoice page — Paystack with ?reference=…/?trxref=…, Stripe with
+// ?session_id=… — and we confirm the charge against the gateway so the payment
+// posts even if the webhook never arrives. The server picks the gateway from the
+// invoice's currency and treats this token accordingly. Idempotent server-side,
+// so racing the webhook is safe for either rail.
 export function VerifyPaymentBanner({ invoiceId }: { invoiceId: string }) {
   const router = useRouter();
   const search = useSearchParams();
-  const reference = search.get("reference") ?? search.get("trxref");
+  const reference = search.get("reference") ?? search.get("trxref") ?? search.get("session_id");
   const [state, setState] = React.useState<"checking" | "posted" | "already" | "pending" | null>(
     reference ? "checking" : null,
   );
