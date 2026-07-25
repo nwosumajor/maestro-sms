@@ -14,13 +14,11 @@ import { AcademicService } from "./academic.service";
 
 const createClassSchema = z.object({
   name: z.string().min(1),
-  subject: z.string().optional(),
   level: z.number().int().min(0).max(50).nullish(),
   nextClassId: z.string().uuid().nullish(),
 });
 const updateClassSchema = z.object({
   name: z.string().min(1).optional(),
-  subject: z.string().nullish(),
   level: z.number().int().min(0).max(50).nullish(),
   nextClassId: z.string().uuid().nullish(),
   supervisorId: z.string().uuid().nullish(),
@@ -108,7 +106,7 @@ export class LmsController {
   @RequirePermission(LMS_PERMISSIONS.CLASS_WRITE)
   createClass(
     @CurrentPrincipal() p: Principal,
-    @Body(new ZodValidationPipe(createClassSchema)) body: { name: string; subject?: string },
+    @Body(new ZodValidationPipe(createClassSchema)) body: { name: string },
   ) {
     return this.lms.createClass(p, body);
   }

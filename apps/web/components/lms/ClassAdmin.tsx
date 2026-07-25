@@ -38,7 +38,7 @@ export function ClassAdmin({
   };
 
   // create class
-  const [cls, setCls] = React.useState({ name: "", subject: "" });
+  const [cls, setCls] = React.useState({ name: "" });
   // assign teacher
   const [at, setAt] = React.useState({ classId: classes[0]?.id ?? "", teacherId: teachers[0]?.id ?? "" });
   // enroll
@@ -54,11 +54,13 @@ export function ClassAdmin({
       </CardHeader>
       <CardContent className="space-y-4">
         <form
-          onSubmit={async (e) => { e.preventDefault(); if (await post("/classes", { name: cls.name, subject: cls.subject || undefined }, "Class created.")) setCls({ name: "", subject: "" }); }}
+          onSubmit={async (e) => { e.preventDefault(); if (await post("/classes", { name: cls.name }, "Class created.")) setCls({ name: "" }); }}
           className="flex flex-wrap items-end gap-2"
         >
-          <div className="space-y-1.5"><Label htmlFor="cl-name">New class</Label><Input id="cl-name" value={cls.name} onChange={(e) => setCls({ ...cls, name: e.target.value })} placeholder="Biology 101" required /></div>
-          <div className="space-y-1.5"><Label htmlFor="cl-subj">Subject</Label><Input id="cl-subj" value={cls.subject} onChange={(e) => setCls({ ...cls, subject: e.target.value })} placeholder="Biology" /></div>
+          {/* A class is a COHORT — its subjects are defined per class in
+              "Subjects, teachers & progression" (the Subject catalog +
+              class-subject-teacher offerings), not typed here. */}
+          <div className="space-y-1.5"><Label htmlFor="cl-name">New class</Label><Input id="cl-name" value={cls.name} onChange={(e) => setCls({ name: e.target.value })} placeholder="JSS1A" required /></div>
           <Button type="submit" size="sm">Create class</Button>
         </form>
 

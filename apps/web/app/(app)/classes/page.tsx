@@ -101,7 +101,7 @@ export default async function ClassesPage() {
               <Card key={c.id}>
                 <CardHeader>
                   <CardTitle className="text-base">{c.name}</CardTitle>
-                  <CardDescription>{c.subject ?? "General"}</CardDescription>
+                  {c.level != null && <CardDescription>Level {c.level}</CardDescription>}
                 </CardHeader>
                 <CardContent className="flex items-center justify-between gap-2">
                   <code className="text-xs text-muted-foreground">{c.id}</code>

@@ -54,14 +54,13 @@ export class LmsService {
   // --- mutations (school_admin) ---------------------------------------------
   async createClass(
     p: Principal,
-    input: { name: string; subject?: string; level?: number | null; nextClassId?: string | null },
+    input: { name: string; level?: number | null; nextClassId?: string | null },
   ) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const cls = await tx.class.create({
         data: {
           schoolId: p.schoolId,
           name: input.name,
-          subject: input.subject ?? null,
           level: input.level ?? null,
           nextClassId: input.nextClassId ?? null,
         },
@@ -75,7 +74,7 @@ export class LmsService {
   async updateClass(
     p: Principal,
     classId: string,
-    input: { name?: string; subject?: string | null; level?: number | null; nextClassId?: string | null; supervisorId?: string | null; capacity?: number | null },
+    input: { name?: string; level?: number | null; nextClassId?: string | null; supervisorId?: string | null; capacity?: number | null },
   ) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.requireClass(tx, classId);
@@ -93,7 +92,6 @@ export class LmsService {
         where: { id: classId },
         data: {
           name: input.name ?? undefined,
-          subject: input.subject === undefined ? undefined : input.subject,
           level: input.level === undefined ? undefined : input.level,
           nextClassId: input.nextClassId === undefined ? undefined : input.nextClassId,
           supervisorId: input.supervisorId === undefined ? undefined : input.supervisorId,
