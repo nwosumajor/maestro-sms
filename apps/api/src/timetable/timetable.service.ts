@@ -24,11 +24,13 @@ import {
 } from "@nestjs/common";
 import type {
   DayOfWeekValue,
+  DayStructureInput,
   TeacherUnavailabilityDto,
   TimetableDiagnosticDto,
   TimetableEntryDto,
   TimetableGenerateResultDto,
 } from "@sms/types";
+import { generateDayStructure, validateDayStructure } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -117,6 +119,45 @@ export class TimetableService {
     });
   }
 
+  /**
+   * Generate the whole day from a COUNT-and-POSITION description (teaching-period
+   * count + break positions) instead of hand-typed sequence numbers, so the order
+   * and clock times are always internally consistent. Replaces the current period
+   * set; refuses (409) when lessons are already placed, since those reference the
+   * existing periods. Staff-wide only.
+   */
+  async generateDay(p: Principal, input: DayStructureInput) {
+    if (!this.isStaffWide(p)) throw new ForbiddenException();
+    const bad = validateDayStructure(input);
+    if (bad) throw new BadRequestException(bad);
+    const generated = generateDayStructure(input);
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const placed = await tx.timetableEntry.count();
+      if (placed > 0) {
+        throw new ConflictException("Clear the placed timetable first — lessons are scheduled against the current periods.");
+      }
+      // Old periods (and any teacher-availability tied to them) are replaced.
+      await tx.teacherUnavailability.deleteMany({});
+      await tx.period.deleteMany({});
+      await tx.period.createMany({
+        data: generated.map((g) => ({
+          schoolId: p.schoolId,
+          name: g.name,
+          sequence: g.sequence,
+          isBreak: g.isBreak,
+          startTime: g.startTime,
+          endTime: g.endTime,
+        })),
+      });
+      await this.log(tx, p, "timetable.day.generate", "period", "day", {
+        teachingPeriods: input.teachingPeriods,
+        breaks: input.breaks.length,
+        total: generated.length,
+      });
+      return tx.period.findMany({ orderBy: { sequence: "asc" } });
+    });
+  }
+
   // --- rooms -----------------------------------------------------------------
   async listRooms(p: Principal) {
     return this.db.runAsTenant(this.ctx(p), (tx) => tx.room.findMany({ orderBy: { name: "asc" } }));
@@ -184,8 +225,10 @@ export class TimetableService {
     if (!this.isStaffWide(p)) throw new ForbiddenException();
     const days = input.days?.length ? input.days : WEEKDAYS;
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const periods = await tx.period.findMany({ orderBy: { sequence: "asc" }, select: { id: true } });
-      if (periods.length === 0) throw new BadRequestException("Define at least one period first");
+      const allPeriods = await tx.period.findMany({ orderBy: { sequence: "asc" }, select: { id: true, isBreak: true } });
+      // Break slots are never schedulable — the solver only fills teaching periods.
+      const periods = (allPeriods as Array<{ id: string; isBreak: boolean }>).filter((pr) => !pr.isBreak);
+      if (periods.length === 0) throw new BadRequestException("Define at least one teaching period first");
       const slots: Slot[] = [];
       for (const day of days) for (const period of periods) slots.push({ day, periodId: period.id });
 
@@ -474,11 +517,13 @@ export class TimetableService {
   private async assertReferencesExist(tx: TenantTx, e: EntryInput) {
     const [cls, period, teacher] = await Promise.all([
       tx.class.findFirst({ where: { id: e.classId }, select: { id: true } }),
-      tx.period.findFirst({ where: { id: e.periodId }, select: { id: true } }),
+      tx.period.findFirst({ where: { id: e.periodId }, select: { id: true, isBreak: true } }),
       tx.user.findFirst({ where: { id: e.teacherId }, select: { id: true } }),
     ]);
     if (!cls) throw new NotFoundException("Class not found");
     if (!period) throw new NotFoundException("Period not found");
+    // A break is a non-teaching slot — no lesson may be placed in it.
+    if ((period as { isBreak?: boolean }).isBreak) throw new BadRequestException("This is a break period — no lesson can be scheduled in it.");
     if (!teacher) throw new NotFoundException("Teacher not found");
     if (e.roomId) {
       const room = await tx.room.findFirst({ where: { id: e.roomId }, select: { id: true } });

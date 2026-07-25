@@ -46,10 +46,12 @@ const routeSchema = z.object({
 });
 const stopSchema = z.object({
   name: z.string().min(1).max(120),
-  sequence: z.number().int().min(0).default(0),
+  // No sequence: the server appends the stop to the end of the route. Reorder
+  // via the reorder endpoint (drag/arrows), never a typed number.
   fareMinor: z.number().int().min(0).default(0),
   pickupTime: z.string().max(20).nullish(),
 });
+const reorderSchema = z.object({ orderedIds: z.array(z.string().uuid()).min(1).max(200) });
 const assignSchema = z.object({
   routeId: z.string().uuid(),
   stopId: z.string().uuid().nullish(),
@@ -167,6 +169,13 @@ export class TransportController {
   @RequirePermission(TRANSPORT_PERMISSIONS.TRANSPORT_MANAGE)
   addStop(@CurrentPrincipal() p: Principal, @Param("id") id: string, @Body(new ZodValidationPipe(stopSchema)) b: z.infer<typeof stopSchema>): Promise<RouteStopDto> {
     return this.transport.addStop(p, id, b);
+  }
+
+  /** Reorder a route's stops from an explicit id list (arrows/drag, not a number). */
+  @Post("routes/:id/stops/reorder")
+  @RequirePermission(TRANSPORT_PERMISSIONS.TRANSPORT_MANAGE)
+  reorderStops(@CurrentPrincipal() p: Principal, @Param("id") id: string, @Body(new ZodValidationPipe(reorderSchema)) b: z.infer<typeof reorderSchema>): Promise<RouteStopDto[]> {
+    return this.transport.reorderStops(p, id, b.orderedIds);
   }
 
   // assignments

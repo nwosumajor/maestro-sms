@@ -35,16 +35,28 @@ export function TimetableAdmin({
   const router = useRouter();
   const [msg, setMsg] = React.useState<string | null>(null);
 
-  // create period
-  const [per, setPer] = React.useState({ name: "", sequence: String(periods.length + 1), startTime: "", endTime: "" });
-  const addPeriod = async (e: React.FormEvent) => {
+  // Generate the day structure from COUNT + BREAK POSITIONS (never typed
+  // sequence numbers): N teaching periods, a start time, minutes per period, and
+  // breaks at chosen positions. The server builds the ordered, time-consistent
+  // period list.
+  const [gen, setGen] = React.useState({ teachingPeriods: "8", dayStart: "08:00", periodMinutes: "40" });
+  const [breaks, setBreaks] = React.useState<{ afterPeriod: string; minutes: string; name: string }[]>([]);
+  const generateDay = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = await fetch("/api/sms/timetable/periods", {
+    setMsg(null);
+    const res = await fetch("/api/sms/timetable/periods/generate", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: per.name, sequence: Number(per.sequence), startTime: per.startTime, endTime: per.endTime }),
+      body: JSON.stringify({
+        teachingPeriods: Number(gen.teachingPeriods),
+        dayStart: gen.dayStart,
+        periodMinutes: Number(gen.periodMinutes),
+        breaks: breaks
+          .filter((b) => b.afterPeriod && b.minutes)
+          .map((b) => ({ afterPeriod: Number(b.afterPeriod), minutes: Number(b.minutes), name: b.name.trim() || undefined })),
+      }),
     });
-    setMsg(res.ok ? "Period added." : `Period failed (${res.status}).`);
-    if (res.ok) { setPer({ name: "", sequence: String(periods.length + 2), startTime: "", endTime: "" }); router.refresh(); }
+    if (res.ok) { setMsg("Day structure generated."); router.refresh(); }
+    else setMsg(await readApiError(res));
   };
 
   // create room
@@ -64,7 +76,7 @@ export function TimetableAdmin({
   const [classId, setClassId] = React.useState(classes[0]?.id ?? "");
   const [teachers, setTeachers] = React.useState<Named[]>([]);
   const [offerings, setOfferings] = React.useState<Offering[]>([]);
-  const [entry, setEntry] = React.useState({ dayOfWeek: "MONDAY", periodId: periods[0]?.id ?? "", subject: "", teacherId: "", roomId: "" });
+  const [entry, setEntry] = React.useState({ dayOfWeek: "MONDAY", periodId: periods.find((p) => !p.isBreak)?.id ?? "", subject: "", teacherId: "", roomId: "" });
 
   const loadClassData = React.useCallback(async (cid: string) => {
     if (!cid) return;
@@ -110,17 +122,41 @@ export function TimetableAdmin({
         <CardDescription>Define periods and rooms, then place conflict-checked lessons.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
-        <form onSubmit={addPeriod} className="flex flex-wrap items-end gap-2">
-          <div className="space-y-1.5"><Label htmlFor="pp-name">Period</Label><Input id="pp-name" value={per.name} onChange={(e) => setPer({ ...per, name: e.target.value })} placeholder="P1" className="w-24" required /></div>
-          <div className="space-y-1.5"><Label htmlFor="pp-seq">Seq</Label><Input id="pp-seq" type="number" min={1} value={per.sequence} onChange={(e) => setPer({ ...per, sequence: e.target.value })} className="w-16" /></div>
-          <div className="space-y-1.5"><Label htmlFor="pp-start">Start</Label><Input id="pp-start" type="time" value={per.startTime} onChange={(e) => setPer({ ...per, startTime: e.target.value })} className="w-32" required /></div>
-          <div className="space-y-1.5"><Label htmlFor="pp-end">End</Label><Input id="pp-end" type="time" value={per.endTime} onChange={(e) => setPer({ ...per, endTime: e.target.value })} className="w-32" required /></div>
-          <Button type="submit" variant="outline" size="sm">Add period</Button>
+        <form onSubmit={generateDay} className="space-y-3 rounded-md border border-dashed border-border p-3">
+          <p className="text-xs font-medium">Build the day — teaching periods &amp; break positions</p>
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="space-y-1"><Label className="text-xs">Teaching periods</Label><Input type="number" min={1} max={50} value={gen.teachingPeriods} onChange={(e) => setGen({ ...gen, teachingPeriods: e.target.value })} className="w-24" required /></div>
+            <div className="space-y-1"><Label className="text-xs">Day starts</Label><Input type="time" value={gen.dayStart} onChange={(e) => setGen({ ...gen, dayStart: e.target.value })} className="w-32" required /></div>
+            <div className="space-y-1"><Label className="text-xs">Minutes / period</Label><Input type="number" min={1} max={600} value={gen.periodMinutes} onChange={(e) => setGen({ ...gen, periodMinutes: e.target.value })} className="w-24" required /></div>
+          </div>
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2">
+              <Label className="text-xs">Breaks</Label>
+              <Button type="button" variant="outline" size="sm" className="h-7"
+                onClick={() => setBreaks([...breaks, { afterPeriod: "", minutes: "20", name: "" }])}>+ Add break</Button>
+            </div>
+            {breaks.length === 0 && <p className="text-xs text-muted-foreground">No breaks — add one to place a break after a given period.</p>}
+            {breaks.map((b, i) => (
+              <div key={i} className="flex flex-wrap items-end gap-2">
+                <div className="space-y-1"><Label className="text-xs">After period</Label>
+                  <select value={b.afterPeriod} onChange={(e) => setBreaks(breaks.map((x, j) => j === i ? { ...x, afterPeriod: e.target.value } : x))} className="h-9 w-28 rounded-md border border-input bg-background px-2 text-sm">
+                    <option value="">—</option>
+                    {Array.from({ length: Math.max(0, Number(gen.teachingPeriods) - 1) }, (_, k) => k + 1).map((n) => <option key={n} value={n}>Period {n}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-1"><Label className="text-xs">Minutes</Label><Input type="number" min={1} max={600} value={b.minutes} onChange={(e) => setBreaks(breaks.map((x, j) => j === i ? { ...x, minutes: e.target.value } : x))} className="w-20" /></div>
+                <div className="space-y-1"><Label className="text-xs">Label</Label><Input value={b.name} onChange={(e) => setBreaks(breaks.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} placeholder="Lunch" className="w-28" /></div>
+                <Button type="button" variant="ghost" size="sm" className="h-9 text-destructive" onClick={() => setBreaks(breaks.filter((_, j) => j !== i))}>remove</Button>
+              </div>
+            ))}
+          </div>
+          <Button type="submit" variant="outline" size="sm">Generate day</Button>
+          <p className="text-xs text-muted-foreground">Replaces the current periods. Clear placed lessons first if any exist.</p>
         </form>
 
         {periods.length > 0 && (
           <div className="space-y-1.5 border-t border-border pt-3">
-            <p className="text-xs font-medium text-muted-foreground">Existing periods — edit name, time or order, then Save</p>
+            <p className="text-xs font-medium text-muted-foreground">Periods — edit name or time (order &amp; breaks come from the day builder above)</p>
             {[...periods].sort((a, b) => a.sequence - b.sequence).map((pd) => (
               <PeriodEditRow key={pd.id} period={pd} onSaved={() => router.refresh()} />
             ))}
@@ -150,7 +186,8 @@ export function TimetableAdmin({
               {DAYS.map((d) => <option key={d} value={d}>{d[0] + d.slice(1).toLowerCase()}</option>)}
             </select>
             <select aria-label="Period" value={entry.periodId} onChange={(e) => setEntry({ ...entry, periodId: e.target.value })} className={selCls}>
-              {periods.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.startTime})</option>)}
+              {/* Break slots are not schedulable — only teaching periods appear. */}
+              {periods.filter((p) => !p.isBreak).map((p) => <option key={p.id} value={p.id}>{p.name} ({p.startTime})</option>)}
             </select>
             {offerings.length > 0 && (
               <select
@@ -373,24 +410,20 @@ function AutoGeneratePanel() {
 /** One editable period row (name / sequence / start / end) → PATCH periods/:id. */
 function PeriodEditRow({ period, onSaved }: { period: Period; onSaved: () => void }) {
   const [name, setName] = React.useState(period.name);
-  const [sequence, setSequence] = React.useState(String(period.sequence));
   const [startTime, setStartTime] = React.useState(period.startTime);
   const [endTime, setEndTime] = React.useState(period.endTime);
   const [busy, setBusy] = React.useState(false);
   const [note, setNote] = React.useState<string | null>(null);
 
-  const dirty =
-    name !== period.name ||
-    Number(sequence) !== period.sequence ||
-    startTime !== period.startTime ||
-    endTime !== period.endTime;
+  // Order is NOT edited here (it comes from the day builder) — only name + times.
+  const dirty = name !== period.name || startTime !== period.startTime || endTime !== period.endTime;
 
   const save = async () => {
     setBusy(true); setNote(null);
     const res = await fetch(`/api/sms/timetable/periods/${period.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: name.trim(), sequence: Number(sequence), startTime, endTime }),
+      body: JSON.stringify({ name: name.trim(), startTime, endTime }),
     });
     setBusy(false);
     if (res.ok) { setNote("Saved ✓"); onSaved(); }
@@ -399,10 +432,11 @@ function PeriodEditRow({ period, onSaved }: { period: Period; onSaved: () => voi
 
   return (
     <div className="flex flex-wrap items-end gap-2">
-      <div className="space-y-1"><Label className="text-xs">Period</Label><Input value={name} onChange={(e) => setName(e.target.value)} className="w-24" /></div>
-      <div className="space-y-1"><Label className="text-xs">Seq</Label><Input type="number" min={1} value={sequence} onChange={(e) => setSequence(e.target.value)} className="w-16" /></div>
+      <span className="w-6 text-xs text-muted-foreground tabular-nums">{period.sequence}.</span>
+      <div className="space-y-1"><Label className="text-xs">{period.isBreak ? "Break" : "Period"}</Label><Input value={name} onChange={(e) => setName(e.target.value)} className="w-28" /></div>
       <div className="space-y-1"><Label className="text-xs">Start</Label><Input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} className="w-32" /></div>
       <div className="space-y-1"><Label className="text-xs">End</Label><Input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} className="w-32" /></div>
+      {period.isBreak && <span className="mb-2 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">break</span>}
       <Button type="button" variant="outline" size="sm" disabled={busy || !dirty || !name.trim()} onClick={save}>
         {busy ? "Saving…" : "Save"}
       </Button>

@@ -4,6 +4,7 @@ export interface PeriodDto {
   id: string;
   name: string;
   sequence: number;
+  isBreak: boolean;
   startTime: string;
   endTime: string;
 }

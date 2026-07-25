@@ -73,14 +73,25 @@ export function validateTermDates(
     return `Another term in this session already uses sequence ${proposed.sequence}.`;
   }
 
-  // Overlap: only checked when BOTH ends of BOTH terms are dated.
+  // Sequence order MUST match chronological order: every LOWER-sequence term ends
+  // STRICTLY BEFORE this term begins, and every HIGHER-sequence term begins
+  // strictly after it ends. This orders the calendar and forecloses overlap (a
+  // strictly stronger check than a bare overlap test), so progression-by-sequence
+  // can never disagree with the auto-advance-by-end-date it drives. The gap is
+  // strict — terms may not share a boundary day — because report-card term
+  // windows are INCLUSIVE date ranges, so a shared day would be counted in both
+  // terms. Only enforced when BOTH ends of BOTH terms are dated (a half-configured
+  // calendar stays permissive).
   if (start !== null && end !== null) {
     for (const t of siblings) {
       const ts = asDay(t.startDate);
       const te = asDay(t.endDate);
       if (ts === null || te === null) continue;
-      if (start <= te && ts <= end) {
-        return `These dates overlap "${t.name}" (${fmtDay(ts)}–${fmtDay(te)}).`;
+      if (t.sequence < proposed.sequence && te >= start) {
+        return `"${t.name}" (term ${t.sequence}) must end before this term (term ${proposed.sequence}) begins — a later term cannot start earlier.`;
+      }
+      if (t.sequence > proposed.sequence && end >= ts) {
+        return `This term (term ${proposed.sequence}) must end before "${t.name}" (term ${t.sequence}) begins — an earlier term cannot end later.`;
       }
     }
   }
@@ -99,6 +110,23 @@ export function validateSessionDates(input: { startDate?: string | Date | null; 
 }
 
 const fmtDay = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
+
+// -----------------------------------------------------------------------------
+// Term presets — the canonical ordinal term slots
+// -----------------------------------------------------------------------------
+// The name-and-order pairing a school picks from, so a term is chosen from a
+// dropdown (name) rather than a free-typed number that could be negative,
+// duplicated, or out of order. The array INDEX is the source of truth for order;
+// `sequence` is the stored value. Covers up to six periods (the DB/zod bound),
+// which comfortably spans the Nigerian three-term year and semester systems.
+export const TERM_PRESETS: ReadonlyArray<{ sequence: number; name: string }> = [
+  { sequence: 1, name: "First Term" },
+  { sequence: 2, name: "Second Term" },
+  { sequence: 3, name: "Third Term" },
+  { sequence: 4, name: "Fourth Term" },
+  { sequence: 5, name: "Fifth Term" },
+  { sequence: 6, name: "Sixth Term" },
+];
 
 // -----------------------------------------------------------------------------
 // Standard 3-term session generation (Tier 2 quick-create)
