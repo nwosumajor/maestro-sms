@@ -3,7 +3,6 @@
 export interface ClassDto {
   id: string;
   name: string;
-  subject: string | null;
   level: number | null;
   nextClassId: string | null;
   supervisorId: string | null;

@@ -15,7 +15,6 @@ model Class {
   id           String   @id @default(uuid()) @db.Uuid
   schoolId     String   @db.Uuid
   name         String
-  subject      String?
   /// Ordering within the school's progression (e.g. JSS1=1, JSS2=2). Drives the
   /// "promote to the next class" flow together with nextClassId.
   level        Int?
