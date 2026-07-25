@@ -8,8 +8,20 @@
 // =============================================================================
 
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import type { AcademicSessionDto, TermDto } from "@sms/types";
-import { pickNextTerm, termHasElapsed } from "@sms/types";
+import type { AcademicSessionDto, CalendarSession, CalendarTerm, SchoolHolidayDto, TermDto } from "@sms/types";
+import { dayUtc, pickNextTerm, standardTermDates, termHasElapsed, validateSessionDates, validateTermDates } from "@sms/types";
+
+interface HolidayRow {
+  id: string;
+  name: string;
+  startDate: Date;
+  endDate: Date;
+  createdAt: Date;
+}
+
+/** Row shapes fed to the pure calendar validators. */
+type CalendarSessionRow = CalendarSession & { id: string };
+type CalendarTermRow = CalendarTerm;
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -147,6 +159,8 @@ export class AcademicService {
   }
 
   async createSession(p: Principal, input: { name: string; startDate?: string | null; endDate?: string | null }) {
+    const bad = validateSessionDates(input);
+    if (bad) throw new BadRequestException(bad);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const s = await tx.academicSession.create({
         data: {
@@ -167,8 +181,17 @@ export class AcademicService {
     input: { name: string; sequence: number; startDate?: string | null; endDate?: string | null },
   ) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const session = await tx.academicSession.findFirst({ where: { id: sessionId }, select: { id: true } });
+      const session = (await tx.academicSession.findFirst({
+        where: { id: sessionId },
+        select: { id: true, startDate: true, endDate: true },
+      })) as CalendarSessionRow | null;
       if (!session) throw new NotFoundException("Session not found");
+      const siblings = (await tx.term.findMany({
+        where: { sessionId },
+        select: { id: true, sessionId: true, name: true, sequence: true, startDate: true, endDate: true },
+      })) as CalendarTermRow[];
+      const bad = validateTermDates(input, session, siblings);
+      if (bad) throw new BadRequestException(bad);
       const t = await tx.term.create({
         data: {
           schoolId: p.schoolId,
@@ -192,8 +215,31 @@ export class AcademicService {
     input: { name?: string; sequence?: number; startDate?: string | null; endDate?: string | null },
   ) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const term = await tx.term.findFirst({ where: { id: termId }, select: { id: true } });
+      const term = (await tx.term.findFirst({
+        where: { id: termId },
+        select: { id: true, sessionId: true, sequence: true, startDate: true, endDate: true },
+      })) as CalendarTermRow | null;
       if (!term) throw new NotFoundException("Term not found");
+      // Validate the EFFECTIVE (merged) dates/sequence against the session window
+      // and the OTHER terms in the same session — a half-edit can't slip past.
+      const session = (await tx.academicSession.findFirst({
+        where: { id: term.sessionId },
+        select: { id: true, startDate: true, endDate: true },
+      })) as CalendarSessionRow | null;
+      const siblings = (await tx.term.findMany({
+        where: { sessionId: term.sessionId, id: { not: termId } },
+        select: { id: true, sessionId: true, name: true, sequence: true, startDate: true, endDate: true },
+      })) as CalendarTermRow[];
+      const bad = validateTermDates(
+        {
+          sequence: input.sequence ?? term.sequence,
+          startDate: input.startDate !== undefined ? input.startDate : term.startDate,
+          endDate: input.endDate !== undefined ? input.endDate : term.endDate,
+        },
+        session,
+        siblings,
+      );
+      if (bad) throw new BadRequestException(bad);
       const data: Record<string, unknown> = {};
       if (input.name !== undefined) data.name = input.name;
       if (input.sequence !== undefined) data.sequence = input.sequence;
@@ -220,15 +266,89 @@ export class AcademicService {
     });
   }
 
-  /** Mark a term current (and clear the others). */
+  /** Mark a term current (and clear the others). The term's SESSION is made
+   *  current too, so the pointer can never land on a term outside the current
+   *  session (an inconsistency the rest of the app reads from). */
   async setCurrentTerm(p: Principal, termId: string) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const term = await tx.term.findFirst({ where: { id: termId }, select: { id: true } });
+      const term = await tx.term.findFirst({ where: { id: termId }, select: { id: true, sessionId: true } });
       if (!term) throw new NotFoundException("Term not found");
       await tx.term.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
       await tx.term.update({ where: { id: termId }, data: { isCurrent: true } });
-      await this.log(tx, p, "academic.term.set_current", "term", termId, {});
+      // Keep the current-session pointer in lock-step with the current term.
+      await tx.academicSession.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
+      await tx.academicSession.update({ where: { id: term.sessionId }, data: { isCurrent: true } });
+      await this.log(tx, p, "academic.term.set_current", "term", termId, { sessionId: term.sessionId });
       return { id: termId, isCurrent: true };
+    });
+  }
+
+  /**
+   * Tier-2 quick-create: a whole standard Nigerian three-term session in one
+   * action. Generates three ~13-week terms (with breaks) from `yearStart` —
+   * editable afterwards. Optionally makes the new session + its first term
+   * current straight away.
+   */
+  async createStandardSession(
+    p: Principal,
+    input: { name: string; yearStart: string; makeCurrent?: boolean },
+  ): Promise<AcademicSessionDto> {
+    const terms = standardTermDates(input.yearStart);
+    const sessionStart = terms[0].startDate;
+    const sessionEnd = terms[terms.length - 1].endDate;
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const s = await tx.academicSession.create({
+        data: { schoolId: p.schoolId, name: input.name, startDate: new Date(sessionStart), endDate: new Date(sessionEnd) },
+      });
+      await tx.term.createMany({
+        data: terms.map((t) => ({
+          schoolId: p.schoolId,
+          sessionId: s.id,
+          name: t.name,
+          sequence: t.sequence,
+          startDate: new Date(t.startDate),
+          endDate: new Date(t.endDate),
+        })),
+      });
+      if (input.makeCurrent) {
+        const first = await tx.term.findFirst({ where: { sessionId: s.id }, orderBy: { sequence: "asc" }, select: { id: true } });
+        await tx.term.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
+        await tx.academicSession.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
+        await tx.academicSession.update({ where: { id: s.id }, data: { isCurrent: true } });
+        if (first) await tx.term.update({ where: { id: first.id }, data: { isCurrent: true } });
+      }
+      await this.log(tx, p, "academic.session.create_standard", "academic_session", s.id, { name: input.name, terms: terms.length, makeCurrent: !!input.makeCurrent });
+      const created = (await tx.academicSession.findFirstOrThrow({ where: { id: s.id } })) as SessionRow;
+      const rows = (await tx.term.findMany({ where: { sessionId: s.id }, orderBy: { sequence: "asc" } })) as TermRow[];
+      return { id: created.id, name: created.name, isCurrent: created.isCurrent, startDate: created.startDate, endDate: created.endDate, terms: rows.map(this.termDto) };
+    });
+  }
+
+  /**
+   * Tier-2 "sync current to today": set the current term (and its session) to the
+   * one whose [startDate,endDate] window contains today, so the pointer reflects
+   * reality without a manual advance. 400 when no dated term contains today.
+   */
+  async setCurrentToToday(p: Principal): Promise<AdvanceTermResult> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const today = new Date();
+      today.setUTCHours(0, 0, 0, 0);
+      const containing = (await tx.term.findFirst({
+        where: { startDate: { lte: today }, endDate: { gte: today } },
+        orderBy: { startDate: "desc" },
+      })) as TermRow | null;
+      if (!containing) {
+        throw new BadRequestException("No term's dates contain today. Set term start/end dates first, or mark a term current manually.");
+      }
+      if (containing.isCurrent) {
+        return { advanced: false, reason: "Today's term is already current.", termId: containing.id, termName: containing.name, sessionId: containing.sessionId };
+      }
+      await tx.term.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
+      await tx.term.update({ where: { id: containing.id }, data: { isCurrent: true } });
+      await tx.academicSession.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
+      await tx.academicSession.update({ where: { id: containing.sessionId }, data: { isCurrent: true } });
+      await this.log(tx, p, "academic.term.set_current", "term", containing.id, { via: "today", sessionId: containing.sessionId });
+      return { advanced: true, termId: containing.id, termName: containing.name, sessionId: containing.sessionId };
     });
   }
 
@@ -244,6 +364,40 @@ export class AcademicService {
       const r = await advanceTermInTx(tx, { schoolId: p.schoolId, actorId: p.userId, audit: this.audit });
       if (!r.advanced) throw new BadRequestException(r.reason ?? "Cannot advance to the next term.");
       return r;
+    });
+  }
+
+  // --- holidays / non-teaching days (Tier 3) --------------------------------
+
+  /** Holidays for the school, soonest span first. Broad read (class.read) so the
+   *  shared calendar and the attendance guard can both see them. */
+  async listHolidays(p: Principal): Promise<SchoolHolidayDto[]> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const rows = (await tx.schoolHoliday.findMany({ orderBy: { startDate: "asc" } })) as HolidayRow[];
+      return rows.map((h) => ({ id: h.id, name: h.name, startDate: h.startDate, endDate: h.endDate, createdAt: h.createdAt }));
+    });
+  }
+
+  async createHoliday(p: Principal, input: { name: string; startDate: string; endDate: string }): Promise<SchoolHolidayDto> {
+    if (dayUtc(input.endDate) < dayUtc(input.startDate)) {
+      throw new BadRequestException("A holiday's end date cannot be before its start date.");
+    }
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const h = (await tx.schoolHoliday.create({
+        data: { schoolId: p.schoolId, name: input.name, startDate: new Date(input.startDate), endDate: new Date(input.endDate), createdById: p.userId },
+      })) as HolidayRow;
+      await this.log(tx, p, "academic.holiday.create", "school_holiday", h.id, { name: input.name });
+      return { id: h.id, name: h.name, startDate: h.startDate, endDate: h.endDate, createdAt: h.createdAt };
+    });
+  }
+
+  async deleteHoliday(p: Principal, id: string): Promise<{ id: string; deleted: true }> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const h = await tx.schoolHoliday.findFirst({ where: { id }, select: { id: true } });
+      if (!h) throw new NotFoundException("Holiday not found");
+      await tx.schoolHoliday.delete({ where: { id } });
+      await this.log(tx, p, "academic.holiday.delete", "school_holiday", id, {});
+      return { id, deleted: true as const };
     });
   }
 

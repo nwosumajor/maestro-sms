@@ -47,3 +47,24 @@ model Term {
   @@index([schoolId, sessionId])
   @@map("term")
 }
+
+// A non-teaching day / span (public holiday, mid-term break, closure). Single-day
+// when startDate == endDate. Tenant-scoped (non-null schoolId, RLS). Drives the
+// pure teaching-day helpers (attendance guard, calendar overlay) — it is a school
+// FACT, not a personal record, so no PII lives here.
+model SchoolHoliday {
+  id          String   @id @default(uuid()) @db.Uuid
+  schoolId    String   @db.Uuid
+  name        String
+  startDate   DateTime @db.Date
+  endDate     DateTime @db.Date
+  createdById String   @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, startDate])
+  @@map("school_holiday")
+}

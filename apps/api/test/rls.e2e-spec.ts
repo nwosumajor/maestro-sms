@@ -183,6 +183,7 @@ d("RLS cross-tenant isolation", () => {
   const transportBoardingA = randomUUID();
   const vehicleMaintenanceA = randomUUID();
   const vehicleLocationA = randomUUID();
+  const schoolHolidayA = randomUUID();
   // Library
   const libraryBookA = randomUUID();
   const bookLoanA = randomUUID();
@@ -764,6 +765,11 @@ d("RLS cross-tenant isolation", () => {
       `INSERT INTO vehicle_location (id,"schoolId","vehicleId",lat,lng) VALUES ($1,$2,$3,6.5,3.4)`,
       [vehicleLocationA, A, vehicleA],
     );
+    // Academic: a non-teaching day for school A.
+    await a.query(
+      `INSERT INTO school_holiday (id,"schoolId",name,"startDate","endDate","createdById","updatedAt") VALUES ($1,$2,'Mid-term break',now(),now(),$3,now())`,
+      [schoolHolidayA, A, userA],
+    );
     // Library: book + loan (borrower userA).
     await a.query(
       `INSERT INTO library_book (id,"schoolId",title,barcode,"totalCopies","availableCopies","updatedAt") VALUES ($1,$2,'Book A','BC-A',3,2,now())`,
@@ -1029,6 +1035,7 @@ d("RLS cross-tenant isolation", () => {
       "vehicle_maintenance",
       "vehicle_location",
       "transport_assignment",
+      "school_holiday",
       "route_stop",
       "transport_route",
       "vehicle",
@@ -1385,6 +1392,7 @@ d("RLS cross-tenant isolation", () => {
     ["transport_boarding", transportBoardingA],
     ["vehicle_maintenance", vehicleMaintenanceA],
     ["vehicle_location", vehicleLocationA],
+    ["school_holiday", schoolHolidayA],
     ["library_book", libraryBookA],
     ["book_loan", bookLoanA],
     ["task", taskA],

@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Header, Param, Post, Put, Query } from "@nestjs/common";
 import { MODULES, USER_KINDS, type UserKind } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
-import type { AcademicSessionDto, ClassDto, ClassEligibilityDto, ClassInfoDto, ClassSubjectDto, IdNameDto, PromotionBatchDto, SubjectDto, UserWithEmailDto } from "@sms/types";
+import type { AcademicSessionDto, ClassDto, ClassEligibilityDto, ClassInfoDto, ClassSubjectDto, IdNameDto, PromotionBatchDto, SchoolHolidayDto, SubjectDto, UserWithEmailDto } from "@sms/types";
 import { z } from "zod";
 import { LMS_PERMISSIONS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -49,6 +49,16 @@ const termUpdateSchema = z.object({
   sequence: z.number().int().min(1).max(6).optional(),
   startDate: isoDate,
   endDate: isoDate,
+});
+const standardSessionSchema = z.object({
+  name: z.string().min(1).max(60),
+  yearStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  makeCurrent: z.boolean().optional(),
+});
+const holidaySchema = z.object({
+  name: z.string().min(1).max(100),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 });
 const teacherSchema = z.object({ teacherId: z.string().uuid() });
 const studentSchema = z.object({ studentId: z.string().uuid() });
@@ -343,6 +353,45 @@ export class LmsController {
   @RequirePermission(LMS_PERMISSIONS.ACADEMIC_MANAGE)
   advanceTerm(@CurrentPrincipal() p: Principal) {
     return this.academic.advanceToNextTerm(p);
+  }
+
+  /** Quick-create a standard 3-term session with dated terms. */
+  @Post("academic/sessions/standard")
+  @RequirePermission(LMS_PERMISSIONS.ACADEMIC_MANAGE)
+  createStandardSession(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(standardSessionSchema)) body: z.infer<typeof standardSessionSchema>,
+  ) {
+    return this.academic.createStandardSession(p, body);
+  }
+
+  /** Set the current term (and session) to the one whose dates contain today. */
+  @Post("academic/sync-current")
+  @RequirePermission(LMS_PERMISSIONS.ACADEMIC_MANAGE)
+  syncCurrentTerm(@CurrentPrincipal() p: Principal) {
+    return this.academic.setCurrentToToday(p);
+  }
+
+  // --- holidays / non-teaching days ------------------------------------------
+  @Get("academic/holidays")
+  @RequirePermission(LMS_PERMISSIONS.CLASS_READ)
+  holidays(@CurrentPrincipal() p: Principal): Promise<SchoolHolidayDto[]> {
+    return this.academic.listHolidays(p);
+  }
+
+  @Post("academic/holidays")
+  @RequirePermission(LMS_PERMISSIONS.ACADEMIC_MANAGE)
+  createHoliday(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(holidaySchema)) body: z.infer<typeof holidaySchema>,
+  ): Promise<SchoolHolidayDto> {
+    return this.academic.createHoliday(p, body);
+  }
+
+  @Delete("academic/holidays/:id")
+  @RequirePermission(LMS_PERMISSIONS.ACADEMIC_MANAGE)
+  deleteHoliday(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.academic.deleteHoliday(p, id);
   }
 
   // --- end-of-session promotion (maker-checker) ------------------------------

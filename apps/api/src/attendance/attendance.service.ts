@@ -16,7 +16,7 @@ import { BadRequestException, ConflictException, Inject, Injectable, Logger, Not
 // VALUE import: Prisma.sql/join only resolve as values, not types (CLAUDE.md).
 import { Prisma } from "@sms/db";
 import type { AttendanceStatusValue } from "@sms/types";
-import { ATTENDANCE_AMENDMENT_CHAIN, WORKFLOW_PERMISSIONS } from "@sms/types";
+import { ATTENDANCE_AMENDMENT_CHAIN, dayUtc, WORKFLOW_PERMISSIONS } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -94,6 +94,7 @@ export class AttendanceService {
     if (stale && !isApprover) {
       await this.db.runAsTenant(this.ctx(p), async (tx) => {
         await this.assertTeacherOfClass(tx, p, classId);
+        await this.assertNotHoliday(tx, date);
         const lockBefore = await this.currentTermStart(tx);
         if (lockBefore && date < lockBefore) {
           throw new ConflictException(
@@ -114,6 +115,7 @@ export class AttendanceService {
 
     const { session, alerts } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.assertTeacherOfClass(tx, p, classId);
+      await this.assertNotHoliday(tx, date);
       // TERM LOCK: a register in a term that has ENDED is read-only for everyone,
       // including leadership — the authoritative check (the UI also greys it out).
       const lockBefore = await this.currentTermStart(tx);
@@ -276,6 +278,28 @@ export class AttendanceService {
     }
     const loaded = await this.loadSession(tx, session.id);
     return { session: loaded, alerts };
+  }
+
+  /**
+   * Reject taking a register on a school-declared holiday. Only EXPLICIT holidays
+   * block — weekends are left alone so a school that runs Saturday classes is not
+   * broken (weekend handling belongs to the teaching-day helpers used in
+   * reporting, not to a hard write guard). Fail-open when none are configured.
+   *
+   * The check is a single INDEXED lookup for a span covering THIS day (uses the
+   * (schoolId, startDate) index) — it never loads the whole holiday table. `date`
+   * is normalised to midnight UTC so a same-day afternoon still matches a DATE
+   * column's midnight endDate.
+   */
+  private async assertNotHoliday(tx: TenantTx, date: Date): Promise<void> {
+    const d = new Date(dayUtc(date));
+    const hit = await tx.schoolHoliday.findFirst({
+      where: { startDate: { lte: d }, endDate: { gte: d } },
+      select: { name: true },
+    });
+    if (hit) {
+      throw new BadRequestException(`This date is a school holiday (${hit.name}) — no register is taken. Remove the holiday if this is a school day.`);
+    }
   }
 
   /**

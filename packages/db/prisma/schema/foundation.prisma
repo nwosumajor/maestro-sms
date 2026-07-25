@@ -161,6 +161,7 @@ model School {
   threadParticipants ThreadParticipant[]
   messages           Message[]
   schoolEvents       SchoolEvent[]
+  schoolHolidays     SchoolHoliday[]
 
   // HR
   employees Employee[]

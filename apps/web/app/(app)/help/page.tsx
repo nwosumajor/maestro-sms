@@ -118,7 +118,7 @@ export default async function HelpPage() {
               { title: "Fees & documents", body: "Fees shows your invoices and payments; Documents holds your report cards, receipts and certificates as secure downloads." },
               { title: "Find your exam hall and seat", body: "Exams lists every exam scheduled for you with the hall, the time and your seat number — check it the day before so you walk straight to the right place." },
               { title: "Borrow from the library", body: mod("library") ? "Library: search the catalogue and see your loans and any fines. Return on time — fines are recorded against your account." : "When your school enables the Library module, your loans appear under Library." },
-              { title: "Take part", body: "Tasks (work assigned to you), Polls (anonymous votes), Discussion (moderated topic groups) and Forms (school surveys) are yours to join. Discipline lets you file a complaint with evidence — a person always reviews it." },
+              { title: "Take part", body: "Tasks (work assigned to you), Polls (anonymous votes), Discussion (moderated topic groups) and Forms (school surveys) are yours to join. Discipline lets you file a complaint about a classmate or a teacher who teaches you — a person always reviews it, and nothing is ever automatic." },
             ]}
           />
         )}
@@ -133,6 +133,7 @@ export default async function HelpPage() {
               { title: "Prepay when it suits you", body: "The invoice page shows your child's credit balance — top it up online any time and the school applies it to invoices as they come due. Useful for paying ahead of term." },
               { title: "Approve scholarship requests", body: "Scholarships: when your child requests a scholarship (or their teacher applies for them), it reaches YOU after the class supervisor. Your approval is also your consent to share their academic record with the sponsor — nothing is submitted without it. You can also start an application for your child yourself. You're notified at every later stage, through to the award." },
               { title: "Absence alerts", body: "You're notified automatically the moment your child is marked absent or late on the register." },
+              { title: "Bus & boarding-house alerts", body: "If your child rides the school bus, you're alerted the moment they board for pickup. For boarders, you're notified when an exeat (a pass to leave the boarding house) is approved, with the expected return time. These arrive in Notifications." },
               { title: "Book a meeting with a teacher", body: "Meetings shows the appointment slots teachers have opened. Pick one, choose which child it's about, and book — the teacher is notified straight away. You can cancel from the same page (so can they, and you'll be told)." },
               { title: "Your child's exam hall and seat", body: "Exams shows each child's upcoming exams with hall, time and seat number." },
               { title: "Choose how we contact you", body: "Account → Notification preferences: switch email, SMS or WhatsApp on or off, and mute categories you don't need (announcements, fee reminders, grade publications…). Your in-app inbox always keeps everything, and payment and security notices are always sent." },
@@ -248,13 +249,15 @@ export default async function HelpPage() {
           />
         )}
 
-        {(can("hostel.manage") || can("transport.manage") || can("library.manage")) && (
+        {/* transport.read (not .manage) so a plain DRIVER — who confirms boarding
+            and shares GPS — also sees this guide, not just the head driver. */}
+        {(can("hostel.manage") || can("transport.read") || can("library.manage")) && (
           <Guide
             title="Facilities — hostel, transport & library"
             description="For wardens, drivers/fleet heads and librarians."
             steps={[
-              { title: "Hostel (wardens)", body: "Hostel: rooms, bed availability and student allocation for your house — head wardens see every hostel. Hostel fee runs route through an approval before they bill." },
-              { title: "Transport (drivers & fleet)", body: "Transport: your vehicle, route and passenger list — the head driver manages the whole fleet. Route changes automatically alert affected parents, and transport fee runs also need an approval." },
+              { title: "Hostel (wardens)", body: "Hostel: rooms, bed availability and student allocation for your house — head wardens see every hostel. Transfer a boarder between rooms, take the roll-call, approve exeat passes (a DIFFERENT warden must approve each, and the guardian is notified), and log maintenance or incidents. Hostel fee runs route through an approval before they bill." },
+              { title: "Transport (drivers & fleet)", body: "Transport: your vehicle, route and passenger list. Every driver confirms each child aboard at pickup — the guardian is alerted automatically — and shares the bus's live location. The head driver manages the whole fleet: scheduling AM/PM trips, logging fuel and maintenance, and changing routes (which automatically alerts affected parents). Transport fee runs need an approval before they bill." },
               { title: "Library (librarians)", body: "Library: the barcode catalogue, loans and fines. A copy must be available to issue; books with loan history can't be deleted." },
             ]}
           />

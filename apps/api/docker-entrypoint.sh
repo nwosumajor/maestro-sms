@@ -161,6 +161,7 @@ apply_rls packages/db/prisma/rls/90_transport_expansion_rls.sql vehicle_location
 # No policies in this one (indexes only) -> the sentinel never matches and it
 # re-runs each boot; every statement is IF NOT EXISTS, so that is a no-op.
 apply_rls packages/db/prisma/rls/91_fulltext_indexes.sql   __fts_indexes_no_policy__
+apply_rls packages/db/prisma/rls/92_academic_holiday_rls.sql school_holiday_delete
 
 # Seed on first provision (compose: SEED_ON_START=true; cloud migrate task: always).
 if [ "${SEED_ON_START}" = "true" ] || [ "$MODE" = "migrate" ]; then
