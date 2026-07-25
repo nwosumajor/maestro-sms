@@ -35,10 +35,28 @@ describe("validateTermDates", () => {
     expect(validateTermDates({ sequence: 1, startDate: "2026-01-05", endDate: "2026-04-10" }, session, siblings)).toMatch(/sequence 1/i);
   });
 
-  it("rejects an overlap with a sibling term", () => {
+  it("rejects an overlap with a sibling term (sequence order must hold)", () => {
     const siblings = [{ id: "t1", sessionId: "s1", name: "First Term", sequence: 1, startDate: "2025-09-01", endDate: "2025-12-12" }];
     // Proposed second term starts inside the first term's window.
-    expect(validateTermDates({ sequence: 2, startDate: "2025-12-01", endDate: "2026-03-01" }, session, siblings)).toMatch(/overlap/i);
+    expect(validateTermDates({ sequence: 2, startDate: "2025-12-01", endDate: "2026-03-01" }, session, siblings)).toMatch(/must end before/i);
+  });
+
+  it("rejects an OUT-OF-ORDER term even when it does not overlap (seq 2 dated before seq 1)", () => {
+    // The gap the old overlap-only check missed: term 2 sits entirely BEFORE
+    // term 1 with a clear gap — no overlap, but the order is wrong.
+    const siblings = [{ id: "t1", sessionId: "s1", name: "First Term", sequence: 1, startDate: "2026-01-05", endDate: "2026-04-10" }];
+    expect(validateTermDates({ sequence: 2, startDate: "2025-09-01", endDate: "2025-12-12" }, session, siblings)).toMatch(/must end before/i);
+  });
+
+  it("rejects a shared boundary day (would double-count that day in both terms)", () => {
+    const siblings = [{ id: "t1", sessionId: "s1", name: "First Term", sequence: 1, startDate: "2025-09-01", endDate: "2025-12-12" }];
+    // Second term starts the SAME day the first ends — inclusive windows overlap.
+    expect(validateTermDates({ sequence: 2, startDate: "2025-12-12", endDate: "2026-03-01" }, session, siblings)).toMatch(/must end before/i);
+  });
+
+  it("allows adjacent terms with a one-day gap", () => {
+    const siblings = [{ id: "t1", sessionId: "s1", name: "First Term", sequence: 1, startDate: "2025-09-01", endDate: "2025-12-12" }];
+    expect(validateTermDates({ sequence: 2, startDate: "2025-12-13", endDate: "2026-03-01" }, session, siblings)).toBeNull();
   });
 
   it("does NOT cross-check when a needed date is absent (half-configured is allowed)", () => {

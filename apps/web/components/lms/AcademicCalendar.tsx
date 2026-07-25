@@ -1,6 +1,7 @@
 "use client";
 
 import type { AcademicSessionDto, SchoolHolidayDto, Serialized } from "@sms/types";
+import { TERM_PRESETS } from "@sms/types";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -221,31 +222,58 @@ export function AcademicCalendar({ sessions, holidays }: { sessions: Session[]; 
                     </div>
                   ))}
                 </div>
-                <form
-                  onSubmit={async (e) => {
-                    e.preventDefault();
-                    if (t.name && t.sequence) {
-                      await send(
-                        "POST",
-                        `/academic/sessions/${s.id}/terms`,
-                        { name: t.name, sequence: Number(t.sequence), startDate: t.startDate || null, endDate: t.endDate || null },
-                        "Term added.",
-                      );
-                      setTerm({ ...term, [s.id]: { name: "", sequence: "", startDate: "", endDate: "" } });
-                    }
-                  }}
-                  className="mt-2 flex flex-wrap items-end gap-2"
-                >
-                  <Input aria-label="Term name" value={t.name} onChange={(e) => setTerm({ ...term, [s.id]: { ...t, name: e.target.value } })} placeholder="First Term" className="w-36" />
-                  <Input aria-label="Sequence" type="number" value={t.sequence} onChange={(e) => setTerm({ ...term, [s.id]: { ...t, sequence: e.target.value } })} placeholder="1" className="w-16" />
-                  <label className="flex items-center gap-1 text-xs text-muted-foreground">
-                    starts<Input aria-label="Term start" type="date" value={t.startDate} onChange={(e) => setTerm({ ...term, [s.id]: { ...t, startDate: e.target.value } })} className="h-9 w-36" />
-                  </label>
-                  <label className="flex items-center gap-1 text-xs text-muted-foreground">
-                    ends<Input aria-label="Term end" type="date" value={t.endDate} onChange={(e) => setTerm({ ...term, [s.id]: { ...t, endDate: e.target.value } })} className="h-9 w-36" />
-                  </label>
-                  <Button type="submit" size="sm" variant="outline">Add term</Button>
-                </form>
+                {(() => {
+                  // The term is CHOSEN from the canonical ordinal slots (name +
+                  // fixed order) — never a free-typed number — and slots already
+                  // used in this session are hidden, so a sequence can't be
+                  // negative, duplicated, or out of range.
+                  const used = new Set(s.terms.map((tm) => tm.sequence));
+                  const available = TERM_PRESETS.filter((p) => !used.has(p.sequence));
+                  if (available.length === 0) return <p className="mt-2 text-xs text-muted-foreground">All terms added for this session.</p>;
+                  return (
+                    <form
+                      onSubmit={async (e) => {
+                        e.preventDefault();
+                        if (t.name && t.sequence) {
+                          await send(
+                            "POST",
+                            `/academic/sessions/${s.id}/terms`,
+                            { name: t.name, sequence: Number(t.sequence), startDate: t.startDate || null, endDate: t.endDate || null },
+                            "Term added.",
+                          );
+                          setTerm({ ...term, [s.id]: { name: "", sequence: "", startDate: "", endDate: "" } });
+                        }
+                      }}
+                      className="mt-2 flex flex-wrap items-end gap-2"
+                    >
+                      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                        Term
+                        <select
+                          aria-label="Term"
+                          value={t.sequence}
+                          onChange={(e) => {
+                            const seq = e.target.value;
+                            const preset = TERM_PRESETS.find((p) => String(p.sequence) === seq);
+                            setTerm({ ...term, [s.id]: { ...t, sequence: seq, name: preset?.name ?? "" } });
+                          }}
+                          className="h-9 w-40 rounded-md border border-input bg-background px-3 text-sm text-foreground"
+                        >
+                          <option value="">Select a term…</option>
+                          {available.map((p) => (
+                            <option key={p.sequence} value={p.sequence}>{p.name}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                        starts<Input aria-label="Term start" type="date" value={t.startDate} onChange={(e) => setTerm({ ...term, [s.id]: { ...t, startDate: e.target.value } })} className="h-9 w-36" />
+                      </label>
+                      <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                        ends<Input aria-label="Term end" type="date" value={t.endDate} onChange={(e) => setTerm({ ...term, [s.id]: { ...t, endDate: e.target.value } })} className="h-9 w-36" />
+                      </label>
+                      <Button type="submit" size="sm" variant="outline" disabled={!t.sequence}>Add term</Button>
+                    </form>
+                  );
+                })()}
               </div>
             );
           })}
