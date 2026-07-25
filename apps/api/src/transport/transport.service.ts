@@ -258,9 +258,8 @@ export class TransportService {
       if (orderedIds.length !== current.size || orderedIds.some((id) => !current.has(id)) || new Set(orderedIds).size !== orderedIds.length) {
         throw new BadRequestException("The order must list each of this route's stops exactly once.");
       }
-      // Two-phase to dodge the transient collisions a unique order would cause
-      // (no unique here, but keep it robust): offset, then final.
-      await Promise.all(orderedIds.map((id, i) => tx.routeStop.update({ where: { id }, data: { sequence: 1000 + i } })));
+      // Single pass: route_stop.sequence has NO unique constraint, so writing the
+      // final 1..N values directly can't collide — no two-phase needed.
       await Promise.all(orderedIds.map((id, i) => tx.routeStop.update({ where: { id }, data: { sequence: i + 1 } })));
       await this.log(tx, p, "transport.stops.reorder", routeId, { count: orderedIds.length });
       const rows = await tx.routeStop.findMany({ where: { routeId }, orderBy: { sequence: "asc" } });
