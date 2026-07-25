@@ -4,6 +4,30 @@
 // Physical exam administration (distinct from the CBT module): a scheduled
 // sitting in a hall, a seat number per student, and an invigilator roster.
 
+/// An exam SCHEDULE — the approvable batch of subject sittings for a term. The
+/// whole schedule is approved once (maker-checker: head teacher → principal);
+/// on approval every linked CBT exam is published (but not yet OPEN — a per-exam
+/// day-of release opens it). Tenant-scoped (RLS).
+model ExamSchedule {
+  id          String   @id @default(uuid()) @db.Uuid
+  schoolId    String   @db.Uuid
+  title       String
+  /// Optional academic term this schedule belongs to (DB link; scalar).
+  termId      String?  @db.Uuid
+  /// DRAFT | PENDING_REVIEW | APPROVED | REJECTED.
+  status      String   @default("DRAFT")
+  createdById String   @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  school   School        @relation(fields: [schoolId], references: [id])
+  sittings ExamSitting[]
+
+  @@index([schoolId])
+  @@index([schoolId, status])
+  @@map("exam_schedule")
+}
+
 /// A scheduled physical exam sitting in a hall.
 model ExamSitting {
   id       String @id @default(uuid()) @db.Uuid
@@ -17,6 +41,12 @@ model ExamSitting {
   hall     String
   capacity Int      @default(0)
   note     String?
+  /// The schedule this sitting belongs to (grouped for batch approval); null for
+  /// a standalone/ad-hoc sitting.
+  scheduleId String? @db.Uuid
+  /// The online CBT exam backing this sitting, if any (DB link; scalar). A sitting
+  /// with a cbtExamId lets students sit online; without, it's a paper exam.
+  cbtExamId String? @db.Uuid
   /// Staff who created it (DB FK to user; audit field).
   createdById String @db.Uuid
 
@@ -24,11 +54,13 @@ model ExamSitting {
   updatedAt DateTime @updatedAt
 
   school       School            @relation(fields: [schoolId], references: [id])
+  schedule     ExamSchedule?     @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
   seats        ExamSeat[]
   invigilators ExamInvigilator[]
 
   @@index([schoolId])
   @@index([schoolId, date])
+  @@index([schoolId, scheduleId])
   @@map("exam_sitting")
 }
 

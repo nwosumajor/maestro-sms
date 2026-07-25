@@ -162,6 +162,7 @@ model School {
   messages           Message[]
   schoolEvents       SchoolEvent[]
   schoolHolidays     SchoolHoliday[]
+  examSchedules      ExamSchedule[]
 
   // HR
   employees Employee[]

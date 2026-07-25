@@ -72,6 +72,14 @@ export const GRADE_PUBLISH_CHAIN: WorkflowStage[] = [
   { key: "PRINCIPAL", label: "Principal (final)", permission: WORKFLOW_PERMISSIONS.REVIEW_PRINCIPAL },
 ];
 
+/** Exam-schedule approval: the whole term's exam schedule goes live only after
+ *  the head teacher AND then the principal approve (each a different person from
+ *  the submitter — separation of duties, engine-enforced). Mirrors GRADE_PUBLISH. */
+export const EXAM_SCHEDULE_CHAIN: WorkflowStage[] = [
+  { key: "HEAD", label: "Head teacher", permission: WORKFLOW_PERMISSIONS.REVIEW_HEAD },
+  { key: "PRINCIPAL", label: "Principal (final)", permission: WORKFLOW_PERMISSIONS.REVIEW_PRINCIPAL },
+];
+
 /** CBT answer-key release: the principal alone signs off before students may
  *  see a closed exam's correct answers (the requesting teacher can never be the
  *  approver — separation of duties, engine-enforced). */
@@ -147,6 +155,7 @@ export const WORKFLOW_TYPES = [
   "GRADE_PUBLISH",
   "CBT_EXAM_PUBLISH",
   "CBT_ANSWER_RELEASE",
+  "EXAM_SCHEDULE_APPROVAL",
   "ADMIN_APPOINTMENT",
   "ATTENDANCE_AMENDMENT",
 ] as const;
@@ -208,6 +217,11 @@ export const WORKFLOW_TYPE_META: Record<WorkflowType, WorkflowTypeMeta> = {
   // Releasing a closed CBT exam's answer key to students: the subject teacher
   // requests it; the key reaches students ONLY after the principal approves.
   CBT_ANSWER_RELEASE: { label: "CBT answer release", selfService: false, systemOnly: true },
+  // Maker-checker on the whole EXAM SCHEDULE: a school admin/principal submits the
+  // term's schedule (all subject sittings at once) via ExamService; it is approved
+  // head teacher → principal, and on approval every linked CBT exam is published
+  // (still not OPEN — a per-exam day-of release opens it).
+  EXAM_SCHEDULE_APPROVAL: { label: "Exam schedule approval", selfService: false, systemOnly: true },
   // Maker-checker on the ADMIN TIER: appointing a junior_admin — or stacking
   // further roles onto one — is requested by a senior (school_admin/principal
   // via /admin/roles; AdminService raises it, never the public endpoint) and
