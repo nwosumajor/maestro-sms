@@ -29,8 +29,18 @@ export function ChangePasswordForm() {
     setBusy(false);
     if (res.ok) {
       setDone(true);
-      // Sign out so the next login mints a fresh session without the expired flag.
-      setTimeout(() => signOut({ redirectTo: "/login" }), 1200);
+      // Sign out so the next login mints a fresh session without the (now stale)
+      // passwordExpired flag, THEN navigate to /login ourselves on the same
+      // origin. We must NOT use signOut's own redirect: behind a reverse proxy
+      // (nginx) it sends the browser to the auth server's ABSOLUTE url — which,
+      // when AUTH_URL is unset, resolves to the internal container host and shows
+      // "site cannot be reached". A relative window.location is always reachable
+      // (same pattern as SessionIdleGuard).
+      setTimeout(() => {
+        void signOut({ redirect: false }).finally(() => {
+          window.location.href = "/login";
+        });
+      }, 1200);
       return;
     }
     if (res.status === 401) setError("Your current password is incorrect.");
