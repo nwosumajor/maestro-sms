@@ -24,6 +24,7 @@ import {
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
 import { PaystackService } from "../payments/paystack.service";
+import { StripeService } from "../payments/stripe.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import { NotificationService } from "../notifications/notification.service";
 import { InvoiceSettlementService } from "./settlement.service";
@@ -44,6 +45,16 @@ export interface ReconcileResult {
   posted: number;
 }
 
+/** Gateway metadata, normalised across Paystack (numeric) and Stripe (string). */
+interface CandidateMeta {
+  kind?: string;
+  invoiceId?: string;
+  schoolId?: string;
+  payerId?: string;
+  invoiceAmountMinor?: number | string;
+  platformFeeMinor?: number | string;
+}
+
 @Injectable()
 export class PaymentReconciliationService {
   private readonly logger = new Logger("Reconcile");
@@ -52,6 +63,7 @@ export class PaymentReconciliationService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly paystack: PaystackService,
+    private readonly stripe: StripeService,
     private readonly privileged: PrivilegedDatabaseService,
     private readonly notifications: NotificationService,
     private readonly settlement: InvoiceSettlementService,
@@ -59,7 +71,7 @@ export class PaymentReconciliationService {
 
   /** Manual trigger (fee.reconcile.run — super_admin). Audited to the caller. */
   async runManual(p: Principal): Promise<ReconcileResult> {
-    if (!this.paystack.isConfigured()) {
+    if (!this.paystack.isConfigured() && !this.stripe.isConfigured()) {
       throw new ServiceUnavailableException("Online payments are not configured");
     }
     if (!this.privileged.client) {
@@ -85,48 +97,61 @@ export class PaymentReconciliationService {
   async sweep(trigger: "SCHEDULED" | "MANUAL"): Promise<ReconcileResult> {
     const zero: ReconcileResult = { scanned: 0, invoiceCharges: 0, missing: 0, posted: 0 };
     const client = this.privileged.client;
-    if (!this.paystack.isConfigured() || !client) {
-      if (trigger === "SCHEDULED") this.logger.log("reconcile skipped (gateway or privileged client unconfigured)");
+    if ((!this.paystack.isConfigured() && !this.stripe.isConfigured()) || !client) {
+      if (trigger === "SCHEDULED") this.logger.log("reconcile skipped (no gateway or privileged client)");
       return zero;
     }
     const from = new Date(Date.now() - RECONCILE_WINDOW_DAYS * 86_400_000);
-    const txs = await this.paystack.listSuccessfulTransactions(from);
-    const result: ReconcileResult = { ...zero, scanned: txs.length };
+
+    // Gather settled charges from BOTH gateways — one list call each (Paystack in
+    // NGN, Stripe in USD). Normalised to a common candidate shape so the ledger
+    // check and settlement are identical for either currency.
+    type Candidate = { reference: string; amountMinor: number; note: string; meta: CandidateMeta };
+    const candidates: Candidate[] = [];
+    if (this.paystack.isConfigured()) {
+      const txs = await this.paystack.listSuccessfulTransactions(from);
+      for (const t of txs) candidates.push({ reference: t.reference, amountMinor: t.amountMinor, note: "Online (Paystack) · recovered by reconciliation", meta: t.metadata as CandidateMeta });
+    }
+    if (this.stripe.isConfigured()) {
+      const sessions = await this.stripe.listRecentPaidSessions(from);
+      for (const s of sessions) candidates.push({ reference: s.reference, amountMinor: s.amountMinor, note: "Online (Stripe, USD) · recovered by reconciliation", meta: s.metadata as CandidateMeta });
+    }
+    const result: ReconcileResult = { ...zero, scanned: candidates.length };
+
+    // Keep only invoice charges, then do ONE batched ledger existence check for
+    // the whole window (not a findFirst per charge — that was an N+1 over the
+    // sweep). The cross-tenant read uses the privileged client; the POST still
+    // goes through the normal tenant-scoped settlement path.
+    const invoiceCands = candidates.filter((c) => c.meta.kind === "invoice" && c.meta.invoiceId && c.meta.schoolId);
+    result.invoiceCharges = invoiceCands.length;
+    if (invoiceCands.length === 0) return result;
+    const refs = [...new Set(invoiceCands.map((c) => c.reference))];
+    const existing = await client.payment.findMany({ where: { reference: { in: refs } }, select: { reference: true } });
+    const have = new Set(existing.map((e: { reference: string | null }) => e.reference));
+
     const recovered: string[] = [];
-    for (const t of txs) {
-      const meta = t.metadata as {
-        kind?: string;
-        invoiceId?: string;
-        schoolId?: string;
-        payerId?: string;
-        invoiceAmountMinor?: number;
-        platformFeeMinor?: number;
-      };
-      if (meta.kind !== "invoice" || !meta.invoiceId || !meta.schoolId) continue;
-      result.invoiceCharges++;
-      // Cross-tenant existence check (privileged); the POST goes through the
-      // normal tenant-scoped settlement path.
-      const existing = await client.payment.findFirst({ where: { reference: t.reference }, select: { id: true } });
-      if (existing) continue;
+    for (const c of invoiceCands) {
+      if (have.has(c.reference)) continue;
       result.missing++;
-      const creditMinor =
-        typeof meta.invoiceAmountMinor === "number" && meta.invoiceAmountMinor > 0
-          ? meta.invoiceAmountMinor
-          : t.amountMinor;
+      const rawAmt = c.meta.invoiceAmountMinor;
+      const declared = typeof rawAmt === "number" ? rawAmt : Number(rawAmt ?? 0);
+      const creditMinor = declared > 0 ? declared : c.amountMinor;
+      const rawFee = c.meta.platformFeeMinor;
+      const platformFeeMinor = typeof rawFee === "number" ? rawFee : Number(rawFee ?? 0);
       const outcome = await this.settlement.applyOnlinePayment({
-        schoolId: meta.schoolId,
-        invoiceId: meta.invoiceId,
+        schoolId: c.meta.schoolId as string,
+        invoiceId: c.meta.invoiceId as string,
         creditMinor,
-        chargedMinor: t.amountMinor,
-        reference: t.reference,
-        payerId: meta.payerId,
-        platformFeeMinor: typeof meta.platformFeeMinor === "number" ? meta.platformFeeMinor : 0,
-        note: "Online (Paystack) · recovered by reconciliation",
+        chargedMinor: c.amountMinor,
+        reference: c.reference,
+        payerId: c.meta.payerId,
+        platformFeeMinor: Number.isFinite(platformFeeMinor) ? platformFeeMinor : 0,
+        note: c.note,
       });
       if (outcome === "posted") {
         result.posted++;
-        recovered.push(t.reference);
-        this.logger.warn(`reconcile: recovered missed settlement ${t.reference} (invoice ${meta.invoiceId})`);
+        recovered.push(c.reference);
+        this.logger.warn(`reconcile: recovered missed settlement ${c.reference} (invoice ${c.meta.invoiceId})`);
       }
     }
     // A recovered payment means webhooks WERE lost — the owner should know the

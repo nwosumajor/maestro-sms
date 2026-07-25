@@ -209,9 +209,11 @@ describe("CbtService — exam publish maker-checker", () => {
     await finalized(tx, {
       id: "wf1", schoolId: "A", type: "CBT_EXAM_PUBLISH", state: "APPROVED", payload: { examId: "e1" }, initiatorId: "t1",
     });
+    // Standalone publish AUTO-RELEASES (releasedAt set) so the quick-quiz flow
+    // stays one step; scheduled exams publish without releasedAt instead.
     expect(examUpdateMany).toHaveBeenCalledWith({
       where: { id: "e1", status: "PENDING_APPROVAL" },
-      data: { status: "PUBLISHED" },
+      data: { status: "PUBLISHED", releasedAt: expect.any(Date) },
     });
     await finalized(tx, {
       id: "wf2", schoolId: "A", type: "CBT_EXAM_PUBLISH", state: "REJECTED", payload: { examId: "e1" }, initiatorId: "t1",

@@ -71,6 +71,12 @@ model CbtExam {
   /// RELEASED — teacher requests, principal approves (CBT_ANSWER_RELEASE).
   answerRelease        String    @default("HIDDEN")
   answersReleasedAt    DateTime?
+  /// Day-of RELEASE gate: an approved (PUBLISHED) exam is only SITTABLE once
+  /// releasedAt is set — a single authorized action (principal / head teacher /
+  /// school admin) on the exam date. Standalone published exams auto-release on
+  /// publish (preserving the quick-quiz flow); scheduled exams wait for this.
+  releasedAt           DateTime?
+  releasedById         String?   @db.Uuid
   /// Shuffle question order per sitting.
   shuffle              Boolean   @default(true)
   /// When set, this exam is a SCHOLARSHIP qualification exam materialized by the

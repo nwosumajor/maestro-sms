@@ -8,7 +8,8 @@
 // =============================================================================
 
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import type { ExamSittingDto, ExamSeatDto, MyExamDto, InvigilationDto } from "@sms/types";
+import type { ExamScheduleDto, ExamSittingDto, ExamSeatDto, MyExamDto, InvigilationDto } from "@sms/types";
+import { EXAM_SCHEDULE_CHAIN } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -19,6 +20,8 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 import { NotificationService } from "../notifications/notification.service";
+import { WorkflowService } from "../workflow/workflow.service";
+import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 
 @Injectable()
 export class ExamService {
@@ -26,7 +29,49 @@ export class ExamService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly notifications: NotificationService,
-  ) {}
+    private readonly workflow: WorkflowService,
+    hooks: WorkflowHooksService,
+  ) {
+    // Maker-checker reactor: when the exam-schedule approval finalizes, publish
+    // every linked CBT exam (APPROVED) or return them to draft (REJECTED). Runs
+    // in the workflow transition's tenant tx; idempotent via status-guarded
+    // updateMany, so a replay or a board veto re-firing is a no-op.
+    hooks.onFinalized(async (tx, req) => {
+      if (req.type !== "EXAM_SCHEDULE_APPROVAL") return;
+      const scheduleId = (req.payload as { scheduleId?: string } | null)?.scheduleId;
+      if (!scheduleId) return;
+      const approved = req.state === "APPROVED";
+      const moved = await tx.examSchedule.updateMany({
+        where: { id: scheduleId, status: "PENDING_REVIEW" },
+        data: { status: approved ? "APPROVED" : "DRAFT" },
+      });
+      if (moved.count === 0) return; // already handled / not claimed
+      const sittings = (await tx.examSitting.findMany({ where: { scheduleId }, select: { cbtExamId: true } })) as Array<{ cbtExamId: string | null }>;
+      const examIds = [...new Set(sittings.map((s) => s.cbtExamId).filter((x): x is string => !!x))];
+      if (examIds.length > 0) {
+        await tx.cbtExam.updateMany({
+          where: { id: { in: examIds }, status: "PENDING_APPROVAL" },
+          data: { status: approved ? "PUBLISHED" : "DRAFT" },
+        });
+      }
+      // AUTO-SEAT on approval: fill each CBT-backed sitting's plan from its exam's
+      // class roster (skips any already-seated) — so approval turns empty seat
+      // plans into populated ones instead of an admin seating every subject.
+      let autoSeated = 0;
+      if (approved) autoSeated = await this.autoSeatSchedule(tx, req.schoolId, scheduleId);
+      await this.audit.record(
+        {
+          actorId: req.initiatorId,
+          action: approved ? "exam.schedule.approved" : "exam.schedule.rejected",
+          entity: "exam_schedule",
+          entityId: scheduleId,
+          schoolId: req.schoolId,
+          metadata: { requestId: req.id, exams: examIds.length, autoSeated },
+        },
+        tx,
+      );
+    });
+  }
 
   private ctx(p: Principal): TenantContext {
     return { schoolId: p.schoolId, userId: p.userId };
@@ -40,10 +85,27 @@ export class ExamService {
 
   async createSitting(
     p: Principal,
-    input: { title: string; subject?: string; date: string; startsAt: string; endsAt: string; hall: string; capacity?: number; note?: string },
+    input: { title: string; subject?: string; date: string; startsAt: string; endsAt: string; hall: string; capacity?: number; note?: string; scheduleId?: string | null; cbtExamId?: string | null },
   ): Promise<ExamSittingDto> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const row = await tx.examSitting.create({
+      // Validate the schedule + CBT exam are in-tenant, and that a CBT-backed
+      // sitting only attaches a DRAFT exam (it gets published via the schedule
+      // approval, never already-live).
+      let cbtStatus: string | null = null;
+      if (input.scheduleId) {
+        const sched = await tx.examSchedule.findFirst({ where: { id: input.scheduleId, status: "DRAFT" }, select: { id: true } });
+        if (!sched) throw new BadRequestException("Schedule not found or already submitted for approval");
+      }
+      if (input.cbtExamId) {
+        const exam = await tx.cbtExam.findFirst({ where: { id: input.cbtExamId }, select: { id: true, status: true } });
+        if (!exam) throw new NotFoundException("CBT exam not found");
+        if (exam.status !== "DRAFT") throw new ConflictException("Only a DRAFT CBT exam can be attached to a sitting");
+        // One exam ↔ one sitting: refuse if it's already linked.
+        const linked = await tx.examSitting.findFirst({ where: { cbtExamId: input.cbtExamId }, select: { id: true } });
+        if (linked) throw new ConflictException("That CBT exam is already attached to a sitting");
+        cbtStatus = exam.status;
+      }
+      const row = (await tx.examSitting.create({
         data: {
           schoolId: p.schoolId,
           title: input.title,
@@ -54,26 +116,56 @@ export class ExamService {
           hall: input.hall,
           capacity: input.capacity ?? 0,
           note: input.note ?? null,
+          scheduleId: input.scheduleId ?? null,
+          cbtExamId: input.cbtExamId ?? null,
           createdById: p.userId,
         },
-      });
+      })) as SittingRow;
       await this.audit.record(
         { actorId: p.userId, action: "exam.sitting.create", entity: "exam_sitting", entityId: row.id, schoolId: p.schoolId },
         tx,
       );
-      return this.toSittingDto(row, 0, 0);
+      return this.toSittingDto(row, 0, 0, { status: cbtStatus, released: false, started: 0, submitted: 0 });
     });
   }
 
   async listSittings(p: Principal): Promise<ExamSittingDto[]> {
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
-      const rows = await tx.examSitting.findMany({ orderBy: { date: "desc" }, take: 200 });
-      const ids = rows.map((r: { id: string }) => r.id);
-      const [seats, invs] = await Promise.all([
+      const rows = (await tx.examSitting.findMany({ orderBy: { date: "desc" }, take: 200 })) as SittingRow[];
+      const ids = rows.map((r) => r.id);
+      const examIds = [...new Set(rows.map((r) => r.cbtExamId).filter((x): x is string => !!x))];
+      // Seat/invigilator counts + the CBT exams' status/release in a fixed number
+      // of batched queries (never per row).
+      const [seats, invs, exams] = await Promise.all([
         this.countBy(tx, "examSeat", "sittingId", ids),
         this.countBy(tx, "examInvigilator", "sittingId", ids),
+        examIds.length
+          ? (tx.cbtExam.findMany({ where: { id: { in: examIds } }, select: { id: true, status: true, releasedAt: true } }) as Promise<Array<{ id: string; status: string; releasedAt: Date | null }>>)
+          : Promise.resolve([] as Array<{ id: string; status: string; releasedAt: Date | null }>),
       ]);
-      return rows.map((r: SittingRow) => this.toSittingDto(r, seats.get(r.id) ?? 0, invs.get(r.id) ?? 0));
+      const examById = new Map(exams.map((e) => [e.id, e]));
+      // The started/submitted tallies are only DISPLAYED for a RELEASED exam, so
+      // the sitting groupBy is scoped to just those (a handful on exam day) — it
+      // never aggregates the sittings of years of long-closed exams on each load.
+      const releasedExamIds = exams.filter((e) => e.releasedAt).map((e) => e.id);
+      const tallies = releasedExamIds.length
+        ? ((await tx.cbtSitting.groupBy({ by: ["examId", "status"], where: { examId: { in: releasedExamIds } }, _count: { _all: true } } as never)) as unknown as Array<{ examId: string; status: string; _count: { _all: number } }>)
+        : [];
+      const started = new Map<string, number>();
+      const submitted = new Map<string, number>();
+      for (const t of tallies) {
+        started.set(t.examId, (started.get(t.examId) ?? 0) + t._count._all);
+        if (t.status === "SUBMITTED" || t.status === "EXPIRED") submitted.set(t.examId, (submitted.get(t.examId) ?? 0) + t._count._all);
+      }
+      return rows.map((r) => {
+        const e = r.cbtExamId ? examById.get(r.cbtExamId) : undefined;
+        return this.toSittingDto(r, seats.get(r.id) ?? 0, invs.get(r.id) ?? 0, {
+          status: e?.status ?? null,
+          released: !!e?.releasedAt,
+          started: r.cbtExamId ? started.get(r.cbtExamId) ?? 0 : 0,
+          submitted: r.cbtExamId ? submitted.get(r.cbtExamId) ?? 0 : 0,
+        });
+      });
     });
   }
 
@@ -87,6 +179,126 @@ export class ExamService {
       );
       return { deleted: true };
     });
+  }
+
+  // --- schedules (maker-checker) + day-of release -----------------------------
+
+  async createSchedule(p: Principal, input: { title: string; termId?: string | null }): Promise<ExamScheduleDto> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const row = await tx.examSchedule.create({
+        data: { schoolId: p.schoolId, title: input.title, termId: input.termId ?? null, createdById: p.userId },
+      });
+      await this.audit.record(
+        { actorId: p.userId, action: "exam.schedule.create", entity: "exam_schedule", entityId: row.id, schoolId: p.schoolId },
+        tx,
+      );
+      return { id: row.id, title: row.title, termId: row.termId, status: row.status, createdAt: row.createdAt.toISOString(), sittingCount: 0, cbtCount: 0 };
+    });
+  }
+
+  async listSchedules(p: Principal): Promise<ExamScheduleDto[]> {
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      const rows = (await tx.examSchedule.findMany({ orderBy: { createdAt: "desc" }, take: 100 })) as Array<{ id: string; title: string; termId: string | null; status: string; createdAt: Date }>;
+      if (rows.length === 0) return [];
+      // TWO grouped COUNTs (total sittings, and CBT-backed sittings) — the DB
+      // aggregates and returns ~one row per schedule, instead of shipping every
+      // sitting row to be counted in Node. No per-schedule fan-out; constant work.
+      const ids = rows.map((r) => r.id);
+      const [totals, cbts] = await Promise.all([
+        tx.examSitting.groupBy({ by: ["scheduleId"], where: { scheduleId: { in: ids } }, _count: { _all: true } } as never) as unknown as Promise<Array<{ scheduleId: string; _count: { _all: number } }>>,
+        tx.examSitting.groupBy({ by: ["scheduleId"], where: { scheduleId: { in: ids }, cbtExamId: { not: null } }, _count: { _all: true } } as never) as unknown as Promise<Array<{ scheduleId: string; _count: { _all: number } }>>,
+      ]);
+      const total = new Map(totals.map((t) => [t.scheduleId, t._count._all]));
+      const cbt = new Map(cbts.map((t) => [t.scheduleId, t._count._all]));
+      return rows.map((r) => ({ id: r.id, title: r.title, termId: r.termId, status: r.status, createdAt: r.createdAt.toISOString(), sittingCount: total.get(r.id) ?? 0, cbtCount: cbt.get(r.id) ?? 0 }));
+    });
+  }
+
+  /** Maker-checker: submit a whole schedule for head-teacher → principal approval.
+   *  Claims the schedule (DRAFT → PENDING_REVIEW) and parks its CBT exams
+   *  PENDING_APPROVAL; the finalized reactor publishes them on approval. */
+  async requestScheduleApproval(p: Principal, scheduleId: string): Promise<{ pendingApproval: true; requestId: string }> {
+    const claimed = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const sched = await tx.examSchedule.findFirst({ where: { id: scheduleId }, select: { id: true, title: true } });
+      if (!sched) throw new NotFoundException("Schedule not found");
+      const sittings = (await tx.examSitting.findMany({ where: { scheduleId }, select: { cbtExamId: true } })) as Array<{ cbtExamId: string | null }>;
+      if (sittings.length === 0) throw new ConflictException("Add at least one sitting before submitting the schedule");
+      const res = await tx.examSchedule.updateMany({ where: { id: scheduleId, status: "DRAFT" }, data: { status: "PENDING_REVIEW" } });
+      if (res.count === 0) throw new ConflictException("Only a draft schedule can be submitted for approval");
+      const examIds = [...new Set(sittings.map((s) => s.cbtExamId).filter((x): x is string => !!x))];
+      if (examIds.length > 0) {
+        await tx.cbtExam.updateMany({ where: { id: { in: examIds }, status: "DRAFT" }, data: { status: "PENDING_APPROVAL" } });
+      }
+      await this.audit.record(
+        { actorId: p.userId, action: "exam.schedule.submit", entity: "exam_schedule", entityId: scheduleId, schoolId: p.schoolId, metadata: { exams: examIds.length } },
+        tx,
+      );
+      return { title: sched.title };
+    });
+    // Raise + submit the two-stage approval; release the claim if it fails so the
+    // schedule can never strand in PENDING_REVIEW without a reviewer.
+    try {
+      const req = (await this.workflow.createRequest(p, {
+        type: "EXAM_SCHEDULE_APPROVAL",
+        title: `Approve exam schedule: ${claimed.title}`,
+        payload: { scheduleId },
+        stages: [...EXAM_SCHEDULE_CHAIN],
+      })) as { id: string };
+      await this.workflow.submit(p, req.id);
+      return { pendingApproval: true, requestId: req.id };
+    } catch (err) {
+      await this.db.runAsTenant(this.ctx(p), async (tx) => {
+        await tx.examSchedule.updateMany({ where: { id: scheduleId, status: "PENDING_REVIEW" }, data: { status: "DRAFT" } });
+        const sittings = (await tx.examSitting.findMany({ where: { scheduleId }, select: { cbtExamId: true } })) as Array<{ cbtExamId: string | null }>;
+        const examIds = [...new Set(sittings.map((s) => s.cbtExamId).filter((x): x is string => !!x))];
+        if (examIds.length > 0) await tx.cbtExam.updateMany({ where: { id: { in: examIds }, status: "PENDING_APPROVAL" }, data: { status: "DRAFT" } });
+      });
+      throw err;
+    }
+  }
+
+  /** Day-of RELEASE (open) an approved CBT-backed sitting for students to sit.
+   *  A single authorized action (exam.release: principal / head teacher /
+   *  school admin). The exam must be PUBLISHED (schedule approved) and its date
+   *  today; releasing sets releasedAt, which startSitting requires. */
+  async releaseSitting(p: Principal, sittingId: string): Promise<{ released: true; examId: string }> {
+    const { examId, title, recipients } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const sitting = (await tx.examSitting.findFirst({ where: { id: sittingId }, select: { cbtExamId: true, date: true, title: true } })) as { cbtExamId: string | null; date: Date; title: string } | null;
+      if (!sitting) throw new NotFoundException("Sitting not found");
+      if (!sitting.cbtExamId) throw new BadRequestException("This is a paper sitting — nothing to release online");
+      // Release is meant for the exam day: refuse before the scheduled date.
+      const today = new Date(); today.setUTCHours(0, 0, 0, 0);
+      if (new Date(sitting.date) > today) throw new ConflictException("The exam can only be released on or after its scheduled date");
+      const res = await tx.cbtExam.updateMany({
+        where: { id: sitting.cbtExamId, status: "PUBLISHED", releasedAt: null },
+        data: { releasedAt: new Date(), releasedById: p.userId },
+      });
+      if (res.count === 0) throw new ConflictException("The exam is not approved for release, or has already been released");
+      await this.audit.record(
+        { actorId: p.userId, action: "exam.release", entity: "cbt", entityId: sitting.cbtExamId, schoolId: p.schoolId, metadata: { sittingId } },
+        tx,
+      );
+      // Recipients = the seated students + their guardians (collected in-tx,
+      // notified after commit so a notification hiccup never rolls back a release).
+      const seatRows = (await tx.examSeat.findMany({ where: { sittingId }, select: { studentId: true } })) as Array<{ studentId: string }>;
+      const studentIds = seatRows.map((s) => s.studentId);
+      const guardians = studentIds.length
+        ? ((await tx.parentChild.findMany({ where: { studentId: { in: studentIds } }, select: { parentId: true } })) as Array<{ parentId: string }>)
+        : [];
+      const recipients = [...new Set([...studentIds, ...guardians.map((g) => g.parentId)])];
+      return { examId: sitting.cbtExamId, title: sitting.title, recipients };
+    });
+    // AUTO-NOTIFY: tell every seated student + guardian the exam is open now.
+    for (const recipientId of recipients) {
+      await this.notifications.enqueue(this.ctx(p), {
+        recipientId,
+        type: "GENERIC",
+        title: `Exam open: ${title}`,
+        body: `The ${title} exam is now open. Sign in and click to start — you have until the timer ends or you submit.`,
+        channels: ["EMAIL"],
+      });
+    }
+    return { released: true as const, examId };
   }
 
   // --- staff: seating ---------------------------------------------------------
@@ -111,6 +323,45 @@ export class ExamService {
       );
       return this.seatPlan(tx, sittingId);
     });
+  }
+
+  /**
+   * Fill the seat plan of every CBT-backed sitting in a schedule from its exam's
+   * class roster (seat 1..N, capped at the hall capacity), skipping any sitting
+   * that is already seated. Fully BATCHED (sittings, their exams' classes, the
+   * already-seated set, and all enrolments in a fixed number of queries; then one
+   * bulk createMany per sitting) — bounded by the schedule size, never per-student
+   * fan-out. Returns how many sittings were seated. Runs inside the reactor tx.
+   */
+  private async autoSeatSchedule(tx: TenantTx, schoolId: string, scheduleId: string): Promise<number> {
+    const sittings = (await tx.examSitting.findMany({
+      where: { scheduleId, cbtExamId: { not: null } },
+      select: { id: true, cbtExamId: true, capacity: true },
+    })) as Array<{ id: string; cbtExamId: string; capacity: number }>;
+    if (sittings.length === 0) return 0;
+    const examIds = [...new Set(sittings.map((s) => s.cbtExamId))];
+    const exams = (await tx.cbtExam.findMany({ where: { id: { in: examIds } }, select: { id: true, classId: true } })) as Array<{ id: string; classId: string | null }>;
+    const classByExam = new Map(exams.map((e) => [e.id, e.classId]));
+    // Which of these sittings already have a seat plan?
+    const already = (await tx.examSeat.groupBy({ by: ["sittingId"], where: { sittingId: { in: sittings.map((s) => s.id) } }, _count: { _all: true } } as never)) as unknown as Array<{ sittingId: string }>;
+    const hasSeats = new Set(already.map((g) => g.sittingId));
+    const classIds = [...new Set(sittings.map((s) => classByExam.get(s.cbtExamId)).filter((x): x is string => !!x))];
+    if (classIds.length === 0) return 0;
+    const enr = (await tx.enrollment.findMany({ where: { classId: { in: classIds } }, select: { classId: true, studentId: true } })) as Array<{ classId: string; studentId: string }>;
+    const byClass = new Map<string, string[]>();
+    for (const e of enr) byClass.set(e.classId, [...(byClass.get(e.classId) ?? []), e.studentId]);
+    let seatedCount = 0;
+    for (const s of sittings) {
+      if (hasSeats.has(s.id)) continue;
+      const classId = classByExam.get(s.cbtExamId);
+      if (!classId) continue;
+      let studentIds = byClass.get(classId) ?? [];
+      if (s.capacity > 0) studentIds = studentIds.slice(0, s.capacity);
+      if (studentIds.length === 0) continue;
+      await tx.examSeat.createMany({ data: studentIds.map((studentId, i) => ({ schoolId, sittingId: s.id, studentId, seatNo: i + 1 })) });
+      seatedCount += 1;
+    }
+    return seatedCount;
   }
 
   /** Auto-seat every student enrolled in a class into the sitting. */
@@ -262,7 +513,12 @@ export class ExamService {
     return new Map<string, string>(users.map((u: { id: string; name: string }) => [u.id, u.name] as const));
   }
 
-  private toSittingDto(s: SittingRow, seated: number, invigilators: number): ExamSittingDto {
+  private toSittingDto(
+    s: SittingRow,
+    seated: number,
+    invigilators: number,
+    cbt: { status: string | null; released: boolean; started: number; submitted: number },
+  ): ExamSittingDto {
     return {
       id: s.id,
       title: s.title,
@@ -275,9 +531,15 @@ export class ExamService {
       note: s.note,
       seated,
       invigilators,
+      scheduleId: s.scheduleId,
+      cbtExamId: s.cbtExamId,
+      cbtStatus: cbt.status,
+      released: cbt.released,
+      started: cbt.started,
+      submitted: cbt.submitted,
     };
   }
 }
 
-type SittingRow = { id: string; title: string; subject: string | null; date: Date; startsAt: string; endsAt: string; hall: string; capacity: number; note: string | null };
+type SittingRow = { id: string; title: string; subject: string | null; date: Date; startsAt: string; endsAt: string; hall: string; capacity: number; note: string | null; scheduleId: string | null; cbtExamId: string | null };
 type SeatWithSitting = { studentId: string; seatNo: number; sitting: { title: string; subject: string | null; date: Date; startsAt: string; endsAt: string; hall: string } };

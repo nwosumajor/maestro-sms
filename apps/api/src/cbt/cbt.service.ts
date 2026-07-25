@@ -70,9 +70,13 @@ export class CbtService {
       const approved = req.state === "APPROVED";
       if (req.type === "CBT_EXAM_PUBLISH") {
         // APPROVED → the exam goes live; REJECTED → back to DRAFT for rework.
+        // A STANDALONE publish (this path) also AUTO-RELEASES it (releasedAt set)
+        // so the quick-quiz flow stays one step — students may sit as soon as the
+        // window opens. SCHEDULED exams instead publish via the exam-schedule
+        // approval WITHOUT releasedAt and wait for a day-of release.
         const res = await tx.cbtExam.updateMany({
           where: { id: examId, status: "PENDING_APPROVAL" },
-          data: { status: approved ? "PUBLISHED" : "DRAFT" },
+          data: approved ? { status: "PUBLISHED", releasedAt: new Date() } : { status: "DRAFT" },
         });
         if (res.count === 0) return;
         await this.audit.record(
@@ -508,6 +512,10 @@ export class CbtService {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const exam = await tx.cbtExam.findFirst({ where: { id: examId } });
       if (!exam || exam.status !== "PUBLISHED") throw new NotFoundException("Exam not found");
+      // RELEASE GATE: an approved exam is only sittable once RELEASED. Standalone
+      // exams auto-release on publish; a scheduled exam waits for its day-of
+      // release by a principal / head teacher / school admin.
+      if (!exam.releasedAt) throw new ConflictException("The exam has not been released yet — wait for your invigilator to open it");
       // 404-not-403: a scholarship exam is invisible unless the student qualified.
       if (exam.scholarshipProgramId) {
         const qualified = await tx.scholarshipApplication.findFirst({

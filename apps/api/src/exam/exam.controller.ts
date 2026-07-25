@@ -1,7 +1,7 @@
-import { Body, Controller, Delete, Get, Param, Post, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post } from "@nestjs/common";
 import { z } from "zod";
 import { EXAM_PERMISSIONS } from "@sms/types";
-import type { ExamSittingDto, ExamSeatDto, InvigilationDto, MyExamDto } from "@sms/types";
+import type { ExamScheduleDto, ExamSittingDto, ExamSeatDto, InvigilationDto, MyExamDto } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
@@ -18,7 +18,10 @@ const sittingSchema = z.object({
   hall: z.string().min(1).max(120),
   capacity: z.number().int().min(0).max(2000).optional(),
   note: z.string().max(500).optional(),
+  scheduleId: z.string().uuid().nullish(),
+  cbtExamId: z.string().uuid().nullish(),
 });
+const scheduleSchema = z.object({ title: z.string().min(1).max(200), termId: z.string().uuid().nullish() });
 const seatSchema = z.object({ studentIds: z.array(z.string().uuid()).max(2000).optional(), classId: z.string().uuid().optional() });
 const invigSchema = z.object({ staffId: z.string().uuid(), lead: z.boolean().optional() });
 
@@ -54,6 +57,36 @@ export class ExamController {
     @Body(new ZodValidationPipe(sittingSchema)) body: z.infer<typeof sittingSchema>,
   ): Promise<ExamSittingDto> {
     return this.exams.createSitting(p, body);
+  }
+
+  // --- schedules (maker-checker) + day-of release ---
+  @Get("schedules")
+  @RequirePermission(EXAM_PERMISSIONS.EXAM_MANAGE)
+  schedules(@CurrentPrincipal() p: Principal): Promise<ExamScheduleDto[]> {
+    return this.exams.listSchedules(p);
+  }
+
+  @Post("schedules")
+  @RequirePermission(EXAM_PERMISSIONS.EXAM_MANAGE)
+  createSchedule(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(scheduleSchema)) body: z.infer<typeof scheduleSchema>,
+  ): Promise<ExamScheduleDto> {
+    return this.exams.createSchedule(p, body);
+  }
+
+  /** Submit the whole schedule for head-teacher → principal approval. */
+  @Post("schedules/:id/submit")
+  @RequirePermission(EXAM_PERMISSIONS.EXAM_MANAGE)
+  submitSchedule(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.exams.requestScheduleApproval(p, id);
+  }
+
+  /** Day-of RELEASE (open) an approved CBT-backed sitting — exam.release only. */
+  @Post(":id/release")
+  @RequirePermission(EXAM_PERMISSIONS.EXAM_RELEASE)
+  release(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.exams.releaseSitting(p, id);
   }
 
   @Delete(":id")

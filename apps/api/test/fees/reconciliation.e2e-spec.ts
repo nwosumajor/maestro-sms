@@ -198,6 +198,44 @@ d("Online settlement, verify-on-return and reconciliation (real Postgres)", () =
     await admin.query(`DELETE FROM invoice WHERE id = $1`, [usdInvoice]);
   });
 
+  it("verify-on-return posts a USD invoice via STRIPE (settles on the session's client_reference_id)", async () => {
+    const usdInvoice = randomUUID();
+    await admin.query(
+      `INSERT INTO invoice (id,"schoolId","studentId",reference,status,currency,"totalMinor","dueDate","createdById","updatedAt")
+       VALUES ($1,$2,$3,'INV-REC-USD2','ISSUED','USD',80000,now(),$4,now())`,
+      [usdInvoice, SA, STUDENT, STAFF],
+    );
+    // The return page passes the SESSION id; we settle on the session's
+    // client_reference_id (the same key the webhook uses → idempotent).
+    const stripeStub = {
+      isConfigured: () => true,
+      retrieveCheckoutSession: jest.fn().mockResolvedValue({
+        paymentStatus: "paid",
+        clientReferenceId: "USD-CONFIRM-1",
+        amountTotal: 80_000,
+        metadata: { kind: "invoice", invoiceId: usdInvoice, schoolId: SA, payerId: PARENT, invoiceAmountMinor: "80000" },
+      }),
+    };
+    const tenant = new PrismaTenantService() as never;
+    const gateway = new PaymentGatewayService(
+      tenant, new AuditLogService(), { isConfigured: () => false } as never, {} as never, { client: null } as never,
+      notifications, { effective: jest.fn().mockResolvedValue({ bearer: "PARENT" }) } as never,
+      {} as never, {} as never, {} as never, { record: jest.fn() } as never, settlement, {} as never, {} as never, stripeStub as never,
+    );
+    const ok = await gateway.confirmInvoicePayment(parent(), usdInvoice, "cs_test_session_id");
+    expect(ok.status).toBe("posted");
+    expect(stripeStub.retrieveCheckoutSession).toHaveBeenCalledWith("cs_test_session_id");
+    // Posted on the client_reference_id, NOT the session id.
+    const posted = await admin.query(`SELECT reference FROM payment WHERE "invoiceId" = $1`, [usdInvoice]);
+    expect(posted.rowCount).toBe(1);
+    expect((posted.rows[0] as { reference: string }).reference).toBe("USD-CONFIRM-1");
+    // Idempotent: a second confirm (webhook could also have fired) posts nothing new.
+    const again = await gateway.confirmInvoicePayment(parent(), usdInvoice, "cs_test_session_id");
+    expect(again.status).toBe("already_recorded");
+    await admin.query(`DELETE FROM payment WHERE "invoiceId" = $1`, [usdInvoice]);
+    await admin.query(`DELETE FROM invoice WHERE id = $1`, [usdInvoice]);
+  });
+
   it("the reconciliation sweep posts a settled charge with no ledger payment and alerts the owner", async () => {
     const paystack = {
       isConfigured: () => true,
@@ -209,14 +247,16 @@ d("Online settlement, verify-on-return and reconciliation (real Postgres)", () =
           { reference: "OTHER", amountMinor: 1_000, metadata: { kind: "subscription" } }, // not an invoice charge
         ]),
     };
-    // Privileged stub: the cross-tenant existence check runs against the REAL
-    // ledger via the admin pool so both branches (found / missing) are honest.
+    // Stripe unconfigured here — this case exercises the Paystack pass only.
+    const stripe = { isConfigured: () => false, listRecentPaidSessions: jest.fn().mockResolvedValue([]) };
+    // Privileged stub: the BATCHED cross-tenant existence check runs against the
+    // REAL ledger via the admin pool so both branches (found / missing) are honest.
     const privileged = {
       client: {
         payment: {
-          findFirst: jest.fn(async (args: { where: { reference: string } }) => {
-            const r = await admin.query(`SELECT id FROM payment WHERE reference = $1`, [args.where.reference]);
-            return r.rowCount ? { id: (r.rows[0] as { id: string }).id } : null;
+          findMany: jest.fn(async (args: { where: { reference: { in: string[] } } }) => {
+            const r = await admin.query(`SELECT reference FROM payment WHERE reference = ANY($1)`, [args.where.reference.in]);
+            return r.rows.map((row) => ({ reference: (row as { reference: string }).reference }));
           }),
         },
         user: { findMany: jest.fn().mockResolvedValue([{ id: STAFF, schoolId: SA }]) },
@@ -227,6 +267,7 @@ d("Online settlement, verify-on-return and reconciliation (real Postgres)", () =
       tenant,
       new AuditLogService(),
       paystack as never,
+      stripe as never,
       privileged as never,
       notifications,
       settlement,
@@ -245,5 +286,38 @@ d("Online settlement, verify-on-return and reconciliation (real Postgres)", () =
     // A second sweep finds nothing missing — fully idempotent.
     const r2 = await reconcile.sweep("SCHEDULED");
     expect(r2).toMatchObject({ missing: 0, posted: 0 });
+  });
+
+  it("the sweep ALSO recovers a missed STRIPE (USD) charge — string metadata coerced", async () => {
+    // Paystack off, Stripe on: a paid USD checkout session with no ledger payment
+    // is recovered exactly like a Paystack one. Stripe metadata is all STRINGS —
+    // the amount must still coerce to a number for the credit.
+    const paystack = { isConfigured: () => false, listSuccessfulTransactions: jest.fn().mockResolvedValue([]) };
+    const stripe = {
+      isConfigured: () => true,
+      listRecentPaidSessions: jest.fn().mockResolvedValue([
+        { reference: "STRIPE-REC-1", amountMinor: 40_000, metadata: { kind: "invoice", invoiceId, schoolId: SA, payerId: PARENT, invoiceAmountMinor: "40000" } },
+      ]),
+    };
+    const privileged = {
+      client: {
+        payment: {
+          findMany: jest.fn(async (args: { where: { reference: { in: string[] } } }) => {
+            const r = await admin.query(`SELECT reference FROM payment WHERE reference = ANY($1)`, [args.where.reference.in]);
+            return r.rows.map((row) => ({ reference: (row as { reference: string }).reference }));
+          }),
+        },
+        user: { findMany: jest.fn().mockResolvedValue([{ id: STAFF, schoolId: SA }]) },
+      },
+    };
+    const tenant = new PrismaTenantService() as never;
+    const reconcile = new PaymentReconciliationService(
+      tenant, new AuditLogService(), paystack as never, stripe as never, privileged as never, notifications, settlement,
+    );
+    const r = await reconcile.sweep("SCHEDULED");
+    expect(r).toMatchObject({ scanned: 1, invoiceCharges: 1, missing: 1, posted: 1 });
+    const posted = await admin.query(`SELECT "amountMinor" FROM payment WHERE reference = $1`, ["STRIPE-REC-1"]);
+    expect(posted.rowCount).toBe(1);
+    expect((posted.rows[0] as { amountMinor: number }).amountMinor).toBe(40_000); // string "40000" coerced
   });
 });

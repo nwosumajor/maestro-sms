@@ -57,6 +57,7 @@ d("RLS cross-tenant isolation", () => {
   const meetingSlotA = randomUUID();
   const meetingBookingA = randomUUID();
   const examSittingA = randomUUID();
+  const examScheduleA = randomUUID();
   const examSeatA = randomUUID();
   const examInvigilatorA = randomUUID();
   const scanEventA = randomUUID();
@@ -383,11 +384,15 @@ d("RLS cross-tenant isolation", () => {
        VALUES ($1,$2,$3,$4,$4,now())`,
       [meetingBookingA, A, meetingSlotA, userA],
     );
-    // Exam logistics: sitting + one seat + one invigilator.
+    // Exam logistics: schedule + sitting + one seat + one invigilator.
     await a.query(
-      `INSERT INTO exam_sitting (id,"schoolId",title,date,"startsAt","endsAt",hall,"createdById","updatedAt")
-       VALUES ($1,$2,'RLS Exam',now(),'09:00','11:00','Hall A',$3,now())`,
-      [examSittingA, A, userA],
+      `INSERT INTO exam_schedule (id,"schoolId",title,"createdById","updatedAt") VALUES ($1,$2,'RLS Schedule',$3,now())`,
+      [examScheduleA, A, userA],
+    );
+    await a.query(
+      `INSERT INTO exam_sitting (id,"schoolId",title,date,"startsAt","endsAt",hall,"scheduleId","createdById","updatedAt")
+       VALUES ($1,$2,'RLS Exam',now(),'09:00','11:00','Hall A',$3,$4,now())`,
+      [examSittingA, A, examScheduleA, userA],
     );
     await a.query(
       `INSERT INTO exam_seat (id,"schoolId","sittingId","studentId","seatNo") VALUES ($1,$2,$3,$4,1)`,
@@ -1184,6 +1189,7 @@ d("RLS cross-tenant isolation", () => {
       "exam_invigilator",
       "exam_seat",
       "exam_sitting",
+      "exam_schedule",
       "meeting_booking",
       "meeting_slot",
       "lesson_cover",
@@ -1288,6 +1294,7 @@ d("RLS cross-tenant isolation", () => {
     ["lesson_cover", lessonCoverA],
     ["meeting_slot", meetingSlotA],
     ["meeting_booking", meetingBookingA],
+    ["exam_schedule", examScheduleA],
     ["exam_sitting", examSittingA],
     ["exam_seat", examSeatA],
     ["exam_invigilator", examInvigilatorA],

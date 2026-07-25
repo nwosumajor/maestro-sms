@@ -132,6 +132,80 @@ export class StripeService {
   }
 
   /**
+   * Retrieve a Checkout Session by id — the USD verify-on-return path (the payer
+   * lands back with ?session_id=…). Returns the payment status, the reference we
+   * set (client_reference_id — the SAME string the webhook settles on, so
+   * confirming can never double-post), the paid amount and metadata. Best-effort:
+   * null when unconfigured or the fetch fails, never a throw.
+   */
+  async retrieveCheckoutSession(
+    sessionId: string,
+  ): Promise<{ paymentStatus: string; clientReferenceId: string; amountTotal: number; metadata: Record<string, string> } | null> {
+    const secret = process.env.STRIPE_SECRET_KEY;
+    if (!secret) return null;
+    try {
+      const res = await fetch(`${STRIPE}/v1/checkout/sessions/${encodeURIComponent(sessionId)}`, {
+        headers: { Authorization: `Bearer ${secret}` },
+      });
+      if (!res.ok) {
+        this.logger.warn(`Stripe session fetch failed: ${res.status} (${sessionId})`);
+        return null;
+      }
+      const j = (await res.json()) as { payment_status?: string; client_reference_id?: string; amount_total?: number; metadata?: Record<string, string> };
+      return {
+        paymentStatus: j.payment_status ?? "",
+        clientReferenceId: j.client_reference_id ?? "",
+        amountTotal: j.amount_total ?? 0,
+        metadata: j.metadata ?? {},
+      };
+    } catch (err) {
+      this.logger.warn(`Stripe session fetch error: ${(err as Error).message}`);
+      return null;
+    }
+  }
+
+  /**
+   * List PAID checkout sessions created since `from` — the USD reconciliation
+   * source (layer 2). Paginated in bounded pages (max 10 × 100 = 1000 sessions
+   * per sweep window; overlapping windows are safe — settlement is idempotent on
+   * the reference). One list call per page, never per-invoice. Best-effort: [].
+   */
+  async listRecentPaidSessions(from: Date): Promise<Array<{ reference: string; amountMinor: number; metadata: Record<string, string> }>> {
+    const secret = process.env.STRIPE_SECRET_KEY;
+    if (!secret) return [];
+    const out: Array<{ reference: string; amountMinor: number; metadata: Record<string, string> }> = [];
+    const createdGte = Math.floor(from.getTime() / 1000);
+    let startingAfter: string | undefined;
+    for (let page = 0; page < 10; page += 1) {
+      const params = new URLSearchParams({ "created[gte]": String(createdGte), limit: "100" });
+      if (startingAfter) params.set("starting_after", startingAfter);
+      let json: { data?: Array<{ id: string; payment_status?: string; client_reference_id?: string; amount_total?: number; metadata?: Record<string, string> }>; has_more?: boolean };
+      try {
+        const res = await fetch(`${STRIPE}/v1/checkout/sessions?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${secret}` },
+        });
+        if (!res.ok) {
+          this.logger.warn(`Stripe session list failed: ${res.status}`);
+          break;
+        }
+        json = (await res.json()) as typeof json;
+      } catch (err) {
+        this.logger.warn(`Stripe session list error: ${(err as Error).message}`);
+        break;
+      }
+      const data = json.data ?? [];
+      for (const s of data) {
+        if (s.payment_status === "paid" && s.client_reference_id) {
+          out.push({ reference: s.client_reference_id, amountMinor: s.amount_total ?? 0, metadata: s.metadata ?? {} });
+        }
+      }
+      if (!json.has_more || data.length === 0) break;
+      startingAfter = data[data.length - 1].id;
+    }
+    return out;
+  }
+
+  /**
    * Verify a Stripe webhook signature (`Stripe-Signature: t=…,v1=…`) against the
    * raw body: HMAC-SHA256 of `${t}.${rawBody}` with STRIPE_WEBHOOK_SECRET.
    * Returns the parsed event, or null when the gateway is disabled / no body.
