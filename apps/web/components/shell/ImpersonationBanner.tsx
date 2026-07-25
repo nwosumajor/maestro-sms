@@ -26,7 +26,7 @@ export function ImpersonationBanner({ userName, schoolName }: { userName: string
         size="sm"
         variant="secondary"
         className="h-6 px-2 text-xs"
-        onClick={() => signOut({ callbackUrl: "/login?returned=1" })}
+        onClick={() => { void signOut({ redirect: false }).finally(() => { window.location.href = "/login?returned=1"; }); }}
       >
         Stop and sign out
       </Button>
