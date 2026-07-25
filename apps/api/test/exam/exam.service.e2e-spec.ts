@@ -128,10 +128,11 @@ d("ExamService (real Postgres)", () => {
     const examId = randomUUID();
     await admin.query(`INSERT INTO cbt_question_bank (id,"schoolId",name,"createdById","updatedAt") VALUES ($1,$2,'Bank',$3,now())`, [bankId, SA, ADMIN]);
     await admin.query(`INSERT INTO cbt_question (id,"schoolId","bankId",prompt,choices,"answerIndex") VALUES ($1,$2,$3,'2+2?','["3","4"]'::jsonb,1)`, [randomUUID(), SA, bankId]);
+    // classId set so AUTO-SEAT on approval fills the plan from the class roster.
     await admin.query(
-      `INSERT INTO cbt_exam (id,"schoolId","bankId",title,"questionCount","durationMinutes","startAt","endAt",status,"createdById","updatedAt")
-       VALUES ($1,$2,$3,'Maths CBT',1,30,now(),now()+interval '1 day','DRAFT',$4,now())`,
-      [examId, SA, bankId, ADMIN],
+      `INSERT INTO cbt_exam (id,"schoolId","bankId",title,"classId","questionCount","durationMinutes","startAt","endAt",status,"createdById","updatedAt")
+       VALUES ($1,$2,$3,'Maths CBT',$4,1,30,now(),now()+interval '1 day','DRAFT',$5,now())`,
+      [examId, SA, bankId, classId, ADMIN],
     );
 
     const sched = await svc.createSchedule(staff(), { title: "First Term Exams" });
@@ -155,11 +156,18 @@ d("ExamService (real Postgres)", () => {
     expect((e.rows[0] as { status: string }).status).toBe("PUBLISHED");
     expect((e.rows[0] as { releasedAt: Date | null }).releasedAt).toBeNull(); // published but NOT yet open
 
-    // Day-of release opens it (single authorized action).
+    // AUTO-SEAT: approval filled the plan from the class roster (S1 + S2).
+    const seatRows = await admin.query(`SELECT "seatNo" FROM exam_seat WHERE "sittingId" = $1 ORDER BY "seatNo"`, [sit.id]);
+    expect(seatRows.rowCount).toBe(2);
+
+    // Day-of release opens it (single authorized action) and AUTO-NOTIFIES the
+    // seated students.
     const rel = await svc.releaseSitting(releaser(), sit.id);
     expect(rel.released).toBe(true);
     e = await admin.query(`SELECT "releasedAt" FROM cbt_exam WHERE id = $1`, [examId]);
     expect((e.rows[0] as { releasedAt: Date | null }).releasedAt).not.toBeNull();
+    const notif = await admin.query(`SELECT "recipientId" FROM notification WHERE title = $1`, [`Exam open: Maths`]);
+    expect(notif.rowCount).toBe(2); // S1 + S2 (no guardians linked in this fixture)
 
     // Releasing again is a no-op conflict (idempotent guard).
     await expect(svc.releaseSitting(releaser(), sit.id)).rejects.toMatchObject({ status: 409 });

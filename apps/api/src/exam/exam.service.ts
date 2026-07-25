@@ -54,6 +54,11 @@ export class ExamService {
           data: { status: approved ? "PUBLISHED" : "DRAFT" },
         });
       }
+      // AUTO-SEAT on approval: fill each CBT-backed sitting's plan from its exam's
+      // class roster (skips any already-seated) — so approval turns empty seat
+      // plans into populated ones instead of an admin seating every subject.
+      let autoSeated = 0;
+      if (approved) autoSeated = await this.autoSeatSchedule(tx, req.schoolId, scheduleId);
       await this.audit.record(
         {
           actorId: req.initiatorId,
@@ -61,7 +66,7 @@ export class ExamService {
           entity: "exam_schedule",
           entityId: scheduleId,
           schoolId: req.schoolId,
-          metadata: { requestId: req.id, exams: examIds.length },
+          metadata: { requestId: req.id, exams: examIds.length, autoSeated },
         },
         tx,
       );
@@ -257,8 +262,8 @@ export class ExamService {
    *  school admin). The exam must be PUBLISHED (schedule approved) and its date
    *  today; releasing sets releasedAt, which startSitting requires. */
   async releaseSitting(p: Principal, sittingId: string): Promise<{ released: true; examId: string }> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const sitting = (await tx.examSitting.findFirst({ where: { id: sittingId }, select: { cbtExamId: true, date: true } })) as { cbtExamId: string | null; date: Date } | null;
+    const { examId, title, recipients } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const sitting = (await tx.examSitting.findFirst({ where: { id: sittingId }, select: { cbtExamId: true, date: true, title: true } })) as { cbtExamId: string | null; date: Date; title: string } | null;
       if (!sitting) throw new NotFoundException("Sitting not found");
       if (!sitting.cbtExamId) throw new BadRequestException("This is a paper sitting — nothing to release online");
       // Release is meant for the exam day: refuse before the scheduled date.
@@ -273,8 +278,27 @@ export class ExamService {
         { actorId: p.userId, action: "exam.release", entity: "cbt", entityId: sitting.cbtExamId, schoolId: p.schoolId, metadata: { sittingId } },
         tx,
       );
-      return { released: true as const, examId: sitting.cbtExamId };
+      // Recipients = the seated students + their guardians (collected in-tx,
+      // notified after commit so a notification hiccup never rolls back a release).
+      const seatRows = (await tx.examSeat.findMany({ where: { sittingId }, select: { studentId: true } })) as Array<{ studentId: string }>;
+      const studentIds = seatRows.map((s) => s.studentId);
+      const guardians = studentIds.length
+        ? ((await tx.parentChild.findMany({ where: { studentId: { in: studentIds } }, select: { parentId: true } })) as Array<{ parentId: string }>)
+        : [];
+      const recipients = [...new Set([...studentIds, ...guardians.map((g) => g.parentId)])];
+      return { examId: sitting.cbtExamId, title: sitting.title, recipients };
     });
+    // AUTO-NOTIFY: tell every seated student + guardian the exam is open now.
+    for (const recipientId of recipients) {
+      await this.notifications.enqueue(this.ctx(p), {
+        recipientId,
+        type: "GENERIC",
+        title: `Exam open: ${title}`,
+        body: `The ${title} exam is now open. Sign in and click to start — you have until the timer ends or you submit.`,
+        channels: ["EMAIL"],
+      });
+    }
+    return { released: true as const, examId };
   }
 
   // --- staff: seating ---------------------------------------------------------
@@ -299,6 +323,45 @@ export class ExamService {
       );
       return this.seatPlan(tx, sittingId);
     });
+  }
+
+  /**
+   * Fill the seat plan of every CBT-backed sitting in a schedule from its exam's
+   * class roster (seat 1..N, capped at the hall capacity), skipping any sitting
+   * that is already seated. Fully BATCHED (sittings, their exams' classes, the
+   * already-seated set, and all enrolments in a fixed number of queries; then one
+   * bulk createMany per sitting) — bounded by the schedule size, never per-student
+   * fan-out. Returns how many sittings were seated. Runs inside the reactor tx.
+   */
+  private async autoSeatSchedule(tx: TenantTx, schoolId: string, scheduleId: string): Promise<number> {
+    const sittings = (await tx.examSitting.findMany({
+      where: { scheduleId, cbtExamId: { not: null } },
+      select: { id: true, cbtExamId: true, capacity: true },
+    })) as Array<{ id: string; cbtExamId: string; capacity: number }>;
+    if (sittings.length === 0) return 0;
+    const examIds = [...new Set(sittings.map((s) => s.cbtExamId))];
+    const exams = (await tx.cbtExam.findMany({ where: { id: { in: examIds } }, select: { id: true, classId: true } })) as Array<{ id: string; classId: string | null }>;
+    const classByExam = new Map(exams.map((e) => [e.id, e.classId]));
+    // Which of these sittings already have a seat plan?
+    const already = (await tx.examSeat.groupBy({ by: ["sittingId"], where: { sittingId: { in: sittings.map((s) => s.id) } }, _count: { _all: true } } as never)) as unknown as Array<{ sittingId: string }>;
+    const hasSeats = new Set(already.map((g) => g.sittingId));
+    const classIds = [...new Set(sittings.map((s) => classByExam.get(s.cbtExamId)).filter((x): x is string => !!x))];
+    if (classIds.length === 0) return 0;
+    const enr = (await tx.enrollment.findMany({ where: { classId: { in: classIds } }, select: { classId: true, studentId: true } })) as Array<{ classId: string; studentId: string }>;
+    const byClass = new Map<string, string[]>();
+    for (const e of enr) byClass.set(e.classId, [...(byClass.get(e.classId) ?? []), e.studentId]);
+    let seatedCount = 0;
+    for (const s of sittings) {
+      if (hasSeats.has(s.id)) continue;
+      const classId = classByExam.get(s.cbtExamId);
+      if (!classId) continue;
+      let studentIds = byClass.get(classId) ?? [];
+      if (s.capacity > 0) studentIds = studentIds.slice(0, s.capacity);
+      if (studentIds.length === 0) continue;
+      await tx.examSeat.createMany({ data: studentIds.map((studentId, i) => ({ schoolId, sittingId: s.id, studentId, seatNo: i + 1 })) });
+      seatedCount += 1;
+    }
+    return seatedCount;
   }
 
   /** Auto-seat every student enrolled in a class into the sitting. */
