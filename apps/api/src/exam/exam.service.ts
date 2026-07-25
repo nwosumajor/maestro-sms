@@ -129,20 +129,23 @@ export class ExamService {
       const rows = (await tx.examSitting.findMany({ orderBy: { date: "desc" }, take: 200 })) as SittingRow[];
       const ids = rows.map((r) => r.id);
       const examIds = [...new Set(rows.map((r) => r.cbtExamId).filter((x): x is string => !!x))];
-      // All the per-sitting facts are gathered in a FIXED number of batched
-      // queries (seat/invigilator counts, the CBT exams' status/release, and the
-      // sitting tallies grouped by exam) — never a query per row.
-      const [seats, invs, exams, tallies] = await Promise.all([
+      // Seat/invigilator counts + the CBT exams' status/release in a fixed number
+      // of batched queries (never per row).
+      const [seats, invs, exams] = await Promise.all([
         this.countBy(tx, "examSeat", "sittingId", ids),
         this.countBy(tx, "examInvigilator", "sittingId", ids),
         examIds.length
           ? (tx.cbtExam.findMany({ where: { id: { in: examIds } }, select: { id: true, status: true, releasedAt: true } }) as Promise<Array<{ id: string; status: string; releasedAt: Date | null }>>)
           : Promise.resolve([] as Array<{ id: string; status: string; releasedAt: Date | null }>),
-        examIds.length
-          ? (tx.cbtSitting.groupBy({ by: ["examId", "status"], where: { examId: { in: examIds } }, _count: { _all: true } } as never) as unknown as Promise<Array<{ examId: string; status: string; _count: { _all: number } }>>)
-          : Promise.resolve([] as Array<{ examId: string; status: string; _count: { _all: number } }>),
       ]);
       const examById = new Map(exams.map((e) => [e.id, e]));
+      // The started/submitted tallies are only DISPLAYED for a RELEASED exam, so
+      // the sitting groupBy is scoped to just those (a handful on exam day) — it
+      // never aggregates the sittings of years of long-closed exams on each load.
+      const releasedExamIds = exams.filter((e) => e.releasedAt).map((e) => e.id);
+      const tallies = releasedExamIds.length
+        ? ((await tx.cbtSitting.groupBy({ by: ["examId", "status"], where: { examId: { in: releasedExamIds } }, _count: { _all: true } } as never)) as unknown as Array<{ examId: string; status: string; _count: { _all: number } }>)
+        : [];
       const started = new Map<string, number>();
       const submitted = new Map<string, number>();
       for (const t of tallies) {
@@ -192,17 +195,16 @@ export class ExamService {
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       const rows = (await tx.examSchedule.findMany({ orderBy: { createdAt: "desc" }, take: 100 })) as Array<{ id: string; title: string; termId: string | null; status: string; createdAt: Date }>;
       if (rows.length === 0) return [];
-      // ONE grouped query for sitting counts (+ how many are CBT-backed) across
-      // every schedule — no per-schedule fan-out.
+      // TWO grouped COUNTs (total sittings, and CBT-backed sittings) — the DB
+      // aggregates and returns ~one row per schedule, instead of shipping every
+      // sitting row to be counted in Node. No per-schedule fan-out; constant work.
       const ids = rows.map((r) => r.id);
-      const sittings = (await tx.examSitting.findMany({ where: { scheduleId: { in: ids } }, select: { scheduleId: true, cbtExamId: true } })) as Array<{ scheduleId: string | null; cbtExamId: string | null }>;
-      const total = new Map<string, number>();
-      const cbt = new Map<string, number>();
-      for (const s of sittings) {
-        if (!s.scheduleId) continue;
-        total.set(s.scheduleId, (total.get(s.scheduleId) ?? 0) + 1);
-        if (s.cbtExamId) cbt.set(s.scheduleId, (cbt.get(s.scheduleId) ?? 0) + 1);
-      }
+      const [totals, cbts] = await Promise.all([
+        tx.examSitting.groupBy({ by: ["scheduleId"], where: { scheduleId: { in: ids } }, _count: { _all: true } } as never) as unknown as Promise<Array<{ scheduleId: string; _count: { _all: number } }>>,
+        tx.examSitting.groupBy({ by: ["scheduleId"], where: { scheduleId: { in: ids }, cbtExamId: { not: null } }, _count: { _all: true } } as never) as unknown as Promise<Array<{ scheduleId: string; _count: { _all: number } }>>,
+      ]);
+      const total = new Map(totals.map((t) => [t.scheduleId, t._count._all]));
+      const cbt = new Map(cbts.map((t) => [t.scheduleId, t._count._all]));
       return rows.map((r) => ({ id: r.id, title: r.title, termId: r.termId, status: r.status, createdAt: r.createdAt.toISOString(), sittingCount: total.get(r.id) ?? 0, cbtCount: cbt.get(r.id) ?? 0 }));
     });
   }
