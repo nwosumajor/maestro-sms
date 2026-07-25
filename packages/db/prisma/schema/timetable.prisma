@@ -34,6 +34,9 @@ model Period {
   name      String
   /// Order within the day (1-based). Unique per school.
   sequence  Int
+  /// A non-teaching slot (short break, lunch). Excluded from lesson placement —
+  /// the CSP solver and manual entry both refuse to schedule into a break.
+  isBreak   Boolean @default(false)
   /// "HH:MM" 24h local school time (no timezone math at this layer).
   startTime String
   endTime   String

@@ -18,7 +18,10 @@ function makeTx(over: Record<string, unknown> = {}) {
     },
     routeStop: {
       findFirst: jest.fn().mockResolvedValue(over.stop ?? { id: "s1", fareMinor: 20000 }),
-      findMany: jest.fn().mockResolvedValue([]),
+      findMany: jest.fn().mockResolvedValue(over.stops ?? []),
+      aggregate: jest.fn().mockResolvedValue({ _max: { sequence: over.maxSeq ?? 0 } }),
+      create: jest.fn((args: { data: Record<string, unknown> }) => Promise.resolve({ id: "s-new", routeId: "r1", name: args.data.name, sequence: args.data.sequence, fareMinor: args.data.fareMinor ?? 0, pickupTime: args.data.pickupTime ?? null })),
+      update: jest.fn().mockResolvedValue({}),
     },
     transportAssignment: {
       count: jest.fn().mockResolvedValue(over.used ?? 0),
@@ -56,6 +59,42 @@ describe("TransportService", () => {
   it("refuses a second active assignment for the same passenger", async () => {
     const { tx } = makeTx({ used: 0, passengerActive: { id: "existing" } });
     await expect(svc(tx).assign(staff, { routeId: "r1", passengerId: "stu1", passengerType: "STUDENT" })).rejects.toThrow(/already has an active/i);
+  });
+
+  it("addStop SERVER-assigns the next sequence (append), ignoring any client value", async () => {
+    const { tx } = makeTx({ maxSeq: 3 });
+    const dto = await svc(tx).addStop(staff, "r1", { name: "Market", fareMinor: 0 });
+    expect(dto.sequence).toBe(4); // max(3) + 1
+    // create was called with the computed sequence, not a passed-in one.
+    expect((tx.routeStop.create as jest.Mock).mock.calls[0][0].data.sequence).toBe(4);
+  });
+
+  it("addStop on an empty route starts at 1", async () => {
+    const { tx } = makeTx({ maxSeq: null }); // _max.sequence null when no rows
+    const dto = await svc(tx).addStop(staff, "r1", { name: "First", fareMinor: 0 });
+    expect(dto.sequence).toBe(1);
+  });
+
+  it("reorderStops rejects a list that isn't exactly the route's stops", async () => {
+    const { tx } = makeTx({ stops: [{ id: "a" }, { id: "b" }, { id: "c" }] });
+    await expect(svc(tx).reorderStops(staff, "r1", ["a", "b"])).rejects.toBeInstanceOf(BadRequestException); // missing "c"
+    await expect(svc(tx).reorderStops(staff, "r1", ["a", "a", "b"])).rejects.toBeInstanceOf(BadRequestException); // dup
+  });
+
+  it("reorderStops assigns sequence 1..N from the given order", async () => {
+    const { tx } = makeTx({ stops: [{ id: "a" }, { id: "b" }, { id: "c" }] });
+    await svc(tx).reorderStops(staff, "r1", ["c", "a", "b"]);
+    // Final pass sets c→1, a→2, b→3 (a two-phase update, so filter to the final values).
+    const finals = (tx.routeStop.update as jest.Mock).mock.calls
+      .map((c) => c[0])
+      .filter((u) => u.data.sequence <= 3);
+    expect(finals).toEqual(
+      expect.arrayContaining([
+        { where: { id: "c" }, data: { sequence: 1 } },
+        { where: { id: "a" }, data: { sequence: 2 } },
+        { where: { id: "b" }, data: { sequence: 3 } },
+      ]),
+    );
   });
 
   it("assigns within capacity", async () => {

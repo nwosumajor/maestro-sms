@@ -221,23 +221,50 @@ export class TransportService {
   async addStop(
     p: Principal,
     routeId: string,
-    input: { name: string; sequence: number; fareMinor: number; pickupTime?: string | null },
+    input: { name: string; fareMinor: number; pickupTime?: string | null },
   ): Promise<RouteStopDto> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const route = await tx.transportRoute.findFirst({ where: { id: routeId }, select: { id: true } });
       if (!route) throw new NotFoundException("Route not found");
+      // The sequence is SERVER-assigned (append to the end of the route) — never
+      // taken from the caller — so it can't be negative, duplicated, or out of
+      // order. Reorder via reorderStops if a stop was added in the wrong place.
+      const agg = await tx.routeStop.aggregate({ where: { routeId }, _max: { sequence: true } });
+      const sequence = (agg._max.sequence ?? 0) + 1;
       const s = await tx.routeStop.create({
         data: {
           schoolId: p.schoolId,
           routeId,
           name: input.name,
-          sequence: input.sequence,
+          sequence,
           fareMinor: input.fareMinor,
           pickupTime: input.pickupTime ?? null,
         },
       });
-      await this.log(tx, p, "transport.stop.create", s.id, { routeId, name: input.name });
+      await this.log(tx, p, "transport.stop.create", s.id, { routeId, name: input.name, sequence });
       return this.stopDto(s);
+    });
+  }
+
+  /** Reassign stop order from an explicit id list (index+1). The list must be
+   *  exactly the route's current stops — so order is set by drag/arrows, never by
+   *  a typed number. */
+  async reorderStops(p: Principal, routeId: string, orderedIds: string[]): Promise<RouteStopDto[]> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const route = await tx.transportRoute.findFirst({ where: { id: routeId }, select: { id: true } });
+      if (!route) throw new NotFoundException("Route not found");
+      const stops = (await tx.routeStop.findMany({ where: { routeId }, select: { id: true } })) as Array<{ id: string }>;
+      const current = new Set(stops.map((s) => s.id));
+      if (orderedIds.length !== current.size || orderedIds.some((id) => !current.has(id)) || new Set(orderedIds).size !== orderedIds.length) {
+        throw new BadRequestException("The order must list each of this route's stops exactly once.");
+      }
+      // Two-phase to dodge the transient collisions a unique order would cause
+      // (no unique here, but keep it robust): offset, then final.
+      await Promise.all(orderedIds.map((id, i) => tx.routeStop.update({ where: { id }, data: { sequence: 1000 + i } })));
+      await Promise.all(orderedIds.map((id, i) => tx.routeStop.update({ where: { id }, data: { sequence: i + 1 } })));
+      await this.log(tx, p, "transport.stops.reorder", routeId, { count: orderedIds.length });
+      const rows = await tx.routeStop.findMany({ where: { routeId }, orderBy: { sequence: "asc" } });
+      return rows.map((s) => this.stopDto(s));
     });
   }
 

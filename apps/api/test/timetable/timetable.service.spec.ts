@@ -11,6 +11,8 @@ interface Fakes {
   classRow?: { id: string } | null;
   enrollment?: { classId: string }[];
   classTeacher?: { id: string } | null;
+  periodIsBreak?: boolean;
+  placedEntries?: number;
 }
 
 function makeService(f: Fakes) {
@@ -19,9 +21,11 @@ function makeService(f: Fakes) {
   const tx = {
     class: { findFirst: jest.fn().mockResolvedValue(f.classRow ?? { id: "c-1" }) },
     period: {
-      findFirst: jest.fn().mockResolvedValue({ id: "per-1" }),
+      findFirst: jest.fn().mockResolvedValue({ id: "per-1", isBreak: f.periodIsBreak ?? false }),
       findMany: jest.fn().mockResolvedValue([]),
       count: jest.fn().mockResolvedValue(0),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
     room: { findFirst: jest.fn().mockResolvedValue({ id: "room-1" }) },
     user: { findFirst: jest.fn().mockResolvedValue({ id: "t-1" }) },
@@ -36,6 +40,7 @@ function makeService(f: Fakes) {
       findFirst: entryFindFirst,
       findMany: jest.fn().mockResolvedValue([]),
       create: jest.fn().mockResolvedValue({ id: "entry-1" }),
+      count: jest.fn().mockResolvedValue(f.placedEntries ?? 0),
     },
   } as unknown as TenantTx;
 
@@ -106,6 +111,30 @@ describe("TimetableService — junior_admin (timetabling tier) is staff-wide", (
     // With no periods defined it fails with BadRequest, NOT Forbidden — proving
     // it got PAST the staff-wide gate.
     await expect(service.generate(principal(["junior_admin"]), {})).rejects.toThrow(/period/i);
+  });
+});
+
+describe("TimetableService — break slots", () => {
+  it("createEntry refuses to place a lesson in a break period", async () => {
+    const { service } = makeService({ periodIsBreak: true });
+    await expect(service.createEntry(principal(["principal"]), entry)).rejects.toThrow(/break/i);
+  });
+
+  it("generateDay refuses (409) when lessons are already placed", async () => {
+    const { service } = makeService({ placedEntries: 3 });
+    await expect(
+      service.generateDay(principal(["principal"]), { teachingPeriods: 6, dayStart: "08:00", periodMinutes: 40, breaks: [{ afterPeriod: 2, minutes: 20 }] }),
+    ).rejects.toThrow(/clear the placed timetable/i);
+  });
+
+  it("generateDay writes the interleaved period set when the timetable is empty", async () => {
+    const { service, tx } = makeService({ placedEntries: 0 });
+    await service.generateDay(principal(["principal"]), { teachingPeriods: 4, dayStart: "08:00", periodMinutes: 40, breaks: [{ afterPeriod: 2, minutes: 20 }] });
+    // 4 teaching + 1 break = 5 rows created, and the old periods were cleared.
+    expect(tx.period.deleteMany as jest.Mock).toHaveBeenCalled();
+    const rows = (tx.period.createMany as jest.Mock).mock.calls[0][0].data;
+    expect(rows).toHaveLength(5);
+    expect(rows.filter((r: { isBreak: boolean }) => r.isBreak)).toHaveLength(1);
   });
 });
 

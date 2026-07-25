@@ -50,6 +50,16 @@ export function TransportManager({
     if (res.ok) { setMsg(ok); router.refresh(); } else setMsg(res.error ?? "Request failed.");
   };
 
+  // Reorder by swapping a stop with its neighbour and sending the full id list —
+  // the server sets sequence from position, so no number is ever typed.
+  const moveStop = (r: Route, index: number, dir: -1 | 1) => {
+    const ids = r.stops.map((s) => s.id);
+    const j = index + dir;
+    if (j < 0 || j >= ids.length) return;
+    [ids[index], ids[j]] = [ids[j], ids[index]];
+    void run(() => postSms(`transport/routes/${r.id}/stops/reorder`, { orderedIds: ids }), "Stops reordered.");
+  };
+
   const activeRoutes = routes.filter((r) => r.status === "ACTIVE");
 
   return (
@@ -139,13 +149,29 @@ export function TransportManager({
           {(r.stops.length > 0 || canManage) && (
             <CardContent className="space-y-2">
               {r.stops.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {r.stops.map((s) => <Badge key={s.id} variant="outline" className="font-normal">{s.name}{r.fareMode === "STOP" ? ` · ${money(s.fareMinor)}` : ""}{s.pickupTime ? ` · ${s.pickupTime}` : ""}</Badge>)}
-                </div>
+                canManage ? (
+                  // Ordered list with arrows — the stop ORDER is set here, never by
+                  // typing a number; the server appends new stops and reorder sends
+                  // the whole id list.
+                  <ol className="space-y-1">
+                    {r.stops.map((s, i) => (
+                      <li key={s.id} className="flex items-center gap-2 text-sm">
+                        <span className="w-5 text-xs text-muted-foreground tabular-nums">{i + 1}.</span>
+                        <span className="flex-1">{s.name}{r.fareMode === "STOP" ? ` · ${money(s.fareMinor)}` : ""}{s.pickupTime ? ` · ${s.pickupTime}` : ""}</span>
+                        <button aria-label="Move up" disabled={busy || i === 0} className="px-1 text-muted-foreground disabled:opacity-30" onClick={() => moveStop(r, i, -1)}>↑</button>
+                        <button aria-label="Move down" disabled={busy || i === r.stops.length - 1} className="px-1 text-muted-foreground disabled:opacity-30" onClick={() => moveStop(r, i, 1)}>↓</button>
+                      </li>
+                    ))}
+                  </ol>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {r.stops.map((s) => <Badge key={s.id} variant="outline" className="font-normal">{s.name}{r.fareMode === "STOP" ? ` · ${money(s.fareMinor)}` : ""}{s.pickupTime ? ` · ${s.pickupTime}` : ""}</Badge>)}
+                  </div>
+                )
               )}
               {canManage && r.status === "ACTIVE" && (
                 <div className="flex gap-2">
-                  <Button variant="outline" size="sm" disabled={busy} onClick={() => { const name = prompt("Stop name?"); if (name) run(() => postSms(`transport/routes/${r.id}/stops`, { name, sequence: r.stops.length + 1, fareMinor: r.fareMode === "STOP" ? Number(prompt("Stop fare (kobo)?") ?? 0) : 0 }), "Stop added."); }}>Add stop</Button>
+                  <Button variant="outline" size="sm" disabled={busy} onClick={() => { const name = prompt("Stop name?"); if (name) run(() => postSms(`transport/routes/${r.id}/stops`, { name, fareMinor: r.fareMode === "STOP" ? Number(prompt("Stop fare (kobo)?") ?? 0) : 0 }), "Stop added."); }}>Add stop</Button>
                   <Button variant="outline" size="sm" disabled={busy} onClick={() => {
                     const name = prompt("New route name?", r.name);
                     if (name?.trim()) void run(() => sendSms("PUT", `transport/routes/${r.id}`, { name: name.trim() }), "Route renamed.");

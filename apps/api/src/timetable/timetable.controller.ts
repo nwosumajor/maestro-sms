@@ -27,6 +27,21 @@ const periodSchema = z.object({
   endTime: hhmm,
 });
 const periodUpdateSchema = periodSchema.partial();
+const dayStructureSchema = z.object({
+  teachingPeriods: z.number().int().min(1).max(50),
+  dayStart: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  periodMinutes: z.number().int().min(1).max(600),
+  breaks: z
+    .array(
+      z.object({
+        afterPeriod: z.number().int().min(1),
+        minutes: z.number().int().min(1).max(600),
+        name: z.string().min(1).max(40).optional(),
+      }),
+    )
+    .max(20)
+    .default([]),
+});
 const roomSchema = z.object({ name: z.string().min(1).max(80), capacity: z.number().int().min(1).nullish() });
 const roomUpdateSchema = roomSchema.partial();
 const entrySchema = z.object({
@@ -119,6 +134,16 @@ export class TimetableController {
     @Body(new ZodValidationPipe(periodSchema)) body: z.infer<typeof periodSchema>,
   ) {
     return this.timetable.createPeriod(p, body);
+  }
+
+  /** Generate the whole day from teaching-period count + break positions. */
+  @Post("periods/generate")
+  @RequirePermission(TIMETABLE_PERMISSIONS.TIMETABLE_WRITE)
+  generateDay(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(dayStructureSchema)) body: z.infer<typeof dayStructureSchema>,
+  ): Promise<PeriodDto[]> {
+    return this.timetable.generateDay(p, body);
   }
 
   @Patch("periods/:id")
