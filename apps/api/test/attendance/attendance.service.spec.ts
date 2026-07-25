@@ -14,6 +14,7 @@ interface Fakes {
   classTeacherMany?: { classId: string }[];
   enrollmentForStudent?: { id: string } | null;
   currentTerm?: { startDate: Date | null } | null;
+  holidays?: { name: string; startDate: Date; endDate: Date }[];
 }
 
 function makeService(f: Fakes) {
@@ -41,6 +42,7 @@ function makeService(f: Fakes) {
       findMany: jest.fn().mockResolvedValue([]),
     },
     term: { findFirst: jest.fn().mockResolvedValue(f.currentTerm ?? null) },
+    schoolHoliday: { findMany: jest.fn().mockResolvedValue(f.holidays ?? []) },
     // The register is written as ONE bulk upsert (INSERT … ON CONFLICT), not a
     // per-student upsert loop — see AttendanceService.markAttendance.
     $executeRaw: jest.fn().mockResolvedValue(1),
@@ -79,6 +81,23 @@ describe("AttendanceService scoping", () => {
       expect.objectContaining({ action: "attendance.mark" }),
       expect.anything(),
     );
+  });
+
+  it("refuses to take a register on a school holiday", async () => {
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const { service } = makeService({
+      classRow: { id: "c-1" },
+      classTeacher: { id: "ct-1" },
+      enrollmentRows: [{ studentId: "stu-1" }],
+      holidays: [{ name: "Mid-term break", startDate: today, endDate: today }],
+    });
+    await expect(
+      service.markAttendance(principal(["teacher"]), "c-1", {
+        date: recent(),
+        records: [{ studentId: "stu-1", status: "PRESENT" }],
+      }),
+    ).rejects.toThrow(/holiday/i);
   });
 
   it("junior_admin (records tier) can mark a register for a class it does NOT teach", async () => {

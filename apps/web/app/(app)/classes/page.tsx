@@ -1,4 +1,4 @@
-import type { AcademicSessionDto, ClassDto, PromotionBatchDto, SubjectDto, Serialized } from "@sms/types";
+import type { AcademicSessionDto, ClassDto, PromotionBatchDto, SchoolHolidayDto, SubjectDto, Serialized } from "@sms/types";
 import Link from "next/link";
 import { hasPermission } from "@/lib/permissions";
 import { auth } from "@/lib/auth";
@@ -34,7 +34,7 @@ export default async function ClassesPage() {
   // Server-side kind filtering: staff for teacher/supervisor pickers, parents for
   // guardian linking — students never pollute a staff picker (and the payload
   // stays small in a large school).
-  const [classes, students, staff, parents, subjects, promotions, sessions, rooms] = await Promise.all([
+  const [classes, students, staff, parents, subjects, promotions, sessions, rooms, holidays] = await Promise.all([
     apiGet<ClassDto[]>("/classes/mine"),
     canWrite ? apiGet<{ id: string; name: string }[]>("/students") : Promise.resolve(null),
     canWrite ? apiGet<{ id: string; name: string; roles: string[] }[]>("/users?kind=staff") : Promise.resolve(null),
@@ -44,6 +44,7 @@ export default async function ClassesPage() {
     canManageAcademic ? apiGet<Serialized<AcademicSessionDto>[]>("/academic/sessions") : Promise.resolve(null),
     // Offering fixed-room picker (CSP input); null (no timetable.read) hides it.
     canManageSubjects ? apiGet<{ id: string; name: string }[]>("/timetable/rooms") : Promise.resolve(null),
+    canManageAcademic ? apiGet<Serialized<SchoolHolidayDto>[]>("/academic/holidays") : Promise.resolve(null),
   ]);
 
   return (
@@ -68,7 +69,7 @@ export default async function ClassesPage() {
           <ClassSubjectsAdmin classes={classes} subjects={subjects} users={staff} rooms={rooms ?? []} />
         )}
 
-        {canManageAcademic && sessions && <AcademicCalendar sessions={sessions} />}
+        {canManageAcademic && sessions && <AcademicCalendar sessions={sessions} holidays={holidays ?? []} />}
 
         {canPromote && classes && promotions && (
           <PromotionManager

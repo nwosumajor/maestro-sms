@@ -16,7 +16,7 @@ import { BadRequestException, ConflictException, Inject, Injectable, Logger, Not
 // VALUE import: Prisma.sql/join only resolve as values, not types (CLAUDE.md).
 import { Prisma } from "@sms/db";
 import type { AttendanceStatusValue } from "@sms/types";
-import { ATTENDANCE_AMENDMENT_CHAIN, WORKFLOW_PERMISSIONS } from "@sms/types";
+import { ATTENDANCE_AMENDMENT_CHAIN, dayUtc, WORKFLOW_PERMISSIONS } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -94,6 +94,7 @@ export class AttendanceService {
     if (stale && !isApprover) {
       await this.db.runAsTenant(this.ctx(p), async (tx) => {
         await this.assertTeacherOfClass(tx, p, classId);
+        await this.assertNotHoliday(tx, date);
         const lockBefore = await this.currentTermStart(tx);
         if (lockBefore && date < lockBefore) {
           throw new ConflictException(
@@ -114,6 +115,7 @@ export class AttendanceService {
 
     const { session, alerts } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.assertTeacherOfClass(tx, p, classId);
+      await this.assertNotHoliday(tx, date);
       // TERM LOCK: a register in a term that has ENDED is read-only for everyone,
       // including leadership — the authoritative check (the UI also greys it out).
       const lockBefore = await this.currentTermStart(tx);
@@ -285,6 +287,25 @@ export class AttendanceService {
    * Returns null when terms/dates are not configured (fail-open — an unset-up
    * school must never have attendance blocked).
    */
+  /**
+   * Reject taking a register on a school-declared holiday. Only EXPLICIT holidays
+   * block — weekends are left alone so a school that runs Saturday classes is not
+   * broken (weekend handling belongs to the teaching-day helpers used in
+   * reporting, not to a hard write guard). Fail-open when none are configured.
+   */
+  private async assertNotHoliday(tx: TenantTx, date: Date): Promise<void> {
+    const d = dayUtc(date);
+    const holidays = (await tx.schoolHoliday.findMany({ select: { name: true, startDate: true, endDate: true } })) as Array<{
+      name: string;
+      startDate: Date;
+      endDate: Date;
+    }>;
+    const hit = holidays.find((h) => d >= dayUtc(h.startDate) && d <= dayUtc(h.endDate));
+    if (hit) {
+      throw new BadRequestException(`This date is a school holiday (${hit.name}) — no register is taken. Remove the holiday if this is a school day.`);
+    }
+  }
+
   private async currentTermStart(tx: TenantTx): Promise<Date | null> {
     const marked = await tx.term.findFirst({ where: { isCurrent: true }, select: { startDate: true } });
     if (marked?.startDate) return marked.startDate;
