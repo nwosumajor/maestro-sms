@@ -1,4 +1,4 @@
-import type { PageDto, PlatformFeedbackDto, Serialized } from "@sms/types";
+import type { FeedbackStatsDto, PageDto, PlatformFeedbackDto, Serialized } from "@sms/types";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
@@ -18,7 +18,10 @@ export default async function OperatorFeedbackPage() {
   const user = session!.user;
   if (!hasPermission(user.permissions, "platform.feedback.review")) redirect("/dashboard");
 
-  const first = await apiGet<Serialized<PageDto<PlatformFeedbackDto>>>("/operator/feedback?limit=25");
+  const [first, stats] = await Promise.all([
+    apiGet<Serialized<PageDto<PlatformFeedbackDto>>>("/operator/feedback?limit=25"),
+    apiGet<Serialized<FeedbackStatsDto>>("/operator/feedback/stats"),
+  ]);
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="operatorfeedback" permissions={user.permissions}>
@@ -27,7 +30,7 @@ export default async function OperatorFeedbackPage() {
           title={<>Feedback inbox</>}
           subtitle={<>Complaints and feature suggestions from users across every school.</>}
         />
-        <FeedbackInbox initial={first ?? { items: [], nextCursor: null }} />
+        <FeedbackInbox initial={first ?? { items: [], nextCursor: null }} stats={stats ?? null} />
       </div>
     </AppShell>
   );

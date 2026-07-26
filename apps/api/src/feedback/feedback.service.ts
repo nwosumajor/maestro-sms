@@ -9,9 +9,22 @@
 // path mutates it, cross-tenant.
 // =============================================================================
 
-import { BadRequestException, Inject, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
-import type { MyFeedbackDto, PageDto, PlatformFeedbackDto } from "@sms/types";
-import { FEEDBACK_KINDS, FEEDBACK_STATUSES } from "@sms/types";
+import {
+  BadRequestException,
+  HttpException,
+  HttpStatus,
+  Inject,
+  Injectable,
+  NotFoundException,
+  ServiceUnavailableException,
+} from "@nestjs/common";
+import type { FeedbackStatsDto, MyFeedbackDto, PageDto, PlatformFeedbackDto } from "@sms/types";
+import { FEEDBACK_BULK_MAX, FEEDBACK_KINDS, FEEDBACK_STATUSES } from "@sms/types";
+import {
+  FEEDBACK_DIGEST_WINDOW_MS,
+  FEEDBACK_USER_HOURLY_CAP,
+  FEEDBACK_USER_WINDOW_MS,
+} from "./feedback.constants";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -51,20 +64,31 @@ export class FeedbackService {
     return { schoolId: p.schoolId, userId: p.userId };
   }
 
-  /** Any authenticated user sends feedback to the platform owner. */
+  /**
+   * Any authenticated user sends feedback to the platform owner.
+   *
+   * At volume (thousands/day) this hot path stays cheap and abuse-resistant:
+   *  - a per-USER rolling-hour cap (DB count over the (userId,createdAt) index)
+   *    stops one account flooding 5000 — cross-instance correct, no per-request
+   *    Redis needed;
+   *  - NO per-submission owner alert. Alerting is COALESCED into an hourly digest
+   *    (FeedbackDigestProcessor → digestSweep) so 5000 submissions become ~24
+   *    summary emails, not 5000 — cheaper and vastly more triageable.
+   */
   async send(p: Principal, input: { kind: string; subject: string; body: string }): Promise<{ id: string }> {
     if (!FEEDBACK_KINDS.includes(input.kind as never)) throw new BadRequestException("Invalid feedback kind");
-    const row = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const since = new Date(Date.now() - FEEDBACK_USER_WINDOW_MS);
+      const recent = await tx.platformFeedback.count({ where: { userId: p.userId, createdAt: { gte: since } } });
+      if (recent >= FEEDBACK_USER_HOURLY_CAP) {
+        throw new HttpException("You've sent a lot of feedback in a short time — please try again later.", HttpStatus.TOO_MANY_REQUESTS);
+      }
       const r = (await tx.platformFeedback.create({
         data: { schoolId: p.schoolId, userId: p.userId, kind: input.kind, subject: input.subject, body: input.body },
       })) as { id: string };
       await this.log(tx, p, "feedback.send", r.id, { kind: input.kind });
-      return r;
+      return { id: r.id };
     });
-    // Alert the platform reviewers (cross-tenant, so via the privileged client);
-    // best-effort — a notification hiccup must never fail the submission.
-    await this.alertReviewers(input.kind, input.subject).catch(() => undefined);
-    return { id: row.id };
   }
 
   /** The sender's own submissions (tenant-scoped read). */
@@ -76,13 +100,17 @@ export class FeedbackService {
   }
 
   /** Platform owner: the cross-tenant inbox (keyset-paged). Privileged read. */
-  async listAll(p: Principal, opts: { cursor?: string; limit?: number; status?: string } = {}): Promise<PageDto<PlatformFeedbackDto>> {
+  async listAll(
+    p: Principal,
+    opts: { cursor?: string; limit?: number; status?: string; kind?: string } = {},
+  ): Promise<PageDto<PlatformFeedbackDto>> {
     const client = this.privileged.client;
     if (!client) throw new ServiceUnavailableException("Feedback review requires the privileged database configuration");
     const limit = pageLimit(opts.limit);
     const cursor = decodeCursor(opts.cursor);
     const where: Record<string, unknown> = { ...seekWhere(cursor) };
     if (opts.status && FEEDBACK_STATUSES.includes(opts.status as never)) where.status = opts.status;
+    if (opts.kind && FEEDBACK_KINDS.includes(opts.kind as never)) where.kind = opts.kind;
     const rows = (await client.platformFeedback.findMany({
       where,
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -138,25 +166,114 @@ export class FeedbackService {
     return { ok: true as const };
   }
 
-  private async alertReviewers(kind: string, subject: string): Promise<void> {
+  /**
+   * Bulk-review — set ONE status on up to FEEDBACK_BULK_MAX ids in a single
+   * updateMany. Essential at volume: 5000/day is untriageable one row at a time,
+   * so the owner can select many and dismiss/resolve in a single cheap query.
+   */
+  async bulkReview(p: Principal, ids: string[], input: { status: string; note?: string | null }): Promise<{ updated: number }> {
     const client = this.privileged.client;
-    if (!client) return; // no privileged client in this deploy → silently skip
-    const reviewers = await client.user.findMany({
+    if (!client) throw new ServiceUnavailableException("Feedback review requires the privileged database configuration");
+    if (!FEEDBACK_STATUSES.includes(input.status as never)) throw new BadRequestException("Invalid status");
+    const unique = [...new Set(ids)].filter(Boolean);
+    if (unique.length === 0) throw new BadRequestException("No feedback selected");
+    if (unique.length > FEEDBACK_BULK_MAX) throw new BadRequestException(`At most ${FEEDBACK_BULK_MAX} at a time`);
+    const res = await client.platformFeedback.updateMany({
+      where: { id: { in: unique } },
+      data: { status: input.status, reviewNote: input.note ?? null, reviewedById: p.userId, reviewedAt: new Date() },
+    });
+    await this.db.runAsTenant(this.ctx(p), (tx) =>
+      this.audit.record(
+        { actorId: p.userId, action: "feedback.bulk_review", entity: "platform_feedback", entityId: "bulk", schoolId: p.schoolId, metadata: { status: input.status, count: res.count } },
+        tx,
+      ),
+    );
+    return { updated: res.count };
+  }
+
+  /**
+   * Aggregate triage counts — ONE grouped query, so the inbox header is O(groups)
+   * not O(rows). Lets the owner see the shape of the backlog at a glance.
+   */
+  async stats(): Promise<FeedbackStatsDto> {
+    const client = this.privileged.client;
+    if (!client) throw new ServiceUnavailableException("Feedback review requires the privileged database configuration");
+    // One scan, one round-trip — conditional FILTER counts (the analytics pattern).
+    // stats is loaded a handful of times a day by the owner (not per submission),
+    // so a single aggregate over the table is fine even at millions of rows.
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const rows = (await client.$queryRaw`
+      SELECT
+        count(*)::int AS total,
+        count(*) FILTER (WHERE status = 'OPEN')::int AS open,
+        count(*) FILTER (WHERE status = 'REVIEWED')::int AS reviewed,
+        count(*) FILTER (WHERE status = 'RESOLVED')::int AS resolved,
+        count(*) FILTER (WHERE status = 'DISMISSED')::int AS dismissed,
+        count(*) FILTER (WHERE kind = 'COMPLAINT')::int AS complaints,
+        count(*) FILTER (WHERE kind = 'SUGGESTION')::int AS suggestions,
+        count(*) FILTER (WHERE status = 'OPEN' AND "createdAt" >= ${since})::int AS last24h
+      FROM platform_feedback
+    `) as Array<{
+      total: number;
+      open: number;
+      reviewed: number;
+      resolved: number;
+      dismissed: number;
+      complaints: number;
+      suggestions: number;
+      last24h: number;
+    }>;
+    const r = rows[0];
+    return {
+      total: r?.total ?? 0,
+      open: r?.open ?? 0,
+      reviewed: r?.reviewed ?? 0,
+      resolved: r?.resolved ?? 0,
+      dismissed: r?.dismissed ?? 0,
+      complaints: r?.complaints ?? 0,
+      suggestions: r?.suggestions ?? 0,
+      last24h: r?.last24h ?? 0,
+    };
+  }
+
+  /**
+   * Digest sweep — the coalesced replacement for per-submission alerts. Runs
+   * hourly (or on-demand). Counts OPEN feedback in the trailing window; if any is
+   * new, sends ONE summary notification+email to each reviewer with the new count
+   * + the total open backlog. Privileged (cross-tenant); disabled (no-op) when no
+   * privileged client is configured. Idempotent-ish: a quiet window notifies
+   * no-one, so 5000/day becomes ~24 emails, never 5000.
+   */
+  async digestSweep(): Promise<{ notified: number; newOpen: number }> {
+    const client = this.privileged.client;
+    if (!client) return { notified: 0, newOpen: 0 };
+    const since = new Date(Date.now() - FEEDBACK_DIGEST_WINDOW_MS);
+    const newOpen = await client.platformFeedback.count({ where: { status: "OPEN", createdAt: { gte: since } } });
+    if (newOpen === 0) return { notified: 0, newOpen: 0 };
+    const totalOpen = await client.platformFeedback.count({ where: { status: "OPEN" } });
+    const reviewers = (await client.user.findMany({
       where: { roles: { some: { role: { name: { in: ["super_admin", "manager_admin"] } } } } },
       select: { id: true, schoolId: true },
-    });
+    })) as { id: string; schoolId: string }[];
+    let notified = 0;
     for (const r of reviewers) {
-      await this.notifications.enqueue(
-        { schoolId: r.schoolId, userId: r.id },
-        {
-          recipientId: r.id,
-          type: "OPERATOR_ALERT",
-          title: `New ${kind === "SUGGESTION" ? "suggestion" : "complaint"}: ${subject}`,
-          body: `A school user sent platform feedback (${kind.toLowerCase()}). Review it in the operator feedback inbox.`,
-          channels: ["EMAIL"],
-        },
-      );
+      await this.notifications
+        .enqueue(
+          { schoolId: r.schoolId, userId: r.id },
+          {
+            recipientId: r.id,
+            type: "OPERATOR_ALERT",
+            title: `${newOpen} new feedback item${newOpen === 1 ? "" : "s"} — ${totalOpen} open`,
+            body: `${newOpen} new complaint(s)/suggestion(s) arrived in the last hour. ${totalOpen} open in total. Review them in the operator feedback inbox.`,
+            channels: ["EMAIL"],
+          },
+        )
+        .then(() => {
+          notified += 1;
+        })
+        .catch(() => undefined); // one bad recipient must not abort the digest
     }
+    return { notified, newOpen };
   }
 
   private log(tx: TenantTx, p: Principal, action: string, entityId: string, metadata: Record<string, unknown>) {

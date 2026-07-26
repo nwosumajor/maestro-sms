@@ -32,3 +32,23 @@ export interface PlatformFeedbackDto {
   schoolName: string;
   createdAt: Date;
 }
+
+/**
+ * Aggregate triage counts for the owner's inbox — one grouped query, so the
+ * header stays cheap no matter how many rows exist. Lets the owner see the shape
+ * of 5000/day at a glance and filter rather than scroll.
+ */
+export interface FeedbackStatsDto {
+  total: number;
+  open: number;
+  reviewed: number;
+  resolved: number;
+  dismissed: number;
+  complaints: number;
+  suggestions: number;
+  /** New OPEN feedback in the last 24h — the "needs attention now" signal. */
+  last24h: number;
+}
+
+/** Max ids a single bulk-review call may touch (bounded work). */
+export const FEEDBACK_BULK_MAX = 200;

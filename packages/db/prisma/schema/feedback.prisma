@@ -33,6 +33,14 @@ model PlatformFeedback {
   school School @relation(fields: [schoolId], references: [id])
 
   @@index([schoolId])
-  @@index([schoolId, createdAt])
+  // The sender's own list (listMine) AND the per-user flood cap both filter by
+  // userId + time — without this they table-scan once the table reaches millions.
+  @@index([userId, createdAt])
+  // The platform owner's cross-tenant inbox orders by (createdAt,id) globally (no
+  // schoolId predicate — the privileged read bypasses RLS), so the schoolId-led
+  // indexes don't serve it. A plain ascending btree is scanned backward for the
+  // DESC keyset. The status-led one serves the filtered inbox + the stats query.
+  @@index([createdAt, id])
+  @@index([status, createdAt, id])
   @@map("platform_feedback")
 }
