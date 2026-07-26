@@ -1,0 +1,46 @@
+// =============================================================================
+// Platform feedback — any signed-in user → the platform owner (super_admin)
+// =============================================================================
+// A cross-tenant channel for COMPLAINTS and feature SUGGESTIONS about the
+// Enterprise application itself (distinct from in-school discipline complaints
+// or messaging). Tenant-scoped (non-null schoolId = the sender's school, RLS):
+// the sender creates + reads their OWN feedback under their tenant GUC; the
+// platform owner reads and reviews ACROSS tenants via the privileged client
+// (same posture as the operator console + scholarship review). Append-only to
+// the sender (no UPDATE/DELETE grant); only the platform review path mutates it.
+
+model PlatformFeedback {
+  id       String @db.Uuid @id @default(uuid())
+  schoolId String @db.Uuid
+
+  /// The sender (DB FK to user; scalar audit field).
+  userId  String @db.Uuid
+  /// COMPLAINT | SUGGESTION.
+  kind    String
+  subject String
+  body    String
+  /// OPEN | REVIEWED | RESOLVED | DISMISSED.
+  status  String @default("OPEN")
+
+  /// Platform-side review (set via the privileged client, cross-tenant).
+  reviewedById String?   @db.Uuid
+  reviewNote   String?
+  reviewedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId])
+  // The sender's own list (listMine) AND the per-user flood cap both filter by
+  // userId + time — without this they table-scan once the table reaches millions.
+  @@index([userId, createdAt])
+  // The platform owner's cross-tenant inbox orders by (createdAt,id) globally (no
+  // schoolId predicate — the privileged read bypasses RLS), so the schoolId-led
+  // indexes don't serve it. A plain ascending btree is scanned backward for the
+  // DESC keyset. The status-led one serves the filtered inbox + the stats query.
+  @@index([createdAt, id])
+  @@index([status, createdAt, id])
+  @@map("platform_feedback")
+}

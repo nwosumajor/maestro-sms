@@ -55,6 +55,7 @@ describe("platform permission split", () => {
         "platform.user.read",
         "platform.user.unlock",
         "platform.grace.manage",
+        "platform.feedback.review",
       ].sort(),
     );
   });

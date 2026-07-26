@@ -114,6 +114,7 @@ const PERMS = [
   "platform.user.read",
   "platform.user.unlock",
   "platform.grace.manage",
+  "platform.feedback.review",
   // owner-only (each is, or becomes, absolute control)
   "platform.impersonate",
   "platform.user.credentials",
@@ -416,7 +417,6 @@ async function main() {
       id: "55555555-5555-5555-5555-555555555555",
       schoolId: school.id,
       name: "History 101",
-      subject: "History",
     },
   });
   await prisma.classTeacher.upsert({

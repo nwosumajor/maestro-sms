@@ -24,6 +24,7 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     "platform.operate",
     "platform.tenants.read", "platform.tenants.write", "platform.onboarding.review",
     "platform.audit.read", "platform.user.read", "platform.user.unlock", "platform.grace.manage",
+    "platform.feedback.review",
     "platform.impersonate", "platform.user.credentials", "platform.tenants.status",
     "platform.subscription.manage", "platform.pricing.manage", "platform.student.read",
     "platform.staff.manage",
@@ -51,6 +52,7 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     "platform.user.read", // support triage: look up an account
     "platform.user.unlock", // support: clear a lockout (grants no access)
     "platform.grace.manage", // extend a late payer's grace (hard-capped => not a comp)
+    "platform.feedback.review", // triage the platform-feedback inbox (support)
     "notification.read", // own inbox (onboarding alerts)
   ],
   // Board: read-only oversight + ultimate veto on workflows.
