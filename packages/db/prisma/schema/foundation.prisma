@@ -163,6 +163,7 @@ model School {
   schoolEvents       SchoolEvent[]
   schoolHolidays     SchoolHoliday[]
   examSchedules      ExamSchedule[]
+  platformFeedback   PlatformFeedback[]
 
   // HR
   employees Employee[]

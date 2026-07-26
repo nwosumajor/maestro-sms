@@ -1,0 +1,54 @@
+import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
+import { z } from "zod";
+import { OPERATOR_PERMISSIONS, FEEDBACK_KINDS, FEEDBACK_STATUSES } from "@sms/types";
+import type { MyFeedbackDto, PageDto, PlatformFeedbackDto } from "@sms/types";
+import { RequirePermission } from "../auth/require-permission.decorator";
+import { CurrentPrincipal } from "../auth/current-principal.decorator";
+import { ZodValidationPipe } from "../common/zod-validation.pipe";
+import type { Principal } from "../integrity/integrity.foundation";
+import { FeedbackService } from "./feedback.service";
+
+const sendSchema = z.object({
+  kind: z.enum(FEEDBACK_KINDS),
+  subject: z.string().min(1).max(200),
+  body: z.string().min(1).max(5000),
+});
+const reviewSchema = z.object({ status: z.enum(FEEDBACK_STATUSES), note: z.string().max(2000).nullish() });
+
+// ALWAYS-ON, no @RequireModule: platform feedback is open to every signed-in user
+// regardless of the school's plan.
+@Controller()
+export class FeedbackController {
+  constructor(private readonly feedback: FeedbackService) {}
+
+  /** Send feedback. NO @RequirePermission → any authenticated user (the guard
+   *  only enforces a permission when one is declared). */
+  @Post("feedback")
+  send(@CurrentPrincipal() p: Principal, @Body(new ZodValidationPipe(sendSchema)) body: z.infer<typeof sendSchema>) {
+    return this.feedback.send(p, body);
+  }
+
+  /** The sender's own submissions. Any authenticated user (their own only). */
+  @Get("feedback/mine")
+  mine(@CurrentPrincipal() p: Principal): Promise<MyFeedbackDto[]> {
+    return this.feedback.listMine(p);
+  }
+
+  /** Platform owner: the cross-tenant inbox. */
+  @Get("operator/feedback")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_FEEDBACK_REVIEW)
+  list(
+    @CurrentPrincipal() p: Principal,
+    @Query("cursor") cursor?: string,
+    @Query("limit") limit?: string,
+    @Query("status") status?: string,
+  ): Promise<PageDto<PlatformFeedbackDto>> {
+    return this.feedback.listAll(p, { cursor, limit: limit ? Number(limit) : undefined, status });
+  }
+
+  @Post("operator/feedback/:id/review")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_FEEDBACK_REVIEW)
+  review(@CurrentPrincipal() p: Principal, @Param("id") id: string, @Body(new ZodValidationPipe(reviewSchema)) body: z.infer<typeof reviewSchema>) {
+    return this.feedback.review(p, id, body);
+  }
+}

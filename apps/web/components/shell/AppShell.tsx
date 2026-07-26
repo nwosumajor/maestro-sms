@@ -15,6 +15,8 @@ import {
   UserIcon,
   BarChart3Icon,
   MessageSquareIcon,
+  MessageSquarePlusIcon,
+  InboxIcon,
   CalendarIcon,
   BriefcaseIcon,
   Building2Icon,
@@ -111,6 +113,8 @@ type NavKey =
   | "operatoraudit"
   | "directory"
   | "announcements"
+  | "feedback"
+  | "operatorfeedback"
   | "account"
   | "help";
 
@@ -185,6 +189,11 @@ const NAV: {
   // staff open Ultimate from the Games hub instead). No module tag — the
   // super_admin-only permission is the gate.
   { key: "ultimate", label: "Ultimate", icon: TrophyIcon, href: "/games/ultimate", perm: "game.ultimate.admin" },
+  // Platform feedback — visible to EVERY signed-in role (no perm): any user can
+  // send the platform owner a complaint or feature suggestion.
+  { key: "feedback", label: "Send feedback", icon: MessageSquarePlusIcon, href: "/feedback" },
+  // The platform owner's cross-tenant feedback inbox.
+  { key: "operatorfeedback", label: "Feedback inbox", icon: InboxIcon, href: "/operator/feedback", perm: "platform.feedback.review" },
   { key: "account", label: "Account", icon: UserIcon, href: "/account" },
   // The application manual — visible to EVERY signed-in role (content inside is
   // role-aware), so a brand-new user can always find their footing.
@@ -202,6 +211,8 @@ const PLATFORM_OWNER_NAV = new Set<NavKey>([
   "directory",
   "ultimate",
   "notifications",
+  "feedback",
+  "operatorfeedback",
   "account",
   "help",
 ]);
@@ -230,6 +241,7 @@ const NAV_GROUP: Record<NavKey, string> = {
   games: "community", ultimate: "community",
   operator: "platform", operatortenants: "platform", operatorscholarships: "platform",
   operatoraudit: "platform", directory: "platform", admin: "platform", account: "platform",
+  feedback: "platform", operatorfeedback: "platform",
   help: "platform",
 };
 

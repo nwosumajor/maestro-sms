@@ -43,6 +43,10 @@ export const OPERATOR_PERMISSIONS = {
    *  bounded goodwill, not a comp. Unbounded plan/period changes stay owner-only
    *  (platform.subscription.manage). */
   PLATFORM_GRACE_MANAGE: "platform.grace.manage",
+  /** Read + triage the cross-tenant platform-feedback inbox (complaints / feature
+   *  suggestions any signed-in user can send). Delegable support work — it grants
+   *  no access to school data beyond the feedback text the sender chose to write. */
+  PLATFORM_FEEDBACK_REVIEW: "platform.feedback.review",
 
   // --- owner-only: is, or becomes, absolute control --------------------------
   /** Sign in AS any user in any school. The total-control backdoor. */
@@ -84,4 +88,5 @@ export const DELEGABLE_PLATFORM_PERMISSIONS: readonly string[] = [
   OPERATOR_PERMISSIONS.PLATFORM_USER_READ,
   OPERATOR_PERMISSIONS.PLATFORM_USER_UNLOCK,
   OPERATOR_PERMISSIONS.PLATFORM_GRACE_MANAGE,
+  OPERATOR_PERMISSIONS.PLATFORM_FEEDBACK_REVIEW,
 ];

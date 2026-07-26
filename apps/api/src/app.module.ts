@@ -22,6 +22,7 @@ import { TimetableModule } from "./timetable/timetable.module";
 import { SearchModule } from "./search/search.module";
 import { MeetingModule } from "./meeting/meeting.module";
 import { ExamModule } from "./exam/exam.module";
+import { FeedbackModule } from "./feedback/feedback.module";
 import { SecurityModule } from "./security/security.module";
 import { AnalyticsModule } from "./analytics/analytics.module";
 import { PrivacyModule } from "./privacy/privacy.module";
@@ -86,6 +87,7 @@ import { HealthController } from "./health.controller";
     SearchModule,
     MeetingModule,
     ExamModule,
+    FeedbackModule,
     SecurityModule,
     AnalyticsModule,
     PrivacyModule,

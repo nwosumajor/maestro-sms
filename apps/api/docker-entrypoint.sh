@@ -163,6 +163,7 @@ apply_rls packages/db/prisma/rls/90_transport_expansion_rls.sql vehicle_location
 apply_rls packages/db/prisma/rls/91_fulltext_indexes.sql   __fts_indexes_no_policy__
 apply_rls packages/db/prisma/rls/92_academic_holiday_rls.sql school_holiday_delete
 apply_rls packages/db/prisma/rls/93_exam_schedule_rls.sql exam_schedule_delete
+apply_rls packages/db/prisma/rls/94_platform_feedback_rls.sql platform_feedback_insert
 
 # Seed on first provision (compose: SEED_ON_START=true; cloud migrate task: always).
 if [ "${SEED_ON_START}" = "true" ] || [ "$MODE" = "migrate" ]; then
