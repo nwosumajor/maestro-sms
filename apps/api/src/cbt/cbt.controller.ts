@@ -57,8 +57,10 @@ export class CbtController {
     return this.cbt.authoringOptions(p);
   }
 
+  /** Ungated for the same reason as banks/:id/questions — cbt.manage (authors) and
+   *  cbt.review (oversight) must BOTH reach it, and @RequirePermission takes one.
+   *  CbtService.listBanks enforces "either", and scopes the rows per audience. */
   @Get("banks")
-  @RequirePermission(CBT_PERMISSIONS.CBT_MANAGE)
   listBanks(@CurrentPrincipal() p: Principal): Promise<CbtBankDto[]> {
     return this.cbt.listBanks(p);
   }

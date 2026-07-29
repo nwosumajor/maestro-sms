@@ -191,17 +191,25 @@ export class CbtService {
   }
 
   async listBanks(p: Principal): Promise<CbtBankDto[]> {
+    // Either permission may list: cbt.manage (authors) or cbt.review (read-only
+    // oversight, e.g. the head teacher who approves publishing). Holding neither
+    // means the banks don't exist for you.
+    const canManage = p.permissions.includes(CBT_PERMISSIONS.CBT_MANAGE);
+    const canReview = p.permissions.includes(CBT_PERMISSIONS.CBT_REVIEW);
+    if (!canManage && !canReview) throw new NotFoundException("Not found");
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      // A teacher sees banks for subjects they teach, plus their own; school-wide
-      // staff see every bank in the school.
-      const where = this.isSchoolWide(p)
-        ? {}
-        : {
-            OR: [
-              { createdById: p.userId },
-              { subjectId: { in: [...(await this.taughtSubjectIds(tx, p))] } },
-            ],
-          };
+      // A teacher sees banks for subjects they teach, plus their own. School-wide
+      // staff AND read-only reviewers see every bank in the school — a head
+      // teacher cannot vet what is going to students if they cannot see it.
+      const where =
+        this.isSchoolWide(p) || canReview
+          ? {}
+          : {
+              OR: [
+                { createdById: p.userId },
+                { subjectId: { in: [...(await this.taughtSubjectIds(tx, p))] } },
+              ],
+            };
       const banks = await tx.cbtQuestionBank.findMany({ where, orderBy: { createdAt: "desc" } });
       const counts = await tx.cbtQuestion.groupBy({ by: ["bankId"], _count: { id: true } });
       const countOf = new Map(counts.map((c) => [c.bankId, c._count.id]));

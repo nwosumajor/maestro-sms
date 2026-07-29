@@ -172,7 +172,7 @@ const NAV: {
   { key: "leave", label: "Leave", icon: CalendarCheckIcon, href: "/leave", perm: "hr.self", module: MODULES.HR },
   { key: "hr", label: "HR", icon: BriefcaseIcon, href: "/hr", perm: "hr.read", module: MODULES.HR },
   { key: "assessments", label: "Assessments", icon: BookOpenIcon, href: "/assessments", perm: "assessment.read", module: MODULES.INTEGRITY },
-  { key: "cbt", label: "CBT exams", icon: BookOpenIcon, href: "/cbt", anyPerm: ["cbt.manage", "cbt.take"], module: MODULES.CBT },
+  { key: "cbt", label: "CBT exams", icon: BookOpenIcon, href: "/cbt", anyPerm: ["cbt.manage", "cbt.take", "cbt.review"], module: MODULES.CBT },
   { key: "gradebook", label: "Grades", icon: GraduationCapIcon, href: "/gradebook", perm: "grade.read", module: MODULES.GRADEBOOK },
   // Approvals is now the UNIFIED inbox: the workflow engine's own requests PLUS
   // pending decisions aggregated from other modules (fees, HR, payroll,
