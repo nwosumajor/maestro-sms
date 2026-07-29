@@ -116,6 +116,41 @@ describe("CbtService — teacher subject scoping", () => {
     await expect(service.createBank(admin(), { name: "General knowledge" })).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  // --- listBanks must be REACHABLE by both audiences --------------------------
+
+  it("a head teacher (cbt.review) LISTS every bank in the school", async () => {
+    // Without this a head teacher could never discover a bank to review: the list
+    // used to require cbt.manage, and non-school-wide callers were scoped to
+    // subjects they teach — a head teacher teaches none, so it returned nothing.
+    const { service, tx } = makeService({
+      banks: [
+        { id: "b1", name: "Maths", subject: "Maths", subjectId: "sub-math", createdById: "t1", createdAt: new Date() },
+        { id: "b2", name: "Chem", subject: "Chem", subjectId: "sub-chem", createdById: "t2", createdAt: new Date() },
+      ],
+      taught: [],
+    });
+    const head: Principal = { schoolId: "A", userId: "head1", roles: ["head_teacher"], permissions: ["cbt.review"] };
+    const list = await service.listBanks(head);
+    expect(list.map((b) => b.id)).toEqual(["b1", "b2"]);
+    // School-wide read means NO subject filter was applied.
+    expect(tx.cbtQuestionBank.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: {} }));
+  });
+
+  it("listBanks 404s for someone holding neither cbt.manage nor cbt.review", async () => {
+    const { service } = makeService({ banks: [] });
+    const student: Principal = { schoolId: "A", userId: "s1", roles: ["student"], permissions: ["cbt.take"] };
+    await expect(service.listBanks(student)).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it("a teacher's bank list stays scoped to subjects they teach", async () => {
+    const { service, tx } = makeService({ banks: [], taught: [{ subjectId: "sub-math" }] });
+    await service.listBanks({ ...teacher(), permissions: ["cbt.manage"] });
+    // A subject filter IS applied for a plain teacher (not school-wide).
+    expect(tx.cbtQuestionBank.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ OR: expect.anything() }) }),
+    );
+  });
+
   // --- reading questions back: editors see the key, reviewers do not ----------
 
   it("a subject teacher READS their own bank's questions WITH the answer key", async () => {
