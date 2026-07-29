@@ -23,6 +23,7 @@ import { SearchModule } from "./search/search.module";
 import { MeetingModule } from "./meeting/meeting.module";
 import { ExamModule } from "./exam/exam.module";
 import { FeedbackModule } from "./feedback/feedback.module";
+import { ApprovalsModule } from "./approvals/approvals.module";
 import { SecurityModule } from "./security/security.module";
 import { AnalyticsModule } from "./analytics/analytics.module";
 import { PrivacyModule } from "./privacy/privacy.module";
@@ -88,6 +89,7 @@ import { HealthController } from "./health.controller";
     MeetingModule,
     ExamModule,
     FeedbackModule,
+    ApprovalsModule,
     SecurityModule,
     AnalyticsModule,
     PrivacyModule,

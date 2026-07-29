@@ -174,7 +174,27 @@ const NAV: {
   { key: "assessments", label: "Assessments", icon: BookOpenIcon, href: "/assessments", perm: "assessment.read", module: MODULES.INTEGRITY },
   { key: "cbt", label: "CBT exams", icon: BookOpenIcon, href: "/cbt", anyPerm: ["cbt.manage", "cbt.take"], module: MODULES.CBT },
   { key: "gradebook", label: "Grades", icon: GraduationCapIcon, href: "/gradebook", perm: "grade.read", module: MODULES.GRADEBOOK },
-  { key: "workflows", label: "Approvals", icon: ClipboardCheckIcon, href: "/workflows", perm: "workflow.read", module: MODULES.WORKFLOW },
+  // Approvals is now the UNIFIED inbox: the workflow engine's own requests PLUS
+  // pending decisions aggregated from other modules (fees, HR, payroll,
+  // security, admissions, privacy). So it is visible to anyone who can approve
+  // ANYTHING, not just workflow.read holders — otherwise an accountant holding
+  // only fee.approve would never see the page listing their own queue.
+  {
+    key: "workflows",
+    label: "Approvals",
+    icon: ClipboardCheckIcon,
+    href: "/workflows",
+    anyPerm: [
+      "workflow.read",
+      "fee.approve",
+      "hr.salary.approve",
+      "hr.payroll.run",
+      "security.elevation.approve",
+      "admission.review",
+      "privacy.erasure.review",
+    ],
+    module: MODULES.WORKFLOW,
+  },
   { key: "tasks", label: "Tasks", icon: ListTodoIcon, href: "/tasks", perm: "task.participate", module: MODULES.TASK },
   { key: "polls", label: "Polls", icon: BarChartHorizontalIcon, href: "/polls", perm: "poll.vote", module: MODULES.POLL },
   { key: "discussion", label: "Discussion", icon: MessagesSquareIcon, href: "/discussion", perm: "discussion.participate", module: MODULES.DISCUSSION },

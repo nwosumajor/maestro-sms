@@ -66,6 +66,7 @@ export * from "./dto/search";
 export * from "./dto/meeting";
 export * from "./dto/exam";
 export * from "./dto/feedback";
+export * from "./dto/approvals";
 export * from "./dto/documents";
 export * from "./dto/hr";
 export * from "./dto/messaging";

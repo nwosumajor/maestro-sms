@@ -155,6 +155,9 @@ model SalaryChangeRequest {
 
   @@index([schoolId])
   @@index([schoolId, employeeId])
+  // Approvals inbox: finds the few rows awaiting a decision without scanning
+  // the whole (ever-growing) table. Mirrors invoice_adjustment/admission_application.
+  @@index([schoolId, status])
   @@map("salary_change_request")
 }
 
@@ -183,6 +186,9 @@ model PayrollRun {
 
   @@unique([schoolId, periodYear, periodMonth, runType])
   @@index([schoolId])
+  // Approvals inbox: finds the few rows awaiting a decision without scanning
+  // the whole (ever-growing) table. Mirrors invoice_adjustment/admission_application.
+  @@index([schoolId, status])
   @@map("payroll_run")
 }
 
@@ -253,6 +259,9 @@ model StaffLoan {
 
   @@index([schoolId])
   @@index([schoolId, userId])
+  // Approvals inbox: finds the few rows awaiting a decision without scanning
+  // the whole (ever-growing) table. Mirrors invoice_adjustment/admission_application.
+  @@index([schoolId, status])
   @@map("staff_loan")
 }
 
@@ -578,6 +587,9 @@ model EmploymentChangeRequest {
 
   @@index([schoolId])
   @@index([schoolId, userId])
+  // Approvals inbox: finds the few rows awaiting a decision without scanning
+  // the whole (ever-growing) table. Mirrors invoice_adjustment/admission_application.
+  @@index([schoolId, status])
   @@map("employment_change_request")
 }
 
@@ -607,6 +619,9 @@ model StaffExit {
 
   @@index([schoolId])
   @@index([schoolId, userId])
+  // Approvals inbox: finds the few rows awaiting a decision without scanning
+  // the whole (ever-growing) table. Mirrors invoice_adjustment/admission_application.
+  @@index([schoolId, status])
   @@map("staff_exit")
 }
 
