@@ -65,7 +65,9 @@ export interface EntryInput {
   classId: string;
   dayOfWeek: DayOfWeekValue;
   periodId: string;
-  subject: string;
+  /** Curriculum Subject id — authoritative. The stored `subject` label is a
+   *  server-maintained copy of its name, never operator text. */
+  subjectId: string;
   teacherId: string;
   roomId?: string | null;
 }
@@ -191,13 +193,15 @@ export class TimetableService {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.assertReferencesExist(tx, input);
       await this.assertNoConflict(tx, input);
+      const subjectName = await this.subjectLabel(tx, input.subjectId);
       const entry = await tx.timetableEntry.create({
         data: {
           schoolId: p.schoolId,
           classId: input.classId,
           dayOfWeek: input.dayOfWeek,
           periodId: input.periodId,
-          subject: input.subject,
+          subjectId: input.subjectId,
+          subject: subjectName,
           teacherId: input.teacherId,
           roomId: input.roomId ?? null,
         },
@@ -283,6 +287,7 @@ export class TimetableService {
           classId: lesson.classId,
           dayOfWeek: lesson.day as DayOfWeekValue,
           periodId: lesson.periodId,
+          subjectId: lesson.subjectId,
           subject: lesson.subject,
           teacherId: lesson.teacherId,
           roomId: lesson.roomId,
@@ -389,7 +394,7 @@ export class TimetableService {
         classId: input.classId ?? current.classId,
         dayOfWeek: (input.dayOfWeek ?? current.dayOfWeek) as DayOfWeekValue,
         periodId: input.periodId ?? current.periodId,
-        subject: input.subject ?? current.subject,
+        subjectId: input.subjectId ?? current.subjectId,
         teacherId: input.teacherId ?? current.teacherId,
         roomId: input.roomId === undefined ? current.roomId : input.roomId,
       };
@@ -401,7 +406,8 @@ export class TimetableService {
           classId: merged.classId,
           dayOfWeek: merged.dayOfWeek,
           periodId: merged.periodId,
-          subject: merged.subject,
+          subjectId: merged.subjectId,
+          subject: await this.subjectLabel(tx, merged.subjectId),
           teacherId: merged.teacherId,
           roomId: merged.roomId ?? null,
         },
@@ -471,6 +477,7 @@ export class TimetableService {
         id: e.id,
         dayOfWeek: e.dayOfWeek,
         periodId: e.periodId,
+        subjectId: e.subjectId,
         subject: e.subject,
         teacherId: e.teacherId,
         teacherName: nameById.get(e.teacherId) ?? "—",
@@ -514,12 +521,22 @@ export class TimetableService {
     if (start >= end) throw new BadRequestException("startTime must be before endTime");
   }
 
+  /** The registry name for a subject — the ONLY source of a lesson's label, so a
+   *  timetable can never display a subject that isn't in the catalog. */
+  private async subjectLabel(tx: TenantTx, subjectId: string): Promise<string> {
+    const s = await tx.subject.findFirst({ where: { id: subjectId }, select: { name: true } });
+    if (!s) throw new NotFoundException("Subject not found");
+    return s.name;
+  }
+
   private async assertReferencesExist(tx: TenantTx, e: EntryInput) {
-    const [cls, period, teacher] = await Promise.all([
+    const [cls, period, teacher, subject] = await Promise.all([
       tx.class.findFirst({ where: { id: e.classId }, select: { id: true } }),
       tx.period.findFirst({ where: { id: e.periodId }, select: { id: true, isBreak: true } }),
       tx.user.findFirst({ where: { id: e.teacherId }, select: { id: true } }),
+      tx.subject.findFirst({ where: { id: e.subjectId }, select: { id: true } }),
     ]);
+    if (!subject) throw new NotFoundException("Subject not found");
     if (!cls) throw new NotFoundException("Class not found");
     if (!period) throw new NotFoundException("Period not found");
     // A break is a non-teaching slot — no lesson may be placed in it.

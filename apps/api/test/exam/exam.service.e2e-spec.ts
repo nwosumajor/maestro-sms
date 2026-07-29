@@ -72,7 +72,7 @@ d("ExamService (real Postgres)", () => {
   });
 
   afterAll(async () => {
-    for (const t of ["exam_invigilator", "exam_seat", "exam_sitting", "exam_schedule", "cbt_sitting", "cbt_exam", "cbt_question", "cbt_question_bank", "enrollment", "class", "user_role", "notification_delivery", "notification", "audit_log"]) {
+    for (const t of ["exam_invigilator", "exam_seat", "exam_sitting", "exam_schedule", "cbt_sitting", "cbt_exam", "cbt_question", "cbt_question_bank", "subject", "enrollment", "class", "user_role", "notification_delivery", "notification", "audit_log"]) {
       await admin.query(`DELETE FROM ${t} WHERE "schoolId" = $1`, [SA]);
     }
     await admin.query(`DELETE FROM role WHERE id = ANY($1)`, [[teacherRoleId, studentRoleId]]);
@@ -126,7 +126,9 @@ d("ExamService (real Postgres)", () => {
     // A DRAFT CBT exam + bank to back a sitting.
     const bankId = randomUUID();
     const examId = randomUUID();
-    await admin.query(`INSERT INTO cbt_question_bank (id,"schoolId",name,"createdById","updatedAt") VALUES ($1,$2,'Bank',$3,now())`, [bankId, SA, ADMIN]);
+    const cbtSubjectId = randomUUID();
+    await admin.query(`INSERT INTO subject (id,"schoolId",name,code,"updatedAt") VALUES ($1,$2,'Exam Subject','EXAMSUBJ',now())`, [cbtSubjectId, SA]);
+    await admin.query(`INSERT INTO cbt_question_bank (id,"schoolId",name,"subjectId","createdById","updatedAt") VALUES ($1,$2,'Bank',$4,$3,now())`, [bankId, SA, ADMIN, cbtSubjectId]);
     await admin.query(`INSERT INTO cbt_question (id,"schoolId","bankId",prompt,choices,"answerIndex") VALUES ($1,$2,$3,'2+2?','["3","4"]'::jsonb,1)`, [randomUUID(), SA, bankId]);
     // classId set so AUTO-SEAT on approval fills the plan from the class roster.
     await admin.query(

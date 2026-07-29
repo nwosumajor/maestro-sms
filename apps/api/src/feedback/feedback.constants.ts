@@ -17,3 +17,13 @@ export const FEEDBACK_DIGEST_WINDOW_MS = 60 * 60 * 1000;
 /** Per-user flood cap: max submissions per rolling hour before a 429. */
 export const FEEDBACK_USER_HOURLY_CAP = 30;
 export const FEEDBACK_USER_WINDOW_MS = 60 * 60 * 1000;
+
+/**
+ * Inbox-header stats are a FULL-TABLE aggregate (counting every row by status and
+ * kind is exactly the question being asked, so no index can serve it). On an
+ * append-only table that grows ~5000/day that scan reaches seconds within a few
+ * years, and it runs on every operator page load. A short TTL makes the cost
+ * per-minute instead of per-view; the numbers are a triage summary, so being up
+ * to a minute stale is immaterial. (Mirrors PlanPricingService's 60s cache.)
+ */
+export const FEEDBACK_STATS_CACHE_MS = 60_000;

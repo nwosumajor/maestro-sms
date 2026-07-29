@@ -42,6 +42,7 @@ d("LessonCoverService (real Postgres)", () => {
   const periodId = randomUUID();
   const entryId = randomUUID(); // ABSENT's Friday P1 lesson
   const busyEntryId = randomUUID(); // BUSY's Friday P1 lesson
+  const coverSubjectId = randomUUID();
   const leaveTypeId = randomUUID();
 
   const staff = (): Principal => ({ userId: ADMIN, schoolId: SA, roles: ["school_admin"], permissions: ["timetable.write"] });
@@ -55,15 +56,16 @@ d("LessonCoverService (real Postgres)", () => {
     }
     await admin.query(`INSERT INTO class (id,"schoolId",name,"updatedAt") VALUES ($1,$2,'JSS1',now()),($3,$2,'JSS2',now())`, [classId, SA, busyClassId]);
     await admin.query(`INSERT INTO period (id,"schoolId",name,sequence,"startTime","endTime","updatedAt") VALUES ($1,$2,'P1',1,'08:00','08:45',now())`, [periodId, SA]);
+    await admin.query(`INSERT INTO subject (id,"schoolId",name,code,"updatedAt") VALUES ($1,$2,'Cover Subject','COVERSUB',now())`, [coverSubjectId, SA]);
     // ABSENT teaches JSS1 Maths on Friday P1.
     await admin.query(
-      `INSERT INTO timetable_entry (id,"schoolId","classId","dayOfWeek","periodId",subject,"teacherId","updatedAt") VALUES ($1,$2,$3,'FRIDAY',$4,'Maths',$5,now())`,
-      [entryId, SA, classId, periodId, ABSENT],
+      `INSERT INTO timetable_entry (id,"schoolId","classId","dayOfWeek","periodId",subject,"subjectId","teacherId","updatedAt") VALUES ($1,$2,$3,'FRIDAY',$4,'Maths',$6,$5,now())`,
+      [entryId, SA, classId, periodId, ABSENT, coverSubjectId],
     );
     // BUSY also teaches Friday P1 (their own class) — makes them double-booked.
     await admin.query(
-      `INSERT INTO timetable_entry (id,"schoolId","classId","dayOfWeek","periodId",subject,"teacherId","updatedAt") VALUES ($1,$2,$3,'FRIDAY',$4,'English',$5,now())`,
-      [busyEntryId, SA, busyClassId, periodId, BUSY],
+      `INSERT INTO timetable_entry (id,"schoolId","classId","dayOfWeek","periodId",subject,"subjectId","teacherId","updatedAt") VALUES ($1,$2,$3,'FRIDAY',$4,'English',$6,$5,now())`,
+      [busyEntryId, SA, busyClassId, periodId, BUSY, coverSubjectId],
     );
     // ABSENT is on approved leave across the window.
     await admin.query(`INSERT INTO leave_type (id,"schoolId",name,"updatedAt") VALUES ($1,$2,'Annual',now())`, [leaveTypeId, SA]);
@@ -81,7 +83,7 @@ d("LessonCoverService (real Postgres)", () => {
   });
 
   afterAll(async () => {
-    for (const t of ["lesson_cover", "leave_request", "leave_type", "timetable_entry", "period", "class", "notification_delivery", "notification", "audit_log"]) {
+    for (const t of ["lesson_cover", "leave_request", "leave_type", "timetable_entry", "subject", "period", "class", "notification_delivery", "notification", "audit_log"]) {
       await admin.query(`DELETE FROM ${t} WHERE "schoolId" = $1`, [SA]);
     }
     await admin.query(`DELETE FROM "user" WHERE "schoolId" = $1`, [SA]);

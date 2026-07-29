@@ -59,6 +59,9 @@ d("RLS cross-tenant isolation", () => {
   const examSittingA = randomUUID();
   const examScheduleA = randomUUID();
   const platformFeedbackA = randomUUID();
+  const cbtSubjectA = randomUUID();
+  const ttSubjectA = randomUUID();
+  const platformFeedbackMessageA = randomUUID();
   const examSeatA = randomUUID();
   const examInvigilatorA = randomUUID();
   const scanEventA = randomUUID();
@@ -364,9 +367,13 @@ d("RLS cross-tenant isolation", () => {
       [roomA, A],
     );
     await a.query(
-      `INSERT INTO timetable_entry (id,"schoolId","classId","dayOfWeek","periodId",subject,"teacherId","roomId","updatedAt")
-       VALUES ($1,$2,$3,'MONDAY',$4,'History',$5,$6,now())`,
-      [ttEntryA, A, classA, periodA, userA, roomA],
+      `INSERT INTO subject (id,"schoolId",name,code,"updatedAt") VALUES ($1,$2,'RLS Timetable Subject','RLSTT',now())`,
+      [ttSubjectA, A],
+    );
+    await a.query(
+      `INSERT INTO timetable_entry (id,"schoolId","classId","dayOfWeek","periodId",subject,"subjectId","teacherId","roomId","updatedAt")
+       VALUES ($1,$2,$3,'MONDAY',$4,'RLS Timetable Subject',$7,$5,$6,now())`,
+      [ttEntryA, A, classA, periodA, userA, roomA, ttSubjectA],
     );
     // Lesson cover on that entry (some Monday), reliever userA.
     await a.query(
@@ -390,10 +397,14 @@ d("RLS cross-tenant isolation", () => {
       `INSERT INTO exam_schedule (id,"schoolId",title,"createdById","updatedAt") VALUES ($1,$2,'RLS Schedule',$3,now())`,
       [examScheduleA, A, userA],
     );
-    // Platform feedback: a complaint from school A's user.
+    // Platform feedback: a complaint from school A's user, plus a thread message.
     await a.query(
       `INSERT INTO platform_feedback (id,"schoolId","userId",kind,subject,body,"updatedAt") VALUES ($1,$2,$3,'COMPLAINT','RLS','hi',now())`,
       [platformFeedbackA, A, userA],
+    );
+    await a.query(
+      `INSERT INTO platform_feedback_message (id,"schoolId","feedbackId","authorId","authorSide",body) VALUES ($1,$2,$3,$4,'SENDER','msg')`,
+      [platformFeedbackMessageA, A, platformFeedbackA, userA],
     );
     await a.query(
       `INSERT INTO exam_sitting (id,"schoolId",title,date,"startsAt","endsAt",hall,"scheduleId","createdById","updatedAt")
@@ -552,8 +563,12 @@ d("RLS cross-tenant isolation", () => {
     );
     // CBT: bank → question → exam → sitting chain in A.
     await a.query(
-      `INSERT INTO cbt_question_bank (id,"schoolId",name,"createdById","updatedAt") VALUES ($1,$2,'RLS Bank',$3,now())`,
-      [cbtBankA, A, userA],
+`INSERT INTO subject (id,"schoolId",name,code,"updatedAt") VALUES ($1,$2,'RLS CBT Subject','RLSCBT',now())`,
+      [cbtSubjectA, A],
+    );
+    await a.query(
+            `INSERT INTO cbt_question_bank (id,"schoolId",name,"subjectId","createdById","updatedAt") VALUES ($1,$2,'RLS Bank',$4,$3,now())`,
+      [cbtBankA, A, userA, cbtSubjectA],
     );
     await a.query(
       `INSERT INTO cbt_question (id,"schoolId","bankId",prompt,choices,"answerIndex") VALUES ($1,$2,$3,'2+2?',$4::jsonb,1)`,
@@ -1121,7 +1136,6 @@ d("RLS cross-tenant isolation", () => {
       // class_subject_teacher references class + subject + user -> purge first;
       // subject is its parent (and FK-free of class), so it follows.
       "class_subject_teacher",
-      "subject",
       "class_teacher",
       "enrollment",
       "parent_child",
@@ -1196,11 +1210,13 @@ d("RLS cross-tenant isolation", () => {
       "exam_seat",
       "exam_sitting",
       "exam_schedule",
+      "platform_feedback_message",
       "platform_feedback",
       "meeting_booking",
       "meeting_slot",
       "lesson_cover",
       "timetable_entry",
+      "subject",
       "period",
       "room",
       "document",
@@ -1303,6 +1319,7 @@ d("RLS cross-tenant isolation", () => {
     ["meeting_booking", meetingBookingA],
     ["exam_schedule", examScheduleA],
     ["platform_feedback", platformFeedbackA],
+    ["platform_feedback_message", platformFeedbackMessageA],
     ["exam_sitting", examSittingA],
     ["exam_seat", examSeatA],
     ["exam_invigilator", examInvigilatorA],

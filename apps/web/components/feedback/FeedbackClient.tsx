@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { readApiError } from "@/lib/api-error";
+import { FeedbackThread } from "@/components/feedback/FeedbackThread";
 
 type Mine = Serialized<MyFeedbackDto>;
 
@@ -118,29 +119,43 @@ export function FeedbackClient({ mine }: { mine: Mine[] }) {
           ) : (
             <ul className="space-y-3">
               {mine.map((f) => (
-                <li key={f.id} className="rounded-md border p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">{f.subject}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {f.kind === "SUGGESTION" ? "Suggestion" : "Complaint"} ·{" "}
-                        {new Date(f.createdAt).toLocaleDateString()}
-                      </p>
-                    </div>
-                    <Badge variant={STATUS_VARIANT[f.status] ?? "outline"}>{f.status}</Badge>
-                  </div>
-                  <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{f.body}</p>
-                  {f.reviewNote && (
-                    <p className="mt-2 rounded bg-muted/50 p-2 text-sm">
-                      <span className="font-medium">Reply from platform team:</span> {f.reviewNote}
-                    </p>
-                  )}
-                </li>
+                <MyFeedbackItem key={f.id} f={f} />
               ))}
             </ul>
           )}
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function MyFeedbackItem({ f }: { f: Mine }) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <li className="rounded-md border p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium">{f.subject}</p>
+          <p className="text-xs text-muted-foreground">
+            {f.kind === "SUGGESTION" ? "Suggestion" : "Complaint"} · {new Date(f.createdAt).toLocaleDateString()}
+          </p>
+        </div>
+        <Badge variant={STATUS_VARIANT[f.status] ?? "outline"}>{f.status}</Badge>
+      </div>
+      <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{f.body}</p>
+      {f.reviewNote && (
+        <p className="mt-2 rounded bg-muted/50 p-2 text-sm">
+          <span className="font-medium">Note from platform team:</span> {f.reviewNote}
+        </p>
+      )}
+      <button type="button" onClick={() => setOpen((v) => !v)} className="mt-2 text-sm font-medium text-primary underline">
+        {open ? "Hide conversation" : "View conversation & reply"}
+      </button>
+      {open && (
+        <div className="mt-2">
+          <FeedbackThread feedbackId={f.id} basePath="/api/sms/feedback" mySide="SENDER" />
+        </div>
+      )}
+    </li>
   );
 }

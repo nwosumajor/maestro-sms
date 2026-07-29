@@ -27,12 +27,21 @@ model PlatformFeedback {
   reviewNote   String?
   reviewedAt   DateTime?
 
+  /// Bumped whenever a message is posted on the thread (or at creation), so the
+  /// inbox can surface actively-replied threads to the top and reopened threads
+  /// don't get buried under createdAt ordering. Written via the privileged client.
+  lastActivityAt DateTime @default(now())
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  school School @relation(fields: [schoolId], references: [id])
+  school   School                     @relation(fields: [schoolId], references: [id])
+  messages PlatformFeedbackMessage[]
 
   @@index([schoolId])
+  // Activity-ordered inbox keyset (reopened/replied threads bubble up).
+  @@index([lastActivityAt, id])
+  @@index([status, lastActivityAt, id])
   // The sender's own list (listMine) AND the per-user flood cap both filter by
   // userId + time — without this they table-scan once the table reaches millions.
   @@index([userId, createdAt])
@@ -43,4 +52,38 @@ model PlatformFeedback {
   @@index([createdAt, id])
   @@index([status, createdAt, id])
   @@map("platform_feedback")
+}
+
+// =============================================================================
+// Platform feedback THREAD — the two-way conversation on a feedback item
+// =============================================================================
+// Append-only messages between the original sender and the platform team. Each
+// message is tenant-scoped (schoolId = the parent feedback's school, RLS): the
+// sender posts + reads on their OWN feedback under their tenant GUC; the platform
+// team posts + reads ACROSS tenants via the privileged client. No UPDATE/DELETE
+// grant to the app role — a conversation record is immutable once sent.
+model PlatformFeedbackMessage {
+  id         String @db.Uuid @id @default(uuid())
+  schoolId   String @db.Uuid
+  feedbackId String @db.Uuid
+
+  /// The author's user id (scalar audit field).
+  authorId String @db.Uuid
+  /// SENDER (the school user) | PLATFORM (the super_admin/manager_admin team).
+  authorSide String
+  body       String
+
+  createdAt DateTime @default(now())
+
+  feedback PlatformFeedback @relation(fields: [feedbackId], references: [id])
+
+  @@index([schoolId])
+  @@index([feedbackId, createdAt])
+  // The per-author rolling-hour reply cap counts by (authorId, createdAt) and the
+  // digest counts SENDER replies in a window — both would SEQ SCAN this
+  // append-only table without these, degrading linearly as the thread archive
+  // grows over the years (measured: 38ms seq scan at 400k rows).
+  @@index([authorId, createdAt])
+  @@index([authorSide, createdAt])
+  @@map("platform_feedback_message")
 }

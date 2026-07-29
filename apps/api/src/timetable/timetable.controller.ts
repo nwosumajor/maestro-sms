@@ -48,7 +48,7 @@ const entrySchema = z.object({
   classId: z.string().uuid(),
   dayOfWeek: z.enum(DAYS_OF_WEEK),
   periodId: z.string().uuid(),
-  subject: z.string().min(1).max(120),
+  subjectId: z.string().uuid(),
   teacherId: z.string().uuid(),
   roomId: z.string().uuid().nullish(),
 });

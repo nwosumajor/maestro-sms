@@ -21,10 +21,10 @@ export class FeedbackDigestProcessor extends WorkerHost {
     super();
   }
 
-  async process(job: Job): Promise<{ notified: number; newOpen: number }> {
-    if (job.name !== FEEDBACK_DIGEST_JOB) return { notified: 0, newOpen: 0 };
+  async process(job: Job): Promise<{ notified: number; newOpen: number; newReplies: number }> {
+    if (job.name !== FEEDBACK_DIGEST_JOB) return { notified: 0, newOpen: 0, newReplies: 0 };
     const r = await this.feedback.digestSweep();
-    this.logger.log(`Feedback digest done: newOpen=${r.newOpen} notified=${r.notified}`);
+    this.logger.log(`Feedback digest done: newOpen=${r.newOpen} newReplies=${r.newReplies} notified=${r.notified}`);
     return r;
   }
 }

@@ -91,3 +91,30 @@ export interface CbtExamResultsDto {
   exam: CbtExamDto;
   rows: CbtExamResultRowDto[];
 }
+
+/**
+ * One question as returned to STAFF for review or authoring.
+ *
+ * `answerIndex` is present ONLY for someone who may EDIT the bank (an author or
+ * a subject teacher, i.e. cbt.manage + bank scope) — they need it to proofread
+ * their own key. Read-only reviewers (cbt.review, e.g. the head teacher who
+ * approves publishing) get `null`, and STUDENTS never receive this shape at all
+ * until a sitting closes. Golden Rule: the key is server-side by default.
+ */
+export interface CbtQuestionDto {
+  id: string;
+  prompt: string;
+  choices: string[];
+  /** Marked correct choice — null unless the caller may edit this bank. */
+  answerIndex: number | null;
+}
+
+/** A bank plus its questions (staff review view). */
+export interface CbtBankQuestionsDto {
+  bankId: string;
+  bankName: string;
+  subject: string | null;
+  /** True when the caller may edit — drives whether answers are shown/editable. */
+  canEdit: boolean;
+  questions: CbtQuestionDto[];
+}

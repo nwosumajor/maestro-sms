@@ -18,10 +18,11 @@ import {
   NotFoundException,
   ServiceUnavailableException,
 } from "@nestjs/common";
-import type { FeedbackStatsDto, MyFeedbackDto, PageDto, PlatformFeedbackDto } from "@sms/types";
+import type { FeedbackStatsDto, FeedbackThreadDto, MyFeedbackDto, PageDto, PlatformFeedbackDto } from "@sms/types";
 import { FEEDBACK_BULK_MAX, FEEDBACK_KINDS, FEEDBACK_STATUSES } from "@sms/types";
 import {
   FEEDBACK_DIGEST_WINDOW_MS,
+  FEEDBACK_STATS_CACHE_MS,
   FEEDBACK_USER_HOURLY_CAP,
   FEEDBACK_USER_WINDOW_MS,
 } from "./feedback.constants";
@@ -36,7 +37,7 @@ import {
 } from "../integrity/integrity.foundation";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import { NotificationService } from "../notifications/notification.service";
-import { decodeCursor, encodeCursor, pageLimit, seekWhere } from "../common/keyset-cursor";
+import { decodeCursor, encodeCursor, pageLimit } from "../common/keyset-cursor";
 
 interface FeedbackRow {
   id: string;
@@ -48,11 +49,23 @@ interface FeedbackRow {
   status: string;
   reviewNote: string | null;
   reviewedAt: Date | null;
+  lastActivityAt: Date;
+  createdAt: Date;
+}
+
+interface MessageRow {
+  id: string;
+  authorId: string;
+  authorSide: string;
+  body: string;
   createdAt: Date;
 }
 
 @Injectable()
 export class FeedbackService {
+  /** Short-TTL cache for the full-table stats aggregate (see stats()). */
+  private statsCache: { at: number; value: FeedbackStatsDto } | null = null;
+
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
@@ -107,13 +120,21 @@ export class FeedbackService {
     const client = this.privileged.client;
     if (!client) throw new ServiceUnavailableException("Feedback review requires the privileged database configuration");
     const limit = pageLimit(opts.limit);
+    // Seek on lastActivityAt (not createdAt): a reopened/replied thread bubbles to
+    // the top instead of staying buried by its original date. The shared cursor
+    // helpers are field-agnostic — we simply store lastActivityAt in the token's
+    // timestamp slot.
     const cursor = decodeCursor(opts.cursor);
-    const where: Record<string, unknown> = { ...seekWhere(cursor) };
+    const where: Record<string, unknown> = cursor
+      ? {
+          OR: [{ lastActivityAt: { lt: cursor.createdAt } }, { lastActivityAt: cursor.createdAt, id: { lt: cursor.id } }],
+        }
+      : {};
     if (opts.status && FEEDBACK_STATUSES.includes(opts.status as never)) where.status = opts.status;
     if (opts.kind && FEEDBACK_KINDS.includes(opts.kind as never)) where.kind = opts.kind;
     const rows = (await client.platformFeedback.findMany({
       where,
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      orderBy: [{ lastActivityAt: "desc" }, { id: "desc" }],
       take: limit + 1,
     })) as FeedbackRow[];
     const hasMore = rows.length > limit;
@@ -140,7 +161,10 @@ export class FeedbackService {
         schoolName: schoolOf.get(r.schoolId) ?? "Unknown school",
         createdAt: r.createdAt,
       })),
-      nextCursor: hasMore && items.length > 0 ? encodeCursor(items[items.length - 1]) : null,
+      nextCursor:
+        hasMore && items.length > 0
+          ? encodeCursor({ id: items[items.length - 1].id, createdAt: items[items.length - 1].lastActivityAt })
+          : null,
     };
   }
 
@@ -164,6 +188,155 @@ export class FeedbackService {
       ),
     );
     return { ok: true as const };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Two-way thread — the sender ↔ platform conversation on a feedback item.
+  // ---------------------------------------------------------------------------
+
+  /** The sender reads the thread on their OWN feedback (tenant-scoped). 404 if it
+   *  isn't theirs (no cross-tenant/foreign existence disclosure). Platform author
+   *  names are anonymised to "Platform team" for the school user. */
+  async getSenderThread(p: Principal, feedbackId: string): Promise<FeedbackThreadDto> {
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      const fb = (await tx.platformFeedback.findFirst({ where: { id: feedbackId, userId: p.userId } })) as FeedbackRow | null;
+      if (!fb) throw new NotFoundException("Feedback not found");
+      const msgs = (await tx.platformFeedbackMessage.findMany({ where: { feedbackId }, orderBy: { createdAt: "asc" }, take: 500 })) as MessageRow[];
+      const senderName = (await tx.user.findFirst({ where: { id: p.userId }, select: { name: true } }))?.name ?? "You";
+      return {
+        id: fb.id,
+        kind: fb.kind,
+        subject: fb.subject,
+        body: fb.body,
+        status: fb.status,
+        createdAt: fb.createdAt,
+        messages: msgs.map((m) => ({
+          id: m.id,
+          authorSide: m.authorSide,
+          authorName: m.authorSide === "PLATFORM" ? "Platform team" : senderName,
+          body: m.body,
+          createdAt: m.createdAt,
+        })),
+      };
+    });
+  }
+
+  /** The sender replies on their OWN feedback. Rate-capped like send(). Inserts a
+   *  SENDER message under the tenant tx (RLS), then bumps the parent's activity +
+   *  REOPENS a closed item to OPEN via the privileged client so it resurfaces in
+   *  the owner's inbox. No per-message reviewer email — the hourly digest reports
+   *  new replies (storm-safe). */
+  async postSenderMessage(p: Principal, feedbackId: string, body: string): Promise<{ id: string }> {
+    const text = body?.trim();
+    if (!text) throw new BadRequestException("Message cannot be empty");
+    const row = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const fb = (await tx.platformFeedback.findFirst({ where: { id: feedbackId, userId: p.userId }, select: { id: true, schoolId: true } })) as
+        | { id: string; schoolId: string }
+        | null;
+      if (!fb) throw new NotFoundException("Feedback not found");
+      const since = new Date(Date.now() - FEEDBACK_USER_WINDOW_MS);
+      const recent = await tx.platformFeedbackMessage.count({ where: { authorId: p.userId, createdAt: { gte: since } } });
+      if (recent >= FEEDBACK_USER_HOURLY_CAP) {
+        throw new HttpException("You've sent a lot of replies in a short time — please try again later.", HttpStatus.TOO_MANY_REQUESTS);
+      }
+      const m = (await tx.platformFeedbackMessage.create({
+        data: { schoolId: fb.schoolId, feedbackId, authorId: p.userId, authorSide: "SENDER", body: text },
+      })) as { id: string };
+      await this.audit.record(
+        { actorId: p.userId, action: "feedback.reply", entity: "platform_feedback", entityId: feedbackId, schoolId: p.schoolId, metadata: { side: "SENDER" } },
+        tx,
+      );
+      return m;
+    });
+    // Bump activity + reopen a closed thread (needs the UPDATE the app role lacks).
+    // ONE statement, not two round-trips: the conditional reopen is expressed as a
+    // CASE so a reply costs a single indexed write on the parent row.
+    // Best-effort: if it fails the reply is still durably saved, and the digest
+    // counts SENDER messages from the message table directly, so the owner is
+    // still alerted — only the inbox ordering would lag.
+    const client = this.privileged.client;
+    if (client) {
+      try {
+        await client.$executeRaw`UPDATE platform_feedback
+             SET "lastActivityAt" = now(),
+                 status = CASE WHEN status IN ('RESOLVED','DISMISSED') THEN 'OPEN' ELSE status END
+             WHERE id = ${feedbackId}::uuid`;
+      } catch {
+        /* non-fatal — see above */
+      }
+    }
+    return { id: row.id };
+  }
+
+  /** Platform owner reads the full thread (cross-tenant, privileged). Shows the
+   *  sender + school and the real author name for each side. */
+  async getPlatformThread(p: Principal, feedbackId: string): Promise<FeedbackThreadDto> {
+    const client = this.privileged.client;
+    if (!client) throw new ServiceUnavailableException("Feedback review requires the privileged database configuration");
+    const fb = (await client.platformFeedback.findFirst({ where: { id: feedbackId } })) as FeedbackRow | null;
+    if (!fb) throw new NotFoundException("Feedback not found");
+    const msgs = (await client.platformFeedbackMessage.findMany({ where: { feedbackId }, orderBy: { createdAt: "asc" }, take: 500 })) as MessageRow[];
+    const authorIds = [...new Set([fb.userId, ...msgs.map((m) => m.authorId)])];
+    const [users, school] = await Promise.all([
+      client.user.findMany({ where: { id: { in: authorIds } }, select: { id: true, name: true } }),
+      client.school.findFirst({ where: { id: fb.schoolId }, select: { name: true } }),
+    ]);
+    const nameOf = new Map(users.map((u: { id: string; name: string }) => [u.id, u.name]));
+    return {
+      id: fb.id,
+      kind: fb.kind,
+      subject: fb.subject,
+      body: fb.body,
+      status: fb.status,
+      senderName: nameOf.get(fb.userId) ?? "Unknown",
+      schoolName: school?.name ?? "Unknown school",
+      createdAt: fb.createdAt,
+      messages: msgs.map((m) => ({
+        id: m.id,
+        authorSide: m.authorSide,
+        authorName: m.authorSide === "PLATFORM" ? nameOf.get(m.authorId) ?? "Platform team" : nameOf.get(m.authorId) ?? "Sender",
+        body: m.body,
+        createdAt: m.createdAt,
+      })),
+    };
+  }
+
+  /** Platform owner posts a reply (privileged, cross-tenant). Bumps activity and
+   *  notifies the SENDER directly (in-app + email) — owner replies are low-volume,
+   *  so a direct alert is fine (no digest needed for this direction). */
+  async postPlatformMessage(p: Principal, feedbackId: string, body: string): Promise<{ id: string }> {
+    const client = this.privileged.client;
+    if (!client) throw new ServiceUnavailableException("Feedback review requires the privileged database configuration");
+    const text = body?.trim();
+    if (!text) throw new BadRequestException("Message cannot be empty");
+    const fb = (await client.platformFeedback.findFirst({ where: { id: feedbackId }, select: { id: true, schoolId: true, userId: true, subject: true } })) as
+      | { id: string; schoolId: string; userId: string; subject: string }
+      | null;
+    if (!fb) throw new NotFoundException("Feedback not found");
+    const m = (await client.platformFeedbackMessage.create({
+      data: { schoolId: fb.schoolId, feedbackId, authorId: p.userId, authorSide: "PLATFORM", body: text },
+    })) as { id: string };
+    await client.platformFeedback.update({ where: { id: feedbackId }, data: { lastActivityAt: new Date() } });
+    await this.db.runAsTenant(this.ctx(p), (tx) =>
+      this.audit.record(
+        { actorId: p.userId, action: "feedback.reply", entity: "platform_feedback", entityId: feedbackId, schoolId: p.schoolId, metadata: { side: "PLATFORM", senderSchoolId: fb.schoolId } },
+        tx,
+      ),
+    );
+    // Notify the sender in their OWN tenant (self-recipient send always allowed).
+    await this.notifications
+      .enqueue(
+        { schoolId: fb.schoolId, userId: fb.userId },
+        {
+          recipientId: fb.userId,
+          type: "FEEDBACK_REPLY",
+          title: `Platform team replied: ${fb.subject}`,
+          body: "The platform team replied to your feedback. Open Send feedback to read and respond.",
+          channels: ["EMAIL"],
+        },
+      )
+      .catch(() => undefined);
+    return { id: m.id };
   }
 
   /**
@@ -198,9 +371,13 @@ export class FeedbackService {
   async stats(): Promise<FeedbackStatsDto> {
     const client = this.privileged.client;
     if (!client) throw new ServiceUnavailableException("Feedback review requires the privileged database configuration");
+    // Served from a short TTL cache: the aggregate below is an unavoidable FULL
+    // scan (counting every row BY status/kind is the question), so on a table
+    // growing ~5000/day it must not run once per page view. See
+    // FEEDBACK_STATS_CACHE_MS.
+    const cached = this.statsCache;
+    if (cached && Date.now() - cached.at < FEEDBACK_STATS_CACHE_MS) return cached.value;
     // One scan, one round-trip — conditional FILTER counts (the analytics pattern).
-    // stats is loaded a handful of times a day by the owner (not per submission),
-    // so a single aggregate over the table is fine even at millions of rows.
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const rows = (await client.$queryRaw`
       SELECT
@@ -224,7 +401,7 @@ export class FeedbackService {
       last24h: number;
     }>;
     const r = rows[0];
-    return {
+    const value: FeedbackStatsDto = {
       total: r?.total ?? 0,
       open: r?.open ?? 0,
       reviewed: r?.reviewed ?? 0,
@@ -234,27 +411,37 @@ export class FeedbackService {
       suggestions: r?.suggestions ?? 0,
       last24h: r?.last24h ?? 0,
     };
+    this.statsCache = { at: Date.now(), value };
+    return value;
   }
 
   /**
    * Digest sweep — the coalesced replacement for per-submission alerts. Runs
-   * hourly (or on-demand). Counts OPEN feedback in the trailing window; if any is
-   * new, sends ONE summary notification+email to each reviewer with the new count
-   * + the total open backlog. Privileged (cross-tenant); disabled (no-op) when no
-   * privileged client is configured. Idempotent-ish: a quiet window notifies
-   * no-one, so 5000/day becomes ~24 emails, never 5000.
+   * hourly (or on-demand). Counts NEW feedback AND new sender replies in the
+   * trailing window; if either is non-zero, sends ONE summary notification+email
+   * to each reviewer with the counts + the total open backlog. Privileged
+   * (cross-tenant); disabled (no-op) when no privileged client is configured.
+   * A quiet window notifies no-one, so 5000/day becomes ~24 emails, never 5000 —
+   * and sender follow-ups ride the same digest rather than blasting per-message.
    */
-  async digestSweep(): Promise<{ notified: number; newOpen: number }> {
+  async digestSweep(): Promise<{ notified: number; newOpen: number; newReplies: number }> {
     const client = this.privileged.client;
-    if (!client) return { notified: 0, newOpen: 0 };
+    if (!client) return { notified: 0, newOpen: 0, newReplies: 0 };
     const since = new Date(Date.now() - FEEDBACK_DIGEST_WINDOW_MS);
-    const newOpen = await client.platformFeedback.count({ where: { status: "OPEN", createdAt: { gte: since } } });
-    if (newOpen === 0) return { notified: 0, newOpen: 0 };
+    const [newOpen, newReplies] = await Promise.all([
+      client.platformFeedback.count({ where: { status: "OPEN", createdAt: { gte: since } } }),
+      client.platformFeedbackMessage.count({ where: { authorSide: "SENDER", createdAt: { gte: since } } }),
+    ]);
+    if (newOpen === 0 && newReplies === 0) return { notified: 0, newOpen: 0, newReplies: 0 };
     const totalOpen = await client.platformFeedback.count({ where: { status: "OPEN" } });
     const reviewers = (await client.user.findMany({
       where: { roles: { some: { role: { name: { in: ["super_admin", "manager_admin"] } } } } },
       select: { id: true, schoolId: true },
     })) as { id: string; schoolId: string }[];
+    const parts: string[] = [];
+    if (newOpen > 0) parts.push(`${newOpen} new item${newOpen === 1 ? "" : "s"}`);
+    if (newReplies > 0) parts.push(`${newReplies} new repl${newReplies === 1 ? "y" : "ies"}`);
+    const summary = parts.join(" + ");
     let notified = 0;
     for (const r of reviewers) {
       await this.notifications
@@ -263,8 +450,8 @@ export class FeedbackService {
           {
             recipientId: r.id,
             type: "OPERATOR_ALERT",
-            title: `${newOpen} new feedback item${newOpen === 1 ? "" : "s"} — ${totalOpen} open`,
-            body: `${newOpen} new complaint(s)/suggestion(s) arrived in the last hour. ${totalOpen} open in total. Review them in the operator feedback inbox.`,
+            title: `${summary} — ${totalOpen} open`,
+            body: `${summary} in the last hour. ${totalOpen} open in total. Review them in the operator feedback inbox.`,
             channels: ["EMAIL"],
           },
         )
@@ -273,7 +460,7 @@ export class FeedbackService {
         })
         .catch(() => undefined); // one bad recipient must not abort the digest
     }
-    return { notified, newOpen };
+    return { notified, newOpen, newReplies };
   }
 
   private log(tx: TenantTx, p: Principal, action: string, entityId: string, metadata: Record<string, unknown>) {

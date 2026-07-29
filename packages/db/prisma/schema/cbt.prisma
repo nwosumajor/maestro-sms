@@ -15,10 +15,11 @@ model CbtQuestionBank {
   schoolId    String   @db.Uuid
   name        String
   subject     String?
-  /// Curriculum Subject link. REQUIRED for teacher authors — a teacher may only
-  /// author banks for subjects they teach (classSubjectTeacher); school-wide
-  /// staff may leave it null (free-text subject label only).
-  subjectId   String?  @db.Uuid
+  /// Curriculum Subject link — REQUIRED. Teacher access to a bank is decided by
+  /// subject (classSubjectTeacher), so a bank with no subject would be
+  /// un-fillable by every teacher and editable only by school-wide staff.
+  /// `subject` above is the denormalised display label, kept in sync server-side.
+  subjectId   String  @db.Uuid
   createdById String   @db.Uuid
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

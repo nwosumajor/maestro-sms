@@ -169,6 +169,9 @@ model Payment {
 
   @@index([schoolId])
   @@index([schoolId, invoiceId])
+  // Approvals inbox: finds the few rows awaiting a decision without scanning
+  // the whole (ever-growing) table. Mirrors invoice_adjustment/admission_application.
+  @@index([schoolId, status])
   @@map("payment")
 }
 

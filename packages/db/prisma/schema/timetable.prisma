@@ -104,7 +104,12 @@ model TimetableEntry {
   classId   String    @db.Uuid
   dayOfWeek DayOfWeek
   periodId  String    @db.Uuid
+  /// Denormalised display label — a server-maintained copy of the Subject's
+  /// name, never operator text. `subjectId` below is authoritative.
   subject   String
+  /// Curriculum Subject — REQUIRED, so a timetable can never name a subject
+  /// that is not in the registry (which would break offerings and grading).
+  subjectId   String @db.Uuid
   /// Teacher (DB FK to user; scalar, no Prisma relation).
   teacherId String    @db.Uuid
   roomId    String?   @db.Uuid
@@ -114,6 +119,7 @@ model TimetableEntry {
 
   school School @relation(fields: [schoolId], references: [id])
   period Period @relation(fields: [periodId], references: [id])
+  subjectRef Subject @relation(fields: [subjectId], references: [id])
   room   Room?  @relation(fields: [roomId], references: [id])
   covers LessonCover[]
 
@@ -121,6 +127,7 @@ model TimetableEntry {
   @@unique([schoolId, classId, dayOfWeek, periodId])
   @@index([schoolId])
   @@index([schoolId, classId])
+  @@index([schoolId, subjectId])
   @@index([schoolId, teacherId, dayOfWeek, periodId])
   @@index([schoolId, roomId, dayOfWeek, periodId])
   @@map("timetable_entry")

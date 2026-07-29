@@ -7,16 +7,24 @@
 // client and 503 without it; digestSweep() no-ops without it and stays silent on
 // a quiet window (the coalesced alert path — no per-submission email storm).
 
-import { BadRequestException, HttpException, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, HttpException, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { FeedbackService } from "../../src/feedback/feedback.service";
 import { FEEDBACK_USER_HOURLY_CAP } from "../../src/feedback/feedback.constants";
 import type { Principal, TenantContext, TenantTx } from "../../src/integrity/integrity.foundation";
 
-function makeService(opts: { privilegedClient?: unknown; recentCount?: number } = {}) {
+function makeService(opts: { privilegedClient?: unknown; recentCount?: number; ownFeedback?: unknown } = {}) {
   const create = jest.fn().mockResolvedValue({ id: "fb1" });
   const findMany = jest.fn().mockResolvedValue([]);
   const count = jest.fn().mockResolvedValue(opts.recentCount ?? 0);
-  const tx = { platformFeedback: { create, findMany, count } } as unknown as TenantTx;
+  const findFirst = jest.fn().mockResolvedValue("ownFeedback" in opts ? opts.ownFeedback : null);
+  const msgCreate = jest.fn().mockResolvedValue({ id: "m1" });
+  const msgFindMany = jest.fn().mockResolvedValue([]);
+  const msgCount = jest.fn().mockResolvedValue(opts.recentCount ?? 0);
+  const tx = {
+    platformFeedback: { create, findMany, count, findFirst },
+    platformFeedbackMessage: { create: msgCreate, findMany: msgFindMany, count: msgCount },
+    user: { findFirst: jest.fn().mockResolvedValue({ name: "Ada" }) },
+  } as unknown as TenantTx;
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const db = {
     runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
@@ -25,7 +33,7 @@ function makeService(opts: { privilegedClient?: unknown; recentCount?: number } 
   const privileged = { client: "privilegedClient" in opts ? opts.privilegedClient : null };
   const notifications = { enqueue: jest.fn().mockResolvedValue(undefined) };
   const service = new FeedbackService(db as never, audit as never, privileged as never, notifications as never);
-  return { service, audit, create, findMany, count, notifications };
+  return { service, audit, create, findMany, count, findFirst, msgCreate, notifications };
 }
 
 const principal = (over: Partial<Principal> = {}): Principal => ({
@@ -82,7 +90,33 @@ describe("FeedbackService", () => {
 
   it("digestSweep() no-ops (notifies no-one) without a privileged client", async () => {
     const { service, notifications } = makeService();
-    await expect(service.digestSweep()).resolves.toEqual({ notified: 0, newOpen: 0 });
+    await expect(service.digestSweep()).resolves.toEqual({ notified: 0, newOpen: 0, newReplies: 0 });
     expect(notifications.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("getSenderThread() 404s on a feedback the caller does not own", async () => {
+    const { service } = makeService({ ownFeedback: null });
+    await expect(service.getSenderThread(principal(), "22222222-2222-2222-2222-222222222222")).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it("postSenderMessage() inserts a SENDER message under the caller's tenant and audits", async () => {
+    const { service, msgCreate, audit } = makeService({ ownFeedback: { id: "fb1", schoolId: "A" } });
+    const res = await service.postSenderMessage(principal(), "fb1", "any update?");
+    expect(res).toEqual({ id: "m1" });
+    expect(msgCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ feedbackId: "fb1", authorSide: "SENDER", schoolId: "A" }) }),
+    );
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: "feedback.reply" }), expect.anything());
+  });
+
+  it("postSenderMessage() rejects an empty body", async () => {
+    const { service } = makeService({ ownFeedback: { id: "fb1", schoolId: "A" } });
+    await expect(service.postSenderMessage(principal(), "fb1", "   ")).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("getPlatformThread()/postPlatformMessage() 503 without a privileged client", async () => {
+    const { service } = makeService();
+    await expect(service.getPlatformThread(principal(), "fb1")).rejects.toBeInstanceOf(ServiceUnavailableException);
+    await expect(service.postPlatformMessage(principal(), "fb1", "hi")).rejects.toBeInstanceOf(ServiceUnavailableException);
   });
 });

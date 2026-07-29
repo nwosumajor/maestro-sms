@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
 import { z } from "zod";
 import { OPERATOR_PERMISSIONS, FEEDBACK_BULK_MAX, FEEDBACK_KINDS, FEEDBACK_STATUSES } from "@sms/types";
-import type { FeedbackStatsDto, MyFeedbackDto, PageDto, PlatformFeedbackDto } from "@sms/types";
+import type { FeedbackStatsDto, FeedbackThreadDto, MyFeedbackDto, PageDto, PlatformFeedbackDto } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
@@ -15,6 +15,7 @@ const sendSchema = z.object({
   body: z.string().min(1).max(5000),
 });
 const reviewSchema = z.object({ status: z.enum(FEEDBACK_STATUSES), note: z.string().max(2000).nullish() });
+const replySchema = z.object({ body: z.string().min(1).max(5000) });
 const bulkSchema = z.object({
   ids: z.array(z.string().uuid()).min(1).max(FEEDBACK_BULK_MAX),
   status: z.enum(FEEDBACK_STATUSES),
@@ -40,6 +41,20 @@ export class FeedbackController {
   @Get("feedback/mine")
   mine(@CurrentPrincipal() p: Principal): Promise<MyFeedbackDto[]> {
     return this.feedback.listMine(p);
+  }
+
+  /** The sender reads the conversation on their OWN feedback (404 otherwise). */
+  @Get("feedback/:id/thread")
+  senderThread(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<FeedbackThreadDto> {
+    return this.feedback.getSenderThread(p, id);
+  }
+
+  /** The sender replies on their OWN feedback. No permission (any user, own only);
+   *  per-IP flood guard + a per-USER cap in the service. */
+  @Post("feedback/:id/reply")
+  @UseGuards(new RateLimitGuard(20, 60_000))
+  senderReply(@CurrentPrincipal() p: Principal, @Param("id") id: string, @Body(new ZodValidationPipe(replySchema)) body: z.infer<typeof replySchema>) {
+    return this.feedback.postSenderMessage(p, id, body.body);
   }
 
   /** Platform owner: the cross-tenant inbox. */
@@ -74,6 +89,20 @@ export class FeedbackController {
   @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_FEEDBACK_REVIEW)
   digest() {
     return this.feedback.digestSweep();
+  }
+
+  /** Platform owner: read the full conversation (cross-tenant). */
+  @Get("operator/feedback/:id/thread")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_FEEDBACK_REVIEW)
+  platformThread(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<FeedbackThreadDto> {
+    return this.feedback.getPlatformThread(p, id);
+  }
+
+  /** Platform owner: reply to the sender (notifies them directly). */
+  @Post("operator/feedback/:id/reply")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_FEEDBACK_REVIEW)
+  platformReply(@CurrentPrincipal() p: Principal, @Param("id") id: string, @Body(new ZodValidationPipe(replySchema)) body: z.infer<typeof replySchema>) {
+    return this.feedback.postPlatformMessage(p, id, body.body);
   }
 
   @Post("operator/feedback/:id/review")

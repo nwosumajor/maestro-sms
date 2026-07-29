@@ -11,8 +11,8 @@
 // audit-logged. Not-visible -> 404 (never 403), no cross-tenant/owner leak.
 // =============================================================================
 
-import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { NON_STAFF_ROLE_NAMES, SEARCH_CAP, type UserKind } from "@sms/types";
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { NON_STAFF_ROLE_NAMES, SEARCH_CAP, normaliseEntityCode, uniqueEntityCode, type UserKind } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -52,15 +52,55 @@ export class LmsService {
   }
 
   // --- mutations (school_admin) ---------------------------------------------
+  /**
+   * Resolve the stable per-school `code` for a subject or class. An
+   * operator-supplied code wins (normalised); otherwise it is derived from the
+   * name by the SAME rule the backfill migration used, de-duplicated against the
+   * codes already in this school. A code is what imports, rosters and pickers
+   * should key on — names are free text and drift.
+   */
+  private async nextCode(
+    tx: TenantTx,
+    entity: "subject" | "class",
+    name: string,
+    supplied?: string | null,
+  ): Promise<string> {
+    const rows =
+      entity === "subject"
+        ? await tx.subject.findMany({ select: { code: true } })
+        : await tx.class.findMany({ select: { code: true } });
+    const taken = rows.map((r: { code: string }) => r.code).filter(Boolean);
+    if (supplied && supplied.trim()) {
+      const wanted = normaliseEntityCode(supplied);
+      if (!wanted) throw new BadRequestException("Code must contain letters or digits");
+      if (taken.some((c) => c.toUpperCase() === wanted)) {
+        throw new ConflictException(`Code ${wanted} is already used by another ${entity}`);
+      }
+      return wanted;
+    }
+    const derived = uniqueEntityCode(name, taken);
+    // A name with no alphanumerics still needs a stable code.
+    return derived || `${entity === "subject" ? "SUBJ" : "CLS"}${Date.now() % 1000000}`;
+  }
+
   async createClass(
     p: Principal,
-    input: { name: string; level?: number | null; nextClassId?: string | null },
+    input: { name: string; level?: number | null; nextClassId?: string | null; code?: string | null },
   ) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      // Same catalog rule as subjects: one "JSS2A" per school, or every roster
+      // picker fills with twins and enrollments split between them.
+      const dup = await tx.class.findFirst({
+        where: { name: { equals: input.name, mode: "insensitive" } },
+        select: { id: true },
+      });
+      if (dup) throw new ConflictException("A class with that name already exists");
+      const code = await this.nextCode(tx, "class", input.name, input.code);
       const cls = await tx.class.create({
         data: {
           schoolId: p.schoolId,
           name: input.name,
+          code,
           level: input.level ?? null,
           nextClassId: input.nextClassId ?? null,
         },
@@ -154,8 +194,9 @@ export class LmsService {
         select: { id: true },
       });
       if (dup) throw new ConflictException("A subject with that name already exists");
+      const code = await this.nextCode(tx, "subject", input.name, input.code);
       const subj = await tx.subject.create({
-        data: { schoolId: p.schoolId, name: input.name, code: input.code ?? null },
+        data: { schoolId: p.schoolId, name: input.name, code },
       });
       await this.log(tx, p, "lms.subject.create", "subject", subj.id, { name: input.name });
       return { id: subj.id, name: subj.name, code: subj.code };
@@ -182,11 +223,23 @@ export class LmsService {
         });
         if (dup) throw new ConflictException("A subject with that name already exists");
       }
+      // A code is now the subject's stable key, so it can be CHANGED but never
+      // cleared — blanking it would break every import/picker keyed on it.
+      let code: string | undefined;
+      if (input.code !== undefined && input.code !== null && input.code.trim()) {
+        code = normaliseEntityCode(input.code);
+        if (!code) throw new BadRequestException("Code must contain letters or digits");
+        const clash = await tx.subject.findFirst({
+          where: { code: { equals: code, mode: "insensitive" }, id: { not: subjectId } },
+          select: { id: true },
+        });
+        if (clash) throw new ConflictException(`Code ${code} is already used by another subject`);
+      }
       const updated = await tx.subject.update({
         where: { id: subjectId },
         data: {
           ...(input.name ? { name: input.name } : {}),
-          ...(input.code !== undefined ? { code: input.code } : {}),
+          ...(code ? { code } : {}),
         },
       });
       await this.log(tx, p, "lms.subject.update", "subject", subjectId, {
@@ -304,6 +357,93 @@ export class LmsService {
       });
       await this.log(tx, p, "lms.teacher.assign", "class", classId, { teacherId });
       return row;
+    });
+  }
+
+  /**
+   * Assign MANY subjects to one class in a single transaction — the whole set a
+   * class offers, set in one action instead of one request per subject.
+   *
+   * ALL-OR-NOTHING by design: every subject and teacher is validated before
+   * anything is written, so a bad id in row 7 cannot leave rows 1-6 applied and
+   * the roster half-built. Existing offerings are upserted, so re-running it is
+   * how you change a teacher rather than a duplicate-key error.
+   */
+  async assignClassSubjectsBulk(
+    p: Principal,
+    classId: string,
+    items: { subjectId: string; teacherId: string; lessonsPerWeek?: number; preferredRoomId?: string | null }[],
+  ): Promise<{ assigned: number }> {
+    if (items.length === 0) throw new BadRequestException("Nothing to assign");
+    const dupes = items.length - new Set(items.map((i) => i.subjectId)).size;
+    if (dupes > 0) throw new BadRequestException("The same subject appears more than once");
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      await this.requireClass(tx, classId);
+      // Validate EVERYTHING first (two set-queries, not two per row).
+      const subjectIds = [...new Set(items.map((i) => i.subjectId))];
+      const teacherIds = [...new Set(items.map((i) => i.teacherId))];
+      const [subjects, teachers] = await Promise.all([
+        tx.subject.findMany({ where: { id: { in: subjectIds } }, select: { id: true } }),
+        tx.user.findMany({ where: { id: { in: teacherIds } }, select: { id: true } }),
+      ]);
+      if (subjects.length !== subjectIds.length) throw new NotFoundException("Subject not found");
+      if (teachers.length !== teacherIds.length) throw new NotFoundException("Teacher not found");
+      const roomIds = [...new Set(items.map((i) => i.preferredRoomId).filter((r): r is string => !!r))];
+      if (roomIds.length > 0) {
+        const rooms = await tx.room.findMany({ where: { id: { in: roomIds } }, select: { id: true } });
+        if (rooms.length !== roomIds.length) throw new NotFoundException("Room not found");
+      }
+      for (const it of items) {
+        await tx.classSubjectTeacher.upsert({
+          where: { classId_subjectId: { classId, subjectId: it.subjectId } },
+          update: {
+            teacherId: it.teacherId,
+            lessonsPerWeek: it.lessonsPerWeek,
+            preferredRoomId: it.preferredRoomId === undefined ? undefined : it.preferredRoomId,
+          },
+          create: {
+            schoolId: p.schoolId,
+            classId,
+            subjectId: it.subjectId,
+            teacherId: it.teacherId,
+            lessonsPerWeek: it.lessonsPerWeek ?? 1,
+            preferredRoomId: it.preferredRoomId ?? null,
+          },
+        });
+      }
+      await this.log(tx, p, "lms.class.subjects.bulk_assign", "class", classId, { count: items.length });
+      return { assigned: items.length };
+    });
+  }
+
+  /**
+   * Enrol MANY students into one class in a single transaction.
+   *
+   * Capacity is checked ONCE for the whole batch (not per student, which would
+   * let a batch straddle the limit), students already enrolled are skipped rather
+   * than erroring, and every id is validated up-front so a bad one can't leave a
+   * partial roster behind.
+   */
+  async enrollStudentsBulk(p: Principal, classId: string, studentIds: string[]): Promise<{ enrolled: number; skipped: number }> {
+    const ids = [...new Set(studentIds)];
+    if (ids.length === 0) throw new BadRequestException("Nothing to enrol");
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      await this.requireClass(tx, classId);
+      const found = await tx.user.findMany({ where: { id: { in: ids } }, select: { id: true } });
+      if (found.length !== ids.length) throw new NotFoundException("Student not found");
+      // Already-enrolled students are a no-op, not a failure — re-running a roster
+      // import must be safe.
+      const existing = await tx.enrollment.findMany({ where: { classId, studentId: { in: ids } }, select: { studentId: true } });
+      const already = new Set(existing.map((e: { studentId: string }) => e.studentId));
+      const toAdd = ids.filter((id) => !already.has(id));
+      if (toAdd.length === 0) return { enrolled: 0, skipped: ids.length };
+      // ONE capacity check for the whole batch.
+      await this.assertCapacity(tx, classId, toAdd.length);
+      await tx.enrollment.createMany({
+        data: toAdd.map((studentId) => ({ schoolId: p.schoolId, classId, studentId })),
+      });
+      await this.log(tx, p, "lms.student.enroll.bulk", "class", classId, { enrolled: toAdd.length, skipped: already.size });
+      return { enrolled: toAdd.length, skipped: already.size };
     });
   }
 

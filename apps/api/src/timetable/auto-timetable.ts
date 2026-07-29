@@ -46,6 +46,8 @@ export interface Slot {
 
 export interface PlacedLesson {
   classId: string;
+  /** Authoritative Subject id, carried through from the offering. */
+  subjectId: string;
   subject: string;
   teacherId: string;
   day: string;
@@ -322,6 +324,7 @@ export function generateTimetable(
 
   const toPlaced = (l: Lesson, slot: Slot): PlacedLesson => ({
     classId: l.classId,
+    subjectId: l.subjectId,
     subject: l.subject,
     teacherId: l.teacherId,
     day: slot.day,
