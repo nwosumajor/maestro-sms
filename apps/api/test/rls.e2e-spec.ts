@@ -60,6 +60,7 @@ d("RLS cross-tenant isolation", () => {
   const examScheduleA = randomUUID();
   const platformFeedbackA = randomUUID();
   const cbtSubjectA = randomUUID();
+  const ttSubjectA = randomUUID();
   const platformFeedbackMessageA = randomUUID();
   const examSeatA = randomUUID();
   const examInvigilatorA = randomUUID();
@@ -366,9 +367,13 @@ d("RLS cross-tenant isolation", () => {
       [roomA, A],
     );
     await a.query(
-      `INSERT INTO timetable_entry (id,"schoolId","classId","dayOfWeek","periodId",subject,"teacherId","roomId","updatedAt")
-       VALUES ($1,$2,$3,'MONDAY',$4,'History',$5,$6,now())`,
-      [ttEntryA, A, classA, periodA, userA, roomA],
+      `INSERT INTO subject (id,"schoolId",name,code,"updatedAt") VALUES ($1,$2,'RLS Timetable Subject','RLSTT',now())`,
+      [ttSubjectA, A],
+    );
+    await a.query(
+      `INSERT INTO timetable_entry (id,"schoolId","classId","dayOfWeek","periodId",subject,"subjectId","teacherId","roomId","updatedAt")
+       VALUES ($1,$2,$3,'MONDAY',$4,'RLS Timetable Subject',$7,$5,$6,now())`,
+      [ttEntryA, A, classA, periodA, userA, roomA, ttSubjectA],
     );
     // Lesson cover on that entry (some Monday), reliever userA.
     await a.query(
@@ -1131,7 +1136,6 @@ d("RLS cross-tenant isolation", () => {
       // class_subject_teacher references class + subject + user -> purge first;
       // subject is its parent (and FK-free of class), so it follows.
       "class_subject_teacher",
-      "subject",
       "class_teacher",
       "enrollment",
       "parent_child",
@@ -1212,6 +1216,7 @@ d("RLS cross-tenant isolation", () => {
       "meeting_slot",
       "lesson_cover",
       "timetable_entry",
+      "subject",
       "period",
       "room",
       "document",

@@ -62,7 +62,7 @@ export class LessonCoverService {
       const teacherIds = [...new Set(leaves.map((l: { userId: string }) => l.userId))];
       const entries = await tx.timetableEntry.findMany({
         where: { teacherId: { in: teacherIds } },
-        select: { id: true, classId: true, subject: true, teacherId: true, dayOfWeek: true, periodId: true },
+        select: { id: true, classId: true, subject: true, subjectId: true, teacherId: true, dayOfWeek: true, periodId: true },
       });
       if (entries.length === 0) return [];
 
@@ -111,6 +111,7 @@ export class LessonCoverService {
             periodName: periodName.get(e.periodId) ?? "",
             periodStart: periodStart.get(e.periodId) ?? "",
             className: className.get(e.classId) ?? "",
+            subjectId: e.subjectId,
             subject: e.subject,
             absentTeacherId: e.teacherId,
             absentTeacherName: teacherName.get(e.teacherId) ?? "",
@@ -136,7 +137,7 @@ export class LessonCoverService {
     const result = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const entry = await tx.timetableEntry.findFirst({
         where: { id: input.timetableEntryId },
-        select: { id: true, classId: true, subject: true, dayOfWeek: true, periodId: true, teacherId: true },
+        select: { id: true, classId: true, subject: true, subjectId: true, dayOfWeek: true, periodId: true, teacherId: true },
       });
       if (!entry) throw new NotFoundException("Lesson not found");
       if (entry.dayOfWeek !== DOW[date.getUTCDay()]) {
@@ -207,6 +208,7 @@ export class LessonCoverService {
       periodName: result.periodName,
       periodStart: result.periodStart,
       className: result.className,
+      subjectId: result.entry.subjectId,
       subject: result.entry.subject,
       absentTeacherId: result.entry.teacherId,
       absentTeacherName: "",
@@ -238,7 +240,7 @@ export class LessonCoverService {
       const rows = await tx.lessonCover.findMany({
         where: { coveringTeacherId: p.userId, date: { gte: start, lte: end } },
         orderBy: { date: "asc" },
-        include: { timetableEntry: { select: { classId: true, subject: true, periodId: true } } },
+        include: { timetableEntry: { select: { classId: true, subject: true, subjectId: true, periodId: true } } },
       });
       const classIds = [...new Set(rows.map((r: { timetableEntry: { classId: string } }) => r.timetableEntry.classId))] as string[];
       const periodIds = [...new Set(rows.map((r: { timetableEntry: { periodId: string } }) => r.timetableEntry.periodId))] as string[];
@@ -248,10 +250,11 @@ export class LessonCoverService {
       ]);
       const className = new Map<string, string>(classes.map((x: { id: string; name: string }) => [x.id, x.name] as const));
       const periodName = new Map<string, string>(periods.map((x: { id: string; name: string }) => [x.id, x.name] as const));
-      return rows.map((r: { id: string; date: Date; note: string | null; timetableEntry: { classId: string; subject: string; periodId: string } }) => ({
+      return rows.map((r: { id: string; date: Date; note: string | null; timetableEntry: { classId: string; subject: string; subjectId: string; periodId: string } }) => ({
         coverId: r.id,
         date: this.dateOnly(r.date),
         className: className.get(r.timetableEntry.classId) ?? "",
+        subjectId: r.timetableEntry.subjectId,
         subject: r.timetableEntry.subject,
         periodName: periodName.get(r.timetableEntry.periodId) ?? "",
         note: r.note,

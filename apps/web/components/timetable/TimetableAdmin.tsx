@@ -72,11 +72,11 @@ export function TimetableAdmin({
   };
 
   // add entry
-  type Offering = { subjectName: string; teacherId: string; teacherName: string };
+  type Offering = { subjectId: string; subjectName: string; teacherId: string; teacherName: string };
   const [classId, setClassId] = React.useState(classes[0]?.id ?? "");
   const [teachers, setTeachers] = React.useState<Named[]>([]);
   const [offerings, setOfferings] = React.useState<Offering[]>([]);
-  const [entry, setEntry] = React.useState({ dayOfWeek: "MONDAY", periodId: periods.find((p) => !p.isBreak)?.id ?? "", subject: "", teacherId: "", roomId: "" });
+  const [entry, setEntry] = React.useState({ dayOfWeek: "MONDAY", periodId: periods.find((p) => !p.isBreak)?.id ?? "", subjectId: "", teacherId: "", roomId: "" });
 
   const loadClassData = React.useCallback(async (cid: string) => {
     if (!cid) return;
@@ -87,8 +87,8 @@ export function TimetableAdmin({
       fetch(`/api/sms/classes/${cid}/subjects`),
     ]);
     const roster = rosterRes.ok ? ((await rosterRes.json()) as { teachers: Named[] }).teachers : [];
-    const subs = subjRes.ok ? ((await subjRes.json()) as { subjectName: string; teacherId: string; teacherName: string }[]) : [];
-    setOfferings(subs.map((s) => ({ subjectName: s.subjectName, teacherId: s.teacherId, teacherName: s.teacherName })));
+    const subs = subjRes.ok ? ((await subjRes.json()) as Offering[]) : [];
+    setOfferings(subs.map((s) => ({ subjectId: s.subjectId, subjectName: s.subjectName, teacherId: s.teacherId, teacherName: s.teacherName })));
     // Merge offering teachers into the option list so a picked offering's teacher exists.
     const merged = new Map<string, Named>();
     roster.forEach((t) => merged.set(t.id, t));
@@ -105,10 +105,10 @@ export function TimetableAdmin({
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         classId, dayOfWeek: entry.dayOfWeek, periodId: entry.periodId,
-        subject: entry.subject, teacherId: entry.teacherId, roomId: entry.roomId || null,
+        subjectId: entry.subjectId, teacherId: entry.teacherId, roomId: entry.roomId || null,
       }),
     });
-    if (res.ok) { setEntry((s) => ({ ...s, subject: "" })); setMsg("Lesson added."); router.refresh(); }
+    if (res.ok) { setEntry((s) => ({ ...s, subjectId: "" })); setMsg("Lesson added."); router.refresh(); }
     else if (res.status === 409) setMsg("Conflict: that class, teacher, or room is already booked in this slot.");
     else setMsg(await readApiError(res));
   };
@@ -189,21 +189,33 @@ export function TimetableAdmin({
               {/* Break slots are not schedulable — only teaching periods appear. */}
               {periods.filter((p) => !p.isBreak).map((p) => <option key={p.id} value={p.id}>{p.name} ({p.startTime})</option>)}
             </select>
-            {offerings.length > 0 && (
+            {/* The subject comes from the class's OFFERINGS (class-subject-teacher),
+                never free text — the server requires a real subject id, so a lesson
+                can no longer name a subject that isn't in the registry. Picking one
+                also fills in that offering's assigned teacher. */}
+            {offerings.length > 0 ? (
               <select
-                aria-label="From class offerings"
+                aria-label="Subject"
                 className={selCls}
-                value=""
+                required
+                value={entry.subjectId}
                 onChange={(e) => {
-                  const o = offerings[Number(e.target.value)];
-                  if (o) setEntry((s) => ({ ...s, subject: o.subjectName, teacherId: o.teacherId }));
+                  const o = offerings.find((x) => x.subjectId === e.target.value);
+                  setEntry((s) => ({ ...s, subjectId: e.target.value, teacherId: o ? o.teacherId : s.teacherId }));
                 }}
               >
-                <option value="">From offerings…</option>
-                {offerings.map((o, i) => <option key={i} value={i}>{o.subjectName} — {o.teacherName}</option>)}
+                <option value="">Subject…</option>
+                {offerings.map((o) => (
+                  <option key={o.subjectId} value={o.subjectId}>
+                    {o.subjectName} — {o.teacherName}
+                  </option>
+                ))}
               </select>
+            ) : (
+              <span className="text-xs text-muted-foreground">
+                Assign subjects to this class first — a lesson must name one of its offerings.
+              </span>
             )}
-            <Input placeholder="Subject" value={entry.subject} onChange={(e) => setEntry({ ...entry, subject: e.target.value })} className="w-36" required />
             <select aria-label="Teacher" value={entry.teacherId} onChange={(e) => setEntry({ ...entry, teacherId: e.target.value })} className={selCls}>
               {teachers.length === 0 && <option value="">No class teacher</option>}
               {teachers.map((t) => <option key={t.id} value={t.id}>{personLabel(t)}</option>)}

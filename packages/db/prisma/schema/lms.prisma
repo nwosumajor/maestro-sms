@@ -114,6 +114,7 @@ model Subject {
 
   school        School                @relation(fields: [schoolId], references: [id])
   classSubjects ClassSubjectTeacher[]
+  timetableEntries TimetableEntry[]
 
   // Identity integrity: a school cannot hold two subjects of the same name or
   // code, so teacher/class assignments can never split across duplicate rows.

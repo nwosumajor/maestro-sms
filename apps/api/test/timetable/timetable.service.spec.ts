@@ -28,6 +28,7 @@ function makeService(f: Fakes) {
       createMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
     room: { findFirst: jest.fn().mockResolvedValue({ id: "room-1" }) },
+    subject: { findFirst: jest.fn().mockResolvedValue({ id: "sub-1", name: "History" }) },
     user: { findFirst: jest.fn().mockResolvedValue({ id: "t-1" }) },
     enrollment: { findMany: jest.fn().mockResolvedValue(f.enrollment ?? []) },
     parentChild: { findMany: jest.fn().mockResolvedValue([]) },
@@ -61,7 +62,7 @@ const entry = {
   classId: "c-1",
   dayOfWeek: "MONDAY" as const,
   periodId: "per-1",
-  subject: "History",
+  subjectId: "sub-1",
   teacherId: "t-1",
   roomId: "room-1",
 };

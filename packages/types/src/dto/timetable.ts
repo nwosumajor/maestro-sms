@@ -13,6 +13,7 @@ export interface TimetableEntryDto {
   id: string;
   dayOfWeek: string;
   periodId: string;
+  subjectId: string;
   subject: string;
   /** Teacher assigned to the lesson (id + resolved display name). */
   teacherId: string;
@@ -58,6 +59,7 @@ export interface CoverLessonDto {
   periodName: string;
   periodStart: string;
   className: string;
+  subjectId: string;
   subject: string;
   absentTeacherId: string;
   absentTeacherName: string;
@@ -72,6 +74,7 @@ export interface MyCoverDutyDto {
   coverId: string;
   date: string;
   className: string;
+  subjectId: string;
   subject: string;
   periodName: string;
   note: string | null;
