@@ -21,6 +21,10 @@ CREATE TABLE "platform_feedback_message" (
 
 CREATE INDEX "platform_feedback_message_schoolId_idx" ON "platform_feedback_message"("schoolId");
 CREATE INDEX "platform_feedback_message_feedbackId_createdAt_idx" ON "platform_feedback_message"("feedbackId", "createdAt");
+-- Hot counts that would otherwise SEQ SCAN this append-only table as it grows:
+-- the per-author rolling-hour reply cap, and the digest's SENDER-reply window.
+CREATE INDEX "platform_feedback_message_authorId_createdAt_idx" ON "platform_feedback_message"("authorId", "createdAt");
+CREATE INDEX "platform_feedback_message_authorSide_createdAt_idx" ON "platform_feedback_message"("authorSide", "createdAt");
 
 ALTER TABLE "platform_feedback_message"
   ADD CONSTRAINT "platform_feedback_message_feedbackId_fkey"

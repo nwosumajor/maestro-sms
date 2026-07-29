@@ -79,5 +79,11 @@ model PlatformFeedbackMessage {
 
   @@index([schoolId])
   @@index([feedbackId, createdAt])
+  // The per-author rolling-hour reply cap counts by (authorId, createdAt) and the
+  // digest counts SENDER replies in a window — both would SEQ SCAN this
+  // append-only table without these, degrading linearly as the thread archive
+  // grows over the years (measured: 38ms seq scan at 400k rows).
+  @@index([authorId, createdAt])
+  @@index([authorSide, createdAt])
   @@map("platform_feedback_message")
 }

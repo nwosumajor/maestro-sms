@@ -22,6 +22,7 @@ import type { FeedbackStatsDto, FeedbackThreadDto, MyFeedbackDto, PageDto, Platf
 import { FEEDBACK_BULK_MAX, FEEDBACK_KINDS, FEEDBACK_STATUSES } from "@sms/types";
 import {
   FEEDBACK_DIGEST_WINDOW_MS,
+  FEEDBACK_STATS_CACHE_MS,
   FEEDBACK_USER_HOURLY_CAP,
   FEEDBACK_USER_WINDOW_MS,
 } from "./feedback.constants";
@@ -62,6 +63,9 @@ interface MessageRow {
 
 @Injectable()
 export class FeedbackService {
+  /** Short-TTL cache for the full-table stats aggregate (see stats()). */
+  private statsCache: { at: number; value: FeedbackStatsDto } | null = null;
+
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
@@ -244,13 +248,22 @@ export class FeedbackService {
       );
       return m;
     });
-    // Bump activity + reopen a closed thread (needs UPDATE the app role lacks).
+    // Bump activity + reopen a closed thread (needs the UPDATE the app role lacks).
+    // ONE statement, not two round-trips: the conditional reopen is expressed as a
+    // CASE so a reply costs a single indexed write on the parent row.
+    // Best-effort: if it fails the reply is still durably saved, and the digest
+    // counts SENDER messages from the message table directly, so the owner is
+    // still alerted — only the inbox ordering would lag.
     const client = this.privileged.client;
     if (client) {
-      await client.platformFeedback
-        .updateMany({ where: { id: feedbackId, status: { in: ["RESOLVED", "DISMISSED"] } }, data: { status: "OPEN" } })
-        .catch(() => undefined);
-      await client.platformFeedback.update({ where: { id: feedbackId }, data: { lastActivityAt: new Date() } }).catch(() => undefined);
+      try {
+        await client.$executeRaw`UPDATE platform_feedback
+             SET "lastActivityAt" = now(),
+                 status = CASE WHEN status IN ('RESOLVED','DISMISSED') THEN 'OPEN' ELSE status END
+             WHERE id = ${feedbackId}::uuid`;
+      } catch {
+        /* non-fatal — see above */
+      }
     }
     return { id: row.id };
   }
@@ -358,9 +371,13 @@ export class FeedbackService {
   async stats(): Promise<FeedbackStatsDto> {
     const client = this.privileged.client;
     if (!client) throw new ServiceUnavailableException("Feedback review requires the privileged database configuration");
+    // Served from a short TTL cache: the aggregate below is an unavoidable FULL
+    // scan (counting every row BY status/kind is the question), so on a table
+    // growing ~5000/day it must not run once per page view. See
+    // FEEDBACK_STATS_CACHE_MS.
+    const cached = this.statsCache;
+    if (cached && Date.now() - cached.at < FEEDBACK_STATS_CACHE_MS) return cached.value;
     // One scan, one round-trip — conditional FILTER counts (the analytics pattern).
-    // stats is loaded a handful of times a day by the owner (not per submission),
-    // so a single aggregate over the table is fine even at millions of rows.
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const rows = (await client.$queryRaw`
       SELECT
@@ -384,7 +401,7 @@ export class FeedbackService {
       last24h: number;
     }>;
     const r = rows[0];
-    return {
+    const value: FeedbackStatsDto = {
       total: r?.total ?? 0,
       open: r?.open ?? 0,
       reviewed: r?.reviewed ?? 0,
@@ -394,6 +411,8 @@ export class FeedbackService {
       suggestions: r?.suggestions ?? 0,
       last24h: r?.last24h ?? 0,
     };
+    this.statsCache = { at: Date.now(), value };
+    return value;
   }
 
   /**
