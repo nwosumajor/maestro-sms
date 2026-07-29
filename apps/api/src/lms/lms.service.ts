@@ -360,6 +360,93 @@ export class LmsService {
     });
   }
 
+  /**
+   * Assign MANY subjects to one class in a single transaction — the whole set a
+   * class offers, set in one action instead of one request per subject.
+   *
+   * ALL-OR-NOTHING by design: every subject and teacher is validated before
+   * anything is written, so a bad id in row 7 cannot leave rows 1-6 applied and
+   * the roster half-built. Existing offerings are upserted, so re-running it is
+   * how you change a teacher rather than a duplicate-key error.
+   */
+  async assignClassSubjectsBulk(
+    p: Principal,
+    classId: string,
+    items: { subjectId: string; teacherId: string; lessonsPerWeek?: number; preferredRoomId?: string | null }[],
+  ): Promise<{ assigned: number }> {
+    if (items.length === 0) throw new BadRequestException("Nothing to assign");
+    const dupes = items.length - new Set(items.map((i) => i.subjectId)).size;
+    if (dupes > 0) throw new BadRequestException("The same subject appears more than once");
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      await this.requireClass(tx, classId);
+      // Validate EVERYTHING first (two set-queries, not two per row).
+      const subjectIds = [...new Set(items.map((i) => i.subjectId))];
+      const teacherIds = [...new Set(items.map((i) => i.teacherId))];
+      const [subjects, teachers] = await Promise.all([
+        tx.subject.findMany({ where: { id: { in: subjectIds } }, select: { id: true } }),
+        tx.user.findMany({ where: { id: { in: teacherIds } }, select: { id: true } }),
+      ]);
+      if (subjects.length !== subjectIds.length) throw new NotFoundException("Subject not found");
+      if (teachers.length !== teacherIds.length) throw new NotFoundException("Teacher not found");
+      const roomIds = [...new Set(items.map((i) => i.preferredRoomId).filter((r): r is string => !!r))];
+      if (roomIds.length > 0) {
+        const rooms = await tx.room.findMany({ where: { id: { in: roomIds } }, select: { id: true } });
+        if (rooms.length !== roomIds.length) throw new NotFoundException("Room not found");
+      }
+      for (const it of items) {
+        await tx.classSubjectTeacher.upsert({
+          where: { classId_subjectId: { classId, subjectId: it.subjectId } },
+          update: {
+            teacherId: it.teacherId,
+            lessonsPerWeek: it.lessonsPerWeek,
+            preferredRoomId: it.preferredRoomId === undefined ? undefined : it.preferredRoomId,
+          },
+          create: {
+            schoolId: p.schoolId,
+            classId,
+            subjectId: it.subjectId,
+            teacherId: it.teacherId,
+            lessonsPerWeek: it.lessonsPerWeek ?? 1,
+            preferredRoomId: it.preferredRoomId ?? null,
+          },
+        });
+      }
+      await this.log(tx, p, "lms.class.subjects.bulk_assign", "class", classId, { count: items.length });
+      return { assigned: items.length };
+    });
+  }
+
+  /**
+   * Enrol MANY students into one class in a single transaction.
+   *
+   * Capacity is checked ONCE for the whole batch (not per student, which would
+   * let a batch straddle the limit), students already enrolled are skipped rather
+   * than erroring, and every id is validated up-front so a bad one can't leave a
+   * partial roster behind.
+   */
+  async enrollStudentsBulk(p: Principal, classId: string, studentIds: string[]): Promise<{ enrolled: number; skipped: number }> {
+    const ids = [...new Set(studentIds)];
+    if (ids.length === 0) throw new BadRequestException("Nothing to enrol");
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      await this.requireClass(tx, classId);
+      const found = await tx.user.findMany({ where: { id: { in: ids } }, select: { id: true } });
+      if (found.length !== ids.length) throw new NotFoundException("Student not found");
+      // Already-enrolled students are a no-op, not a failure — re-running a roster
+      // import must be safe.
+      const existing = await tx.enrollment.findMany({ where: { classId, studentId: { in: ids } }, select: { studentId: true } });
+      const already = new Set(existing.map((e: { studentId: string }) => e.studentId));
+      const toAdd = ids.filter((id) => !already.has(id));
+      if (toAdd.length === 0) return { enrolled: 0, skipped: ids.length };
+      // ONE capacity check for the whole batch.
+      await this.assertCapacity(tx, classId, toAdd.length);
+      await tx.enrollment.createMany({
+        data: toAdd.map((studentId) => ({ schoolId: p.schoolId, classId, studentId })),
+      });
+      await this.log(tx, p, "lms.student.enroll.bulk", "class", classId, { enrolled: toAdd.length, skipped: already.size });
+      return { enrolled: toAdd.length, skipped: already.size };
+    });
+  }
+
   async enrollStudent(p: Principal, classId: string, studentId: string) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.requireClass(tx, classId);

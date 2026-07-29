@@ -66,6 +66,20 @@ const subjectUpdateSchema = z.object({
   name: z.string().min(1).max(120).optional(),
   code: z.string().max(30).nullish(),
 });
+const classSubjectsBulkSchema = z.object({
+  items: z
+    .array(
+      z.object({
+        subjectId: z.string().uuid(),
+        teacherId: z.string().uuid(),
+        lessonsPerWeek: z.number().int().min(1).max(20).optional(),
+        preferredRoomId: z.string().uuid().nullish(),
+      }),
+    )
+    .min(1)
+    .max(60),
+});
+const enrollBulkSchema = z.object({ studentIds: z.array(z.string().uuid()).min(1).max(500) });
 const classSubjectSchema = z.object({
   subjectId: z.string().uuid(),
   teacherId: z.string().uuid(),
@@ -163,6 +177,17 @@ export class LmsController {
     return this.lms.deleteSubject(p, subjectId);
   }
 
+  /** Assign MANY subjects to a class at once (all-or-nothing, upserts). */
+  @Post("classes/:classId/subjects/bulk")
+  @RequirePermission(LMS_PERMISSIONS.SUBJECT_MANAGE)
+  assignClassSubjectsBulk(
+    @CurrentPrincipal() p: Principal,
+    @Param("classId") classId: string,
+    @Body(new ZodValidationPipe(classSubjectsBulkSchema)) body: z.infer<typeof classSubjectsBulkSchema>,
+  ) {
+    return this.lms.assignClassSubjectsBulk(p, classId, body.items);
+  }
+
   @Post("classes/:classId/subjects")
   @RequirePermission(LMS_PERMISSIONS.SUBJECT_MANAGE)
   assignClassSubject(
@@ -204,6 +229,17 @@ export class LmsController {
     @Body(new ZodValidationPipe(teacherSchema)) body: { teacherId: string },
   ) {
     return this.lms.assignTeacher(p, classId, body.teacherId);
+  }
+
+  /** Enrol MANY students at once — one capacity check, already-enrolled skipped. */
+  @Post("classes/:classId/enrollments/bulk")
+  @RequirePermission(LMS_PERMISSIONS.ENROLLMENT_WRITE)
+  enrollBulk(
+    @CurrentPrincipal() p: Principal,
+    @Param("classId") classId: string,
+    @Body(new ZodValidationPipe(enrollBulkSchema)) body: z.infer<typeof enrollBulkSchema>,
+  ) {
+    return this.lms.enrollStudentsBulk(p, classId, body.studentIds);
   }
 
   @Post("classes/:classId/enrollments")
