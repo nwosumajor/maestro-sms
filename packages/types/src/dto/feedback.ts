@@ -52,3 +52,30 @@ export interface FeedbackStatsDto {
 
 /** Max ids a single bulk-review call may touch (bounded work). */
 export const FEEDBACK_BULK_MAX = 200;
+
+/** Who wrote a thread message. */
+export const FEEDBACK_MESSAGE_SIDES = ["SENDER", "PLATFORM"] as const;
+export type FeedbackMessageSide = (typeof FEEDBACK_MESSAGE_SIDES)[number];
+
+/** One message in a feedback conversation (either side). */
+export interface FeedbackMessageDto {
+  id: string;
+  authorSide: string; // SENDER | PLATFORM
+  authorName: string;
+  body: string;
+  createdAt: Date;
+}
+
+/** The full thread for one feedback item: the original + every reply. */
+export interface FeedbackThreadDto {
+  id: string;
+  kind: string;
+  subject: string;
+  body: string;
+  status: string;
+  /** Present only on the platform-owner view (who + which school sent it). */
+  senderName?: string;
+  schoolName?: string;
+  createdAt: Date;
+  messages: FeedbackMessageDto[];
+}

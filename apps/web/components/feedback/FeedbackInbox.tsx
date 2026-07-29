@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { readApiError } from "@/lib/api-error";
+import { FeedbackThread } from "@/components/feedback/FeedbackThread";
 
 type Item = Serialized<PlatformFeedbackDto>;
 type Page = Serialized<PageDto<PlatformFeedbackDto>>;
@@ -187,6 +188,7 @@ function FeedbackRow({
   const [note, setNote] = React.useState(item.reviewNote ?? "");
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
+  const [threadOpen, setThreadOpen] = React.useState(false);
 
   const review = async (status: FeedbackStatus) => {
     setBusy(true);
@@ -230,12 +232,23 @@ function FeedbackRow({
 
           <p className="whitespace-pre-wrap text-sm text-muted-foreground">{item.body}</p>
 
+          <button
+            type="button"
+            onClick={() => setThreadOpen((v) => !v)}
+            className="text-sm font-medium text-primary underline"
+          >
+            {threadOpen ? "Hide conversation" : "View conversation & reply"}
+          </button>
+          {threadOpen && (
+            <FeedbackThread feedbackId={item.id} basePath="/api/sms/operator/feedback" mySide="PLATFORM" />
+          )}
+
           <div className="space-y-2 border-t pt-3">
             <Input
               value={note}
               onChange={(e) => setNote(e.target.value)}
               maxLength={2000}
-              placeholder="Optional reply / internal note (visible to the sender)"
+              placeholder="Closing note (shown to the sender when you set a status)"
             />
             <div className="flex flex-wrap items-center gap-2">
               <Button size="sm" variant="secondary" disabled={busy} onClick={() => void review("REVIEWED")}>

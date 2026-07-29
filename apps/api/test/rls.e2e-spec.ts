@@ -59,6 +59,7 @@ d("RLS cross-tenant isolation", () => {
   const examSittingA = randomUUID();
   const examScheduleA = randomUUID();
   const platformFeedbackA = randomUUID();
+  const platformFeedbackMessageA = randomUUID();
   const examSeatA = randomUUID();
   const examInvigilatorA = randomUUID();
   const scanEventA = randomUUID();
@@ -390,10 +391,14 @@ d("RLS cross-tenant isolation", () => {
       `INSERT INTO exam_schedule (id,"schoolId",title,"createdById","updatedAt") VALUES ($1,$2,'RLS Schedule',$3,now())`,
       [examScheduleA, A, userA],
     );
-    // Platform feedback: a complaint from school A's user.
+    // Platform feedback: a complaint from school A's user, plus a thread message.
     await a.query(
       `INSERT INTO platform_feedback (id,"schoolId","userId",kind,subject,body,"updatedAt") VALUES ($1,$2,$3,'COMPLAINT','RLS','hi',now())`,
       [platformFeedbackA, A, userA],
+    );
+    await a.query(
+      `INSERT INTO platform_feedback_message (id,"schoolId","feedbackId","authorId","authorSide",body) VALUES ($1,$2,$3,$4,'SENDER','msg')`,
+      [platformFeedbackMessageA, A, platformFeedbackA, userA],
     );
     await a.query(
       `INSERT INTO exam_sitting (id,"schoolId",title,date,"startsAt","endsAt",hall,"scheduleId","createdById","updatedAt")
@@ -1196,6 +1201,7 @@ d("RLS cross-tenant isolation", () => {
       "exam_seat",
       "exam_sitting",
       "exam_schedule",
+      "platform_feedback_message",
       "platform_feedback",
       "meeting_booking",
       "meeting_slot",
@@ -1303,6 +1309,7 @@ d("RLS cross-tenant isolation", () => {
     ["meeting_booking", meetingBookingA],
     ["exam_schedule", examScheduleA],
     ["platform_feedback", platformFeedbackA],
+    ["platform_feedback_message", platformFeedbackMessageA],
     ["exam_sitting", examSittingA],
     ["exam_seat", examSeatA],
     ["exam_invigilator", examInvigilatorA],
