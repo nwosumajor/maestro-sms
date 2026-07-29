@@ -15,6 +15,7 @@
 import { BadRequestException, Injectable, Logger, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { Prisma, type PrismaClient } from "@sms/db";
 import { SCHOLARSHIP_MAX_AWARDS, type ScholarshipApplicationDto, type ScholarshipProgramDto } from "@sms/types";
+import { uniqueEntityCode } from "@sms/types";
 import { NotificationService } from "../notifications/notification.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import {
@@ -363,8 +364,26 @@ export class ScholarshipAdminService {
           cbtExams += 1;
           continue;
         }
+        // A bank MUST name a real Subject — teacher access is decided by subject,
+        // so a subject-less bank is un-fillable by every teacher in the school.
+        // The program's category is the subject; find-or-create it in each school
+        // (privileged client, so this crosses into the tenant deliberately).
+        const subjectName = String(program.category).replaceAll("_", " ");
+        const existingCodes = (await db.subject.findMany({ where: { schoolId }, select: { code: true } })).map((r) => r.code);
+        const subject =
+          (await db.subject.findFirst({ where: { schoolId, name: subjectName }, select: { id: true, name: true } })) ??
+          (await db.subject.create({
+            data: { schoolId, name: subjectName, code: uniqueEntityCode(subjectName, existingCodes) },
+            select: { id: true, name: true },
+          }));
         const bank = await db.cbtQuestionBank.create({
-          data: { schoolId, name: `Scholarship: ${program.title}`, subject: String(program.category).replaceAll("_", " "), createdById: p.userId },
+          data: {
+            schoolId,
+            name: `Scholarship: ${program.title}`,
+            subject: subject.name,
+            subjectId: subject.id,
+            createdById: p.userId,
+          },
         });
         await db.cbtQuestion.createMany({
           data: questions.map((q) => ({

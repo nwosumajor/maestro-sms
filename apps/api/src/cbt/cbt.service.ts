@@ -19,12 +19,14 @@ import {
 import { Prisma } from "@sms/db";
 import { randomUUID } from "node:crypto";
 import { CBT_ANSWER_RELEASE_CHAIN } from "@sms/types";
+import { CBT_PERMISSIONS } from "@sms/types";
 import type {
   CbtAuthoringOptionsDto,
   CbtBankDto,
   CbtExamDto,
   CbtExamResultsDto,
   CbtSittingViewDto,
+  CbtBankQuestionsDto,
 } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -220,22 +222,23 @@ export class CbtService {
   ): Promise<CbtBankDto> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const subjectId = input.subjectId ?? null;
-      let subjectLabel = input.subject?.trim() || null;
+      // EVERY bank must name its subject — including one created by school-wide
+      // staff. A subject-less bank is invisible and un-fillable to every teacher
+      // (access is decided by subject), so it silently becomes admin-only.
+      if (!subjectId) throw new BadRequestException("Pick the subject this bank is for");
       if (!this.isSchoolWide(p)) {
         // SECURITY: a teacher authors banks ONLY for a subject they teach —
         // relationship-scoped like grading (classSubjectTeacher is authoritative).
-        if (!subjectId) throw new BadRequestException("Pick the subject this bank is for");
         const teaches = await tx.classSubjectTeacher.findFirst({
           where: { teacherId: p.userId, subjectId },
           select: { id: true },
         });
         if (!teaches) throw new NotFoundException("Subject not found"); // 404-not-403
       }
-      if (subjectId) {
-        const subject = await tx.subject.findFirst({ where: { id: subjectId }, select: { name: true } });
-        if (!subject) throw new NotFoundException("Subject not found");
-        subjectLabel = subject.name;
-      }
+      const subject = await tx.subject.findFirst({ where: { id: subjectId }, select: { name: true } });
+      if (!subject) throw new NotFoundException("Subject not found");
+      // The label is a denormalised copy of the registry name, never user text.
+      const subjectLabel = subject.name;
       const bank = await tx.cbtQuestionBank.create({
         data: {
           schoolId: p.schoolId,
@@ -258,6 +261,50 @@ export class CbtService {
   }
 
   /** Bulk-add questions (typed rows — the CSV parse happens client-side). */
+  /**
+   * Read a bank's questions (staff). Two audiences, two visibilities:
+   *
+   *  - EDITORS (cbt.manage + bank scope: the author, or a teacher of the bank's
+   *    subject, or school-wide staff) get `answerIndex` — they must be able to
+   *    proofread the key they are responsible for.
+   *  - REVIEWERS (cbt.review only, e.g. the head teacher who approves publishing)
+   *    get the prompts and choices with `answerIndex: null`. They can judge
+   *    question quality and coverage without holding the answer key.
+   *
+   * 404-not-403 for a bank outside the caller's scope, and every read is audited
+   * because question keys are exam-integrity material.
+   */
+  async getBankQuestions(p: Principal, bankId: string): Promise<CbtBankQuestionsDto> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const bank = await tx.cbtQuestionBank.findFirst({ where: { id: bankId } });
+      if (!bank) throw new NotFoundException("Bank not found");
+      const canEdit =
+        p.permissions.includes(CBT_PERMISSIONS.CBT_MANAGE) && (await this.canTouchBank(tx, p, bank));
+      // A pure reviewer needs cbt.review; anyone else sees nothing (404-not-403).
+      const canReview = p.permissions.includes(CBT_PERMISSIONS.CBT_REVIEW);
+      if (!canEdit && !canReview) throw new NotFoundException("Bank not found");
+      const rows = await tx.cbtQuestion.findMany({
+        where: { bankId },
+        orderBy: { createdAt: "asc" },
+        select: { id: true, prompt: true, choices: true, answerIndex: true },
+      });
+      await this.log(tx, p, "cbt.bank.questions_read", bankId, { count: rows.length, withAnswers: canEdit });
+      return {
+        bankId: bank.id,
+        bankName: bank.name,
+        subject: bank.subject,
+        canEdit,
+        questions: rows.map((q) => ({
+          id: q.id,
+          prompt: q.prompt,
+          choices: q.choices as unknown as string[],
+          // SECURITY: the key is withheld from read-only reviewers.
+          answerIndex: canEdit ? q.answerIndex : null,
+        })),
+      };
+    });
+  }
+
   async addQuestions(p: Principal, bankId: string, questions: QuestionInput[]): Promise<{ added: number }> {
     for (const q of questions) {
       if (q.choices.length < 2 || q.choices.length > 6) throw new BadRequestException("Each question needs 2–6 choices");

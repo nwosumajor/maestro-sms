@@ -15,6 +15,7 @@ export * from "./recurrence";
 export * from "./scan";
 export * from "./dto/member-scan";
 export * from "./admission-number";
+export * from "./entity-code";
 export * from "./grading";
 export * from "./lms-badges";
 export * from "./dto/subscription";

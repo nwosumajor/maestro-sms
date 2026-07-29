@@ -4,7 +4,7 @@
 
 import { Body, Controller, Get, Param, Post, Put } from "@nestjs/common";
 import { CBT_PERMISSIONS, MODULES } from "@sms/types";
-import type { CbtAuthoringOptionsDto, CbtBankDto, CbtExamDto, CbtExamResultsDto, CbtSittingViewDto } from "@sms/types";
+import type { CbtAuthoringOptionsDto, CbtBankDto, CbtExamDto, CbtExamResultsDto, CbtSittingViewDto, CbtBankQuestionsDto } from "@sms/types";
 import { z } from "zod";
 import { RequireModule } from "../auth/require-module.decorator";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -67,6 +67,19 @@ export class CbtController {
   @RequirePermission(CBT_PERMISSIONS.CBT_MANAGE)
   createBank(@CurrentPrincipal() p: Principal, @Body(new ZodValidationPipe(bankSchema)) body: z.infer<typeof bankSchema>) {
     return this.cbt.createBank(p, body);
+  }
+
+  /**
+   * Read a bank's questions. Two DIFFERENT permissions may reach it — a subject
+   * teacher via cbt.manage (their own banks only) or an oversight reader via
+   * cbt.review (any bank, no answer key) — and @RequirePermission takes exactly
+   * one. So the route is ungated and CbtService.getBankQuestions enforces
+   * "cbt.manage + bank scope OR cbt.review", 404-not-403 otherwise. Gating on
+   * either permission here would lock out the other audience.
+   */
+  @Get("banks/:id/questions")
+  bankQuestions(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<CbtBankQuestionsDto> {
+    return this.cbt.getBankQuestions(p, id);
   }
 
   @Post("banks/:id/questions")

@@ -11,8 +11,8 @@
 // audit-logged. Not-visible -> 404 (never 403), no cross-tenant/owner leak.
 // =============================================================================
 
-import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { NON_STAFF_ROLE_NAMES, SEARCH_CAP, type UserKind } from "@sms/types";
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { NON_STAFF_ROLE_NAMES, SEARCH_CAP, normaliseEntityCode, uniqueEntityCode, type UserKind } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -52,15 +52,55 @@ export class LmsService {
   }
 
   // --- mutations (school_admin) ---------------------------------------------
+  /**
+   * Resolve the stable per-school `code` for a subject or class. An
+   * operator-supplied code wins (normalised); otherwise it is derived from the
+   * name by the SAME rule the backfill migration used, de-duplicated against the
+   * codes already in this school. A code is what imports, rosters and pickers
+   * should key on — names are free text and drift.
+   */
+  private async nextCode(
+    tx: TenantTx,
+    entity: "subject" | "class",
+    name: string,
+    supplied?: string | null,
+  ): Promise<string> {
+    const rows =
+      entity === "subject"
+        ? await tx.subject.findMany({ select: { code: true } })
+        : await tx.class.findMany({ select: { code: true } });
+    const taken = rows.map((r: { code: string }) => r.code).filter(Boolean);
+    if (supplied && supplied.trim()) {
+      const wanted = normaliseEntityCode(supplied);
+      if (!wanted) throw new BadRequestException("Code must contain letters or digits");
+      if (taken.some((c) => c.toUpperCase() === wanted)) {
+        throw new ConflictException(`Code ${wanted} is already used by another ${entity}`);
+      }
+      return wanted;
+    }
+    const derived = uniqueEntityCode(name, taken);
+    // A name with no alphanumerics still needs a stable code.
+    return derived || `${entity === "subject" ? "SUBJ" : "CLS"}${Date.now() % 1000000}`;
+  }
+
   async createClass(
     p: Principal,
-    input: { name: string; level?: number | null; nextClassId?: string | null },
+    input: { name: string; level?: number | null; nextClassId?: string | null; code?: string | null },
   ) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      // Same catalog rule as subjects: one "JSS2A" per school, or every roster
+      // picker fills with twins and enrollments split between them.
+      const dup = await tx.class.findFirst({
+        where: { name: { equals: input.name, mode: "insensitive" } },
+        select: { id: true },
+      });
+      if (dup) throw new ConflictException("A class with that name already exists");
+      const code = await this.nextCode(tx, "class", input.name, input.code);
       const cls = await tx.class.create({
         data: {
           schoolId: p.schoolId,
           name: input.name,
+          code,
           level: input.level ?? null,
           nextClassId: input.nextClassId ?? null,
         },
@@ -154,8 +194,9 @@ export class LmsService {
         select: { id: true },
       });
       if (dup) throw new ConflictException("A subject with that name already exists");
+      const code = await this.nextCode(tx, "subject", input.name, input.code);
       const subj = await tx.subject.create({
-        data: { schoolId: p.schoolId, name: input.name, code: input.code ?? null },
+        data: { schoolId: p.schoolId, name: input.name, code },
       });
       await this.log(tx, p, "lms.subject.create", "subject", subj.id, { name: input.name });
       return { id: subj.id, name: subj.name, code: subj.code };
@@ -182,11 +223,23 @@ export class LmsService {
         });
         if (dup) throw new ConflictException("A subject with that name already exists");
       }
+      // A code is now the subject's stable key, so it can be CHANGED but never
+      // cleared — blanking it would break every import/picker keyed on it.
+      let code: string | undefined;
+      if (input.code !== undefined && input.code !== null && input.code.trim()) {
+        code = normaliseEntityCode(input.code);
+        if (!code) throw new BadRequestException("Code must contain letters or digits");
+        const clash = await tx.subject.findFirst({
+          where: { code: { equals: code, mode: "insensitive" }, id: { not: subjectId } },
+          select: { id: true },
+        });
+        if (clash) throw new ConflictException(`Code ${code} is already used by another subject`);
+      }
       const updated = await tx.subject.update({
         where: { id: subjectId },
         data: {
           ...(input.name ? { name: input.name } : {}),
-          ...(input.code !== undefined ? { code: input.code } : {}),
+          ...(code ? { code } : {}),
         },
       });
       await this.log(tx, p, "lms.subject.update", "subject", subjectId, {

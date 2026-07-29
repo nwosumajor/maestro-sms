@@ -108,10 +108,61 @@ describe("CbtService — teacher subject scoping", () => {
     expect(audit.record).toHaveBeenCalled();
   });
 
-  it("school-wide staff may create a bank with no subject", async () => {
+  it("EVERY bank must name a subject — even one created by school-wide staff", async () => {
+    // A subject-less bank is invisible and un-fillable to every teacher (access
+    // is decided by subject), so it would silently become admin-only. Refusing it
+    // at creation is what keeps question authoring delegable to subject teachers.
     const { service } = makeService({});
-    const bank = await service.createBank(admin(), { name: "General knowledge" });
-    expect(bank.subjectId).toBeNull();
+    await expect(service.createBank(admin(), { name: "General knowledge" })).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  // --- reading questions back: editors see the key, reviewers do not ----------
+
+  it("a subject teacher READS their own bank's questions WITH the answer key", async () => {
+    const { service } = makeService({
+      bank: { id: "b1", name: "Maths bank", subject: "Maths", createdById: "t1", subjectId: "sub-math" },
+      taught: [{ subjectId: "sub-math" }],
+      questions: [{ id: "q1", prompt: "2+2?", choices: ["3", "4"], answerIndex: 1 }],
+    });
+    const view = await service.getBankQuestions(
+      { ...teacher(), permissions: ["cbt.manage"] },
+      "b1",
+    );
+    expect(view.canEdit).toBe(true);
+    expect(view.questions[0].answerIndex).toBe(1); // author may proofread the key
+  });
+
+  it("a head teacher (cbt.review) READS questions but NEVER the answer key", async () => {
+    const { service } = makeService({
+      bank: { id: "b1", name: "Maths bank", subject: "Maths", createdById: "someone-else", subjectId: "sub-math" },
+      taught: [],
+      questions: [{ id: "q1", prompt: "2+2?", choices: ["3", "4"], answerIndex: 1 }],
+    });
+    const head: Principal = { schoolId: "A", userId: "head1", roles: ["head_teacher"], permissions: ["cbt.review"] };
+    const view = await service.getBankQuestions(head, "b1");
+    expect(view.canEdit).toBe(false);
+    expect(view.questions[0].prompt).toBe("2+2?");
+    expect(view.questions[0].choices).toEqual(["3", "4"]);
+    expect(view.questions[0].answerIndex).toBeNull(); // SECURITY: key withheld
+  });
+
+  it("a teacher CANNOT read another subject's bank at all (404, not 403)", async () => {
+    const { service } = makeService({
+      bank: { id: "b1", name: "Chem bank", subject: "Chem", createdById: "someone-else", subjectId: "sub-chem" },
+      taught: [{ subjectId: "sub-math" }],
+    });
+    await expect(
+      service.getBankQuestions({ ...teacher(), permissions: ["cbt.manage"] }, "b1"),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it("someone with neither permission gets 404 (no existence disclosure)", async () => {
+    const { service } = makeService({
+      bank: { id: "b1", name: "Maths bank", subject: "Maths", createdById: "x", subjectId: "sub-math" },
+      taught: [],
+    });
+    const student: Principal = { schoolId: "A", userId: "s1", roles: ["student"], permissions: ["cbt.take"] };
+    await expect(service.getBankQuestions(student, "b1")).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it("a teacher cannot add questions to a bank outside their subjects (404, not 403)", async () => {

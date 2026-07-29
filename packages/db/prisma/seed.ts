@@ -61,6 +61,7 @@ const PERMS = [
   "certificate.issue",
   // CBT mock-exam hall (add-on module)
   "cbt.manage",
+  "cbt.review",
   "cbt.take",
   // Alumni
   "alumni.manage",
@@ -417,6 +418,7 @@ async function main() {
       id: "55555555-5555-5555-5555-555555555555",
       schoolId: school.id,
       name: "History 101",
+      code: "HISTORY1", // matches the identity backfill's derivation
     },
   });
   await prisma.classTeacher.upsert({

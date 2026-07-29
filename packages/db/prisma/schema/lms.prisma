@@ -15,6 +15,9 @@ model Class {
   id           String   @id @default(uuid()) @db.Uuid
   schoolId     String   @db.Uuid
   name         String
+  /// Short stable code (e.g. JSS2A). Auto-generated from the name when left
+  /// blank; unique per school so rosters and CSV imports key on it.
+  code         String @default(dbgenerated("left(replace(gen_random_uuid()::text, '-', ''), 8)"))
   /// Ordering within the school's progression (e.g. JSS1=1, JSS2=2). Drives the
   /// "promote to the next class" flow together with nextClassId.
   level        Int?
@@ -44,6 +47,10 @@ model Class {
   promotionsFrom  PromotionBatch[] @relation("PromotionSource")
   promotionsTo    PromotionBatch[] @relation("PromotionTarget")
 
+  // Identity integrity: no two classes in a school share a name or code, so a
+  // student or teacher can never be assigned to an ambiguous class.
+  @@unique([schoolId, name])
+  @@unique([schoolId, code])
   @@index([schoolId])
   @@index([schoolId, supervisorId])
   @@map("class")
@@ -99,13 +106,19 @@ model Subject {
   id        String   @id @default(uuid()) @db.Uuid
   schoolId  String   @db.Uuid
   name      String
-  code      String?
+  /// Short stable code (e.g. MTH, ENG). Auto-generated from the name when left
+  /// blank; unique per school so imports and pickers key on it, not free text.
+  code      String @default(dbgenerated("left(replace(gen_random_uuid()::text, '-', ''), 8)"))
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   school        School                @relation(fields: [schoolId], references: [id])
   classSubjects ClassSubjectTeacher[]
 
+  // Identity integrity: a school cannot hold two subjects of the same name or
+  // code, so teacher/class assignments can never split across duplicate rows.
+  @@unique([schoolId, name])
+  @@unique([schoolId, code])
   @@index([schoolId])
   @@map("subject")
 }

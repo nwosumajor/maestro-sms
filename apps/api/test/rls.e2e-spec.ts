@@ -59,6 +59,7 @@ d("RLS cross-tenant isolation", () => {
   const examSittingA = randomUUID();
   const examScheduleA = randomUUID();
   const platformFeedbackA = randomUUID();
+  const cbtSubjectA = randomUUID();
   const platformFeedbackMessageA = randomUUID();
   const examSeatA = randomUUID();
   const examInvigilatorA = randomUUID();
@@ -557,8 +558,12 @@ d("RLS cross-tenant isolation", () => {
     );
     // CBT: bank → question → exam → sitting chain in A.
     await a.query(
-      `INSERT INTO cbt_question_bank (id,"schoolId",name,"createdById","updatedAt") VALUES ($1,$2,'RLS Bank',$3,now())`,
-      [cbtBankA, A, userA],
+`INSERT INTO subject (id,"schoolId",name,code,"updatedAt") VALUES ($1,$2,'RLS CBT Subject','RLSCBT',now())`,
+      [cbtSubjectA, A],
+    );
+    await a.query(
+            `INSERT INTO cbt_question_bank (id,"schoolId",name,"subjectId","createdById","updatedAt") VALUES ($1,$2,'RLS Bank',$4,$3,now())`,
+      [cbtBankA, A, userA, cbtSubjectA],
     );
     await a.query(
       `INSERT INTO cbt_question (id,"schoolId","bankId",prompt,choices,"answerIndex") VALUES ($1,$2,$3,'2+2?',$4::jsonb,1)`,
