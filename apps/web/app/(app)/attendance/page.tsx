@@ -1,15 +1,15 @@
 import type { AttendanceRecordDto, IdNameDto, Serialized } from "@sms/types";
 import { hasPermission } from "@/lib/permissions";
-import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { cn } from "@/lib/utils";
 import { shortDate, titleCase } from "@/lib/format";
 import { TakeRegister } from "@/components/attendance/TakeRegister";
+import { RegisterBoard } from "@/components/attendance/RegisterBoard";
+import { StudentPicker } from "@/components/attendance/StudentPicker";
 import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +17,16 @@ export const dynamic = "force-dynamic";
 type Student = Serialized<IdNameDto>;
 type ClassRow = Serialized<IdNameDto>;
 type Record_ = Serialized<AttendanceRecordDto>;
+type Summary = {
+  from: string | null;
+  to: string | null;
+  present: number;
+  absent: number;
+  late: number;
+  excused: number;
+  total: number;
+  percent: number | null;
+};
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   PRESENT: "secondary",
@@ -42,7 +52,12 @@ export default async function AttendancePage({
 
   const list = students ?? [];
   const selectedId = searchParams.studentId ?? list[0]?.id;
-  const records = selectedId ? await apiGet<Record_[]>(`/students/${selectedId}/attendance`) : [];
+  const [records, summary] = selectedId
+    ? await Promise.all([
+        apiGet<Record_[]>(`/students/${selectedId}/attendance`),
+        apiGet<Summary>(`/students/${selectedId}/attendance/summary`),
+      ])
+    : [[], null];
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="attendance" permissions={user.permissions}>
@@ -50,6 +65,10 @@ export default async function AttendancePage({
         <PageHeader title={<>Attendance</>} subtitle={<>{canWrite
               ? "Take a class register, and review a student's attendance history."
               : "Your attendance history. Guardians are alerted automatically on an absence."}</>} />
+
+        {/* Missing registers first: it is the only thing on this page that is
+            time-critical, and the 7-day correction window is why. */}
+        {canWrite && <RegisterBoard />}
 
         {canWrite && classes && classes.length > 0 && (
           <Card>
@@ -64,23 +83,29 @@ export default async function AttendancePage({
         )}
 
         <div className="space-y-3">
-          {list.length > 1 && (
-            <div className="flex flex-wrap gap-2">
-              {list.map((s) => (
-                <Link
-                  key={s.id}
-                  href={`/attendance?studentId=${s.id}`}
-                  className={cn(
-                    "rounded-md border px-3 py-1.5 text-sm font-medium transition-colors",
-                    s.id === selectedId
-                      ? "border-primary bg-primary/10 text-primary"
-                      : "border-border text-muted-foreground hover:bg-accent",
-                  )}
-                >
-                  {s.name}
-                </Link>
-              ))}
-            </div>
+          <StudentPicker students={list} selectedId={selectedId} />
+
+          {/* Totals before the log. Nobody reads 200 rows to work out whether a
+              child is attending, and this figure is term-scoped the same way the
+              report card is, so the two cannot disagree. */}
+          {summary && summary.total > 0 && (
+            <Card>
+              <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-2 py-4 text-sm">
+                <span>
+                  <span className="text-2xl font-semibold tabular-nums">{summary.percent}%</span>{" "}
+                  <span className="text-muted-foreground">attended</span>
+                </span>
+                <span className="text-muted-foreground tabular-nums">
+                  {summary.present} present · {summary.absent} absent · {summary.late} late
+                  {summary.excused > 0 ? ` · ${summary.excused} excused` : ""}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {summary.from && summary.to ? `this term (${shortDate(summary.from)} – ${shortDate(summary.to)})` : "all recorded days"}
+                  {" · "}
+                  {summary.total} day{summary.total === 1 ? "" : "s"} recorded
+                </span>
+              </CardContent>
+            </Card>
           )}
 
           {records === null ? (

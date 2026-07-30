@@ -10,6 +10,8 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type {
   ClashCandidate,
+  ExamAttendanceDto,
+  ExamAttendanceRowDto,
   ExamDayDto,
   ExamDayHallDto,
   ExamScheduleDto,
@@ -470,6 +472,11 @@ export class ExamService {
    */
   async examDay(p: Principal, date: string): Promise<ExamDayDto> {
     const sittings = await this.listSittings(p, { date });
+    // Register tallies for the whole day in one read, so a hall shows how many
+    // failed to turn up next to how many were expected.
+    const tallies = await this.db.runAsTenantReadOnly(this.ctx(p), (tx) =>
+      this.attendanceTallies(tx, sittings.map((s) => s.id)),
+    );
     const halls: ExamDayHallDto[] = sittings
       .map((s) => {
         const overCapacity = s.capacity > 0 && s.seated > s.capacity;
@@ -495,6 +502,11 @@ export class ExamService {
           submitted: s.submitted,
           noInvigilator: s.invigilators === 0,
           noSeats: s.seated === 0,
+          absent: tallies.get(s.id)?.absent ?? 0,
+          // Seated but unmarked. Reported as a COUNT rather than folded into
+          // `absent`, because "we have not taken the register" and "they did not
+          // come" are different problems with different fixes.
+          unmarked: Math.max(0, s.seated - (tallies.get(s.id)?.marked ?? 0)),
           warning: clash
             ? describeClash("hall", clash)
             : overCapacity
@@ -832,6 +844,161 @@ export class ExamService {
     return rows.map((r: { staffId: string; lead: boolean }) => ({ sittingId, staffId: r.staffId, staffName: names.get(r.staffId) ?? "", lead: r.lead }));
   }
 
+  // --- the sitting's own register (append-only) --------------------------------
+
+  /**
+   * Who sat this exam: every seated student with their latest mark.
+   *
+   * `status: null` means NOT YET MARKED, which is deliberately distinct from
+   * ABSENT. Conflating them would make an unmarked hall look like a hall where
+   * everybody failed to turn up — and would quietly manufacture absence records
+   * for pupils who were sitting there.
+   */
+  async getSittingAttendance(p: Principal, sittingId: string): Promise<ExamAttendanceDto> {
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      const sitting = (await tx.examSitting.findFirst({
+        where: { id: sittingId },
+        select: { id: true, title: true, hall: true, date: true, startsAt: true, endsAt: true },
+      })) as { id: string; title: string; hall: string; date: Date; startsAt: string; endsAt: string } | null;
+      if (!sitting) throw new NotFoundException("Sitting not found");
+
+      const seats = await this.seatPlan(tx, sittingId);
+      // ONE query for the whole sitting's marks, newest first; the first row seen
+      // per student is their current mark. Append-only means a student can have
+      // several rows, so this is a fold, not a lookup — but it is still one read.
+      const marks = (await tx.examAttendance.findMany({
+        where: { sittingId },
+        orderBy: { createdAt: "desc" },
+        select: { studentId: true, status: true, note: true, markedById: true, createdAt: true },
+      })) as Array<{ studentId: string; status: string; note: string | null; markedById: string; createdAt: Date }>;
+      const latest = new Map<string, (typeof marks)[number]>();
+      for (const m of marks) if (!latest.has(m.studentId)) latest.set(m.studentId, m);
+
+      const markerNames = await this.userNames(tx, [...latest.values()].map((m) => m.markedById));
+
+      const rows: ExamAttendanceRowDto[] = seats.map((s) => {
+        const m = latest.get(s.studentId);
+        return {
+          studentId: s.studentId,
+          studentName: s.studentName,
+          seatNo: s.seatNo,
+          status: m?.status ?? null,
+          note: m?.note ?? null,
+          markedByName: m ? markerNames.get(m.markedById) ?? null : null,
+          markedAt: m ? m.createdAt.toISOString() : null,
+        };
+      });
+
+      return {
+        sittingId,
+        title: sitting.title,
+        hall: sitting.hall,
+        date: this.dateOnly(sitting.date),
+        startsAt: sitting.startsAt,
+        endsAt: sitting.endsAt,
+        rows,
+        present: rows.filter((r) => r.status === "PRESENT").length,
+        absent: rows.filter((r) => r.status === "ABSENT").length,
+        unmarked: rows.filter((r) => r.status === null).length,
+      };
+    });
+  }
+
+  /**
+   * Mark the sitting's register. Append-only: each call INSERTS rows, so a
+   * correction is a new row and the previous mark stays visible in the history
+   * rather than being silently overwritten.
+   *
+   * Only SEATED students can be marked — the seat plan is the definition of who was
+   * expected, and marking someone who was never seated would create an absence for
+   * a pupil who was never due to sit.
+   *
+   * This does NOT touch the daily class register. A pupil can be in school and miss
+   * one exam, so writing ABSENT into that day's register would overwrite the class
+   * teacher's mark with something it does not mean.
+   */
+  async markSittingAttendance(
+    p: Principal,
+    sittingId: string,
+    entries: Array<{ studentId: string; status: string; note?: string | null }>,
+  ): Promise<ExamAttendanceDto> {
+    if (entries.length === 0) throw new BadRequestException("Nothing to mark");
+    await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const sitting = await tx.examSitting.findFirst({ where: { id: sittingId }, select: { id: true } });
+      if (!sitting) throw new NotFoundException("Sitting not found");
+
+      const seated = (await tx.examSeat.findMany({ where: { sittingId }, select: { studentId: true } })) as Array<{ studentId: string }>;
+      const seatedIds = new Set(seated.map((s) => s.studentId));
+      if (seatedIds.size === 0) {
+        throw new ConflictException("Nobody is seated for this sitting yet — seat the class before taking its register");
+      }
+      // De-duplicate within the request (last wins) so one submission can't write
+      // two contradictory marks for the same student in the same instant.
+      const byStudent = new Map<string, { studentId: string; status: string; note?: string | null }>();
+      for (const e of entries) {
+        if (!seatedIds.has(e.studentId)) {
+          throw new BadRequestException("A student who is not seated for this sitting cannot be marked");
+        }
+        if (e.status !== "PRESENT" && e.status !== "ABSENT") {
+          throw new BadRequestException('status must be "PRESENT" or "ABSENT"');
+        }
+        byStudent.set(e.studentId, e);
+      }
+
+      await tx.examAttendance.createMany({
+        data: [...byStudent.values()].map((e) => ({
+          schoolId: p.schoolId,
+          sittingId,
+          studentId: e.studentId,
+          status: e.status,
+          note: e.note ?? null,
+          markedById: p.userId,
+        })),
+      });
+
+      const absent = [...byStudent.values()].filter((e) => e.status === "ABSENT").length;
+      await this.audit.record(
+        {
+          actorId: p.userId,
+          action: "exam.attendance.mark",
+          entity: "exam_sitting",
+          entityId: sittingId,
+          schoolId: p.schoolId,
+          metadata: { marked: byStudent.size, absent },
+        },
+        tx,
+      );
+    });
+    return this.getSittingAttendance(p, sittingId);
+  }
+
+  /** Absent/unmarked tallies for a set of sittings, batched — feeds the day board. */
+  private async attendanceTallies(
+    tx: TenantTx,
+    sittingIds: string[],
+  ): Promise<Map<string, { absent: number; marked: number }>> {
+    const out = new Map<string, { absent: number; marked: number }>();
+    if (sittingIds.length === 0) return out;
+    // Append-only means "latest row per student" can't be a plain groupBy, so fold
+    // in Node — but still from ONE query for every sitting on the board.
+    const rows = (await tx.examAttendance.findMany({
+      where: { sittingId: { in: sittingIds } },
+      orderBy: { createdAt: "desc" },
+      select: { sittingId: true, studentId: true, status: true },
+    })) as Array<{ sittingId: string; studentId: string; status: string }>;
+    const seen = new Set<string>();
+    for (const r of rows) {
+      const key = `${r.sittingId}:${r.studentId}`;
+      if (seen.has(key)) continue; // an older, superseded mark
+      seen.add(key);
+      const cur = out.get(r.sittingId) ?? { absent: 0, marked: 0 };
+      cur.marked += 1;
+      if (r.status === "ABSENT") cur.absent += 1;
+      out.set(r.sittingId, cur);
+    }
+    return out;
+  }
+
   // --- the hall pack: printable seating chart + attendance sheet ---------------
 
   /**
@@ -851,15 +1018,25 @@ export class ExamService {
       const sitting = (await tx.examSitting.findFirst({ where: { id: sittingId } })) as SittingRow | null;
       // 404 not 403 — a cross-tenant id must not confirm the sitting exists.
       if (!sitting) throw new NotFoundException("Sitting not found");
-      const [seats, invigilators, school, cls] = await Promise.all([
+      const [seats, invigilators, school, cls, marks] = await Promise.all([
         this.seatPlan(tx, sittingId),
         this.getInvigilatorsIn(tx, sittingId),
         tx.school.findFirst({ where: { id: p.schoolId }, select: { name: true } }) as Promise<{ name: string } | null>,
         sitting.classId
           ? (tx.class.findFirst({ where: { id: sitting.classId }, select: { name: true } }) as Promise<{ name: string } | null>)
           : Promise.resolve(null),
+        tx.examAttendance.findMany({
+          where: { sittingId },
+          orderBy: { createdAt: "desc" },
+          select: { studentId: true, status: true },
+        }) as Promise<Array<{ studentId: string; status: string }>>,
       ]);
-      return { sitting, seats, invigilators, schoolName: school?.name ?? "", className: cls?.name ?? null };
+      // Marks already recorded are PRINTED onto the sheet, so the paper round-trips:
+      // print blank -> mark in the hall -> enter -> reprint as the filed record.
+      // Without this the archived copy would always look untaken.
+      const latest = new Map<string, string>();
+      for (const m of marks) if (!latest.has(m.studentId)) latest.set(m.studentId, m.status);
+      return { sitting, seats, invigilators, schoolName: school?.name ?? "", className: cls?.name ?? null, marks: latest };
     });
 
     await this.db.runAsTenant(this.ctx(p), async (tx) => {
@@ -887,6 +1064,7 @@ export class ExamService {
     invigilators: InvigilationDto[];
     schoolName: string;
     className: string | null;
+    marks: Map<string, string>;
   }): Promise<Buffer> {
     const { default: PDFDocument } = await import("pdfkit");
     return new Promise<Buffer>((resolve, reject) => {
@@ -947,7 +1125,17 @@ export class ExamService {
           y = header(doc.page.margins.top);
         }
         let x = left;
-        const cells = [String(s.seatNo), s.studentName, "", ""];
+        // A mark already in the system is printed: "PRESENT" fills the signature
+        // box (it is already attested digitally, so re-signing adds nothing) and an
+        // absence is stamped in the Absent column. An UNMARKED row stays blank, so
+        // a blank sheet is still what you print to take the register on paper.
+        const mark = d.marks.get(s.studentId);
+        const cells = [
+          String(s.seatNo),
+          s.studentName,
+          mark === "PRESENT" ? "recorded present" : "",
+          mark === "ABSENT" ? "ABSENT" : "",
+        ];
         for (let i = 0; i < cols.length; i++) {
           doc.rect(x, y, cols[i]!.w, rowH).stroke();
           if (cells[i]) doc.fontSize(9).text(cells[i]!, x + 4, y + 7, { width: cols[i]!.w - 8, ellipsis: true });

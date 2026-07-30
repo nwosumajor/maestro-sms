@@ -7,6 +7,7 @@ import { postSms } from "@/components/game/play-ui";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { SittingRegister } from "./SittingRegister";
 
 type Board = Serialized<ExamDayDto>;
 
@@ -31,6 +32,7 @@ export function ExamDayBoard({ canRelease }: { canRelease: boolean }) {
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
+  const [openRegister, setOpenRegister] = React.useState<string | null>(null);
 
   const load = React.useCallback(async (d: string) => {
     const res = await fetch(`/api/sms/exams/day?date=${d}`);
@@ -58,10 +60,12 @@ export function ExamDayBoard({ canRelease }: { canRelease: boolean }) {
   };
 
   // Problems first. An exam officer with fifteen halls needs the two that are
-  // wrong, not a list in timetable order.
+  // wrong, not a list in timetable order. An untaken register ranks below a missing
+  // invigilator: it can still be fixed after the exam, an unwatched hall cannot.
   const halls = React.useMemo(() => {
     if (!board) return [];
-    const severity = (h: Board["halls"][number]) => (h.warning ? 0 : h.noInvigilator ? 1 : h.noSeats ? 2 : 3);
+    const severity = (h: Board["halls"][number]) =>
+      h.warning ? 0 : h.noInvigilator ? 1 : h.noSeats ? 2 : h.unmarked > 0 ? 3 : 4;
     return [...board.halls].sort((a, b) => severity(a) - severity(b) || a.startsAt.localeCompare(b.startsAt));
   }, [board]);
 
@@ -130,21 +134,39 @@ export function ExamDayBoard({ canRelease }: { canRelease: boolean }) {
                     <p className="mt-1 text-sm text-muted-foreground tabular-nums">
                       {h.capacity > 0 ? `${h.seated}/${h.capacity} seated` : `${h.seated} seated`} · {h.invigilators} invigilator(s)
                       {h.released ? ` · ${h.submitted}/${h.started} submitted` : ""}
+                      {h.absent > 0 ? ` · ${h.absent} absent` : ""}
                     </p>
 
                     <div className="mt-2 flex flex-wrap items-center gap-1.5">
                       {h.warning && <Badge variant="destructive">{h.warning}</Badge>}
                       {h.noInvigilator && <Badge variant="outline">no invigilator</Badge>}
                       {h.noSeats && <Badge variant="outline">nobody seated</Badge>}
+                      {/* "Not yet recorded" is its own state, never counted as absent. */}
+                      {h.unmarked > 0 && !h.noSeats && <Badge variant="outline">{h.unmarked} register not taken</Badge>}
                       {canRelease && h.cbtStatus === "PUBLISHED" && !h.released && (
                         <Button size="sm" disabled={busy} onClick={() => act(() => postSms(`exams/${h.sittingId}/release`, {}), "Released.")}>
                           Release
+                        </Button>
+                      )}
+                      {!h.noSeats && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setOpenRegister(openRegister === h.sittingId ? null : h.sittingId)}
+                        >
+                          {openRegister === h.sittingId ? "Close register" : "Take register"}
                         </Button>
                       )}
                       <a className="text-xs text-muted-foreground underline hover:text-foreground" href={`/api/sms/exams/${h.sittingId}/attendance.pdf`}>
                         attendance sheet
                       </a>
                     </div>
+
+                    {openRegister === h.sittingId && (
+                      <div className="mt-3 border-t pt-3">
+                        <SittingRegister sittingId={h.sittingId} onSaved={() => void load(date)} />
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

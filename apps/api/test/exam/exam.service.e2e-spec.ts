@@ -77,7 +77,7 @@ d("ExamService (real Postgres)", () => {
     // Every tenant table now FKs to school, so a missed child fails the teardown
     // loudly instead of leaving an unreachable orphan row — which is exactly how
     // this line came to be needed.
-    for (const t of ["exam_invigilator", "exam_seat", "exam_sitting", "exam_schedule", "cbt_sitting", "cbt_exam", "cbt_question", "cbt_question_bank", "subject", "room", "enrollment", "class", "user_role", "notification_delivery", "notification", "audit_log"]) {
+    for (const t of ["exam_attendance", "exam_invigilator", "exam_seat", "exam_sitting", "exam_schedule", "cbt_sitting", "cbt_exam", "cbt_question", "cbt_question_bank", "subject", "room", "enrollment", "class", "user_role", "notification_delivery", "notification", "audit_log"]) {
       await admin.query(`DELETE FROM ${t} WHERE "schoolId" = $1`, [SA]);
     }
     await admin.query(`DELETE FROM role WHERE id = ANY($1)`, [[teacherRoleId, studentRoleId]]);
@@ -359,6 +359,100 @@ d("ExamService (real Postgres)", () => {
     expect(found.map((s) => s.title)).toContain("Printable");
     // Hall filter is case-insensitive, like clash detection.
     expect((await svc.listSittings(staff(), { hall: "hall t" })).map((s) => s.title)).toContain("Printable");
+  });
+
+  // --- the sitting's own register (append-only) -------------------------------
+  it("marks a sitting's register, and a correction APPENDS rather than overwriting", async () => {
+    const sit = await svc.createSitting(staff(), { title: "Register Test", date: planDay, startsAt: "05:00", endsAt: "05:45", hall: "Hall V", classId });
+    await svc.seatClass(staff(), sit.id, classId);
+
+    // Before anyone marks it, status is NULL — deliberately NOT "ABSENT". Treating
+    // an untaken register as absence would manufacture absence records for pupils
+    // who were sitting right there.
+    let reg = await svc.getSittingAttendance(staff(), sit.id);
+    expect(reg.rows).toHaveLength(2);
+    expect(reg.rows.every((r) => r.status === null)).toBe(true);
+    expect(reg).toMatchObject({ present: 0, absent: 0, unmarked: 2 });
+
+    await svc.markSittingAttendance(staff(), sit.id, [
+      { studentId: S1, status: "PRESENT" },
+      { studentId: S2, status: "ABSENT", note: "no-show" },
+    ]);
+    reg = await svc.getSittingAttendance(staff(), sit.id);
+    expect(reg).toMatchObject({ present: 1, absent: 1, unmarked: 0 });
+    expect(reg.rows.find((r) => r.studentId === S2)).toMatchObject({ status: "ABSENT", note: "no-show" });
+    expect(reg.rows.find((r) => r.studentId === S2)?.markedByName).toBe("Admin");
+
+    // Correct S2: the LATEST row wins, but the earlier one survives — so the record
+    // still shows the mark was changed, and by whom.
+    await svc.markSittingAttendance(staff(), sit.id, [{ studentId: S2, status: "PRESENT", note: "arrived late" }]);
+    reg = await svc.getSittingAttendance(staff(), sit.id);
+    expect(reg).toMatchObject({ present: 2, absent: 0, unmarked: 0 });
+    const rows = await admin.query(`SELECT status FROM exam_attendance WHERE "sittingId" = $1 AND "studentId" = $2 ORDER BY "createdAt"`, [sit.id, S2]);
+    expect(rows.rows.map((r) => (r as { status: string }).status)).toEqual(["ABSENT", "PRESENT"]);
+  });
+
+  it("does NOT write the daily class register — they answer different questions", async () => {
+    // The single most important boundary here. A pupil can be in school and miss
+    // ONE exam, so writing ABSENT into the day's register would overwrite the class
+    // teacher's mark with something it does not mean.
+    const sit = await svc.createSitting(staff(), { title: "No Bleed", date: planDay, startsAt: "04:00", endsAt: "04:30", hall: "Hall W", classId });
+    await svc.seatClass(staff(), sit.id, classId);
+    const before = await admin.query(`SELECT count(*)::int AS n FROM attendance_record WHERE "schoolId" = $1`, [SA]);
+    const beforeSessions = await admin.query(`SELECT count(*)::int AS n FROM attendance_session WHERE "schoolId" = $1`, [SA]);
+
+    await svc.markSittingAttendance(staff(), sit.id, [{ studentId: S1, status: "ABSENT" }]);
+
+    const after = await admin.query(`SELECT count(*)::int AS n FROM attendance_record WHERE "schoolId" = $1`, [SA]);
+    const afterSessions = await admin.query(`SELECT count(*)::int AS n FROM attendance_session WHERE "schoolId" = $1`, [SA]);
+    expect((after.rows[0] as { n: number }).n).toBe((before.rows[0] as { n: number }).n);
+    expect((afterSessions.rows[0] as { n: number }).n).toBe((beforeSessions.rows[0] as { n: number }).n);
+  });
+
+  it("refuses to mark someone who is not seated, or an unseated sitting at all", async () => {
+    const empty = await svc.createSitting(staff(), { title: "Unseated", date: planDay, startsAt: "03:00", endsAt: "03:30", hall: "Hall X" });
+    // Nobody seated: there is no roster to take a register against.
+    await expect(svc.markSittingAttendance(staff(), empty.id, [{ studentId: S1, status: "PRESENT" }])).rejects.toMatchObject({ status: 409 });
+
+    const sit = await svc.createSitting(staff(), { title: "Seated Only", date: planDay, startsAt: "02:00", endsAt: "02:30", hall: "Hall Y", classId });
+    await svc.seatClass(staff(), sit.id, classId);
+    // The seat plan defines who was EXPECTED; marking anyone else would invent an
+    // absence for someone never due to sit. TEACHER is a real in-tenant user, so
+    // this proves the check is "is seated", not merely "exists".
+    await expect(svc.markSittingAttendance(staff(), sit.id, [{ studentId: TEACHER, status: "ABSENT" }])).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("surfaces absent + unmarked counts on the exam-day board", async () => {
+    const board = await svc.examDay(staff(), planDay);
+    // "No Bleed" had one of two seated pupils marked absent, so one is still unmarked.
+    const noBleed = board.halls.find((h) => h.title === "No Bleed");
+    expect(noBleed).toMatchObject({ absent: 1, unmarked: 1 });
+    // "Register Test" was fully marked and everyone ended up present.
+    expect(board.halls.find((h) => h.title === "Register Test")).toMatchObject({ absent: 0, unmarked: 0 });
+    // A hall nobody has marked at all reports unmarked, not absent — "we haven't
+    // taken it" must never read as "they didn't come".
+    expect(board.halls.find((h) => h.title === "Seated Only")).toMatchObject({ absent: 0, unmarked: 2 });
+  });
+
+  it("prints recorded marks onto the hall pack so the paper round-trips", async () => {
+    const sit = await svc.createSitting(staff(), { title: "Printback", date: planDay, startsAt: "01:00", endsAt: "01:30", hall: "Hall Z2", classId });
+    await svc.seatClass(staff(), sit.id, classId);
+
+    // Blank sheet first — this is what you print to take the register on paper.
+    const blank = await svc.attendanceSheetPdf(staff(), sit.id);
+    expect(blank.buffer.subarray(0, 4).toString()).toBe("%PDF");
+
+    await svc.markSittingAttendance(staff(), sit.id, [{ studentId: S1, status: "ABSENT" }]);
+    const filed = await svc.attendanceSheetPdf(staff(), sit.id);
+    expect(filed.buffer.subarray(0, 4).toString()).toBe("%PDF");
+
+    // The reprint is the FILED record, so a recorded absence must reach the page —
+    // otherwise the archived copy always looks untaken. Asserted as a byte
+    // DIFFERENCE rather than a text search, because pdfkit Flate-compresses the
+    // content stream: grepping the buffer for "ABSENT" silently passes/fails on the
+    // compression setting rather than on whether the mark was rendered.
+    expect(filed.buffer.equals(blank.buffer)).toBe(false);
+    expect(filed.buffer.length).not.toBe(blank.buffer.length);
   });
 
   it("rejects a sitting whose end time is not after its start", async () => {

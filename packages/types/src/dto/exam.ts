@@ -49,6 +49,37 @@ export interface ExamSeatDto {
   seatNo: number;
 }
 
+/**
+ * One student's line on a sitting's register: their seat, plus whether they were
+ * marked. `status` is null when nobody has marked them yet — distinct from ABSENT,
+ * because "not yet taken" and "did not turn up" must never look the same.
+ */
+export interface ExamAttendanceRowDto {
+  studentId: string;
+  studentName: string;
+  seatNo: number;
+  /** PRESENT | ABSENT | null (unmarked). */
+  status: string | null;
+  note: string | null;
+  markedByName: string | null;
+  markedAt: string | null;
+}
+
+/** A sitting's register: every seated student, with totals. */
+export interface ExamAttendanceDto {
+  sittingId: string;
+  title: string;
+  hall: string;
+  date: string;
+  startsAt: string;
+  endsAt: string;
+  rows: ExamAttendanceRowDto[];
+  present: number;
+  absent: number;
+  /** Seated but not yet marked either way. */
+  unmarked: number;
+}
+
 /** An invigilator assignment. */
 export interface InvigilationDto {
   sittingId: string;
@@ -82,6 +113,10 @@ export interface ExamDayHallDto {
   noInvigilator: boolean;
   /** Seated nobody, so no student can sit it. */
   noSeats: boolean;
+  /** Marked absent on this sitting's own register (not the daily class register). */
+  absent: number;
+  /** Seated but not yet marked present or absent. */
+  unmarked: number;
   /** Over capacity, or a hall/time clash with another sitting the same day. */
   warning: string | null;
 }

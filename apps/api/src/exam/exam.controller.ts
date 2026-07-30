@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res } from "@
 import type { Response } from "express";
 import { z } from "zod";
 import { EXAM_PERMISSIONS } from "@sms/types";
-import type { ExamDayDto, ExamScheduleDto, ExamSittingDto, ExamSeatDto, InvigilationDto, MyExamDto } from "@sms/types";
+import type { ExamAttendanceDto, ExamDayDto, ExamScheduleDto, ExamSittingDto, ExamSeatDto, InvigilationDto, MyExamDto } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
@@ -47,6 +47,19 @@ const sittingPatchSchema = z
     classId: z.string().uuid().nullish(),
   })
   .strict();
+/** PRESENT | ABSENT only — the two things an invigilator can actually observe. */
+const examAttendanceSchema = z.object({
+  entries: z
+    .array(
+      z.object({
+        studentId: z.string().uuid(),
+        status: z.enum(["PRESENT", "ABSENT"]),
+        note: z.string().max(300).nullish(),
+      }),
+    )
+    .min(1)
+    .max(2000),
+});
 const scheduleSchema = z.object({ title: z.string().min(1).max(200), termId: z.string().uuid().nullish() });
 const seatSchema = z.object({ studentIds: z.array(z.string().uuid()).max(2000).optional(), classId: z.string().uuid().optional() });
 const invigSchema = z.object({ staffId: z.string().uuid(), lead: z.boolean().optional() });
@@ -162,6 +175,27 @@ export class ExamController {
   @RequirePermission(EXAM_PERMISSIONS.EXAM_MANAGE)
   seats(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<ExamSeatDto[]> {
     return this.exams.getSeatPlan(p, id);
+  }
+
+  /** The sitting's own register: every seated student with their latest mark.
+   *  `status: null` = not yet marked, which is NOT the same as absent. */
+  @Get(":id/attendance")
+  @RequirePermission(EXAM_PERMISSIONS.EXAM_MANAGE)
+  sittingAttendance(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<ExamAttendanceDto> {
+    return this.exams.getSittingAttendance(p, id);
+  }
+
+  /** Mark the sitting's register. APPEND-ONLY — a correction is a new row, and this
+   *  never writes the daily class register (a pupil can be in school and miss one
+   *  exam). Only seated students can be marked. */
+  @Post(":id/attendance")
+  @RequirePermission(EXAM_PERMISSIONS.EXAM_MANAGE)
+  markSittingAttendance(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(examAttendanceSchema)) body: z.infer<typeof examAttendanceSchema>,
+  ): Promise<ExamAttendanceDto> {
+    return this.exams.markSittingAttendance(p, id, body.entries);
   }
 
   /** The printable hall pack: seating chart + signature column + absentee tally.

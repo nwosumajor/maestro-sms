@@ -55,6 +55,14 @@ export class AttendanceController {
     return this.attendance.getClassAttendance(p, classId, date);
   }
 
+  /** Which of the caller's classes have no register for ?date= (default today).
+   *  Teacher -> their classes; whole-school staff -> every class. */
+  @Get("attendance/registers")
+  @RequirePermission(ATTENDANCE_PERMISSIONS.ATTENDANCE_READ)
+  registers(@CurrentPrincipal() p: Principal, @Query("date") date?: string) {
+    return this.attendance.getRegisterStatus(p, date);
+  }
+
   /** A student's attendance history. Relationship-scoped (staff/teacher/parent/self). */
   @Get("students/:studentId/attendance")
   @RequirePermission(ATTENDANCE_PERMISSIONS.ATTENDANCE_READ)
@@ -63,5 +71,12 @@ export class AttendanceController {
     @Param("studentId") studentId: string,
   ) {
     return this.attendance.getStudentAttendance(p, studentId);
+  }
+
+  /** A student's current-term totals (% present, absences, lates). Same scoping. */
+  @Get("students/:studentId/attendance/summary")
+  @RequirePermission(ATTENDANCE_PERMISSIONS.ATTENDANCE_READ)
+  studentSummary(@CurrentPrincipal() p: Principal, @Param("studentId") studentId: string) {
+    return this.attendance.getStudentSummary(p, studentId);
   }
 }

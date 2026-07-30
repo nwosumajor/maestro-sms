@@ -50,7 +50,13 @@ function makeService(f: Fakes) {
 
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
-  const notifications = { enqueue: jest.fn().mockResolvedValue({ id: "n-1" }) };
+  const notifications = {
+    enqueue: jest.fn().mockResolvedValue({ id: "n-1" }),
+    // Guardian alerts go out BATCHED: one call per distinct message with all its
+    // recipients, rather than a transaction + queue round-trip per guardian (which
+    // meant 40+ sequential awaits on the days a whole class is marked absent).
+    enqueueMany: jest.fn().mockResolvedValue({ created: 1, failed: 0 }),
+  };
   const workflow = { createRequest: jest.fn().mockResolvedValue({ id: "wf-1" }), submit: jest.fn().mockResolvedValue({ id: "wf-1" }) };
   const hooks = { onFinalized: jest.fn() };
   const service = new AttendanceService(db as never, audit as never, notifications as never, workflow as never, hooks as never);
@@ -129,9 +135,11 @@ describe("AttendanceService scoping", () => {
       date: recent(),
       records: [{ studentId: "stu-1", status: "ABSENT" }],
     });
-    expect(notifications.enqueue).toHaveBeenCalledWith(
+    // The guardian is in the recipient LIST, and the message names the status.
+    expect(notifications.enqueueMany).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ recipientId: "dad-1", type: "ATTENDANCE_ABSENCE" }),
+      ["dad-1"],
+      expect.objectContaining({ type: "ATTENDANCE_ABSENCE" }),
     );
   });
 
@@ -147,6 +155,7 @@ describe("AttendanceService scoping", () => {
       records: [{ studentId: "stu-1", status: "PRESENT" }],
     });
     expect(notifications.enqueue).not.toHaveBeenCalled();
+    expect(notifications.enqueueMany).not.toHaveBeenCalled();
   });
 
   it("a teacher who doesn't teach the class gets 404", async () => {
