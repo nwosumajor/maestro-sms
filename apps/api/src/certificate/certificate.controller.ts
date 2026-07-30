@@ -15,6 +15,12 @@ const issueSchema = z.object({
   title: z.string().max(160).optional(),
   body: z.string().max(600).optional(),
 });
+const issueClassSchema = z.object({
+  classId: z.string().uuid(),
+  type: z.string().min(1).max(40),
+  title: z.string().max(200).optional(),
+  body: z.string().max(2000).optional(),
+});
 
 @RequireModule(MODULES.CERTIFICATE)
 @Controller("certificates")
@@ -32,6 +38,21 @@ export class CertificateController {
     const { buffer, filename } = await this.certificates.issue(p, body);
     res.set({ "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${filename}"` });
     return new StreamableFile(buffer);
+  }
+
+  /**
+   * Register a certificate for every enrolled pupil in a class who does not already
+   * hold one of that type. Returns the class with an already-issued flag; the PDFs
+   * are still produced per pupil by POST /certificates/issue, which the console
+   * links to. Idempotent — pressing it twice never mints a second certificate.
+   */
+  @Post("issue-class")
+  @RequirePermission(CERTIFICATE_PERMISSIONS.CERTIFICATE_ISSUE)
+  issueClass(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(issueClassSchema)) body: z.infer<typeof issueClassSchema>,
+  ) {
+    return this.certificates.issueForClass(p, body);
   }
 
   @Get("history/:subjectId")

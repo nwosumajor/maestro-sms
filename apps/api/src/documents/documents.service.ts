@@ -50,6 +50,11 @@ export interface CreateDocumentInput {
   sizeBytes?: number;
 }
 
+/** Documents per page. A term's report-card run for a class is ~30-40 files. */
+const DOCUMENT_PAGE_SIZE = 50;
+/** Ceiling a caller can request per page. */
+const DOCUMENT_PAGE_MAX = 200;
+
 @Injectable()
 export class DocumentsService {
   private readonly logger = new Logger("Documents");
@@ -179,7 +184,22 @@ export class DocumentsService {
   }
 
   // --- reads -----------------------------------------------------------------
-  async listDocuments(p: Principal, opts?: { studentId?: string; type?: DocumentTypeValue }) {
+  /**
+   * Documents, filtered and PAGED.
+   *
+   * The type/student filters existed already and the page passed neither, so a
+   * school saw the 200 most recent documents in one list with everything older
+   * unreachable — the same ceiling the invoice list had. A vault that accumulates
+   * report cards and receipts every term passes 200 within a year.
+   *
+   * Cursor paging, not offset: an offset shifts when a document is uploaded
+   * mid-browse, silently skipping or repeating rows.
+   */
+  async listDocuments(
+    p: Principal,
+    opts?: { studentId?: string; type?: DocumentTypeValue; cursor?: string; limit?: number },
+  ): Promise<{ items: unknown[]; nextCursor: string | null }> {
+    const limit = Math.min(Math.max(opts?.limit ?? DOCUMENT_PAGE_SIZE, 1), DOCUMENT_PAGE_MAX);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const where: Record<string, unknown> = {};
       if (opts?.type) where.type = opts.type;
@@ -187,11 +207,20 @@ export class DocumentsService {
         if (opts?.studentId) where.studentId = opts.studentId;
       } else {
         const ids = await this.visibleStudentIds(tx, p);
-        if (ids.length === 0) return [];
+        if (ids.length === 0) return { items: [], nextCursor: null };
         where.studentId =
           opts?.studentId && ids.includes(opts.studentId) ? opts.studentId : { in: ids };
       }
-      return tx.document.findMany({ where, orderBy: { createdAt: "desc" }, take: 200 });
+      // One extra row tells us whether another page exists, without a second query.
+      const rows = (await tx.document.findMany({
+        where,
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: limit + 1,
+        ...(opts?.cursor ? { cursor: { id: opts.cursor }, skip: 1 } : {}),
+      })) as Array<{ id: string }>;
+      const hasMore = rows.length > limit;
+      const items = hasMore ? rows.slice(0, limit) : rows;
+      return { items, nextCursor: hasMore ? (items[items.length - 1]?.id ?? null) : null };
     });
   }
 

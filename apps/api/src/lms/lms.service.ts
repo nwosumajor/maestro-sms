@@ -12,7 +12,7 @@
 // =============================================================================
 
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { NON_STAFF_ROLE_NAMES, SEARCH_CAP, normaliseEntityCode, uniqueEntityCode, type UserKind } from "@sms/types";
+import { NON_STAFF_ROLE_NAMES, ROSTER_CAP, SEARCH_CAP, normaliseEntityCode, uniqueEntityCode, type UserKind } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -553,12 +553,41 @@ export class LmsService {
   /** The students the caller may see (id + name): self / their children / the
    *  students in classes they teach / ALL students by role (school-wide staff).
    *  Powers the student pickers in the SIS, attendance, and fees UIs. */
+  /**
+   * How many students the caller can see, as a COUNT.
+   *
+   * This exists so the roster LIST can finally be capped. The list was deliberately
+   * left uncapped because the admin dashboard derived its student tile from
+   * `.length` of it — so the whole roster was shipped to five pages (admin,
+   * students, certificates, documents, classes) to render one number and four
+   * pickers. Counting in Postgres removes the reason to ship it.
+   *
+   * Same definition of "student" as the list: by ROLE, not by enrolment, so a
+   * freshly created student who has not been placed in a class yet still counts —
+   * and it matches the billing seat count (one meaning of "student" platform-wide).
+   */
+  async countStudents(p: Principal): Promise<{ students: number }> {
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      if (this.isRosterWide(p)) {
+        const students = (await tx.user.count({
+          where: { roles: { some: { role: { name: "student" } } } },
+        })) as number;
+        return { students };
+      }
+      // Relationship-scoped callers: the count must match what listStudents would
+      // return them, so reuse it rather than re-deriving the membership rules and
+      // risking the two drifting apart.
+      const rows = await this.listStudents(p);
+      return { students: rows.length };
+    });
+  }
+
   async listStudents(p: Principal, q?: string) {
-    // scale: an optional `q` typeahead narrows the roster server-side and caps
-    // the result (SEARCH_CAP) so a large school's picker never ships thousands
-    // of rows. Without `q` the whole-school path stays UNCAPPED on purpose — the
-    // admin dashboard derives its student count from this list, so truncating it
-    // would undercount. Pure read → replica path (Phase 1).
+    // scale: an optional `q` typeahead narrows the roster server-side and caps the
+    // result (SEARCH_CAP). The unsearched whole-school path is ALSO capped now —
+    // it used to be uncapped on purpose, because the admin dashboard counted this
+    // list, but that tile reads countStudents() instead, so nothing depends on the
+    // list being complete any more. Pure read → replica path (Phase 1).
     const search = q?.trim();
     const nameFilter: { name?: { contains: string; mode: "insensitive" } } = search
       ? { name: { contains: search, mode: "insensitive" } }
@@ -578,7 +607,10 @@ export class LmsService {
           where: { roles: { some: { role: { name: "student" } } }, ...nameFilter },
           select: { id: true, name: true },
           orderBy: { name: "asc" },
-          ...searchLimit,
+          // Bounded either way: SEARCH_CAP when narrowing, ROSTER_CAP otherwise.
+          // Anything that needs a COUNT calls countStudents(); anything that needs a
+          // specific student searches for them.
+          ...(searchLimit.take ? searchLimit : { take: ROSTER_CAP }),
         });
       }
       // Relationship-scoped callers (teacher/parent/student): membership joins

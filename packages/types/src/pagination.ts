@@ -17,3 +17,13 @@ export const LIST_CAP = 500;
 /** Cap for a typeahead/search result set (people pickers). Small — the caller
  *  is expected to narrow with a query, not scroll thousands of rows. */
 export const SEARCH_CAP = 50;
+
+/**
+ * Ceiling on an UNSEARCHED roster listing.
+ *
+ * Comfortably past a class or a year group, so every legitimate "show me the list"
+ * still fits — but it means a picker can no longer be fed by dumping the whole
+ * school. Anything needing a total calls the count endpoint; anything needing a
+ * particular person searches (SEARCH_CAP).
+ */
+export const ROSTER_CAP = 500;

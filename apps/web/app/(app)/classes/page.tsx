@@ -36,7 +36,8 @@ export default async function ClassesPage() {
   // stays small in a large school).
   const [classes, students, staff, parents, subjects, promotions, sessions, rooms, holidays] = await Promise.all([
     apiGet<ClassDto[]>("/classes/mine"),
-    canWrite ? apiGet<{ id: string; name: string }[]>("/students") : Promise.resolve(null),
+    // Roster no longer prefetched: the enrol/link controls search on demand.
+    Promise.resolve(null),
     canWrite ? apiGet<{ id: string; name: string; roles: string[] }[]>("/users?kind=staff") : Promise.resolve(null),
     canWrite ? apiGet<{ id: string; name: string; roles: string[] }[]>("/users?kind=parent") : Promise.resolve(null),
     canManageSubjects ? apiGet<SubjectDto[]>("/subjects") : Promise.resolve(null),

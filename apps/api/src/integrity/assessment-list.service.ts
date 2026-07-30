@@ -37,7 +37,11 @@ export class AssessmentListService {
     return p.roles.some((r) => SCHOOL_WIDE_ROLES.has(r));
   }
 
-  async listAssessments(p: Principal): Promise<AssessmentSummaryDto[]> {
+  /** `classId` narrows the QUERY. A school-wide caller sees every assessment ever
+   *  created, capped to the most-recent page — so without a filter the older ones
+   *  are simply unreachable, and "which assessments does JSS2B have?" had no answer
+   *  short of scrolling. */
+  async listAssessments(p: Principal, filter: { classId?: string } = {}): Promise<AssessmentSummaryDto[]> {
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       let where: Record<string, unknown> = {};
       if (!this.schoolWide(p)) {
@@ -47,6 +51,9 @@ export class AssessmentListService {
       }
       // scale: school-wide staff see every assessment ever created — cap to the
       // most-recent page so a long-lived tenant can't force an unbounded scan.
+      // The class filter is ANDed on top of the scoping above, so it can only ever
+      // narrow what the caller was already entitled to see.
+      if (filter.classId) where = { AND: [where, { classId: filter.classId }] };
       const assessments = await tx.assessment.findMany({ where, orderBy: { createdAt: "desc" }, take: LIST_CAP });
       if (assessments.length === 0) return [];
       const ids = assessments.map((a) => a.id);

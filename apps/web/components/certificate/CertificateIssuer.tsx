@@ -4,6 +4,7 @@
 // generated PDF (the POST streams a PDF, so we fetch as a blob and save it).
 
 import * as React from "react";
+import { StudentPicker } from "@/components/people/StudentPicker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,7 +14,7 @@ import { personLabel } from "@/lib/people";
 
 type Person = { id: string; name: string; roles?: string[] };
 
-export function CertificateIssuer({ staff, students }: { staff: Person[]; students: Person[] }) {
+export function CertificateIssuer({ staff, students = [] }: { staff: Person[]; students?: Person[] }) {
   const [type, setType] = React.useState("ID_CARD");
   // Categorised person picker: choose Student or Staff, then a name from ONLY
   // that list (defaults to students — the overwhelmingly common case).
@@ -77,9 +78,15 @@ export function CertificateIssuer({ staff, students }: { staff: Person[]; studen
           </div>
           <div className="space-y-1.5">
             <Label>Person</Label>
-            <select value={subjectId} onChange={(e) => setSubjectId(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
-              {people.map((u) => <option key={u.id} value={u.id}>{personLabel(u)}</option>)}
-            </select>
+            {/* Students are searched (the roster no longer arrives whole); staff is a
+                short list, so it stays a plain select. */}
+            {category === "STUDENT" ? (
+              <StudentPicker value={subjectId} onChange={setSubjectId} seed={students} />
+            ) : (
+              <select value={subjectId} onChange={(e) => setSubjectId(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
+                {people.map((u) => <option key={u.id} value={u.id}>{personLabel(u)}</option>)}
+              </select>
+            )}
           </div>
           <Button disabled={busy || !subjectId} onClick={issue}>{busy ? "Generating…" : "Generate PDF"}</Button>
         </div>

@@ -5,6 +5,7 @@
 // hostel fees (which post as invoice line items alongside academic fees).
 
 import type { HostelDto, HostelAllocationDto, Serialized } from "@sms/types";
+import { StudentPicker } from "@/components/people/StudentPicker";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { postSms, sendSms } from "@/components/game/play-ui";
@@ -200,9 +201,9 @@ export function HostelManager({
             </div>
             <div className="space-y-1.5">
               <Label>Student</Label>
-              <select value={allocStudent} onChange={(e) => setAllocStudent(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
-                {students.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
+              {/* Searched, not enumerated: the roster list is bounded, so a
+    dropdown built from it would silently omit people. */}
+<StudentPicker value={allocStudent} onChange={(id) => setAllocStudent(id)} seed={students} />
             </div>
             <Button disabled={busy || !allocRoom || !allocStudent} onClick={() => run(() => postSms("hostels/allocations", { roomId: allocRoom, studentId: allocStudent }), "Student allocated.")}>Allocate</Button>
           </CardContent>

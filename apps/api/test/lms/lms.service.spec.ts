@@ -9,6 +9,7 @@
 //  - a non-member sees none, and roster access for a non-member is 404
 // =============================================================================
 
+import { SEARCH_CAP } from "@sms/types";
 import { LmsService } from "../../src/lms/lms.service";
 import type { Principal, TenantContext, TenantTx } from "../../src/integrity/integrity.foundation";
 
@@ -119,5 +120,64 @@ describe("LmsService relationship scoping", () => {
     (tx.class.findFirst as jest.Mock).mockResolvedValue({ id: "c1", name: "A" });
     (tx.classTeacher.findFirst as jest.Mock).mockResolvedValue(null); // not a teacher of it
     await expect(service.getClassRoster(principal(["teacher"]), "c1")).rejects.toThrow(/not found/i);
+  });
+});
+
+// ===========================================================================
+// The roster: a COUNT, and a list that is finally bounded
+// ===========================================================================
+// listStudents was deliberately uncapped because the admin dashboard derived its
+// student tile from `.length` of it — so the whole roster was shipped to five
+// pages to render one number and four pickers. These pin the replacement: the
+// count is a COUNT, and the list is bounded whether or not it is searched.
+describe("LmsService roster", () => {
+  const mk = (tx: Record<string, unknown>) => {
+    const db = {
+      runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx as unknown as TenantTx),
+      runAsTenantReadOnly: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx as unknown as TenantTx),
+    };
+    return new LmsService(db as never, { record: jest.fn() } as never);
+  };
+
+  it("counts whole-school students in SQL, loading no rows", async () => {
+    const count = jest.fn().mockResolvedValue(912);
+    const findMany = jest.fn();
+    const out = await mk({ user: { count, findMany } }).countStudents(principal(["school_admin"]));
+    expect(out).toEqual({ students: 912 });
+    expect(findMany).not.toHaveBeenCalled();
+    // By ROLE, not by enrolment — a student not yet placed in a class still counts,
+    // and this matches the billing seat definition.
+    expect(JSON.stringify(count.mock.calls[0][0])).toContain("student");
+  });
+
+  it("BOUNDS the unsearched roster — the cap the count made safe to add", async () => {
+    const findMany = jest.fn().mockResolvedValue([]);
+    await mk({ user: { findMany, count: jest.fn() } }).listStudents(principal(["school_admin"]));
+    const arg = findMany.mock.calls[0][0] as { take?: number };
+    expect(typeof arg.take).toBe("number");
+    expect(arg.take).toBeGreaterThan(0);
+  });
+
+  it("a search narrows to the tighter SEARCH_CAP, not the roster cap", async () => {
+    const findMany = jest.fn().mockResolvedValue([]);
+    await mk({ user: { findMany, count: jest.fn() } }).listStudents(principal(["school_admin"]), "ada");
+    const arg = findMany.mock.calls[0][0] as { take: number; where: { name?: { contains: string } } };
+    expect(arg.where.name?.contains).toBe("ada");
+    expect(arg.take).toBe(SEARCH_CAP);
+  });
+
+  it("a relationship-scoped caller's count matches what they can actually list", async () => {
+    // Derived from listStudents rather than re-implementing the membership rules,
+    // so the tile and the page cannot drift apart.
+    const tx = {
+      user: { count: jest.fn(), findMany: jest.fn().mockResolvedValue([{ id: "s1" }, { id: "s2" }]) },
+      classTeacher: { findMany: jest.fn().mockResolvedValue([{ classId: "c1" }]) },
+      enrollment: { findMany: jest.fn().mockResolvedValue([{ studentId: "s1" }, { studentId: "s2" }]) },
+      parentChild: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    const out = await mk(tx).countStudents(principal(["teacher"]));
+    expect(out.students).toBe(2);
+    // The whole-school COUNT path must NOT be used for a scoped caller.
+    expect(tx.user.count).not.toHaveBeenCalled();
   });
 });

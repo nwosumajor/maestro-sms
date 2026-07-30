@@ -6,6 +6,7 @@
 // transport fees (billed alongside academic fees).
 
 import type { VehicleDto, TransportRouteDto, TransportAssignmentDto, Serialized } from "@sms/types";
+import { StudentPicker } from "@/components/people/StudentPicker";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { postSms, sendSms } from "@/components/game/play-ui";
@@ -197,9 +198,9 @@ export function TransportManager({
             </div>
             <div className="space-y-1.5">
               <Label>Student</Label>
-              <select value={aStudent} onChange={(e) => setAStudent(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
-                {students.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
+              {/* Searched, not enumerated: the roster list is bounded, so a
+    dropdown built from it would silently omit people. */}
+<StudentPicker value={aStudent} onChange={(id) => setAStudent(id)} seed={students} />
             </div>
             <Button disabled={busy || !aRoute || !aStudent} onClick={() => run(() => postSms("transport/assignments", { routeId: aRoute, passengerId: aStudent, passengerType: "STUDENT" }), "Assigned.")}>Assign</Button>
           </CardContent>

@@ -1,6 +1,7 @@
 "use client";
 
 import type { IdNameDto, Serialized } from "@sms/types";
+import { StudentPicker } from "@/components/people/StudentPicker";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -24,7 +25,7 @@ function fileToBase64(file: File): Promise<string> {
 
 const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
 
-export function DocumentUpload({ students }: { students: Student[] }) {
+export function DocumentUpload({ students = [] }: { students?: Student[] }) {
   const router = useRouter();
   const [studentId, setStudentId] = React.useState(students[0]?.id ?? "");
   const [type, setType] = React.useState<(typeof TYPES)[number]>("REPORT_CARD");
@@ -83,10 +84,9 @@ export function DocumentUpload({ students }: { students: Student[] }) {
         <form onSubmit={submit} className="flex flex-wrap items-end gap-3">
           <div className="space-y-1.5">
             <Label htmlFor="d-student">Student</Label>
-            <select id="d-student" value={studentId} onChange={(e) => setStudentId(e.target.value)}
-              className="h-9 rounded-md border border-input bg-background px-3 text-sm">
-              {students.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
+            {/* Typeahead, not a dropdown of the whole school. This page used to
+                receive every student just to fill this one control. */}
+            <StudentPicker value={studentId} onChange={setStudentId} seed={students} />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="d-type">Type</Label>

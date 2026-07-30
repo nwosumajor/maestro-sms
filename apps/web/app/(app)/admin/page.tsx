@@ -21,7 +21,10 @@ export default async function AdminPage() {
   if (!hasPermission(user.permissions, "fee.manage")) redirect("/dashboard");
 
   const [students, classes, invoices, workflows] = await Promise.all([
-    apiGet<{ id: string }[]>("/students"),
+    // The COUNT, not the roster. This tile counting `.length` of /students is why
+    // that list had to stay uncapped — and why the whole roster was shipped to
+    // five pages to render one number.
+    apiGet<{ students: number }>("/students/count"),
     apiGet<{ id: string }[]>("/classes/mine"),
     // The SUMMARY aggregate, not a page of rows. Summing rows in Node only ever
     // covered the most recent page, so "Total invoiced" quietly under-reported once
@@ -37,7 +40,7 @@ export default async function AdminPage() {
   const pendingApprovals = (workflows ?? []).filter((w) => w.state === "PENDING_REVIEW").length;
 
   const stats = [
-    { label: "Students", value: String((students ?? []).length), href: "/students" },
+    { label: "Students", value: String(students?.students ?? 0), href: "/students" },
     { label: "Classes", value: String((classes ?? []).length), href: "/classes" },
     { label: "Outstanding", value: money(outstandingMinor, currency), href: "/fees" },
     { label: "Collected", value: money(collectedMinor, currency), href: "/fees" },

@@ -276,6 +276,14 @@ export class LmsController {
     return this.lms.listStudents(p, q);
   }
 
+  /** How many students the caller can see. Exists so nothing has to COUNT the list
+   *  above — which is why that list had to stay uncapped. */
+  @Get("students/count")
+  @RequirePermission(LMS_PERMISSIONS.CLASS_READ)
+  studentCount(@CurrentPrincipal() p: Principal): Promise<{ students: number }> {
+    return this.lms.countStudents(p);
+  }
+
   /** Staff user directory (id + name + roles) for admin pickers. class.write-gated.
    *  `?kind=staff|teacher|parent` narrows by role category so pickers never mix
    *  students into a staff list (omit for the full directory, e.g. role admin). */

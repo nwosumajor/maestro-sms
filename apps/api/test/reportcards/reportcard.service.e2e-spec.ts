@@ -99,7 +99,8 @@ d("ReportCardService generate() persists to the Document Vault (real Postgres)",
     expect(buffer.subarray(0, 5).toString()).toBe("%PDF-"); // the caller still gets their own copy immediately
 
     // The student did NOT generate it, yet can list + download their own vault copy.
-    const mine = await documents.listDocuments(student(), { studentId: STUDENT });
+    const mine = (await documents.listDocuments(student(), { studentId: STUDENT }))
+      .items as Array<{ id: string; type: string; status: string }>;
     const rc = mine.find((doc: { type: string }) => doc.type === "REPORT_CARD");
     expect(rc).toBeDefined();
     expect(rc!.status).toBe("UPLOADED");
@@ -109,7 +110,8 @@ d("ReportCardService generate() persists to the Document Vault (real Postgres)",
   });
 
   it("the GUARDIAN can retrieve the same document independently", async () => {
-    const mine = await documents.listDocuments(guardian(), { studentId: STUDENT });
+    const mine = (await documents.listDocuments(guardian(), { studentId: STUDENT }))
+      .items as Array<{ type: string }>;
     expect(mine.some((doc: { type: string }) => doc.type === "REPORT_CARD")).toBe(true);
   });
 
@@ -122,7 +124,8 @@ d("ReportCardService generate() persists to the Document Vault (real Postgres)",
   });
 
   it("an UNRELATED parent never sees it (404-not-403 cross-family isolation)", async () => {
-    const theirs = await documents.listDocuments(otherParent(), { studentId: STUDENT });
+    const theirs = (await documents.listDocuments(otherParent(), { studentId: STUDENT }))
+      .items as Array<{ type: string }>;
     expect(theirs.filter((doc: { type: string }) => doc.type === "REPORT_CARD")).toHaveLength(0);
   });
 });
