@@ -19,7 +19,17 @@ import {
 import { Prisma } from "@sms/db";
 import { randomUUID } from "node:crypto";
 import { CBT_ANSWER_RELEASE_CHAIN } from "@sms/types";
-import { CBT_PERMISSIONS } from "@sms/types";
+import {
+  CBT_PERMISSIONS,
+  CBT_BLUEPRINT_MAX_ITEMS,
+  CBT_QUESTION_TYPES,
+  CBT_THEORY_ANSWER_MAX,
+  CBT_INTEGRITY_BATCH_MAX,
+  CBT_INTEGRITY_FOCUS_ALERT_COUNT,
+  CBT_INTEGRITY_FOCUS_ALERT_MS,
+  CBT_INTEGRITY_LONG_ABSENCE_MS,
+  gradeComponentMax,
+} from "@sms/types";
 import type {
   CbtAuthoringOptionsDto,
   CbtBankDto,
@@ -27,6 +37,12 @@ import type {
   CbtExamResultsDto,
   CbtSittingViewDto,
   CbtBankQuestionsDto,
+  CbtBlueprintItem,
+  CbtAvailabilityDto,
+  CbtMarkingQueueDto,
+  CbtMarkingProgressDto,
+  CbtIntegrityEventInput,
+  CbtIntegritySummaryDto,
 } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -39,6 +55,8 @@ import {
 } from "../integrity/integrity.foundation";
 import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
+import { TermResultService } from "../gradebook/term-result.service";
+import { NotificationService } from "../notifications/notification.service";
 
 /** Grace after the duration elapses before a late save/submit is refused. */
 const SUBMIT_GRACE_MS = 30_000;
@@ -51,6 +69,16 @@ interface QuestionInput {
   prompt: string;
   choices: string[];
   answerIndex: number;
+  /** Curriculum level this question targets; null/undefined = any level. */
+  level?: number | null;
+  /** Optional syllabus topic, used by exam blueprints. */
+  topic?: string | null;
+  /** OBJECTIVE (default) or THEORY. */
+  type?: string | null;
+  /** THEORY only: marks this answer can score. */
+  maxMarks?: number | null;
+  /** THEORY only: the mark scheme. Marker-only, never sent to a candidate. */
+  markGuide?: string | null;
 }
 
 @Injectable()
@@ -59,6 +87,10 @@ export class CbtService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly workflow: WorkflowService,
+    // One-way dependency: CBT pushes scores INTO the gradebook. The gradebook
+    // knows nothing about CBT, so there is no cycle.
+    private readonly termResults: TermResultService,
+    private readonly notifications: NotificationService,
     hooks: WorkflowHooksService,
   ) {
     // Maker-checker reactors, run in the SAME tenant tx as the workflow
@@ -147,6 +179,84 @@ export class CbtService {
     return (await this.taughtSubjectIds(tx, p)).has(bank.subjectId);
   }
 
+  /** The curriculum level of a class (Class.level). Null when the class has no
+   *  level set, or no class is targeted — which means "draw from everything". */
+  private async classLevel(tx: TenantTx, classId: string | null): Promise<number | null> {
+    if (!classId) return null;
+    const k = await tx.class.findFirst({ where: { id: classId }, select: { level: true } });
+    return k?.level ?? null;
+  }
+
+  /** The question pool for a bank at a level: questions for THAT level plus
+   *  any-level ones. A null level (unlevelled class) draws from the whole bank. */
+  private poolWhere(bankId: string, level: number | null, topic?: string) {
+    const base: Record<string, unknown> = { bankId };
+    if (level !== null) base.OR = [{ level }, { level: null }];
+    if (topic !== undefined) base.topic = topic;
+    return base;
+  }
+
+  /**
+   * Validate an exam blueprint against the pool that actually exists. Every line
+   * must name a topic with ENOUGH questions at this level, so a paper can never
+   * promise 10 "Waves" questions when the bank holds 4. Returns null when no
+   * blueprint was supplied (draw at random instead).
+   */
+  private async validateBlueprint(
+    tx: TenantTx,
+    bankId: string,
+    level: number | null,
+    items?: CbtBlueprintItem[] | null,
+  ): Promise<CbtBlueprintItem[] | null> {
+    if (!items || items.length === 0) return null;
+    if (items.length > CBT_BLUEPRINT_MAX_ITEMS) {
+      throw new BadRequestException(`A blueprint may have at most ${CBT_BLUEPRINT_MAX_ITEMS} topics`);
+    }
+    const seen = new Set<string>();
+    const out: CbtBlueprintItem[] = [];
+    for (const raw of items) {
+      const topic = (raw.topic ?? "").trim();
+      if (!topic) throw new BadRequestException("Every blueprint line needs a topic");
+      if (seen.has(topic.toLowerCase())) throw new BadRequestException(`Topic "${topic}" appears twice in the blueprint`);
+      seen.add(topic.toLowerCase());
+      if (!Number.isInteger(raw.count) || raw.count < 1) throw new BadRequestException(`"${topic}" needs a positive question count`);
+      const have = await tx.cbtQuestion.count({ where: this.poolWhere(bankId, level, topic) });
+      if (have < raw.count) {
+        throw new ConflictException(
+          `"${topic}" has only ${have} question(s) for this class's level — asked for ${raw.count}.`,
+        );
+      }
+      out.push({ topic, count: raw.count });
+    }
+    return out;
+  }
+
+  /**
+   * What a teacher can actually draw for a given bank + class. Powers the exam
+   * form so the counts are visible BEFORE the paper is defined, instead of the
+   * teacher discovering a shortfall at creation time.
+   */
+  async availability(p: Principal, bankId: string, classId?: string | null): Promise<CbtAvailabilityDto> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const bank = await tx.cbtQuestionBank.findFirst({ where: { id: bankId } });
+      if (!bank) throw new NotFoundException("Bank not found");
+      const canEdit = p.permissions.includes(CBT_PERMISSIONS.CBT_MANAGE) && (await this.canTouchBank(tx, p, bank));
+      if (!canEdit && !p.permissions.includes(CBT_PERMISSIONS.CBT_REVIEW)) throw new NotFoundException("Bank not found");
+      const level = await this.classLevel(tx, classId ?? null);
+      const where = this.poolWhere(bankId, level);
+      const [available, grouped] = await Promise.all([
+        tx.cbtQuestion.count({ where }),
+        // ONE grouped aggregate for every topic — never a query per topic.
+        tx.cbtQuestion.groupBy({ by: ["topic"], where, _count: { _all: true } }),
+      ]);
+      const byTopic = (grouped as { topic: string | null; _count: { _all: number } }[])
+        .filter((g) => !!g.topic)
+        .map((g) => ({ topic: g.topic as string, available: g._count._all }))
+        .sort((a, b) => a.topic.localeCompare(b.topic));
+      return { level, available, byTopic };
+    });
+  }
+
   // --- banks & questions (staff) ---------------------------------------------
 
   /** What the caller may author against. School-wide staff: every subject and
@@ -157,12 +267,12 @@ export class CbtService {
       if (this.isSchoolWide(p)) {
         const [subjects, classes] = await Promise.all([
           tx.subject.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
-          tx.class.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
+          tx.class.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, level: true } }),
         ]);
         return {
           schoolWide: true,
           subjects,
-          classes: classes.map((c) => ({ id: c.id, name: c.name, subjectIds: null })),
+          classes: classes.map((c) => ({ id: c.id, name: c.name, level: c.level ?? null, subjectIds: null })),
         };
       }
       const rows = await tx.classSubjectTeacher.findMany({
@@ -170,14 +280,14 @@ export class CbtService {
         select: {
           subjectId: true,
           subject: { select: { name: true } },
-          class: { select: { id: true, name: true } },
+          class: { select: { id: true, name: true, level: true } },
         },
       });
       const subjects = new Map<string, { id: string; name: string }>();
-      const classes = new Map<string, { id: string; name: string; subjectIds: string[] }>();
+      const classes = new Map<string, { id: string; name: string; level: number | null; subjectIds: string[] }>();
       for (const r of rows) {
         subjects.set(r.subjectId, { id: r.subjectId, name: r.subject.name });
-        const c = classes.get(r.class.id) ?? { id: r.class.id, name: r.class.name, subjectIds: [] };
+        const c = classes.get(r.class.id) ?? { id: r.class.id, name: r.class.name, level: r.class.level ?? null, subjectIds: [] };
         if (!c.subjectIds.includes(r.subjectId)) c.subjectIds.push(r.subjectId);
         classes.set(r.class.id, c);
       }
@@ -315,9 +425,19 @@ export class CbtService {
 
   async addQuestions(p: Principal, bankId: string, questions: QuestionInput[]): Promise<{ added: number }> {
     for (const q of questions) {
-      if (q.choices.length < 2 || q.choices.length > 6) throw new BadRequestException("Each question needs 2–6 choices");
-      if (!Number.isInteger(q.answerIndex) || q.answerIndex < 0 || q.answerIndex >= q.choices.length) {
-        throw new BadRequestException("answerIndex must point at one of the choices");
+      const type = q.type ?? "OBJECTIVE";
+      if (!(CBT_QUESTION_TYPES as readonly string[]).includes(type)) throw new BadRequestException("Unknown question type");
+      if (type === "THEORY") {
+        // A theory question has no key to check — it needs a mark ceiling instead,
+        // and choices/answerIndex are meaningless.
+        if (!q.prompt?.trim()) throw new BadRequestException("A theory question needs a prompt");
+        const max = q.maxMarks ?? 1;
+        if (!Number.isInteger(max) || max < 1 || max > 100) throw new BadRequestException("maxMarks must be 1–100");
+      } else {
+        if (q.choices.length < 2 || q.choices.length > 6) throw new BadRequestException("Each question needs 2–6 choices");
+        if (!Number.isInteger(q.answerIndex) || q.answerIndex < 0 || q.answerIndex >= q.choices.length) {
+          throw new BadRequestException("answerIndex must point at one of the choices");
+        }
       }
     }
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
@@ -332,6 +452,12 @@ export class CbtService {
           prompt: q.prompt.trim(),
           choices: q.choices as unknown as Prisma.InputJsonValue,
           answerIndex: q.answerIndex,
+          level: q.level ?? null,
+          topic: q.topic?.trim() || null,
+          type: q.type ?? "OBJECTIVE",
+          // Objective questions are always worth 1 mark; theory carries its own.
+          maxMarks: (q.type ?? "OBJECTIVE") === "THEORY" ? (q.maxMarks ?? 1) : 1,
+          markGuide: (q.type ?? "OBJECTIVE") === "THEORY" ? (q.markGuide?.trim() || null) : null,
         })),
       });
       await this.log(tx, p, "cbt.bank.questions_add", bankId, { added: questions.length });
@@ -347,10 +473,17 @@ export class CbtService {
       bankId: string;
       title: string;
       classId?: string | null;
+      /** Section A size (auto-marked). Falls back to questionCount for callers
+       *  that predate sections. */
+      objectiveCount?: number;
+      /** Section B size (marked by hand). 0/omitted = objective-only paper. */
+      theoryCount?: number;
       questionCount: number;
       durationMinutes: number;
       startAt: string;
       endAt: string;
+      /** Optional per-topic paper definition; overrides questionCount. */
+      blueprint?: CbtBlueprintItem[] | null;
     },
   ): Promise<CbtExamDto> {
     const startAt = new Date(input.startAt);
@@ -380,15 +513,58 @@ export class CbtService {
         const klass = await tx.class.findFirst({ where: { id: input.classId }, select: { id: true } });
         if (!klass) throw new NotFoundException("Class not found");
       }
-      const available = await tx.cbtQuestion.count({ where: { bankId: input.bankId } });
-      if (available === 0) throw new ConflictException("The bank has no questions yet");
+      // LEVEL TARGETING: an exam draws only questions written for THIS class's
+      // curriculum level (or tagged "any level"). That is what lets one Physics
+      // bank serve SS1A/SS2A/SS3A without an SS1 pupil ever drawing an SS3
+      // question — a bank/class mismatch becomes impossible rather than merely
+      // discouraged.
+      const level = await this.classLevel(tx, input.classId ?? null);
+      // TWO SECTIONS, sized and validated INDEPENDENTLY against their own pools.
+      // An objective-only paper (theoryCount 0) is the default and behaves exactly
+      // as before; adding theory makes the paper's total the sum of both sections.
+      const wantObjective = Math.max(0, input.objectiveCount ?? input.questionCount ?? 0);
+      const wantTheory = Math.max(0, input.theoryCount ?? 0);
+      if (wantObjective + wantTheory < 1) throw new BadRequestException("A paper needs at least one question");
+      const [haveObjective, haveTheory] = await Promise.all([
+        tx.cbtQuestion.count({ where: { ...this.poolWhere(input.bankId, level), type: "OBJECTIVE" } }),
+        tx.cbtQuestion.count({ where: { ...this.poolWhere(input.bankId, level), type: "THEORY" } }),
+      ]);
+      if (wantObjective > 0 && haveObjective === 0) {
+        throw new ConflictException(
+          level === null
+            ? "The bank has no objective questions yet"
+            : `The bank has no objective questions for this class's level — tag questions for level ${level}, or leave their level blank to use them for any class.`,
+        );
+      }
+      if (wantTheory > 0 && haveTheory === 0) {
+        throw new ConflictException(
+          level === null
+            ? "The bank has no theory questions yet"
+            : `The bank has no theory questions for this class's level — add theory questions tagged for level ${level}.`,
+        );
+      }
+      // BLUEPRINT governs SECTION A's topic mix; validated against what exists so a
+      // paper definition can never promise coverage the bank cannot deliver.
+      const blueprint = await this.validateBlueprint(tx, input.bankId, level, input.blueprint);
+      const objectiveCount = blueprint
+        ? blueprint.reduce((n, b) => n + b.count, 0)
+        : Math.min(wantObjective, haveObjective);
+      const theoryCount = Math.min(wantTheory, haveTheory);
+      const questionCount = objectiveCount + theoryCount;
+      // Stamp the term so a paper marked weeks later still files under the term it
+      // was SET in, not whichever term is current when the marks are recorded.
+      const currentTerm = await tx.term.findFirst({ where: { isCurrent: true }, select: { id: true } });
       const exam = await tx.cbtExam.create({
         data: {
           schoolId: p.schoolId,
           bankId: input.bankId,
           title: input.title.trim(),
           classId: input.classId ?? null,
-          questionCount: Math.min(Math.max(1, input.questionCount), available),
+          objectiveCount,
+          theoryCount,
+          questionCount,
+          termId: currentTerm?.id ?? null,
+          ...(blueprint ? { blueprint: blueprint as unknown as Prisma.InputJsonValue } : {}),
           durationMinutes: input.durationMinutes,
           startAt,
           endAt,
@@ -589,15 +765,47 @@ export class CbtService {
 
       let sitting = await tx.cbtSitting.findFirst({ where: { examId, studentId: p.userId } });
       if (!sitting) {
-        // Server-side sample: shuffle the bank, take N — the order is FIXED for
-        // the sitting so refreshes can't fish for new questions.
-        const pool = await tx.cbtQuestion.findMany({ where: { bankId: exam.bankId }, select: { id: true } });
-        const ids = pool.map((q) => q.id);
-        for (let i = ids.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [ids[i], ids[j]] = [ids[j]!, ids[i]!];
+        // Server-side sample. The order is FIXED for the sitting so refreshes
+        // can't fish for new questions.
+        //
+        // Two things narrow the pool before anything is drawn:
+        //   LEVEL — only questions for this class's curriculum level (or tagged
+        //     "any level"), so one shared bank can serve SS1A/SS2A/SS3A and an SS1
+        //     pupil never receives an SS3 question;
+        //   TYPE  — Section A is drawn from OBJECTIVE and Section B from THEORY,
+        //     each independently, and concatenated in that order so the paper reads
+        //     as two sections rather than an interleaved mix.
+        const level = await this.classLevel(tx, exam.classId ?? null);
+        const blueprint = Array.isArray(exam.blueprint) ? (exam.blueprint as unknown as CbtBlueprintItem[]) : null;
+        const pick = (arr: string[], n: number) => {
+          for (let i = arr.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [arr[i], arr[j]] = [arr[j]!, arr[i]!];
+          }
+          return arr.slice(0, n);
+        };
+        const drawFrom = async (type: "OBJECTIVE" | "THEORY", n: number, topic?: string) => {
+          if (n <= 0) return [];
+          const rows = await tx.cbtQuestion.findMany({
+            where: { ...this.poolWhere(exam.bankId, level, topic), type },
+            select: { id: true },
+          });
+          const ids = rows.map((q) => q.id);
+          return exam.shuffle ? pick(ids, n) : ids.sort().slice(0, n);
+        };
+        // SECTION A — objective. A blueprint governs its topic mix.
+        let sectionA: string[] = [];
+        if (blueprint) {
+          for (const line of blueprint) sectionA.push(...(await drawFrom("OBJECTIVE", line.count, line.topic)));
+          if (exam.shuffle) sectionA = pick(sectionA, sectionA.length);
+          else sectionA.sort();
+        } else {
+          const wantA = exam.objectiveCount > 0 ? exam.objectiveCount : exam.questionCount - exam.theoryCount;
+          sectionA = await drawFrom("OBJECTIVE", wantA);
         }
-        const sampled = exam.shuffle ? ids.slice(0, exam.questionCount) : ids.sort().slice(0, exam.questionCount);
+        // SECTION B — theory (empty for an objective-only paper).
+        const sectionB = await drawFrom("THEORY", exam.theoryCount);
+        const sampled = [...sectionA, ...sectionB];
         sitting = await tx.cbtSitting.create({
           data: {
             id: randomUUID(),
@@ -697,6 +905,493 @@ export class CbtService {
     });
   }
 
+  // --- theory: candidate answers + human marking --------------------------------
+
+  /**
+   * Save a candidate's THEORY answer. Upserts ONE row keyed on
+   * (sittingId, questionId) — deliberately not a field inside the sitting's
+   * `answers` JSON, which would rewrite every other essay on each autosave and
+   * make "all answers to Q3" unqueryable.
+   */
+  async answerTheory(p: Principal, sittingId: string, questionId: string, text: string): Promise<{ ok: true }> {
+    if (typeof text !== "string") throw new BadRequestException("Answer must be text");
+    if (text.length > CBT_THEORY_ANSWER_MAX) {
+      throw new BadRequestException(`An answer may be at most ${CBT_THEORY_ANSWER_MAX} characters`);
+    }
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const sitting = await tx.cbtSitting.findFirst({ where: { id: sittingId, studentId: p.userId } });
+      if (!sitting) throw new NotFoundException("Sitting not found");
+      if (sitting.status !== "IN_PROGRESS") throw new ConflictException("This sitting is finished");
+      const exam = await tx.cbtExam.findFirst({ where: { id: sitting.examId } });
+      if (!exam) throw new NotFoundException("Sitting not found");
+      if (this.timeUp(sitting.startedAt, exam, new Date())) {
+        await this.finalize(tx, p, sitting.id, "EXPIRED");
+        throw new ConflictException("Time is up — the sitting has been submitted automatically");
+      }
+      const order = sitting.questionIds as unknown as string[];
+      if (!order.includes(questionId)) throw new BadRequestException("Not one of your questions");
+      const q = await tx.cbtQuestion.findFirst({ where: { id: questionId }, select: { type: true } });
+      if (q?.type !== "THEORY") throw new BadRequestException("That question is not a theory question");
+      await tx.cbtTheoryAnswer.upsert({
+        where: { sittingId_questionId: { sittingId, questionId } },
+        // A re-save NEVER touches the mark: a marker's work is not undone by the
+        // candidate (and after submission the sitting is no longer IN_PROGRESS).
+        update: { text },
+        create: {
+          schoolId: p.schoolId,
+          examId: sitting.examId,
+          sittingId,
+          questionId,
+          studentId: p.userId,
+          text,
+        },
+      });
+      return { ok: true as const };
+    });
+  }
+
+  /**
+   * The VERTICAL marking queue: every candidate's answer to ONE question of one
+   * exam. Marking a class question-by-question (rather than script-by-script) means
+   * the mark scheme is internalised once and marks stay comparable — and it is a
+   * single indexed read on (examId, questionId) rather than a scan of sittings.
+   *
+   * ANONYMOUS by default: candidates appear as a stable pseudonym, so a mark is not
+   * coloured by whose script it is. Names appear once the question is fully marked,
+   * or earlier if school-wide staff deliberately reveal them (audited).
+   */
+  async markingQueue(
+    p: Principal,
+    examId: string,
+    questionId: string,
+    opts: { reveal?: boolean } = {},
+  ): Promise<CbtMarkingQueueDto> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const { question } = await this.requireMarkable(tx, p, examId, questionId);
+      const rows = await tx.cbtTheoryAnswer.findMany({
+        where: { examId, questionId },
+        orderBy: { createdAt: "asc" },
+        take: 500,
+        select: { id: true, studentId: true, text: true, marksAwarded: true, comment: true, markedAt: true },
+      });
+      const marked = rows.filter((r) => r.marksAwarded !== null).length;
+      // Reveal when marking for this question is COMPLETE (bias can no longer
+      // apply), or when school-wide staff deliberately ask.
+      const complete = rows.length > 0 && marked === rows.length;
+      const reveal = complete || (!!opts.reveal && this.isSchoolWide(p));
+      const names = reveal
+        ? new Map(
+            (
+              await tx.user.findMany({
+                where: { id: { in: [...new Set(rows.map((r) => r.studentId))] } },
+                select: { id: true, name: true },
+              })
+            ).map((u: { id: string; name: string }) => [u.id, u.name] as const),
+          )
+        : new Map<string, string>();
+      if (opts.reveal && this.isSchoolWide(p) && !complete) {
+        await this.log(tx, p, "cbt.marking.reveal", examId, { questionId });
+      }
+      return {
+        examId,
+        questionId,
+        prompt: question.prompt,
+        markGuide: question.markGuide,
+        maxMarks: question.maxMarks,
+        marked,
+        total: rows.length,
+        anonymous: !reveal,
+        answers: rows.map((r, i) => ({
+          answerId: r.id,
+          candidateLabel: `Candidate ${i + 1}`,
+          studentName: reveal ? (names.get(r.studentId) ?? null) : null,
+          text: r.text,
+          marksAwarded: r.marksAwarded,
+          comment: r.comment,
+          markedAt: r.markedAt,
+        })),
+      };
+    });
+  }
+
+  /** Award a mark. Human-only, bounded by the question's maxMarks, audited. */
+  async markAnswer(p: Principal, answerId: string, marks: number, comment?: string | null): Promise<{ ok: true }> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const ans = await tx.cbtTheoryAnswer.findFirst({
+        where: { id: answerId },
+        select: { id: true, examId: true, questionId: true },
+      });
+      if (!ans) throw new NotFoundException("Answer not found");
+      const { question } = await this.requireMarkable(tx, p, ans.examId, ans.questionId);
+      if (!Number.isInteger(marks) || marks < 0 || marks > question.maxMarks) {
+        throw new BadRequestException(`Marks must be a whole number from 0 to ${question.maxMarks}`);
+      }
+      await tx.cbtTheoryAnswer.update({
+        where: { id: answerId },
+        data: { marksAwarded: marks, comment: comment?.trim() || null, markedById: p.userId, markedAt: new Date() },
+      });
+      await this.log(tx, p, "cbt.marking.mark", answerId, { examId: ans.examId, questionId: ans.questionId, marks });
+      return { ok: true as const };
+    });
+  }
+
+  /**
+   * Per-question marking progress for an exam. `provisional` is the gate on
+   * publishing: while any theory answer is unmarked, a script's stored score is
+   * only its objective part and must not be presented as final.
+   */
+  async markingProgress(p: Principal, examId: string): Promise<CbtMarkingProgressDto> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const exam = await tx.cbtExam.findFirst({ where: { id: examId } });
+      if (!exam) throw new NotFoundException("Exam not found");
+      const bank = await tx.cbtQuestionBank.findFirst({ where: { id: exam.bankId } });
+      if (!bank || !(await this.canTouchBank(tx, p, bank))) throw new NotFoundException("Exam not found");
+      const rows = await tx.cbtTheoryAnswer.findMany({
+        where: { examId },
+        select: { questionId: true, marksAwarded: true },
+      });
+      if (rows.length === 0) return { examId, provisional: false, questions: [] };
+      const ids = [...new Set(rows.map((r) => r.questionId))];
+      const questions = await tx.cbtQuestion.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, prompt: true, maxMarks: true },
+      });
+      const byId = new Map(questions.map((q) => [q.id, q] as const));
+      const out = ids.map((qid) => {
+        const mine = rows.filter((r) => r.questionId === qid);
+        const q = byId.get(qid);
+        return {
+          questionId: qid,
+          prompt: q?.prompt ?? "",
+          maxMarks: q?.maxMarks ?? 1,
+          marked: mine.filter((r) => r.marksAwarded !== null).length,
+          total: mine.length,
+        };
+      });
+      return { examId, provisional: out.some((q) => q.marked < q.total), questions: out };
+    });
+  }
+
+  /**
+   * ONE PRESS: record this exam's scores into every candidate's gradesheet.
+   *
+   * The score recorded is the WHOLE paper — Section A (auto-marked, 1 per correct)
+   * plus Section B (the marks a human awarded) — scaled to the gradesheet's exam
+   * component. An objective-only paper simply has no Section B, so its result
+   * captures only the objective score.
+   *
+   * Refuses while marking is incomplete: a provisional total must never be filed
+   * as a term grade. It writes through the SAME merge-aware component path the LMS
+   * push uses, so the other three components (midterm / assignment / class note)
+   * are preserved and the row stays DRAFT for the normal publish chain.
+   *
+   * Efficient by construction: three set-queries (sittings, theory marks, question
+   * maxima) and one write per candidate — never a query per student.
+   */
+  async recordExamGrades(
+    p: Principal,
+    examId: string,
+  ): Promise<{ recorded: number; skipped: number; examMax: number }> {
+    const plan = await this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      const exam = await tx.cbtExam.findFirst({ where: { id: examId } });
+      if (!exam) throw new NotFoundException("Exam not found");
+      const bank = await tx.cbtQuestionBank.findFirst({ where: { id: exam.bankId } });
+      if (!bank || !p.permissions.includes(CBT_PERMISSIONS.CBT_MANAGE) || !(await this.canTouchBank(tx, p, bank))) {
+        throw new NotFoundException("Exam not found");
+      }
+      if (!exam.classId) throw new BadRequestException("This paper is not aimed at a class, so it has no gradesheet to write to");
+      if (!bank.subjectId) throw new BadRequestException("This paper's bank has no subject, so it has no gradesheet column");
+      const termId = exam.termId ?? (await tx.term.findFirst({ where: { isCurrent: true }, select: { id: true } }))?.id;
+      if (!termId) throw new BadRequestException("No term is set for this paper and no current term is configured");
+
+      // Only finished scripts are gradeable.
+      const sittings = await tx.cbtSitting.findMany({
+        where: { examId, status: { in: ["SUBMITTED", "EXPIRED"] } },
+        select: { id: true, studentId: true, score: true, questionIds: true },
+      });
+      if (sittings.length === 0) throw new ConflictException("No submitted scripts yet");
+
+      // ONE read for every theory mark on this paper.
+      const theory = await tx.cbtTheoryAnswer.findMany({
+        where: { examId },
+        select: { sittingId: true, questionId: true, marksAwarded: true },
+      });
+      if (theory.some((t) => t.marksAwarded === null)) {
+        throw new ConflictException(
+          "Some theory answers are still unmarked — finish marking before recording, so a provisional total is never filed as a grade.",
+        );
+      }
+      // ONE read for the question maxima, to compute the paper's ceiling.
+      const qIds = [...new Set(sittings.flatMap((sg) => (sg.questionIds as unknown as string[]) ?? []))];
+      const questions = qIds.length
+        ? await tx.cbtQuestion.findMany({ where: { id: { in: qIds } }, select: { id: true, type: true, maxMarks: true } })
+        : [];
+      const maxOf = new Map(questions.map((q) => [q.id, q.type === "THEORY" ? q.maxMarks : 1] as const));
+
+      const marksBySitting = new Map<string, number>();
+      for (const t of theory) {
+        marksBySitting.set(t.sittingId, (marksBySitting.get(t.sittingId) ?? 0) + (t.marksAwarded ?? 0));
+      }
+      const rows = sittings.map((sg) => {
+        const order = (sg.questionIds as unknown as string[]) ?? [];
+        // The paper's ceiling for THIS script (papers are sampled per sitting).
+        const paperMax = order.reduce((n, qid) => n + (maxOf.get(qid) ?? 1), 0);
+        const objective = sg.score ?? 0;
+        const theoryMarks = marksBySitting.get(sg.id) ?? 0;
+        return { studentId: sg.studentId, raw: objective + theoryMarks, paperMax };
+      });
+      return { classId: exam.classId, subjectId: bank.subjectId, termId, rows };
+    });
+
+    // Scale to the gradesheet's exam component and write through the merge-aware
+    // path (one call per candidate; each is an upsert, so re-pressing is safe).
+    const examMax = gradeComponentMax("exam");
+    let recorded = 0;
+    let skipped = 0;
+    for (const r of plan.rows) {
+      if (r.paperMax <= 0) {
+        skipped += 1;
+        continue;
+      }
+      const scaled = Math.round((r.raw / r.paperMax) * examMax * 100) / 100;
+      try {
+        await this.termResults.applyExamComponent(p, {
+          classId: plan.classId,
+          subjectId: plan.subjectId,
+          termId: plan.termId,
+          studentId: r.studentId,
+          exam: Math.min(scaled, examMax),
+        });
+        recorded += 1;
+      } catch {
+        // A candidate who has left the class or doesn't offer the subject for the
+        // term is skipped rather than failing the whole batch.
+        skipped += 1;
+      }
+    }
+    await this.db.runAsTenant(this.ctx(p), (tx) =>
+      this.log(tx, p, "cbt.exam.grades.record", examId, { recorded, skipped, examMax }),
+    );
+    return { recorded, skipped, examMax };
+  }
+
+  // --- exam integrity ------------------------------------------------------------
+
+  /**
+   * Record client-observed integrity events for the caller's OWN sitting.
+   *
+   * These are SIGNALS, not verdicts (Golden Rule #8): nothing here penalises,
+   * voids or auto-submits. They are written to the shared integrity_signal table,
+   * so they inherit the NDPR retention purge that governs all telemetry on minors.
+   *
+   * Once a sitting crosses the alert threshold, the subject teacher, head teacher
+   * and principal are notified ONCE — per sitting, not per event, or a restless
+   * candidate would bury the inbox that is supposed to make this reviewable.
+   */
+  async recordIntegrityEvents(
+    p: Principal,
+    sittingId: string,
+    events: CbtIntegrityEventInput[],
+  ): Promise<{ recorded: number; focusLosses: number; awayMs: number; alerted: boolean }> {
+    if (!Array.isArray(events) || events.length === 0) return { recorded: 0, focusLosses: 0, awayMs: 0, alerted: false };
+    if (events.length > CBT_INTEGRITY_BATCH_MAX) throw new BadRequestException("Too many events in one batch");
+
+    const outcome = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      // OWN sitting only — 404-not-403, and only while it is live.
+      const sitting = await tx.cbtSitting.findFirst({
+        where: { id: sittingId, studentId: p.userId },
+        select: { id: true, examId: true, status: true },
+      });
+      if (!sitting) throw new NotFoundException("Sitting not found");
+      if (sitting.status !== "IN_PROGRESS") return null; // nothing to record on a closed script
+
+      const rows = events
+        .filter((e) => e.type === "FOCUS_LOSS" || e.type === "PASTE")
+        .map((e) => {
+          const awayMs = Math.max(0, Math.min(Number(e.awayMs ?? 0), 6 * 60 * 60 * 1000));
+          const long = e.type === "FOCUS_LOSS" && awayMs >= CBT_INTEGRITY_LONG_ABSENCE_MS;
+          return {
+            schoolId: p.schoolId,
+            sittingId,
+            type: e.type as never,
+            // A single long absence is more interesting than a brief blur.
+            severity: (long ? "HIGH" : "LOW") as never,
+            source: "CLIENT" as never,
+            // CLIENT-observed and trivially bypassable, so never presented as
+            // certain — the confidence says so explicitly.
+            confidence: 0.5,
+            evidence: (e.type === "FOCUS_LOSS"
+              ? { awayMs }
+              : { chars: Math.max(0, Math.min(Number(e.chars ?? 0), 100_000)) }) as unknown as Prisma.InputJsonValue,
+            detector: "cbt-exam-room",
+          };
+        });
+      if (rows.length === 0) return null;
+      await tx.integritySignal.createMany({ data: rows });
+
+      // Totals for THIS sitting, from the table (not the batch) — the client may
+      // have posted several batches and could be restarted mid-exam.
+      const all = await tx.integritySignal.findMany({
+        where: { sittingId },
+        select: { type: true, evidence: true },
+      });
+      const focus = all.filter((r) => r.type === "FOCUS_LOSS");
+      const focusLosses = focus.length;
+      const awayMs = focus.reduce((n, r) => n + Number((r.evidence as { awayMs?: number } | null)?.awayMs ?? 0), 0);
+      return { recorded: rows.length, examId: sitting.examId, focusLosses, awayMs };
+    });
+    if (!outcome) return { recorded: 0, focusLosses: 0, awayMs: 0, alerted: false };
+
+    const crossed =
+      outcome.focusLosses >= CBT_INTEGRITY_FOCUS_ALERT_COUNT || outcome.awayMs >= CBT_INTEGRITY_FOCUS_ALERT_MS;
+    let alerted = false;
+    if (crossed) alerted = await this.alertIntegrity(p, sittingId, outcome.examId, outcome.focusLosses, outcome.awayMs);
+    return { recorded: outcome.recorded, focusLosses: outcome.focusLosses, awayMs: outcome.awayMs, alerted };
+  }
+
+  /**
+   * Notify the people who can act: the subject teacher for that class, plus the
+   * head teacher and principal. ONCE per sitting — guarded by an audit-log marker,
+   * so repeated batches (or a page reload) can't re-alert.
+   */
+  private async alertIntegrity(
+    p: Principal,
+    sittingId: string,
+    examId: string,
+    focusLosses: number,
+    awayMs: number,
+  ): Promise<boolean> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      // Idempotence: the marker IS the "already alerted" record.
+      const already = await tx.auditLog.findFirst({
+        where: { action: "cbt.integrity.alert", entityId: sittingId },
+        select: { id: true },
+      });
+      if (already) return false;
+
+      const exam = await tx.cbtExam.findFirst({
+        where: { id: examId },
+        select: { id: true, title: true, classId: true, bankId: true },
+      });
+      if (!exam) return false;
+      const bank = exam.bankId
+        ? await tx.cbtQuestionBank.findFirst({ where: { id: exam.bankId }, select: { subjectId: true } })
+        : null;
+      const student = await tx.user.findFirst({ where: { id: p.userId }, select: { name: true } });
+
+      const recipients = new Set<string>();
+      // The subject teacher for this class — the person who set the paper.
+      if (exam.classId && bank?.subjectId) {
+        const cst = await tx.classSubjectTeacher.findMany({
+          where: { classId: exam.classId, subjectId: bank.subjectId },
+          select: { teacherId: true },
+        });
+        for (const t of cst) recipients.add(t.teacherId);
+      }
+      // Head teacher + principal — oversight, per the request.
+      const leaders = await tx.user.findMany({
+        where: { roles: { some: { role: { name: { in: ["head_teacher", "principal"] } } } } },
+        select: { id: true },
+      });
+      for (const l of leaders) recipients.add(l.id);
+      recipients.delete(p.userId); // never notify the candidate as a reviewer
+
+      const seconds = Math.round(awayMs / 1000);
+      for (const recipientId of recipients) {
+        await this.notifications
+          .enqueue(
+            { schoolId: p.schoolId, userId: p.userId },
+            {
+              recipientId,
+              type: "INTEGRITY_SIGNAL",
+              title: `Exam integrity — ${exam.title}`,
+              body:
+                `${student?.name ?? "A candidate"} left the exam ${focusLosses} time(s), ${seconds}s away in total. ` +
+                `These are signals for your review, not a finding of malpractice — open the exam's integrity report to see the evidence.`,
+              channels: ["EMAIL"],
+            },
+          )
+          .catch(() => undefined);
+      }
+      await this.log(tx, p, "cbt.integrity.alert", sittingId, { examId, focusLosses, awayMs, notified: recipients.size });
+      return true;
+    });
+  }
+
+  /**
+   * Per-candidate integrity summary for an exam (staff). One read of the signals
+   * plus one batched name lookup — never a query per candidate.
+   */
+  async examIntegrity(p: Principal, examId: string): Promise<CbtIntegritySummaryDto[]> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const exam = await tx.cbtExam.findFirst({ where: { id: examId }, select: { id: true, bankId: true } });
+      if (!exam) throw new NotFoundException("Exam not found");
+      const bank = await tx.cbtQuestionBank.findFirst({ where: { id: exam.bankId } });
+      if (!bank || !p.permissions.includes(CBT_PERMISSIONS.CBT_MANAGE) || !(await this.canTouchBank(tx, p, bank))) {
+        throw new NotFoundException("Exam not found");
+      }
+      const sittings = await tx.cbtSitting.findMany({ where: { examId }, select: { id: true, studentId: true } });
+      if (sittings.length === 0) return [];
+      const signals = await tx.integritySignal.findMany({
+        where: { sittingId: { in: sittings.map((sg) => sg.id) } },
+        select: { sittingId: true, type: true, evidence: true },
+      });
+      const alerts = await tx.auditLog.findMany({
+        where: { action: "cbt.integrity.alert", entityId: { in: sittings.map((sg) => sg.id) } },
+        select: { entityId: true },
+      });
+      const alertedIds = new Set(alerts.map((a: { entityId: string }) => a.entityId));
+      const names = new Map(
+        (
+          await tx.user.findMany({
+            where: { id: { in: [...new Set(sittings.map((sg) => sg.studentId))] } },
+            select: { id: true, name: true },
+          })
+        ).map((u: { id: string; name: string }) => [u.id, u.name] as const),
+      );
+      return sittings
+        .map((sg) => {
+          const mine = signals.filter((x) => x.sittingId === sg.id);
+          const focus = mine.filter((x) => x.type === "FOCUS_LOSS");
+          return {
+            sittingId: sg.id,
+            studentId: sg.studentId,
+            studentName: names.get(sg.studentId) ?? "Unknown",
+            focusLosses: focus.length,
+            awayMs: focus.reduce((n, r) => n + Number((r.evidence as { awayMs?: number } | null)?.awayMs ?? 0), 0),
+            pastes: mine.filter((x) => x.type === "PASTE").length,
+            alerted: alertedIds.has(sg.id),
+          };
+        })
+        // Most concerning first, so a reviewer sees the outliers immediately.
+        .sort((a, b) => b.awayMs - a.awayMs || b.focusLosses - a.focusLosses);
+    });
+  }
+
+  /** Shared gate: the caller may mark this exam's question, and it IS theory. */
+  private async requireMarkable(
+    tx: TenantTx,
+    p: Principal,
+    examId: string,
+    questionId: string,
+  ): Promise<{ question: { prompt: string; markGuide: string | null; maxMarks: number } }> {
+    const exam = await tx.cbtExam.findFirst({ where: { id: examId }, select: { id: true, bankId: true } });
+    if (!exam) throw new NotFoundException("Exam not found");
+    const bank = await tx.cbtQuestionBank.findFirst({ where: { id: exam.bankId } });
+    // Marking is AUTHORING-level access: cbt.manage plus the bank's own scope, so a
+    // teacher marks only their own subject's papers. 404-not-403 otherwise.
+    if (!bank || !p.permissions.includes(CBT_PERMISSIONS.CBT_MANAGE) || !(await this.canTouchBank(tx, p, bank))) {
+      throw new NotFoundException("Exam not found");
+    }
+    const question = await tx.cbtQuestion.findFirst({
+      where: { id: questionId },
+      select: { prompt: true, markGuide: true, maxMarks: true, type: true, bankId: true },
+    });
+    if (!question || question.bankId !== exam.bankId) throw new NotFoundException("Question not found");
+    if (question.type !== "THEORY") throw new BadRequestException("That question is auto-marked, not marked by hand");
+    return { question };
+  }
+
   // --- internals ---------------------------------------------------------------
 
   private timeUp(startedAt: Date, exam: { durationMinutes: number; endAt: Date }, now: Date): boolean {
@@ -715,16 +1410,26 @@ export class CbtService {
     const answers = (sitting.answers as Record<string, number> | null) ?? {};
     const questions = await tx.cbtQuestion.findMany({
       where: { id: { in: order } },
-      select: { id: true, answerIndex: true },
+      select: { id: true, answerIndex: true, type: true, maxMarks: true },
     });
-    const correctOf = new Map(questions.map((q) => [q.id, q.answerIndex]));
-    const score = order.reduce((n, qid) => (answers[qid] != null && answers[qid] === correctOf.get(qid) ? n + 1 : n), 0);
+    // Only OBJECTIVE questions auto-mark. Theory marks are awarded by a human
+    // later (Golden Rule #8), so the stored score is the objective part and the
+    // sitting reads as PROVISIONAL until every theory answer has been marked.
+    const objective = questions.filter((q) => q.type !== "THEORY");
+    const correctOf = new Map(objective.map((q) => [q.id, q.answerIndex]));
+    const score = objective.reduce(
+      (n, q) => (answers[q.id] != null && answers[q.id] === correctOf.get(q.id) ? n + 1 : n),
+      0,
+    );
+    // `total` is the whole paper's mark ceiling: 1 per objective + maxMarks per
+    // theory, so a partially-marked script never looks like a low score.
+    const total = questions.reduce((n, q) => n + (q.type === "THEORY" ? q.maxMarks : 1), 0);
     const updated = await tx.cbtSitting.updateMany({
       where: { id: sittingId, status: "IN_PROGRESS" },
-      data: { status, submittedAt: new Date(), score, total: order.length },
+      data: { status, submittedAt: new Date(), score, total },
     });
     if (updated.count > 0) {
-      await this.log(tx, p, "cbt.sitting.finalize", sittingId, { status, score, total: order.length });
+      await this.log(tx, p, "cbt.sitting.finalize", sittingId, { status, score, total });
     }
   }
 
@@ -749,12 +1454,25 @@ export class CbtService {
     const order = sitting.questionIds as string[];
     const rows = await tx.cbtQuestion.findMany({
       where: { id: { in: order } },
-      select: { id: true, prompt: true, choices: true, answerIndex: true },
+      // NOTE: markGuide is deliberately NOT selected — a mark scheme must never
+      // travel on a candidate-facing shape, not even to be dropped later.
+      select: { id: true, prompt: true, choices: true, answerIndex: true, type: true, maxMarks: true },
     });
     const byId = new Map(rows.map((q) => [q.id, q]));
     const finished = sitting.status !== "IN_PROGRESS";
     const released = exam.answerRelease === "RELEASED";
     const deadline = Math.min(sitting.startedAt.getTime() + exam.durationMinutes * 60_000, exam.endAt.getTime());
+    // Theory answers live in their own rows (one per question), so the sitter's
+    // saved text comes from there rather than the sitting's JSON blob.
+    const theoryRows = await tx.cbtTheoryAnswer.findMany({
+      where: { sittingId: sitting.id },
+      select: { questionId: true, text: true, marksAwarded: true },
+    });
+    const theoryAnswers: Record<string, string> = {};
+    for (const r of theoryRows) theoryAnswers[r.questionId] = r.text;
+    // PROVISIONAL: the stored score is only the objective part until every theory
+    // answer has been marked by a human.
+    const provisional = finished && theoryRows.some((r) => r.marksAwarded === null);
     void p;
     return {
       sittingId: sitting.id,
@@ -768,6 +1486,8 @@ export class CbtService {
       total: finished ? sitting.total : null,
       answers: (sitting.answers as Record<string, number> | null) ?? {},
       answersReleased: released,
+      theoryAnswers,
+      provisional,
       questions: order
         .map((qid) => byId.get(qid))
         .filter((q): q is NonNullable<typeof q> => Boolean(q))
@@ -778,6 +1498,10 @@ export class CbtService {
           // SERVER AUTHORITY: the key is withheld until the sitting is closed
           // AND the exam's release was approved by the principal.
           answerIndex: finished && released ? q.answerIndex : null,
+          type: q.type,
+          maxMarks: q.maxMarks,
+          // NOTE: markGuide is deliberately absent — a mark scheme is
+          // marker-only and must never reach a candidate.
         })),
     };
   }

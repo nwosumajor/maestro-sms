@@ -16,6 +16,7 @@ export * from "./scan";
 export * from "./dto/member-scan";
 export * from "./admission-number";
 export * from "./entity-code";
+export * from "./meeting-link";
 export * from "./grading";
 export * from "./lms-badges";
 export * from "./dto/subscription";

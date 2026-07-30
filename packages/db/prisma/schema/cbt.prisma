@@ -41,12 +41,29 @@ model CbtQuestion {
   choices     Json
   /// Index into choices — SERVER-ONLY until the sitting is submitted.
   answerIndex Int
+  /// Curriculum level this question targets (Class.level). NULL = any level, so
+  /// one subject bank serves SS1/SS2/SS3 without duplicating shared questions.
+  level       Int?
+  /// Optional syllabus topic ("Waves"), so an exam can draw a BALANCED paper.
+  topic       String?
+  /// OBJECTIVE (choices + answerIndex, auto-marked) or THEORY (open response,
+  /// marked by a human). Both live in the SAME bank and share level/topic.
+  type        String   @default("OBJECTIVE")
+  /// Marks a THEORY answer can score. Objective questions are worth 1.
+  maxMarks    Int      @default(1)
+  /// The mark scheme. MARKER-ONLY — never serialized to a candidate, and withheld
+  /// from read-only cbt.review reviewers exactly like answerIndex.
+  markGuide   String?
   createdAt   DateTime @default(now())
 
   school School          @relation(fields: [schoolId], references: [id])
   bank   CbtQuestionBank @relation(fields: [bankId], references: [id], onDelete: Cascade)
 
   @@index([schoolId, bankId])
+  // Sampling filters by (bank, level) and the blueprint counts by topic — keep
+  // both indexed so a growing bank never turns a sitting start into a scan.
+  @@index([bankId, level])
+  @@index([bankId, topic])
   @@map("cbt_question")
 }
 
@@ -59,6 +76,13 @@ model CbtExam {
   /// Restrict sitting to one class; null = any cbt.take holder in the school.
   classId              String?   @db.Uuid
   /// Questions sampled per sitting (min of this and the bank's size).
+  /// SECTION A size: how many OBJECTIVE questions this paper draws.
+  objectiveCount       Int       @default(0)
+  /// SECTION B size: how many THEORY questions this paper draws. 0 = the paper is
+  /// objective-only, and its result captures only the objective score.
+  theoryCount          Int       @default(0)
+  /// Total questions in the paper = objectiveCount + theoryCount. Kept in step by
+  /// the service; retained because sittings and DTOs already key on it.
   questionCount        Int
   durationMinutes      Int
   startAt              DateTime
@@ -80,9 +104,17 @@ model CbtExam {
   releasedById         String?   @db.Uuid
   /// Shuffle question order per sitting.
   shuffle              Boolean   @default(true)
+  /// Optional paper BLUEPRINT: [{topic, count}]. When set, each sitting draws
+  /// that many questions per topic, so every pupil gets identical syllabus
+  /// coverage with different questions. NULL = draw questionCount at random.
+  blueprint            Json?
   /// When set, this exam is a SCHOLARSHIP qualification exam materialized by the
   /// platform's announce step: only students holding a QUALIFIED application for
   /// that program may see/sit it (checked in listExams/startSitting).
+  /// The term this paper belongs to, stamped at creation (mirrors Assessment).
+  /// Recording scores to the gradesheet needs it, and resolving "current term" at
+  /// record time would file a late-marked paper under the wrong term.
+  termId               String?   @db.Uuid
   scholarshipProgramId String?   @db.Uuid
   createdById          String    @db.Uuid
   createdAt            DateTime  @default(now())
@@ -90,9 +122,11 @@ model CbtExam {
 
   school   School          @relation(fields: [schoolId], references: [id])
   bank     CbtQuestionBank @relation(fields: [bankId], references: [id])
+  term     Term?           @relation(fields: [termId], references: [id])
   sittings CbtSitting[]
 
   @@index([schoolId, status])
+  @@index([schoolId, termId])
   @@map("cbt_exam")
 }
 
@@ -115,10 +149,57 @@ model CbtSitting {
   score       Int?
   total       Int?
 
+  theoryAnswers CbtTheoryAnswer[]
+  integritySignals IntegritySignal[]
   school School  @relation(fields: [schoolId], references: [id])
   exam   CbtExam @relation(fields: [examId], references: [id], onDelete: Cascade)
 
   @@unique([examId, studentId])
   @@index([schoolId, examId])
   @@map("cbt_sitting")
+}
+
+/// One candidate's answer to one THEORY question, plus the mark a human awarded.
+///
+/// Deliberately a TABLE, not a field in the sitting's `answers` JSON blob. Three
+/// reasons, all of which bite as cohorts grow:
+///   1. autosave writes ONE row instead of rewriting every essay in the blob;
+///   2. VERTICAL marking ("every answer to Q3") is an indexed query — impossible
+///      against a blob, which would mean reading and parsing every sitting;
+///   3. a mark needs its own marker, timestamp and comment, with an audit trail.
+///
+/// Marks are never computed: `marksAwarded` is null until a person sets it, and a
+/// sitting's score stays PROVISIONAL while any answer is unmarked (Golden Rule #8).
+model CbtTheoryAnswer {
+  id        String @db.Uuid @id @default(uuid())
+  schoolId  String @db.Uuid
+
+  /// Denormalised from the sitting so the marking queue can filter on
+  /// (examId, questionId) directly, without joining every sitting.
+  examId     String @db.Uuid
+  sittingId  String @db.Uuid
+  questionId String @db.Uuid
+  /// The candidate (scalar audit field; marking is anonymous by default).
+  studentId  String @db.Uuid
+
+  text String
+
+  /// Null until a human marks it. 0..question.maxMarks, enforced in the service.
+  marksAwarded Int?
+  comment      String?
+  markedById   String?   @db.Uuid
+  markedAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school  School      @relation(fields: [schoolId], references: [id])
+  sitting CbtSitting  @relation(fields: [sittingId], references: [id])
+
+  /// One answer per (sitting, question) — autosave UPSERTS on this.
+  @@unique([sittingId, questionId])
+  /// The vertical-marking query.
+  @@index([examId, questionId])
+  @@index([schoolId])
+  @@map("cbt_theory_answer")
 }

@@ -91,7 +91,12 @@ export class AssessmentListService {
       const nameById = new Map(students.map((u) => [u.id, u.name]));
       const signals = await tx.integritySignal.findMany({ where: { submissionId: { in: subs.map((s) => s.id) } }, select: { submissionId: true } });
       const signalCount = new Map<string, number>();
-      for (const sig of signals) signalCount.set(sig.submissionId, (signalCount.get(sig.submissionId) ?? 0) + 1);
+      // submissionId is nullable now (a signal may belong to a CBT sitting instead),
+      // but this query filtered on submissionId so every row here has one.
+      for (const sig of signals) {
+        if (!sig.submissionId) continue;
+        signalCount.set(sig.submissionId, (signalCount.get(sig.submissionId) ?? 0) + 1);
+      }
       await this.audit.record(
         { actorId: p.userId, action: "integrity.submissions.list", entity: "assessment", entityId: assessmentId, schoolId: p.schoolId, metadata: { count: subs.length } },
         tx,

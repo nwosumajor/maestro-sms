@@ -205,7 +205,10 @@ model IntegritySignal {
   id       String @id @default(uuid()) @db.Uuid
   schoolId String @db.Uuid
 
-  submissionId String                  @db.Uuid
+  /// ONE of submissionId / sittingId is set (DB CHECK). LMS submissions and CBT
+  /// sittings share this table deliberately: CBT telemetry then inherits the same
+  /// NDPR retention purge, RLS and consent gating rather than needing copies.
+  submissionId String?                  @db.Uuid
   type         IntegritySignalType
   severity     IntegritySignalSeverity
   source       IntegritySignalSource
@@ -222,9 +225,17 @@ model IntegritySignal {
   createdAt DateTime @default(now())
 
   school     School     @relation(fields: [schoolId], references: [id])
-  submission Submission @relation(fields: [submissionId], references: [id])
+  submission Submission? @relation(fields: [submissionId], references: [id])
+  /// CBT path — a candidate's sitting.
+  sittingId  String?    @db.Uuid
+  sitting    CbtSitting? @relation(fields: [sittingId], references: [id])
 
   @@index([schoolId])
+  @@index([sittingId])
+  // The DAILY NDPR retention purge deletes by (schoolId, createdAt < cutoff).
+  // Without this it seq-scans the whole table every night — and CBT focus-loss
+  // telemetry now makes this the highest-volume table in the system.
+  @@index([schoolId, createdAt])
   @@index([schoolId, submissionId])
   @@index([schoolId, submissionId, type])
   @@map("integrity_signal")

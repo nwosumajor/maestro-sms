@@ -1,6 +1,8 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@sms/db";
 import { expandOccurrences } from "@sms/types";
+import { MEETING_PROVIDERS, isMeetingJoinOpen, meetingJoinOpensAt, normalizeMeetingUrl } from "@sms/types";
+import type { MeetingProvider } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -30,6 +32,8 @@ type EventRow = {
   recurrence: string;
   recurrenceUntil: Date | null;
   recurrenceDays: unknown;
+  provider: string | null;
+  joinUrl: string | null;
   createdAt: Date;
 };
 
@@ -45,6 +49,9 @@ export interface EventInput {
   recurrenceUntil?: string | null;
   /** WEEKLY only, e.g. ["MON","WED"]. Empty ⇒ the start date's own weekday. */
   recurrenceDays?: string[];
+  /** Optional VIDEO meeting (staff meetings, parents evening). Server-validated. */
+  provider?: string | null;
+  joinUrl?: string | null;
 }
 
 @Injectable()
@@ -109,7 +116,27 @@ export class EventsService {
     });
   }
 
+  /**
+   * Validate an optional video link: a known provider AND a URL that survives the
+   * shared validator (https + per-provider host allowlist), so a "Teams" event can
+   * never be stored pointing at another domain. One without the other is a client
+   * error, not a silently half-configured meeting.
+   */
+  private validateLink(provider?: string | null, joinUrl?: string | null): { provider: string | null; joinUrl: string | null } {
+    const hasP = !!provider && provider.trim() !== "";
+    const hasU = !!joinUrl && joinUrl.trim() !== "";
+    if (!hasP && !hasU) return { provider: null, joinUrl: null };
+    if (hasP !== hasU) throw new BadRequestException("A video meeting needs both a provider and a join link");
+    if (!(MEETING_PROVIDERS as readonly string[]).includes(provider as string)) {
+      throw new BadRequestException("Unknown meeting provider");
+    }
+    const url = normalizeMeetingUrl(provider as MeetingProvider, joinUrl as string);
+    if (!url) throw new BadRequestException(`That is not a valid https ${provider} meeting link`);
+    return { provider: provider as string, joinUrl: url };
+  }
+
   async createEvent(p: Principal, input: EventInput) {
+    const link = this.validateLink(input.provider, input.joinUrl);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const e = await tx.schoolEvent.create({
         data: {

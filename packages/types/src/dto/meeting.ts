@@ -10,6 +10,14 @@ export interface MeetingSlotDto {
   location: string | null;
   note: string | null;
   active: boolean;
+  /** Video meeting, when the host attached one. */
+  provider: string | null;
+  /** Released only inside the join window (or to the host); null otherwise. */
+  joinUrl: string | null;
+  /** True when the link is live right now. */
+  joinOpen: boolean;
+  /** When the Join button starts working (null if there is no link). */
+  joinOpensAt: Date | null;
 }
 
 /** A parent's booking of a slot. */

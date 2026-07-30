@@ -112,6 +112,7 @@ d("RLS cross-tenant isolation", () => {
   const cbtQuestionA = randomUUID();
   const cbtExamA = randomUUID();
   const cbtSittingA = randomUUID();
+  const cbtTheoryAnswerA = randomUUID();
   // Ultimate: ONLY the tenant-scoped governance/bridge tables are isolation-tested.
   // The arena tables (ultimate_competition / ultimate_participant) are
   // CROSS-TENANT by design (RLS-exempt — see 21_ultimate_rls.sql) and carry no PII.
@@ -582,6 +583,11 @@ d("RLS cross-tenant isolation", () => {
     await a.query(
       `INSERT INTO cbt_sitting (id,"schoolId","examId","studentId","questionIds") VALUES ($1,$2,$3,$4,$5::jsonb)`,
       [cbtSittingA, A, cbtExamA, userA, JSON.stringify([cbtQuestionA])],
+    );
+    await a.query(
+      `INSERT INTO cbt_theory_answer (id,"schoolId","examId","sittingId","questionId","studentId",text,"updatedAt")
+       VALUES ($1,$2,$3,$4,$5,$6,'an essay',now())`,
+      [cbtTheoryAnswerA, A, cbtExamA, cbtSittingA, cbtQuestionA, userA],
     );
     // Ultimate (step 8): an arena competition (cross-tenant) + the tenant-scoped
     // enrollment/consent/entry-link governance rows for school A.
@@ -1187,6 +1193,7 @@ d("RLS cross-tenant isolation", () => {
       "school_referral_conversion",
       "school_referral_code",
       "message_credit_entry",
+      "cbt_theory_answer",
       "cbt_sitting",
       "cbt_exam",
       "cbt_question",
@@ -1355,6 +1362,7 @@ d("RLS cross-tenant isolation", () => {
     ["cbt_question", cbtQuestionA],
     ["cbt_exam", cbtExamA],
     ["cbt_sitting", cbtSittingA],
+    ["cbt_theory_answer", cbtTheoryAnswerA],
     ["lms_content", lmsContentA],
     ["quiz_attempt", quizAttemptA],
     ["forum_post", forumPostA],

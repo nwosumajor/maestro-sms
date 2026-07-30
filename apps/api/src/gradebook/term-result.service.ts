@@ -424,6 +424,71 @@ export class TermResultService {
    *  grading guard set (scope, enrolment, subject-taker, maker-checker) and
    *  leaves the row as DRAFT for the normal publish chain. Used by the LMS
    *  "pull scores into the report card" flow. */
+  /**
+   * Merge a CBT paper's total into the EXAM component, leaving the other three
+   * components untouched and the row DRAFT for the normal publish chain. This is
+   * the "record exam scores to the gradesheet" path — the exact mirror of
+   * applyAssignmentComponent, so both pushes behave identically.
+   */
+  async applyExamComponent(
+    p: Principal,
+    input: { classId: string; subjectId: string; termId: string; studentId: string; exam: number },
+  ): Promise<SubjectResultDto> {
+    const { classId, subjectId, termId, studentId, exam } = input;
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const term = await tx.term.findFirst({ where: { id: termId }, select: { id: true, sessionId: true } });
+      const subject = await tx.subject.findFirst({ where: { id: subjectId }, select: { id: true, name: true } });
+      if (!term || !subject) throw new NotFoundException("Not found");
+      if (!(await this.canGradeClassSubject(tx, p, classId, subjectId))) throw new NotFoundException("Not found");
+      const enrolled = await tx.enrollment.findFirst({
+        where: { classId, studentId, status: "ACTIVE" },
+        select: { id: true },
+      });
+      if (!enrolled) throw new NotFoundException("Student is not enrolled in this class");
+      const takers = await this.subjectTakers(tx, classId, termId, subjectId);
+      if (!takers.includes(studentId)) {
+        throw new NotFoundException("This student does not offer this subject for the term");
+      }
+      const student = await tx.user.findFirst({ where: { id: studentId }, select: { id: true, name: true } });
+      if (!student) throw new NotFoundException("Not found");
+      const existing = await tx.subjectResult.findFirst({
+        where: { sessionId: term.sessionId, termId, subjectId, studentId },
+        select: { status: true, midterm: true, assignment: true, classNote: true },
+      });
+      if (existing?.status === "PENDING_APPROVAL") {
+        throw new ConflictException(
+          "These grades are awaiting head-teacher/principal approval and can't be edited until the review completes.",
+        );
+      }
+      const unpublished = existing?.status === "PUBLISHED";
+      // MERGE: keep the other three components; only the exam slice changes.
+      const scored = this.applyComponents({
+        exam,
+        midterm: existing?.midterm ?? null,
+        assignment: existing?.assignment ?? null,
+        classNote: existing?.classNote ?? null,
+      });
+      const data = { ...scored, gradedById: p.userId, gradedAt: new Date() };
+      const row = await tx.subjectResult.upsert({
+        where: { sessionId_termId_subjectId_studentId: { sessionId: term.sessionId, termId, subjectId, studentId } },
+        create: { schoolId: p.schoolId, sessionId: term.sessionId, termId, classId, subjectId, studentId, ...data },
+        update: { classId, ...data, ...(unpublished ? { status: "DRAFT" } : {}) },
+      });
+      await this.audit.record(
+        {
+          actorId: p.userId,
+          action: "gradebook.term.exam.applied",
+          entity: "subject_result",
+          entityId: row.id,
+          schoolId: p.schoolId,
+          metadata: { subjectId, studentId, termId, exam },
+        },
+        tx,
+      );
+      return this.toResultDto(row, subject.name, student.name);
+    });
+  }
+
   async applyAssignmentComponent(
     p: Principal,
     input: { classId: string; subjectId: string; termId: string; studentId: string; assignment: number },

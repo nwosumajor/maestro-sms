@@ -164,6 +164,7 @@ model School {
   schoolHolidays     SchoolHoliday[]
   examSchedules      ExamSchedule[]
   platformFeedback   PlatformFeedback[]
+  cbtTheoryAnswers   CbtTheoryAnswer[]
 
   // HR
   employees Employee[]

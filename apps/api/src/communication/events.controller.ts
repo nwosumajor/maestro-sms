@@ -1,5 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Post, Query } from "@nestjs/common";
 import { MODULES } from "@sms/types";
+import { MEETING_PROVIDERS } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
 import type { CalendarEventDto } from "@sms/types";
 import { z } from "zod";
@@ -21,6 +22,10 @@ const eventSchema = z.object({
   recurrence: z.enum(["NONE", "DAILY", "WEEKLY", "MONTHLY"]).optional(),
   recurrenceUntil: z.string().datetime().nullish(),
   recurrenceDays: z.array(z.enum(["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"])).max(7).optional(),
+  // Optional VIDEO meeting (staff meetings, parents evening, assemblies). The
+  // URL is re-validated server-side; this only shapes the request.
+  provider: z.enum(MEETING_PROVIDERS).nullish(),
+  joinUrl: z.string().max(1000).nullish(),
 });
 
 @RequireModule(MODULES.CALENDAR)

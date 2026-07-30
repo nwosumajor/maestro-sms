@@ -231,7 +231,9 @@ const PLATFORM_OWNER_NAV = new Set<NavKey>([
   "directory",
   "ultimate",
   "notifications",
-  "feedback",
+  // NOTE: "feedback" (Send feedback) is deliberately ABSENT. The platform team IS
+  // the recipient — offering them a form to send feedback to themselves is noise.
+  // They get the INBOX instead, and reply inside each thread.
   "operatorfeedback",
   "account",
   "help",

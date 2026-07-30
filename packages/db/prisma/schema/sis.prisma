@@ -39,6 +39,21 @@ model StudentProfile {
 
   notes String?
 
+  /// COMPLETION + REVIEW. A bulk-imported pupil starts INCOMPLETE (a name and
+  /// nothing else), is nudged until they SUBMIT, then the class supervisor checks
+  /// it and the school admin APPROVES. CHANGES_REQUESTED sends it back with a note.
+  profileStatus String    @default("INCOMPLETE")
+  submittedAt   DateTime?
+  /// Set by the class supervisor's check, then the school admin's approval.
+  supervisorReviewedById String?   @db.Uuid
+  supervisorReviewedAt   DateTime?
+  approvedById  String?   @db.Uuid
+  approvedAt    DateTime?
+  /// Why it was sent back, shown to the pupil so they know what to fix.
+  reviewNote    String?
+  /// When the pupil was last nudged — the sweep uses it to avoid daily spam.
+  lastNudgedAt  DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -52,6 +67,11 @@ model StudentProfile {
   // Admission number is unique WITHIN a school (nulls allowed for legacy rows).
   @@unique([schoolId, admissionNumber])
   @@index([schoolId])
+  // The nudge sweep and the review queue both filter on status.
+  @@index([schoolId, profileStatus])
+  // The scheduled nudge sweep runs across ALL tenants, so it has no schoolId to
+  // lead with and cannot use the index above. This one serves it directly.
+  @@index([profileStatus, lastNudgedAt])
   @@index([schoolId, studentId])
   @@map("student_profile")
 }

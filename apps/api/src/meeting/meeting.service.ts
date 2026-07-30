@@ -11,6 +11,8 @@
 
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { MeetingSlotDto, MeetingBookingDto } from "@sms/types";
+import { MEETING_PROVIDERS, isMeetingJoinOpen, meetingJoinOpensAt, normalizeMeetingUrl } from "@sms/types";
+import type { MeetingProvider } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -41,7 +43,7 @@ export class MeetingService {
   /** Open a slot. A teacher opens their OWN; staff-wide may open for any teacher. */
   async createSlot(
     p: Principal,
-    input: { teacherId?: string; startsAt: string; endsAt: string; capacity?: number; location?: string; note?: string },
+    input: { teacherId?: string; startsAt: string; endsAt: string; capacity?: number; location?: string; note?: string; provider?: string | null; joinUrl?: string | null },
   ): Promise<MeetingSlotDto> {
     const staffWide = p.roles.some((r) => STAFF_WIDE.has(r));
     const teacherId = input.teacherId && staffWide ? input.teacherId : p.userId;
@@ -50,6 +52,9 @@ export class MeetingService {
     if (Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime()) || endsAt <= startsAt) {
       throw new BadRequestException("endsAt must be after startsAt");
     }
+    // Validate the optional video link BEFORE opening a transaction: an invalid
+    // URL is a client error, not a half-written slot.
+    const link = this.validateLink(input.provider, input.joinUrl);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const row = await tx.meetingSlot.create({
         data: {
@@ -60,6 +65,8 @@ export class MeetingService {
           capacity: Math.max(1, Math.min(input.capacity ?? 1, 30)),
           location: input.location ?? null,
           note: input.note ?? null,
+          provider: link.provider,
+          joinUrl: link.joinUrl,
         },
       });
       await this.audit.record(
@@ -231,7 +238,32 @@ export class MeetingService {
     return new Map<string, string>(users.map((u: { id: string; name: string }) => [u.id, u.name] as const));
   }
 
-  private toSlotDto(s: SlotRow, booked: number, _p: Principal | null, teacherName?: string): MeetingSlotDto {
+  /**
+   * Validate an optional video link. A provider MUST be one we know, and the URL
+   * must survive the shared validator (https + per-provider host allowlist), so a
+   * "Teams" meeting can never be stored pointing somewhere else. Supplying one
+   * without the other is a client error rather than a silent half-configured slot.
+   */
+  private validateLink(provider?: string | null, joinUrl?: string | null): { provider: string | null; joinUrl: string | null } {
+    const hasP = !!provider && provider.trim() !== "";
+    const hasU = !!joinUrl && joinUrl.trim() !== "";
+    if (!hasP && !hasU) return { provider: null, joinUrl: null };
+    if (hasP !== hasU) throw new BadRequestException("A video meeting needs both a provider and a join link");
+    if (!(MEETING_PROVIDERS as readonly string[]).includes(provider as string)) {
+      throw new BadRequestException("Unknown meeting provider");
+    }
+    const url = normalizeMeetingUrl(provider as MeetingProvider, joinUrl as string);
+    if (!url) throw new BadRequestException(`That is not a valid https ${provider} meeting link`);
+    return { provider: provider as string, joinUrl: url };
+  }
+
+  private toSlotDto(s: SlotRow, booked: number, p: Principal | null, teacherName?: string): MeetingSlotDto {
+    // SECURITY: the join link is released only inside the server-computed window
+    // (15 min before -> 30 min after), so a link that leaks early is unusable.
+    // The HOST always sees their own link — they created it and need it to hand
+    // out or re-open.
+    const isHost = !!p && p.userId === s.teacherId;
+    const open = isMeetingJoinOpen(s.startsAt, s.endsAt);
     return {
       id: s.id,
       teacherId: s.teacherId,
@@ -243,6 +275,11 @@ export class MeetingService {
       location: s.location,
       note: s.note,
       active: s.active,
+      provider: s.provider ?? null,
+      /** Null until the window opens (or unless you are the host). */
+      joinUrl: s.joinUrl ? (open || isHost ? s.joinUrl : null) : null,
+      joinOpen: !!s.joinUrl && open,
+      joinOpensAt: s.joinUrl ? meetingJoinOpensAt(s.startsAt) : null,
     };
   }
 
@@ -261,5 +298,5 @@ export class MeetingService {
   }
 }
 
-type SlotRow = { id: string; teacherId: string; startsAt: Date; endsAt: Date; capacity: number; location: string | null; note: string | null; active: boolean };
+type SlotRow = { id: string; teacherId: string; startsAt: Date; endsAt: Date; capacity: number; location: string | null; note: string | null; active: boolean; provider: string | null; joinUrl: string | null };
 type BookingRow = { id: string; slotId: string; studentId: string; status: string; note: string | null; slot?: { startsAt: Date; teacherId: string; location: string | null } };

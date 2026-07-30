@@ -20,6 +20,7 @@ import {
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
 import { autoSuffixLoginOnClash, isPlatformTierRole, requiresContactEmail } from "@sms/types";
+import { NON_STAFF_ROLE_NAMES } from "@sms/types";
 import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
@@ -98,6 +99,87 @@ export class AdminService {
    *  manager_admin — anything carrying a `platform.*` permission) are HIDDEN
    *  from school-level admins: they cannot see them in the picker, and the
    *  assign/remove paths refuse them independently. */
+  /**
+   * School-wide roster exports for leadership (principal / school_admin only).
+   *
+   * Deliberately minimal columns — a name plus role, or a name plus class. No
+   * contact details, no medical data, no admission numbers: this is the "who is in
+   * this school" list a head needs for a register or a board pack, and widening it
+   * would turn a routine download into a PII export. The reads are audited for the
+   * same reason.
+   *
+   * CSV cells are quoted AND formula-neutralised (OWASP CSV injection) so a name
+   * like "=cmd" can't execute when the file is opened in a spreadsheet.
+   */
+  private csvCell(value: string): string {
+    let v = String(value ?? "");
+    if (/^[=+\-@\t\r]/.test(v)) v = `'${v}`;
+    return `"${v.replace(/"/g, '""')}"`;
+  }
+
+  /** Every staff member with their role(s). */
+  async staffRosterCsv(p: Principal): Promise<string> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const users = await tx.user.findMany({
+        where: { roles: { some: { role: { name: { notIn: [...NON_STAFF_ROLE_NAMES] } } } } },
+        select: { id: true, name: true, email: true, status: true, roles: { select: { role: { select: { name: true } } } } },
+        orderBy: { name: "asc" },
+      });
+      await this.audit.record(
+        { actorId: p.userId, action: "admin.staff.export", entity: "user", entityId: "roster", schoolId: p.schoolId, metadata: { count: users.length } },
+        tx,
+      );
+      const lines = ['"#","Name","Role(s)","Email","Status"'];
+      users.forEach((u, i) => {
+        const roles = u.roles
+          .map((r: { role: { name: string } }) => r.role.name)
+          .filter((n: string) => !(NON_STAFF_ROLE_NAMES as readonly string[]).includes(n))
+          .sort()
+          .join(", ");
+        lines.push([this.csvCell(String(i + 1)), this.csvCell(u.name), this.csvCell(roles), this.csvCell(u.email), this.csvCell(u.status)].join(","));
+      });
+      return `${lines.join("\n")}\n`;
+    });
+  }
+
+  /** Every student with the class they are actively enrolled in. */
+  async studentRosterCsv(p: Principal): Promise<string> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      // Students are those holding the student ROLE — the same definition the
+      // billing seat count uses, so a not-yet-enrolled pupil still appears.
+      const students = await tx.user.findMany({
+        where: { roles: { some: { role: { name: "student" } } } },
+        select: { id: true, name: true, status: true },
+        orderBy: { name: "asc" },
+      });
+      // ONE query for every active enrolment, not one per student.
+      const enrolments = students.length
+        ? await tx.enrollment.findMany({
+            where: { studentId: { in: students.map((u) => u.id) }, status: "ACTIVE" },
+            select: { studentId: true, class: { select: { name: true } } },
+          })
+        : [];
+      const classOf = new Map<string, string>();
+      for (const e of enrolments) classOf.set(e.studentId, e.class?.name ?? "");
+      await this.audit.record(
+        { actorId: p.userId, action: "admin.students.export", entity: "user", entityId: "roster", schoolId: p.schoolId, metadata: { count: students.length } },
+        tx,
+      );
+      const lines = ['"#","Name","Class","Status"'];
+      students.forEach((u, i) => {
+        lines.push(
+          [
+            this.csvCell(String(i + 1)),
+            this.csvCell(u.name),
+            this.csvCell(classOf.get(u.id) ?? "Not enrolled"),
+            this.csvCell(u.status),
+          ].join(","),
+        );
+      });
+      return `${lines.join("\n")}\n`;
+    });
+  }
+
   async listRoles(p: Principal) {
     const rows = await this.db.runAsTenant(this.ctx(p), (tx) =>
       tx.role.findMany({ select: { name: true }, orderBy: { name: "asc" } }),

@@ -188,7 +188,9 @@ export interface LmsRevisionDto {
 }
 
 /** Live/virtual classroom. */
-export type LiveProvider = "ZOOM" | "MEET" | "JITSI" | "OTHER";
+// Subset of MeetingProvider (see meeting-link.ts) — Teams included so an LMS
+// live class can use the same providers as staff / parent-teacher meetings.
+export type LiveProvider = "ZOOM" | "MEET" | "TEAMS" | "JITSI" | "OTHER";
 export type LiveStatus = "SCHEDULED" | "LIVE" | "ENDED" | "CANCELLED";
 
 /** A scheduled live class session. The `joinUrl` is NOT in the list payload —
