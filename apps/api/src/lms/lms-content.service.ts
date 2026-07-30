@@ -36,6 +36,7 @@ import type {
   ForumPostDto,
   LmsContentBody,
   LmsContentDto,
+  MyLearningDto,
   LmsContentStatus,
   LmsContentType,
   LmsPresignDto,
@@ -79,6 +80,16 @@ const CONTENT_TYPES = new Set<LmsContentType>(["MATERIAL", "LESSON", "QUIZ", "FO
 // Only these two content types can be tagged with a (subject, term) and pulled
 // into the report card — the rest aren't numerically graded.
 const GRADABLE_TYPES = new Set<LmsContentType>(["QUIZ", "ASSIGNMENT"]);
+/**
+ * Ceiling on one class's content page. A class publishing an item every school day
+ * reaches ~200 in a year, so this holds a full year while still bounding the query —
+ * the list was previously unbounded and re-read the entire class TWICE per staff
+ * load. Narrow with the type/status filters rather than raising this.
+ */
+const CONTENT_PAGE_MAX = 300;
+/** Ceiling on the cross-class learning list. A student in ~10 classes each publishing
+ *  weekly is well inside this for a full year; it exists so the query is bounded. */
+const MY_LEARNING_MAX = 400;
 
 type ContentRow = {
   id: string;
@@ -393,26 +404,106 @@ export class LmsContentService {
   }
 
   // --- reads (relationship + approval scoped) -------------------------------
-  async listContent(p: Principal, classId: string): Promise<LmsContentDto[]> {
+  /**
+   * A class's content, optionally narrowed by type or status.
+   *
+   * This used to run TWO unbounded queries for a staff viewer: one fetching every
+   * content row in the class purely to feed reconcile(), then another fetching
+   * everything again for the list. Neither had a `take`, so both grew for the whole
+   * academic year — a class with a term of lessons, quizzes, assignments and forums
+   * paid for its entire history on every page load, twice.
+   *
+   * Now it is ONE bounded read, and reconcile works from that same set. The safety
+   * net still fires for anything pending on the page you are actually looking at,
+   * which is what it was for: the inbox approval already updates the row, and this
+   * only catches a row whose update was missed.
+   */
+  async listContent(
+    p: Principal,
+    classId: string,
+    filter: { type?: string; status?: string } = {},
+  ): Promise<LmsContentDto[]> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const staff = await this.canAuthor(tx, p, classId);
       if (!staff) await this.assertEnrolledOrGuardian(tx, p, classId);
-      if (staff) {
-        // Reconcile any inbox-approved items before listing (safety net).
-        const all = (await tx.lmsContent.findMany({ where: { classId } })) as ContentRow[];
-        await this.reconcile(tx, all);
-      }
-      const where = staff
-        ? { classId }
-        : { classId, status: "PUBLISHED" }; // students/parents: published only
+
+      const where: Record<string, unknown> = { classId };
+      // Students and parents see PUBLISHED only — a status filter must never be able
+      // to widen that, so the caller's value is applied only for staff.
+      if (!staff) where.status = "PUBLISHED";
+      else if (filter.status) where.status = filter.status;
+      if (filter.type) where.type = filter.type;
+
       const rows = (await tx.lmsContent.findMany({
         where,
         orderBy: { createdAt: "desc" },
+        take: CONTENT_PAGE_MAX,
       })) as ContentRow[];
+
+      // Reconcile from the rows we already have rather than re-reading the class.
+      if (staff) await this.reconcile(tx, rows);
+
       const names = await this.nameMap(tx, rows.map((r) => r.authorId));
       const done = staff ? new Set<string>() : await this.completedSet(tx, p.userId, rows.map((r) => r.id));
       const viewerId = staff ? undefined : p.userId;
       return rows.map((r) => this.toDto(r, staff, names.get(r.authorId) ?? "User", done.has(r.id), viewerId));
+    });
+  }
+
+  /**
+   * Everything published to a student, across every class they are enrolled in,
+   * with what they have not finished first.
+   *
+   * A student previously had to go Classes -> pick a class -> content, per class, to
+   * find out what was new. Nothing aggregated it, so the question "what do I still
+   * have to do?" had no answer anywhere in the product — which is the question the
+   * whole module exists to serve.
+   *
+   * PUBLISHED only, and scoped to their own enrolments: this is one query over their
+   * classes, not a widened read. Parents are deliberately not served here — they get
+   * their child's classes through the existing per-class view, and a parent to-do
+   * list would imply the parent owes the work.
+   */
+  async myLearning(p: Principal): Promise<MyLearningDto> {
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      const enrolled = (await tx.enrollment.findMany({
+        where: { studentId: p.userId },
+        select: { classId: true },
+      })) as Array<{ classId: string }>;
+      const classIds = [...new Set(enrolled.map((e) => e.classId))];
+      if (classIds.length === 0) return { outstanding: 0, items: [] };
+
+      const rows = (await tx.lmsContent.findMany({
+        where: { classId: { in: classIds }, status: "PUBLISHED" },
+        orderBy: { createdAt: "desc" },
+        take: MY_LEARNING_MAX,
+        select: { id: true, classId: true, type: true, title: true, createdAt: true },
+      })) as Array<{ id: string; classId: string; type: LmsContentType; title: string; createdAt: Date }>;
+      if (rows.length === 0) return { outstanding: 0, items: [] };
+
+      // Two batched lookups for the whole list: completion state and class names.
+      const [done, classes] = await Promise.all([
+        this.completedSet(tx, p.userId, rows.map((r) => r.id)),
+        tx.class.findMany({ where: { id: { in: classIds } }, select: { id: true, name: true } }) as Promise<
+          Array<{ id: string; name: string }>
+        >,
+      ]);
+      const classById = new Map(classes.map((c) => [c.id, c.name]));
+
+      const items = rows.map((r) => ({
+        id: r.id,
+        classId: r.classId,
+        className: classById.get(r.classId) ?? "—",
+        type: r.type,
+        title: r.title,
+        completed: done.has(r.id),
+        createdAt: r.createdAt.toISOString(),
+      }));
+      // Unfinished first, then newest. A to-do list that buries the to-dos under
+      // things you already did is just an archive.
+      items.sort((a, b) => Number(a.completed) - Number(b.completed) || b.createdAt.localeCompare(a.createdAt));
+
+      return { outstanding: items.filter((i) => !i.completed).length, items };
     });
   }
 

@@ -74,6 +74,7 @@ type NavKey =
   | "students"
   | "family"
   | "classes"
+  | "learning"
   | "timetable"
   | "attendance"
   | "fees"
@@ -154,6 +155,9 @@ const NAV: {
   { key: "students", label: "Students", icon: IdCardIcon, href: "/students", perm: "student.profile.read", module: MODULES.SIS },
   { key: "family", label: "My children", icon: UsersIcon, href: "/family", perm: "family.read", module: MODULES.SIS },
   { key: "classes", label: "Classes", icon: UsersIcon, href: "/classes", perm: "class.read", module: MODULES.LMS },
+  // Gated on lms.quiz.attempt, which ONLY students hold: this is a personal to-do
+  // list, and a teacher opening it would get an empty page (they are not enrolled).
+  { key: "learning", label: "My learning", icon: BookOpenIcon, href: "/learning", perm: "lms.quiz.attempt", module: MODULES.LMS },
   { key: "timetable", label: "Timetable", icon: CalendarDaysIcon, href: "/timetable", perm: "timetable.read", module: MODULES.TIMETABLE },
   { key: "certificates", label: "Certificates", icon: AwardIcon, href: "/certificates", perm: "certificate.issue", module: MODULES.CERTIFICATE },
   { key: "attendance", label: "Attendance", icon: CalendarCheckIcon, href: "/attendance", perm: "attendance.read", module: MODULES.ATTENDANCE },
@@ -254,7 +258,7 @@ const NAV_GROUPS: { key: string; label: string }[] = [
 const NAV_GROUP: Record<NavKey, string> = {
   dashboard: "overview", analytics: "overview", reports: "overview", announcements: "overview",
   notifications: "overview", messages: "overview", calendar: "overview", meetings: "overview", exams: "overview", scan: "overview",
-  classes: "teaching", timetable: "teaching", assessments: "teaching", gradebook: "teaching",
+  classes: "teaching", learning: "teaching", timetable: "teaching", assessments: "teaching", gradebook: "teaching",
   certificates: "teaching", documents: "teaching", library: "teaching",
   students: "people", family: "people", attendance: "people", hr: "people", leave: "people", alumni: "people",
   fees: "operations", billing: "operations", group: "operations", cbt: "teaching", hostel: "operations", transport: "operations",

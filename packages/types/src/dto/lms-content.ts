@@ -109,6 +109,30 @@ export interface LmsSubmissionDto {
   gradedAt: Date | null;
 }
 
+/**
+ * One item in a student's cross-class learning list.
+ *
+ * Deliberately lighter than LmsContentDto: this view is a to-do list, so it carries
+ * what you need to decide what to open next and nothing more. Notably it omits
+ * `body` — a quiz body per item, across every class, would be a large payload for a
+ * page nobody reads the content ON.
+ */
+export interface MyLearningItemDto {
+  id: string;
+  classId: string;
+  className: string;
+  type: LmsContentType;
+  title: string;
+  completed: boolean;
+  createdAt: string;
+}
+
+/** A student's learning across every class they are enrolled in. */
+export interface MyLearningDto {
+  outstanding: number;
+  items: MyLearningItemDto[];
+}
+
 export interface LmsContentDto {
   id: string;
   classId: string;

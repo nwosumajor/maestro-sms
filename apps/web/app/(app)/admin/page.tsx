@@ -1,4 +1,4 @@
-import type { InvoiceListItemDto, WorkflowSummaryDto, Serialized } from "@sms/types";
+import type { InvoiceSummaryDto, WorkflowSummaryDto, Serialized } from "@sms/types";
 import { hasPermission, type Permission } from "@/lib/permissions";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -11,7 +11,7 @@ import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
-type InvoiceRow = Serialized<InvoiceListItemDto>;
+type InvoiceSummary = Serialized<InvoiceSummaryDto>;
 type WorkflowRow = Serialized<WorkflowSummaryDto>;
 
 export default async function AdminPage() {
@@ -23,20 +23,25 @@ export default async function AdminPage() {
   const [students, classes, invoices, workflows] = await Promise.all([
     apiGet<{ id: string }[]>("/students"),
     apiGet<{ id: string }[]>("/classes/mine"),
-    apiGet<InvoiceRow[]>("/invoices"),
+    // The SUMMARY aggregate, not a page of rows. Summing rows in Node only ever
+    // covered the most recent page, so "Total invoiced" quietly under-reported once
+    // a school passed that many invoices.
+    apiGet<InvoiceSummary>("/invoices/summary"),
     apiGet<WorkflowRow[]>("/workflows"),
   ]);
 
-  const inv = invoices ?? [];
-  const outstanding = inv.filter((i) => i.status === "ISSUED" || i.status === "PARTIALLY_PAID");
-  const invoicedTotal = inv.reduce((n, i) => n + i.totalMinor, 0);
+  const outstandingMinor = invoices?.outstandingMinor ?? 0;
+  const collectedMinor = invoices?.collectedMinor ?? 0;
+  const overdueCount = invoices?.overdueCount ?? 0;
+  const currency = invoices?.currency ?? "NGN";
   const pendingApprovals = (workflows ?? []).filter((w) => w.state === "PENDING_REVIEW").length;
 
   const stats = [
     { label: "Students", value: String((students ?? []).length), href: "/students" },
     { label: "Classes", value: String((classes ?? []).length), href: "/classes" },
-    { label: "Outstanding invoices", value: String(outstanding.length), href: "/fees" },
-    { label: "Total invoiced", value: money(invoicedTotal, inv[0]?.currency ?? "NGN"), href: "/fees" },
+    { label: "Outstanding", value: money(outstandingMinor, currency), href: "/fees" },
+    { label: "Collected", value: money(collectedMinor, currency), href: "/fees" },
+    { label: "Past due", value: String(overdueCount), href: "/fees" },
     { label: "Approvals pending", value: String(pendingApprovals), href: "/workflows" },
   ];
 

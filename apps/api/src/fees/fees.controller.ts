@@ -8,7 +8,8 @@ import { FEES_PERMISSIONS, INVOICE_STATUSES, PAYMENT_METHODS } from "@sms/types"
 import type {
   FeeItemDto,
   FeeReportDto,
-  InvoiceListItemDto,
+  InvoicePageDto,
+  InvoiceSummaryDto,
   InvoiceDetailDto,
   PendingPaymentDto,
 } from "@sms/types";
@@ -363,15 +364,35 @@ export class FeesController {
     return this.fees.financeReport(p);
   }
 
+  /** Invoices, filtered and paged. `q` matches the reference — how staff actually
+   *  look one up when a parent quotes it off their copy. */
   @Get("invoices")
   @RequirePermission(FEES_PERMISSIONS.FEE_READ)
   listInvoices(
     @CurrentPrincipal() p: Principal,
     @Query("studentId") studentId?: string,
     @Query("status") status?: string,
-  ): Promise<InvoiceListItemDto[]> {
+    @Query("q") q?: string,
+    @Query("cursor") cursor?: string,
+    @Query("limit") limit?: string,
+  ): Promise<InvoicePageDto> {
     const parsed = status && INVOICE_STATUSES.includes(status as never) ? (status as never) : undefined;
-    return this.fees.listInvoices(p, { studentId, status: parsed });
+    const n = limit ? Number(limit) : undefined;
+    return this.fees.listInvoices(p, {
+      studentId,
+      status: parsed,
+      q,
+      cursor,
+      limit: Number.isFinite(n) ? n : undefined,
+    }) as Promise<InvoicePageDto>;
+  }
+
+  /** Outstanding / collected / overdue over the caller's VISIBLE set — one SQL
+   *  aggregate, never a sum of the page currently on screen. */
+  @Get("invoices/summary")
+  @RequirePermission(FEES_PERMISSIONS.FEE_READ)
+  invoiceSummary(@CurrentPrincipal() p: Principal): Promise<InvoiceSummaryDto> {
+    return this.fees.invoiceSummary(p);
   }
 
   @Get("invoices/:id")
