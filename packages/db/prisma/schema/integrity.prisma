@@ -232,6 +232,10 @@ model IntegritySignal {
 
   @@index([schoolId])
   @@index([sittingId])
+  // The DAILY NDPR retention purge deletes by (schoolId, createdAt < cutoff).
+  // Without this it seq-scans the whole table every night — and CBT focus-loss
+  // telemetry now makes this the highest-volume table in the system.
+  @@index([schoolId, createdAt])
   @@index([schoolId, submissionId])
   @@index([schoolId, submissionId, type])
   @@map("integrity_signal")

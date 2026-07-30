@@ -69,6 +69,9 @@ model StudentProfile {
   @@index([schoolId])
   // The nudge sweep and the review queue both filter on status.
   @@index([schoolId, profileStatus])
+  // The scheduled nudge sweep runs across ALL tenants, so it has no schoolId to
+  // lead with and cannot use the index above. This one serves it directly.
+  @@index([profileStatus, lastNudgedAt])
   @@index([schoolId, studentId])
   @@map("student_profile")
 }
