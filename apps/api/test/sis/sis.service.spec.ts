@@ -38,7 +38,9 @@ function makeService(f: Fakes) {
 
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
-  const service = new SisService(db as never, audit as never);
+  // Profile submit/review notifies the pupil, guardians and reviewers.
+  const notifications = { enqueue: jest.fn().mockResolvedValue(undefined) };
+  const service = new SisService(db as never, audit as never, notifications as never);
   return { service, tx, audit };
 }
 
@@ -105,7 +107,8 @@ describe("SisService relationship scoping", () => {
       enrollment: { findFirst: jest.fn().mockResolvedValue(null) },
     } as unknown as TenantTx;
     const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
-    const service = new SisService(db as never, { record: jest.fn() } as never);
+    const notifications = { enqueue: jest.fn().mockResolvedValue(undefined) };
+    const service = new SisService(db as never, { record: jest.fn() } as never, notifications as never);
     await expect(
       service.addContact(principal(["junior_admin"]), "stu-9", { name: "Aunt", relationship: "aunt", phone: "080" }),
     ).resolves.toEqual({ id: "ec-1" });

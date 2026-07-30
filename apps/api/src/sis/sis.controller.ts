@@ -1,9 +1,9 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Put } from "@nestjs/common";
 import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
-import type { ContactDto, MedicalRecordDto, StudentProfileDto } from "@sms/types";
+import type { ContactDto, MedicalRecordDto, StudentProfileDto, SisCompletionDto } from "@sms/types";
 import { z } from "zod";
-import { SIS_PERMISSIONS } from "@sms/types";
+import { SIS_PERMISSIONS, ADMIN_PERMISSIONS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { RequireStepUp } from "../auth/require-stepup.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -45,6 +45,8 @@ const medicalSchema = z.object({
   notes: nullableStr,
 });
 
+const reviewSchema = z.object({ decision: z.enum(["PASS", "CHANGES"]), note: z.string().max(1000).nullish() });
+
 @RequireModule(MODULES.SIS)
 @Controller("students/:studentId")
 export class SisController {
@@ -68,6 +70,42 @@ export class SisController {
   }
 
   // --- emergency contacts ---
+  /** What the pupil still has to fill in (drives the first-sign-in prompt). */
+  @Get("profile/completion")
+  @RequirePermission(SIS_PERMISSIONS.STUDENT_PROFILE_READ)
+  completion(@CurrentPrincipal() p: Principal, @Param("studentId") studentId: string): Promise<SisCompletionDto> {
+    return this.sis.completion(p, studentId);
+  }
+
+  /** The pupil (or their parent) submits the finished profile for review. */
+  @Post("profile/submit")
+  @RequirePermission(SIS_PERMISSIONS.STUDENT_PROFILE_WRITE)
+  submitProfile(@CurrentPrincipal() p: Principal, @Param("studentId") studentId: string): Promise<SisCompletionDto> {
+    return this.sis.submitProfile(p, studentId);
+  }
+
+  /**
+   * STAGE 1 — the CLASS SUPERVISOR checks it. Gated on the read permission, not a
+   * write one: authorisation here is the RELATIONSHIP (supervisor of a class the
+   * pupil is in), which the service enforces, 404-not-403.
+   */
+  @Post("profile/supervisor-review")
+  @RequirePermission(SIS_PERMISSIONS.STUDENT_PROFILE_READ)
+  supervisorReview(
+    @CurrentPrincipal() p: Principal,
+    @Param("studentId") studentId: string,
+    @Body(new ZodValidationPipe(reviewSchema)) body: z.infer<typeof reviewSchema>,
+  ) {
+    return this.sis.supervisorReview(p, studentId, body.decision, body.note);
+  }
+
+  /** STAGE 2 — the SCHOOL ADMIN approves (rbac.manage: principal / school_admin). */
+  @Post("profile/approve")
+  @RequirePermission(ADMIN_PERMISSIONS.RBAC_MANAGE)
+  approveProfile(@CurrentPrincipal() p: Principal, @Param("studentId") studentId: string) {
+    return this.sis.approveProfile(p, studentId);
+  }
+
   @Get("contacts")
   @RequirePermission(SIS_PERMISSIONS.STUDENT_CONTACT_READ)
   listContacts(@CurrentPrincipal() p: Principal, @Param("studentId") studentId: string): Promise<ContactDto[]> {

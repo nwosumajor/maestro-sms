@@ -50,6 +50,28 @@ export class AdminController {
     private readonly studentImport: StudentImportService,
   ) {}
 
+  /**
+   * School-wide roster exports. LEADERSHIP ONLY — gated on rbac.manage, which only
+   * principal and school_admin hold, so a junior_admin or HR clerk cannot pull the
+   * whole school. Columns are deliberately minimal (no contact/medical data) and
+   * both reads are audited.
+   */
+  @Get("admin/export/staff.csv")
+  @RequirePermission(ADMIN_PERMISSIONS.RBAC_MANAGE)
+  @Header("Content-Type", "text/csv")
+  @Header("Content-Disposition", 'attachment; filename="staff-roster.csv"')
+  staffCsv(@CurrentPrincipal() p: Principal): Promise<string> {
+    return this.admin.staffRosterCsv(p);
+  }
+
+  @Get("admin/export/students.csv")
+  @RequirePermission(ADMIN_PERMISSIONS.RBAC_MANAGE)
+  @Header("Content-Type", "text/csv")
+  @Header("Content-Disposition", 'attachment; filename="student-roster.csv"')
+  studentsCsv(@CurrentPrincipal() p: Principal): Promise<string> {
+    return this.admin.studentRosterCsv(p);
+  }
+
   @Get("roles")
   @RequirePermission(ADMIN_PERMISSIONS.RBAC_MANAGE)
   roles(@CurrentPrincipal() p: Principal) {
