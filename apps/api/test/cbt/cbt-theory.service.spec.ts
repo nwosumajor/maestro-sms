@@ -13,7 +13,7 @@
 //   SCORING   — only objective auto-marks; `total` is the whole paper's ceiling,
 //     and the exam reads PROVISIONAL while any answer is unmarked.
 
-import { BadRequestException, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, NotFoundException } from "@nestjs/common";
 import { CbtService } from "../../src/cbt/cbt.service";
 import type { Principal, TenantContext, TenantTx } from "../../src/integrity/integrity.foundation";
 
@@ -24,6 +24,7 @@ function makeService(over: {
   answers?: Record<string, unknown>[];
   answer?: Record<string, unknown> | null;
   taught?: { subjectId: string }[];
+  sittings?: Record<string, unknown>[];
 } = {}) {
   const createMany = jest.fn().mockResolvedValue({ count: 1 });
   const upsert = jest.fn().mockResolvedValue({ id: "ta1" });
@@ -44,7 +45,12 @@ function makeService(over: {
       upsert,
       update,
     },
-    cbtSitting: { findFirst: jest.fn(), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+    cbtSitting: {
+      findFirst: jest.fn(),
+      findMany: jest.fn().mockResolvedValue(over.sittings ?? []),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
+    term: { findFirst: jest.fn().mockResolvedValue({ id: "term1", sessionId: "sess1" }) },
     classSubjectTeacher: { findMany: jest.fn().mockResolvedValue(over.taught ?? []), findFirst: jest.fn().mockResolvedValue(null) },
     class: { findFirst: jest.fn().mockResolvedValue(null), findMany: jest.fn().mockResolvedValue([]) },
     user: { findMany: jest.fn().mockResolvedValue([{ id: "s1", name: "Ada" }, { id: "s2", name: "Bola" }]) },
@@ -56,8 +62,10 @@ function makeService(over: {
   };
   const workflow = { createRequest: jest.fn(), submit: jest.fn() };
   const hooks = { onFinalized: () => undefined };
-  const service = new CbtService(db as never, audit as never, workflow as never, hooks as never);
-  return { service, tx, audit, createMany, upsert, update };
+  // CBT pushes scores into the gradebook; the push itself is tested there.
+  const termResults = { applyExamComponent: jest.fn().mockResolvedValue({}) };
+  const service = new CbtService(db as never, audit as never, workflow as never, termResults as never, hooks as never);
+  return { service, tx, audit, createMany, upsert, update, termResults };
 }
 
 const teacher = (): Principal => ({ schoolId: "A", userId: "t1", roles: ["teacher"], permissions: ["cbt.manage"] });
@@ -230,6 +238,72 @@ describe("CBT theory questions", () => {
       await expect(service.markingProgress(teacher(), "e1")).resolves.toEqual({
         examId: "e1", provisional: false, questions: [],
       });
+    });
+  });
+
+  describe("recording the combined score to the gradesheet", () => {
+    const EXAM_FULL = { id: "e1", bankId: "b1", classId: "c1", termId: "term1" };
+
+    it("records objective + theory, scaled to the exam component", async () => {
+      // Paper: 2 objective (1 each) + 1 theory (5) = ceiling 7.
+      // Script: 2 objective correct + 4 theory marks = 6/7 -> 6/7 * 60 = 51.43
+      const { service, termResults } = makeService({
+        bank: BANK, exam: EXAM_FULL, taught: [{ subjectId: "sub-phy" }],
+        sittings: [{ id: "sg1", studentId: "s1", score: 2, questionIds: ["o1", "o2", "t1"] }],
+        answers: [{ sittingId: "sg1", questionId: "t1", marksAwarded: 4 }],
+        question: { id: "t1", type: "THEORY", maxMarks: 5 },
+      });
+      const res = await service.recordExamGrades(teacher(), "e1");
+      expect(res).toMatchObject({ recorded: 1, skipped: 0, examMax: 60 });
+      expect(termResults.applyExamComponent).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ classId: "c1", subjectId: "sub-phy", termId: "term1", studentId: "s1", exam: 51.43 }),
+      );
+    });
+
+    it("REFUSES while any theory answer is unmarked (never files a provisional total)", async () => {
+      const { service, termResults } = makeService({
+        bank: BANK, exam: EXAM_FULL, taught: [{ subjectId: "sub-phy" }],
+        sittings: [{ id: "sg1", studentId: "s1", score: 2, questionIds: ["o1", "t1"] }],
+        answers: [{ sittingId: "sg1", questionId: "t1", marksAwarded: null }],
+        question: { id: "t1", type: "THEORY", maxMarks: 5 },
+      });
+      await expect(service.recordExamGrades(teacher(), "e1")).rejects.toBeInstanceOf(ConflictException);
+      expect(termResults.applyExamComponent).not.toHaveBeenCalled();
+    });
+
+    it("an OBJECTIVE-ONLY paper records just the objective score", async () => {
+      // 2 objective, both correct -> 2/2 * 60 = 60. No theory rows at all.
+      const { service, termResults } = makeService({
+        bank: BANK, exam: EXAM_FULL, taught: [{ subjectId: "sub-phy" }],
+        sittings: [{ id: "sg1", studentId: "s1", score: 2, questionIds: ["o1", "o2"] }],
+        answers: [],
+        question: { id: "o1", type: "OBJECTIVE", maxMarks: 1 },
+      });
+      const res = await service.recordExamGrades(teacher(), "e1");
+      expect(res.recorded).toBe(1);
+      expect(termResults.applyExamComponent).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ exam: 60 }),
+      );
+    });
+
+    it("refuses a paper with no class or no subject (nothing to write to)", async () => {
+      const noClass = makeService({
+        bank: BANK, exam: { id: "e1", bankId: "b1", classId: null, termId: "term1" }, taught: [{ subjectId: "sub-phy" }],
+      });
+      await expect(noClass.service.recordExamGrades(teacher(), "e1")).rejects.toBeInstanceOf(BadRequestException);
+
+      const noSubject = makeService({
+        bank: { id: "b1", createdById: "t1", subjectId: null },
+        exam: EXAM_FULL, taught: [],
+      });
+      await expect(noSubject.service.recordExamGrades(teacher(), "e1")).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it("refuses when nothing has been submitted yet", async () => {
+      const { service } = makeService({ bank: BANK, exam: EXAM_FULL, taught: [{ subjectId: "sub-phy" }], sittings: [] });
+      await expect(service.recordExamGrades(teacher(), "e1")).rejects.toBeInstanceOf(ConflictException);
     });
   });
 });

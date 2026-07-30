@@ -41,7 +41,11 @@ const examSchema = z.object({
   bankId: z.string().uuid(),
   title: z.string().min(1).max(200),
   classId: z.string().uuid().nullish(),
-  questionCount: z.number().int().min(1).max(200),
+  // Section sizes. objectiveCount defaults to questionCount for callers that
+  // predate sections; theoryCount 0 (default) = objective-only paper.
+  questionCount: z.number().int().min(0).max(200),
+  objectiveCount: z.number().int().min(0).max(200).optional(),
+  theoryCount: z.number().int().min(0).max(50).optional(),
   durationMinutes: z.number().int().min(5).max(300),
   startAt: z.string().datetime(),
   endAt: z.string().datetime(),
@@ -153,6 +157,17 @@ export class CbtController {
   @RequirePermission(CBT_PERMISSIONS.CBT_MANAGE)
   requestAnswerRelease(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
     return this.cbt.requestAnswerRelease(p, id);
+  }
+
+  /**
+   * ONE PRESS: record this paper's scores (Section A + Section B) into every
+   * candidate's gradesheet for the exam component. Refuses while any theory answer
+   * is unmarked, so a provisional total is never filed as a term grade.
+   */
+  @Post("exams/:id/record-grades")
+  @RequirePermission(CBT_PERMISSIONS.CBT_MANAGE)
+  recordGrades(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.cbt.recordExamGrades(p, id);
   }
 
   @Get("exams/:id/results")

@@ -19,7 +19,7 @@ import {
 import { Prisma } from "@sms/db";
 import { randomUUID } from "node:crypto";
 import { CBT_ANSWER_RELEASE_CHAIN } from "@sms/types";
-import { CBT_PERMISSIONS, CBT_BLUEPRINT_MAX_ITEMS, CBT_QUESTION_TYPES, CBT_THEORY_ANSWER_MAX } from "@sms/types";
+import { CBT_PERMISSIONS, CBT_BLUEPRINT_MAX_ITEMS, CBT_QUESTION_TYPES, CBT_THEORY_ANSWER_MAX, gradeComponentMax } from "@sms/types";
 import type {
   CbtAuthoringOptionsDto,
   CbtBankDto,
@@ -43,6 +43,7 @@ import {
 } from "../integrity/integrity.foundation";
 import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
+import { TermResultService } from "../gradebook/term-result.service";
 
 /** Grace after the duration elapses before a late save/submit is refused. */
 const SUBMIT_GRACE_MS = 30_000;
@@ -73,6 +74,9 @@ export class CbtService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly workflow: WorkflowService,
+    // One-way dependency: CBT pushes scores INTO the gradebook. The gradebook
+    // knows nothing about CBT, so there is no cycle.
+    private readonly termResults: TermResultService,
     hooks: WorkflowHooksService,
   ) {
     // Maker-checker reactors, run in the SAME tenant tx as the workflow
@@ -455,6 +459,11 @@ export class CbtService {
       bankId: string;
       title: string;
       classId?: string | null;
+      /** Section A size (auto-marked). Falls back to questionCount for callers
+       *  that predate sections. */
+      objectiveCount?: number;
+      /** Section B size (marked by hand). 0/omitted = objective-only paper. */
+      theoryCount?: number;
       questionCount: number;
       durationMinutes: number;
       startAt: string;
@@ -496,27 +505,51 @@ export class CbtService {
       // question — a bank/class mismatch becomes impossible rather than merely
       // discouraged.
       const level = await this.classLevel(tx, input.classId ?? null);
-      const available = await tx.cbtQuestion.count({ where: this.poolWhere(input.bankId, level) });
-      if (available === 0) {
+      // TWO SECTIONS, sized and validated INDEPENDENTLY against their own pools.
+      // An objective-only paper (theoryCount 0) is the default and behaves exactly
+      // as before; adding theory makes the paper's total the sum of both sections.
+      const wantObjective = Math.max(0, input.objectiveCount ?? input.questionCount ?? 0);
+      const wantTheory = Math.max(0, input.theoryCount ?? 0);
+      if (wantObjective + wantTheory < 1) throw new BadRequestException("A paper needs at least one question");
+      const [haveObjective, haveTheory] = await Promise.all([
+        tx.cbtQuestion.count({ where: { ...this.poolWhere(input.bankId, level), type: "OBJECTIVE" } }),
+        tx.cbtQuestion.count({ where: { ...this.poolWhere(input.bankId, level), type: "THEORY" } }),
+      ]);
+      if (wantObjective > 0 && haveObjective === 0) {
         throw new ConflictException(
           level === null
-            ? "The bank has no questions yet"
-            : `The bank has no questions for this class's level yet — tag questions for level ${level}, or leave their level blank to use them for any class.`,
+            ? "The bank has no objective questions yet"
+            : `The bank has no objective questions for this class's level — tag questions for level ${level}, or leave their level blank to use them for any class.`,
         );
       }
-      // BLUEPRINT: validated against what actually exists, so a paper definition
-      // can never promise coverage the bank cannot deliver.
+      if (wantTheory > 0 && haveTheory === 0) {
+        throw new ConflictException(
+          level === null
+            ? "The bank has no theory questions yet"
+            : `The bank has no theory questions for this class's level — add theory questions tagged for level ${level}.`,
+        );
+      }
+      // BLUEPRINT governs SECTION A's topic mix; validated against what exists so a
+      // paper definition can never promise coverage the bank cannot deliver.
       const blueprint = await this.validateBlueprint(tx, input.bankId, level, input.blueprint);
-      const questionCount = blueprint
+      const objectiveCount = blueprint
         ? blueprint.reduce((n, b) => n + b.count, 0)
-        : Math.min(Math.max(1, input.questionCount), available);
+        : Math.min(wantObjective, haveObjective);
+      const theoryCount = Math.min(wantTheory, haveTheory);
+      const questionCount = objectiveCount + theoryCount;
+      // Stamp the term so a paper marked weeks later still files under the term it
+      // was SET in, not whichever term is current when the marks are recorded.
+      const currentTerm = await tx.term.findFirst({ where: { isCurrent: true }, select: { id: true } });
       const exam = await tx.cbtExam.create({
         data: {
           schoolId: p.schoolId,
           bankId: input.bankId,
           title: input.title.trim(),
           classId: input.classId ?? null,
+          objectiveCount,
+          theoryCount,
           questionCount,
+          termId: currentTerm?.id ?? null,
           ...(blueprint ? { blueprint: blueprint as unknown as Prisma.InputJsonValue } : {}),
           durationMinutes: input.durationMinutes,
           startAt,
@@ -718,15 +751,47 @@ export class CbtService {
 
       let sitting = await tx.cbtSitting.findFirst({ where: { examId, studentId: p.userId } });
       if (!sitting) {
-        // Server-side sample: shuffle the bank, take N — the order is FIXED for
-        // the sitting so refreshes can't fish for new questions.
-        const pool = await tx.cbtQuestion.findMany({ where: { bankId: exam.bankId }, select: { id: true } });
-        const ids = pool.map((q) => q.id);
-        for (let i = ids.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [ids[i], ids[j]] = [ids[j]!, ids[i]!];
+        // Server-side sample. The order is FIXED for the sitting so refreshes
+        // can't fish for new questions.
+        //
+        // Two things narrow the pool before anything is drawn:
+        //   LEVEL — only questions for this class's curriculum level (or tagged
+        //     "any level"), so one shared bank can serve SS1A/SS2A/SS3A and an SS1
+        //     pupil never receives an SS3 question;
+        //   TYPE  — Section A is drawn from OBJECTIVE and Section B from THEORY,
+        //     each independently, and concatenated in that order so the paper reads
+        //     as two sections rather than an interleaved mix.
+        const level = await this.classLevel(tx, exam.classId ?? null);
+        const blueprint = Array.isArray(exam.blueprint) ? (exam.blueprint as unknown as CbtBlueprintItem[]) : null;
+        const pick = (arr: string[], n: number) => {
+          for (let i = arr.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [arr[i], arr[j]] = [arr[j]!, arr[i]!];
+          }
+          return arr.slice(0, n);
+        };
+        const drawFrom = async (type: "OBJECTIVE" | "THEORY", n: number, topic?: string) => {
+          if (n <= 0) return [];
+          const rows = await tx.cbtQuestion.findMany({
+            where: { ...this.poolWhere(exam.bankId, level, topic), type },
+            select: { id: true },
+          });
+          const ids = rows.map((q) => q.id);
+          return exam.shuffle ? pick(ids, n) : ids.sort().slice(0, n);
+        };
+        // SECTION A — objective. A blueprint governs its topic mix.
+        let sectionA: string[] = [];
+        if (blueprint) {
+          for (const line of blueprint) sectionA.push(...(await drawFrom("OBJECTIVE", line.count, line.topic)));
+          if (exam.shuffle) sectionA = pick(sectionA, sectionA.length);
+          else sectionA.sort();
+        } else {
+          const wantA = exam.objectiveCount > 0 ? exam.objectiveCount : exam.questionCount - exam.theoryCount;
+          sectionA = await drawFrom("OBJECTIVE", wantA);
         }
-        const sampled = exam.shuffle ? ids.slice(0, exam.questionCount) : ids.sort().slice(0, exam.questionCount);
+        // SECTION B — theory (empty for an objective-only paper).
+        const sectionB = await drawFrom("THEORY", exam.theoryCount);
+        const sampled = [...sectionA, ...sectionB];
         sitting = await tx.cbtSitting.create({
           data: {
             id: randomUUID(),
@@ -991,6 +1056,109 @@ export class CbtService {
       });
       return { examId, provisional: out.some((q) => q.marked < q.total), questions: out };
     });
+  }
+
+  /**
+   * ONE PRESS: record this exam's scores into every candidate's gradesheet.
+   *
+   * The score recorded is the WHOLE paper — Section A (auto-marked, 1 per correct)
+   * plus Section B (the marks a human awarded) — scaled to the gradesheet's exam
+   * component. An objective-only paper simply has no Section B, so its result
+   * captures only the objective score.
+   *
+   * Refuses while marking is incomplete: a provisional total must never be filed
+   * as a term grade. It writes through the SAME merge-aware component path the LMS
+   * push uses, so the other three components (midterm / assignment / class note)
+   * are preserved and the row stays DRAFT for the normal publish chain.
+   *
+   * Efficient by construction: three set-queries (sittings, theory marks, question
+   * maxima) and one write per candidate — never a query per student.
+   */
+  async recordExamGrades(
+    p: Principal,
+    examId: string,
+  ): Promise<{ recorded: number; skipped: number; examMax: number }> {
+    const plan = await this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      const exam = await tx.cbtExam.findFirst({ where: { id: examId } });
+      if (!exam) throw new NotFoundException("Exam not found");
+      const bank = await tx.cbtQuestionBank.findFirst({ where: { id: exam.bankId } });
+      if (!bank || !p.permissions.includes(CBT_PERMISSIONS.CBT_MANAGE) || !(await this.canTouchBank(tx, p, bank))) {
+        throw new NotFoundException("Exam not found");
+      }
+      if (!exam.classId) throw new BadRequestException("This paper is not aimed at a class, so it has no gradesheet to write to");
+      if (!bank.subjectId) throw new BadRequestException("This paper's bank has no subject, so it has no gradesheet column");
+      const termId = exam.termId ?? (await tx.term.findFirst({ where: { isCurrent: true }, select: { id: true } }))?.id;
+      if (!termId) throw new BadRequestException("No term is set for this paper and no current term is configured");
+
+      // Only finished scripts are gradeable.
+      const sittings = await tx.cbtSitting.findMany({
+        where: { examId, status: { in: ["SUBMITTED", "EXPIRED"] } },
+        select: { id: true, studentId: true, score: true, questionIds: true },
+      });
+      if (sittings.length === 0) throw new ConflictException("No submitted scripts yet");
+
+      // ONE read for every theory mark on this paper.
+      const theory = await tx.cbtTheoryAnswer.findMany({
+        where: { examId },
+        select: { sittingId: true, questionId: true, marksAwarded: true },
+      });
+      if (theory.some((t) => t.marksAwarded === null)) {
+        throw new ConflictException(
+          "Some theory answers are still unmarked — finish marking before recording, so a provisional total is never filed as a grade.",
+        );
+      }
+      // ONE read for the question maxima, to compute the paper's ceiling.
+      const qIds = [...new Set(sittings.flatMap((sg) => (sg.questionIds as unknown as string[]) ?? []))];
+      const questions = qIds.length
+        ? await tx.cbtQuestion.findMany({ where: { id: { in: qIds } }, select: { id: true, type: true, maxMarks: true } })
+        : [];
+      const maxOf = new Map(questions.map((q) => [q.id, q.type === "THEORY" ? q.maxMarks : 1] as const));
+
+      const marksBySitting = new Map<string, number>();
+      for (const t of theory) {
+        marksBySitting.set(t.sittingId, (marksBySitting.get(t.sittingId) ?? 0) + (t.marksAwarded ?? 0));
+      }
+      const rows = sittings.map((sg) => {
+        const order = (sg.questionIds as unknown as string[]) ?? [];
+        // The paper's ceiling for THIS script (papers are sampled per sitting).
+        const paperMax = order.reduce((n, qid) => n + (maxOf.get(qid) ?? 1), 0);
+        const objective = sg.score ?? 0;
+        const theoryMarks = marksBySitting.get(sg.id) ?? 0;
+        return { studentId: sg.studentId, raw: objective + theoryMarks, paperMax };
+      });
+      return { classId: exam.classId, subjectId: bank.subjectId, termId, rows };
+    });
+
+    // Scale to the gradesheet's exam component and write through the merge-aware
+    // path (one call per candidate; each is an upsert, so re-pressing is safe).
+    const examMax = gradeComponentMax("exam");
+    let recorded = 0;
+    let skipped = 0;
+    for (const r of plan.rows) {
+      if (r.paperMax <= 0) {
+        skipped += 1;
+        continue;
+      }
+      const scaled = Math.round((r.raw / r.paperMax) * examMax * 100) / 100;
+      try {
+        await this.termResults.applyExamComponent(p, {
+          classId: plan.classId,
+          subjectId: plan.subjectId,
+          termId: plan.termId,
+          studentId: r.studentId,
+          exam: Math.min(scaled, examMax),
+        });
+        recorded += 1;
+      } catch {
+        // A candidate who has left the class or doesn't offer the subject for the
+        // term is skipped rather than failing the whole batch.
+        skipped += 1;
+      }
+    }
+    await this.db.runAsTenant(this.ctx(p), (tx) =>
+      this.log(tx, p, "cbt.exam.grades.record", examId, { recorded, skipped, examMax }),
+    );
+    return { recorded, skipped, examMax };
   }
 
   /** Shared gate: the caller may mark this exam's question, and it IS theory. */

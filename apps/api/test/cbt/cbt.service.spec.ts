@@ -29,6 +29,8 @@ function makeService(over: {
   );
   const tx = {
     // Theory answers are their own rows now; an objective-only paper has none.
+    // createExam stamps the paper's term at creation.
+    term: { findFirst: jest.fn().mockResolvedValue({ id: "term1", sessionId: "sess1" }) },
     cbtTheoryAnswer: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn().mockResolvedValue(null), upsert: jest.fn(), update: jest.fn() },
     cbtQuestionBank: {
       findFirst: jest.fn().mockResolvedValue(over.bank ?? null),
@@ -82,7 +84,9 @@ function makeService(over: {
       };
   let finalized: FinalizedHandler | undefined;
   const hooks = { onFinalized: (h: FinalizedHandler) => { finalized = h; } };
-  const service = new CbtService(db as never, audit as never, workflow as never, hooks as never);
+  // CBT pushes scores into the gradebook; the push itself is tested there.
+  const termResults = { applyExamComponent: jest.fn().mockResolvedValue({}) };
+  const service = new CbtService(db as never, audit as never, workflow as never, termResults as never, hooks as never);
   return { service, tx, audit, workflow, examUpdateMany, bankCreate, finalized: finalized! };
 }
 

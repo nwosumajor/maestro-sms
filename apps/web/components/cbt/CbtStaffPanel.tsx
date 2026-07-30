@@ -116,7 +116,8 @@ export function CbtStaffPanel({ banks, exams, options }: { banks: Bank[]; exams:
     title: "",
     bankId: banks[0]?.id ?? "",
     classId: "",
-    questionCount: "20",
+    objectiveCount: "20",
+    theoryCount: "0",
     durationMinutes: "40",
     startAt: "",
     endAt: "",
@@ -480,6 +481,21 @@ export function CbtStaffPanel({ banks, exams, options }: { banks: Bank[]; exams:
                       <Button size="sm" variant="outline" disabled={busy} onClick={() => setMarking({ id: e.id, title: e.title })}>
                         Mark theory
                       </Button>
+                      {/* ONE PRESS: Section A + Section B -> each candidate's
+                          gradesheet. Refused server-side while marking is open. */}
+                      <Button
+                        size="sm"
+                        disabled={busy}
+                        onClick={() =>
+                          void act(
+                            () => post(`cbt/exams/${e.id}/record-grades`),
+                            "Scores recorded to the gradesheet.",
+                            false,
+                          )
+                        }
+                      >
+                        Record to gradesheet
+                      </Button>
                     </span>
                   </li>
                 );
@@ -499,7 +515,10 @@ export function CbtStaffPanel({ banks, exams, options }: { banks: Bank[]; exams:
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>
-            <Input className="tnum" inputMode="numeric" placeholder="Questions per sitting" value={exam.questionCount} onChange={(e) => setExam({ ...exam, questionCount: e.target.value.replace(/\D/g, "") })} />
+            {/* TWO SECTIONS, sized independently. Theory 0 = objective-only paper,
+                whose result captures only the objective score. */}
+            <Input className="tnum" inputMode="numeric" placeholder="Section A — objective questions" value={exam.objectiveCount} onChange={(e) => setExam({ ...exam, objectiveCount: e.target.value.replace(/\D/g, "") })} />
+            <Input className="tnum" inputMode="numeric" placeholder="Section B — theory questions (0 = none)" value={exam.theoryCount} onChange={(e) => setExam({ ...exam, theoryCount: e.target.value.replace(/\D/g, "") })} />
             <Input className="tnum" inputMode="numeric" placeholder="Duration (minutes)" value={exam.durationMinutes} onChange={(e) => setExam({ ...exam, durationMinutes: e.target.value.replace(/\D/g, "") })} />
             <div className="grid grid-cols-2 gap-2">
               <Input type="datetime-local" value={exam.startAt} onChange={(e) => setExam({ ...exam, startAt: e.target.value })} />
@@ -516,7 +535,10 @@ export function CbtStaffPanel({ banks, exams, options }: { banks: Bank[]; exams:
                     bankId: exam.bankId,
                     title: exam.title,
                     classId: exam.classId || null,
-                    questionCount: Number(exam.questionCount) || 20,
+                    objectiveCount: Number(exam.objectiveCount) || 0,
+                    theoryCount: Number(exam.theoryCount) || 0,
+                    // Legacy total, kept in step by the server.
+                    questionCount: (Number(exam.objectiveCount) || 0) + (Number(exam.theoryCount) || 0),
                     durationMinutes: Number(exam.durationMinutes) || 40,
                     startAt: new Date(exam.startAt).toISOString(),
                     endAt: new Date(exam.endAt).toISOString(),

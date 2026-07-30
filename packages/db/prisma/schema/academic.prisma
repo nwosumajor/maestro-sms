@@ -46,6 +46,7 @@ model Term {
   @@index([schoolId])
   @@index([schoolId, sessionId])
   @@map("term")
+  cbtExams CbtExam[]
 }
 
 // A non-teaching day / span (public holiday, mid-term break, closure). Single-day

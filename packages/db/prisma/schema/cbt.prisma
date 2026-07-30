@@ -76,6 +76,13 @@ model CbtExam {
   /// Restrict sitting to one class; null = any cbt.take holder in the school.
   classId              String?   @db.Uuid
   /// Questions sampled per sitting (min of this and the bank's size).
+  /// SECTION A size: how many OBJECTIVE questions this paper draws.
+  objectiveCount       Int       @default(0)
+  /// SECTION B size: how many THEORY questions this paper draws. 0 = the paper is
+  /// objective-only, and its result captures only the objective score.
+  theoryCount          Int       @default(0)
+  /// Total questions in the paper = objectiveCount + theoryCount. Kept in step by
+  /// the service; retained because sittings and DTOs already key on it.
   questionCount        Int
   durationMinutes      Int
   startAt              DateTime
@@ -104,6 +111,10 @@ model CbtExam {
   /// When set, this exam is a SCHOLARSHIP qualification exam materialized by the
   /// platform's announce step: only students holding a QUALIFIED application for
   /// that program may see/sit it (checked in listExams/startSitting).
+  /// The term this paper belongs to, stamped at creation (mirrors Assessment).
+  /// Recording scores to the gradesheet needs it, and resolving "current term" at
+  /// record time would file a late-marked paper under the wrong term.
+  termId               String?   @db.Uuid
   scholarshipProgramId String?   @db.Uuid
   createdById          String    @db.Uuid
   createdAt            DateTime  @default(now())
@@ -111,9 +122,11 @@ model CbtExam {
 
   school   School          @relation(fields: [schoolId], references: [id])
   bank     CbtQuestionBank @relation(fields: [bankId], references: [id])
+  term     Term?           @relation(fields: [termId], references: [id])
   sittings CbtSitting[]
 
   @@index([schoolId, status])
+  @@index([schoolId, termId])
   @@map("cbt_exam")
 }
 
