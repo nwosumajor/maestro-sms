@@ -133,4 +133,69 @@ describe("LibraryService", () => {
     // The requested borrowerId is ignored; scoped to the caller.
     expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { borrowerId: "stu1" } }));
   });
+
+  // ===========================================================================
+  // Catalogue export + report aggregation
+  // ===========================================================================
+  describe("export and report", () => {
+    /** Local harness: these two paths use runAsTenantReadOnly and $queryRaw, which
+     *  the shared makeTx above does not model. */
+    const mk = (tx: Record<string, unknown>) => {
+      const db = {
+        runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx as unknown as TenantTx),
+        runAsTenantReadOnly: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx as unknown as TenantTx),
+      };
+      return new LibraryService(db as never, { record: jest.fn() } as never);
+    };
+    const book = (i: number) => ({
+      id: `b${i}`, title: `Title ${i}`, author: "A", isbn: null, barcode: `BC${i}`,
+      category: null, totalCopies: 1, availableCopies: 1, customFields: {},
+    });
+
+    it("exports the WHOLE catalogue, not the 200 the on-screen list caps at", async () => {
+      // Routed through searchBooks (take: 200), a 500-title library exported 200 rows
+      // and said nothing — the file looked complete, so the loss would only surface
+      // as a stock-take that never reconciled.
+      const rows = Array.from({ length: 500 }, (_, i) => book(i));
+      const findMany = jest.fn().mockResolvedValue(rows);
+      const res = await mk({ libraryBook: { findMany } }).exportCsv(librarian);
+      expect(res.truncated).toBe(false);
+      expect(res.csv.split("\n")).toHaveLength(501); // header + 500
+      // And it asked for more than 200.
+      expect((findMany.mock.calls[0][0] as { take: number }).take).toBeGreaterThan(200);
+    });
+
+    it("announces truncation IN THE FILE when the ceiling is genuinely hit", async () => {
+      // A librarian reconciling stock will not read an HTTP header; they will see
+      // the last line of the sheet.
+      const rows = Array.from({ length: 20_001 }, (_, i) => book(i));
+      const res = await mk({ libraryBook: { findMany: jest.fn().mockResolvedValue(rows) } }).exportCsv(librarian);
+      expect(res.truncated).toBe(true);
+      expect(res.csv).toContain("truncated at 20000 titles");
+    });
+
+    it("reports via SQL aggregates, never by loading every loan row", async () => {
+      const queryRaw = jest
+        .fn()
+        .mockResolvedValueOnce([{ issued: 7, returned: 12, overdue: 3, finesAccruedMinor: 45_000, finesCollectedMinor: 20_000 }])
+        .mockResolvedValueOnce([{ totalTitles: 120, totalCopies: 300, availableCopies: 281 }]);
+      const loanFindMany = jest.fn();
+      const bookFindMany = jest.fn();
+      const out = await mk({
+        $queryRaw: queryRaw,
+        bookLoan: { findMany: loanFindMany },
+        libraryBook: { findMany: bookFindMany },
+      }).report(librarian, {});
+
+      expect(out).toEqual({
+        issued: 7, returned: 12, overdue: 3,
+        finesAccruedMinor: 45_000, finesCollectedMinor: 20_000,
+        totalTitles: 120, totalCopies: 300, availableCopies: 281,
+      });
+      // The point of the change: no row-loading at all on this path.
+      expect(loanFindMany).not.toHaveBeenCalled();
+      expect(bookFindMany).not.toHaveBeenCalled();
+      expect(queryRaw).toHaveBeenCalledTimes(2);
+    });
+  });
 });

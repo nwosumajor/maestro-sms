@@ -61,33 +61,46 @@ export class GroupService {
     const startOfMonth = new Date(startOfDay);
     startOfMonth.setDate(1);
 
-    const perSchool: GroupSchoolStatsDto[] = [];
-    for (const school of schools) {
-      // Aggregates only — one school at a time keeps every query bounded.
-      const [studentRows, staffRows, attToday, attPresent, paidMonth, invoiced, collected] = await Promise.all([
-        client.userRole.findMany({
-          where: { schoolId: school.id, role: { name: "student" } },
-          select: { userId: true },
-          distinct: ["userId"],
+    // ONE grouped query per METRIC across every campus, instead of seven queries
+    // per school inside a sequential loop. A 20-school group was 140 round trips
+    // taken one school at a time — the group console is the page a director opens
+    // first, and it got slower with every campus they added.
+    //
+    // Every one of these is still an aggregate: nothing loads rows to count them in
+    // Node, which the student tally previously did (findMany + distinct, then
+    // `.length`).
+    const [studentGroups, staffGroups, attTotalGroups, attPresentGroups, paidGroups, invoicedGroups, collectedGroups] =
+      await Promise.all([
+        client.userRole.groupBy({
+          by: ["schoolId"],
+          where: { schoolId: { in: schoolIds }, role: { name: "student" } },
+          _count: { userId: true },
         }),
-        client.employee.count({ where: { schoolId: school.id } }),
-        client.attendanceRecord.count({
-          where: { schoolId: school.id, session: { date: { gte: startOfDay } } },
+        client.employee.groupBy({ by: ["schoolId"], where: { schoolId: { in: schoolIds } }, _count: { _all: true } }),
+        client.attendanceRecord.groupBy({
+          by: ["schoolId"],
+          where: { schoolId: { in: schoolIds }, session: { date: { gte: startOfDay } } },
+          _count: { _all: true },
         }),
-        client.attendanceRecord.count({
-          where: { schoolId: school.id, status: "PRESENT", session: { date: { gte: startOfDay } } },
+        client.attendanceRecord.groupBy({
+          by: ["schoolId"],
+          where: { schoolId: { in: schoolIds }, status: "PRESENT", session: { date: { gte: startOfDay } } },
+          _count: { _all: true },
         }),
-        client.payment.aggregate({
-          where: { schoolId: school.id, status: "POSTED", kind: "PAYMENT", paidAt: { gte: startOfMonth } },
+        client.payment.groupBy({
+          by: ["schoolId"],
+          where: { schoolId: { in: schoolIds }, status: "POSTED", kind: "PAYMENT", paidAt: { gte: startOfMonth } },
           _sum: { amountMinor: true },
         }),
-        client.invoice.aggregate({
-          where: { schoolId: school.id, status: { in: ["ISSUED", "PARTIALLY_PAID"] } },
+        client.invoice.groupBy({
+          by: ["schoolId"],
+          where: { schoolId: { in: schoolIds }, status: { in: ["ISSUED", "PARTIALLY_PAID"] } },
           _sum: { totalMinor: true },
         }),
-        client.payment.aggregate({
+        client.payment.groupBy({
+          by: ["schoolId"],
           where: {
-            schoolId: school.id,
+            schoolId: { in: schoolIds },
             status: "POSTED",
             kind: "PAYMENT",
             invoice: { status: { in: ["ISSUED", "PARTIALLY_PAID"] } },
@@ -95,22 +108,42 @@ export class GroupService {
           _sum: { amountMinor: true },
         }),
       ]);
+
+    const countBy = (rows: Array<{ schoolId: string; _count: { _all?: number; userId?: number } }>): Map<string, number> =>
+      new Map(rows.map((r) => [r.schoolId, r._count._all ?? r._count.userId ?? 0]));
+    const sumBy = (
+      rows: Array<{ schoolId: string; _sum: { amountMinor?: number | null; totalMinor?: number | null } }>,
+    ): Map<string, number> =>
+      new Map(rows.map((r) => [r.schoolId, r._sum.amountMinor ?? r._sum.totalMinor ?? 0]));
+
+    const students = countBy(studentGroups as never);
+    const staff = countBy(staffGroups as never);
+    const attTotal = countBy(attTotalGroups as never);
+    const attPresent = countBy(attPresentGroups as never);
+    const paid = sumBy(paidGroups as never);
+    const invoiced = sumBy(invoicedGroups as never);
+    const collected = sumBy(collectedGroups as never);
+
+    // Built from `schools`, so a campus with no data at all still appears — an
+    // absent school reads as a problem, not as a school with nothing to report.
+    const perSchool: GroupSchoolStatsDto[] = schools.map((school) => {
       const sub = subOf.get(school.id);
-      perSchool.push({
+      const total = attTotal.get(school.id) ?? 0;
+      return {
         schoolId: school.id,
         name: school.name,
         slug: school.slug,
         active: school.status === "ACTIVE",
-        students: studentRows.length,
-        staff: staffRows,
-        attendanceTodayPct: attToday > 0 ? Math.round((attPresent / attToday) * 100) : null,
-        collectedThisMonthMinor: paidMonth._sum.amountMinor ?? 0,
-        outstandingFeesMinor: Math.max(0, (invoiced._sum.totalMinor ?? 0) - (collected._sum.amountMinor ?? 0)),
+        students: students.get(school.id) ?? 0,
+        staff: staff.get(school.id) ?? 0,
+        attendanceTodayPct: total > 0 ? Math.round(((attPresent.get(school.id) ?? 0) / total) * 100) : null,
+        collectedThisMonthMinor: paid.get(school.id) ?? 0,
+        outstandingFeesMinor: Math.max(0, (invoiced.get(school.id) ?? 0) - (collected.get(school.id) ?? 0)),
         plan: sub?.plan ?? "STANDARD",
         subscriptionStatus: sub?.status ?? "ACTIVE",
         currentPeriodEnd: sub?.currentPeriodEnd ?? null,
-      });
-    }
+      };
+    });
 
     // Group reads touch every campus — audited in the DIRECTOR's own tenant.
     await this.db.runAsTenant({ schoolId: p.schoolId, userId: p.userId }, (tx) =>

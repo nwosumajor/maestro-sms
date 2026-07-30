@@ -161,8 +161,9 @@ export class HostelController {
   allocations(
     @CurrentPrincipal() p: Principal,
     @Query("hostelId") hostelId?: string,
+    @Query("q") q?: string,
   ): Promise<HostelAllocationDto[]> {
-    return this.hostel.listAllocations(p, hostelId);
+    return this.hostel.listAllocations(p, hostelId, q);
   }
 
   @Post("allocations")
