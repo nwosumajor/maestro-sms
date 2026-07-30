@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Res } from "@nestjs/common";
+import type { Response } from "express";
 import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
 import type {
@@ -256,5 +257,42 @@ export class TimetableController {
   @RequirePermission(TIMETABLE_PERMISSIONS.TIMETABLE_READ)
   classTimetable(@CurrentPrincipal() p: Principal, @Param("classId") classId: string): Promise<TimetableEntryDto[]> {
     return this.timetable.getClassTimetable(p, classId);
+  }
+
+  /** The grid along whichever axis you ask for: class, TEACHER or ROOM. Scoped the
+   *  same way as /entries, so this never widens what a caller can see. */
+  @Get("view")
+  @RequirePermission(TIMETABLE_PERMISSIONS.TIMETABLE_READ)
+  view(
+    @CurrentPrincipal() p: Principal,
+    @Query("classId") classId?: string,
+    @Query("teacherId") teacherId?: string,
+    @Query("roomId") roomId?: string,
+  ): Promise<TimetableEntryDto[]> {
+    return this.timetable.getTimetableView(p, { classId, teacherId, roomId });
+  }
+
+  /** Standing teaching load per teacher — assigned vs available periods. The
+   *  solver's overload analysis, but of the timetable as it currently stands. */
+  @Get("load")
+  @RequirePermission(TIMETABLE_PERMISSIONS.TIMETABLE_READ)
+  load(@CurrentPrincipal() p: Principal) {
+    return this.timetable.getTeacherLoad(p);
+  }
+
+  /** Printable landscape grid for a class or a teacher. Audited; reuses the view's
+   *  scoping, so nobody can print a week they cannot already see. */
+  @Get("print.pdf")
+  @RequirePermission(TIMETABLE_PERMISSIONS.TIMETABLE_READ)
+  async print(
+    @CurrentPrincipal() p: Principal,
+    @Res() res: Response,
+    @Query("classId") classId?: string,
+    @Query("teacherId") teacherId?: string,
+  ) {
+    const { buffer, filename } = await this.timetable.timetablePdf(p, { classId, teacherId });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(buffer);
   }
 }

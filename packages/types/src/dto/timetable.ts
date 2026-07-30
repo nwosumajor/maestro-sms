@@ -13,6 +13,10 @@ export interface TimetableEntryDto {
   id: string;
   dayOfWeek: string;
   periodId: string;
+  /** The class being taught. Required by the TEACHER and ROOM views: in those, the
+   *  class is the thing you don't already know from the axis you picked. */
+  classId: string;
+  className: string;
   subjectId: string;
   subject: string;
   /** Teacher assigned to the lesson (id + resolved display name). */

@@ -1,14 +1,12 @@
 import type { IdNameDto, PeriodDto, TimetableEntryDto, Serialized } from "@sms/types";
 import { hasPermission } from "@/lib/permissions";
-import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { cn } from "@/lib/utils";
 import { TimetableAdmin } from "@/components/timetable/TimetableAdmin";
 import { CoverPanel } from "@/components/timetable/CoverPanel";
-import { TimetableGrid } from "@/components/timetable/TimetableGrid";
+import { TimetableViews, TeacherLoadPanel } from "@/components/timetable/TimetableViews";
 import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
@@ -29,9 +27,11 @@ export default async function TimetablePage({
   const [periods, classes, rooms, allTeachers] = await Promise.all([
     apiGet<Period[]>("/timetable/periods"),
     apiGet<ClassRow[]>("/classes/mine"),
-    canWrite ? apiGet<Room[]>("/timetable/rooms") : Promise.resolve(null),
-    // Teacher directory for the availability editor (class.write accompanies
-    // timetable.write on every writing role).
+    // Rooms are needed by the ROOM view too, not just the admin editor, so this is
+    // no longer gated on write.
+    apiGet<Room[]>("/timetable/rooms"),
+    // Teacher directory for the availability editor AND the teacher view (class.write
+    // accompanies timetable.write on every writing role).
     canWrite ? apiGet<{ id: string; name: string; roles?: string[] }[]>("/users?kind=teacher") : Promise.resolve(null),
   ]);
 
@@ -81,34 +81,22 @@ export default async function TimetablePage({
             <AlertDescription>You are not linked to any classes.</AlertDescription>
           </Alert>
         ) : (
-          <>
-            <div className="flex flex-wrap gap-2">
-              {list.map((c) => (
-                <Link
-                  key={c.id}
-                  href={`/timetable?classId=${c.id}`}
-                  className={cn(
-                    "rounded-md border px-3 py-1.5 text-sm font-medium transition-colors",
-                    c.id === selectedId
-                      ? "border-primary bg-primary/10 text-primary"
-                      : "border-border text-muted-foreground hover:bg-accent",
-                  )}
-                >
-                  {c.name}
-                </Link>
-              ))}
-            </div>
-
-            <TimetableGrid
-              classId={selectedId}
-              entries={entries ?? []}
-              periods={periods ?? []}
-              rooms={rooms ?? []}
-              teachers={teacherOptions}
-              canWrite={canWrite}
-            />
-          </>
+          <TimetableViews
+            classes={list}
+            teachers={allTeachers ?? []}
+            rooms={rooms ?? []}
+            periods={periods ?? []}
+            classId={selectedId}
+            classEntries={entries ?? []}
+            teacherOptions={teacherOptions}
+            canWrite={canWrite}
+          />
         )}
+
+        {/* Load is a leadership question, so it sits below the grid rather than
+            competing with it. Gated on write — a teacher does not need the roster's
+            workload, and the endpoint is staff-wide only anyway. */}
+        {canWrite && <TeacherLoadPanel />}
       </div>
     </AppShell>
   );

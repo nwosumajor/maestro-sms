@@ -51,6 +51,19 @@ const STAFF_WIDE_ROLES = new Set(["school_admin", "principal", "board", "super_a
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 const WEEKDAYS: DayOfWeekValue[] = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"];
 
+/** A timetable entry row as the grid/view queries select it (period + room joined). */
+type EntryRow = {
+  id: string;
+  dayOfWeek: string;
+  periodId: string;
+  classId: string;
+  subjectId: string;
+  subject: string;
+  teacherId: string;
+  roomId: string | null;
+  room: { name: string } | null;
+};
+
 export interface PeriodInput {
   name: string;
   sequence: number;
@@ -468,22 +481,300 @@ export class TimetableService {
         include: { period: true, room: { select: { name: true } } },
         orderBy: [{ dayOfWeek: "asc" }, { period: { sequence: "asc" } }],
       });
-      const teacherIds = [...new Set(rows.map((e) => e.teacherId))];
-      const users = teacherIds.length
-        ? await tx.user.findMany({ where: { id: { in: teacherIds } }, select: { id: true, name: true } })
-        : [];
-      const nameById = new Map(users.map((u) => [u.id, u.name]));
-      return rows.map((e) => ({
-        id: e.id,
-        dayOfWeek: e.dayOfWeek,
-        periodId: e.periodId,
-        subjectId: e.subjectId,
-        subject: e.subject,
-        teacherId: e.teacherId,
-        teacherName: nameById.get(e.teacherId) ?? "—",
-        roomId: e.roomId,
-        room: e.room ? { name: e.room.name } : null,
-      }));
+      return this.toEntryDtos(tx, rows as EntryRow[]);
+    });
+  }
+
+  /**
+   * Map entry rows to DTOs, batch-resolving the teacher AND class names.
+   *
+   * Shared by the class grid and the teacher/room views so all three carry the same
+   * fields. teacherId and classId are scalar FKs (the documented pattern that keeps
+   * the User model lean), so the names come from two batched lookups — never one
+   * query per row.
+   */
+  private async toEntryDtos(tx: TenantTx, rows: EntryRow[]): Promise<TimetableEntryDto[]> {
+    const teacherIds = [...new Set(rows.map((e) => e.teacherId))];
+    const classIds = [...new Set(rows.map((e) => e.classId))];
+    const [users, classes] = await Promise.all([
+      teacherIds.length
+        ? (tx.user.findMany({ where: { id: { in: teacherIds } }, select: { id: true, name: true } }) as Promise<Array<{ id: string; name: string }>>)
+        : Promise.resolve([] as Array<{ id: string; name: string }>),
+      classIds.length
+        ? (tx.class.findMany({ where: { id: { in: classIds } }, select: { id: true, name: true } }) as Promise<Array<{ id: string; name: string }>>)
+        : Promise.resolve([] as Array<{ id: string; name: string }>),
+    ]);
+    const nameById = new Map(users.map((u) => [u.id, u.name]));
+    const classById = new Map(classes.map((c) => [c.id, c.name]));
+    return rows.map((e) => ({
+      id: e.id,
+      dayOfWeek: e.dayOfWeek,
+      periodId: e.periodId,
+      classId: e.classId,
+      className: classById.get(e.classId) ?? "—",
+      subjectId: e.subjectId,
+      subject: e.subject,
+      teacherId: e.teacherId,
+      teacherName: nameById.get(e.teacherId) ?? "—",
+      roomId: e.roomId,
+      room: e.room ? { name: e.room.name } : null,
+    }));
+  }
+
+  /**
+   * One grid, viewed along whichever axis you asked for: a CLASS, a TEACHER, or a
+   * ROOM.
+   *
+   * The teacher axis is the one that was missing in practice. A teacher could only
+   * ever open a class grid, so answering "when do I teach?" meant opening each class
+   * they teach and scanning for their own name. The room axis answers the question
+   * rooms exist for — "what is in Lab 1 on Tuesday?" — which otherwise needed the
+   * same manual sweep across every class.
+   *
+   * Scoping is deliberately the SAME as listEntries, so a teacher asking for another
+   * teacher's week gets only the lessons they were already entitled to see, and a
+   * student or parent gets only their own classes.
+   */
+  async getTimetableView(
+    p: Principal,
+    opts: { classId?: string; teacherId?: string; roomId?: string },
+  ): Promise<TimetableEntryDto[]> {
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      const where: Record<string, unknown> = {};
+      if (opts.teacherId) where.teacherId = opts.teacherId;
+      if (opts.roomId) where.roomId = opts.roomId;
+
+      if (this.isStaffWide(p)) {
+        if (opts.classId) where.classId = opts.classId;
+      } else if (p.roles.includes("teacher")) {
+        const taught = await this.taughtClassIds(tx, p);
+        // Their own lessons, or any lesson of a class they teach.
+        where.OR = [{ teacherId: p.userId }, { classId: { in: taught } }];
+        if (opts.classId) where.classId = opts.classId;
+      } else {
+        const classIds = await this.visibleClassIds(tx, p);
+        if (classIds.length === 0) return [];
+        where.classId = opts.classId && classIds.includes(opts.classId) ? opts.classId : { in: classIds };
+      }
+
+      const rows = (await tx.timetableEntry.findMany({
+        where,
+        include: { period: true, room: { select: { name: true } } },
+        orderBy: [{ dayOfWeek: "asc" }, { period: { sequence: "asc" } }],
+        take: 500,
+      })) as EntryRow[];
+      return this.toEntryDtos(tx, rows);
+    });
+  }
+
+  /**
+   * Standing teaching load per teacher: periods assigned vs periods they are
+   * actually available for.
+   *
+   * The solver already computes TEACHER_OVERLOAD, but only inside a generate run —
+   * it is shown once and discarded, so nobody could ask "who is overloaded right
+   * now?" of the timetable as it stands. That is the question behind every request
+   * to move a lesson, and the one a head teacher needs before agreeing to one.
+   *
+   * Capacity is schedulable periods (breaks excluded) x weekdays, MINUS that
+   * teacher's own unavailability. Using the raw grid size instead would report a
+   * part-time teacher as chronically under-used.
+   */
+  async getTeacherLoad(
+    p: Principal,
+  ): Promise<Array<{ teacherId: string; teacherName: string; assigned: number; capacity: number; percent: number }>> {
+    if (!this.isStaffWide(p)) throw new ForbiddenException();
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      const [periods, entryCounts, unavail] = await Promise.all([
+        tx.period.findMany({ select: { id: true, isBreak: true } }) as Promise<Array<{ id: string; isBreak: boolean }>>,
+        // One grouped count for the whole school, not a query per teacher.
+        tx.timetableEntry.groupBy({ by: ["teacherId"], _count: { _all: true } } as never) as unknown as Promise<
+          Array<{ teacherId: string; _count: { _all: number } }>
+        >,
+        tx.teacherUnavailability.findMany({ select: { teacherId: true } }) as Promise<Array<{ teacherId: string }>>,
+      ]);
+      const teachingPeriods = periods.filter((pr) => !pr.isBreak).length;
+      const grid = teachingPeriods * WEEKDAYS.length;
+
+      const blockedByTeacher = new Map<string, number>();
+      for (const u of unavail) blockedByTeacher.set(u.teacherId, (blockedByTeacher.get(u.teacherId) ?? 0) + 1);
+
+      // Everyone who either teaches something or has declared unavailability. A
+      // teacher with zero lessons is exactly who a head teacher is looking for, so
+      // they must not be omitted just for having no entries.
+      const ids = [...new Set([...entryCounts.map((e) => e.teacherId), ...blockedByTeacher.keys()])];
+      if (ids.length === 0) return [];
+      const users = (await tx.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } })) as Array<{
+        id: string;
+        name: string;
+      }>;
+      const assignedBy = new Map(entryCounts.map((e) => [e.teacherId, e._count._all]));
+
+      return users
+        .map((u) => {
+          const assigned = assignedBy.get(u.id) ?? 0;
+          const capacity = Math.max(0, grid - (blockedByTeacher.get(u.id) ?? 0));
+          return {
+            teacherId: u.id,
+            teacherName: u.name,
+            assigned,
+            capacity,
+            percent: capacity > 0 ? Math.round((assigned / capacity) * 100) : 0,
+          };
+        })
+        // Heaviest first: the ones at risk are what the panel is for.
+        .sort((a, b) => b.percent - a.percent || a.teacherName.localeCompare(b.teacherName));
+    });
+  }
+
+  // --- printable timetable -----------------------------------------------------
+
+  /**
+   * The timetable as a printable landscape grid, for a class or a teacher.
+   *
+   * A class timetable is the single most-printed artefact in a school — pinned on the
+   * classroom wall, handed to each pupil, taped inside a staff planner — and there
+   * was no output of any kind. Every other document in the product (report cards,
+   * payslips, receipts, certificates, exam sheets) had one.
+   *
+   * Reuses getTimetableView, so what prints is exactly what the caller is allowed to
+   * see on screen; a parent cannot print another class's week.
+   */
+  async timetablePdf(
+    p: Principal,
+    opts: { classId?: string; teacherId?: string },
+  ): Promise<{ buffer: Buffer; filename: string }> {
+    if (!opts.classId && !opts.teacherId) throw new BadRequestException("Give a classId or a teacherId");
+    // A TEACHER's sheet is for staff, or for that teacher themselves.
+    //
+    // The row scoping below would already keep a parent from SEEING lessons they are
+    // not entitled to — but it would hand them a document titled "Teaching timetable
+    // — <name>" containing only the fraction of it their child happens to be in.
+    // That is not a leak; it is a partial document labelled as a complete one, which
+    // someone will print and act on. A teacher's week is not a parent-facing artefact
+    // in the first place, so the axis itself is gated.
+    if (opts.teacherId && opts.teacherId !== p.userId && !this.isStaffWide(p) && !p.roles.includes("teacher")) {
+      throw new ForbiddenException("A teacher's timetable is available to staff, or to that teacher");
+    }
+    const entries = await this.getTimetableView(p, opts);
+    const { periods, schoolName, subjectLabel } = await this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      const [rows, school, cls, teacher] = await Promise.all([
+        tx.period.findMany({ orderBy: { sequence: "asc" }, select: { id: true, name: true, startTime: true, endTime: true, isBreak: true } }) as Promise<
+          Array<{ id: string; name: string; startTime: string; endTime: string; isBreak: boolean }>
+        >,
+        tx.school.findFirst({ where: { id: p.schoolId }, select: { name: true } }) as Promise<{ name: string } | null>,
+        opts.classId
+          ? (tx.class.findFirst({ where: { id: opts.classId }, select: { name: true } }) as Promise<{ name: string } | null>)
+          : Promise.resolve(null),
+        opts.teacherId
+          ? (tx.user.findFirst({ where: { id: opts.teacherId }, select: { name: true } }) as Promise<{ name: string } | null>)
+          : Promise.resolve(null),
+      ]);
+      // 404 rather than an empty sheet: printing a blank grid for an id that does not
+      // exist in this tenant would look like "there are no lessons".
+      if (opts.classId && !cls) throw new NotFoundException("Class not found");
+      if (opts.teacherId && !teacher) throw new NotFoundException("Teacher not found");
+      return { periods: rows, schoolName: school?.name ?? "", subjectLabel: cls?.name ?? teacher?.name ?? "" };
+    });
+
+    await this.db.runAsTenant(this.ctx(p), (tx) =>
+      this.log(tx, p, "timetable.print", "timetable", opts.classId ?? opts.teacherId ?? "", {
+        axis: opts.classId ? "class" : "teacher",
+        lessons: entries.length,
+      }),
+    );
+
+    const buffer = await this.renderTimetablePdf({
+      schoolName,
+      title: opts.classId ? `Timetable — ${subjectLabel}` : `Teaching timetable — ${subjectLabel}`,
+      byTeacher: !!opts.teacherId,
+      periods,
+      entries,
+    });
+    const safe = subjectLabel.replace(/[^a-zA-Z0-9-_]+/g, "_") || "timetable";
+    return { buffer, filename: `timetable-${safe}.pdf` };
+  }
+
+  private async renderTimetablePdf(d: {
+    schoolName: string;
+    title: string;
+    byTeacher: boolean;
+    periods: Array<{ id: string; name: string; startTime: string; endTime: string; isBreak: boolean }>;
+    entries: TimetableEntryDto[];
+  }): Promise<Buffer> {
+    const { default: PDFDocument } = await import("pdfkit");
+    return new Promise<Buffer>((resolve, reject) => {
+      // LANDSCAPE: five weekday columns beside a period column do not fit portrait
+      // without shrinking the text past the point of being readable on a wall.
+      const doc = new PDFDocument({ margin: 30, size: "A4", layout: "landscape" });
+      const chunks: Buffer[] = [];
+      doc.on("data", (c: Buffer) => chunks.push(c));
+      doc.on("end", () => resolve(Buffer.concat(chunks)));
+      doc.on("error", reject);
+
+      doc.fontSize(14).text(d.schoolName, { align: "center" });
+      doc.fontSize(11).text(d.title, { align: "center" });
+      doc.moveDown(0.5);
+
+      const left = doc.page.margins.left;
+      const usable = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+      const periodW = 90;
+      const dayW = (usable - periodW) / WEEKDAYS.length;
+      const rowH = Math.max(30, Math.min(52, (doc.page.height - doc.y - 60) / Math.max(1, d.periods.length + 1)));
+
+      let y = doc.y;
+      // Header row.
+      doc.fontSize(9);
+      doc.rect(left, y, periodW, rowH * 0.7).stroke();
+      doc.text("Period", left + 4, y + 6, { width: periodW - 8 });
+      WEEKDAYS.forEach((day, i) => {
+        const x = left + periodW + i * dayW;
+        doc.rect(x, y, dayW, rowH * 0.7).stroke();
+        doc.text(day.charAt(0) + day.slice(1).toLowerCase(), x + 4, y + 6, { width: dayW - 8 });
+      });
+      y += rowH * 0.7;
+
+      for (const pr of d.periods) {
+        doc.rect(left, y, periodW, rowH).stroke();
+        doc.fontSize(8.5).text(pr.name, left + 4, y + 5, { width: periodW - 8, ellipsis: true });
+        doc.fontSize(7).fillColor("#666").text(`${pr.startTime}–${pr.endTime}`, left + 4, y + 16, { width: periodW - 8 });
+        doc.fillColor("#000");
+
+        WEEKDAYS.forEach((day, i) => {
+          const x = left + periodW + i * dayW;
+          doc.rect(x, y, dayW, rowH).stroke();
+          // A break spans the row as a labelled band — leaving it blank makes a
+          // printed timetable look like it has a hole in it.
+          if (pr.isBreak) {
+            doc.fontSize(7.5).fillColor("#888").text("break", x + 4, y + rowH / 2 - 4, { width: dayW - 8, align: "center" });
+            doc.fillColor("#000");
+            return;
+          }
+          const e = d.entries.find((x2) => x2.periodId === pr.id && x2.dayOfWeek === day);
+          if (!e) return;
+          doc.fontSize(8.5).text(e.subject, x + 4, y + 5, { width: dayW - 8, ellipsis: true });
+          // On a TEACHER's sheet the class is the useful line; on a CLASS's sheet it
+          // is the teacher. Printing both would not fit and would bury the one that
+          // matters.
+          const second = d.byTeacher ? e.className : e.teacherName;
+          doc.fontSize(7).fillColor("#555").text(second, x + 4, y + 16, { width: dayW - 8, ellipsis: true });
+          if (e.room) doc.text(e.room.name, x + 4, y + 25, { width: dayW - 8, ellipsis: true });
+          doc.fillColor("#000");
+        });
+        y += rowH;
+      }
+
+      if (d.periods.length === 0) {
+        doc.fontSize(9).text("No periods defined yet.", left, y + 10);
+      }
+
+      doc.fontSize(7).fillColor("#888").text(
+        `${d.entries.length} lesson${d.entries.length === 1 ? "" : "s"} · printed ${new Date().toISOString().slice(0, 10)}`,
+        left,
+        doc.page.height - doc.page.margins.bottom - 12,
+      );
+
+      doc.end();
     });
   }
 

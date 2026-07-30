@@ -16,7 +16,7 @@
 
 import { Pool } from "pg";
 import { randomUUID } from "node:crypto";
-import { BadRequestException, ForbiddenException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import { TimetableService } from "../../src/timetable/timetable.service";
 import { PrismaTenantService } from "../../src/foundation/prisma-tenant.service";
 import { AuditLogService } from "../../src/foundation/audit-log.service";
@@ -208,5 +208,120 @@ d("TimetableService integration (CSP auto-generation, RLS)", () => {
   it("non-school-wide staff cannot generate or set availability", async () => {
     await expect(svc.generate(teacher(T1), {})).rejects.toBeInstanceOf(ForbiddenException);
     await expect(svc.setUnavailability(teacher(T1), T1, [])).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  // ===========================================================================
+  // Viewing the grid by TEACHER and by ROOM, load, and printing
+  // ===========================================================================
+  // Expectations are re-derived from the DB rather than hard-coded, so these do not
+  // become brittle against the state earlier tests leave behind.
+  describe("views, load and print", () => {
+    beforeAll(async () => {
+      // A known, complete grid to view.
+      await svc.generate(staff(), { days: [...DAYS], replace: true });
+    });
+
+    it("views the grid by TEACHER — the axis that was unreachable before", async () => {
+      // A teacher previously had to open every class they teach and scan for their
+      // own name to answer "when do I teach?".
+      const mine = await svc.getTimetableView(staff(), { teacherId: T1 });
+      expect(mine.length).toBeGreaterThan(0);
+      expect(mine.every((e) => e.teacherId === T1)).toBe(true);
+      // The CLASS is what a teacher needs in their own view — it is the thing not
+      // implied by the axis they picked.
+      expect(mine.every((e) => !!e.className && e.className !== "—")).toBe(true);
+      expect(new Set(mine.map((e) => e.className)).size).toBeGreaterThan(1); // T1 teaches C1 + C2
+
+      const db = await admin.query(`SELECT count(*)::int AS n FROM timetable_entry WHERE "teacherId" = $1`, [T1]);
+      expect(mine).toHaveLength((db.rows[0] as { n: number }).n);
+    });
+
+    it("views the grid by ROOM — what rooms exist to prevent double-booking of", async () => {
+      const lab = await svc.getTimetableView(staff(), { roomId: LAB });
+      expect(lab.length).toBeGreaterThan(0);
+      expect(lab.every((e) => e.roomId === LAB)).toBe(true);
+      // Only Chemistry is room-fixed to the LAB in this fixture.
+      expect(new Set(lab.map((e) => e.subject))).toEqual(new Set(["Chemistry"]));
+      // No two lessons share a slot in one room — the invariant the room axis makes
+      // visible rather than merely enforced on write.
+      const slots = lab.map((e) => `${e.dayOfWeek}:${e.periodId}`);
+      expect(new Set(slots).size).toBe(slots.length);
+    });
+
+    it("the class view still carries the teacher, and both axes agree", async () => {
+      const byClass = await svc.getTimetableView(staff(), { classId: C1 });
+      expect(byClass.every((e) => e.classId === C1)).toBe(true);
+      expect(byClass.every((e) => !!e.teacherName && e.teacherName !== "—")).toBe(true);
+      // The same lesson must appear in both views — one grid, two axes, not two
+      // sources of truth.
+      const byTeacher = await svc.getTimetableView(staff(), { teacherId: T2 });
+      const shared = byClass.filter((e) => e.teacherId === T2).map((e) => e.id).sort();
+      expect(byTeacher.map((e) => e.id).sort()).toEqual(shared);
+    });
+
+    it("teacher load reports assigned vs AVAILABLE periods, heaviest first", async () => {
+      const load = await svc.getTeacherLoad(staff());
+      expect(load.length).toBeGreaterThan(0);
+
+      // Assigned counts match the grid exactly.
+      for (const row of load) {
+        const db = await admin.query(`SELECT count(*)::int AS n FROM timetable_entry WHERE "teacherId" = $1`, [row.teacherId]);
+        expect(row.assigned).toBe((db.rows[0] as { n: number }).n);
+      }
+
+      // Capacity is NET of the teacher's own unavailability — using the raw grid
+      // would report a part-time teacher as chronically under-used. T1 has one
+      // blocked slot from an earlier test, T2 none.
+      const t1 = load.find((r) => r.teacherId === T1)!;
+      const t2 = load.find((r) => r.teacherId === T2)!;
+      const blocked = await admin.query(`SELECT count(*)::int AS n FROM teacher_unavailability WHERE "teacherId" = $1`, [T1]);
+      expect(t1.capacity).toBe(t2.capacity - (blocked.rows[0] as { n: number }).n);
+      expect(t1.percent).toBe(Math.round((t1.assigned / t1.capacity) * 100));
+
+      // Heaviest first — the panel exists to surface who is at risk.
+      const pcts = load.map((r) => r.percent);
+      expect([...pcts].sort((a, b) => b - a)).toEqual(pcts);
+    });
+
+    it("load is staff-wide only", async () => {
+      await expect(svc.getTeacherLoad(teacher(T1))).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it("prints a real PDF for a class and for a teacher, and 404s an unknown id", async () => {
+      const cls = await svc.timetablePdf(staff(), { classId: C1 });
+      expect(cls.buffer.subarray(0, 4).toString()).toBe("%PDF");
+      expect(cls.buffer.length).toBeGreaterThan(1000);
+      expect(cls.filename).toMatch(/^timetable-.*\.pdf$/);
+
+      const tch = await svc.timetablePdf(staff(), { teacherId: T1 });
+      expect(tch.buffer.subarray(0, 4).toString()).toBe("%PDF");
+      // Different axis, different sheet: the class sheet names teachers, the teacher
+      // sheet names classes, so identical bytes would mean the axis was ignored.
+      expect(tch.buffer.equals(cls.buffer)).toBe(false);
+
+      // A blank grid for a non-existent id would read as "no lessons".
+      await expect(svc.timetablePdf(staff(), { classId: randomUUID() })).rejects.toBeInstanceOf(NotFoundException);
+      await expect(svc.timetablePdf(staff(), {})).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it("printing and viewing cannot widen what a caller may see", async () => {
+      // T2 teaches only C1, so asking for T1's week yields only the lessons T2 could
+      // already see (T1's lessons in C1) — never T1's lessons in C2.
+      const asT2 = await svc.getTimetableView(teacher(T2), { teacherId: T1 });
+      expect(asT2.every((e) => e.classId === C1)).toBe(true);
+      expect(asT2.some((e) => e.classId === C2)).toBe(false);
+    });
+
+    it("a teacher's SHEET is gated to staff or that teacher, not just row-scoped", async () => {
+      // Row scoping alone would hand a parent a document titled "Teaching timetable
+      // — <name>" containing only the slice their child is in: not a leak, but a
+      // partial document labelled as a complete one, which someone will print and
+      // act on.
+      const parent = (): Principal => ({ userId: randomUUID(), schoolId: SA, roles: ["parent"], permissions: [] });
+      await expect(svc.timetablePdf(parent(), { teacherId: T1 })).rejects.toBeInstanceOf(ForbiddenException);
+      // Staff and the teacher themselves are fine.
+      await expect(svc.timetablePdf(staff(), { teacherId: T1 })).resolves.toMatchObject({ filename: expect.any(String) });
+      await expect(svc.timetablePdf(teacher(T1), { teacherId: T1 })).resolves.toMatchObject({ filename: expect.any(String) });
+    });
   });
 });
