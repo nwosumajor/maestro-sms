@@ -1,4 +1,4 @@
-import type { AnalyticsOverviewDto, Serialized } from "@sms/types";
+import type { AcademicSessionDto, AnalyticsOverviewDto, Serialized } from "@sms/types";
 import { redirect } from "next/navigation";
 import { hasPermission } from "@/lib/permissions";
 import { auth } from "@/lib/auth";
@@ -10,19 +10,39 @@ import { RCDonut, RCColumns, RCBars } from "@/components/charts/rc";
 import { RC } from "@/components/charts/colors";
 import { money } from "@/lib/format";
 import { PageHeader } from "@/components/shell/PageHeader";
+import { PeriodBar } from "@/components/analytics/PeriodBar";
 
 export const dynamic = "force-dynamic";
 
 type Overview = Serialized<AnalyticsOverviewDto>;
 
-export default async function AnalyticsPage() {
+export default async function AnalyticsPage({
+  searchParams,
+}: {
+  searchParams?: { termId?: string; from?: string; to?: string };
+}) {
   const session = await auth();
   const user = session!.user;
   // Analytics serves fee.read holders only — school-wide staff + families. Other
   // roles (teacher, HR, warden…) get an empty family scope, so send them to the
   // dashboard instead of a page of zeros (matches the nav gate in AppShell).
   if (!hasPermission(user.permissions, "fee.read")) redirect("/dashboard");
-  const o = await apiGet<Overview>("/analytics/overview");
+  // The window is a QUERY parameter, so each choice re-runs the server aggregate
+  // rather than filtering anything in the browser.
+  const qs = new URLSearchParams();
+  for (const k of ["termId", "from", "to"] as const) {
+    const v = searchParams?.[k];
+    if (v) qs.set(k, v);
+  }
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  const [o, sessions] = await Promise.all([
+    apiGet<Overview>(`/analytics/overview${suffix}`),
+    // Term list for the selector. An accountant holds fee.read but not class.read,
+    // so this can come back null — the page then offers the current term and an
+    // explicit range, rather than failing.
+    apiGet<Serialized<AcademicSessionDto>[]>("/academic/sessions"),
+  ]);
+  const terms = (sessions ?? []).flatMap((s) => s.terms ?? []).slice(0, 12);
 
   const att = o?.attendance;
   const gr = o?.grades;
@@ -35,7 +55,23 @@ export default async function AnalyticsPage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="analytics" permissions={user.permissions}>
       <div className="space-y-8">
-        <PageHeader title={<>Analytics</>} subtitle={<>{o?.scope === "school" ? "School-wide figures, last 30 days." : "Your family's figures, last 30 days."}</>} />
+        <PageHeader
+          title={<>Analytics</>}
+          subtitle={
+            <>
+              {o?.scope === "school" ? "School-wide figures" : "Your family's figures"} for{" "}
+              {o?.period?.label ?? "the current term"}. Defaults to the current term, so these agree with the
+              term-scoped report card.
+            </>
+          }
+        />
+
+        <PeriodBar
+          period={o?.period}
+          terms={terms}
+          activeTermId={searchParams?.termId}
+          exportHref={`/api/sms/analytics/overview.csv${suffix}`}
+        />
 
         {/* KPI band */}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

@@ -39,8 +39,16 @@ export class NotificationController {
   /** The caller's own inbox (self-scoped). `?unread=1` for unread only. */
   @Get()
   @RequirePermission(NOTIFICATION_PERMISSIONS.NOTIFICATION_READ)
-  list(@CurrentPrincipal() p: Principal, @Query("unread") unread?: string): Promise<NotificationInboxDto> {
-    return this.notifications.listMine(p, { unreadOnly: unread === "1" || unread === "true" });
+  list(
+    @CurrentPrincipal() p: Principal,
+    @Query("unread") unread?: string,
+    @Query("limit") limit?: string,
+  ): Promise<NotificationInboxDto> {
+    const n = limit ? Number(limit) : undefined;
+    return this.notifications.listMine(p, {
+      unreadOnly: unread === "1" || unread === "true",
+      limit: Number.isFinite(n) ? n : undefined,
+    });
   }
 
   /** Mark one of the caller's own notifications read. */

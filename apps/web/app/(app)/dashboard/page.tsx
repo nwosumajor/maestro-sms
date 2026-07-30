@@ -1,12 +1,11 @@
 import type {
   AnalyticsOverviewDto,
   CalendarEventDto,
-  ClassDto,
+  DashboardSummaryDto,
   GamesAnalyticsDto,
   NotificationInboxDto,
   PlatformAnalyticsDto,
   Serialized,
-  WorkflowSummaryDto,
 } from "@sms/types";
 import Link from "next/link";
 import {
@@ -39,7 +38,6 @@ import { GamesAnalytics } from "@/components/operator/GamesAnalytics";
 
 export const dynamic = "force-dynamic";
 
-type WorkflowDto = Serialized<WorkflowSummaryDto>;
 type Overview = Serialized<AnalyticsOverviewDto>;
 type Inbox = Serialized<NotificationInboxDto>;
 type Ev = Serialized<CalendarEventDto>;
@@ -154,19 +152,29 @@ export default async function DashboardPage() {
   }
 
   // Role console data — every read is optional; nulls shrink the page gracefully.
-  const [overview, workflows, classes, inbox, events] = await Promise.all([
+  //
+  // The tile COUNTS come from one summary endpoint that counts in SQL. This page
+  // used to pull /workflows and /classes/mine in full and count them here, which
+  // shipped hundreds of rows to render two numbers — and got the approvals figure
+  // WRONG, because /workflows caps at its list page, so anything past that cap was
+  // silently missing from the count.
+  //
+  // The two lists below are fetched only as far as they are DISPLAYED: six inbox
+  // rows, and events windowed from yesterday by the server rather than fetched wide
+  // and filtered here.
+  const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString().slice(0, 10);
+  const [overview, summary, inbox, events] = await Promise.all([
     apiGet<Overview>("/analytics/overview"),
-    apiGet<WorkflowDto[]>("/workflows"),
-    apiGet<ClassDto[]>("/classes/mine"),
-    apiGet<Inbox>("/notifications"),
-    apiGet<Ev[]>("/events"),
+    apiGet<Serialized<DashboardSummaryDto>>("/dashboard/summary"),
+    apiGet<Inbox>("/notifications?limit=6"),
+    apiGet<Ev[]>(`/events?from=${since}`),
   ]);
 
-  const pending = (workflows ?? []).filter((w) => w.state === "PENDING_REVIEW").length;
-  const unread = inbox?.unread ?? 0;
+  const pending = summary?.pendingApprovals ?? 0;
+  const classCount = summary?.classes ?? 0;
+  const unread = summary?.unreadNotifications ?? inbox?.unread ?? 0;
   const recent = (inbox?.items ?? []).slice(0, 6);
   const upcoming = (events ?? [])
-    .filter((e) => new Date(e.startsAt).getTime() >= Date.now() - 24 * 3600 * 1000)
     .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime())
     .slice(0, 5);
 
@@ -176,8 +184,8 @@ export default async function DashboardPage() {
   const stats: { label: string; value: string; sub?: string; href: string }[] = [];
   if (overview?.operations?.students != null)
     stats.push({ label: "Students", value: overview.operations.students.toLocaleString(), sub: "on the register", href: "/students" });
-  if ((classes ?? []).length > 0 || can("class.read"))
-    stats.push({ label: isFamily ? "Classes" : "My classes", value: String((classes ?? []).length), sub: "this session", href: "/classes" });
+  if (classCount > 0 || can("class.read"))
+    stats.push({ label: isFamily ? "Classes" : "My classes", value: String(classCount), sub: "this session", href: "/classes" });
   if (att != null)
     stats.push({ label: "Attendance", value: `${att}%`, sub: isFamily ? "your record" : "school-wide", href: "/attendance" });
   if (overview?.fees && can("fee.read"))
