@@ -43,12 +43,12 @@ model MeetingBooking {
   id       String @id @default(uuid()) @db.Uuid
   schoolId String @db.Uuid
 
-  slotId    String @db.Uuid
+  slotId    String  @db.Uuid
   /// The booking parent + the child it concerns (DB FKs to user; scalar).
-  parentId  String @db.Uuid
-  studentId String @db.Uuid
+  parentId  String  @db.Uuid
+  studentId String  @db.Uuid
   /// BOOKED | CANCELLED.
-  status    String @default("BOOKED")
+  status    String  @default("BOOKED")
   note      String?
 
   createdAt DateTime @default(now())

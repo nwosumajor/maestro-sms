@@ -10,7 +10,7 @@
 // the sender (no UPDATE/DELETE grant); only the platform review path mutates it.
 
 model PlatformFeedback {
-  id       String @db.Uuid @id @default(uuid())
+  id       String @id @default(uuid()) @db.Uuid
   schoolId String @db.Uuid
 
   /// The sender (DB FK to user; scalar audit field).
@@ -35,7 +35,7 @@ model PlatformFeedback {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  school   School                     @relation(fields: [schoolId], references: [id])
+  school   School                    @relation(fields: [schoolId], references: [id])
   messages PlatformFeedbackMessage[]
 
   @@index([schoolId])
@@ -63,12 +63,12 @@ model PlatformFeedback {
 // team posts + reads ACROSS tenants via the privileged client. No UPDATE/DELETE
 // grant to the app role — a conversation record is immutable once sent.
 model PlatformFeedbackMessage {
-  id         String @db.Uuid @id @default(uuid())
+  id         String @id @default(uuid()) @db.Uuid
   schoolId   String @db.Uuid
   feedbackId String @db.Uuid
 
   /// The author's user id (scalar audit field).
-  authorId String @db.Uuid
+  authorId   String @db.Uuid
   /// SENDER (the school user) | PLATFORM (the super_admin/manager_admin team).
   authorSide String
   body       String
@@ -76,6 +76,8 @@ model PlatformFeedbackMessage {
   createdAt DateTime @default(now())
 
   feedback PlatformFeedback @relation(fields: [feedbackId], references: [id])
+
+  school School @relation(fields: [schoolId], references: [id])
 
   @@index([schoolId])
   @@index([feedbackId, createdAt])

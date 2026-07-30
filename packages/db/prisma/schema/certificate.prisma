@@ -20,6 +20,8 @@ model IssuedCertificate {
   serial     String
   createdAt  DateTime @default(now())
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@index([schoolId])
   @@index([schoolId, subjectId])
   @@map("issued_certificate")

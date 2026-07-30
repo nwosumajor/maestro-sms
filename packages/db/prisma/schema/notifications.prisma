@@ -118,9 +118,9 @@ model NotificationPreference {
   /// DB FK to user; no Prisma relation. Unique — one preference per user.
   userId String @unique @db.Uuid
 
-  emailEnabled    Boolean @default(true)
-  smsEnabled      Boolean @default(true)
-  whatsappEnabled Boolean @default(true)
+  emailEnabled    Boolean  @default(true)
+  smsEnabled      Boolean  @default(true)
+  whatsappEnabled Boolean  @default(true)
   /// Notification types the user has muted on external channels.
   mutedTypes      String[]
 

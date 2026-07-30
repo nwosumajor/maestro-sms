@@ -28,6 +28,8 @@ model SchoolGroupMember {
 
   group SchoolGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@unique([groupId, schoolId])
   @@map("school_group_member")
 }

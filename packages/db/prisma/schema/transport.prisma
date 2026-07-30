@@ -21,6 +21,8 @@ model Vehicle {
 
   routes TransportRoute[]
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@index([schoolId])
   @@map("vehicle")
 }
@@ -45,6 +47,8 @@ model TransportRoute {
   stops       RouteStop[]
   assignments TransportAssignment[]
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@index([schoolId])
   @@index([schoolId, status])
   @@map("transport_route")
@@ -64,6 +68,8 @@ model RouteStop {
 
   route       TransportRoute        @relation(fields: [routeId], references: [id])
   assignments TransportAssignment[]
+
+  school School @relation(fields: [schoolId], references: [id])
 
   @@index([schoolId])
   @@index([schoolId, routeId])
@@ -87,6 +93,8 @@ model TransportAssignment {
   route TransportRoute @relation(fields: [routeId], references: [id])
   stop  RouteStop?     @relation(fields: [stopId], references: [id])
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@index([schoolId])
   @@index([schoolId, passengerId])
   @@index([routeId, status])
@@ -96,19 +104,21 @@ model TransportAssignment {
 /// A scheduled trip on a route: the morning pickup or afternoon drop-off, with a
 /// depart time and the weekdays it runs. Boardings are recorded against a trip.
 model TransportTrip {
-  id           String   @id @default(uuid()) @db.Uuid
-  schoolId     String   @db.Uuid
-  routeId      String   @db.Uuid
+  id         String   @id @default(uuid()) @db.Uuid
+  schoolId   String   @db.Uuid
+  routeId    String   @db.Uuid
   /// AM_PICKUP | PM_DROPOFF
-  direction    String   @default("AM_PICKUP")
-  name         String?
+  direction  String   @default("AM_PICKUP")
+  name       String?
   /// HH:MM local depart time.
-  departTime   String
+  departTime String
   /// Weekdays it runs, e.g. ["MON","TUE","WED","THU","FRI"].
-  daysOfWeek   Json     @default("[\"MON\",\"TUE\",\"WED\",\"THU\",\"FRI\"]")
-  status       String   @default("ACTIVE")
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  daysOfWeek Json     @default("[\"MON\",\"TUE\",\"WED\",\"THU\",\"FRI\"]")
+  status     String   @default("ACTIVE")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
 
   @@index([schoolId])
   @@index([schoolId, routeId])
@@ -120,22 +130,24 @@ model TransportTrip {
 /// (one row per boarding event); a re-scan of the same passenger+trip+date+direction
 /// is idempotent via the unique index.
 model TransportBoarding {
-  id            String   @id @default(uuid()) @db.Uuid
-  schoolId      String   @db.Uuid
-  tripId        String?  @db.Uuid
-  routeId       String   @db.Uuid
-  passengerId   String   @db.Uuid
+  id           String   @id @default(uuid()) @db.Uuid
+  schoolId     String   @db.Uuid
+  tripId       String?  @db.Uuid
+  routeId      String   @db.Uuid
+  passengerId  String   @db.Uuid
   /// The boarding date (day granularity).
-  date          DateTime @db.Date
+  date         DateTime @db.Date
   /// PICKUP | DROPOFF
-  direction     String   @default("PICKUP")
+  direction    String   @default("PICKUP")
   /// BOARDED | ABSENT
-  status        String   @default("BOARDED")
+  status       String   @default("BOARDED")
   /// SCAN | MANUAL
-  method        String   @default("MANUAL")
-  stopId        String?  @db.Uuid
-  recordedById  String   @db.Uuid
-  recordedAt    DateTime @default(now())
+  method       String   @default("MANUAL")
+  stopId       String?  @db.Uuid
+  recordedById String   @db.Uuid
+  recordedAt   DateTime @default(now())
+
+  school School @relation(fields: [schoolId], references: [id])
 
   @@unique([passengerId, date, direction])
   @@index([schoolId])
@@ -163,6 +175,8 @@ model VehicleMaintenance {
   recordedById String   @db.Uuid
   createdAt    DateTime @default(now())
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@index([schoolId])
   @@index([schoolId, vehicleId, date])
   @@map("vehicle_maintenance")
@@ -181,6 +195,8 @@ model VehicleLocation {
   /// Heading in degrees (0–359), if known.
   headingDeg Float?
   recordedAt DateTime @default(now())
+
+  school School @relation(fields: [schoolId], references: [id])
 
   @@index([schoolId])
   @@index([schoolId, vehicleId, recordedAt])

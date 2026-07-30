@@ -1534,44 +1534,81 @@ d("RLS cross-tenant isolation", () => {
   });
 
   /**
-   * Golden Rule #1 as a DATA assertion, not just a schema one.
+   * Golden Rule #1 enforced at the SCHEMA level — the companion to the RLS coverage
+   * gate above.
    *
-   * Every tenant-scoped table carries a non-null schoolId — but 71 of them have no
-   * FOREIGN KEY to `school`, so nothing at the DB level stops a row referencing a
-   * school that has been deleted. Such rows are not a security leak (no live tenant
-   * can match a schoolId that no longer exists, so RLS hides them from everyone)
-   * but they are permanent, uncountable debris: tenant-scoped code can never see
-   * them to clean them up, and school churn accumulates them forever.
+   * Every tenant table carries a schoolId, but for a long time only 105 of 176 had a
+   * FOREIGN KEY to `school`, so nothing at the DB level stopped a row outliving the
+   * school it names. Those orphans were never a security leak (no live tenant can
+   * match a schoolId that no longer exists, so RLS hides them from everyone) but
+   * they were permanent, uncountable debris that tenant-scoped code can never see to
+   * clean up — 115 in the live DB and 530 in the test DB, all left by teardowns that
+   * deleted a school without clearing its children.
    *
-   * This gate is how that stops being invisible. It found 115 real orphans across
-   * lms_content_revision and xapi_statement, left by suites that delete a school
-   * without clearing its children first — which is exactly the class of teardown
-   * bug it will now catch at the point it is introduced.
+   * Migration 20261111000000_school_fk_integrity closed that, so ORPHANS ARE NOW
+   * STRUCTURALLY IMPOSSIBLE rather than merely absent. This gate protects that
+   * property: it asserts the constraint EXISTS, is VALIDATED (a NOT VALID constraint
+   * would silently tolerate pre-existing orphans), and carries the right ON DELETE.
+   *
+   * Checking the schema beats re-counting rows: it is one query instead of 176, and
+   * it fails when a new tenant table is added WITHOUT an FK — at the point the gap
+   * is introduced, rather than once debris has already accumulated.
+   *
+   * Required ON DELETE is derived from the column, not hard-coded, so it cannot rot:
+   *   - schoolId NOT NULL -> RESTRICT ('r'). A school must not be erasable while it
+   *     still owns rows; offboarding is an explicit ordered procedure, never one
+   *     statement that vaporises a customer's ledger and audit trail.
+   *   - schoolId NULLABLE -> SET NULL ('n'). Only gateway_event, whose column is
+   *     nullable BY DESIGN because a verified webhook is recorded before its tenant
+   *     is resolved.
    */
-  it("no tenant row references a school that does not exist (Golden Rule #1)", async () => {
-    const { rows: tables } = await adminPool.query<{ relname: string }>(`
-      SELECT c.relname
-      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+  it("every tenant table has a validated FK to school with the right ON DELETE (Golden Rule #1)", async () => {
+    const { rows } = await adminPool.query<{
+      relname: string;
+      nullable: boolean;
+      confdeltype: string | null;
+      convalidated: boolean | null;
+    }>(`
+      SELECT c.relname,
+             col.is_nullable = 'YES'          AS nullable,
+             con.confdeltype::text            AS confdeltype,
+             con.convalidated                 AS convalidated
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      JOIN information_schema.columns col
+        ON col.table_schema = 'public' AND col.table_name = c.relname
+       AND col.column_name = 'schoolId'
+      LEFT JOIN pg_constraint con
+        ON con.conrelid = c.oid AND con.contype = 'f'
+       AND con.confrelid = 'school'::regclass
       WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relispartition = false
-        AND EXISTS (
-          SELECT 1 FROM information_schema.columns col
-          WHERE col.table_schema = 'public' AND col.table_name = c.relname
-            AND col.column_name = 'schoolId')
       ORDER BY 1`);
-    const offenders: string[] = [];
-    for (const { relname } of tables) {
-      const { rows } = await adminPool.query<{ n: string }>(
-        `SELECT count(*)::text AS n FROM "${relname}" x
-         WHERE x."schoolId" IS NOT NULL
-           AND NOT EXISTS (SELECT 1 FROM school s WHERE s.id = x."schoolId")`,
-      );
-      const n = Number(rows[0]?.n ?? 0);
-      if (n > 0) offenders.push(`${relname} (${n})`);
-    }
-    // A failure here names the table and the count, so the fix is obvious: either
-    // the suite that deleted the school must clear that table in its teardown, or
-    // the table needs a real FK to school.
+
+    // ultimate_participant is the ONE documented exemption, the same one the RLS
+    // coverage gate above carves out: the cross-school arena table is deliberately
+    // RLS-disabled and carries no Prisma relation ("keeps the arena standalone"), so
+    // a db push-built database has no constraint to find.
+    const exempt = new Set(["ultimate_participant"]);
+
+    const offenders = rows
+      .filter((r) => !exempt.has(r.relname))
+      .map((r) => {
+        const want = r.nullable ? "n" : "r";
+        if (!r.confdeltype) return `${r.relname}: no FK to school`;
+        if (!r.convalidated) return `${r.relname}: FK is NOT VALID`;
+        if (r.confdeltype !== want)
+          return `${r.relname}: ON DELETE '${r.confdeltype}', expected '${want}'`;
+        return null;
+      })
+      .filter(Boolean);
+
+    // A failure names the table and what is wrong. For a NEW tenant table the fix is
+    // to add `school School @relation(fields: [schoolId], references: [id])` to its
+    // Prisma model plus the back-relation on School — not to widen this exemption.
     expect(offenders).toEqual([]);
+    // Guard the guard: if the table discovery query ever silently matched nothing,
+    // the assertion above would pass vacuously.
+    expect(rows.length).toBeGreaterThan(150);
   });
 
   it("gateway_event: the app role can INSERT with NO tenant GUC (webhook context), null-school rows are invisible to tenants, and UPDATE is denied", async () => {

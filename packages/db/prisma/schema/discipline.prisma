@@ -29,6 +29,8 @@ model DisciplineComplaint {
   evidence  DisciplineEvidence[]
   entries   DisciplineEntry[]
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@index([schoolId])
   @@index([schoolId, againstId])
   @@map("discipline_complaint")
@@ -43,6 +45,8 @@ model DisciplineAssignee {
   createdAt   DateTime @default(now())
 
   complaint DisciplineComplaint @relation(fields: [complaintId], references: [id])
+
+  school School @relation(fields: [schoolId], references: [id])
 
   @@unique([complaintId, assigneeId])
   @@index([schoolId])
@@ -61,6 +65,8 @@ model DisciplineEvidence {
 
   complaint DisciplineComplaint @relation(fields: [complaintId], references: [id])
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@index([schoolId])
   @@index([schoolId, complaintId])
   @@map("discipline_evidence")
@@ -76,6 +82,8 @@ model DisciplineEntry {
   createdAt   DateTime @default(now())
 
   complaint DisciplineComplaint @relation(fields: [complaintId], references: [id])
+
+  school School @relation(fields: [schoolId], references: [id])
 
   @@index([schoolId])
   @@index([complaintId])

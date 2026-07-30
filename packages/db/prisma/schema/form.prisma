@@ -26,6 +26,8 @@ model Form {
 
   responses FormResponse[]
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@index([schoolId])
   @@map("form")
 }
@@ -42,6 +44,8 @@ model FormResponse {
   createdAt    DateTime @default(now())
 
   form Form @relation(fields: [formId], references: [id])
+
+  school School @relation(fields: [schoolId], references: [id])
 
   @@unique([formId, respondentId])
   @@index([schoolId])

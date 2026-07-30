@@ -22,6 +22,8 @@ model LibraryBook {
 
   loans BookLoan[]
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@unique([schoolId, barcode])
   @@index([schoolId])
   @@map("library_book")
@@ -46,6 +48,8 @@ model BookLoan {
   updatedAt    DateTime  @updatedAt
 
   book LibraryBook @relation(fields: [bookId], references: [id])
+
+  school School @relation(fields: [schoolId], references: [id])
 
   @@index([schoolId])
   @@index([schoolId, borrowerId])

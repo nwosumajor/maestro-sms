@@ -33,22 +33,22 @@ model ExamSitting {
   id       String @id @default(uuid()) @db.Uuid
   schoolId String @db.Uuid
 
-  title    String
-  subject  String?
-  date     DateTime @db.Date
-  startsAt String   // "09:00"
-  endsAt   String   // "11:00"
-  hall     String
-  capacity Int      @default(0)
-  note     String?
+  title       String
+  subject     String?
+  date        DateTime @db.Date
+  startsAt    String // "09:00"
+  endsAt      String // "11:00"
+  hall        String
+  capacity    Int      @default(0)
+  note        String?
   /// The schedule this sitting belongs to (grouped for batch approval); null for
   /// a standalone/ad-hoc sitting.
-  scheduleId String? @db.Uuid
+  scheduleId  String?  @db.Uuid
   /// The online CBT exam backing this sitting, if any (DB link; scalar). A sitting
   /// with a cbtExamId lets students sit online; without, it's a paper exam.
-  cbtExamId String? @db.Uuid
+  cbtExamId   String?  @db.Uuid
   /// Staff who created it (DB FK to user; audit field).
-  createdById String @db.Uuid
+  createdById String   @db.Uuid
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

@@ -18,6 +18,8 @@ model DiscussionGroup {
 
   posts DiscussionPost[]
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@index([schoolId])
   @@map("discussion_group")
 }
@@ -36,6 +38,8 @@ model DiscussionPost {
   group    DiscussionGroup     @relation(fields: [groupId], references: [id])
   comments DiscussionComment[]
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@index([schoolId])
   @@index([schoolId, groupId])
   @@map("discussion_post")
@@ -51,6 +55,8 @@ model DiscussionComment {
   createdAt DateTime @default(now())
 
   post DiscussionPost @relation(fields: [postId], references: [id])
+
+  school School @relation(fields: [schoolId], references: [id])
 
   @@index([schoolId])
   @@index([postId])
