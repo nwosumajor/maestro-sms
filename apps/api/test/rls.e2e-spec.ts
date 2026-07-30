@@ -1533,6 +1533,47 @@ d("RLS cross-tenant isolation", () => {
     expect(uncovered).toEqual([]);
   });
 
+  /**
+   * Golden Rule #1 as a DATA assertion, not just a schema one.
+   *
+   * Every tenant-scoped table carries a non-null schoolId — but 71 of them have no
+   * FOREIGN KEY to `school`, so nothing at the DB level stops a row referencing a
+   * school that has been deleted. Such rows are not a security leak (no live tenant
+   * can match a schoolId that no longer exists, so RLS hides them from everyone)
+   * but they are permanent, uncountable debris: tenant-scoped code can never see
+   * them to clean them up, and school churn accumulates them forever.
+   *
+   * This gate is how that stops being invisible. It found 115 real orphans across
+   * lms_content_revision and xapi_statement, left by suites that delete a school
+   * without clearing its children first — which is exactly the class of teardown
+   * bug it will now catch at the point it is introduced.
+   */
+  it("no tenant row references a school that does not exist (Golden Rule #1)", async () => {
+    const { rows: tables } = await adminPool.query<{ relname: string }>(`
+      SELECT c.relname
+      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relispartition = false
+        AND EXISTS (
+          SELECT 1 FROM information_schema.columns col
+          WHERE col.table_schema = 'public' AND col.table_name = c.relname
+            AND col.column_name = 'schoolId')
+      ORDER BY 1`);
+    const offenders: string[] = [];
+    for (const { relname } of tables) {
+      const { rows } = await adminPool.query<{ n: string }>(
+        `SELECT count(*)::text AS n FROM "${relname}" x
+         WHERE x."schoolId" IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM school s WHERE s.id = x."schoolId")`,
+      );
+      const n = Number(rows[0]?.n ?? 0);
+      if (n > 0) offenders.push(`${relname} (${n})`);
+    }
+    // A failure here names the table and the count, so the fix is obvious: either
+    // the suite that deleted the school must clear that table in its teardown, or
+    // the table needs a real FK to school.
+    expect(offenders).toEqual([]);
+  });
+
   it("gateway_event: the app role can INSERT with NO tenant GUC (webhook context), null-school rows are invisible to tenants, and UPDATE is denied", async () => {
     const id = randomUUID();
     // System-context INSERT (no GUC set) — the webhook writes before tenant resolution.
