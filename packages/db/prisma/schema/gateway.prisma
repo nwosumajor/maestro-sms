@@ -27,6 +27,14 @@ model GatewayEvent {
 
   receivedAt DateTime @default(now())
 
+  // OPTIONAL relation, matching the nullable column above — this is the ONE
+  // documented exception to Golden Rule #1's non-null schoolId, because the
+  // verified webhook must be durably recorded BEFORE its tenant is known.
+  // ON DELETE SET NULL (Prisma's default for an optional relation) is right
+  // here too: the event log is an append-only record of what the gateway sent,
+  // and it must survive independently of tenant lifecycle.
+  school School? @relation(fields: [schoolId], references: [id])
+
   @@index([gateway, eventType])
   @@index([reference])
   @@index([schoolId])

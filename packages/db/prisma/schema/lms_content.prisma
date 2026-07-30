@@ -112,6 +112,8 @@ model LmsProgress {
   completedAt DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@unique([contentId, studentId])
   @@index([schoolId])
   @@index([schoolId, contentId])
@@ -128,6 +130,8 @@ model LmsModule {
   orderIndex Int      @default(0)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
 
   @@index([schoolId])
   @@index([schoolId, classId])
@@ -153,6 +157,8 @@ model LmsSubmission {
   submittedAt DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@unique([contentId, studentId])
   @@index([schoolId])
   @@index([schoolId, contentId])
@@ -175,6 +181,8 @@ model LmsContentRevision {
   note      String?
   authorId  String   @db.Uuid
   createdAt DateTime @default(now())
+
+  school School @relation(fields: [schoolId], references: [id])
 
   @@index([schoolId])
   @@index([schoolId, contentId])
@@ -200,6 +208,8 @@ model LmsLiveSession {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@index([schoolId])
   @@index([schoolId, classId])
   @@map("lms_live_session")
@@ -218,6 +228,8 @@ model LmsAward {
   note        String?
   awardedById String   @db.Uuid
   createdAt   DateTime @default(now())
+
+  school School @relation(fields: [schoolId], references: [id])
 
   @@index([schoolId])
   @@index([schoolId, classId])
@@ -245,6 +257,8 @@ model XapiStatement {
   result     Json     @default("{}")
   storedAt   DateTime @default(now())
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@index([schoolId])
   @@index([schoolId, classId])
   @@index([schoolId, actorId])
@@ -259,6 +273,8 @@ model LmsLiveAttendance {
   sessionId String   @db.Uuid
   studentId String   @db.Uuid
   joinedAt  DateTime @default(now())
+
+  school School @relation(fields: [schoolId], references: [id])
 
   @@unique([sessionId, studentId])
   @@index([schoolId])

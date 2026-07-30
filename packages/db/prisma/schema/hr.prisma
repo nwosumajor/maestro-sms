@@ -86,6 +86,8 @@ model LeaveType {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@unique([schoolId, name])
   @@index([schoolId])
   @@map("leave_type")
@@ -102,6 +104,8 @@ model LeaveBalance {
   usedDays     Float    @default(0)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
 
   @@unique([schoolId, userId, leaveTypeId, year])
   @@index([schoolId])
@@ -129,6 +133,8 @@ model LeaveRequest {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@index([schoolId])
   @@index([schoolId, userId])
   @@map("leave_request")
@@ -152,6 +158,8 @@ model SalaryChangeRequest {
   decidedAt     DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
 
   @@index([schoolId])
   @@index([schoolId, employeeId])
@@ -184,6 +192,8 @@ model PayrollRun {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@unique([schoolId, periodYear, periodMonth, runType])
   @@index([schoolId])
   // Approvals inbox: finds the few rows awaiting a decision without scanning
@@ -207,6 +217,8 @@ model Payslip {
   breakdownEnc  String?
   createdAt     DateTime @default(now())
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@unique([payrollRunId, userId])
   @@index([schoolId])
   @@map("payslip")
@@ -229,6 +241,8 @@ model PayComponent {
   createdById String   @db.Uuid
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
 
   @@index([schoolId])
   @@index([schoolId, userId])
@@ -257,6 +271,8 @@ model StaffLoan {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@index([schoolId])
   @@index([schoolId, userId])
   // Approvals inbox: finds the few rows awaiting a decision without scanning
@@ -276,6 +292,8 @@ model LoanRepayment {
   userId       String   @db.Uuid
   amountEnc    String
   createdAt    DateTime @default(now())
+
+  school School @relation(fields: [schoolId], references: [id])
 
   @@unique([loanId, payrollRunId])
   @@index([schoolId])
@@ -302,6 +320,8 @@ model StaffChecklist {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@index([schoolId])
   @@index([schoolId, userId])
   @@map("staff_checklist")
@@ -317,6 +337,8 @@ model StaffChecklistItem {
   done        Boolean   @default(false)
   doneById    String?   @db.Uuid
   doneAt      DateTime?
+
+  school School @relation(fields: [schoolId], references: [id])
 
   @@index([schoolId])
   @@index([schoolId, checklistId])
@@ -340,6 +362,8 @@ model StaffDocument {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@index([schoolId])
   @@index([schoolId, userId])
   @@map("staff_document")
@@ -359,6 +383,8 @@ model TrainingRecord {
   createdById String    @db.Uuid
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
 
   @@index([schoolId])
   @@index([schoolId, userId])
@@ -391,6 +417,8 @@ model Appraisal {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@index([schoolId])
   @@index([schoolId, userId])
   @@map("appraisal")
@@ -411,6 +439,8 @@ model DisciplinaryCase {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@index([schoolId])
   @@index([schoolId, userId])
   @@map("disciplinary_case")
@@ -424,6 +454,8 @@ model DisciplinaryEntry {
   note      String
   authorId  String   @db.Uuid
   createdAt DateTime @default(now())
+
+  school School @relation(fields: [schoolId], references: [id])
 
   @@index([schoolId])
   @@index([schoolId, caseId])
@@ -447,6 +479,8 @@ model JobRequisition {
   createdById String   @db.Uuid
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
 
   @@index([schoolId])
   @@map("job_requisition")
@@ -473,6 +507,8 @@ model Applicant {
   createdById     String   @db.Uuid
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
 
   @@index([schoolId])
   @@index([schoolId, requisitionId])
@@ -508,6 +544,8 @@ model StaffAttendance {
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@unique([userId, date])
   @@index([schoolId])
   @@index([schoolId, date])
@@ -533,6 +571,8 @@ model AttendanceKiosk {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@unique([schoolId])
   @@map("attendance_kiosk")
 }
@@ -554,6 +594,8 @@ model DutyAssignment {
   assignedById String   @db.Uuid
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
 
   @@index([schoolId])
   @@index([schoolId, date])
@@ -584,6 +626,8 @@ model EmploymentChangeRequest {
   decidedAt     DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
 
   @@index([schoolId])
   @@index([schoolId, userId])
@@ -617,6 +661,8 @@ model StaffExit {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@index([schoolId])
   @@index([schoolId, userId])
   // Approvals inbox: finds the few rows awaiting a decision without scanning
@@ -643,6 +689,8 @@ model AttendanceDevice {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@unique([schoolId, deviceId])
   @@index([schoolId])
   @@map("attendance_device")
@@ -658,6 +706,8 @@ model BiometricEnrollment {
   createdById  String   @db.Uuid
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
 
   @@unique([schoolId, deviceUserId])
   @@index([schoolId])

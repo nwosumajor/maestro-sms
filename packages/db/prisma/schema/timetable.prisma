@@ -109,7 +109,7 @@ model TimetableEntry {
   subject   String
   /// Curriculum Subject — REQUIRED, so a timetable can never name a subject
   /// that is not in the registry (which would break offerings and grading).
-  subjectId   String @db.Uuid
+  subjectId String    @db.Uuid
   /// Teacher (DB FK to user; scalar, no Prisma relation).
   teacherId String    @db.Uuid
   roomId    String?   @db.Uuid
@@ -117,11 +117,11 @@ model TimetableEntry {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  school School @relation(fields: [schoolId], references: [id])
-  period Period @relation(fields: [periodId], references: [id])
-  subjectRef Subject @relation(fields: [subjectId], references: [id])
-  room   Room?  @relation(fields: [roomId], references: [id])
-  covers LessonCover[]
+  school     School        @relation(fields: [schoolId], references: [id])
+  period     Period        @relation(fields: [periodId], references: [id])
+  subjectRef Subject       @relation(fields: [subjectId], references: [id])
+  room       Room?         @relation(fields: [roomId], references: [id])
+  covers     LessonCover[]
 
   /// A class has at most one lesson per (day, period).
   @@unique([schoolId, classId, dayOfWeek, periodId])
@@ -141,13 +141,13 @@ model LessonCover {
   id       String @id @default(uuid()) @db.Uuid
   schoolId String @db.Uuid
 
-  timetableEntryId String   @db.Uuid
-  date             DateTime @db.Date
+  timetableEntryId  String   @db.Uuid
+  date              DateTime @db.Date
   /// The reliever (DB FK to user; scalar, no Prisma relation).
-  coveringTeacherId String  @db.Uuid
+  coveringTeacherId String   @db.Uuid
   note              String?
   /// Who assigned the cover (DB FK to user; audit field).
-  assignedById String @db.Uuid
+  assignedById      String   @db.Uuid
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

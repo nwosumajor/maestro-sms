@@ -82,7 +82,7 @@ model Assessment {
   /// teachers of that class.
   classId String? @db.Uuid
   /// The term this assessment belongs to (set to the current term at creation).
-  termId    String? @db.Uuid
+  termId  String? @db.Uuid
 
   // --- Integrity toggles (all default OFF; opt-in only) ---
   /// Capture (NOT silently block) paste events into answer fields.
@@ -208,7 +208,7 @@ model IntegritySignal {
   /// ONE of submissionId / sittingId is set (DB CHECK). LMS submissions and CBT
   /// sittings share this table deliberately: CBT telemetry then inherits the same
   /// NDPR retention purge, RLS and consent gating rather than needing copies.
-  submissionId String?                  @db.Uuid
+  submissionId String?                 @db.Uuid
   type         IntegritySignalType
   severity     IntegritySignalSeverity
   source       IntegritySignalSource
@@ -224,10 +224,10 @@ model IntegritySignal {
 
   createdAt DateTime @default(now())
 
-  school     School     @relation(fields: [schoolId], references: [id])
+  school     School      @relation(fields: [schoolId], references: [id])
   submission Submission? @relation(fields: [submissionId], references: [id])
   /// CBT path — a candidate's sitting.
-  sittingId  String?    @db.Uuid
+  sittingId  String?     @db.Uuid
   sitting    CbtSitting? @relation(fields: [sittingId], references: [id])
 
   @@index([schoolId])

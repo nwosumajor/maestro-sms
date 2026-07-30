@@ -20,6 +20,8 @@ model Task {
   assignments TaskAssignment[]
   comments    TaskComment[]
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@index([schoolId])
   @@index([schoolId, createdById])
   @@map("task")
@@ -41,6 +43,8 @@ model TaskAssignment {
 
   task Task @relation(fields: [taskId], references: [id])
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@unique([taskId, assigneeId])
   @@index([schoolId])
   @@index([schoolId, assigneeId])
@@ -56,6 +60,8 @@ model TaskComment {
   createdAt DateTime @default(now())
 
   task Task @relation(fields: [taskId], references: [id])
+
+  school School @relation(fields: [schoolId], references: [id])
 
   @@index([schoolId])
   @@index([taskId])

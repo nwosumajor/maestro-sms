@@ -68,14 +68,27 @@ jobs:
       - name: Generate Prisma client
         run: pnpm db:generate
 
-      # `migrate deploy` replays migrations in filename order, but the ledger has
-      # a known chronological gap (20260713020000_multi_currency_billing ALTERs
-      # plan_price before 20260726000000_plan_pricing CREATEs it — safe only on
-      # a DB whose ledger was repaired in place, never on a truly fresh one).
-      # `db push` builds the CURRENT schema directly, matching how every other
-      # fresh test DB in this repo is built (see CLAUDE.md "Repo workflow").
-      - name: Push schema (fresh test DB — see comment above)
-        run: pnpm --filter @sms/db exec prisma db push --skip-generate
+      # Builds the test DB the SAME way production is built — `migrate deploy`, the
+      # exact path the deploy job's one-off `migrate` ECS task runs. This used to be
+      # `db push` because the ledger had a chronological gap (20260713020000_multi_
+      # currency_billing ALTERed plan_price before 20260726000000_plan_pricing CREATEd
+      # it), so a truly fresh DB died with 42P01. The 20260713010500/20260725999999/
+      # 20260726000001 trio closed that, so CI can now exercise the real thing.
+      #
+      # This matters for FIDELITY, not just tidiness. `db push` only knows the Prisma
+      # schema, and 31 foreign keys exist ONLY in migrations: the documented
+      # "scalar column + DB FK, no Prisma relation" pattern used to keep the User
+      # model lean (document.studentId, employee.userId, payment.recordedById, the
+      # ultimate_* arena links...), plus a dozen where the migration's ON DELETE
+      # deliberately differs from Prisma's default (invoice_line_item -> invoice is
+      # CASCADE in production, RESTRICT under db push). Under `db push` CI ran against
+      # 287 FKs while production has 318, so tests could pass on referential
+      # integrity production does not have — or fail on integrity it does.
+      #
+      # It also means a broken migration now fails CI instead of failing on deploy,
+      # which is how the 42P07 outage reached production in the first place.
+      - name: Apply migrations (same path as production deploy)
+        run: pnpm --filter @sms/db exec prisma migrate deploy
         env:
           DATABASE_URL: ${{ env.ADMIN_URL }}
 

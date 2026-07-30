@@ -20,6 +20,8 @@ model Hostel {
 
   rooms HostelRoom[]
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@index([schoolId])
   @@map("hostel")
 }
@@ -42,6 +44,8 @@ model HostelRoom {
   hostel      Hostel             @relation(fields: [hostelId], references: [id])
   allocations HostelAllocation[]
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@unique([hostelId, roomNumber])
   @@index([schoolId])
   @@index([schoolId, hostelId])
@@ -61,6 +65,8 @@ model HostelAllocation {
 
   room HostelRoom @relation(fields: [roomId], references: [id])
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@index([schoolId])
   @@index([schoolId, studentId])
   @@index([roomId, status])
@@ -69,18 +75,20 @@ model HostelAllocation {
 
 /// Nightly roll-call / boarding attendance. One row per (hostel, student, date).
 model HostelAttendance {
-  id         String   @id @default(uuid()) @db.Uuid
-  schoolId   String   @db.Uuid
-  hostelId   String   @db.Uuid
-  studentId  String   @db.Uuid
+  id        String   @id @default(uuid()) @db.Uuid
+  schoolId  String   @db.Uuid
+  hostelId  String   @db.Uuid
+  studentId String   @db.Uuid
   /// The roll-call date (day granularity).
-  date       DateTime @db.Date
+  date      DateTime @db.Date
   /// PRESENT | ABSENT | EXEAT | SICK | LATE
-  status     String   @default("PRESENT")
-  note       String?
-  takenById  String   @db.Uuid
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  status    String   @default("PRESENT")
+  note      String?
+  takenById String   @db.Uuid
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
 
   @@unique([hostelId, studentId, date])
   @@index([schoolId])
@@ -109,6 +117,8 @@ model HostelExeat {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@index([schoolId])
   @@index([schoolId, hostelId, status])
   @@index([schoolId, studentId])
@@ -118,23 +128,25 @@ model HostelExeat {
 /// Hostel maintenance / incident log (broken facility, discipline, health, etc.).
 /// Append-first with a status lifecycle; resolution is recorded, rows are kept.
 model HostelIncident {
-  id            String    @id @default(uuid()) @db.Uuid
-  schoolId      String    @db.Uuid
-  hostelId      String    @db.Uuid
+  id             String    @id @default(uuid()) @db.Uuid
+  schoolId       String    @db.Uuid
+  hostelId       String    @db.Uuid
   /// Optional room the incident concerns.
-  roomId        String?   @db.Uuid
+  roomId         String?   @db.Uuid
   /// MAINTENANCE | DISCIPLINE | HEALTH | SECURITY | OTHER
-  category      String    @default("MAINTENANCE")
-  title         String
-  description   String?
+  category       String    @default("MAINTENANCE")
+  title          String
+  description    String?
   /// OPEN | IN_PROGRESS | RESOLVED
-  status        String    @default("OPEN")
-  reportedById  String    @db.Uuid
-  resolvedById  String?   @db.Uuid
-  resolvedAt    DateTime?
+  status         String    @default("OPEN")
+  reportedById   String    @db.Uuid
+  resolvedById   String?   @db.Uuid
+  resolvedAt     DateTime?
   resolutionNote String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
 
   @@index([schoolId])
   @@index([schoolId, hostelId, status])

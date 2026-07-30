@@ -22,6 +22,8 @@ model Poll {
   options PollOption[]
   votes   PollVote[]
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@index([schoolId])
   @@map("poll")
 }
@@ -36,6 +38,8 @@ model PollOption {
 
   poll  Poll       @relation(fields: [pollId], references: [id])
   votes PollVote[]
+
+  school School @relation(fields: [schoolId], references: [id])
 
   @@index([schoolId])
   @@index([schoolId, pollId])
@@ -54,6 +58,8 @@ model PollVote {
 
   poll   Poll       @relation(fields: [pollId], references: [id])
   option PollOption @relation(fields: [optionId], references: [id])
+
+  school School @relation(fields: [schoolId], references: [id])
 
   @@unique([pollId, voterId])
   @@index([schoolId])

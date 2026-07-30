@@ -62,6 +62,8 @@ model AgentCommission {
 
   agent Agent @relation(fields: [agentId], references: [id])
 
+  school School @relation(fields: [schoolId], references: [id])
+
   @@index([agentId])
   @@map("agent_commission")
 }

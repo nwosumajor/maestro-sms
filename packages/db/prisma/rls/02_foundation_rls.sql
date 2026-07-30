@@ -40,8 +40,19 @@ CREATE POLICY user_role_delete ON "user_role" FOR DELETE
 -- and privileges revoked, so entries can never be altered by the app.
 ALTER TABLE "audit_log" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "audit_log" FORCE  ROW LEVEL SECURITY;
+-- These two are DROP-then-CREATE, unlike every other policy in this file, because
+-- audit_log is the one table a MIGRATION also policies: 20260824000000_audit_log_
+-- partition re-creates the table as partitioned and re-declares these same two
+-- policy names on it. So on a database built by `prisma migrate deploy` they already
+-- exist by the time this file runs, and a bare CREATE POLICY aborts 02 partway
+-- through — leaving the REST of this file (integrity_consent, the grants) unapplied.
+-- Postgres has no CREATE POLICY IF NOT EXISTS, so drop first. Re-declaring the same
+-- definition is a no-op in effect, and the drop+create is atomic within the file's
+-- transaction, so there is no window where audit_log sits unprotected.
+DROP POLICY IF EXISTS audit_log_select ON "audit_log";
 CREATE POLICY audit_log_select ON "audit_log" FOR SELECT
   USING ("schoolId" = current_setting('app.current_school_id', true)::uuid);
+DROP POLICY IF EXISTS audit_log_insert ON "audit_log";
 CREATE POLICY audit_log_insert ON "audit_log" FOR INSERT
   WITH CHECK ("schoolId" = current_setting('app.current_school_id', true)::uuid);
 

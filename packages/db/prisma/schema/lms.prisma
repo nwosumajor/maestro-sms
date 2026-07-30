@@ -17,7 +17,7 @@ model Class {
   name         String
   /// Short stable code (e.g. JSS2A). Auto-generated from the name when left
   /// blank; unique per school so rosters and CSV imports key on it.
-  code         String @default(dbgenerated("left(replace(gen_random_uuid()::text, '-', ''), 8)"))
+  code         String   @default(dbgenerated("left(replace(gen_random_uuid()::text, '-', ''), 8)"))
   /// Ordering within the school's progression (e.g. JSS1=1, JSS2=2). Drives the
   /// "promote to the next class" flow together with nextClassId.
   level        Int?
@@ -108,12 +108,12 @@ model Subject {
   name      String
   /// Short stable code (e.g. MTH, ENG). Auto-generated from the name when left
   /// blank; unique per school so imports and pickers key on it, not free text.
-  code      String @default(dbgenerated("left(replace(gen_random_uuid()::text, '-', ''), 8)"))
+  code      String   @default(dbgenerated("left(replace(gen_random_uuid()::text, '-', ''), 8)"))
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  school        School                @relation(fields: [schoolId], references: [id])
-  classSubjects ClassSubjectTeacher[]
+  school           School                @relation(fields: [schoolId], references: [id])
+  classSubjects    ClassSubjectTeacher[]
   timetableEntries TimetableEntry[]
 
   // Identity integrity: a school cannot hold two subjects of the same name or

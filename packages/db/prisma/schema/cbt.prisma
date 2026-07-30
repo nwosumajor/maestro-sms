@@ -19,7 +19,7 @@ model CbtQuestionBank {
   /// subject (classSubjectTeacher), so a bank with no subject would be
   /// un-fillable by every teacher and editable only by school-wide staff.
   /// `subject` above is the denormalised display label, kept in sync server-side.
-  subjectId   String  @db.Uuid
+  subjectId   String   @db.Uuid
   createdById String   @db.Uuid
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -149,10 +149,10 @@ model CbtSitting {
   score       Int?
   total       Int?
 
-  theoryAnswers CbtTheoryAnswer[]
+  theoryAnswers    CbtTheoryAnswer[]
   integritySignals IntegritySignal[]
-  school School  @relation(fields: [schoolId], references: [id])
-  exam   CbtExam @relation(fields: [examId], references: [id], onDelete: Cascade)
+  school           School            @relation(fields: [schoolId], references: [id])
+  exam             CbtExam           @relation(fields: [examId], references: [id], onDelete: Cascade)
 
   @@unique([examId, studentId])
   @@index([schoolId, examId])
@@ -171,8 +171,8 @@ model CbtSitting {
 /// Marks are never computed: `marksAwarded` is null until a person sets it, and a
 /// sitting's score stays PROVISIONAL while any answer is unmarked (Golden Rule #8).
 model CbtTheoryAnswer {
-  id        String @db.Uuid @id @default(uuid())
-  schoolId  String @db.Uuid
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
 
   /// Denormalised from the sitting so the marking queue can filter on
   /// (examId, questionId) directly, without joining every sitting.
@@ -193,8 +193,8 @@ model CbtTheoryAnswer {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  school  School      @relation(fields: [schoolId], references: [id])
-  sitting CbtSitting  @relation(fields: [sittingId], references: [id])
+  school  School     @relation(fields: [schoolId], references: [id])
+  sitting CbtSitting @relation(fields: [sittingId], references: [id])
 
   /// One answer per (sitting, question) — autosave UPSERTS on this.
   @@unique([sittingId, questionId])

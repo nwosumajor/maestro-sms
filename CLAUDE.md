@@ -599,16 +599,35 @@ unit tests + an `observability.module` DI smoke test.
 - DB setup order: `prisma migrate deploy` → `pnpm --filter @sms/db rls` →
   `prisma db seed` (or `pnpm --filter @sms/db setup`). RLS lives in `prisma/rls/`,
   NOT prisma migrations — Prisma's shadow DB rejects the `major_user` GRANT.
-- **The migration history does NOT replay from scratch**: `20260713020000_
-  multi_currency_billing` ALTERs `plan_price`, a table not CREATEd until the
-  LATER-stamped `20260726000000_plan_pricing` — a real chronological gap in the
-  ledger (fixed in place, historically, on already-migrated DBs; never fix it by
-  reordering/renaming migration folders — that breaks the checksum every
-  already-migrated environment, including the live compose stack, has recorded).
-  A genuinely FRESH database (a new CI run, a new local test DB) must be built
-  with `prisma db push` (+ `pnpm rls` + seed), NOT `migrate deploy`, or it 500s
-  on `relation "plan_price" does not exist`. CI (`.github/workflows/ci.yml`)
-  uses `db push` for exactly this reason.
+- **The migration history REPLAYS from scratch — keep it that way.** It did not
+  used to: `20260713020000_multi_currency_billing` ALTERs `plan_price`, a table
+  not CREATEd until the LATER-stamped `20260726000000_plan_pricing`, so a fresh
+  `migrate deploy` died on `relation "plan_price" does not exist` (P3018/42P01).
+  The folders were simply mis-stamped — every already-migrated DB ran them in
+  AUTHORING order (plan_pricing Jul 9, multi_currency Jul 13) and is consistent.
+  It is fixed by a trio that touches no historical file, since renaming or
+  reordering folders would break the checksum every already-migrated environment
+  has recorded: `20260713010500_plan_price_replay_bootstrap` creates the table
+  early IF ABSENT (marker COMMENT), `20260725999999_*_drop` removes it again
+  ONLY if it still carries that marker, and `20260726000001_*_repair` re-applies
+  the multi-currency column + composite PK idempotently. All three are no-ops on
+  an already-migrated DB. // GOTCHA: without the third one `migrate deploy`
+  reported SUCCESS while producing a single-currency `plan_price` — a silent
+  divergence from production, strictly worse than the loud 42P01 it replaced.
+  So a fresh DB is now built the SAME way production is: `migrate deploy` +
+  `pnpm rls` + seed. **CI does this too, deliberately** — `db push` only knows
+  the Prisma schema, and 31 FKs live only in migrations (the documented "scalar
+  column + DB FK, no Prisma relation" pattern that keeps the `User` model lean,
+  plus a dozen whose migration ON DELETE differs from Prisma's default), so
+  `db push` gave CI 287 FKs against production's 318 — tests passing on
+  referential integrity production lacks. It also means a broken migration now
+  fails CI instead of failing on deploy.
+- RLS files use bare `CREATE POLICY` (Postgres has no IF NOT EXISTS for it), so
+  they are order-sensitive, not idempotent — the entrypoint applies them per-file
+  against a sentinel. `02_foundation_rls.sql` is the ONE exception: its two
+  `audit_log` policies DROP-then-CREATE, because `20260824000000_audit_log_
+  partition` re-declares those same names. Without that, 02 aborted partway on
+  any migrate-deploy DB and silently left the rest of the file unapplied.
 - New tenant table: add an `prisma/rls/NN_*.sql` file and a cross-tenant case to
   `apps/api/test/rls.e2e-spec.ts` (and its afterAll cleanup, child rows BEFORE
   parents — FK order matters). Register the new rls file in

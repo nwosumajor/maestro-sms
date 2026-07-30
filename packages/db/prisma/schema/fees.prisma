@@ -322,11 +322,11 @@ model InvoiceAdjustment {
   id       String @id @default(uuid()) @db.Uuid
   schoolId String @db.Uuid
 
-  invoiceId String @db.Uuid
+  invoiceId     String  @db.Uuid
   /// DISCOUNT | WAIVER
-  kind        String
-  amountMinor Int
-  reason      String
+  kind          String
+  amountMinor   Int
+  reason        String
   /// PENDING_APPROVAL | APPROVED | REJECTED
   status        String  @default("PENDING_APPROVAL")
   requestedById String  @db.Uuid
