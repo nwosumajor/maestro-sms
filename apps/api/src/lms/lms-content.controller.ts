@@ -12,6 +12,7 @@ import { Body, Controller, Delete, Get, Param, Post, Put, Query } from "@nestjs/
 import { z } from "zod";
 import { GRADEBOOK_PERMISSIONS, LMS_PERMISSIONS, MODULES } from "@sms/types";
 import type {
+  MyLearningDto,
   ClassProgressDto,
   ForumPostDto,
   LmsAnalyticsDto,
@@ -122,8 +123,23 @@ export class LmsContentController {
 
   @Get("classes/:classId/content")
   @RequirePermission(LMS_PERMISSIONS.CONTENT_READ)
-  list(@CurrentPrincipal() p: Principal, @Param("classId") classId: string): Promise<LmsContentDto[]> {
-    return this.content.listContent(p, classId);
+  list(
+    @CurrentPrincipal() p: Principal,
+    @Param("classId") classId: string,
+    @Query("type") type?: string,
+    @Query("status") status?: string,
+  ): Promise<LmsContentDto[]> {
+    // Both narrow the QUERY. `status` is ignored for students/parents in the
+    // service — it can only ever narrow within PUBLISHED, never widen past it.
+    return this.content.listContent(p, classId, { type, status });
+  }
+
+  /** A student's learning across every class they are enrolled in, unfinished first.
+   *  Self-scoped: there is no id to pass, so it can only ever return your own. */
+  @Get("my/learning")
+  @RequirePermission(LMS_PERMISSIONS.CONTENT_READ)
+  myLearning(@CurrentPrincipal() p: Principal): Promise<MyLearningDto> {
+    return this.content.myLearning(p);
   }
 
   @Get("content/approvals/pending")

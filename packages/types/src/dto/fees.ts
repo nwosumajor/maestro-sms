@@ -1,5 +1,20 @@
 // Fees / Billing response DTOs (wire form: dates are ISO strings).
 
+/** A page of invoices plus the cursor for the next one (null = end of list). */
+export interface InvoicePageDto {
+  items: InvoiceListItemDto[];
+  nextCursor: string | null;
+}
+
+/** The headline figures on the fees page. Money in integer minor units. */
+export interface InvoiceSummaryDto {
+  outstandingMinor: number;
+  collectedMinor: number;
+  /** Billable invoices past their due date with a balance still owing. */
+  overdueCount: number;
+  currency: string;
+}
+
 export interface InvoiceListItemDto {
   id: string;
   reference: string;

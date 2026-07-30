@@ -12,6 +12,7 @@ import { LmsGradebook } from "@/components/lms/LmsGradebook";
 import { LiveSessions } from "@/components/lms/LiveSessions";
 import { Awards } from "@/components/lms/Awards";
 import { PageHeader } from "@/components/shell/PageHeader";
+import { ContentFilterBar } from "@/components/lms/ContentFilterBar";
 
 export const dynamic = "force-dynamic";
 
@@ -20,12 +21,24 @@ export const dynamic = "force-dynamic";
 // PUBLISHED content (quiz answer keys stripped by the API). Authoring + the
 // submit/review approval flow live in the ContentManager client island; the API
 // re-checks every permission, relationship and approval transition.
-export default async function ClassContentPage({ params }: { params: { id: string } }) {
+export default async function ClassContentPage({
+  params,
+  searchParams,
+}: {
+  params: { id: string };
+  searchParams?: { type?: string; status?: string };
+}) {
   const session = await auth();
   const user = session!.user;
   const classId = params.id;
 
-  const content = await apiGet<Serialized<LmsContentDto>[]>(`/classes/${classId}/content`);
+  // Filtering narrows the QUERY, not the browser. A class accumulates a year of
+  // content, so asking for just the quizzes should cost less, not the same.
+  const qs = new URLSearchParams();
+  if (searchParams?.type) qs.set("type", searchParams.type);
+  if (searchParams?.status) qs.set("status", searchParams.status);
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  const content = await apiGet<Serialized<LmsContentDto>[]>(`/classes/${classId}/content${suffix}`);
 
   const canAuthor = hasPermission(user.permissions, "lms.content.write");
   const canReview = hasPermission(user.permissions, "lms.content.approve");
@@ -62,6 +75,12 @@ export default async function ClassContentPage({ params }: { params: { id: strin
             {canAuthor && <ClassProgress classId={classId} />}
             <Awards classId={classId} canManage={canAuthor} />
             <LiveSessions classId={classId} canManage={canAuthor} />
+            <ContentFilterBar
+              classId={classId}
+              type={searchParams?.type}
+              status={searchParams?.status}
+              showStatus={canAuthor}
+            />
             <ContentManager
               classId={classId}
               initial={content}

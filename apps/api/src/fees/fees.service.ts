@@ -11,6 +11,8 @@
 
 import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
+// VALUE import: Prisma.sql/join only resolve as values, not types (CLAUDE.md).
+import { Prisma } from "@sms/db";
 import {
   PAYMENT_APPROVAL_THRESHOLD_MINOR,
   type InvoiceStatusValue,
@@ -29,6 +31,12 @@ import { NotificationService } from "../notifications/notification.service";
 import { PaystackService } from "../payments/paystack.service";
 
 /** Roles that see ALL billing rows in the tenant. */
+/** Invoices per page. One issue run for a class is ~30-40 rows, so a page shows a
+ *  class's worth at a time. */
+const INVOICE_PAGE_SIZE = 50;
+/** Ceiling a caller can request per page. */
+const INVOICE_PAGE_MAX = 200;
+
 const BILLING_WIDE_ROLES = new Set([
   "accountant",
   "school_admin",
@@ -295,21 +303,117 @@ export class FeesService {
     });
   }
 
-  async listInvoices(p: Principal, opts?: { studentId?: string; status?: InvoiceStatusValue }) {
+  /**
+   * Invoices, filtered and PAGED.
+   *
+   * This was a flat `take: 200` with no way to reach past it, and the page passed no
+   * filters at all — so an accountant saw the 200 most recent invoices and older ones
+   * were simply unreachable from the fees page. A term's billing for a few hundred
+   * students exceeds that in one issue run.
+   *
+   * `q` matches the reference, which is how staff actually look an invoice up: a
+   * parent quotes "INV-2041" off their copy, not a student id.
+   *
+   * Paging is by CURSOR on (createdAt, id) rather than an offset. Offsets shift when
+   * a new invoice is issued mid-browse, which silently skips or repeats rows on the
+   * next page — for a financial list that is not cosmetic.
+   */
+  async listInvoices(
+    p: Principal,
+    opts?: { studentId?: string; status?: InvoiceStatusValue; q?: string; cursor?: string; limit?: number },
+  ): Promise<{ items: unknown[]; nextCursor: string | null }> {
+    const limit = Math.min(Math.max(opts?.limit ?? INVOICE_PAGE_SIZE, 1), INVOICE_PAGE_MAX);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const where: Record<string, unknown> = {};
       if (opts?.status) where.status = opts.status;
+      const q = opts?.q?.trim();
+      if (q) where.reference = { contains: q, mode: "insensitive" };
 
       if (this.isBillingWide(p)) {
         if (opts?.studentId) where.studentId = opts.studentId;
       } else {
         const ids = await this.visibleStudentIds(tx, p);
-        if (ids.length === 0) return [];
+        if (ids.length === 0) return { items: [], nextCursor: null };
         where.studentId = opts?.studentId && ids.includes(opts.studentId)
           ? opts.studentId
           : { in: ids };
       }
-      return tx.invoice.findMany({ where, orderBy: { createdAt: "desc" }, take: 200 });
+
+      // Fetch one extra to learn whether another page exists without a second query.
+      const rows = (await tx.invoice.findMany({
+        where,
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: limit + 1,
+        ...(opts?.cursor ? { cursor: { id: opts.cursor }, skip: 1 } : {}),
+      })) as Array<{ id: string }>;
+
+      const hasMore = rows.length > limit;
+      const items = hasMore ? rows.slice(0, limit) : rows;
+      return { items, nextCursor: hasMore ? (items[items.length - 1]?.id ?? null) : null };
+    });
+  }
+
+  /**
+   * The three numbers a fees page is opened for: outstanding, collected, overdue.
+   *
+   * Computed as ONE aggregate in Postgres over the caller's visible set, never by
+   * summing the rows the page happens to be showing — with paging in place those are
+   * one page of many, and a total derived from a page is simply wrong.
+   *
+   * Money is cast to ::float8 deliberately, matching the analytics aggregate: a
+   * school's lifetime kobo total overflows int4, and int8 comes back as BigInt which
+   * the JSON layer cannot serialize. float8 is exact well past any real total.
+   */
+  async invoiceSummary(
+    p: Principal,
+  ): Promise<{ outstandingMinor: number; collectedMinor: number; overdueCount: number; currency: string }> {
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      // Scope first: a parent's summary must cover only their children.
+      let studentFilter = Prisma.sql``;
+      if (!this.isBillingWide(p)) {
+        const ids = await this.visibleStudentIds(tx, p);
+        if (ids.length === 0) return { outstandingMinor: 0, collectedMinor: 0, overdueCount: 0, currency: "NGN" };
+        // = ANY(ARRAY[...]) rather than IN (...): with Prisma.join, `IN (a,b,c)::uuid[]`
+        // applies the cast to the LAST element only and Postgres rejects it
+        // (42883, uuid = uuid[]). Only the parent-scoped path builds this clause, so
+        // the staff path would have kept working while every parent got a 500.
+        studentFilter = Prisma.sql`AND i."studentId" = ANY(ARRAY[${Prisma.join(ids)}]::uuid[])`;
+      }
+
+      const rows = (await tx.$queryRaw`
+        WITH billable AS (
+          SELECT i.id, i."totalMinor", i."dueDate", i.status
+          FROM invoice i
+          WHERE i.status IN ('ISSUED', 'PARTIALLY_PAID', 'PAID')
+          ${studentFilter}
+        ), paid AS (
+          SELECT p."invoiceId",
+                 SUM(CASE WHEN p.kind = 'REFUND' THEN -p."amountMinor" ELSE p."amountMinor" END) AS amt
+          FROM payment p
+          WHERE p.status = 'POSTED' AND p."invoiceId" IN (SELECT id FROM billable)
+          GROUP BY p."invoiceId"
+        )
+        SELECT
+          COALESCE(SUM(b."totalMinor" - COALESCE(pd.amt, 0)), 0)::float8 AS "outstandingMinor",
+          COALESCE(SUM(COALESCE(pd.amt, 0)), 0)::float8                  AS "collectedMinor",
+          COUNT(*) FILTER (
+            WHERE b."dueDate" IS NOT NULL
+              AND b."dueDate" < now()
+              AND b."totalMinor" - COALESCE(pd.amt, 0) > 0
+          )::int AS "overdueCount"
+        FROM billable b
+        LEFT JOIN paid pd ON pd."invoiceId" = b.id
+      `) as Array<{ outstandingMinor: number; collectedMinor: number; overdueCount: number }>;
+
+      const r = rows[0] ?? { outstandingMinor: 0, collectedMinor: 0, overdueCount: 0 };
+      return {
+        outstandingMinor: Math.round(r.outstandingMinor),
+        collectedMinor: Math.round(r.collectedMinor),
+        overdueCount: r.overdueCount,
+        // The ledger is single-currency per school in practice; USD invoices are a
+        // per-invoice rail, so the headline figure follows the school's default.
+        currency: "NGN",
+      };
     });
   }
 

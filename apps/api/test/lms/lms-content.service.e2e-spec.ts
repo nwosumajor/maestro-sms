@@ -185,4 +185,48 @@ d("LmsContentService integration (authoring, approval, quiz, forum, RLS)", () =>
     await expect(svc.getContent(student(PRB, SB), c.id)).rejects.toThrow(/not found/i);
     await expect(svc.review({ userId: PRB, schoolId: SB, roles: ["principal"], permissions: [] }, c.id, "APPROVE")).rejects.toThrow(/not found/i);
   });
+
+  // ===========================================================================
+  // Content listing: bounded reads, filters, and the cross-class learning view
+  // ===========================================================================
+  describe("listing and my learning", () => {
+    it("filters the class list by TYPE and (for staff) by STATUS", async () => {
+      const quizzes = await svc.listContent(teacher(), CLS, { type: "QUIZ" });
+      expect(quizzes.length).toBeGreaterThan(0);
+      expect(quizzes.every((c) => c.type === "QUIZ")).toBe(true);
+
+      const published = await svc.listContent(teacher(), CLS, { status: "PUBLISHED" });
+      expect(published.every((c) => c.status === "PUBLISHED")).toBe(true);
+      // A term of mixed content is one undifferentiated list without this.
+      const all = await svc.listContent(teacher(), CLS);
+      expect(all.length).toBeGreaterThanOrEqual(quizzes.length);
+    });
+
+    it("a STUDENT's status filter can only narrow within PUBLISHED, never widen", async () => {
+      // Asking for DRAFT as a student must not reveal drafts — the service pins the
+      // status for non-staff before the caller's value is considered.
+      const asStudent = await svc.listContent(student(S1), CLS, { status: "DRAFT" });
+      expect(asStudent.every((c) => c.status === "PUBLISHED")).toBe(true);
+    });
+
+    it("my learning aggregates published content across a student's classes", async () => {
+      const mine = await svc.myLearning(student(S1));
+      expect(mine.items.length).toBeGreaterThan(0);
+      // Published only — a student must never see a draft here either.
+      expect(mine.items.every((i) => !!i.className && i.className !== "—")).toBe(true);
+      expect(mine.outstanding).toBe(mine.items.filter((i) => !i.completed).length);
+      // Unfinished first: a to-do list that buries the to-dos is just an archive.
+      const flags = mine.items.map((i) => Number(i.completed));
+      expect([...flags].sort((a, b) => a - b)).toEqual(flags);
+
+      const published = await svc.listContent(student(S1), CLS);
+      expect(mine.items.length).toBe(published.length);
+    });
+
+    it("my learning is empty for a student with no enrolments", async () => {
+      // S2 is deliberately not enrolled — this must be an empty list, not an error
+      // and not another class's work.
+      expect(await svc.myLearning(student(S2))).toEqual({ outstanding: 0, items: [] });
+    });
+  });
 });

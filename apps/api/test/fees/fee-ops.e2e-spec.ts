@@ -29,6 +29,7 @@ const d = APP_URL && ADMIN_URL ? describe : describe.skip;
 d("FeeOpsService adjustments + late fees + receipts + journal (real Postgres)", () => {
   let admin: Pool;
   let svc: FeeOpsService;
+  let fees: FeesService;
 
   const SA = randomUUID();
   const MAKER = randomUUID(); // accountant requesting
@@ -90,7 +91,7 @@ d("FeeOpsService adjustments + late fees + receipts + journal (real Postgres)", 
     const audit = new AuditLogService();
     const queue = { add: jest.fn().mockResolvedValue(undefined) };
     const notifications = new NotificationService(tenant, audit, queue as never);
-    const fees = new FeesService(tenant, audit, notifications, { isConfigured: () => false } as never);
+    fees = new FeesService(tenant, audit, notifications, { isConfigured: () => false } as never);
     // Privileged stub: the sweep's school list is THIS school with its config.
     const privileged = {
       client: {
@@ -187,5 +188,93 @@ d("FeeOpsService adjustments + late fees + receipts + journal (real Postgres)", 
     for (const line of lines.slice(1)) {
       for (const cell of line.split(",")) expect(/^[=+@\t\r]/.test(cell.replace(/^"/, ""))).toBe(false);
     }
+  });
+
+  // ===========================================================================
+  // Invoice list: filtering, cursor paging, and the summary totals
+  // ===========================================================================
+  // Expectations are re-derived from the DB, because the tests above deliberately
+  // mutate this fixture (a discount is applied, a late fee is added).
+  describe("list, paging and summary", () => {
+    const sumFromDb = async (): Promise<{ outstanding: number; collected: number }> => {
+      const r = await admin.query<{ o: string; c: string }>(
+        `WITH billable AS (
+           SELECT id, "totalMinor" FROM invoice
+           WHERE "schoolId" = $1 AND status IN ('ISSUED','PARTIALLY_PAID','PAID')
+         ), paid AS (
+           SELECT "invoiceId", SUM(CASE WHEN kind = 'REFUND' THEN -"amountMinor" ELSE "amountMinor" END) AS amt
+           FROM payment WHERE status = 'POSTED' AND "invoiceId" IN (SELECT id FROM billable)
+           GROUP BY "invoiceId"
+         )
+         SELECT COALESCE(SUM(b."totalMinor" - COALESCE(p.amt,0)),0)::text AS o,
+                COALESCE(SUM(COALESCE(p.amt,0)),0)::text AS c
+         FROM billable b LEFT JOIN paid p ON p."invoiceId" = b.id`,
+        [SA],
+      );
+      return { outstanding: Number(r.rows[0].o), collected: Number(r.rows[0].c) };
+    };
+
+    it("summarises outstanding, collected and overdue over the WHOLE visible set", async () => {
+      const got = await fees.invoiceSummary(maker());
+      const want = await sumFromDb();
+      expect(got.outstandingMinor).toBe(want.outstanding);
+      expect(got.collectedMinor).toBe(want.collected);
+      // The fixture has an invoice due 10 days ago that is still owing.
+      expect(got.overdueCount).toBeGreaterThanOrEqual(1);
+    });
+
+    it("the summary is NOT a sum of the page on screen", async () => {
+      // One invoice per page, but the totals must still cover every invoice —
+      // otherwise the headline figure silently changes as you page.
+      const page = await fees.listInvoices(maker(), { limit: 1 });
+      expect(page.items).toHaveLength(1);
+      const summary = await fees.invoiceSummary(maker());
+      const want = await sumFromDb();
+      expect(summary.outstandingMinor).toBe(want.outstanding);
+      expect(summary.outstandingMinor).toBeGreaterThan(0);
+    });
+
+    it("pages by cursor without skipping or repeating a row", async () => {
+      const all = await fees.listInvoices(maker(), { limit: 100 });
+      expect(all.nextCursor).toBeNull(); // one page holds the fixture
+      const total = all.items.length;
+      expect(total).toBeGreaterThanOrEqual(3);
+
+      // Walk it one at a time and confirm we see exactly the same set, once each.
+      const seen: string[] = [];
+      let cursor: string | null | undefined = undefined;
+      for (let guard = 0; guard < 20; guard++) {
+        const page = await fees.listInvoices(maker(), { limit: 1, cursor: cursor ?? undefined });
+        seen.push(...(page.items as Array<{ id: string }>).map((i) => i.id));
+        if (!page.nextCursor) break;
+        cursor = page.nextCursor;
+      }
+      expect(seen).toHaveLength(total);
+      expect(new Set(seen).size).toBe(total); // no repeats
+      expect(new Set(seen)).toEqual(new Set((all.items as Array<{ id: string }>).map((i) => i.id)));
+    });
+
+    it("filters by reference — how staff look one up from a parent's copy", async () => {
+      const hit = await fees.listInvoices(maker(), { q: "FO-LATE" });
+      expect((hit.items as Array<{ reference: string }>).map((i) => i.reference)).toEqual(["INV-FO-LATE"]);
+      // Case-insensitive, because nobody types the reference in caps.
+      const lower = await fees.listInvoices(maker(), { q: "fo-late" });
+      expect(lower.items).toHaveLength(1);
+      expect(await fees.listInvoices(maker(), { q: "nothing-matches" })).toMatchObject({ items: [], nextCursor: null });
+    });
+
+    it("scopes both the list and the summary to the caller's own children", async () => {
+      // The guardian sees their child's invoices and a summary over just those.
+      const mine = await fees.listInvoices(guardian(), { limit: 100 });
+      expect(mine.items.length).toBeGreaterThan(0);
+      const mineSummary = await fees.invoiceSummary(guardian());
+      expect(mineSummary.outstandingMinor).toBeGreaterThan(0);
+
+      // An unrelated parent sees nothing — and a summary of zero, not the school's.
+      const none = await fees.listInvoices(outsider(), { limit: 100 });
+      expect(none.items).toEqual([]);
+      const noneSummary = await fees.invoiceSummary(outsider());
+      expect(noneSummary).toMatchObject({ outstandingMinor: 0, collectedMinor: 0, overdueCount: 0 });
+    });
   });
 });
