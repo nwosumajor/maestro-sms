@@ -7,3 +7,9 @@ export interface DocumentRowDto {
   status: string;
   createdAt: Date;
 }
+
+/** A page of documents plus the cursor for the next one (null = end of list). */
+export interface DocumentPageDto {
+  items: DocumentRowDto[];
+  nextCursor: string | null;
+}

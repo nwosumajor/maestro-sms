@@ -1,6 +1,7 @@
 "use client";
 
 import type { FeeItemDto, IdNameDto, Serialized } from "@sms/types";
+import { StudentPicker } from "@/components/people/StudentPicker";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -94,10 +95,9 @@ export function FeesAdmin({ students, items }: { students: Student[]; items: Fee
             <div className="flex flex-col gap-3 sm:flex-row">
               <div className="space-y-1.5">
                 <Label htmlFor="inv-student">Student</Label>
-                <select id="inv-student" value={studentId} onChange={(e) => setStudentId(e.target.value)}
-                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm sm:w-56">
-                  {students.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
+                {/* Searched, not enumerated: the roster list is bounded, so a
+    dropdown built from it would silently omit people. */}
+<StudentPicker value={studentId} onChange={(id) => setStudentId(id)} seed={students} />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="inv-due">Due date</Label>

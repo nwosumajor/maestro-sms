@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Put, Query } from "@nestjs/common";
 import { MODULES, INTEGRITY_PERMISSIONS } from "@sms/types";
 import type { AssessmentSubmissionDto, AssessmentSummaryDto } from "@sms/types";
 import { z } from "zod";
@@ -43,8 +43,11 @@ export class AssessmentListController {
 
   @Get()
   @RequirePermission(INTEGRITY_PERMISSIONS.ASSESSMENT_READ)
-  list(@CurrentPrincipal() p: Principal): Promise<AssessmentSummaryDto[]> {
-    return this.assessments.listAssessments(p);
+  list(
+    @CurrentPrincipal() p: Principal,
+    @Query("classId") classId?: string,
+  ): Promise<AssessmentSummaryDto[]> {
+    return this.assessments.listAssessments(p, { classId });
   }
 
   /** Create an assessment/assignment (teacher of the class / school-wide). */

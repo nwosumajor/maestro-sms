@@ -1,6 +1,7 @@
 "use client";
 
 import type { IdNameDto, UserSummaryDto, Serialized } from "@sms/types";
+import { StudentPicker } from "@/components/people/StudentPicker";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -15,11 +16,11 @@ type User = Serialized<UserSummaryDto>;
 
 export function ClassAdmin({
   classes,
-  students,
+  students = [],
   users,
 }: {
   classes: Named[];
-  students: Named[];
+  students?: Named[];
   users: User[];
 }) {
   const router = useRouter();
@@ -86,9 +87,9 @@ export function ClassAdmin({
           <select aria-label="Class" value={en.classId} onChange={(e) => setEn({ ...en, classId: e.target.value })} className={sel}>
             {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
-          <select aria-label="Student" value={en.studentId} onChange={(e) => setEn({ ...en, studentId: e.target.value })} className={sel}>
-            {students.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
+          {/* Searched, not enumerated — this page used to receive the whole roster
+              purely to fill these two controls. */}
+          <div className="w-56"><StudentPicker value={en.studentId} onChange={(id) => setEn({ ...en, studentId: id })} seed={students} /></div>
           <Button type="submit" size="sm" variant="outline" disabled={!en.studentId}>Enroll</Button>
         </form>
 
@@ -100,9 +101,7 @@ export function ClassAdmin({
           <select aria-label="Parent" value={lg.parentId} onChange={(e) => setLg({ ...lg, parentId: e.target.value })} className={sel}>
             {parents.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
-          <select aria-label="Student" value={lg.studentId} onChange={(e) => setLg({ ...lg, studentId: e.target.value })} className={sel}>
-            {students.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
+          <div className="w-56"><StudentPicker value={lg.studentId} onChange={(id) => setLg({ ...lg, studentId: id })} seed={students} /></div>
           <Button type="submit" size="sm" variant="outline" disabled={!lg.parentId || !lg.studentId}>Link</Button>
         </form>
 

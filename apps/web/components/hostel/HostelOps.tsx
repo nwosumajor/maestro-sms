@@ -1,6 +1,7 @@
 "use client";
 
 import type { HostelDto, HostelExeatDto, HostelIncidentDto, HostelAttendanceDto, HostelAllocationDto, Serialized } from "@sms/types";
+import { StudentPicker } from "@/components/people/StudentPicker";
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -159,7 +160,9 @@ function ExeatPanel({ students, onMsg }: { students: { id: string; name: string 
       <CardHeader><CardTitle className="text-base">Exeat / gate-pass</CardTitle><CardDescription>Approved leave; guardians are notified on approval + movement.</CardDescription></CardHeader>
       <CardContent className="space-y-3">
         <div className="flex flex-wrap items-end gap-2">
-          <select className={sel} value={studentId} onChange={(e) => setStudentId(e.target.value)}>{students.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
+          {/* Searched, not enumerated: the roster list is bounded, so a
+    dropdown built from it would silently omit people. */}
+<StudentPicker value={studentId} onChange={(id) => setStudentId(id)} seed={students} />
           <Input placeholder="Reason" value={reason} onChange={(e) => setReason(e.target.value)} className="w-32" />
           <label className="text-xs text-muted-foreground">out<Input type="datetime-local" value={depart} onChange={(e) => setDepart(e.target.value)} className="h-9 w-44" /></label>
           <label className="text-xs text-muted-foreground">back<Input type="datetime-local" value={ret} onChange={(e) => setRet(e.target.value)} className="h-9 w-44" /></label>

@@ -15,15 +15,21 @@ export const dynamic = "force-dynamic";
 
 type Assessment = Serialized<AssessmentSummaryDto>;
 
-export default async function AssessmentsPage() {
+export default async function AssessmentsPage({
+  searchParams,
+}: {
+  searchParams?: { classId?: string };
+}) {
   const session = await auth();
   const user = session!.user;
   if (!hasPermission(user.permissions, "assessment.read")) redirect("/dashboard");
   const canReview = hasPermission(user.permissions, "integrity.report.read");
   const canWrite = hasPermission(user.permissions, "assessment.write");
   const [assessmentsData, classes] = await Promise.all([
-    apiGet<Assessment[]>("/assessments"),
-    canWrite ? apiGet<{ id: string; name: string }[]>("/classes/mine") : Promise.resolve(null),
+    // Filtering narrows the QUERY — this list caps at its most-recent page, so
+    // narrowing by class is how you reach an older assessment at all.
+    apiGet<Assessment[]>(`/assessments${searchParams?.classId ? `?classId=${encodeURIComponent(searchParams.classId)}` : ""}`),
+    apiGet<{ id: string; name: string }[]>("/classes/mine"),
   ]);
   const assessments = assessmentsData ?? [];
 
@@ -33,6 +39,27 @@ export default async function AssessmentsPage() {
         <PageHeader title={<>Assessments</>} subtitle={<>{canReview
               ? "Assessments you own or teach. Open one to review submissions and integrity signals."
               : "Your assessments. Open one to work on it."}</>} />
+
+        {(classes ?? []).length > 1 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="mr-1 text-xs text-muted-foreground">Class</span>
+            <Link
+              href="/assessments"
+              className={`rounded-md border px-2.5 py-1 text-xs font-medium ${!searchParams?.classId ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-accent"}`}
+            >
+              All
+            </Link>
+            {(classes ?? []).map((c) => (
+              <Link
+                key={c.id}
+                href={`/assessments?classId=${c.id}`}
+                className={`rounded-md border px-2.5 py-1 text-xs font-medium ${searchParams?.classId === c.id ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-accent"}`}
+              >
+                {c.name}
+              </Link>
+            ))}
+          </div>
+        )}
 
         {canWrite && <CreateAssessment classes={classes ?? []} />}
 

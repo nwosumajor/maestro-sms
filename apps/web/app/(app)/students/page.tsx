@@ -6,15 +6,35 @@ import { AppShell } from "@/components/shell/AppShell";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { PageHeader } from "@/components/shell/PageHeader";
+import { StudentSearch } from "@/components/people/StudentSearch";
 
 export const dynamic = "force-dynamic";
 
 type Student = Serialized<IdNameDto>;
 
-export default async function StudentsPage() {
+export default async function StudentsPage({
+  searchParams,
+}: {
+  searchParams?: { q?: string };
+}) {
   const session = await auth();
   const user = session!.user;
-  const students = await apiGet<Student[]>("/students");
+
+  // The search runs in the QUERY. The roster list is bounded now (it used to be
+  // uncapped so the admin dashboard could count it), so on a large school this page
+  // shows a page of the register and search is how you reach the rest — not a
+  // convenience over an already-downloaded list.
+  const q = searchParams?.q?.trim();
+  const [students, count] = await Promise.all([
+    apiGet<Student[]>(`/students${q ? `?q=${encodeURIComponent(q)}` : ""}`),
+    apiGet<{ students: number }>("/students/count"),
+  ]);
+
+  const shown = students ?? [];
+  const total = count?.students ?? 0;
+  // Only say "showing N of M" when it is actually true; claiming a partial view when
+  // you can see everyone is just noise.
+  const partial = !q && total > shown.length;
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="students" permissions={user.permissions}>
@@ -22,14 +42,27 @@ export default async function StudentsPage() {
         <PageHeader title={<>Students</>} subtitle={<>Students you can see — your own record, your children, or those you
             teach. Open one for their profile, contacts, and (if permitted) medical record.</>} />
 
-        {students === null || students.length === 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <StudentSearch initial={q ?? ""} />
+          <span className="text-sm text-muted-foreground tabular-nums">
+            {q
+              ? `${shown.length} match${shown.length === 1 ? "" : "es"}`
+              : partial
+                ? `showing ${shown.length} of ${total} — search to find anyone else`
+                : `${total} student${total === 1 ? "" : "s"}`}
+          </span>
+        </div>
+
+        {shown.length === 0 ? (
           <Alert variant="info">
-            <AlertTitle>No students</AlertTitle>
-            <AlertDescription>There are no student records available to you.</AlertDescription>
+            <AlertTitle>{q ? "No match" : "No students"}</AlertTitle>
+            <AlertDescription>
+              {q ? `No student matches “${q}”.` : "There are no student records available to you."}
+            </AlertDescription>
           </Alert>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {students.map((s) => (
+            {shown.map((s) => (
               <Link key={s.id} href={`/students/${s.id}`}>
                 <Card className="transition-colors hover:border-primary/40">
                   <CardContent className="flex items-center gap-3 p-4">
