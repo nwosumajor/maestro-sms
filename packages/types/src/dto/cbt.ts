@@ -221,3 +221,51 @@ export interface CbtMarkingProgressDto {
     total: number;
   }[];
 }
+
+// =============================================================================
+// Exam integrity (CBT)
+// =============================================================================
+// What this is and is NOT. It records that a candidate left the exam, and for how
+// long, so a human can review it — nothing more. Per Golden Rule #8 there is no
+// automatic penalty, no auto-void and no mark deduction; staff see the evidence
+// and decide. And per the integrity module's own policy, monitoring is TRANSPARENT:
+// the candidate is told on screen that leaving is recorded.
+//
+// Be clear about its reach: this catches a candidate who tabs away to look
+// something up. It cannot see a second device, another person in the room, or a
+// browser with scripting disabled. The value is deterrence plus a reviewable
+// record — invigilation is what actually prevents those.
+
+/** One client-observed event, batched up and posted periodically. */
+export interface CbtIntegrityEventInput {
+  /** FOCUS_LOSS (left the tab/app) or PASTE (pasted into a theory answer). */
+  type: string;
+  /** For FOCUS_LOSS: how long they were away. */
+  awayMs?: number;
+  /** For PASTE: how many characters arrived at once. */
+  chars?: number;
+}
+
+/** How many focus losses before staff are notified (once per sitting). */
+export const CBT_INTEGRITY_FOCUS_ALERT_COUNT = 3;
+/** …or this much cumulative time away, whichever comes first. */
+export const CBT_INTEGRITY_FOCUS_ALERT_MS = 60_000;
+/** A single absence longer than this is on its own worth a look. */
+export const CBT_INTEGRITY_LONG_ABSENCE_MS = 30_000;
+/** Cap per POST so a misbehaving client can't flood the signal table. */
+export const CBT_INTEGRITY_BATCH_MAX = 25;
+
+/** A candidate's integrity summary on the staff results view. */
+export interface CbtIntegritySummaryDto {
+  sittingId: string;
+  studentId: string;
+  studentName: string;
+  /** Times they left the exam. */
+  focusLosses: number;
+  /** Total milliseconds away. */
+  awayMs: number;
+  /** Large single-event pastes into a theory answer. */
+  pastes: number;
+  /** True once staff were notified for this sitting. */
+  alerted: boolean;
+}

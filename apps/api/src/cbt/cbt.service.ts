@@ -19,7 +19,17 @@ import {
 import { Prisma } from "@sms/db";
 import { randomUUID } from "node:crypto";
 import { CBT_ANSWER_RELEASE_CHAIN } from "@sms/types";
-import { CBT_PERMISSIONS, CBT_BLUEPRINT_MAX_ITEMS, CBT_QUESTION_TYPES, CBT_THEORY_ANSWER_MAX, gradeComponentMax } from "@sms/types";
+import {
+  CBT_PERMISSIONS,
+  CBT_BLUEPRINT_MAX_ITEMS,
+  CBT_QUESTION_TYPES,
+  CBT_THEORY_ANSWER_MAX,
+  CBT_INTEGRITY_BATCH_MAX,
+  CBT_INTEGRITY_FOCUS_ALERT_COUNT,
+  CBT_INTEGRITY_FOCUS_ALERT_MS,
+  CBT_INTEGRITY_LONG_ABSENCE_MS,
+  gradeComponentMax,
+} from "@sms/types";
 import type {
   CbtAuthoringOptionsDto,
   CbtBankDto,
@@ -31,6 +41,8 @@ import type {
   CbtAvailabilityDto,
   CbtMarkingQueueDto,
   CbtMarkingProgressDto,
+  CbtIntegrityEventInput,
+  CbtIntegritySummaryDto,
 } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -44,6 +56,7 @@ import {
 import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 import { TermResultService } from "../gradebook/term-result.service";
+import { NotificationService } from "../notifications/notification.service";
 
 /** Grace after the duration elapses before a late save/submit is refused. */
 const SUBMIT_GRACE_MS = 30_000;
@@ -77,6 +90,7 @@ export class CbtService {
     // One-way dependency: CBT pushes scores INTO the gradebook. The gradebook
     // knows nothing about CBT, so there is no cycle.
     private readonly termResults: TermResultService,
+    private readonly notifications: NotificationService,
     hooks: WorkflowHooksService,
   ) {
     // Maker-checker reactors, run in the SAME tenant tx as the workflow
@@ -1159,6 +1173,199 @@ export class CbtService {
       this.log(tx, p, "cbt.exam.grades.record", examId, { recorded, skipped, examMax }),
     );
     return { recorded, skipped, examMax };
+  }
+
+  // --- exam integrity ------------------------------------------------------------
+
+  /**
+   * Record client-observed integrity events for the caller's OWN sitting.
+   *
+   * These are SIGNALS, not verdicts (Golden Rule #8): nothing here penalises,
+   * voids or auto-submits. They are written to the shared integrity_signal table,
+   * so they inherit the NDPR retention purge that governs all telemetry on minors.
+   *
+   * Once a sitting crosses the alert threshold, the subject teacher, head teacher
+   * and principal are notified ONCE — per sitting, not per event, or a restless
+   * candidate would bury the inbox that is supposed to make this reviewable.
+   */
+  async recordIntegrityEvents(
+    p: Principal,
+    sittingId: string,
+    events: CbtIntegrityEventInput[],
+  ): Promise<{ recorded: number; focusLosses: number; awayMs: number; alerted: boolean }> {
+    if (!Array.isArray(events) || events.length === 0) return { recorded: 0, focusLosses: 0, awayMs: 0, alerted: false };
+    if (events.length > CBT_INTEGRITY_BATCH_MAX) throw new BadRequestException("Too many events in one batch");
+
+    const outcome = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      // OWN sitting only — 404-not-403, and only while it is live.
+      const sitting = await tx.cbtSitting.findFirst({
+        where: { id: sittingId, studentId: p.userId },
+        select: { id: true, examId: true, status: true },
+      });
+      if (!sitting) throw new NotFoundException("Sitting not found");
+      if (sitting.status !== "IN_PROGRESS") return null; // nothing to record on a closed script
+
+      const rows = events
+        .filter((e) => e.type === "FOCUS_LOSS" || e.type === "PASTE")
+        .map((e) => {
+          const awayMs = Math.max(0, Math.min(Number(e.awayMs ?? 0), 6 * 60 * 60 * 1000));
+          const long = e.type === "FOCUS_LOSS" && awayMs >= CBT_INTEGRITY_LONG_ABSENCE_MS;
+          return {
+            schoolId: p.schoolId,
+            sittingId,
+            type: e.type as never,
+            // A single long absence is more interesting than a brief blur.
+            severity: (long ? "HIGH" : "LOW") as never,
+            source: "CLIENT" as never,
+            // CLIENT-observed and trivially bypassable, so never presented as
+            // certain — the confidence says so explicitly.
+            confidence: 0.5,
+            evidence: (e.type === "FOCUS_LOSS"
+              ? { awayMs }
+              : { chars: Math.max(0, Math.min(Number(e.chars ?? 0), 100_000)) }) as unknown as Prisma.InputJsonValue,
+            detector: "cbt-exam-room",
+          };
+        });
+      if (rows.length === 0) return null;
+      await tx.integritySignal.createMany({ data: rows });
+
+      // Totals for THIS sitting, from the table (not the batch) — the client may
+      // have posted several batches and could be restarted mid-exam.
+      const all = await tx.integritySignal.findMany({
+        where: { sittingId },
+        select: { type: true, evidence: true },
+      });
+      const focus = all.filter((r) => r.type === "FOCUS_LOSS");
+      const focusLosses = focus.length;
+      const awayMs = focus.reduce((n, r) => n + Number((r.evidence as { awayMs?: number } | null)?.awayMs ?? 0), 0);
+      return { recorded: rows.length, examId: sitting.examId, focusLosses, awayMs };
+    });
+    if (!outcome) return { recorded: 0, focusLosses: 0, awayMs: 0, alerted: false };
+
+    const crossed =
+      outcome.focusLosses >= CBT_INTEGRITY_FOCUS_ALERT_COUNT || outcome.awayMs >= CBT_INTEGRITY_FOCUS_ALERT_MS;
+    let alerted = false;
+    if (crossed) alerted = await this.alertIntegrity(p, sittingId, outcome.examId, outcome.focusLosses, outcome.awayMs);
+    return { recorded: outcome.recorded, focusLosses: outcome.focusLosses, awayMs: outcome.awayMs, alerted };
+  }
+
+  /**
+   * Notify the people who can act: the subject teacher for that class, plus the
+   * head teacher and principal. ONCE per sitting — guarded by an audit-log marker,
+   * so repeated batches (or a page reload) can't re-alert.
+   */
+  private async alertIntegrity(
+    p: Principal,
+    sittingId: string,
+    examId: string,
+    focusLosses: number,
+    awayMs: number,
+  ): Promise<boolean> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      // Idempotence: the marker IS the "already alerted" record.
+      const already = await tx.auditLog.findFirst({
+        where: { action: "cbt.integrity.alert", entityId: sittingId },
+        select: { id: true },
+      });
+      if (already) return false;
+
+      const exam = await tx.cbtExam.findFirst({
+        where: { id: examId },
+        select: { id: true, title: true, classId: true, bankId: true },
+      });
+      if (!exam) return false;
+      const bank = exam.bankId
+        ? await tx.cbtQuestionBank.findFirst({ where: { id: exam.bankId }, select: { subjectId: true } })
+        : null;
+      const student = await tx.user.findFirst({ where: { id: p.userId }, select: { name: true } });
+
+      const recipients = new Set<string>();
+      // The subject teacher for this class — the person who set the paper.
+      if (exam.classId && bank?.subjectId) {
+        const cst = await tx.classSubjectTeacher.findMany({
+          where: { classId: exam.classId, subjectId: bank.subjectId },
+          select: { teacherId: true },
+        });
+        for (const t of cst) recipients.add(t.teacherId);
+      }
+      // Head teacher + principal — oversight, per the request.
+      const leaders = await tx.user.findMany({
+        where: { roles: { some: { role: { name: { in: ["head_teacher", "principal"] } } } } },
+        select: { id: true },
+      });
+      for (const l of leaders) recipients.add(l.id);
+      recipients.delete(p.userId); // never notify the candidate as a reviewer
+
+      const seconds = Math.round(awayMs / 1000);
+      for (const recipientId of recipients) {
+        await this.notifications
+          .enqueue(
+            { schoolId: p.schoolId, userId: p.userId },
+            {
+              recipientId,
+              type: "INTEGRITY_SIGNAL",
+              title: `Exam integrity — ${exam.title}`,
+              body:
+                `${student?.name ?? "A candidate"} left the exam ${focusLosses} time(s), ${seconds}s away in total. ` +
+                `These are signals for your review, not a finding of malpractice — open the exam's integrity report to see the evidence.`,
+              channels: ["EMAIL"],
+            },
+          )
+          .catch(() => undefined);
+      }
+      await this.log(tx, p, "cbt.integrity.alert", sittingId, { examId, focusLosses, awayMs, notified: recipients.size });
+      return true;
+    });
+  }
+
+  /**
+   * Per-candidate integrity summary for an exam (staff). One read of the signals
+   * plus one batched name lookup — never a query per candidate.
+   */
+  async examIntegrity(p: Principal, examId: string): Promise<CbtIntegritySummaryDto[]> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const exam = await tx.cbtExam.findFirst({ where: { id: examId }, select: { id: true, bankId: true } });
+      if (!exam) throw new NotFoundException("Exam not found");
+      const bank = await tx.cbtQuestionBank.findFirst({ where: { id: exam.bankId } });
+      if (!bank || !p.permissions.includes(CBT_PERMISSIONS.CBT_MANAGE) || !(await this.canTouchBank(tx, p, bank))) {
+        throw new NotFoundException("Exam not found");
+      }
+      const sittings = await tx.cbtSitting.findMany({ where: { examId }, select: { id: true, studentId: true } });
+      if (sittings.length === 0) return [];
+      const signals = await tx.integritySignal.findMany({
+        where: { sittingId: { in: sittings.map((sg) => sg.id) } },
+        select: { sittingId: true, type: true, evidence: true },
+      });
+      const alerts = await tx.auditLog.findMany({
+        where: { action: "cbt.integrity.alert", entityId: { in: sittings.map((sg) => sg.id) } },
+        select: { entityId: true },
+      });
+      const alertedIds = new Set(alerts.map((a: { entityId: string }) => a.entityId));
+      const names = new Map(
+        (
+          await tx.user.findMany({
+            where: { id: { in: [...new Set(sittings.map((sg) => sg.studentId))] } },
+            select: { id: true, name: true },
+          })
+        ).map((u: { id: string; name: string }) => [u.id, u.name] as const),
+      );
+      return sittings
+        .map((sg) => {
+          const mine = signals.filter((x) => x.sittingId === sg.id);
+          const focus = mine.filter((x) => x.type === "FOCUS_LOSS");
+          return {
+            sittingId: sg.id,
+            studentId: sg.studentId,
+            studentName: names.get(sg.studentId) ?? "Unknown",
+            focusLosses: focus.length,
+            awayMs: focus.reduce((n, r) => n + Number((r.evidence as { awayMs?: number } | null)?.awayMs ?? 0), 0),
+            pastes: mine.filter((x) => x.type === "PASTE").length,
+            alerted: alertedIds.has(sg.id),
+          };
+        })
+        // Most concerning first, so a reviewer sees the outliers immediately.
+        .sort((a, b) => b.awayMs - a.awayMs || b.focusLosses - a.focusLosses);
+    });
   }
 
   /** Shared gate: the caller may mark this exam's question, and it IS theory. */

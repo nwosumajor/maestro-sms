@@ -3,8 +3,8 @@
 // server-side until a sitting closes; the clock is server law.
 
 import { Body, Controller, Get, Param, Post, Put, Query } from "@nestjs/common";
-import { CBT_PERMISSIONS, CBT_BLUEPRINT_MAX_ITEMS, CBT_QUESTION_TYPES, MODULES } from "@sms/types";
-import type { CbtAuthoringOptionsDto, CbtBankDto, CbtExamDto, CbtExamResultsDto, CbtSittingViewDto, CbtBankQuestionsDto, CbtAvailabilityDto, CbtMarkingQueueDto, CbtMarkingProgressDto } from "@sms/types";
+import { CBT_PERMISSIONS, CBT_BLUEPRINT_MAX_ITEMS, CBT_QUESTION_TYPES, CBT_INTEGRITY_BATCH_MAX, MODULES } from "@sms/types";
+import type { CbtAuthoringOptionsDto, CbtBankDto, CbtExamDto, CbtExamResultsDto, CbtSittingViewDto, CbtBankQuestionsDto, CbtAvailabilityDto, CbtMarkingQueueDto, CbtMarkingProgressDto, CbtIntegritySummaryDto } from "@sms/types";
 import { z } from "zod";
 import { RequireModule } from "../auth/require-module.decorator";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -60,6 +60,18 @@ const examSchema = z.object({
 // direct status change left is closing a live exam early.
 const statusSchema = z.object({ status: z.enum(["CLOSED"]) });
 const theoryAnswerSchema = z.object({ questionId: z.string().uuid(), text: z.string().max(20000) });
+const integritySchema = z.object({
+  events: z
+    .array(
+      z.object({
+        type: z.enum(["FOCUS_LOSS", "PASTE"]),
+        awayMs: z.number().int().min(0).max(6 * 60 * 60 * 1000).optional(),
+        chars: z.number().int().min(0).max(100_000).optional(),
+      }),
+    )
+    .min(1)
+    .max(CBT_INTEGRITY_BATCH_MAX),
+});
 const markSchema = z.object({ marks: z.number().int().min(0).max(100), comment: z.string().max(2000).nullish() });
 const answerSchema = z.object({ questionId: z.string().uuid(), choiceIndex: z.number().int().min(0).max(5) });
 
@@ -170,6 +182,13 @@ export class CbtController {
     return this.cbt.recordExamGrades(p, id);
   }
 
+  /** Per-candidate integrity report for staff review. */
+  @Get("exams/:id/integrity")
+  @RequirePermission(CBT_PERMISSIONS.CBT_MANAGE)
+  examIntegrity(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<CbtIntegritySummaryDto[]> {
+    return this.cbt.examIntegrity(p, id);
+  }
+
   @Get("exams/:id/results")
   @RequirePermission(CBT_PERMISSIONS.CBT_MANAGE)
   results(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<CbtExamResultsDto> {
@@ -254,6 +273,21 @@ export class CbtController {
     @Body(new ZodValidationPipe(markSchema)) body: z.infer<typeof markSchema>,
   ) {
     return this.cbt.markAnswer(p, answerId, body.marks, body.comment);
+  }
+
+  /**
+   * Candidate's own sitting reports integrity events (left the tab, pasted).
+   * SIGNALS ONLY — recording one never penalises, voids or submits the paper
+   * (Golden Rule #8). Staff are notified once a sitting crosses the threshold.
+   */
+  @Post("sittings/:id/integrity")
+  @RequirePermission(CBT_PERMISSIONS.CBT_TAKE)
+  integrity(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(integritySchema)) body: z.infer<typeof integritySchema>,
+  ) {
+    return this.cbt.recordIntegrityEvents(p, id, body.events);
   }
 
   @Post("sittings/:id/submit")

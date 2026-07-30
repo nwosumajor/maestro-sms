@@ -85,8 +85,9 @@ function makeService(over: {
   let finalized: FinalizedHandler | undefined;
   const hooks = { onFinalized: (h: FinalizedHandler) => { finalized = h; } };
   // CBT pushes scores into the gradebook; the push itself is tested there.
+  const notifications = { enqueue: jest.fn().mockResolvedValue(undefined) };
   const termResults = { applyExamComponent: jest.fn().mockResolvedValue({}) };
-  const service = new CbtService(db as never, audit as never, workflow as never, termResults as never, hooks as never);
+  const service = new CbtService(db as never, audit as never, workflow as never, termResults as never, notifications as never, hooks as never);
   return { service, tx, audit, workflow, examUpdateMany, bankCreate, finalized: finalized! };
 }
 

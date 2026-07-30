@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { WorkflowModule } from "../workflow/workflow.module";
 import { GradebookModule } from "../gradebook/gradebook.module";
+import { NotificationModule } from "../notifications/notification.module";
 import { CbtController } from "./cbt.controller";
 import { CbtService } from "./cbt.service";
 
@@ -8,7 +9,7 @@ import { CbtService } from "./cbt.service";
 // (TENANT_DATABASE, AUDIT_LOG_SERVICE, guards) and the WorkflowModule for the
 // exam-publish / answer-release maker-checker chains; all state is tenant-scoped.
 @Module({
-  imports: [WorkflowModule, GradebookModule],
+  imports: [WorkflowModule, GradebookModule, NotificationModule],
   controllers: [CbtController],
   providers: [CbtService],
 })

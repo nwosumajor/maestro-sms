@@ -60,6 +60,57 @@ export function CbtExamRoom({ initial }: { initial: Sitting }) {
   };
   const firstPending = s.questions.find((q) => !answeredIds.has(q.id));
 
+  // --- exam integrity -------------------------------------------------------
+  // Leaving the exam (switching tab, minimising, closing the app) is RECORDED and
+  // shown to staff. It is deliberately visible to the candidate: monitoring minors
+  // covertly is against this module's own policy, and a warning they can see is a
+  // better deterrent than one they cannot.
+  //
+  // Nothing here penalises: no auto-submit, no mark change, no lock-out. The
+  // server treats these as signals for a human to review (Golden Rule #8).
+  const [integrity, setIntegrity] = React.useState({ focusLosses: 0, awayMs: 0 });
+  const awaySince = React.useRef<number | null>(null);
+  const queue = React.useRef<{ type: string; awayMs?: number; chars?: number }[]>([]);
+
+  const flush = React.useCallback(async () => {
+    if (queue.current.length === 0) return;
+    const events = queue.current.splice(0, 25);
+    const res = await fetch(`/api/sms/cbt/sittings/${s.sittingId}/integrity`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ events }),
+    });
+    if (res.ok) {
+      const r = (await res.json()) as { focusLosses: number; awayMs: number };
+      setIntegrity({ focusLosses: r.focusLosses, awayMs: r.awayMs });
+    }
+  }, [s.sittingId]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const onHide = () => {
+      if (document.visibilityState === "hidden") {
+        awaySince.current = Date.now();
+      } else if (awaySince.current !== null) {
+        const awayMs = Date.now() - awaySince.current;
+        awaySince.current = null;
+        // Ignore sub-second flickers (a click into the URL bar isn't cheating).
+        if (awayMs >= 1000) {
+          queue.current.push({ type: "FOCUS_LOSS", awayMs });
+          void flush();
+        }
+      }
+    };
+    document.addEventListener("visibilitychange", onHide);
+    window.addEventListener("blur", onHide);
+    window.addEventListener("focus", onHide);
+    return () => {
+      document.removeEventListener("visibilitychange", onHide);
+      window.removeEventListener("blur", onHide);
+      window.removeEventListener("focus", onHide);
+    };
+  }, [open, flush]);
+
   // Time's up → submit automatically (the server would refuse late answers anyway).
   const submittedRef = React.useRef(false);
   React.useEffect(() => {
@@ -151,6 +202,35 @@ export function CbtExamRoom({ initial }: { initial: Sitting }) {
         )}
       </Card>
 
+      {/* TRANSPARENT MONITORING NOTICE. Always shown while the paper is open, so a
+          candidate knows before they act — not a warning that only appears once
+          they've already left. Escalates in tone once it has actually happened. */}
+      {open && (
+        <div
+          className={cn(
+            "rounded-md border px-3 py-2 text-xs",
+            integrity.focusLosses > 0
+              ? "border-amber-500/60 bg-amber-500/10 text-amber-800 dark:text-amber-300"
+              : "border-border bg-muted/40 text-muted-foreground",
+          )}
+        >
+          {integrity.focusLosses > 0 ? (
+            <>
+              <span className="font-semibold">
+                You have left this exam {integrity.focusLosses} time
+                {integrity.focusLosses === 1 ? "" : "s"} ({Math.round(integrity.awayMs / 1000)}s away).
+              </span>{" "}
+              This is recorded and shown to your teacher. Stay on this page until you submit.
+            </>
+          ) : (
+            <>
+              Keep this tab open until you submit. Leaving the exam — switching tabs, apps or windows — is recorded and
+              shown to your teacher. Your time keeps running either way.
+            </>
+          )}
+        </div>
+      )}
+
       {/* QUESTION NAVIGATOR — the answered/pending map.
           Filled = answered, outlined = still to do. Tap a number to jump straight
           there, so nothing is left unanswered just because it was further down the
@@ -241,6 +321,15 @@ export function CbtExamRoom({ initial }: { initial: Sitting }) {
                     value={s.theoryAnswers[q.id] ?? ""}
                     onChange={(e) => void write(q.id, e.target.value)}
                     disabled={!open}
+                    onPaste={(e) => {
+                      // Recorded, NOT blocked — blocking breaks assistive tech and
+                      // is trivially worked around anyway.
+                      const chars = e.clipboardData?.getData("text")?.length ?? 0;
+                      if (chars > 0) {
+                        queue.current.push({ type: "PASTE", chars });
+                        void flush();
+                      }
+                    }}
                     placeholder="Write your answer…"
                     aria-label={`Answer for question ${i + 1}`}
                   />

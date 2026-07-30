@@ -25,6 +25,9 @@ function makeService(over: {
   answer?: Record<string, unknown> | null;
   taught?: { subjectId: string }[];
   sittings?: Record<string, unknown>[];
+  signals?: Record<string, unknown>[];
+  alreadyAlerted?: boolean;
+  sitting?: Record<string, unknown> | null;
 } = {}) {
   const createMany = jest.fn().mockResolvedValue({ count: 1 });
   const upsert = jest.fn().mockResolvedValue({ id: "ta1" });
@@ -46,14 +49,22 @@ function makeService(over: {
       update,
     },
     cbtSitting: {
-      findFirst: jest.fn(),
+      findFirst: jest.fn().mockResolvedValue(over.sitting ?? null),
       findMany: jest.fn().mockResolvedValue(over.sittings ?? []),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     term: { findFirst: jest.fn().mockResolvedValue({ id: "term1", sessionId: "sess1" }) },
+    integritySignal: {
+      createMany: jest.fn().mockResolvedValue({ count: 1 }),
+      findMany: jest.fn().mockResolvedValue(over.signals ?? []),
+    },
+    auditLog: { findFirst: jest.fn().mockResolvedValue(over.alreadyAlerted ? { id: "a1" } : null), findMany: jest.fn().mockResolvedValue([]) },
     classSubjectTeacher: { findMany: jest.fn().mockResolvedValue(over.taught ?? []), findFirst: jest.fn().mockResolvedValue(null) },
     class: { findFirst: jest.fn().mockResolvedValue(null), findMany: jest.fn().mockResolvedValue([]) },
-    user: { findMany: jest.fn().mockResolvedValue([{ id: "s1", name: "Ada" }, { id: "s2", name: "Bola" }]) },
+    user: {
+      findMany: jest.fn().mockResolvedValue([{ id: "s1", name: "Ada" }, { id: "s2", name: "Bola" }]),
+      findFirst: jest.fn().mockResolvedValue({ id: "s1", name: "Ada" }),
+    },
   } as unknown as TenantTx;
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const db = {
@@ -63,12 +74,15 @@ function makeService(over: {
   const workflow = { createRequest: jest.fn(), submit: jest.fn() };
   const hooks = { onFinalized: () => undefined };
   // CBT pushes scores into the gradebook; the push itself is tested there.
+  const notifications = { enqueue: jest.fn().mockResolvedValue(undefined) };
   const termResults = { applyExamComponent: jest.fn().mockResolvedValue({}) };
-  const service = new CbtService(db as never, audit as never, workflow as never, termResults as never, hooks as never);
-  return { service, tx, audit, createMany, upsert, update, termResults };
+  const service = new CbtService(db as never, audit as never, workflow as never, termResults as never, notifications as never, hooks as never);
+  return { service, tx, audit, createMany, upsert, update, termResults, notifications };
 }
 
 const teacher = (): Principal => ({ schoolId: "A", userId: "t1", roles: ["teacher"], permissions: ["cbt.manage"] });
+const student = (): Principal => ({ schoolId: "A", userId: "s1", roles: ["student"], permissions: ["cbt.take"] });
+const EXAM_FOR_INTEGRITY = { id: "e1", title: "Physics SS2A", classId: "c1", bankId: "b1" };
 const admin = (): Principal => ({ schoolId: "A", userId: "adm", roles: ["school_admin"], permissions: ["cbt.manage"] });
 
 const BANK = { id: "b1", createdById: "t1", subjectId: "sub-phy" };
@@ -304,6 +318,97 @@ describe("CBT theory questions", () => {
     it("refuses when nothing has been submitted yet", async () => {
       const { service } = makeService({ bank: BANK, exam: EXAM_FULL, taught: [{ subjectId: "sub-phy" }], sittings: [] });
       await expect(service.recordExamGrades(teacher(), "e1")).rejects.toBeInstanceOf(ConflictException);
+    });
+  });
+
+  describe("exam integrity (signals only — never a penalty)", () => {
+    const LIVE = { id: "sg1", examId: "e1", status: "IN_PROGRESS" };
+    const focus = (awayMs: number) => ({ type: "FOCUS_LOSS", evidence: { awayMs } });
+
+    it("records a focus loss and returns the running totals", async () => {
+      const { service, tx } = makeService({
+        sitting: LIVE, exam: EXAM_FOR_INTEGRITY, bank: BANK,
+        signals: [focus(5000), focus(4000)],
+      });
+      const res = await service.recordIntegrityEvents(student(), "sg1", [{ type: "FOCUS_LOSS", awayMs: 4000 }]);
+      expect(res).toMatchObject({ recorded: 1, focusLosses: 2, awayMs: 9000 });
+      expect(tx.integritySignal.createMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: [expect.objectContaining({ sittingId: "sg1", type: "FOCUS_LOSS", source: "CLIENT" })],
+        }),
+      );
+    });
+
+    it("marks a LONG single absence as high severity, a brief one as low", async () => {
+      const long = makeService({ sitting: LIVE, exam: EXAM_FOR_INTEGRITY, bank: BANK, signals: [] });
+      await long.service.recordIntegrityEvents(student(), "sg1", [{ type: "FOCUS_LOSS", awayMs: 45_000 }]);
+      expect(long.tx.integritySignal.createMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: [expect.objectContaining({ severity: "HIGH" })] }),
+      );
+      const brief = makeService({ sitting: LIVE, exam: EXAM_FOR_INTEGRITY, bank: BANK, signals: [] });
+      await brief.service.recordIntegrityEvents(student(), "sg1", [{ type: "FOCUS_LOSS", awayMs: 2000 }]);
+      expect(brief.tx.integritySignal.createMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: [expect.objectContaining({ severity: "LOW" })] }),
+      );
+    });
+
+    it("client signals are never presented as certain (confidence < 1)", async () => {
+      const { service, tx } = makeService({ sitting: LIVE, exam: EXAM_FOR_INTEGRITY, bank: BANK, signals: [] });
+      await service.recordIntegrityEvents(student(), "sg1", [{ type: "FOCUS_LOSS", awayMs: 3000 }]);
+      const data = (tx.integritySignal.createMany as jest.Mock).mock.calls[0][0].data[0];
+      expect(data.confidence).toBeLessThan(1);
+      expect(data.detector).toBe("cbt-exam-room");
+    });
+
+    it("NOTIFIES once the threshold is crossed, and NEVER touches the sitting", async () => {
+      const { service, notifications, tx } = makeService({
+        sitting: LIVE, exam: EXAM_FOR_INTEGRITY, bank: BANK,
+        signals: [focus(5000), focus(5000), focus(5000)], // 3 losses -> threshold
+      });
+      const res = await service.recordIntegrityEvents(student(), "sg1", [{ type: "FOCUS_LOSS", awayMs: 5000 }]);
+      expect(res.alerted).toBe(true);
+      expect(notifications.enqueue).toHaveBeenCalled();
+      // GOLDEN RULE #8: no penalty, no auto-submit, no status change.
+      expect(tx.cbtSitting.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("does NOT re-alert a sitting that already alerted", async () => {
+      const { service, notifications } = makeService({
+        sitting: LIVE, exam: EXAM_FOR_INTEGRITY, bank: BANK, alreadyAlerted: true,
+        signals: [focus(9000), focus(9000), focus(9000), focus(9000)],
+      });
+      const res = await service.recordIntegrityEvents(student(), "sg1", [{ type: "FOCUS_LOSS", awayMs: 9000 }]);
+      expect(res.alerted).toBe(false);
+      expect(notifications.enqueue).not.toHaveBeenCalled();
+    });
+
+    it("stays silent below the threshold", async () => {
+      const { service, notifications } = makeService({
+        sitting: LIVE, exam: EXAM_FOR_INTEGRITY, bank: BANK, signals: [focus(2000)],
+      });
+      const res = await service.recordIntegrityEvents(student(), "sg1", [{ type: "FOCUS_LOSS", awayMs: 2000 }]);
+      expect(res.alerted).toBe(false);
+      expect(notifications.enqueue).not.toHaveBeenCalled();
+    });
+
+    it("records nothing on a CLOSED sitting", async () => {
+      const { service, tx } = makeService({ sitting: { ...LIVE, status: "SUBMITTED" }, exam: EXAM_FOR_INTEGRITY, bank: BANK });
+      const res = await service.recordIntegrityEvents(student(), "sg1", [{ type: "FOCUS_LOSS", awayMs: 5000 }]);
+      expect(res.recorded).toBe(0);
+      expect(tx.integritySignal.createMany).not.toHaveBeenCalled();
+    });
+
+    it("404s on someone else's sitting", async () => {
+      const { service } = makeService({ sitting: null });
+      await expect(
+        service.recordIntegrityEvents(student(), "sg-other", [{ type: "FOCUS_LOSS", awayMs: 1000 }]),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it("refuses an oversized batch (a bad client can't flood the table)", async () => {
+      const { service } = makeService({ sitting: LIVE });
+      const many = Array.from({ length: 40 }, () => ({ type: "FOCUS_LOSS", awayMs: 1000 }));
+      await expect(service.recordIntegrityEvents(student(), "sg1", many)).rejects.toBeInstanceOf(BadRequestException);
     });
   });
 });

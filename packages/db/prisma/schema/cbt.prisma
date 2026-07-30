@@ -150,6 +150,7 @@ model CbtSitting {
   total       Int?
 
   theoryAnswers CbtTheoryAnswer[]
+  integritySignals IntegritySignal[]
   school School  @relation(fields: [schoolId], references: [id])
   exam   CbtExam @relation(fields: [examId], references: [id], onDelete: Cascade)
 
