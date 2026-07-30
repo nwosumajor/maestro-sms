@@ -400,4 +400,98 @@ describe("CbtService — gated answer-key release", () => {
     expect(viewReleased.answersReleased).toBe(true);
     expect(viewReleased.questions[0]!.answerIndex).toBe(1);
   });
+
+  // --- level targeting: ONE bank serves SS1A / SS2A / SS3A --------------------
+
+  it("an exam draws ONLY its class's level (plus any-level questions)", async () => {
+    // The accuracy guarantee: a shared "Physics" bank must never hand an SS1
+    // pupil an SS3 question. Level comes from Class.level, and the pool predicate
+    // is (level = classLevel OR level IS NULL).
+    const { service, tx } = makeService({
+      bank: { id: "b1", name: "Physics", subject: "Physics", createdById: "t1", subjectId: "sub-phy" },
+      taught: [{ subjectId: "sub-phy" }],
+      teachesLookup: true,
+      klass: { id: "ss1a", level: 1 },
+      questionCount: 9,
+    });
+    await service.createExam({ ...teacher(), permissions: ["cbt.manage"] }, {
+      bankId: "b1", title: "Physics SS1 mock", classId: "ss1a",
+      questionCount: 5, durationMinutes: 30,
+      startAt: new Date(Date.now() + 3600_000).toISOString(),
+      endAt: new Date(Date.now() + 7200_000).toISOString(),
+    });
+    // The availability count that sized the paper was level-filtered.
+    const call = (tx.cbtQuestion.count as jest.Mock).mock.calls.at(-1)?.[0];
+    expect(call.where).toMatchObject({ bankId: "b1", OR: [{ level: 1 }, { level: null }] });
+  });
+
+  it("refuses an exam when the bank has nothing at that class's level", async () => {
+    const { service } = makeService({
+      bank: { id: "b1", name: "Physics", subject: "Physics", createdById: "t1", subjectId: "sub-phy" },
+      taught: [{ subjectId: "sub-phy" }],
+      teachesLookup: true,
+      klass: { id: "ss1a", level: 1 },
+      questionCount: 0, // nothing matches this level
+    });
+    await expect(
+      service.createExam({ ...teacher(), permissions: ["cbt.manage"] }, {
+        bankId: "b1", title: "Physics SS1 mock", classId: "ss1a",
+        questionCount: 5, durationMinutes: 30,
+        startAt: new Date(Date.now() + 3600_000).toISOString(),
+        endAt: new Date(Date.now() + 7200_000).toISOString(),
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it("a blueprint asking for more than a topic holds is REFUSED", async () => {
+    // A paper definition must never promise coverage the bank cannot deliver.
+    const { service } = makeService({
+      bank: { id: "b1", name: "Physics", subject: "Physics", createdById: "t1", subjectId: "sub-phy" },
+      taught: [{ subjectId: "sub-phy" }],
+      teachesLookup: true,
+      klass: { id: "ss2a", level: 2 },
+      questionCount: 4, // every topic count resolves to 4
+    });
+    await expect(
+      service.createExam({ ...teacher(), permissions: ["cbt.manage"] }, {
+        bankId: "b1", title: "Physics SS2 mock", classId: "ss2a",
+        questionCount: 10, durationMinutes: 30,
+        startAt: new Date(Date.now() + 3600_000).toISOString(),
+        endAt: new Date(Date.now() + 7200_000).toISOString(),
+        blueprint: [{ topic: "Waves", count: 10 }],
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it("a blueprint rejects a duplicated topic", async () => {
+    const { service } = makeService({
+      bank: { id: "b1", name: "Physics", subject: "Physics", createdById: "t1", subjectId: "sub-phy" },
+      taught: [{ subjectId: "sub-phy" }],
+      teachesLookup: true,
+      klass: { id: "ss2a", level: 2 },
+      questionCount: 50,
+    });
+    await expect(
+      service.createExam({ ...teacher(), permissions: ["cbt.manage"] }, {
+        bankId: "b1", title: "dup", classId: "ss2a",
+        questionCount: 4, durationMinutes: 30,
+        startAt: new Date(Date.now() + 3600_000).toISOString(),
+        endAt: new Date(Date.now() + 7200_000).toISOString(),
+        blueprint: [{ topic: "Waves", count: 2 }, { topic: "waves", count: 2 }],
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("questions persist their level + topic tags", async () => {
+    const { service, tx } = makeService({
+      bank: { id: "b1", createdById: "t1", subjectId: "sub-phy" },
+      taught: [{ subjectId: "sub-phy" }],
+    });
+    await service.addQuestions({ ...teacher(), permissions: ["cbt.manage"] }, "b1", [
+      { prompt: "Ohm's law?", choices: ["a", "b"], answerIndex: 0, level: 1, topic: " Electricity " },
+    ]);
+    expect(tx.cbtQuestion.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: [expect.objectContaining({ level: 1, topic: "Electricity" })] }),
+    );
+  });
 });

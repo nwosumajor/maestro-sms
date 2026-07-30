@@ -20,7 +20,7 @@ export interface CbtAuthoringOptionsDto {
   /** Classes an exam may target. For a teacher, `subjectIds` lists which of
    *  their subjects they teach IN that class (the exam's bank subject must be
    *  one of them); null = unrestricted (school-wide staff). */
-  classes: { id: string; name: string; subjectIds: string[] | null }[];
+  classes: { id: string; name: string; level: number | null; subjectIds: string[] | null }[];
 }
 
 export interface CbtExamDto {
@@ -117,4 +117,33 @@ export interface CbtBankQuestionsDto {
   /** True when the caller may edit — drives whether answers are shown/editable. */
   canEdit: boolean;
   questions: CbtQuestionDto[];
+}
+
+// =============================================================================
+// Level + topic targeting
+// =============================================================================
+// A subject bank (e.g. "Physics") serves EVERY class that studies it. Each
+// question carries an optional curriculum LEVEL (Class.level — SS1=1, SS2=2 …)
+// and an optional TOPIC. An exam for SS1A draws only questions whose level
+// matches SS1 or is null ("any level"), so one bank can serve SS1A/SS2A/SS3A
+// without duplicating a single question, and a stream (SS1A vs SS1B) shares its
+// level's questions automatically.
+
+/** One line of an exam blueprint: draw `count` questions from `topic`. */
+export interface CbtBlueprintItem {
+  topic: string;
+  count: number;
+}
+
+/** Max blueprint lines — keeps a paper definition bounded and reviewable. */
+export const CBT_BLUEPRINT_MAX_ITEMS = 20;
+
+/** What is actually available to draw for a given exam target. */
+export interface CbtAvailabilityDto {
+  /** Level resolved from the target class (null when the class has no level). */
+  level: number | null;
+  /** Questions matching that level (plus any-level questions). */
+  available: number;
+  /** Per-topic counts within that matching pool, for the blueprint builder. */
+  byTopic: { topic: string; available: number }[];
 }

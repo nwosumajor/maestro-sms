@@ -2,9 +2,9 @@
 // and run exams; students (cbt.take) sit them. Every answer key stays
 // server-side until a sitting closes; the clock is server law.
 
-import { Body, Controller, Get, Param, Post, Put } from "@nestjs/common";
-import { CBT_PERMISSIONS, MODULES } from "@sms/types";
-import type { CbtAuthoringOptionsDto, CbtBankDto, CbtExamDto, CbtExamResultsDto, CbtSittingViewDto, CbtBankQuestionsDto } from "@sms/types";
+import { Body, Controller, Get, Param, Post, Put, Query } from "@nestjs/common";
+import { CBT_PERMISSIONS, CBT_BLUEPRINT_MAX_ITEMS, MODULES } from "@sms/types";
+import type { CbtAuthoringOptionsDto, CbtBankDto, CbtExamDto, CbtExamResultsDto, CbtSittingViewDto, CbtBankQuestionsDto, CbtAvailabilityDto } from "@sms/types";
 import { z } from "zod";
 import { RequireModule } from "../auth/require-module.decorator";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -25,6 +25,9 @@ const questionsSchema = z.object({
         prompt: z.string().min(1).max(2000),
         choices: z.array(z.string().min(1).max(500)).min(2).max(6),
         answerIndex: z.number().int().min(0).max(5),
+        // Curriculum level this question targets; omit for "any level".
+        level: z.number().int().min(1).max(20).nullish(),
+        topic: z.string().max(80).nullish(),
       }),
     )
     .min(1)
@@ -38,6 +41,12 @@ const examSchema = z.object({
   durationMinutes: z.number().int().min(5).max(300),
   startAt: z.string().datetime(),
   endAt: z.string().datetime(),
+  // Optional per-topic paper definition. When present it REPLACES questionCount
+  // (the total becomes the sum of the lines) and is validated against the bank.
+  blueprint: z
+    .array(z.object({ topic: z.string().min(1).max(80), count: z.number().int().min(1).max(200) }))
+    .max(CBT_BLUEPRINT_MAX_ITEMS)
+    .nullish(),
 });
 // Publishing is maker-checker (POST exams/:id/request-publish) — the only
 // direct status change left is closing a live exam early.
@@ -82,6 +91,22 @@ export class CbtController {
   @Get("banks/:id/questions")
   bankQuestions(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<CbtBankQuestionsDto> {
     return this.cbt.getBankQuestions(p, id);
+  }
+
+  /**
+   * What can actually be drawn for this bank + class: the resolved level, the
+   * total matching pool, and per-topic counts. Lets the exam form show real
+   * numbers BEFORE a paper is defined instead of failing at creation. Ungated for
+   * the same reason as banks/:id/questions (two audiences); the service enforces
+   * cbt.manage + scope OR cbt.review.
+   */
+  @Get("banks/:id/availability")
+  availability(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Query("classId") classId?: string,
+  ): Promise<CbtAvailabilityDto> {
+    return this.cbt.availability(p, id, classId ?? null);
   }
 
   @Post("banks/:id/questions")

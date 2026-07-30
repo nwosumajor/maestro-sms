@@ -41,12 +41,21 @@ model CbtQuestion {
   choices     Json
   /// Index into choices — SERVER-ONLY until the sitting is submitted.
   answerIndex Int
+  /// Curriculum level this question targets (Class.level). NULL = any level, so
+  /// one subject bank serves SS1/SS2/SS3 without duplicating shared questions.
+  level       Int?
+  /// Optional syllabus topic ("Waves"), so an exam can draw a BALANCED paper.
+  topic       String?
   createdAt   DateTime @default(now())
 
   school School          @relation(fields: [schoolId], references: [id])
   bank   CbtQuestionBank @relation(fields: [bankId], references: [id], onDelete: Cascade)
 
   @@index([schoolId, bankId])
+  // Sampling filters by (bank, level) and the blueprint counts by topic — keep
+  // both indexed so a growing bank never turns a sitting start into a scan.
+  @@index([bankId, level])
+  @@index([bankId, topic])
   @@map("cbt_question")
 }
 
@@ -80,6 +89,10 @@ model CbtExam {
   releasedById         String?   @db.Uuid
   /// Shuffle question order per sitting.
   shuffle              Boolean   @default(true)
+  /// Optional paper BLUEPRINT: [{topic, count}]. When set, each sitting draws
+  /// that many questions per topic, so every pupil gets identical syllabus
+  /// coverage with different questions. NULL = draw questionCount at random.
+  blueprint            Json?
   /// When set, this exam is a SCHOLARSHIP qualification exam materialized by the
   /// platform's announce step: only students holding a QUALIFIED application for
   /// that program may see/sit it (checked in listExams/startSitting).

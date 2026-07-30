@@ -19,7 +19,7 @@ import {
 import { Prisma } from "@sms/db";
 import { randomUUID } from "node:crypto";
 import { CBT_ANSWER_RELEASE_CHAIN } from "@sms/types";
-import { CBT_PERMISSIONS } from "@sms/types";
+import { CBT_PERMISSIONS, CBT_BLUEPRINT_MAX_ITEMS } from "@sms/types";
 import type {
   CbtAuthoringOptionsDto,
   CbtBankDto,
@@ -27,6 +27,8 @@ import type {
   CbtExamResultsDto,
   CbtSittingViewDto,
   CbtBankQuestionsDto,
+  CbtBlueprintItem,
+  CbtAvailabilityDto,
 } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -51,6 +53,10 @@ interface QuestionInput {
   prompt: string;
   choices: string[];
   answerIndex: number;
+  /** Curriculum level this question targets; null/undefined = any level. */
+  level?: number | null;
+  /** Optional syllabus topic, used by exam blueprints. */
+  topic?: string | null;
 }
 
 @Injectable()
@@ -147,6 +153,84 @@ export class CbtService {
     return (await this.taughtSubjectIds(tx, p)).has(bank.subjectId);
   }
 
+  /** The curriculum level of a class (Class.level). Null when the class has no
+   *  level set, or no class is targeted — which means "draw from everything". */
+  private async classLevel(tx: TenantTx, classId: string | null): Promise<number | null> {
+    if (!classId) return null;
+    const k = await tx.class.findFirst({ where: { id: classId }, select: { level: true } });
+    return k?.level ?? null;
+  }
+
+  /** The question pool for a bank at a level: questions for THAT level plus
+   *  any-level ones. A null level (unlevelled class) draws from the whole bank. */
+  private poolWhere(bankId: string, level: number | null, topic?: string) {
+    const base: Record<string, unknown> = { bankId };
+    if (level !== null) base.OR = [{ level }, { level: null }];
+    if (topic !== undefined) base.topic = topic;
+    return base;
+  }
+
+  /**
+   * Validate an exam blueprint against the pool that actually exists. Every line
+   * must name a topic with ENOUGH questions at this level, so a paper can never
+   * promise 10 "Waves" questions when the bank holds 4. Returns null when no
+   * blueprint was supplied (draw at random instead).
+   */
+  private async validateBlueprint(
+    tx: TenantTx,
+    bankId: string,
+    level: number | null,
+    items?: CbtBlueprintItem[] | null,
+  ): Promise<CbtBlueprintItem[] | null> {
+    if (!items || items.length === 0) return null;
+    if (items.length > CBT_BLUEPRINT_MAX_ITEMS) {
+      throw new BadRequestException(`A blueprint may have at most ${CBT_BLUEPRINT_MAX_ITEMS} topics`);
+    }
+    const seen = new Set<string>();
+    const out: CbtBlueprintItem[] = [];
+    for (const raw of items) {
+      const topic = (raw.topic ?? "").trim();
+      if (!topic) throw new BadRequestException("Every blueprint line needs a topic");
+      if (seen.has(topic.toLowerCase())) throw new BadRequestException(`Topic "${topic}" appears twice in the blueprint`);
+      seen.add(topic.toLowerCase());
+      if (!Number.isInteger(raw.count) || raw.count < 1) throw new BadRequestException(`"${topic}" needs a positive question count`);
+      const have = await tx.cbtQuestion.count({ where: this.poolWhere(bankId, level, topic) });
+      if (have < raw.count) {
+        throw new ConflictException(
+          `"${topic}" has only ${have} question(s) for this class's level — asked for ${raw.count}.`,
+        );
+      }
+      out.push({ topic, count: raw.count });
+    }
+    return out;
+  }
+
+  /**
+   * What a teacher can actually draw for a given bank + class. Powers the exam
+   * form so the counts are visible BEFORE the paper is defined, instead of the
+   * teacher discovering a shortfall at creation time.
+   */
+  async availability(p: Principal, bankId: string, classId?: string | null): Promise<CbtAvailabilityDto> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const bank = await tx.cbtQuestionBank.findFirst({ where: { id: bankId } });
+      if (!bank) throw new NotFoundException("Bank not found");
+      const canEdit = p.permissions.includes(CBT_PERMISSIONS.CBT_MANAGE) && (await this.canTouchBank(tx, p, bank));
+      if (!canEdit && !p.permissions.includes(CBT_PERMISSIONS.CBT_REVIEW)) throw new NotFoundException("Bank not found");
+      const level = await this.classLevel(tx, classId ?? null);
+      const where = this.poolWhere(bankId, level);
+      const [available, grouped] = await Promise.all([
+        tx.cbtQuestion.count({ where }),
+        // ONE grouped aggregate for every topic — never a query per topic.
+        tx.cbtQuestion.groupBy({ by: ["topic"], where, _count: { _all: true } }),
+      ]);
+      const byTopic = (grouped as { topic: string | null; _count: { _all: number } }[])
+        .filter((g) => !!g.topic)
+        .map((g) => ({ topic: g.topic as string, available: g._count._all }))
+        .sort((a, b) => a.topic.localeCompare(b.topic));
+      return { level, available, byTopic };
+    });
+  }
+
   // --- banks & questions (staff) ---------------------------------------------
 
   /** What the caller may author against. School-wide staff: every subject and
@@ -157,12 +241,12 @@ export class CbtService {
       if (this.isSchoolWide(p)) {
         const [subjects, classes] = await Promise.all([
           tx.subject.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
-          tx.class.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
+          tx.class.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, level: true } }),
         ]);
         return {
           schoolWide: true,
           subjects,
-          classes: classes.map((c) => ({ id: c.id, name: c.name, subjectIds: null })),
+          classes: classes.map((c) => ({ id: c.id, name: c.name, level: c.level ?? null, subjectIds: null })),
         };
       }
       const rows = await tx.classSubjectTeacher.findMany({
@@ -170,14 +254,14 @@ export class CbtService {
         select: {
           subjectId: true,
           subject: { select: { name: true } },
-          class: { select: { id: true, name: true } },
+          class: { select: { id: true, name: true, level: true } },
         },
       });
       const subjects = new Map<string, { id: string; name: string }>();
-      const classes = new Map<string, { id: string; name: string; subjectIds: string[] }>();
+      const classes = new Map<string, { id: string; name: string; level: number | null; subjectIds: string[] }>();
       for (const r of rows) {
         subjects.set(r.subjectId, { id: r.subjectId, name: r.subject.name });
-        const c = classes.get(r.class.id) ?? { id: r.class.id, name: r.class.name, subjectIds: [] };
+        const c = classes.get(r.class.id) ?? { id: r.class.id, name: r.class.name, level: r.class.level ?? null, subjectIds: [] };
         if (!c.subjectIds.includes(r.subjectId)) c.subjectIds.push(r.subjectId);
         classes.set(r.class.id, c);
       }
@@ -332,6 +416,8 @@ export class CbtService {
           prompt: q.prompt.trim(),
           choices: q.choices as unknown as Prisma.InputJsonValue,
           answerIndex: q.answerIndex,
+          level: q.level ?? null,
+          topic: q.topic?.trim() || null,
         })),
       });
       await this.log(tx, p, "cbt.bank.questions_add", bankId, { added: questions.length });
@@ -351,6 +437,8 @@ export class CbtService {
       durationMinutes: number;
       startAt: string;
       endAt: string;
+      /** Optional per-topic paper definition; overrides questionCount. */
+      blueprint?: CbtBlueprintItem[] | null;
     },
   ): Promise<CbtExamDto> {
     const startAt = new Date(input.startAt);
@@ -380,15 +468,34 @@ export class CbtService {
         const klass = await tx.class.findFirst({ where: { id: input.classId }, select: { id: true } });
         if (!klass) throw new NotFoundException("Class not found");
       }
-      const available = await tx.cbtQuestion.count({ where: { bankId: input.bankId } });
-      if (available === 0) throw new ConflictException("The bank has no questions yet");
+      // LEVEL TARGETING: an exam draws only questions written for THIS class's
+      // curriculum level (or tagged "any level"). That is what lets one Physics
+      // bank serve SS1A/SS2A/SS3A without an SS1 pupil ever drawing an SS3
+      // question — a bank/class mismatch becomes impossible rather than merely
+      // discouraged.
+      const level = await this.classLevel(tx, input.classId ?? null);
+      const available = await tx.cbtQuestion.count({ where: this.poolWhere(input.bankId, level) });
+      if (available === 0) {
+        throw new ConflictException(
+          level === null
+            ? "The bank has no questions yet"
+            : `The bank has no questions for this class's level yet — tag questions for level ${level}, or leave their level blank to use them for any class.`,
+        );
+      }
+      // BLUEPRINT: validated against what actually exists, so a paper definition
+      // can never promise coverage the bank cannot deliver.
+      const blueprint = await this.validateBlueprint(tx, input.bankId, level, input.blueprint);
+      const questionCount = blueprint
+        ? blueprint.reduce((n, b) => n + b.count, 0)
+        : Math.min(Math.max(1, input.questionCount), available);
       const exam = await tx.cbtExam.create({
         data: {
           schoolId: p.schoolId,
           bankId: input.bankId,
           title: input.title.trim(),
           classId: input.classId ?? null,
-          questionCount: Math.min(Math.max(1, input.questionCount), available),
+          questionCount,
+          ...(blueprint ? { blueprint: blueprint as unknown as Prisma.InputJsonValue } : {}),
           durationMinutes: input.durationMinutes,
           startAt,
           endAt,

@@ -31,8 +31,10 @@ async function post(path: string, body?: unknown, method = "POST") {
   });
 }
 
-type DraftQuestion = { prompt: string; choices: string[]; answerIndex: number };
-const emptyQuestion = (): DraftQuestion => ({ prompt: "", choices: ["", "", "", ""], answerIndex: 0 });
+// `level` targets a curriculum level (Class.level) so ONE subject bank serves
+// SS1A/SS2A/SS3A; blank means "any level". `topic` feeds exam blueprints.
+type DraftQuestion = { prompt: string; choices: string[]; answerIndex: number; level: string; topic: string };
+const emptyQuestion = (): DraftQuestion => ({ prompt: "", choices: ["", "", "", ""], answerIndex: 0, level: "", topic: "" });
 
 /** One question per line: prompt | choice1 | choice2 | ... | #correctIndex */
 function parseBulk(text: string): DraftQuestion[] {
@@ -44,7 +46,7 @@ function parseBulk(text: string): DraftQuestion[] {
       const parts = line.split("|").map((p) => p.trim());
       const last = parts[parts.length - 1] ?? "";
       const answerIndex = Number(last.replace(/^#/, ""));
-      return { prompt: parts[0] ?? "", choices: parts.slice(1, -1), answerIndex };
+      return { prompt: parts[0] ?? "", choices: parts.slice(1, -1), answerIndex, level: "", topic: "" };
     });
 }
 
@@ -63,10 +65,21 @@ function compactQuestion(q: DraftQuestion, n: number): DraftQuestion | string {
   });
   if (kept.length < 2) return `Question ${n} needs at least two options.`;
   if (answerIndex < 0) return `Question ${n}: mark one of the filled options as correct.`;
-  return { prompt, choices: kept, answerIndex };
+  return { prompt, choices: kept, answerIndex, level: q.level, topic: q.topic };
 }
 
 export function CbtStaffPanel({ banks, exams, options }: { banks: Bank[]; exams: Exam[]; options: Options }) {
+  // Levels the caller can actually target, derived from their own classes — so a
+  // teacher tags questions with the levels they teach, not a free-typed number.
+  const levelOptions = React.useMemo(() => {
+    const seen = new Map<number, string>();
+    for (const c of options.classes) {
+      if (c.level == null) continue;
+      if (!seen.has(c.level)) seen.set(c.level, `Level ${c.level}`);
+    }
+    return [...seen.entries()].sort((a, b) => a[0] - b[0]).map(([level, label]) => ({ level, label }));
+  }, [options.classes]);
+
   const [msg, setMsg] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
 
@@ -128,7 +141,16 @@ export function CbtStaffPanel({ banks, exams, options }: { banks: Bank[]; exams:
       if (bad) return setMsg(`Check this line — it doesn't parse: "${bad.prompt || "(empty)"}"`);
       if (payload.length === 0) return setMsg("Nothing to add yet.");
     }
-    void act(() => post(`cbt/banks/${qBank}/questions`, { questions: payload }), `${payload.length} question${payload.length === 1 ? "" : "s"} added.`);
+    // Wire shape: level is a number or null ("any level"), topic a trimmed
+    // string or null. The server re-validates both.
+    const wire = payload.map((q) => ({
+      prompt: q.prompt,
+      choices: q.choices,
+      answerIndex: q.answerIndex,
+      level: q.level.trim() ? Number(q.level) : null,
+      topic: q.topic.trim() || null,
+    }));
+    void act(() => post(`cbt/banks/${qBank}/questions`, { questions: wire }), `${wire.length} question${wire.length === 1 ? "" : "s"} added.`);
   };
 
   // A teacher may only aim an exam at a class where they teach the bank's subject.
@@ -232,6 +254,26 @@ export function CbtStaffPanel({ banks, exams, options }: { banks: Bank[]; exams:
                         )}
                       </div>
                       <Input value={q.prompt} onChange={(e) => setQ(i, { prompt: e.target.value })} placeholder="Type the question…" />
+                      {/* Level + topic: this is what lets ONE subject bank serve
+                          SS1A/SS2A/SS3A. Blank level = usable by any class. */}
+                      <div className="flex flex-wrap gap-2">
+                        <select
+                          aria-label={`Level for question ${i + 1}`}
+                          className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                          value={q.level}
+                          onChange={(e) => setQ(i, { level: e.target.value })}
+                        >
+                          <option value="">Any level</option>
+                          {levelOptions.map((l) => <option key={l.level} value={String(l.level)}>{l.label}</option>)}
+                        </select>
+                        <Input
+                          aria-label={`Topic for question ${i + 1}`}
+                          className="h-8 w-40 text-xs"
+                          value={q.topic}
+                          onChange={(e) => setQ(i, { topic: e.target.value })}
+                          placeholder="Topic (optional)"
+                        />
+                      </div>
                       <div className="grid gap-2 sm:grid-cols-2">
                         {q.choices.map((c, k) => (
                           <label key={k} className="flex items-center gap-2">
