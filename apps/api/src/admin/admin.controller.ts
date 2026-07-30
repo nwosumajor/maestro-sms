@@ -9,6 +9,7 @@ import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { AdminService } from "./admin.service";
 import { StudentImportService } from "./student-import.service";
+import { SisNudgeService } from "../sis/sis-nudge.service";
 
 const roleSchema = z.object({ roleName: z.string().min(1).max(40) });
 const createUserSchema = z.object({
@@ -48,6 +49,7 @@ export class AdminController {
   constructor(
     private readonly admin: AdminService,
     private readonly studentImport: StudentImportService,
+    private readonly sisNudge: SisNudgeService,
   ) {}
 
   /**
@@ -56,7 +58,19 @@ export class AdminController {
    * whole school. Columns are deliberately minimal (no contact/medical data) and
    * both reads are audited.
    */
-  @Get("admin/export/staff.csv")
+  /**
+   * Nudge this school's pupils whose SIS profile is still outstanding, on demand.
+   * SCHOOL-SCOPED: the sweep is restricted to the caller's own schoolId from the
+   * verified JWT, so this never becomes a cross-tenant trigger. The scheduled daily
+   * job covers every school separately.
+   */
+  @Post("sis/nudge/run")
+  @RequirePermission(ADMIN_PERMISSIONS.RBAC_MANAGE)
+  runSisNudge(@CurrentPrincipal() p: Principal): Promise<{ nudged: number; scanned: number }> {
+    return this.sisNudge.sweep(p.schoolId).then((r) => ({ nudged: r.nudged, scanned: r.scanned }));
+  }
+
+  @Get("export/staff.csv")
   @RequirePermission(ADMIN_PERMISSIONS.RBAC_MANAGE)
   @Header("Content-Type", "text/csv")
   @Header("Content-Disposition", 'attachment; filename="staff-roster.csv"')
@@ -64,7 +78,7 @@ export class AdminController {
     return this.admin.staffRosterCsv(p);
   }
 
-  @Get("admin/export/students.csv")
+  @Get("export/students.csv")
   @RequirePermission(ADMIN_PERMISSIONS.RBAC_MANAGE)
   @Header("Content-Type", "text/csv")
   @Header("Content-Disposition", 'attachment; filename="student-roster.csv"')
