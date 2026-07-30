@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { readApiError } from "@/lib/api-error";
+import { CbtMarkingConsole } from "@/components/cbt/CbtMarkingConsole";
 import { dateTime } from "@/lib/format";
 
 type Bank = Serialized<CbtBankDto>;
@@ -33,8 +34,19 @@ async function post(path: string, body?: unknown, method = "POST") {
 
 // `level` targets a curriculum level (Class.level) so ONE subject bank serves
 // SS1A/SS2A/SS3A; blank means "any level". `topic` feeds exam blueprints.
-type DraftQuestion = { prompt: string; choices: string[]; answerIndex: number; level: string; topic: string };
-const emptyQuestion = (): DraftQuestion => ({ prompt: "", choices: ["", "", "", ""], answerIndex: 0, level: "", topic: "" });
+type DraftQuestion = {
+  prompt: string;
+  choices: string[];
+  answerIndex: number;
+  level: string;
+  topic: string;
+  /** OBJECTIVE (pick a choice) or THEORY (written answer, marked by hand). */
+  type: "OBJECTIVE" | "THEORY";
+  /** THEORY only. */
+  maxMarks: string;
+  markGuide: string;
+};
+const emptyQuestion = (): DraftQuestion => ({ prompt: "", choices: ["", "", "", ""], answerIndex: 0, level: "", topic: "", type: "OBJECTIVE", maxMarks: "5", markGuide: "" });
 
 /** One question per line: prompt | choice1 | choice2 | ... | #correctIndex */
 function parseBulk(text: string): DraftQuestion[] {
@@ -46,7 +58,7 @@ function parseBulk(text: string): DraftQuestion[] {
       const parts = line.split("|").map((p) => p.trim());
       const last = parts[parts.length - 1] ?? "";
       const answerIndex = Number(last.replace(/^#/, ""));
-      return { prompt: parts[0] ?? "", choices: parts.slice(1, -1), answerIndex, level: "", topic: "" };
+      return { prompt: parts[0] ?? "", choices: parts.slice(1, -1), answerIndex, level: "", topic: "", type: "OBJECTIVE" as const, maxMarks: "5", markGuide: "" };
     });
 }
 
@@ -55,6 +67,12 @@ function parseBulk(text: string): DraftQuestion[] {
 function compactQuestion(q: DraftQuestion, n: number): DraftQuestion | string {
   const prompt = q.prompt.trim();
   if (!prompt) return `Question ${n} needs a prompt.`;
+  // A THEORY question has no options to validate — just a prompt and a ceiling.
+  if (q.type === "THEORY") {
+    const max = Number(q.maxMarks);
+    if (!Number.isInteger(max) || max < 1 || max > 100) return `Question ${n}: marks must be a whole number from 1 to 100.`;
+    return { ...q, prompt, choices: [], answerIndex: 0 };
+  }
   const kept: string[] = [];
   let answerIndex = -1;
   q.choices.forEach((c, i) => {
@@ -65,7 +83,7 @@ function compactQuestion(q: DraftQuestion, n: number): DraftQuestion | string {
   });
   if (kept.length < 2) return `Question ${n} needs at least two options.`;
   if (answerIndex < 0) return `Question ${n}: mark one of the filled options as correct.`;
-  return { prompt, choices: kept, answerIndex, level: q.level, topic: q.topic };
+  return { ...q, prompt, choices: kept, answerIndex };
 }
 
 export function CbtStaffPanel({ banks, exams, options }: { banks: Bank[]; exams: Exam[]; options: Options }) {
@@ -104,6 +122,7 @@ export function CbtStaffPanel({ banks, exams, options }: { banks: Bank[]; exams:
     endAt: "",
   });
   const [results, setResults] = React.useState<Serialized<CbtExamResultsDto> | null>(null);
+  const [marking, setMarking] = React.useState<{ id: string; title: string } | null>(null);
 
   const setQ = (i: number, patch: Partial<DraftQuestion>) =>
     setQuestions((qs) => qs.map((q, j) => (j === i ? { ...q, ...patch } : q)));
@@ -149,6 +168,10 @@ export function CbtStaffPanel({ banks, exams, options }: { banks: Bank[]; exams:
       answerIndex: q.answerIndex,
       level: q.level.trim() ? Number(q.level) : null,
       topic: q.topic.trim() || null,
+      type: q.type,
+      // Theory-only fields; the server ignores them for objective questions.
+      maxMarks: q.type === "THEORY" ? Number(q.maxMarks) : null,
+      markGuide: q.type === "THEORY" ? q.markGuide.trim() || null : null,
     }));
     void act(() => post(`cbt/banks/${qBank}/questions`, { questions: wire }), `${wire.length} question${wire.length === 1 ? "" : "s"} added.`);
   };
@@ -161,6 +184,15 @@ export function CbtStaffPanel({ banks, exams, options }: { banks: Bank[]; exams:
 
   return (
     <div className="space-y-6">
+      {/* Marking console — opened from an exam row; theory only. */}
+      {marking && (
+        <div className="space-y-2">
+          <button type="button" onClick={() => setMarking(null)} className="text-sm text-primary underline">
+            ← Back to the CBT console
+          </button>
+          <CbtMarkingConsole examId={marking.id} examTitle={marking.title} />
+        </div>
+      )}
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Question banks</CardTitle>
@@ -254,6 +286,41 @@ export function CbtStaffPanel({ banks, exams, options }: { banks: Bank[]; exams:
                         )}
                       </div>
                       <Input value={q.prompt} onChange={(e) => setQ(i, { prompt: e.target.value })} placeholder="Type the question…" />
+                      {/* Objective vs theory. Theory has no options — it is written
+                          out and marked by a person, so it carries a mark ceiling
+                          and a mark scheme instead of a correct choice. */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <select
+                          aria-label={`Question ${i + 1} type`}
+                          className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                          value={q.type}
+                          onChange={(e) => setQ(i, { type: e.target.value as "OBJECTIVE" | "THEORY" })}
+                        >
+                          <option value="OBJECTIVE">Objective (auto-marked)</option>
+                          <option value="THEORY">Theory (marked by hand)</option>
+                        </select>
+                        {q.type === "THEORY" && (
+                          <>
+                            <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                              Marks
+                              <Input
+                                aria-label={`Marks for question ${i + 1}`}
+                                className="h-8 w-16 text-xs"
+                                value={q.maxMarks}
+                                onChange={(e) => setQ(i, { maxMarks: e.target.value })}
+                                inputMode="numeric"
+                              />
+                            </label>
+                            <Input
+                              aria-label={`Mark scheme for question ${i + 1}`}
+                              className="h-8 flex-1 text-xs"
+                              value={q.markGuide}
+                              onChange={(e) => setQ(i, { markGuide: e.target.value })}
+                              placeholder="Mark scheme — seen only by the marker"
+                            />
+                          </>
+                        )}
+                      </div>
                       {/* Level + topic: this is what lets ONE subject bank serve
                           SS1A/SS2A/SS3A. Blank level = usable by any class. */}
                       <div className="flex flex-wrap gap-2">
@@ -274,6 +341,8 @@ export function CbtStaffPanel({ banks, exams, options }: { banks: Bank[]; exams:
                           placeholder="Topic (optional)"
                         />
                       </div>
+                      {q.type === "OBJECTIVE" && (
+                        <>
                       <div className="grid gap-2 sm:grid-cols-2">
                         {q.choices.map((c, k) => (
                           <label key={k} className="flex items-center gap-2">
@@ -304,6 +373,14 @@ export function CbtStaffPanel({ banks, exams, options }: { banks: Bank[]; exams:
                           </button>
                         )}
                       </div>
+                        </>
+                      )}
+                      {q.type === "THEORY" && (
+                        <p className="text-xs text-muted-foreground">
+                          Candidates write their answer. You mark it later from the marking
+                          console — one question across the whole class at a time.
+                        </p>
+                      )}
                     </div>
                   ))}
                   <div className="flex items-center gap-2">
@@ -398,6 +475,10 @@ export function CbtStaffPanel({ banks, exams, options }: { banks: Bank[]; exams:
                         }}
                       >
                         Results
+                      </Button>
+                      {/* Theory marking: vertical, one question across the class. */}
+                      <Button size="sm" variant="outline" disabled={busy} onClick={() => setMarking({ id: e.id, title: e.title })}>
+                        Mark theory
                       </Button>
                     </span>
                   </li>

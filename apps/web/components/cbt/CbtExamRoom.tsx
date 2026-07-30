@@ -54,6 +54,23 @@ export function CbtExamRoom({ initial }: { initial: Sitting }) {
     if (!res.ok) setMsg(await readApiError(res));
   };
 
+  // THEORY autosave. Debounced per question so typing doesn't post per keystroke,
+  // and it writes ONE row server-side (not the whole answer blob).
+  const timers = React.useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const write = async (questionId: string, text: string) => {
+    if (!open) return;
+    setS((cur) => ({ ...cur, theoryAnswers: { ...cur.theoryAnswers, [questionId]: text } }));
+    clearTimeout(timers.current[questionId]);
+    timers.current[questionId] = setTimeout(async () => {
+      const res = await fetch(`/api/sms/cbt/sittings/${s.sittingId}/answer-theory`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ questionId, text }),
+      });
+      if (!res.ok) setMsg(await readApiError(res));
+    }, 800);
+  };
+
   async function submit() {
     setBusy(true);
     setMsg(null);
@@ -112,6 +129,21 @@ export function CbtExamRoom({ initial }: { initial: Sitting }) {
                 <span className="mr-2 text-muted-foreground">{i + 1}.</span>
                 {q.prompt}
               </p>
+              {q.type === "THEORY" ? (
+                <div className="space-y-1">
+                  <textarea
+                    className="min-h-[9rem] w-full rounded-md border border-input bg-background p-2 text-sm"
+                    value={s.theoryAnswers[q.id] ?? ""}
+                    onChange={(e) => void write(q.id, e.target.value)}
+                    disabled={!open}
+                    placeholder="Write your answer…"
+                    aria-label={`Answer for question ${i + 1}`}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {q.maxMarks} mark{q.maxMarks === 1 ? "" : "s"} · saved as you type · marked by your teacher
+                  </p>
+                </div>
+              ) : (
               <div className="grid gap-2 sm:grid-cols-2">
                 {q.choices.map((choice, ci) => {
                   const picked = mine === ci;
@@ -144,6 +176,7 @@ export function CbtExamRoom({ initial }: { initial: Sitting }) {
                   );
                 })}
               </div>
+              )}
             </CardContent>
           </Card>
         );

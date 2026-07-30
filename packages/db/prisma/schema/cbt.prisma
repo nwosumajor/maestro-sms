@@ -46,6 +46,14 @@ model CbtQuestion {
   level       Int?
   /// Optional syllabus topic ("Waves"), so an exam can draw a BALANCED paper.
   topic       String?
+  /// OBJECTIVE (choices + answerIndex, auto-marked) or THEORY (open response,
+  /// marked by a human). Both live in the SAME bank and share level/topic.
+  type        String   @default("OBJECTIVE")
+  /// Marks a THEORY answer can score. Objective questions are worth 1.
+  maxMarks    Int      @default(1)
+  /// The mark scheme. MARKER-ONLY — never serialized to a candidate, and withheld
+  /// from read-only cbt.review reviewers exactly like answerIndex.
+  markGuide   String?
   createdAt   DateTime @default(now())
 
   school School          @relation(fields: [schoolId], references: [id])
@@ -128,10 +136,56 @@ model CbtSitting {
   score       Int?
   total       Int?
 
+  theoryAnswers CbtTheoryAnswer[]
   school School  @relation(fields: [schoolId], references: [id])
   exam   CbtExam @relation(fields: [examId], references: [id], onDelete: Cascade)
 
   @@unique([examId, studentId])
   @@index([schoolId, examId])
   @@map("cbt_sitting")
+}
+
+/// One candidate's answer to one THEORY question, plus the mark a human awarded.
+///
+/// Deliberately a TABLE, not a field in the sitting's `answers` JSON blob. Three
+/// reasons, all of which bite as cohorts grow:
+///   1. autosave writes ONE row instead of rewriting every essay in the blob;
+///   2. VERTICAL marking ("every answer to Q3") is an indexed query — impossible
+///      against a blob, which would mean reading and parsing every sitting;
+///   3. a mark needs its own marker, timestamp and comment, with an audit trail.
+///
+/// Marks are never computed: `marksAwarded` is null until a person sets it, and a
+/// sitting's score stays PROVISIONAL while any answer is unmarked (Golden Rule #8).
+model CbtTheoryAnswer {
+  id        String @db.Uuid @id @default(uuid())
+  schoolId  String @db.Uuid
+
+  /// Denormalised from the sitting so the marking queue can filter on
+  /// (examId, questionId) directly, without joining every sitting.
+  examId     String @db.Uuid
+  sittingId  String @db.Uuid
+  questionId String @db.Uuid
+  /// The candidate (scalar audit field; marking is anonymous by default).
+  studentId  String @db.Uuid
+
+  text String
+
+  /// Null until a human marks it. 0..question.maxMarks, enforced in the service.
+  marksAwarded Int?
+  comment      String?
+  markedById   String?   @db.Uuid
+  markedAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school  School      @relation(fields: [schoolId], references: [id])
+  sitting CbtSitting  @relation(fields: [sittingId], references: [id])
+
+  /// One answer per (sitting, question) — autosave UPSERTS on this.
+  @@unique([sittingId, questionId])
+  /// The vertical-marking query.
+  @@index([examId, questionId])
+  @@index([schoolId])
+  @@map("cbt_theory_answer")
 }

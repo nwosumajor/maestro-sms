@@ -3,8 +3,8 @@
 // server-side until a sitting closes; the clock is server law.
 
 import { Body, Controller, Get, Param, Post, Put, Query } from "@nestjs/common";
-import { CBT_PERMISSIONS, CBT_BLUEPRINT_MAX_ITEMS, MODULES } from "@sms/types";
-import type { CbtAuthoringOptionsDto, CbtBankDto, CbtExamDto, CbtExamResultsDto, CbtSittingViewDto, CbtBankQuestionsDto, CbtAvailabilityDto } from "@sms/types";
+import { CBT_PERMISSIONS, CBT_BLUEPRINT_MAX_ITEMS, CBT_QUESTION_TYPES, MODULES } from "@sms/types";
+import type { CbtAuthoringOptionsDto, CbtBankDto, CbtExamDto, CbtExamResultsDto, CbtSittingViewDto, CbtBankQuestionsDto, CbtAvailabilityDto, CbtMarkingQueueDto, CbtMarkingProgressDto } from "@sms/types";
 import { z } from "zod";
 import { RequireModule } from "../auth/require-module.decorator";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -23,8 +23,12 @@ const questionsSchema = z.object({
     .array(
       z.object({
         prompt: z.string().min(1).max(2000),
-        choices: z.array(z.string().min(1).max(500)).min(2).max(6),
-        answerIndex: z.number().int().min(0).max(5),
+        // Theory questions carry no choices; the service validates per type.
+        choices: z.array(z.string().min(1).max(500)).max(6).default([]),
+        answerIndex: z.number().int().min(0).max(5).default(0),
+        type: z.enum(CBT_QUESTION_TYPES).optional(),
+        maxMarks: z.number().int().min(1).max(100).nullish(),
+        markGuide: z.string().max(4000).nullish(),
         // Curriculum level this question targets; omit for "any level".
         level: z.number().int().min(1).max(20).nullish(),
         topic: z.string().max(80).nullish(),
@@ -51,6 +55,8 @@ const examSchema = z.object({
 // Publishing is maker-checker (POST exams/:id/request-publish) — the only
 // direct status change left is closing a live exam early.
 const statusSchema = z.object({ status: z.enum(["CLOSED"]) });
+const theoryAnswerSchema = z.object({ questionId: z.string().uuid(), text: z.string().max(20000) });
+const markSchema = z.object({ marks: z.number().int().min(0).max(100), comment: z.string().max(2000).nullish() });
 const answerSchema = z.object({ questionId: z.string().uuid(), choiceIndex: z.number().int().min(0).max(5) });
 
 @RequireModule(MODULES.CBT)
@@ -191,6 +197,48 @@ export class CbtController {
     @Body(new ZodValidationPipe(answerSchema)) body: z.infer<typeof answerSchema>,
   ) {
     return this.cbt.answer(p, id, body.questionId, body.choiceIndex);
+  }
+
+  /** Candidate saves a THEORY answer (one row upserted, not a JSON blob). */
+  @Post("sittings/:id/answer-theory")
+  @RequirePermission(CBT_PERMISSIONS.CBT_TAKE)
+  answerTheory(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(theoryAnswerSchema)) body: z.infer<typeof theoryAnswerSchema>,
+  ) {
+    return this.cbt.answerTheory(p, id, body.questionId, body.text);
+  }
+
+  // --- marking (staff) ----------------------------------------------------------
+  /** The VERTICAL marking queue for one question: every candidate's answer. */
+  @Get("exams/:id/marking")
+  @RequirePermission(CBT_PERMISSIONS.CBT_MANAGE)
+  markingQueue(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Query("questionId") questionId: string,
+    @Query("reveal") reveal?: string,
+  ): Promise<CbtMarkingQueueDto> {
+    return this.cbt.markingQueue(p, id, questionId, { reveal: reveal === "true" });
+  }
+
+  /** Per-question progress + whether results are still PROVISIONAL. */
+  @Get("exams/:id/marking/progress")
+  @RequirePermission(CBT_PERMISSIONS.CBT_MANAGE)
+  markingProgress(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<CbtMarkingProgressDto> {
+    return this.cbt.markingProgress(p, id);
+  }
+
+  /** Award a mark to one answer. */
+  @Post("marking/:answerId")
+  @RequirePermission(CBT_PERMISSIONS.CBT_MANAGE)
+  markAnswer(
+    @CurrentPrincipal() p: Principal,
+    @Param("answerId") answerId: string,
+    @Body(new ZodValidationPipe(markSchema)) body: z.infer<typeof markSchema>,
+  ) {
+    return this.cbt.markAnswer(p, answerId, body.marks, body.comment);
   }
 
   @Post("sittings/:id/submit")

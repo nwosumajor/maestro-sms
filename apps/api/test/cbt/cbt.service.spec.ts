@@ -28,6 +28,8 @@ function makeService(over: {
     Promise.resolve({ id: "bank-new", createdAt: new Date(), ...data }),
   );
   const tx = {
+    // Theory answers are their own rows now; an objective-only paper has none.
+    cbtTheoryAnswer: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn().mockResolvedValue(null), upsert: jest.fn(), update: jest.fn() },
     cbtQuestionBank: {
       findFirst: jest.fn().mockResolvedValue(over.bank ?? null),
       findMany: jest.fn().mockResolvedValue(over.banks ?? []),

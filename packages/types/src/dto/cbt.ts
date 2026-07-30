@@ -53,6 +53,10 @@ export interface CbtSittingQuestionDto {
   prompt: string;
   choices: string[];
   answerIndex: number | null;
+  /** OBJECTIVE (pick a choice) or THEORY (write an answer). */
+  type: string;
+  /** Marks this question carries — 1 for objective, the ceiling for theory. */
+  maxMarks: number;
 }
 
 export interface CbtSittingViewDto {
@@ -73,6 +77,13 @@ export interface CbtSittingViewDto {
    *  principal approved). Until then every question's answerIndex is null even
    *  after the sitting closes — the score alone is visible. */
   answersReleased: boolean;
+  /** { [questionId]: text } — the sitter's saved THEORY answers. */
+  theoryAnswers: Record<string, string>;
+  /**
+   * True when the paper contains theory that has not been fully marked, so
+   * `score` is only the objective part and must not be shown as final.
+   */
+  provisional: boolean;
   questions: CbtSittingQuestionDto[];
 }
 
@@ -146,4 +157,67 @@ export interface CbtAvailabilityDto {
   available: number;
   /** Per-topic counts within that matching pool, for the blueprint builder. */
   byTopic: { topic: string; available: number }[];
+}
+
+// =============================================================================
+// Theory (open-response) questions
+// =============================================================================
+// Theory questions live in the SAME banks as objective ones and reuse the same
+// level/topic targeting, so a subject bank can hold SS1 objective and SS2 theory
+// side by side and each exam draws what fits its class.
+//
+// The difference is marking: there is no answer key to compare against, so a
+// HUMAN awards the marks. Golden Rule #8 applies literally here — nothing is
+// auto-scored, and the mark guide only assists the marker.
+
+export const CBT_QUESTION_TYPES = ["OBJECTIVE", "THEORY"] as const;
+export type CbtQuestionType = (typeof CBT_QUESTION_TYPES)[number];
+
+/** Longest answer a candidate may submit for one theory question. */
+export const CBT_THEORY_ANSWER_MAX = 20_000;
+
+/** A candidate's answer awaiting (or carrying) a mark, as the MARKER sees it. */
+export interface CbtMarkingAnswerDto {
+  answerId: string;
+  /**
+   * Stable pseudonym for this candidate within the exam ("Candidate 7").
+   * Marking is anonymous by DEFAULT so a mark is not coloured by who wrote it.
+   */
+  candidateLabel: string;
+  /** The pupil's name — present ONLY once revealed (marking complete, or a
+   *  school-wide reveal). Null while anonymous. */
+  studentName: string | null;
+  text: string;
+  marksAwarded: number | null;
+  comment: string | null;
+  markedAt: Date | null;
+}
+
+/** One question's marking queue: the guide, the max, and the answers. */
+export interface CbtMarkingQueueDto {
+  examId: string;
+  questionId: string;
+  prompt: string;
+  /** The mark scheme — marker-only, never sent to a candidate. */
+  markGuide: string | null;
+  maxMarks: number;
+  marked: number;
+  total: number;
+  /** True while candidate names are withheld from the marker. */
+  anonymous: boolean;
+  answers: CbtMarkingAnswerDto[];
+}
+
+/** Per-question marking progress for an exam ("Q1 40/40 · Q2 12/40"). */
+export interface CbtMarkingProgressDto {
+  examId: string;
+  /** True while ANY theory answer is unmarked — results stay PROVISIONAL. */
+  provisional: boolean;
+  questions: {
+    questionId: string;
+    prompt: string;
+    maxMarks: number;
+    marked: number;
+    total: number;
+  }[];
 }
