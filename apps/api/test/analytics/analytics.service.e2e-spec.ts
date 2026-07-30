@@ -146,7 +146,7 @@ d("AnalyticsService.overview grade-band aggregate (real Postgres)", () => {
   });
 
   afterAll(async () => {
-    for (const t of ["payment", "invoice", "grade", "submission", "assessment", "parent_child", "student_profile"]) {
+    for (const t of ["attendance_record", "attendance_session", "term", "academic_session", "class", "payment", "invoice", "grade", "submission", "assessment", "parent_child", "student_profile"]) {
       await admin.query(`DELETE FROM ${t} WHERE "schoolId" = $1`, [SA]);
     }
     await admin.query(`DELETE FROM "user" WHERE "schoolId" = $1`, [SA]);
@@ -195,5 +195,96 @@ d("AnalyticsService.overview grade-band aggregate (real Postgres)", () => {
   it("demographics: hidden without student.profile.read", async () => {
     const out = await svc.overview({ userId: STAFF, schoolId: SA, roles: ["principal"], permissions: ["grade.read", "fee.read"] });
     expect(out.demographics).toBeUndefined();
+  });
+
+  // ===========================================================================
+  // The reporting WINDOW
+  // ===========================================================================
+  describe("period selection", () => {
+    // The shared fixture principal does not hold attendance.read, and the service
+    // omits the attendance block without it — so these tests need their own.
+    const attStaff = (): Principal => ({
+      userId: STAFF,
+      schoolId: SA,
+      roles: ["principal"],
+      permissions: [...perms, "attendance.read"],
+    });
+    const CLS = randomUUID();
+    const SESS = randomUUID();
+    const TERM = randomUUID();
+    const inTerm = randomUUID();   // register dated INSIDE the term
+    const outTerm = randomUUID();  // register dated OUTSIDE it
+
+    beforeAll(async () => {
+      await admin.query(`INSERT INTO class (id,"schoolId",name,"updatedAt") VALUES ($1,$2,'AN Class',now())`, [CLS, SA]);
+      await admin.query(
+        `INSERT INTO academic_session (id,"schoolId",name,"isCurrent","updatedAt") VALUES ($1,$2,'AN Session',false,now())`,
+        [SESS, SA],
+      );
+      // A PAST term: 60 days ago -> 30 days ago. Deliberately outside the old
+      // hard-coded rolling 30-day window.
+      await admin.query(
+        `INSERT INTO term (id,"schoolId","sessionId",name,sequence,"startDate","endDate","isCurrent","updatedAt")
+         VALUES ($1,$2,$3,'AN Term',1, now() - interval '60 days', now() - interval '30 days', false, now())`,
+        [TERM, SA, SESS],
+      );
+      // Two registers. BOTH rows are written NOW (createdAt = today) — the shape a
+      // back-filled or corrected register actually has.
+      for (const [id, offset] of [[inTerm, "45 days"], [outTerm, "5 days"]] as const) {
+        await admin.query(
+          `INSERT INTO attendance_session (id,"schoolId","classId",date,"takenById","createdAt","updatedAt")
+           VALUES ($1,$2,$3, (now() - interval '${offset}')::date, $4, now(), now())`,
+          [id, SA, CLS, STAFF],
+        );
+        await admin.query(
+          `INSERT INTO attendance_record (id,"schoolId","sessionId","studentId",status,"createdAt","updatedAt")
+           VALUES ($1,$2,$3,$4,'PRESENT', now(), now())`,
+          [randomUUID(), SA, id, S1],
+        );
+      }
+    });
+
+    it("windows attendance on the REGISTER DATE, not when the row was written", async () => {
+      // The bug: filtering on createdAt meant a register corrected weeks later
+      // counted against the period it was TYPED in, and silently vanished from the
+      // one it belonged to. Both rows here were written today; only one is FOR a
+      // day inside the term.
+      const o = await svc.overview(attStaff(), { termId: TERM });
+      expect(o.period?.termId).toBe(TERM);
+      expect(o.period?.label).toBe("AN Term");
+      expect(o.attendance?.total).toBe(1);
+      expect(o.attendance?.PRESENT).toBe(1);
+    });
+
+    it("an explicit range wins over a term", async () => {
+      const from = new Date(Date.now() - 10 * 86_400_000).toISOString().slice(0, 10);
+      const to = new Date().toISOString().slice(0, 10);
+      const o = await svc.overview(attStaff(), { from, to });
+      expect(o.period?.termId).toBeNull();
+      expect(o.period?.label).toBe(`${from} – ${to}`);
+      // Only the 5-days-ago register falls in this window.
+      expect(o.attendance?.total).toBe(1);
+    });
+
+    it("states the window on every response so a figure is never unlabelled", async () => {
+      const o = await svc.overview(attStaff(), {});
+      expect(o.period).toBeTruthy();
+      expect(o.period?.from).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(o.period?.to).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(o.period?.label).toBeTruthy();
+    });
+
+    it("exports the same figures as CSV, carrying the period and formula-guarded", async () => {
+      const { csv, filename } = await svc.overviewCsv(attStaff(), { termId: TERM });
+      expect(filename).toMatch(/^analytics-\d{4}-\d{2}-\d{2}\.csv$/);
+      expect(csv.split("\n")[0]).toBe("Section,Metric,Value");
+      // The window travels WITH the numbers — a sheet with no stated period is the
+      // one that gets misquoted later.
+      expect(csv).toContain('"Period","Label","AN Term"');
+      // OWASP CSV injection guard, same as every other export here.
+      for (const line of csv.split("\n").slice(1)) {
+        for (const cell of line.split(",")) expect(/^[=+@\t\r]/.test(cell.replace(/^"/, ""))).toBe(false);
+      }
+    });
   });
 });

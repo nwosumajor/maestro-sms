@@ -1,7 +1,20 @@
 // Role-scoped analytics overview response DTO.
 
+/** The window an overview was computed over, echoed back so the page can SAY what
+ *  it is showing. A figure with no stated period is the one people misquote. */
+export interface AnalyticsPeriodDto {
+  from: string;
+  to: string;
+  /** Human label: the term's name, or "Last 30 days" / an explicit range. */
+  label: string;
+  /** The term this window came from, when it came from one. */
+  termId: string | null;
+}
+
 export interface AnalyticsOverviewDto {
   scope: "school" | "family";
+  /** Always present: what period these numbers cover. */
+  period?: AnalyticsPeriodDto;
   attendance?: {
     PRESENT: number;
     ABSENT: number;
@@ -27,4 +40,13 @@ export interface AnalyticsOverviewDto {
     pendingApprovals?: number;
     integritySignals?: number;
   };
+}
+
+/** Home-page tile counts. Each one is a COUNT in Postgres over the caller's own
+ *  scope — the dashboard used to fetch whole lists and count them in the browser,
+ *  which also made the approvals figure under-report past the list cap. */
+export interface DashboardSummaryDto {
+  pendingApprovals: number;
+  classes: number;
+  unreadNotifications: number;
 }

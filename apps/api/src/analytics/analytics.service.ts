@@ -68,19 +68,127 @@ export class AnalyticsService {
     return p.roles.some((r) => STAFF_WIDE.has(r));
   }
 
-  async overview(p: Principal) {
+  /**
+   * Resolve the reporting window.
+   *
+   * Defaults to the CURRENT TERM, not a rolling 30 days. The rolling window was the
+   * only option and it could not be changed, so a principal could never ask "how was
+   * last term?" — and worse, because report cards and fee figures are term-scoped,
+   * the attendance percentage here could disagree with the one printed on the report
+   * card with nothing on screen to explain the difference.
+   *
+   * Falls back to 30 days when no term is configured (fail-open — reporting zero
+   * would read as "nothing happened"), and says so in the label either way: a figure
+   * with no stated period is the one people misquote.
+   */
+  private async resolvePeriod(
+    tx: TenantTx,
+    range?: { termId?: string; from?: string; to?: string },
+  ): Promise<{ from: Date; to: Date; label: string; termId: string | null }> {
+    const end = (d: Date) => {
+      const x = new Date(d);
+      x.setUTCHours(23, 59, 59, 999);
+      return x;
+    };
+    // An explicit range wins — it is the most specific thing the caller said.
+    if (range?.from && range?.to) {
+      return {
+        from: new Date(`${range.from}T00:00:00.000Z`),
+        to: end(new Date(`${range.to}T00:00:00.000Z`)),
+        label: `${range.from} – ${range.to}`,
+        termId: null,
+      };
+    }
+    const term = (await tx.term.findFirst({
+      where: range?.termId ? { id: range.termId } : { isCurrent: true },
+      select: { id: true, name: true, startDate: true, endDate: true },
+    })) as { id: string; name: string; startDate: Date | null; endDate: Date | null } | null;
+    if (term?.startDate && term.endDate) {
+      return { from: term.startDate, to: end(term.endDate), label: term.name, termId: term.id };
+    }
+    const from = new Date(Date.now() - 30 * 86_400_000);
+    return { from, to: new Date(), label: "Last 30 days", termId: null };
+  }
+
+  /**
+   * The overview as CSV, for the board pack.
+   *
+   * A principal presenting figures previously retyped them off the screen, which is
+   * how a number ends up in minutes that does not match the system. Reuses
+   * overview() exactly, so the file cannot drift from the page — and it carries the
+   * PERIOD in its own rows, because a sheet of numbers with no stated window is the
+   * thing that gets misquoted six months later.
+   */
+  async overviewCsv(
+    p: Principal,
+    range?: { termId?: string; from?: string; to?: string },
+  ): Promise<{ csv: string; filename: string }> {
+    const o = await this.overview(p, range);
+    // Formula-injection guard + quoting, same as every other export here (OWASP).
+    const esc = (v: string | number | null): string => {
+      let s = String(v ?? "");
+      if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+      return `"${s.replace(/"/g, '""')}"`;
+    };
+    const rows: Array<[string, string, string | number | null]> = [];
+    rows.push(["Period", "Label", o.period?.label ?? ""]);
+    rows.push(["Period", "From", o.period?.from ?? ""]);
+    rows.push(["Period", "To", o.period?.to ?? ""]);
+    rows.push(["Scope", "Scope", o.scope]);
+
+    if (o.attendance) {
+      const a = o.attendance;
+      rows.push(["Attendance", "Present", a.PRESENT], ["Attendance", "Absent", a.ABSENT]);
+      rows.push(["Attendance", "Late", a.LATE], ["Attendance", "Excused", a.EXCUSED]);
+      rows.push(["Attendance", "Records", a.total], ["Attendance", "Rate %", a.ratePct]);
+    }
+    if (o.fees) {
+      // Minor units are the ledger's truth; a rounded major unit in a board pack is
+      // how a reconciliation goes missing.
+      rows.push(["Fees", "Invoiced (minor)", o.fees.invoicedMinor]);
+      rows.push(["Fees", "Collected (minor)", o.fees.collectedMinor]);
+      rows.push(["Fees", "Outstanding (minor)", o.fees.outstandingMinor]);
+      rows.push(["Fees", "Invoices", o.fees.invoices]);
+    }
+    if (o.grades) {
+      for (const k of ["A", "B", "C", "D", "F"] as const) rows.push(["Grades", `Band ${k}`, o.grades[k]]);
+      rows.push(["Grades", "Graded", o.grades.graded], ["Grades", "Average %", o.grades.averagePct]);
+    }
+    if (o.operations) {
+      for (const [k, v] of Object.entries(o.operations)) rows.push(["Operations", k, v as number]);
+    }
+
+    const csv = ["Section,Metric,Value", ...rows.map((r) => r.map(esc).join(","))].join("\n");
+    const stamp = o.period?.from ?? new Date().toISOString().slice(0, 10);
+    return { csv, filename: `analytics-${stamp}.csv` };
+  }
+
+  async overview(p: Principal, range?: { termId?: string; from?: string; to?: string }) {
     // Read-only aggregate — routed to the read replica (when configured) to keep
     // reporting load off the primary writer. Reference use of runAsTenantReadOnly.
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       const staff = this.isStaff(p);
       const studentIds = staff ? null : await this.scopedStudentIds(tx, p);
-      const since = new Date(Date.now() - 30 * 86_400_000);
+      const period = await this.resolvePeriod(tx, range);
+      const since = period.from;
 
-      const out: AnalyticsOverviewDto = { scope: staff ? "school" : "family" };
+      const out: AnalyticsOverviewDto = {
+        scope: staff ? "school" : "family",
+        period: {
+          from: period.from.toISOString().slice(0, 10),
+          to: period.to.toISOString().slice(0, 10),
+          label: period.label,
+          termId: period.termId,
+        },
+      };
 
-      // --- attendance (last 30 days) ---
+      // --- attendance (over the selected period) ---
       if (p.permissions.includes("attendance.read")) {
-        const where: Record<string, unknown> = { createdAt: { gte: since } };
+        // Windowed on the SESSION DATE — the day the register is FOR — not on
+        // createdAt. Correcting a register weeks later wrote a row with today's
+        // createdAt, so a back-filled absence counted against the wrong period and
+        // silently vanished from the one it belonged to.
+        const where: Record<string, unknown> = { session: { date: { gte: period.from, lte: period.to } } };
         if (!staff) {
           if (!studentIds || studentIds.length === 0) where.studentId = "__none__";
           else where.studentId = { in: studentIds };

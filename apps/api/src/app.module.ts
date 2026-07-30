@@ -31,6 +31,7 @@ import { CommunicationModule } from "./communication/communication.module";
 import { ReportCardModule } from "./reportcards/reportcard.module";
 import { HrModule } from "./hr/hr.module";
 import { AdminModule } from "./admin/admin.module";
+import { DashboardModule } from "./dashboard/dashboard.module";
 import { OperatorModule } from "./operator/operator.module";
 import { ScholarshipModule } from "./scholarship/scholarship.module";
 import { AdmissionsModule } from "./admissions/admissions.module";
@@ -97,6 +98,7 @@ import { HealthController } from "./health.controller";
     ReportCardModule,
     HrModule,
     AdminModule,
+    DashboardModule,
     OperatorModule,
     ScholarshipModule,
     AdmissionsModule,

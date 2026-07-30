@@ -141,12 +141,16 @@ export class NotificationService {
   }
 
   // --- recipient inbox (self-scoped) ----------------------------------------
-  async listMine(p: Principal, opts?: { unreadOnly?: boolean }) {
+  async listMine(p: Principal, opts?: { unreadOnly?: boolean; limit?: number }) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const where: Record<string, unknown> = { recipientId: p.userId };
       if (opts?.unreadOnly) where.readAt = null;
+      // The dashboard shows six; the inbox page shows the full hundred. Fetching a
+      // hundred rows to render six is the kind of waste that only shows up as a
+      // slow home page nobody can attribute to anything.
+      const take = Math.min(Math.max(opts?.limit ?? 100, 1), 100);
       const [items, unread] = await Promise.all([
-        tx.notification.findMany({ where, orderBy: { createdAt: "desc" }, take: 100 }),
+        tx.notification.findMany({ where, orderBy: { createdAt: "desc" }, take }),
         tx.notification.count({ where: { recipientId: p.userId, readAt: null } }),
       ]);
       return { items, unread };
