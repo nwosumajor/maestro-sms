@@ -28,6 +28,48 @@ model ExamSchedule {
   @@map("exam_schedule")
 }
 
+/// Who actually turned up to a SITTING — APPEND-ONLY.
+///
+/// Deliberately separate from the daily class register (`attendance_session` /
+/// `attendance_record`), which records whether a pupil was in SCHOOL that day. A
+/// pupil can be in school and still miss one exam, so folding exam absence into
+/// the day's register would overwrite the class teacher's mark with something it
+/// does not mean. These are two different facts about two different things.
+///
+/// Append-only (INSERT + SELECT only, per rls/97) for the same reason
+/// `integrity_signal` and `disciplinary_entry` are: an exam absence has
+/// consequences — a resit, a withheld grade, a malpractice enquiry — so the record
+/// of who marked what, and when, must not be rewritable. A correction is a NEW
+/// row; the latest row per (sitting, student) is the current answer.
+model ExamAttendance {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  sittingId String  @db.Uuid
+  /// Student (DB FK to user; scalar, keeping the User model lean).
+  studentId String  @db.Uuid
+  /// PRESENT | ABSENT. Deliberately NOT the four-value AttendanceStatus enum of the
+  /// daily register: an invigilator marking a hall knows only who is in the seat.
+  /// "Excused" and "late" are judgements made afterwards, and recording them here
+  /// would imply the invigilator made them.
+  status    String
+  /// Free note — "arrived 09:20", "sent to sick bay", "no-show".
+  note      String?
+
+  /// Staff member who marked it (DB FK to user; audit field).
+  markedById String   @db.Uuid
+  createdAt  DateTime @default(now())
+
+  school  School      @relation(fields: [schoolId], references: [id])
+  sitting ExamSitting @relation(fields: [sittingId], references: [id], onDelete: Cascade)
+
+  @@index([schoolId])
+  /// The read pattern: the latest row per student in a sitting.
+  @@index([schoolId, sittingId, studentId, createdAt])
+  @@index([schoolId, studentId])
+  @@map("exam_attendance")
+}
+
 /// A scheduled physical exam sitting in a hall.
 model ExamSitting {
   id       String @id @default(uuid()) @db.Uuid
@@ -73,6 +115,7 @@ model ExamSitting {
   class        Class?            @relation(fields: [classId], references: [id], onDelete: SetNull)
   seats        ExamSeat[]
   invigilators ExamInvigilator[]
+  attendance   ExamAttendance[]
 
   @@index([schoolId])
   // (schoolId, date) already serves the hall-clash lookup: a clash can only occur

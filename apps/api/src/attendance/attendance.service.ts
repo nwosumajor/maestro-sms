@@ -128,20 +128,33 @@ export class AttendanceService {
       return this.applyRegister(tx, p.schoolId, p.userId, classId, date, input.records, { makerChecker: false });
     });
 
-    // Best-effort, post-commit: notify each guardian (in-app + email). A failure
-    // here never fails the attendance write.
+    // Best-effort, post-commit guardian alerts. A failure here never fails the
+    // attendance write.
+    //
+    // BATCHED per distinct message. This was one transaction and queue round-trip
+    // per guardian, which is fine for the usual two or three absences but not for
+    // the days that actually matter — a strike, a flood, a bus that never arrived —
+    // when a teacher marks a whole class absent and the register write then waits on
+    // 40+ sequential notifications. Alerts are grouped by (status, student) because
+    // the body names both, so siblings' guardians still get the right message.
+    const groups = new Map<string, { status: string; studentId: string; guardianIds: string[] }>();
     for (const a of alerts) {
+      const key = `${a.status}:${a.studentId}`;
+      const g = groups.get(key) ?? { status: a.status, studentId: a.studentId, guardianIds: [] };
+      g.guardianIds.push(a.guardianId);
+      groups.set(key, g);
+    }
+    for (const g of groups.values()) {
       try {
-        await this.notifications.enqueue(this.ctx(p), {
-          recipientId: a.guardianId,
+        await this.notifications.enqueueMany(this.ctx(p), g.guardianIds, {
           type: "ATTENDANCE_ABSENCE",
           title: "Attendance alert",
-          body: `Your child was marked ${a.status} on ${input.date}.`,
-          data: { classId, date: input.date, studentId: a.studentId, status: a.status },
+          body: `Your child was marked ${g.status} on ${input.date}.`,
+          data: { classId, date: input.date, studentId: g.studentId, status: g.status },
           channels: ["EMAIL"],
         });
       } catch (err) {
-        this.logger.error(`Attendance notification failed for guardian ${a.guardianId}: ${String(err)}`);
+        this.logger.error(`Attendance notification failed for student ${g.studentId}: ${String(err)}`);
       }
     }
 
@@ -178,7 +191,11 @@ export class AttendanceService {
       await this.assertCanAccessStudent(tx, p, studentId);
       return tx.attendanceRecord.findMany({
         where: { studentId },
-        orderBy: { createdAt: "desc" },
+        // Order by the DAY THE REGISTER IS FOR, not when the row was written.
+        // Ordering by createdAt meant correcting a month-old register today put it
+        // at the TOP of the history, above this week — so a parent reading down the
+        // list saw an out-of-sequence date and no way to tell why.
+        orderBy: [{ session: { date: "desc" } }, { createdAt: "desc" }],
         include: { session: { select: { classId: true, date: true } } },
         take: 200,
       });
@@ -320,6 +337,131 @@ export class AttendanceService {
       select: { startDate: true },
     });
     return containing?.startDate ?? null;
+  }
+
+  /**
+   * Which of the caller's classes still have NO register for a date.
+   *
+   * This is the question a school actually asks every morning, and until now there
+   * was nowhere to ask it: you had to open each class in turn to discover the one
+   * that was never taken. Missing registers are the failure mode that matters —
+   * an absence nobody recorded is indistinguishable from a pupil who was present,
+   * and by the time anyone notices, the 7-day window has closed and correcting it
+   * needs a maker-checker amendment.
+   *
+   * Scoped exactly like every other read here: whole-school staff see every class,
+   * a teacher only the classes they teach.
+   */
+  async getRegisterStatus(
+    p: Principal,
+    dateStr?: string,
+  ): Promise<{ date: string; classes: { classId: string; className: string; taken: boolean; marked: number; enrolled: number }[] }> {
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      // dayUtc returns a TIMESTAMP, not a Date — wrap it so the column comparison
+      // gets a Date and the label is UTC-midnight, matching the @db.Date column.
+      const date = dateStr ? new Date(`${dateStr}T00:00:00.000Z`) : new Date(dayUtc(new Date()));
+      const iso = date.toISOString().slice(0, 10);
+
+      // The caller's classes, by the same relationship rule as the rest of the file.
+      const classes = this.isSchoolWide(p)
+        ? ((await tx.class.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } })) as Array<{ id: string; name: string }>)
+        : await (async () => {
+            const mine = (await tx.classTeacher.findMany({ where: { teacherId: p.userId }, select: { classId: true } })) as Array<{ classId: string }>;
+            const ids = [...new Set(mine.map((m) => m.classId))];
+            if (ids.length === 0) return [] as Array<{ id: string; name: string }>;
+            return (await tx.class.findMany({ where: { id: { in: ids } }, orderBy: { name: "asc" }, select: { id: true, name: true } })) as Array<{
+              id: string;
+              name: string;
+            }>;
+          })();
+      if (classes.length === 0) return { date: iso, classes: [] };
+
+      const classIds = classes.map((c) => c.id);
+      // Three BATCHED queries regardless of class count — sessions for the day, a
+      // grouped count of marks, and a grouped count of enrolments. Never per class.
+      const sessions = (await tx.attendanceSession.findMany({
+        where: { classId: { in: classIds }, date },
+        select: { id: true, classId: true },
+      })) as Array<{ id: string; classId: string }>;
+      const sessionByClass = new Map(sessions.map((s) => [s.classId, s.id]));
+      const [markCounts, enrolCounts] = await Promise.all([
+        sessions.length
+          ? (tx.attendanceRecord.groupBy({
+              by: ["sessionId"],
+              where: { sessionId: { in: sessions.map((s) => s.id) } },
+              _count: { _all: true },
+            } as never) as unknown as Promise<Array<{ sessionId: string; _count: { _all: number } }>>)
+          : Promise.resolve([] as Array<{ sessionId: string; _count: { _all: number } }>),
+        tx.enrollment.groupBy({ by: ["classId"], where: { classId: { in: classIds } }, _count: { _all: true } } as never) as unknown as Promise<
+          Array<{ classId: string; _count: { _all: number } }>
+        >,
+      ]);
+      const markBySession = new Map(markCounts.map((m) => [m.sessionId, m._count._all]));
+      const enrolByClass = new Map(enrolCounts.map((e) => [e.classId, e._count._all]));
+
+      return {
+        date: iso,
+        classes: classes.map((c) => {
+          const sessionId = sessionByClass.get(c.id);
+          return {
+            classId: c.id,
+            className: c.name,
+            taken: !!sessionId,
+            marked: sessionId ? markBySession.get(sessionId) ?? 0 : 0,
+            enrolled: enrolByClass.get(c.id) ?? 0,
+          };
+        }),
+      };
+    });
+  }
+
+  /**
+   * A student's attendance TOTALS for the current term.
+   *
+   * The history list answers "what happened on the 12th"; nobody reads 200 rows to
+   * work out whether a child is attending. This is one grouped aggregate, term-
+   * scoped the same way the report card is (the `isCurrent` term's window), so the
+   * figure a parent sees on this page matches the figure printed on the report.
+   */
+  async getStudentSummary(
+    p: Principal,
+    studentId: string,
+  ): Promise<{ from: string | null; to: string | null; present: number; absent: number; late: number; excused: number; total: number; percent: number | null }> {
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      await this.assertCanAccessStudent(tx, p, studentId);
+      const term = (await tx.term.findFirst({ where: { isCurrent: true }, select: { startDate: true, endDate: true } })) as
+        | { startDate: Date | null; endDate: Date | null }
+        | null;
+      // No configured term: fall back to ALL history rather than reporting zero,
+      // which would read as "never attended".
+      const window =
+        term?.startDate && term.endDate ? { gte: term.startDate, lte: term.endDate } : undefined;
+
+      const grouped = (await tx.attendanceRecord.groupBy({
+        by: ["status"],
+        where: { studentId, ...(window ? { session: { date: window } } : {}) },
+        _count: { _all: true },
+      } as never)) as unknown as Array<{ status: string; _count: { _all: number } }>;
+
+      const n = (s: string) => grouped.find((g) => g.status === s)?._count._all ?? 0;
+      const present = n("PRESENT");
+      const absent = n("ABSENT");
+      const late = n("LATE");
+      const excused = n("EXCUSED");
+      const total = present + absent + late + excused;
+      return {
+        from: term?.startDate ? term.startDate.toISOString().slice(0, 10) : null,
+        to: term?.endDate ? term.endDate.toISOString().slice(0, 10) : null,
+        present,
+        absent,
+        late,
+        excused,
+        total,
+        // LATE counts as attending — the pupil was in school. Reporting it as an
+        // absence would understate attendance and contradict the report card.
+        percent: total > 0 ? Math.round(((present + late + excused) / total) * 100) : null,
+      };
+    });
   }
 
   /** The lock boundary for the UI: dates before this are read-only. */

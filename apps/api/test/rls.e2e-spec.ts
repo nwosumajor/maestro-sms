@@ -64,6 +64,7 @@ d("RLS cross-tenant isolation", () => {
   const platformFeedbackMessageA = randomUUID();
   const examSeatA = randomUUID();
   const examInvigilatorA = randomUUID();
+  const examAttendanceA = randomUUID();
   const scanEventA = randomUUID();
   const teacherUnavailA = randomUUID();
   const grantA = randomUUID();
@@ -419,6 +420,12 @@ d("RLS cross-tenant isolation", () => {
     await a.query(
       `INSERT INTO exam_invigilator (id,"schoolId","sittingId","staffId") VALUES ($1,$2,$3,$4)`,
       [examInvigilatorA, A, examSittingA, userA],
+    );
+    // Exam attendance: the APPEND-ONLY per-sitting register (who actually sat the
+    // exam). Distinct from the daily class register — see rls/97.
+    await a.query(
+      `INSERT INTO exam_attendance (id,"schoolId","sittingId","studentId",status,"markedById") VALUES ($1,$2,$3,$4,'PRESENT',$4)`,
+      [examAttendanceA, A, examSittingA, userA],
     );
     // Scan event (append-only movement log).
     await a.query(
@@ -1213,6 +1220,7 @@ d("RLS cross-tenant isolation", () => {
       "privilege_grant",
       "teacher_unavailability",
       "scan_event",
+      "exam_attendance",
       "exam_invigilator",
       "exam_seat",
       "exam_sitting",
@@ -1328,6 +1336,7 @@ d("RLS cross-tenant isolation", () => {
     ["platform_feedback", platformFeedbackA],
     ["platform_feedback_message", platformFeedbackMessageA],
     ["exam_sitting", examSittingA],
+    ["exam_attendance", examAttendanceA],
     ["exam_seat", examSeatA],
     ["exam_invigilator", examInvigilatorA],
     ["scan_event", scanEventA],
@@ -1664,6 +1673,29 @@ d("RLS cross-tenant isolation", () => {
       await expect(
         c.query(`UPDATE integrity_signal SET severity='HIGH' WHERE "schoolId" = $1`, [A]),
       ).rejects.toThrow();
+    });
+  });
+
+  it("exam_attendance is append-only: INSERT allowed, UPDATE and DELETE denied", async () => {
+    // An exam absence has consequences — a resit, a withheld grade, a malpractice
+    // enquiry — so a mark must not be quietly rewritable. A correction is a NEW row
+    // and the latest one wins, which keeps the fact that it changed, and who changed
+    // it, in the record. DELETE is checked too: erasing the row would hide the
+    // correction entirely, which UPDATE-only protection would still allow.
+    await asApp(A, async (c) => {
+      await c.query(
+        `INSERT INTO exam_attendance (id,"schoolId","sittingId","studentId",status,"markedById")
+         VALUES (gen_random_uuid(),$1,$2,$3,'ABSENT',$3)`,
+        [A, examSittingA, userA],
+      );
+    });
+    await asApp(A, async (c) => {
+      await expect(
+        c.query(`UPDATE exam_attendance SET status='PRESENT' WHERE "schoolId" = $1`, [A]),
+      ).rejects.toThrow();
+    });
+    await asApp(A, async (c) => {
+      await expect(c.query(`DELETE FROM exam_attendance WHERE "schoolId" = $1`, [A])).rejects.toThrow();
     });
   });
 

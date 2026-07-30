@@ -300,6 +300,9 @@ model School {
   vehicleLocations         VehicleLocation[]
   vehicleMaintenances      VehicleMaintenance[]
   xapiStatements           XapiStatement[]
+  // Exam attendance — the APPEND-ONLY per-sitting register. Distinct from the
+  // daily class register above: this is who sat an exam, not who was in school.
+  examAttendance           ExamAttendance[]
 
   @@map("school")
 }

@@ -11,7 +11,9 @@ export const dynamic = "force-dynamic";
 export default async function ExamsPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ schedule?: string }>;
+  // Next 14: searchParams is a plain object, not a Promise (every other page in
+  // this app takes it this way).
+  searchParams?: { schedule?: string };
 }) {
   const session = await auth();
   const user = session!.user;
@@ -20,8 +22,7 @@ export default async function ExamsPage({
 
   // Narrowing by schedule happens in the QUERY, not the browser: a school with a
   // term of subjects x class levels shouldn't ship every sitting to render one.
-  const sp = (await searchParams) ?? {};
-  const scheduleQuery = sp.schedule ? `?scheduleId=${encodeURIComponent(sp.schedule)}` : "";
+  const scheduleQuery = searchParams?.schedule ? `?scheduleId=${encodeURIComponent(searchParams.schedule)}` : "";
 
   const [sittings, myExams, myInvigilations, classes, staff, rooms, schedules, draftExams] = await Promise.all([
     canManage ? apiGet<Serialized<ExamSittingDto>[]>(`/exams${scheduleQuery}`) : Promise.resolve([]),
