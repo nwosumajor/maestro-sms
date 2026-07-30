@@ -65,6 +65,20 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql://major_user:${APP_DB_PASSWORD}@postgres:5432/${POSTGRES_DB}}
       # Migrations + RLS grants run as the superuser.
       DATABASE_MIGRATE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      # PRIVILEGED background jobs — the NDPR integrity purge, billing dunning, HR
+      # document reminders, the SIS profile nudge, operator/cross-tenant reads. They
+      # legitimately span tenants, so they cannot use the RLS-scoped app role.
+      #
+      # Set EXPLICITLY rather than relying on the fall-back to DATABASE_MIGRATE_URL:
+      # a silent fall-back means a missing value looks identical to a working one,
+      # and the jobs that depend on it fail CLOSED (they no-op), so the symptom is
+      # "reminders stopped arriving" with nothing in the logs to point at.
+      #
+      # Overridable so a deployment can hand these jobs a NARROWER role than the
+      # migration superuser (they need SELECT/UPDATE/DELETE on telemetry and
+      # subscription tables, never DDL). Defaults to the superuser here because the
+      # local stack has no second role provisioned.
+      DATABASE_RETENTION_URL: ${DATABASE_RETENTION_URL:-postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}}
       SEED_ON_START: ${SEED_ON_START:-false}
       # Demo school + @demo.school logins. FAIL-CLOSED: never set this in cloud.
       SEED_DEMO_DATA: ${SEED_DEMO_DATA:-false}

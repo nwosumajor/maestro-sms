@@ -95,7 +95,10 @@ d("LmsContentService integration (authoring, approval, quiz, forum, RLS)", () =>
   });
 
   afterAll(async () => {
-    for (const t of ["forum_post", "quiz_attempt", "lms_content", "workflow_audit_log", "workflow_request"]) {
+    // lms_content_revision and xapi_statement have NO foreign key to school, so
+    // deleting the school below leaves them behind as unreachable orphans. Clear
+    // them explicitly — children before lms_content (revision references it).
+    for (const t of ["lms_content_revision", "xapi_statement", "forum_post", "quiz_attempt", "lms_content", "workflow_audit_log", "workflow_request"]) {
       await admin.query(`DELETE FROM ${t} WHERE "schoolId" = ANY($1)`, [[SA, SB]]);
     }
     for (const t of ["enrollment", "class_teacher", "class", "audit_log"]) {
