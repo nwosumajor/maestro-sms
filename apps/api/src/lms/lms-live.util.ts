@@ -1,42 +1,21 @@
 // =============================================================================
-// LMS live-classroom helpers (pure)
+// LMS live-classroom helpers
 // =============================================================================
-// A live session carries an external meeting URL. We validate it to https and,
-// for known providers, host-allowlist it — the same defensive posture as the
-// video-embed canonicaliser. `isJoinable` derives whether the join window is
-// currently open, so the server (not the client) decides when a link is live.
+// The URL rules now live in ONE place — `@sms/types/meeting-link` — shared with
+// parent-teacher meeting slots and calendar (staff) meetings, so a link accepted
+// on one surface is accepted identically on the others. This module keeps the
+// LMS-specific bits: its own status states and its duration-based window.
 // =============================================================================
 
+import { normalizeMeetingUrl, MEETING_JOIN_EARLY_MS, MEETING_JOIN_GRACE_MS } from "@sms/types";
 import type { LiveProvider } from "@sms/types";
 
-const PROVIDER_HOSTS: Record<Exclude<LiveProvider, "OTHER">, (host: string) => boolean> = {
-  ZOOM: (h) => h === "zoom.us" || h.endsWith(".zoom.us"),
-  MEET: (h) => h === "meet.google.com",
-  JITSI: (h) => h === "meet.jit.si" || h.endsWith(".jitsi.net") || h.endsWith(".8x8.vc"),
-};
-
-/** Validate + return a normalised https join URL, or null. Known providers are
- *  host-allowlisted; OTHER accepts any https URL (rendered as a link, never an
- *  iframe). Rejects non-https (blocks javascript:/data: and downgrade). */
+/** Validate + return a normalised https join URL, or null. Delegates to the
+ *  shared validator (https-only + per-provider host allowlist). */
 export function normalizeJoinUrl(provider: LiveProvider, raw: string): string | null {
-  if (typeof raw !== "string" || !raw.trim()) return null;
-  let u: URL;
-  try {
-    u = new URL(raw.trim());
-  } catch {
-    return null;
-  }
-  if (u.protocol !== "https:") return null;
-  const host = u.hostname.toLowerCase();
-  if (provider !== "OTHER") {
-    const ok = PROVIDER_HOSTS[provider];
-    if (!ok || !ok(host)) return null;
-  }
-  return u.toString();
+  // LiveProvider is a subset of MeetingProvider, so this is a safe widening.
+  return normalizeMeetingUrl(provider, raw);
 }
-
-const JOIN_EARLY_MS = 15 * 60 * 1000; // openable 15 min before start
-const JOIN_GRACE_MS = 30 * 60 * 1000; // and until 30 min after the scheduled end
 
 /** Is the session's join window open right now? ENDED/CANCELLED are never
  *  joinable; otherwise the window is [start-15m, start+duration+30m]. */
@@ -50,5 +29,5 @@ export function isJoinable(
   const start = startsAt.getTime();
   const end = start + Math.max(0, durationMinutes) * 60 * 1000;
   const t = now.getTime();
-  return t >= start - JOIN_EARLY_MS && t <= end + JOIN_GRACE_MS;
+  return t >= start - MEETING_JOIN_EARLY_MS && t <= end + MEETING_JOIN_GRACE_MS;
 }

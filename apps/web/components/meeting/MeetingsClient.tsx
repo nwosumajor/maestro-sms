@@ -3,6 +3,8 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import type { MeetingSlotDto, MeetingBookingDto, Serialized } from "@sms/types";
+import { MEETING_PROVIDERS, MEETING_PROVIDER_LABELS } from "@sms/types";
+import { JoinMeetingLink } from "@/components/meeting/JoinMeetingLink";
 import { sendSms, postSms } from "@/components/game/play-ui";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -32,7 +34,7 @@ export function MeetingsClient({
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
-  const [form, setForm] = React.useState({ date: "", start: "09:00", end: "09:30", location: "", note: "" });
+  const [form, setForm] = React.useState({ date: "", start: "09:00", end: "09:30", location: "", note: "", provider: "", joinUrl: "" });
   const [childBy, setChildBy] = React.useState<Record<string, string>>({});
 
   const run = async (fn: () => Promise<{ ok: boolean; error?: string | null }>, ok: string) => {
@@ -51,7 +53,14 @@ export function MeetingsClient({
     const startsAt = new Date(`${form.date}T${form.start}:00`).toISOString();
     const endsAt = new Date(`${form.date}T${form.end}:00`).toISOString();
     return run(
-      () => postSms("meetings/slots", { startsAt, endsAt, location: form.location || undefined, note: form.note || undefined }),
+      () => postSms("meetings/slots", {
+        startsAt, endsAt,
+        location: form.location || undefined,
+        note: form.note || undefined,
+        // A video meeting needs BOTH; the server re-validates the URL.
+        provider: form.provider || undefined,
+        joinUrl: form.provider ? form.joinUrl : undefined,
+      }),
       "Slot opened.",
     );
   };
@@ -71,6 +80,16 @@ export function MeetingsClient({
               <span className="text-sm text-muted-foreground">to</span>
               <input type="time" className="rounded-md border bg-background p-1.5 text-sm" value={form.end} onChange={(e) => setForm({ ...form, end: e.target.value })} />
               <input placeholder="Location (optional)" className="w-40 rounded-md border bg-background p-1.5 text-sm" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} />
+            {/* Optional video meeting: paste a link from Zoom/Meet/Teams/Jitsi.
+                The server validates the host, and only releases the link to
+                parents inside the join window. */}
+            <select aria-label="Video platform" className="rounded-md border bg-background p-1.5 text-sm" value={form.provider} onChange={(e) => setForm({ ...form, provider: e.target.value })}>
+              <option value="">In person</option>
+              {MEETING_PROVIDERS.map((mp) => <option key={mp} value={mp}>{MEETING_PROVIDER_LABELS[mp]}</option>)}
+            </select>
+            {form.provider && (
+              <input placeholder="https://… join link" className="w-56 rounded-md border bg-background p-1.5 text-sm" value={form.joinUrl} onChange={(e) => setForm({ ...form, joinUrl: e.target.value })} required />
+            )}
               <Button size="sm" disabled={busy || !form.date} onClick={createSlot}>Open slot</Button>
             </div>
           </CardContent>
@@ -86,7 +105,9 @@ export function MeetingsClient({
                 {mySlots.map((s) => (
                   <tr key={s.id} className="border-b border-border last:border-0">
                     <td className="px-4 py-2">{dateTime(s.startsAt)}</td>
-                    <td className="px-4 py-2 text-muted-foreground">{s.location ?? "—"}</td>
+                    <td className="px-4 py-2 text-muted-foreground">
+                      <JoinMeetingLink provider={s.provider} joinUrl={s.joinUrl} joinOpen={s.joinOpen} joinOpensAt={s.joinOpensAt} location={s.location} />
+                    </td>
                     <td className="px-4 py-2 text-right">
                       {s.booked > 0 ? (
                         <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs text-emerald-600 dark:text-emerald-400">{s.booked}/{s.capacity} booked</span>
@@ -119,7 +140,10 @@ export function MeetingsClient({
                   {openSlots.map((s) => (
                     <tr key={s.id} className="border-b border-border last:border-0">
                       <td className="px-4 py-2">{dateTime(s.startsAt)}</td>
-                      <td className="px-4 py-2 text-muted-foreground">{s.teacherName ?? "Teacher"}{s.location ? ` · ${s.location}` : ""}</td>
+                      <td className="px-4 py-2 text-muted-foreground">
+                        {s.teacherName ?? "Teacher"}{" · "}
+                        <JoinMeetingLink provider={s.provider} joinUrl={s.joinUrl} joinOpen={s.joinOpen} joinOpensAt={s.joinOpensAt} location={s.location} />
+                      </td>
                       <td className="px-4 py-2 text-right">
                         <span className="inline-flex items-center gap-1.5">
                           <select className="rounded-md border bg-background p-1 text-xs" value={childBy[s.id] ?? children[0]?.studentId ?? ""} onChange={(e) => setChildBy({ ...childBy, [s.id]: e.target.value })}>

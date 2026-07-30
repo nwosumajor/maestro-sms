@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Post, Query } from "@nestjs/common";
 import { z } from "zod";
 import { MEETING_PERMISSIONS } from "@sms/types";
+import { MEETING_PROVIDERS } from "@sms/types";
 import type { MeetingSlotDto, MeetingBookingDto } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -15,6 +16,10 @@ const slotSchema = z.object({
   capacity: z.number().int().min(1).max(30).optional(),
   location: z.string().max(200).optional(),
   note: z.string().max(500).optional(),
+  // Optional VIDEO meeting. The URL is re-validated server-side (https +
+  // per-provider host allowlist) — this only shapes the request.
+  provider: z.enum(MEETING_PROVIDERS).nullish(),
+  joinUrl: z.string().max(1000).nullish(),
 });
 const bookSchema = z.object({
   slotId: z.string().uuid(),

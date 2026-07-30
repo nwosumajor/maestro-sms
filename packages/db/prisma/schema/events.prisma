@@ -37,6 +37,12 @@ model SchoolEvent {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  /// Optional VIDEO meeting. `provider` names the platform and `joinUrl` is
+  /// server-validated (https + per-provider host allowlist, see @sms/types
+  /// meeting-link) so a "Teams" link can never point elsewhere. The link is
+  /// only released to attendees inside the server-computed join window.
+  provider String?
+  joinUrl  String?
   school School @relation(fields: [schoolId], references: [id])
 
   @@index([schoolId])
