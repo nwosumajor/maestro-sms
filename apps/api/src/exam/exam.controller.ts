@@ -1,7 +1,8 @@
-import { Body, Controller, Delete, Get, Param, Post } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res } from "@nestjs/common";
+import type { Response } from "express";
 import { z } from "zod";
 import { EXAM_PERMISSIONS } from "@sms/types";
-import type { ExamScheduleDto, ExamSittingDto, ExamSeatDto, InvigilationDto, MyExamDto } from "@sms/types";
+import type { ExamDayDto, ExamScheduleDto, ExamSittingDto, ExamSeatDto, InvigilationDto, MyExamDto } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
@@ -9,18 +10,43 @@ import type { Principal } from "../integrity/integrity.foundation";
 import { ExamService } from "./exam.service";
 
 const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
-const sittingSchema = z.object({
-  title: z.string().min(1).max(200),
-  subject: z.string().max(120).optional(),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  startsAt: hhmm,
-  endsAt: hhmm,
-  hall: z.string().min(1).max(120),
-  capacity: z.number().int().min(0).max(2000).optional(),
-  note: z.string().max(500).optional(),
-  scheduleId: z.string().uuid().nullish(),
-  cbtExamId: z.string().uuid().nullish(),
-});
+const ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const sittingSchema = z
+  .object({
+    title: z.string().min(1).max(200),
+    subject: z.string().max(120).optional(),
+    date: ymd,
+    startsAt: hhmm,
+    endsAt: hhmm,
+    // Either pick a room from the registry (preferred — it carries the capacity)
+    // or type a hall for an ad-hoc venue. The service enforces that one is present.
+    hall: z.string().min(1).max(120).optional(),
+    roomId: z.string().uuid().nullish(),
+    capacity: z.number().int().min(0).max(2000).optional(),
+    note: z.string().max(500).optional(),
+    classId: z.string().uuid().nullish(),
+    scheduleId: z.string().uuid().nullish(),
+    cbtExamId: z.string().uuid().nullish(),
+  })
+  .refine((v) => !!v.roomId || !!v.hall?.trim(), { message: "Pick a room or type a hall name" });
+
+/** Every field optional — a PATCH edits only what it names, so a partial body must
+ *  not be read as "clear the rest". `.strict()` makes a typo'd key a 400 rather
+ *  than a silently ignored no-op edit. */
+const sittingPatchSchema = z
+  .object({
+    title: z.string().min(1).max(200).optional(),
+    subject: z.string().max(120).nullish(),
+    date: ymd.optional(),
+    startsAt: hhmm.optional(),
+    endsAt: hhmm.optional(),
+    hall: z.string().min(1).max(120).optional(),
+    roomId: z.string().uuid().nullish(),
+    capacity: z.number().int().min(0).max(2000).optional(),
+    note: z.string().max(500).nullish(),
+    classId: z.string().uuid().nullish(),
+  })
+  .strict();
 const scheduleSchema = z.object({ title: z.string().min(1).max(200), termId: z.string().uuid().nullish() });
 const seatSchema = z.object({ studentIds: z.array(z.string().uuid()).max(2000).optional(), classId: z.string().uuid().optional() });
 const invigSchema = z.object({ staffId: z.string().uuid(), lead: z.boolean().optional() });
@@ -44,10 +70,26 @@ export class ExamController {
   }
 
   // --- staff management ---
+  /** Sittings, narrowed server-side (schedule / single day / range / hall / text). */
   @Get()
   @RequirePermission(EXAM_PERMISSIONS.EXAM_MANAGE)
-  list(@CurrentPrincipal() p: Principal): Promise<ExamSittingDto[]> {
-    return this.exams.listSittings(p);
+  list(
+    @CurrentPrincipal() p: Principal,
+    @Query("scheduleId") scheduleId?: string,
+    @Query("date") date?: string,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+    @Query("hall") hall?: string,
+    @Query("q") q?: string,
+  ): Promise<ExamSittingDto[]> {
+    return this.exams.listSittings(p, { scheduleId, date, from, to, hall, q });
+  }
+
+  /** The exam-day board: one date, grouped by hall, warnings precomputed. */
+  @Get("day")
+  @RequirePermission(EXAM_PERMISSIONS.EXAM_MANAGE)
+  day(@CurrentPrincipal() p: Principal, @Query("date") date?: string): Promise<ExamDayDto> {
+    return this.exams.examDay(p, ymd.parse(date ?? new Date().toISOString().slice(0, 10)));
   }
 
   @Post()
@@ -57,6 +99,19 @@ export class ExamController {
     @Body(new ZodValidationPipe(sittingSchema)) body: z.infer<typeof sittingSchema>,
   ): Promise<ExamSittingDto> {
     return this.exams.createSitting(p, body);
+  }
+
+  /** Edit a sitting IN PLACE — seats and the invigilator roster are preserved.
+   *  Declared before the `:id/...` routes below purely for readability; Nest
+   *  matches on method + path, so PATCH has no collision with them. */
+  @Patch(":id")
+  @RequirePermission(EXAM_PERMISSIONS.EXAM_MANAGE)
+  update(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(sittingPatchSchema)) body: z.infer<typeof sittingPatchSchema>,
+  ): Promise<ExamSittingDto> {
+    return this.exams.updateSitting(p, id, body);
   }
 
   // --- schedules (maker-checker) + day-of release ---
@@ -82,6 +137,14 @@ export class ExamController {
     return this.exams.requestScheduleApproval(p, id);
   }
 
+  /** Seat every unseated sitting in the schedule from its class roster, on demand.
+   *  Idempotent — already-seated sittings are skipped, never renumbered. */
+  @Post("schedules/:id/seat")
+  @RequirePermission(EXAM_PERMISSIONS.EXAM_MANAGE)
+  seatSchedule(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<{ seated: number; skipped: number }> {
+    return this.exams.seatSchedule(p, id);
+  }
+
   /** Day-of RELEASE (open) an approved CBT-backed sitting — exam.release only. */
   @Post(":id/release")
   @RequirePermission(EXAM_PERMISSIONS.EXAM_RELEASE)
@@ -99,6 +162,17 @@ export class ExamController {
   @RequirePermission(EXAM_PERMISSIONS.EXAM_MANAGE)
   seats(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<ExamSeatDto[]> {
     return this.exams.getSeatPlan(p, id);
+  }
+
+  /** The printable hall pack: seating chart + signature column + absentee tally.
+   *  Audited — it lists the names of minors sitting a specific exam. */
+  @Get(":id/attendance.pdf")
+  @RequirePermission(EXAM_PERMISSIONS.EXAM_MANAGE)
+  async attendanceSheet(@CurrentPrincipal() p: Principal, @Param("id") id: string, @Res() res: Response) {
+    const { buffer, filename } = await this.exams.attendanceSheetPdf(p, id);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(buffer);
   }
 
   /** Seat a list of students, or auto-seat a whole class. */

@@ -7,8 +7,13 @@ export interface ExamSittingDto {
   startsAt: string;
   endsAt: string;
   hall: string;
+  /** Set when the hall was picked from the room registry rather than typed. */
+  roomId: string | null;
   capacity: number;
   note: string | null;
+  /** The class sitting this exam — the roster a paper sitting auto-seats from. */
+  classId: string | null;
+  className: string | null;
   seated: number;
   invigilators: number;
   /** Grouping into an approvable schedule (null for a standalone sitting). */
@@ -50,6 +55,41 @@ export interface InvigilationDto {
   staffId: string;
   staffName: string;
   lead: boolean;
+}
+
+/**
+ * One hall's state on exam day. Built for the question an exam officer actually
+ * asks while walking the halls — "is this room started, and is anyone watching
+ * it?" — so the warnings are part of the payload rather than something the
+ * browser has to infer.
+ */
+export interface ExamDayHallDto {
+  sittingId: string;
+  hall: string;
+  title: string;
+  subject: string | null;
+  startsAt: string;
+  endsAt: string;
+  seated: number;
+  capacity: number;
+  invigilators: number;
+  /** Null for a paper sitting; otherwise the backing exam's status. */
+  cbtStatus: string | null;
+  released: boolean;
+  started: number;
+  submitted: number;
+  /** Rostered nobody — the one omission that cannot be fixed after the exam. */
+  noInvigilator: boolean;
+  /** Seated nobody, so no student can sit it. */
+  noSeats: boolean;
+  /** Over capacity, or a hall/time clash with another sitting the same day. */
+  warning: string | null;
+}
+
+/** The exam-day board: every sitting on one date, grouped by hall. */
+export interface ExamDayDto {
+  date: string;
+  halls: ExamDayHallDto[];
 }
 
 /** A student's (or invigilator's) view of an upcoming exam. */

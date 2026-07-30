@@ -199,8 +199,11 @@ export class CbtController {
   /** Staff: every exam, all statuses. */
   @Get("exams/all")
   @RequirePermission(CBT_PERMISSIONS.CBT_MANAGE)
-  listAllExams(@CurrentPrincipal() p: Principal): Promise<CbtExamDto[]> {
-    return this.cbt.listExams(p, true);
+  listAllExams(@CurrentPrincipal() p: Principal, @Query("status") status?: string): Promise<CbtExamDto[]> {
+    // Optional status narrows server-side (the exams page asks for DRAFT only).
+    // Unknown values simply match nothing rather than 400 — this is a filter, not
+    // a command, and an empty list is the honest answer.
+    return this.cbt.listExams(p, true, status?.trim() || undefined);
   }
 
   /** Students: published exams they can sit (class-scoped, window-live). */
