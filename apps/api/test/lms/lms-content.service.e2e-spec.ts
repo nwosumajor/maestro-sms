@@ -43,6 +43,10 @@ d("LmsContentService integration (authoring, approval, quiz, forum, RLS)", () =>
 
   const teacher = (): Principal => ({ userId: T, schoolId: SA, roles: ["teacher"], permissions: [] });
   const principal = (): Principal => ({ userId: PR, schoolId: SA, roles: ["principal"], permissions: [] });
+  // A REAL principal: the guard populates permissions from roles, so a live approver
+  // holds lms.content.approve. The fixture above deliberately does not, which is why
+  // the read gap went unnoticed.
+  const approver = (): Principal => ({ userId: PR, schoolId: SA, roles: ["principal"], permissions: ["lms.content.approve"] });
   const student = (u: string, s = SA): Principal => ({ userId: u, schoolId: s, roles: ["student"], permissions: [] });
 
   const QUIZ_BODY = {
@@ -227,6 +231,58 @@ d("LmsContentService integration (authoring, approval, quiz, forum, RLS)", () =>
       // S2 is deliberately not enrolled — this must be an empty list, not an error
       // and not another class's work.
       expect(await svc.myLearning(student(S2))).toEqual({ outstanding: 0, items: [] });
+    });
+  });
+
+  // ===========================================================================
+  // The content APPROVER can read what they are approving — but still not author
+  // ===========================================================================
+  describe("approver visibility", () => {
+    it("lists a class's content without teaching it (previously 404)", async () => {
+      // A principal is deliberately NOT school-wide for content authoring, and
+      // canAuthor gated the READ too — so the approver could approve from the
+      // /workflows inbox without ever being able to open the item and read it.
+      const seen = await svc.listContent(approver(), CLS);
+      expect(seen.length).toBeGreaterThan(0);
+      // Everything, not just published — you cannot review a draft you cannot see.
+      const asTeacher = await svc.listContent(teacher(), CLS);
+      expect(seen.length).toBe(asTeacher.length);
+    });
+
+    it("opens a DRAFT item, answer key included, so a quiz can actually be reviewed", async () => {
+      const draft = await svc.createContent(teacher(), {
+        classId: CLS,
+        type: "QUIZ",
+        title: "Approver Sees This",
+        body: QUIZ_BODY,
+      });
+      expect(draft.status).toBe("DRAFT");
+
+      const asApprover = await svc.getContent(approver(), draft.id);
+      expect(asApprover.title).toBe("Approver Sees This");
+      // The answer key must NOT be stripped: approving a quiz you cannot read the
+      // answers of is not a review.
+      const body = asApprover.body as { quiz: { questions: { answer: string }[] } };
+      expect(body.quiz.questions.some((q) => q.answer !== "")).toBe(true);
+    });
+
+    it("still CANNOT author — visibility widened, write access did not", async () => {
+      // The whole point of separating the two: every write path still goes through
+      // assertTeacherOfClass -> canAuthor, which this change did not touch.
+      await expect(
+        svc.createContent(approver(), {
+          classId: CLS,
+          type: "LESSON",
+          title: "Should Be Refused",
+          body: { kind: "LESSON", blocks: [{ type: "paragraph", text: "no" }] },
+        }),
+      ).rejects.toThrow(/not found/i);
+    });
+
+    it("a plain teacher of ANOTHER class still sees nothing (no general widening)", async () => {
+      // The gate is the approval PERMISSION, not "any staff".
+      const outsider: Principal = { userId: S2, schoolId: SA, roles: ["teacher"], permissions: [] };
+      await expect(svc.listContent(outsider, CLS)).rejects.toThrow(/not found/i);
     });
   });
 });

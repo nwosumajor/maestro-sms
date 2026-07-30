@@ -173,4 +173,58 @@ describe("HostelService", () => {
     // ...but a structural act (wide()-only) is refused at the service.
     await expect(svc(tx).deleteHostel(ja, "h1")).rejects.toThrow(/administrator/i);
   });
+
+  // ===========================================================================
+  // Allocation listing: bounded, and searchable by student name
+  // ===========================================================================
+  describe("listAllocations", () => {
+    const mk = (tx: Record<string, unknown>) => {
+      const db = { runAsTenant: <T>(_c: unknown, fn: (t: unknown) => Promise<T>) => fn(tx) };
+      return new HostelService(
+        db as never,
+        { record: jest.fn() } as never,
+        {} as never, // workflow (unused on this path)
+        { onFinalized: jest.fn() } as never, // hooks — the ctor registers a reactor
+        { enqueue: jest.fn() } as never,
+      );
+    };
+    const wide: Principal = { schoolId: "A", userId: "adm", roles: ["school_admin"], permissions: ["hostel.read", "hostel.manage"] };
+
+    it("bounds the query instead of shipping every occupied bed", async () => {
+      const allocFindMany = jest.fn().mockResolvedValue([]);
+      await mk({
+        hostelRoom: { findMany: jest.fn().mockResolvedValue([{ id: "r1" }]) },
+        hostelAllocation: { findMany: allocFindMany },
+      }).listAllocations(wide);
+      const arg = allocFindMany.mock.calls[0][0] as { take?: number };
+      expect(typeof arg.take).toBe("number");
+      expect(arg.take).toBeGreaterThan(0);
+    });
+
+    it("resolves a name search to student ids first (studentId has no Prisma relation)", async () => {
+      const userFindMany = jest.fn().mockResolvedValue([{ id: "stu-1" }]);
+      const allocFindMany = jest.fn().mockResolvedValue([]);
+      await mk({
+        hostelRoom: { findMany: jest.fn().mockResolvedValue([{ id: "r1" }]) },
+        hostelAllocation: { findMany: allocFindMany },
+        user: { findMany: userFindMany },
+      }).listAllocations(wide, undefined, "ada");
+      expect(userFindMany).toHaveBeenCalled();
+      const where = (allocFindMany.mock.calls[0][0] as { where: { studentId?: { in: string[] } } }).where;
+      expect(where.studentId).toEqual({ in: ["stu-1"] });
+    });
+
+    it("returns nothing when the name matches nobody — not everybody", async () => {
+      // The failure mode worth guarding: an unmatched filter that silently falls
+      // back to the full list reads as "search is broken" or, worse, goes unnoticed.
+      const allocFindMany = jest.fn();
+      const out = await mk({
+        hostelRoom: { findMany: jest.fn().mockResolvedValue([{ id: "r1" }]) },
+        hostelAllocation: { findMany: allocFindMany },
+        user: { findMany: jest.fn().mockResolvedValue([]) },
+      }).listAllocations(wide, undefined, "nobody");
+      expect(out).toEqual([]);
+      expect(allocFindMany).not.toHaveBeenCalled();
+    });
+  });
 });

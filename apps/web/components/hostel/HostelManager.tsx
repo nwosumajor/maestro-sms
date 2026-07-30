@@ -39,6 +39,16 @@ export function HostelManager({
   const router = useRouter();
   const [msg, setMsg] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
+  const [allocQ, setAllocQ] = React.useState("");
+  // Matches the student OR the room, because "who is in B-04?" is asked as often as
+  // "where does Adaeze sleep?".
+  const shownAllocations = React.useMemo(() => {
+    const n = allocQ.trim().toLowerCase();
+    if (!n) return allocations;
+    return allocations.filter((a) =>
+      `${a.studentName} ${a.hostelName} ${a.roomNumber}`.toLowerCase().includes(n),
+    );
+  }, [allocations, allocQ]);
 
   // new hostel
   const [hName, setHName] = React.useState("");
@@ -245,7 +255,20 @@ export function HostelManager({
 
       {allocations.length > 0 && (
         <Card>
-          <CardHeader><CardTitle className="text-base">Current allocations</CardTitle></CardHeader>
+          <CardHeader>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <CardTitle className="text-base">Current allocations</CardTitle>
+              {/* Local narrowing of the list already on the page. The API also takes
+                  ?q= for the same search, which is what the page uses when a school
+                  has more beds than one response should carry. */}
+              <input
+                placeholder="Find a student…"
+                className="w-48 rounded-md border bg-background p-1.5 text-sm"
+                value={allocQ}
+                onChange={(e) => setAllocQ(e.target.value)}
+              />
+            </div>
+          </CardHeader>
           <CardContent>
             <table className="w-full text-sm">
               <thead><tr className="border-b border-border text-left text-xs text-muted-foreground">
@@ -254,7 +277,7 @@ export function HostelManager({
                 {canManage && <th className="py-1 font-medium"></th>}
               </tr></thead>
               <tbody>
-                {allocations.map((a) => (
+                {shownAllocations.map((a) => (
                   <tr key={a.id} className="border-b border-border/50">
                     <td className="py-1 pr-3">{a.studentName}</td><td className="py-1 pr-3">{a.hostelName}</td>
                     <td className="py-1 pr-3">{a.roomNumber}</td><td className="py-1 pr-3">{money(a.rentMinor)}</td>
@@ -263,6 +286,9 @@ export function HostelManager({
                 ))}
               </tbody>
             </table>
+            {shownAllocations.length === 0 && (
+              <p className="py-3 text-sm text-muted-foreground">No allocation matches &ldquo;{allocQ}&rdquo;.</p>
+            )}
           </CardContent>
         </Card>
       )}

@@ -48,6 +48,10 @@ function genderAdmits(hostelType: string, studentGender: string | null): boolean
   return true; // unknown hostel type → don't block
 }
 
+/** Ceiling on one allocation listing. Past any single school's bed count, so it is
+ *  a backstop rather than a page size — narrow with hostelId or the name search. */
+const ALLOCATION_PAGE_MAX = 1000;
+
 @Injectable()
 export class HostelService {
   private readonly logger = new Logger("Hostel");
@@ -347,7 +351,20 @@ export class HostelService {
     });
   }
 
-  async listAllocations(p: Principal, hostelId?: string): Promise<HostelAllocationDto[]> {
+  /**
+   * Current bed allocations, optionally narrowed to one hostel or one student.
+   *
+   * ACTIVE allocations are bounded by BED COUNT rather than by history, so this was
+   * never unbounded in the runaway sense — but a large boarding school asking for
+   * every hostel at once still shipped every occupied bed to render a list nobody
+   * scrolls. `q` is the lookup that page is actually used for: find where this
+   * pupil sleeps.
+   */
+  async listAllocations(
+    p: Principal,
+    hostelId?: string,
+    q?: string,
+  ): Promise<HostelAllocationDto[]> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       if (hostelId) await this.assertHostelInScope(tx, p, hostelId);
       // A warden sees allocations only within their own hostels.
@@ -357,8 +374,28 @@ export class HostelService {
           ? {}
           : { hostel: { wardenId: p.userId } };
       const rooms = await tx.hostelRoom.findMany({ where: roomWhere, select: { id: true } });
-      const where = { roomId: { in: rooms.map((r: { id: string }) => r.id) }, status: "ACTIVE" };
-      const allocs = await tx.hostelAllocation.findMany({ where, orderBy: { allocatedAt: "desc" } });
+      const where: Record<string, unknown> = {
+        roomId: { in: rooms.map((r: { id: string }) => r.id) },
+        status: "ACTIVE",
+      };
+      // Resolve the name search to student ids FIRST: studentId is a scalar FK with
+      // no Prisma relation (the documented pattern that keeps the User model lean),
+      // so it cannot be filtered through a join.
+      const needle = q?.trim();
+      if (needle) {
+        const matches = (await tx.user.findMany({
+          where: { name: { contains: needle, mode: "insensitive" } },
+          select: { id: true },
+          take: ALLOCATION_PAGE_MAX,
+        })) as Array<{ id: string }>;
+        if (matches.length === 0) return [];
+        where.studentId = { in: matches.map((m) => m.id) };
+      }
+      const allocs = await tx.hostelAllocation.findMany({
+        where,
+        orderBy: { allocatedAt: "desc" },
+        take: ALLOCATION_PAGE_MAX,
+      });
       if (allocs.length === 0) return [];
       // Batch room/hostel/student lookups (was 4 queries per allocation via
       // allocationDto — hundreds for a full dorm).

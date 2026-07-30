@@ -24,6 +24,10 @@ import {
 type Json = Record<string, string>;
 
 // Library policy (sensible defaults; could become per-school settings later).
+/** Ceiling on a catalogue CSV. Well past any school library, but a CSV must still
+ *  fit in memory and in one response — and when it bites, the file says so. */
+const CATALOGUE_EXPORT_MAX = 20_000;
+
 const LOAN_DAYS = 14;
 const RENEW_DAYS = 7;
 const MAX_RENEWALS = 2;
@@ -261,28 +265,66 @@ export class LibraryService {
       const issuedRange: Record<string, Date> = {};
       if (opts.from) issuedRange.gte = new Date(opts.from);
       if (opts.to) issuedRange.lte = new Date(opts.to);
-      const loanWhere = Object.keys(issuedRange).length ? { issuedAt: issuedRange } : {};
-      const loans = await tx.bookLoan.findMany({ where: loanWhere });
-      const now = Date.now();
-      let issued = 0, returned = 0, overdue = 0, finesAccruedMinor = 0, finesCollectedMinor = 0;
-      for (const l of loans as Array<{ status: string; dueAt: Date; fineMinor: number; finePaid: boolean }>) {
-        if (l.status === "ISSUED") {
-          issued++;
-          if (l.dueAt.getTime() < now) overdue++;
-        } else returned++;
-        finesAccruedMinor += l.fineMinor;
-        if (l.finePaid) finesCollectedMinor += l.fineMinor;
-      }
-      const books = await tx.libraryBook.findMany({ select: { totalCopies: true, availableCopies: true } });
-      const totalCopies = books.reduce((s: number, b: { totalCopies: number }) => s + b.totalCopies, 0);
-      const availableCopies = books.reduce((s: number, b: { availableCopies: number }) => s + b.availableCopies, 0);
-      return { issued, returned, overdue, finesAccruedMinor, finesCollectedMinor, totalTitles: books.length, totalCopies, availableCopies };
+      // Counted and summed IN POSTGRES. This used to pull every loan row and every
+      // book row into Node to add them up — two unbounded reads that grow with the
+      // school's entire lending history, on a page whose whole output is eight
+      // numbers. A library keeping five years of loans paid for all of them to
+      // render a tally.
+      const from = issuedRange.gte ?? null;
+      const to = issuedRange.lte ?? null;
+      const [loanAgg, bookAgg] = await Promise.all([
+        tx.$queryRaw`
+          SELECT
+            COUNT(*) FILTER (WHERE status = 'ISSUED')::int                              AS issued,
+            COUNT(*) FILTER (WHERE status <> 'ISSUED')::int                             AS returned,
+            COUNT(*) FILTER (WHERE status = 'ISSUED' AND "dueAt" < now())::int          AS overdue,
+            COALESCE(SUM("fineMinor"), 0)::float8                                       AS "finesAccruedMinor",
+            COALESCE(SUM("fineMinor") FILTER (WHERE "finePaid"), 0)::float8             AS "finesCollectedMinor"
+          FROM book_loan
+          WHERE (${from}::timestamptz IS NULL OR "issuedAt" >= ${from}::timestamptz)
+            AND (${to}::timestamptz   IS NULL OR "issuedAt" <= ${to}::timestamptz)
+        ` as Promise<Array<{ issued: number; returned: number; overdue: number; finesAccruedMinor: number; finesCollectedMinor: number }>>,
+        tx.$queryRaw`
+          SELECT COUNT(*)::int                              AS "totalTitles",
+                 COALESCE(SUM("totalCopies"), 0)::int       AS "totalCopies",
+                 COALESCE(SUM("availableCopies"), 0)::int   AS "availableCopies"
+          FROM library_book
+        ` as Promise<Array<{ totalTitles: number; totalCopies: number; availableCopies: number }>>,
+      ]);
+      const l = loanAgg[0] ?? { issued: 0, returned: 0, overdue: 0, finesAccruedMinor: 0, finesCollectedMinor: 0 };
+      const b = bookAgg[0] ?? { totalTitles: 0, totalCopies: 0, availableCopies: 0 };
+      return {
+        issued: l.issued,
+        returned: l.returned,
+        overdue: l.overdue,
+        // Fines are minor units; ::float8 for the same reason as the fees aggregate
+        // (int8 comes back as BigInt, which the JSON layer cannot serialize).
+        finesAccruedMinor: Math.round(l.finesAccruedMinor),
+        finesCollectedMinor: Math.round(l.finesCollectedMinor),
+        totalTitles: b.totalTitles,
+        totalCopies: b.totalCopies,
+        availableCopies: b.availableCopies,
+      };
     });
   }
 
-  /** Export the catalogue as CSV. Librarian. */
-  async exportCsv(p: Principal): Promise<{ csv: string; filename: string }> {
-    const books = await this.searchBooks(p, undefined);
+  /**
+   * Export the catalogue as CSV. Librarian.
+   *
+   * Reads the catalogue DIRECTLY rather than through searchBooks, which caps at 200
+   * for the on-screen list. Routed through it, a 2,000-title library exported 200
+   * rows and said nothing — the file looked complete, so the truncation would only
+   * surface as a stock-take that never reconciled.
+   *
+   * An export is bounded too (a CSV must fit in memory and in a response), but at a
+   * ceiling appropriate to a whole catalogue, and it says so when it bites.
+   */
+  async exportCsv(p: Principal): Promise<{ csv: string; filename: string; truncated: boolean }> {
+    const rowsRaw = await this.db.runAsTenantReadOnly(this.ctx(p), (tx) =>
+      tx.libraryBook.findMany({ orderBy: { title: "asc" }, take: CATALOGUE_EXPORT_MAX + 1 }),
+    );
+    const truncated = rowsRaw.length > CATALOGUE_EXPORT_MAX;
+    const books = (truncated ? rowsRaw.slice(0, CATALOGUE_EXPORT_MAX) : rowsRaw).map((b) => this.bookDto(b));
     // Quote + neutralise spreadsheet formula injection (OWASP CSV injection).
     const esc = (v: string | number | null) => {
       let s = String(v ?? "");
@@ -293,7 +335,14 @@ export class LibraryService {
     const rows = books.map((b) =>
       [b.title, b.author, b.isbn, b.barcode, b.category, b.totalCopies, b.availableCopies].map(esc).join(","),
     );
-    return { csv: [header, ...rows].join("\n"), filename: `library-catalogue-${new Date().toISOString().slice(0, 10)}.csv` };
+    // A truncated export announces itself IN THE FILE. A librarian reconciling
+    // stock will not read an HTTP header, but they will see the last line.
+    const note = truncated ? [`"NOTE: truncated at ${CATALOGUE_EXPORT_MAX} titles — narrow the catalogue and export again"`] : [];
+    return {
+      csv: [header, ...rows, ...note].join("\n"),
+      filename: `library-catalogue-${new Date().toISOString().slice(0, 10)}.csv`,
+      truncated,
+    };
   }
 
   // --- helpers --------------------------------------------------------------

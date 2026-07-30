@@ -47,7 +47,7 @@ import type {
   XapiStatementDto,
   XapiVerb,
 } from "@sms/types";
-import { badgeMeta, gradeComponentMax, isBadgeKey } from "@sms/types";
+import { badgeMeta, gradeComponentMax, isBadgeKey, LMS_PERMISSIONS } from "@sms/types";
 import { isXapiVerb, normalizeXapiResult } from "./xapi.util";
 import {
   AUDIT_LOG_SERVICE,
@@ -424,7 +424,7 @@ export class LmsContentService {
     filter: { type?: string; status?: string } = {},
   ): Promise<LmsContentDto[]> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const staff = await this.canAuthor(tx, p, classId);
+      const staff = await this.canSeeAll(tx, p, classId);
       if (!staff) await this.assertEnrolledOrGuardian(tx, p, classId);
 
       const where: Record<string, unknown> = { classId };
@@ -1859,6 +1859,26 @@ export class LmsContentService {
     return !!teaches;
   }
 
+  /**
+   * Can this caller SEE everything in the class — including drafts and quiz answer
+   * keys — without necessarily being able to author it?
+   *
+   * The approver could not. `canAuthor` conflated "may write" with "sees
+   * everything", and a principal is deliberately not in SCHOOL_WIDE_ROLES here
+   * (CLAUDE.md: "Principal authors nothing by default but is the content APPROVER"),
+   * so listing a class's content 404'd for them. `review()` delegates to the
+   * workflow engine and never called this, which is why approving still worked —
+   * the principal could approve content they had no way to open and read.
+   *
+   * Approving something you cannot see is the actual defect. So visibility follows
+   * the APPROVAL permission, and authoring stays exactly where it was: every write
+   * path goes through assertTeacherOfClass -> canAuthor, which this does not touch.
+   */
+  private async canSeeAll(tx: TenantTx, p: Principal, classId: string): Promise<boolean> {
+    if (p.permissions.includes(LMS_PERMISSIONS.CONTENT_APPROVE)) return true;
+    return this.canAuthor(tx, p, classId);
+  }
+
   private async assertTeacherOfClass(tx: TenantTx, p: Principal, classId: string): Promise<void> {
     const cls = await tx.class.findFirst({ where: { id: classId }, select: { id: true } });
     if (!cls) throw new NotFoundException("Class not found");
@@ -1896,7 +1916,7 @@ export class LmsContentService {
 
   /** Assert the caller may READ this content; returns whether they are staff. */
   private async assertCanRead(tx: TenantTx, p: Principal, row: ContentRow): Promise<boolean> {
-    const staff = await this.canAuthor(tx, p, row.classId);
+    const staff = await this.canSeeAll(tx, p, row.classId);
     if (staff) return true;
     // Non-staff: must be enrolled/guardian AND the content must be published.
     await this.assertEnrolledOrGuardian(tx, p, row.classId);
