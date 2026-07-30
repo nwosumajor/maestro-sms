@@ -81,6 +81,55 @@ export class NotificationService {
     return notification;
   }
 
+  /**
+   * Enqueue the SAME notification for many recipients, in ONE tenant transaction.
+   *
+   * The alternative — awaiting `enqueue` per recipient — opens a transaction and a
+   * queue round-trip each time. That is fine for the two or three guardians most
+   * producers notify, but a whole class plus their guardians is ~100, and the one
+   * place that happens is releasing an exam: the single most latency-sensitive
+   * click in the product, made by a principal with a hall full of students waiting.
+   *
+   * Per-recipient failures are ISOLATED rather than fatal. A release that already
+   * committed must not be reported as failed because one recipient's row could not
+   * be written, so this returns the count and lets the caller carry on.
+   */
+  async enqueueMany(
+    actor: TenantContext,
+    recipientIds: string[],
+    input: Omit<NotificationInput, "recipientId">,
+  ): Promise<{ created: number; failed: number }> {
+    const uniq = [...new Set(recipientIds)].filter(Boolean);
+    if (uniq.length === 0) return { created: 0, failed: 0 };
+    const results = await this.db.runAsTenant(this.ctx(actor), async (tx) => {
+      const out: Array<{ id: string; deliveries: number } | null> = [];
+      for (const recipientId of uniq) {
+        try {
+          const { notification, deliveries } = await this.persist(tx, actor, { ...input, recipientId });
+          out.push({ id: notification.id, deliveries });
+        } catch {
+          out.push(null); // one bad recipient must not sink the batch
+        }
+      }
+      return out;
+    });
+    // Queue OUTSIDE the transaction: a Redis hiccup must not roll back the inbox
+    // rows, which are the durable record. Delivery is the best-effort part.
+    let created = 0;
+    for (const r of results) {
+      if (!r) continue;
+      created += 1;
+      if (r.deliveries > 0) {
+        try {
+          await this.queueDelivery(actor, r.id);
+        } catch {
+          /* non-fatal: the in-app inbox row exists regardless */
+        }
+      }
+    }
+    return { created, failed: results.length - created };
+  }
+
   // --- staff send (permission-gated by controller; scoped here) -------------
   async send(p: Principal, input: NotificationInput) {
     const { notification, deliveries } = await this.db.runAsTenant(this.ctx(p), async (tx) => {

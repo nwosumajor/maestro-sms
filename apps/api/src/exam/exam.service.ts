@@ -8,8 +8,23 @@
 // =============================================================================
 
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import type { ExamScheduleDto, ExamSittingDto, ExamSeatDto, MyExamDto, InvigilationDto } from "@sms/types";
-import { EXAM_SCHEDULE_CHAIN } from "@sms/types";
+import type {
+  ClashCandidate,
+  ExamDayDto,
+  ExamDayHallDto,
+  ExamScheduleDto,
+  ExamSittingDto,
+  ExamSeatDto,
+  MyExamDto,
+  InvigilationDto,
+} from "@sms/types";
+import {
+  EXAM_SCHEDULE_CHAIN,
+  describeClash,
+  findHallClash,
+  findPersonClash,
+  isValidTimeRange,
+} from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -22,6 +37,14 @@ import {
 import { NotificationService } from "../notifications/notification.service";
 import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
+
+/** How many upcoming exams a personal list will return. A student sits a dozen a
+ *  term; a parent of several children a few dozen. Well clear of real use, but it
+ *  stops the query being unbounded. */
+const MY_EXAMS_MAX = 200;
+/** How far ahead "upcoming" reaches — one term's worth of published schedule. */
+const MY_EXAMS_HORIZON_DAYS = 120;
+const MY_EXAMS_HORIZON = (): Date => new Date(Date.now() + MY_EXAMS_HORIZON_DAYS * 24 * 60 * 60 * 1000);
 
 @Injectable()
 export class ExamService {
@@ -81,11 +104,107 @@ export class ExamService {
     return d.toISOString().slice(0, 10);
   }
 
+  // --- clash detection --------------------------------------------------------
+
+  /**
+   * Refuse a sitting that double-books a hall. Reads only that DAY's sittings
+   * (served by exam_sitting(schoolId, date)), so the cost is a handful of rows
+   * regardless of how many terms of exam history the school has.
+   *
+   * `excludeId` is what makes EDITING possible: when re-timing a sitting it must
+   * not be compared against itself, or every save would report a clash with the
+   * row being saved.
+   */
+  private async assertNoHallClash(
+    tx: TenantTx,
+    input: { date: string; startsAt: string; endsAt: string; hall: string },
+    excludeId?: string,
+  ): Promise<void> {
+    if (!isValidTimeRange(input.startsAt, input.endsAt)) {
+      throw new BadRequestException("The end time must be after the start time (24h HH:MM)");
+    }
+    const sameDay = (await tx.examSitting.findMany({
+      where: { date: new Date(`${input.date}T00:00:00.000Z`), ...(excludeId ? { id: { not: excludeId } } : {}) },
+      select: { id: true, date: true, startsAt: true, endsAt: true, hall: true, title: true },
+    })) as Array<{ id: string; date: Date; startsAt: string; endsAt: string; hall: string; title: string }>;
+    const clash = findHallClash(input, sameDay.map((s) => ({ ...s, date: this.dateOnly(s.date) })));
+    if (clash) throw new ConflictException(describeClash("hall", clash));
+  }
+
+  /**
+   * Refuse rostering someone onto two overlapping sittings. Deliberately ignores
+   * the hall — an invigilator cannot be in two places at once even when the halls
+   * differ, which is precisely the case a hall-only check misses.
+   */
+  private async assertNoInvigilatorClash(
+    tx: TenantTx,
+    staffId: string,
+    target: { id: string; date: Date; startsAt: string; endsAt: string },
+  ): Promise<void> {
+    const duties = (await tx.examInvigilator.findMany({
+      where: { staffId, sittingId: { not: target.id } },
+      select: { sitting: { select: { id: true, date: true, startsAt: true, endsAt: true, hall: true, title: true } } },
+    })) as Array<{ sitting: { id: string; date: Date; startsAt: string; endsAt: string; hall: string; title: string } }>;
+    const others: ClashCandidate[] = duties
+      .filter((d) => this.dateOnly(d.sitting.date) === this.dateOnly(target.date))
+      .map((d) => ({ ...d.sitting, date: this.dateOnly(d.sitting.date) }));
+    const clash = findPersonClash({ date: this.dateOnly(target.date), startsAt: target.startsAt, endsAt: target.endsAt }, others);
+    if (clash) throw new ConflictException(describeClash("invigilator", clash));
+  }
+
+  /**
+   * Resolve a picked room into the hall LABEL and a capacity default. The label is
+   * stored alongside the id so a past sitting still reads honestly after the room
+   * is renamed or removed; the capacity default is what stops it being retyped
+   * (and mistyped) for every sitting in a hall.
+   */
+  private async resolveRoom(
+    tx: TenantTx,
+    roomId: string | null | undefined,
+    fallbackHall: string | undefined,
+    givenCapacity: number | undefined,
+  ): Promise<{ roomId: string | null; hall: string; capacity: number }> {
+    if (roomId) {
+      const room = (await tx.room.findFirst({ where: { id: roomId }, select: { id: true, name: true, capacity: true } })) as
+        | { id: string; name: string; capacity: number | null }
+        | null;
+      if (!room) throw new NotFoundException("Room not found");
+      return { roomId: room.id, hall: room.name, capacity: givenCapacity ?? room.capacity ?? 0 };
+    }
+    const hall = (fallbackHall ?? "").trim();
+    if (!hall) throw new BadRequestException("Pick a room or type a hall name");
+    return { roomId: null, hall, capacity: givenCapacity ?? 0 };
+  }
+
+  /** In-tenant existence check for an optional class, returning its NAME so the
+   *  caller can echo it back (404, never cross-tenant leak). The name matters:
+   *  a response carrying `classId` but a null `className` renders as "no class"
+   *  in the UI even though one was just set. */
+  private async assertClass(tx: TenantTx, classId: string | null | undefined): Promise<string | null> {
+    if (!classId) return null;
+    const cls = (await tx.class.findFirst({ where: { id: classId }, select: { name: true } })) as { name: string } | null;
+    if (!cls) throw new NotFoundException("Class not found");
+    return cls.name;
+  }
+
   // --- staff: sittings --------------------------------------------------------
 
   async createSitting(
     p: Principal,
-    input: { title: string; subject?: string; date: string; startsAt: string; endsAt: string; hall: string; capacity?: number; note?: string; scheduleId?: string | null; cbtExamId?: string | null },
+    input: {
+      title: string;
+      subject?: string;
+      date: string;
+      startsAt: string;
+      endsAt: string;
+      hall?: string;
+      roomId?: string | null;
+      capacity?: number;
+      note?: string;
+      classId?: string | null;
+      scheduleId?: string | null;
+      cbtExamId?: string | null;
+    },
   ): Promise<ExamSittingDto> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       // Validate the schedule + CBT exam are in-tenant, and that a CBT-backed
@@ -105,6 +224,11 @@ export class ExamService {
         if (linked) throw new ConflictException("That CBT exam is already attached to a sitting");
         cbtStatus = exam.status;
       }
+      const className = await this.assertClass(tx, input.classId);
+      const venue = await this.resolveRoom(tx, input.roomId, input.hall, input.capacity);
+      // Refuse a double-booked hall BEFORE writing, so a clash is never persisted
+      // and then discovered on exam morning.
+      await this.assertNoHallClash(tx, { date: input.date, startsAt: input.startsAt, endsAt: input.endsAt, hall: venue.hall });
       const row = (await tx.examSitting.create({
         data: {
           schoolId: p.schoolId,
@@ -113,9 +237,11 @@ export class ExamService {
           date: new Date(`${input.date}T00:00:00.000Z`),
           startsAt: input.startsAt,
           endsAt: input.endsAt,
-          hall: input.hall,
-          capacity: input.capacity ?? 0,
+          hall: venue.hall,
+          roomId: venue.roomId,
+          capacity: venue.capacity,
           note: input.note ?? null,
+          classId: input.classId ?? null,
           scheduleId: input.scheduleId ?? null,
           cbtExamId: input.cbtExamId ?? null,
           createdById: p.userId,
@@ -125,13 +251,163 @@ export class ExamService {
         { actorId: p.userId, action: "exam.sitting.create", entity: "exam_sitting", entityId: row.id, schoolId: p.schoolId },
         tx,
       );
-      return this.toSittingDto(row, 0, 0, { status: cbtStatus, released: false, started: 0, submitted: 0 });
+      return this.toSittingDto(row, 0, 0, { status: cbtStatus, released: false, started: 0, submitted: 0 }, className);
     });
   }
 
-  async listSittings(p: Principal): Promise<ExamSittingDto[]> {
+  /**
+   * Edit a sitting IN PLACE — the point being that it leaves the seating plan and
+   * the invigilator roster alone.
+   *
+   * Before this existed the only way to correct a sitting was delete + recreate,
+   * and deleteSitting cascades seats and invigilators. So moving an exam thirty
+   * minutes, or fixing a typo'd hall, silently destroyed a seating plan for a
+   * whole class and a roster that had already been notified to staff. That is the
+   * kind of data loss nobody attributes to the tool: it just looks like the seats
+   * "never saved".
+   *
+   * A RELEASED sitting is frozen (409). Students may be mid-exam against a server
+   * clock derived from the exam, so re-timing it underneath them is never a
+   * correction — it is an incident. Everything short of that stays editable,
+   * because halls really do change on the morning, and every change is audited
+   * with its before/after so the record shows who moved what.
+   */
+  async updateSitting(
+    p: Principal,
+    id: string,
+    patch: {
+      title?: string;
+      subject?: string | null;
+      date?: string;
+      startsAt?: string;
+      endsAt?: string;
+      hall?: string;
+      roomId?: string | null;
+      capacity?: number;
+      note?: string | null;
+      classId?: string | null;
+    },
+  ): Promise<ExamSittingDto> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const current = (await tx.examSitting.findFirst({ where: { id } })) as SittingRow | null;
+      if (!current) throw new NotFoundException("Sitting not found");
+
+      if (current.cbtExamId) {
+        const exam = (await tx.cbtExam.findFirst({ where: { id: current.cbtExamId }, select: { releasedAt: true } })) as
+          | { releasedAt: Date | null }
+          | null;
+        if (exam?.releasedAt) {
+          throw new ConflictException("This exam has been released and students may be sitting it — it can no longer be edited");
+        }
+      }
+
+      // Merge patch over current so a partial edit still clash-checks against the
+      // FULL resulting sitting, not just the fields that happened to change.
+      const date = patch.date ?? this.dateOnly(current.date);
+      const startsAt = patch.startsAt ?? current.startsAt;
+      const endsAt = patch.endsAt ?? current.endsAt;
+      const roomTouched = patch.roomId !== undefined || patch.hall !== undefined || patch.capacity !== undefined;
+      const venue = roomTouched
+        ? await this.resolveRoom(
+            tx,
+            patch.roomId !== undefined ? patch.roomId : current.roomId,
+            patch.hall ?? current.hall,
+            patch.capacity,
+          )
+        : { roomId: current.roomId, hall: current.hall, capacity: current.capacity };
+      if (patch.classId !== undefined) await this.assertClass(tx, patch.classId);
+
+      await this.assertNoHallClash(tx, { date, startsAt, endsAt, hall: venue.hall }, id);
+
+      const data = {
+        ...(patch.title !== undefined ? { title: patch.title } : {}),
+        ...(patch.subject !== undefined ? { subject: patch.subject } : {}),
+        ...(patch.date !== undefined ? { date: new Date(`${date}T00:00:00.000Z`) } : {}),
+        ...(patch.startsAt !== undefined ? { startsAt } : {}),
+        ...(patch.endsAt !== undefined ? { endsAt } : {}),
+        ...(roomTouched ? { hall: venue.hall, roomId: venue.roomId, capacity: venue.capacity } : {}),
+        ...(patch.note !== undefined ? { note: patch.note } : {}),
+        ...(patch.classId !== undefined ? { classId: patch.classId } : {}),
+      };
+      if (Object.keys(data).length === 0) throw new BadRequestException("Nothing to change");
+
+      const row = (await tx.examSitting.update({ where: { id }, data })) as SittingRow;
+
+      // Audit the CHANGED fields with before/after. A bare "updated" entry would
+      // not answer the only question ever asked afterwards: what did it used to be?
+      const changed: Record<string, { from: unknown; to: unknown }> = {};
+      for (const k of Object.keys(data) as Array<keyof typeof data>) {
+        const before = (current as unknown as Record<string, unknown>)[k];
+        const after = (row as unknown as Record<string, unknown>)[k];
+        const norm = (v: unknown) => (v instanceof Date ? v.toISOString().slice(0, 10) : v);
+        if (norm(before) !== norm(after)) changed[k as string] = { from: norm(before), to: norm(after) };
+      }
+      await this.audit.record(
+        {
+          actorId: p.userId,
+          action: "exam.sitting.update",
+          entity: "exam_sitting",
+          entityId: id,
+          schoolId: p.schoolId,
+          metadata: { changed },
+        },
+        tx,
+      );
+
+      // Re-read the counts so the caller gets a truthful row back — and so the UI
+      // can SEE that seats and invigilators survived the edit.
+      const [seated, invigilators, cls] = await Promise.all([
+        tx.examSeat.count({ where: { sittingId: id } }) as Promise<number>,
+        tx.examInvigilator.count({ where: { sittingId: id } }) as Promise<number>,
+        row.classId
+          ? (tx.class.findFirst({ where: { id: row.classId }, select: { name: true } }) as Promise<{ name: string } | null>)
+          : Promise.resolve(null),
+      ]);
+      const exam = row.cbtExamId
+        ? ((await tx.cbtExam.findFirst({ where: { id: row.cbtExamId }, select: { status: true, releasedAt: true } })) as
+            | { status: string; releasedAt: Date | null }
+            | null)
+        : null;
+      return this.toSittingDto(
+        row,
+        seated,
+        invigilators,
+        { status: exam?.status ?? null, released: !!exam?.releasedAt, started: 0, submitted: 0 },
+        cls?.name ?? null,
+      );
+    });
+  }
+
+  /**
+   * Sittings, FILTERED server-side.
+   *
+   * The unfiltered list was capped at 200 and rendered whole. A term is subjects ×
+   * class levels, so a real school blows past a hundred sittings and an exam
+   * officer was left scrolling one flat list to find Tuesday's halls. Every filter
+   * here narrows the QUERY, so choosing a schedule or a single day makes the
+   * payload smaller rather than shipping everything and hiding rows in the browser.
+   */
+  async listSittings(
+    p: Principal,
+    filter: { scheduleId?: string; from?: string; to?: string; date?: string; hall?: string; q?: string } = {},
+  ): Promise<ExamSittingDto[]> {
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
-      const rows = (await tx.examSitting.findMany({ orderBy: { date: "desc" }, take: 200 })) as SittingRow[];
+      const where: Record<string, unknown> = {};
+      if (filter.scheduleId) where.scheduleId = filter.scheduleId;
+      if (filter.date) {
+        where.date = new Date(`${filter.date}T00:00:00.000Z`);
+      } else if (filter.from || filter.to) {
+        where.date = {
+          ...(filter.from ? { gte: new Date(`${filter.from}T00:00:00.000Z`) } : {}),
+          ...(filter.to ? { lte: new Date(`${filter.to}T00:00:00.000Z`) } : {}),
+        };
+      }
+      if (filter.hall) where.hall = { equals: filter.hall, mode: "insensitive" };
+      if (filter.q) {
+        const q = filter.q.trim();
+        if (q) where.OR = [{ title: { contains: q, mode: "insensitive" } }, { subject: { contains: q, mode: "insensitive" } }];
+      }
+      const rows = (await tx.examSitting.findMany({ where, orderBy: [{ date: "desc" }, { startsAt: "asc" }], take: 200 })) as SittingRow[];
       const ids = rows.map((r) => r.id);
       const examIds = [...new Set(rows.map((r) => r.cbtExamId).filter((x): x is string => !!x))];
       // Seat/invigilator counts + the CBT exams' status/release in a fixed number
@@ -157,16 +433,77 @@ export class ExamService {
         started.set(t.examId, (started.get(t.examId) ?? 0) + t._count._all);
         if (t.status === "SUBMITTED" || t.status === "EXPIRED") submitted.set(t.examId, (submitted.get(t.examId) ?? 0) + t._count._all);
       }
+      // Class names in ONE query keyed by the distinct classIds on the page — the
+      // list shows "Mathematics · SS1", and an id would make the grid unreadable.
+      const classIds = [...new Set(rows.map((r) => r.classId).filter((x): x is string => !!x))];
+      const classes = classIds.length
+        ? ((await tx.class.findMany({ where: { id: { in: classIds } }, select: { id: true, name: true } })) as Array<{ id: string; name: string }>)
+        : [];
+      const classById = new Map(classes.map((c) => [c.id, c.name]));
       return rows.map((r) => {
         const e = r.cbtExamId ? examById.get(r.cbtExamId) : undefined;
-        return this.toSittingDto(r, seats.get(r.id) ?? 0, invs.get(r.id) ?? 0, {
-          status: e?.status ?? null,
-          released: !!e?.releasedAt,
-          started: r.cbtExamId ? started.get(r.cbtExamId) ?? 0 : 0,
-          submitted: r.cbtExamId ? submitted.get(r.cbtExamId) ?? 0 : 0,
-        });
+        return this.toSittingDto(
+          r,
+          seats.get(r.id) ?? 0,
+          invs.get(r.id) ?? 0,
+          {
+            status: e?.status ?? null,
+            released: !!e?.releasedAt,
+            started: r.cbtExamId ? started.get(r.cbtExamId) ?? 0 : 0,
+            submitted: r.cbtExamId ? submitted.get(r.cbtExamId) ?? 0 : 0,
+          },
+          r.classId ? classById.get(r.classId) ?? null : null,
+        );
       });
     });
+  }
+
+  /**
+   * The exam-day board: one date, grouped by hall, with the warnings computed
+   * server-side.
+   *
+   * This exists because the questions asked while walking the halls on exam
+   * morning are not the questions the planning list answers. "Is Hall B started?"
+   * and above all "is anyone actually invigilating Hall B?" — an unstaffed hall is
+   * the one omission that cannot be repaired after the fact, so it is surfaced as
+   * a flag on the payload rather than something the browser has to notice.
+   */
+  async examDay(p: Principal, date: string): Promise<ExamDayDto> {
+    const sittings = await this.listSittings(p, { date });
+    const halls: ExamDayHallDto[] = sittings
+      .map((s) => {
+        const overCapacity = s.capacity > 0 && s.seated > s.capacity;
+        // Reuse the SAME pure clash rule the writes enforce, so a sitting that
+        // predates the check (or was created before this release) still shows up.
+        const clash = findHallClash(
+          { date: s.date, startsAt: s.startsAt, endsAt: s.endsAt, hall: s.hall },
+          sittings.filter((o) => o.id !== s.id).map((o) => ({ id: o.id, date: o.date, startsAt: o.startsAt, endsAt: o.endsAt, hall: o.hall, title: o.title })),
+        );
+        return {
+          sittingId: s.id,
+          hall: s.hall,
+          title: s.title,
+          subject: s.subject,
+          startsAt: s.startsAt,
+          endsAt: s.endsAt,
+          seated: s.seated,
+          capacity: s.capacity,
+          invigilators: s.invigilators,
+          cbtStatus: s.cbtStatus,
+          released: s.released,
+          started: s.started,
+          submitted: s.submitted,
+          noInvigilator: s.invigilators === 0,
+          noSeats: s.seated === 0,
+          warning: clash
+            ? describeClash("hall", clash)
+            : overCapacity
+              ? `${s.seated} seated in a hall of ${s.capacity}`
+              : null,
+        };
+      })
+      .sort((a, b) => a.startsAt.localeCompare(b.startsAt) || a.hall.localeCompare(b.hall));
+    return { date, halls };
   }
 
   async deleteSitting(p: Principal, id: string): Promise<{ deleted: boolean }> {
@@ -288,15 +625,20 @@ export class ExamService {
       const recipients = [...new Set([...studentIds, ...guardians.map((g) => g.parentId)])];
       return { examId: sitting.cbtExamId, title: sitting.title, recipients };
     });
-    // AUTO-NOTIFY: tell every seated student + guardian the exam is open now.
-    for (const recipientId of recipients) {
-      await this.notifications.enqueue(this.ctx(p), {
-        recipientId,
+    // AUTO-NOTIFY every seated student + guardian, in ONE batch. This used to be a
+    // sequential await per recipient — ~100 transactions and queue round-trips for a
+    // single class, on the one click a principal makes with a hall full of students
+    // waiting. Failures here are swallowed by design: the release has committed and
+    // must be reported as done.
+    try {
+      await this.notifications.enqueueMany(this.ctx(p), recipients, {
         type: "GENERIC",
         title: `Exam open: ${title}`,
         body: `The ${title} exam is now open. Sign in and click to start — you have until the timer ends or you submit.`,
         channels: ["EMAIL"],
       });
+    } catch {
+      /* non-fatal: the exam is open either way */
     }
     return { released: true as const, examId };
   }
@@ -334,18 +676,30 @@ export class ExamService {
    * fan-out. Returns how many sittings were seated. Runs inside the reactor tx.
    */
   private async autoSeatSchedule(tx: TenantTx, schoolId: string, scheduleId: string): Promise<number> {
+    // EVERY sitting in the schedule, not just the CBT-backed ones. A sitting knows
+    // its class either directly (sitting.classId — the only source a PAPER exam
+    // has) or through its backing CBT exam. Before sitting.classId existed this
+    // could only ever seat online exams, so an exam officer still hand-seated
+    // every paper hall one dropdown at a time.
     const sittings = (await tx.examSitting.findMany({
-      where: { scheduleId, cbtExamId: { not: null } },
-      select: { id: true, cbtExamId: true, capacity: true },
-    })) as Array<{ id: string; cbtExamId: string; capacity: number }>;
+      where: { scheduleId },
+      select: { id: true, cbtExamId: true, classId: true, capacity: true },
+    })) as Array<{ id: string; cbtExamId: string | null; classId: string | null; capacity: number }>;
     if (sittings.length === 0) return 0;
-    const examIds = [...new Set(sittings.map((s) => s.cbtExamId))];
-    const exams = (await tx.cbtExam.findMany({ where: { id: { in: examIds } }, select: { id: true, classId: true } })) as Array<{ id: string; classId: string | null }>;
+    const examIds = [...new Set(sittings.map((s) => s.cbtExamId).filter((x): x is string => !!x))];
+    const exams = examIds.length
+      ? ((await tx.cbtExam.findMany({ where: { id: { in: examIds } }, select: { id: true, classId: true } })) as Array<{ id: string; classId: string | null }>)
+      : [];
     const classByExam = new Map(exams.map((e) => [e.id, e.classId]));
-    // Which of these sittings already have a seat plan?
+    // The sitting's OWN class wins: it is the explicit instruction, and an exam
+    // moved to a different cohort should not silently keep seating the exam's.
+    const classOf = (s: { cbtExamId: string | null; classId: string | null }): string | null =>
+      s.classId ?? (s.cbtExamId ? classByExam.get(s.cbtExamId) ?? null : null);
+    // Which of these sittings already have a seat plan? Skipping them is what makes
+    // this safe to re-run: a second pass never renumbers seats students were told.
     const already = (await tx.examSeat.groupBy({ by: ["sittingId"], where: { sittingId: { in: sittings.map((s) => s.id) } }, _count: { _all: true } } as never)) as unknown as Array<{ sittingId: string }>;
     const hasSeats = new Set(already.map((g) => g.sittingId));
-    const classIds = [...new Set(sittings.map((s) => classByExam.get(s.cbtExamId)).filter((x): x is string => !!x))];
+    const classIds = [...new Set(sittings.map(classOf).filter((x): x is string => !!x))];
     if (classIds.length === 0) return 0;
     const enr = (await tx.enrollment.findMany({ where: { classId: { in: classIds } }, select: { classId: true, studentId: true } })) as Array<{ classId: string; studentId: string }>;
     const byClass = new Map<string, string[]>();
@@ -353,7 +707,7 @@ export class ExamService {
     let seatedCount = 0;
     for (const s of sittings) {
       if (hasSeats.has(s.id)) continue;
-      const classId = classByExam.get(s.cbtExamId);
+      const classId = classOf(s);
       if (!classId) continue;
       let studentIds = byClass.get(classId) ?? [];
       if (s.capacity > 0) studentIds = studentIds.slice(0, s.capacity);
@@ -362,6 +716,36 @@ export class ExamService {
       seatedCount += 1;
     }
     return seatedCount;
+  }
+
+  /**
+   * Seat every unseated sitting in a schedule, on demand.
+   *
+   * Approval already does this, but only once and only at that moment — a sitting
+   * added afterwards, or one whose class was set later, stayed empty with no way
+   * to fill it except the per-sitting dropdown. This is the same batched routine
+   * exposed as a button, and because it skips already-seated sittings it is safe to
+   * press repeatedly: it never renumbers a seat a student has already been told.
+   */
+  async seatSchedule(p: Principal, scheduleId: string): Promise<{ seated: number; skipped: number }> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const sched = await tx.examSchedule.findFirst({ where: { id: scheduleId }, select: { id: true } });
+      if (!sched) throw new NotFoundException("Schedule not found");
+      const total = (await tx.examSitting.count({ where: { scheduleId } })) as number;
+      const seated = await this.autoSeatSchedule(tx, p.schoolId, scheduleId);
+      await this.audit.record(
+        {
+          actorId: p.userId,
+          action: "exam.schedule.seat",
+          entity: "exam_schedule",
+          entityId: scheduleId,
+          schoolId: p.schoolId,
+          metadata: { seated, total },
+        },
+        tx,
+      );
+      return { seated, skipped: total - seated };
+    });
   }
 
   /** Auto-seat every student enrolled in a class into the sitting. */
@@ -388,12 +772,16 @@ export class ExamService {
 
   async assignInvigilator(p: Principal, sittingId: string, staffId: string, lead: boolean): Promise<InvigilationDto> {
     const outcome = await this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const sitting = await tx.examSitting.findFirst({ where: { id: sittingId }, select: { id: true, title: true, date: true, startsAt: true, hall: true } });
+      const sitting = await tx.examSitting.findFirst({ where: { id: sittingId }, select: { id: true, title: true, date: true, startsAt: true, endsAt: true, hall: true } });
       if (!sitting) throw new NotFoundException("Sitting not found");
       const staff = await tx.user.findFirst({ where: { id: staffId }, select: { id: true, name: true, roles: { select: { role: { select: { name: true } } } } } });
       if (!staff) throw new NotFoundException("Staff not found");
       const isStaff = staff.roles.some((r: { role: { name: string } }) => r.role.name !== "student" && r.role.name !== "parent");
       if (!isStaff) throw new BadRequestException("Only a staff member can invigilate");
+      // Nobody can watch two halls at once. Checked here rather than left to the
+      // roster-builder's memory, because the failure surfaces on exam morning with
+      // one of the two halls simply unattended.
+      await this.assertNoInvigilatorClash(tx, staffId, sitting);
       // Assignment rows are INSERT/DELETE only (rls/87 grants no UPDATE — a
       // roster change is a remove + re-add, so the history reads honestly).
       // Re-assigning the same staffer replaces the row rather than updating it.
@@ -433,10 +821,154 @@ export class ExamService {
   }
 
   async getInvigilators(p: Principal, sittingId: string): Promise<InvigilationDto[]> {
-    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
-      const rows = await tx.examInvigilator.findMany({ where: { sittingId } });
-      const names = await this.userNames(tx, rows.map((r: { staffId: string }) => r.staffId));
-      return rows.map((r: { staffId: string; lead: boolean }) => ({ sittingId, staffId: r.staffId, staffName: names.get(r.staffId) ?? "", lead: r.lead }));
+    return this.db.runAsTenantReadOnly(this.ctx(p), (tx) => this.getInvigilatorsIn(tx, sittingId));
+  }
+
+  /** Roster read that works INSIDE an existing tx, so the attendance sheet can
+   *  gather seats + roster + school in one read rather than reopening the tenant. */
+  private async getInvigilatorsIn(tx: TenantTx, sittingId: string): Promise<InvigilationDto[]> {
+    const rows = await tx.examInvigilator.findMany({ where: { sittingId }, orderBy: { lead: "desc" } });
+    const names = await this.userNames(tx, rows.map((r: { staffId: string }) => r.staffId));
+    return rows.map((r: { staffId: string; lead: boolean }) => ({ sittingId, staffId: r.staffId, staffName: names.get(r.staffId) ?? "", lead: r.lead }));
+  }
+
+  // --- the hall pack: printable seating chart + attendance sheet ---------------
+
+  /**
+   * The sheet the invigilator physically carries into the hall: who sits where, a
+   * signature column, and a place to record absentees.
+   *
+   * The seat plan and roster were already stored and already had endpoints — they
+   * were simply never reachable, so the one artefact the whole seating exercise
+   * exists to produce could not be printed. Halls run on paper on exam day: the
+   * network is the first thing to fail and a signature column is the attendance
+   * record that gets archived.
+   *
+   * Audited, because it lists the names of minors sitting a specific exam.
+   */
+  async attendanceSheetPdf(p: Principal, sittingId: string): Promise<{ buffer: Buffer; filename: string }> {
+    const data = await this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      const sitting = (await tx.examSitting.findFirst({ where: { id: sittingId } })) as SittingRow | null;
+      // 404 not 403 — a cross-tenant id must not confirm the sitting exists.
+      if (!sitting) throw new NotFoundException("Sitting not found");
+      const [seats, invigilators, school, cls] = await Promise.all([
+        this.seatPlan(tx, sittingId),
+        this.getInvigilatorsIn(tx, sittingId),
+        tx.school.findFirst({ where: { id: p.schoolId }, select: { name: true } }) as Promise<{ name: string } | null>,
+        sitting.classId
+          ? (tx.class.findFirst({ where: { id: sitting.classId }, select: { name: true } }) as Promise<{ name: string } | null>)
+          : Promise.resolve(null),
+      ]);
+      return { sitting, seats, invigilators, schoolName: school?.name ?? "", className: cls?.name ?? null };
+    });
+
+    await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      await this.audit.record(
+        {
+          actorId: p.userId,
+          action: "exam.attendance_sheet.print",
+          entity: "exam_sitting",
+          entityId: sittingId,
+          schoolId: p.schoolId,
+          metadata: { seats: data.seats.length },
+        },
+        tx,
+      );
+    });
+
+    const buffer = await this.renderAttendanceSheet(data);
+    const safe = `${data.sitting.title}-${this.dateOnly(data.sitting.date)}`.replace(/[^a-zA-Z0-9-_]+/g, "_");
+    return { buffer, filename: `attendance-${safe}.pdf` };
+  }
+
+  private async renderAttendanceSheet(d: {
+    sitting: SittingRow;
+    seats: ExamSeatDto[];
+    invigilators: InvigilationDto[];
+    schoolName: string;
+    className: string | null;
+  }): Promise<Buffer> {
+    const { default: PDFDocument } = await import("pdfkit");
+    return new Promise<Buffer>((resolve, reject) => {
+      const doc = new PDFDocument({ margin: 40, size: "A4" });
+      const chunks: Buffer[] = [];
+      doc.on("data", (c: Buffer) => chunks.push(c));
+      doc.on("end", () => resolve(Buffer.concat(chunks)));
+      doc.on("error", reject);
+
+      const left = doc.page.margins.left;
+      const right = doc.page.width - doc.page.margins.right;
+
+      doc.fontSize(14).text(d.schoolName, { align: "center" });
+      doc.fontSize(11).text("EXAMINATION ATTENDANCE SHEET", { align: "center" });
+      doc.moveDown(0.6);
+
+      doc.fontSize(10);
+      const meta = [
+        `Exam: ${d.sitting.title}${d.sitting.subject ? ` (${d.sitting.subject})` : ""}`,
+        d.className ? `Class: ${d.className}` : null,
+        `Date: ${this.dateOnly(d.sitting.date)}    Time: ${d.sitting.startsAt}–${d.sitting.endsAt}`,
+        `Hall: ${d.sitting.hall}${d.sitting.capacity > 0 ? ` (capacity ${d.sitting.capacity})` : ""}`,
+        `Seated: ${d.seats.length}`,
+        d.invigilators.length
+          ? `Invigilator(s): ${d.invigilators.map((i) => `${i.staffName}${i.lead ? " (lead)" : ""}`).join(", ")}`
+          : "Invigilator(s): __________________________  (NONE ROSTERED)",
+      ].filter(Boolean) as string[];
+      for (const line of meta) doc.text(line);
+      doc.moveDown(0.5);
+
+      // Column layout. Signature is deliberately the widest column — it is the
+      // thing being collected; everything else is context for finding the row.
+      const cols = [
+        { label: "Seat", w: 40 },
+        { label: "Student", w: 200 },
+        { label: "Signature", w: 190 },
+        { label: "Absent", w: 45 },
+      ];
+      const rowH = 22;
+
+      const header = (y: number): number => {
+        let x = left;
+        doc.fontSize(9);
+        for (const c of cols) {
+          doc.rect(x, y, c.w, rowH).stroke();
+          doc.text(c.label, x + 4, y + 7, { width: c.w - 8 });
+          x += c.w;
+        }
+        return y + rowH;
+      };
+
+      let y = header(doc.y);
+      for (const s of d.seats) {
+        // Page break BEFORE drawing, and re-draw the header — a continuation page
+        // of unlabelled boxes is unusable in a hall.
+        if (y + rowH > doc.page.height - doc.page.margins.bottom - 60) {
+          doc.addPage();
+          y = header(doc.page.margins.top);
+        }
+        let x = left;
+        const cells = [String(s.seatNo), s.studentName, "", ""];
+        for (let i = 0; i < cols.length; i++) {
+          doc.rect(x, y, cols[i]!.w, rowH).stroke();
+          if (cells[i]) doc.fontSize(9).text(cells[i]!, x + 4, y + 7, { width: cols[i]!.w - 8, ellipsis: true });
+          x += cols[i]!.w;
+        }
+        y += rowH;
+      }
+
+      if (d.seats.length === 0) {
+        doc.fontSize(9).text("No students seated for this sitting.", left, y + 8);
+        y += 24;
+      }
+
+      doc.moveDown(1.5);
+      doc.fontSize(9).text(`Total present: ____________     Total absent: ____________`, left, Math.max(y + 18, doc.y));
+      doc.moveDown(1.2);
+      doc.text("Invigilator signature: ______________________________", left);
+      doc.moveDown(0.4);
+      doc.text(`Printed ${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC`, left, undefined, { width: right - left });
+
+      doc.end();
     });
   }
 
@@ -451,8 +983,17 @@ export class ExamService {
       kids.forEach((k: { studentId: string }) => studentIds.add(k.studentId));
       if (studentIds.size === 0) return [];
       const seats = await tx.examSeat.findMany({
-        where: { studentId: { in: [...studentIds] }, sitting: { date: { gte: new Date(new Date().toISOString().slice(0, 10)) } } },
+        where: {
+          studentId: { in: [...studentIds] },
+          // BOUNDED both ways. "Upcoming" with no upper edge meant a parent of
+          // three children pulled every seat ever scheduled into the future; the
+          // horizon below covers a term, which is as far ahead as a schedule is
+          // ever published.
+          sitting: { date: { gte: new Date(new Date().toISOString().slice(0, 10)), lte: MY_EXAMS_HORIZON() } },
+        },
         include: { sitting: { select: { title: true, subject: true, date: true, startsAt: true, endsAt: true, hall: true } } },
+        orderBy: { sitting: { date: "asc" } },
+        take: MY_EXAMS_MAX,
       });
       const names = await this.userNames(tx, seats.map((s: { studentId: string }) => s.studentId));
       return seats
@@ -475,8 +1016,13 @@ export class ExamService {
   async myInvigilations(p: Principal): Promise<MyExamDto[]> {
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       const rows = await tx.examInvigilator.findMany({
-        where: { staffId: p.userId, sitting: { date: { gte: new Date(new Date().toISOString().slice(0, 10)) } } },
+        where: {
+          staffId: p.userId,
+          sitting: { date: { gte: new Date(new Date().toISOString().slice(0, 10)), lte: MY_EXAMS_HORIZON() } },
+        },
         include: { sitting: { select: { title: true, subject: true, date: true, startsAt: true, endsAt: true, hall: true } } },
+        orderBy: { sitting: { date: "asc" } },
+        take: MY_EXAMS_MAX,
       });
       return rows
         .map((r: { lead: boolean; sitting: { title: string; subject: string | null; date: Date; startsAt: string; endsAt: string; hall: string } }) => ({
@@ -518,6 +1064,7 @@ export class ExamService {
     seated: number,
     invigilators: number,
     cbt: { status: string | null; released: boolean; started: number; submitted: number },
+    className: string | null,
   ): ExamSittingDto {
     return {
       id: s.id,
@@ -527,8 +1074,11 @@ export class ExamService {
       startsAt: s.startsAt,
       endsAt: s.endsAt,
       hall: s.hall,
+      roomId: s.roomId,
       capacity: s.capacity,
       note: s.note,
+      classId: s.classId,
+      className,
       seated,
       invigilators,
       scheduleId: s.scheduleId,
@@ -541,5 +1091,19 @@ export class ExamService {
   }
 }
 
-type SittingRow = { id: string; title: string; subject: string | null; date: Date; startsAt: string; endsAt: string; hall: string; capacity: number; note: string | null; scheduleId: string | null; cbtExamId: string | null };
+type SittingRow = {
+  id: string;
+  title: string;
+  subject: string | null;
+  date: Date;
+  startsAt: string;
+  endsAt: string;
+  hall: string;
+  roomId: string | null;
+  capacity: number;
+  note: string | null;
+  classId: string | null;
+  scheduleId: string | null;
+  cbtExamId: string | null;
+};
 type SeatWithSitting = { studentId: string; seatNo: number; sitting: { title: string; subject: string | null; date: Date; startsAt: string; endsAt: string; hall: string } };

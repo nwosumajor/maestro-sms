@@ -38,9 +38,21 @@ model ExamSitting {
   date        DateTime @db.Date
   startsAt    String // "09:00"
   endsAt      String // "11:00"
+  /// The hall LABEL as printed on the timetable and the attendance sheet. Kept as
+  /// a stored string even when roomId is set, so a past sitting still reads
+  /// honestly after a room is renamed or removed.
   hall        String
+  /// The room from the school's registry, when the hall was picked rather than
+  /// typed. Optional because sittings predate the picker and an ad-hoc venue
+  /// (a marquee, a borrowed hall) is legitimate. Having it is what lets capacity
+  /// come from the registry instead of being retyped per sitting.
+  roomId      String?  @db.Uuid
   capacity    Int      @default(0)
   note        String?
+  /// The class sitting this exam. For a CBT-backed sitting the roster is read off
+  /// the exam's own classId; a PAPER sitting has no exam, so without this there is
+  /// nothing to auto-seat FROM and every paper hall had to be seated by hand.
+  classId     String?  @db.Uuid
   /// The schedule this sitting belongs to (grouped for batch approval); null for
   /// a standalone/ad-hoc sitting.
   scheduleId  String?  @db.Uuid
@@ -55,10 +67,16 @@ model ExamSitting {
 
   school       School            @relation(fields: [schoolId], references: [id])
   schedule     ExamSchedule?     @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+  // SetNull on both: losing a room or a class must never delete exam history, and
+  // the sitting stays readable because `hall` carries its own label.
+  room         Room?             @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  class        Class?            @relation(fields: [classId], references: [id], onDelete: SetNull)
   seats        ExamSeat[]
   invigilators ExamInvigilator[]
 
   @@index([schoolId])
+  // (schoolId, date) already serves the hall-clash lookup: a clash can only occur
+  // on the same day, so the check reads one day's sittings, never a table scan.
   @@index([schoolId, date])
   @@index([schoolId, scheduleId])
   @@map("exam_sitting")

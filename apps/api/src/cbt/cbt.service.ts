@@ -688,11 +688,18 @@ export class CbtService {
   }
 
   /** Staff see every exam; students see PUBLISHED exams open to them. */
-  async listExams(p: Principal, staff: boolean): Promise<CbtExamDto[]> {
+  async listExams(p: Principal, staff: boolean, status?: string): Promise<CbtExamDto[]> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       let exams;
       if (staff) {
-        exams = await tx.cbtExam.findMany({ orderBy: { startAt: "desc" }, take: 100 });
+        // `status` narrows in the QUERY. The exams page only ever offers DRAFT exams
+        // for attaching to a sitting (they publish via schedule approval), and it
+        // used to fetch all 100 and discard most of them in the browser.
+        exams = await tx.cbtExam.findMany({
+          where: status ? { status } : {},
+          orderBy: { startAt: "desc" },
+          take: 100,
+        });
       } else {
         // Student view: published, current-or-upcoming, and class-open to them.
         const myClasses = await tx.enrollment.findMany({
