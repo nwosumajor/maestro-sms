@@ -303,6 +303,7 @@ model School {
   // Exam attendance — the APPEND-ONLY per-sitting register. Distinct from the
   // daily class register above: this is who sat an exam, not who was in school.
   examAttendance           ExamAttendance[]
+  AttendanceTermRollup     AttendanceTermRollup[]
 
   @@map("school")
 }

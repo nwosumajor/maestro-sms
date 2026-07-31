@@ -9,6 +9,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { shortDate, titleCase } from "@/lib/format";
 import { TakeRegister } from "@/components/attendance/TakeRegister";
 import { RegisterBoard } from "@/components/attendance/RegisterBoard";
+import { ClassAttendanceBoard } from "@/components/attendance/ClassAttendanceBoard";
 import { StudentPicker } from "@/components/attendance/StudentPicker";
 import { PageHeader } from "@/components/shell/PageHeader";
 
@@ -72,6 +73,11 @@ export default async function AttendancePage({
         {/* Missing registers first: it is the only thing on this page that is
             time-critical, and the 7-day correction window is why. */}
         {canWrite && <RegisterBoard />}
+
+        {/* Class-by-class attendance for senior staff. Each row carries the server's
+            own canTake decision, so a supervisor sees a Take-register button only for
+            their class and an administrator sees one everywhere. */}
+        {canWrite && <ClassAttendanceBoard />}
 
         {canWrite && classes && classes.length > 0 && (
           <Card>

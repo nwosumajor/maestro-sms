@@ -6,7 +6,7 @@ import { AttendanceService } from "../../src/attendance/attendance.service";
 import type { Principal, TenantContext, TenantTx } from "../../src/integrity/integrity.foundation";
 
 interface Fakes {
-  classRow?: { id: string } | null;
+  classRow?: { id: string; supervisorId?: string | null } | null;
   classTeacher?: { id: string } | null; // is caller a teacher of the class?
   enrollmentRows?: { studentId: string }[]; // enrolled in the class
   parentChild?: { id: string } | null;
@@ -73,9 +73,12 @@ const principal = (roles: string[], userId = "u-1"): Principal => ({
 const recent = () => new Date().toISOString().slice(0, 10);
 
 describe("AttendanceService scoping", () => {
-  it("a teacher of the class can mark enrolled students", async () => {
+  it("the class SUPERVISOR can mark enrolled students", async () => {
+    // POLICY CHANGE: teaching a class is no longer enough to take its register.
+    // The register records who physically looked at the room, so it follows
+    // responsibility for the class, not timetable contact with it.
     const { service, audit } = makeService({
-      classRow: { id: "c-1" },
+      classRow: { id: "c-1", supervisorId: "u-1" },
       classTeacher: { id: "ct-1" },
       enrollmentRows: [{ studentId: "stu-1" }],
     });
@@ -93,7 +96,7 @@ describe("AttendanceService scoping", () => {
     const today = new Date();
     today.setUTCHours(0, 0, 0, 0);
     const { service } = makeService({
-      classRow: { id: "c-1" },
+      classRow: { id: "c-1", supervisorId: "u-1" },
       classTeacher: { id: "ct-1" },
       enrollmentRows: [{ studentId: "stu-1" }],
       holidays: [{ name: "Mid-term break", startDate: today, endDate: today }],
@@ -106,15 +109,13 @@ describe("AttendanceService scoping", () => {
     ).rejects.toThrow(/holiday/i);
   });
 
-  it("junior_admin (records tier) can mark a register for a class it does NOT teach", async () => {
-    // No classTeacher row: only the school-wide short-circuit lets junior_admin
-    // through. Regression for the dead attendance.write grant.
+  it("school_admin covers ANY class — the absent-supervisor path", async () => {
     const { service, audit } = makeService({
-      classRow: { id: "c-1" },
+      classRow: { id: "c-1", supervisorId: "someone-else" },
       classTeacher: null,
       enrollmentRows: [{ studentId: "stu-1" }],
     });
-    await service.markAttendance(principal(["junior_admin"]), "c-1", {
+    await service.markAttendance(principal(["school_admin"]), "c-1", {
       date: recent(),
       records: [{ studentId: "stu-1", status: "PRESENT" }],
     });
@@ -124,9 +125,70 @@ describe("AttendanceService scoping", () => {
     );
   });
 
+  it("a SUBJECT teacher of the class can no longer take its register (403)", async () => {
+    // They still SEE it — hence 403 rather than 404. A teacher looking at a class
+    // they can open would read a 404 as a bug, not as a rule.
+    const { service } = makeService({
+      classRow: { id: "c-1", supervisorId: "someone-else" },
+      classTeacher: { id: "ct-1" },
+      enrollmentRows: [{ studentId: "stu-1" }],
+    });
+    await expect(
+      service.markAttendance(principal(["teacher"]), "c-1", {
+        date: recent(),
+        records: [{ studentId: "stu-1", status: "PRESENT" }],
+      }),
+    ).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("principal and junior_admin VIEW every register but can no longer write one", async () => {
+    // Both held write before. Seniority does not make someone the person who looked
+    // at the room; cover is an administrative act with a named owner.
+    for (const role of ["principal", "junior_admin"]) {
+      const { service } = makeService({
+        classRow: { id: "c-1", supervisorId: "someone-else" },
+        classTeacher: null,
+        enrollmentRows: [{ studentId: "stu-1" }],
+      });
+      await expect(
+        service.markAttendance(principal([role]), "c-1", {
+          date: recent(),
+          records: [{ studentId: "stu-1", status: "PRESENT" }],
+        }),
+      ).rejects.toMatchObject({ status: 403 });
+    }
+  });
+
+  it("a class with NO supervisor is takeable only by a cover role", async () => {
+    // Otherwise an unsupervised class would have no one able to record it at all.
+    const { service } = makeService({
+      classRow: { id: "c-1", supervisorId: null },
+      classTeacher: { id: "ct-1" },
+      enrollmentRows: [{ studentId: "stu-1" }],
+    });
+    await expect(
+      service.markAttendance(principal(["teacher"]), "c-1", {
+        date: recent(),
+        records: [{ studentId: "stu-1", status: "PRESENT" }],
+      }),
+    ).rejects.toMatchObject({ status: 403 });
+
+    const admin = makeService({
+      classRow: { id: "c-1", supervisorId: null },
+      classTeacher: null,
+      enrollmentRows: [{ studentId: "stu-1" }],
+    });
+    await expect(
+      admin.service.markAttendance(principal(["school_admin"]), "c-1", {
+        date: recent(),
+        records: [{ studentId: "stu-1", status: "PRESENT" }],
+      }),
+    ).resolves.toBeTruthy();
+  });
+
   it("marking ABSENT notifies the student's guardians", async () => {
     const { service, notifications } = makeService({
-      classRow: { id: "c-1" },
+      classRow: { id: "c-1", supervisorId: "u-1" },
       classTeacher: { id: "ct-1" },
       enrollmentRows: [{ studentId: "stu-1" }],
       guardianLinks: [{ parentId: "dad-1", studentId: "stu-1" }],
@@ -145,7 +207,7 @@ describe("AttendanceService scoping", () => {
 
   it("marking PRESENT does NOT notify guardians", async () => {
     const { service, notifications } = makeService({
-      classRow: { id: "c-1" },
+      classRow: { id: "c-1", supervisorId: "u-1" },
       classTeacher: { id: "ct-1" },
       enrollmentRows: [{ studentId: "stu-1" }],
       guardianLinks: [{ parentId: "dad-1", studentId: "stu-1" }],
@@ -158,8 +220,10 @@ describe("AttendanceService scoping", () => {
     expect(notifications.enqueueMany).not.toHaveBeenCalled();
   });
 
-  it("a teacher who doesn't teach the class gets 404", async () => {
-    const { service } = makeService({ classRow: { id: "c-1" }, classTeacher: null });
+  it("a teacher with NO relationship to the class still gets 404, not 403", async () => {
+    // 404 vs 403 is the disclosure boundary: a stranger must not learn the class
+    // exists, whereas someone who can already see it gets told the rule (403).
+    const { service } = makeService({ classRow: { id: "c-1", supervisorId: "someone-else" }, classTeacher: null });
     await expect(
       service.markAttendance(principal(["teacher"]), "c-1", {
         date: recent(),
@@ -170,7 +234,7 @@ describe("AttendanceService scoping", () => {
 
   it("marking a non-enrolled student is rejected (400)", async () => {
     const { service } = makeService({
-      classRow: { id: "c-1" },
+      classRow: { id: "c-1", supervisorId: "u-1" },
       classTeacher: { id: "ct-1" },
       enrollmentRows: [{ studentId: "stu-1" }],
     });
@@ -211,7 +275,7 @@ describe("AttendanceService — term lock", () => {
 
   it("REJECTS marking a register dated before the current term's start", async () => {
     const { service } = makeService({
-      classRow: { id: "c-1" },
+      classRow: { id: "c-1", supervisorId: "u-1" },
       classTeacher: { id: "ct-1" },
       enrollmentRows: [{ studentId: "s-1" }],
       currentTerm: { startDate: new Date("2026-05-01") }, // term starts AFTER the register date
@@ -221,7 +285,7 @@ describe("AttendanceService — term lock", () => {
 
   it("ALLOWS marking a register within the current term", async () => {
     const { service } = makeService({
-      classRow: { id: "c-1" },
+      classRow: { id: "c-1", supervisorId: "u-1" },
       classTeacher: { id: "ct-1" },
       enrollmentRows: [{ studentId: "s-1" }],
       currentTerm: { startDate: new Date("2026-01-01") }, // register date is within the term
@@ -231,7 +295,7 @@ describe("AttendanceService — term lock", () => {
 
   it("FAIL-OPEN: no term configured -> no lock, marking allowed", async () => {
     const { service } = makeService({
-      classRow: { id: "c-1" },
+      classRow: { id: "c-1", supervisorId: "u-1" },
       classTeacher: { id: "ct-1" },
       enrollmentRows: [{ studentId: "s-1" }],
       currentTerm: null,
@@ -255,7 +319,7 @@ describe("AttendanceService — stale-register maker-checker (>7 days)", () => {
 
   it("a TEACHER editing a >7-day register RAISES an amendment (not applied directly)", async () => {
     const { service, workflow, audit } = makeService({
-      classRow: { id: "c-1" },
+      classRow: { id: "c-1", supervisorId: "u-1" },
       classTeacher: { id: "ct-1" },
       enrollmentRows: [{ studentId: "s-1" }],
       currentTerm: { startDate: null }, // no term lock
@@ -275,7 +339,7 @@ describe("AttendanceService — stale-register maker-checker (>7 days)", () => {
 
   it("an APPROVER (attendance.amend.review) edits a >7-day register DIRECTLY", async () => {
     const { service, workflow, audit } = makeService({
-      classRow: { id: "c-1" },
+      classRow: { id: "c-1", supervisorId: "u-1" },
       classTeacher: { id: "ct-1" },
       enrollmentRows: [{ studentId: "s-1" }],
       currentTerm: { startDate: null },
@@ -291,7 +355,7 @@ describe("AttendanceService — stale-register maker-checker (>7 days)", () => {
 
   it("a TEACHER editing a RECENT (<=7 day) register applies DIRECTLY", async () => {
     const { service, workflow } = makeService({
-      classRow: { id: "c-1" },
+      classRow: { id: "c-1", supervisorId: "u-1" },
       classTeacher: { id: "ct-1" },
       enrollmentRows: [{ studentId: "s-1" }],
       currentTerm: { startDate: null },

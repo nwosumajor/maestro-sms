@@ -167,6 +167,7 @@ apply_rls packages/db/prisma/rls/94_platform_feedback_rls.sql platform_feedback_
 apply_rls packages/db/prisma/rls/95_platform_feedback_message_rls.sql platform_feedback_message_insert
 apply_rls packages/db/prisma/rls/96_cbt_theory_rls.sql cbt_theory_answer_update
 apply_rls packages/db/prisma/rls/97_exam_attendance_rls.sql exam_attendance_insert
+apply_rls packages/db/prisma/rls/98_attendance_rollup_rls.sql attendance_term_rollup_delete
 
 # Seed on first provision (compose: SEED_ON_START=true; cloud migrate task: always).
 if [ "${SEED_ON_START}" = "true" ] || [ "$MODE" = "migrate" ]; then

@@ -65,6 +65,7 @@ d("RLS cross-tenant isolation", () => {
   const examSeatA = randomUUID();
   const examInvigilatorA = randomUUID();
   const examAttendanceA = randomUUID();
+  const attendanceRollupA = randomUUID();
   const scanEventA = randomUUID();
   const teacherUnavailA = randomUUID();
   const grantA = randomUUID();
@@ -713,6 +714,12 @@ d("RLS cross-tenant isolation", () => {
       `INSERT INTO term (id,"schoolId","sessionId",name,sequence,"updatedAt") VALUES ($1,$2,$3,'First Term',1,now())`,
       [termA, A, sessionA],
     );
+    // Per-term attendance rollup (derived totals for an ENDED term).
+    await a.query(
+      `INSERT INTO attendance_term_rollup (id,"schoolId","termId","classId","studentId",present,absent,late,excused,total)
+       VALUES ($1,$2,$3,$4,$5,10,1,0,0,11)`,
+      [attendanceRollupA, A, termA, classA, userA],
+    );
     // Term-weighted subject result (student userA, subjectA, termA/sessionA).
     await a.query(
       `INSERT INTO subject_result (id,"schoolId","sessionId","termId","classId","subjectId","studentId",exam,total,grade,status,"updatedAt")
@@ -1220,6 +1227,7 @@ d("RLS cross-tenant isolation", () => {
       "privilege_grant",
       "teacher_unavailability",
       "scan_event",
+      "attendance_term_rollup",
       "exam_attendance",
       "exam_invigilator",
       "exam_seat",
@@ -1336,6 +1344,7 @@ d("RLS cross-tenant isolation", () => {
     ["platform_feedback", platformFeedbackA],
     ["platform_feedback_message", platformFeedbackMessageA],
     ["exam_sitting", examSittingA],
+    ["attendance_term_rollup", attendanceRollupA],
     ["exam_attendance", examAttendanceA],
     ["exam_seat", examSeatA],
     ["exam_invigilator", examInvigilatorA],
@@ -1571,6 +1580,45 @@ d("RLS cross-tenant isolation", () => {
    *     nullable BY DESIGN because a verified webhook is recorded before its tenant
    *     is resolved.
    */
+  /**
+   * Golden Rule #2 as a gate: RLS must actually be ENABLED on every tenant table.
+   *
+   * The coverage meta-test above only inspects tables where relrowsecurity is
+   * already true — so a tenant table with RLS switched OFF is invisible to it and
+   * passes silently. That is not hypothetical: attendance_term_rollup shipped to
+   * the live stack with no RLS at all, because its prisma/rls file was written and
+   * tested but never registered in docker-entrypoint.sh. The suite was green
+   * throughout, since the test database had the file applied by hand.
+   *
+   * This closes that: a tenant table that is not RLS-protected fails here by name,
+   * whether or not anyone remembered to add it to the cases list.
+   */
+  it("every tenant table has RLS ENABLED and FORCED (Golden Rule #2)", async () => {
+    const { rows } = await adminPool.query<{ relname: string; enabled: boolean; forced: boolean }>(`
+      SELECT c.relname, c.relrowsecurity AS enabled, c.relforcerowsecurity AS forced
+      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND c.relispartition = false
+        AND EXISTS (
+          SELECT 1 FROM information_schema.columns col
+          WHERE col.table_schema = 'public' AND col.table_name = c.relname
+            AND col.column_name = 'schoolId')
+      ORDER BY 1`);
+
+    // ultimate_participant is the ONE documented exemption: the cross-school arena
+    // table is deliberately RLS-disabled (cross-tenant by design, carries no PII).
+    const exemptFromRls = new Set(["ultimate_participant"]);
+
+    const offenders = rows
+      .filter((r) => !exemptFromRls.has(r.relname))
+      .map((r) => (!r.enabled ? `${r.relname}: RLS DISABLED` : !r.forced ? `${r.relname}: RLS not FORCED` : null))
+      .filter(Boolean);
+
+    // FORCE matters as much as ENABLE: without it the table owner bypasses every
+    // policy, and migrations/seeds run as exactly that owner.
+    expect(offenders).toEqual([]);
+    expect(rows.length).toBeGreaterThan(150);
+  });
+
   it("every tenant table has a validated FK to school with the right ON DELETE (Golden Rule #1)", async () => {
     const { rows } = await adminPool.query<{
       relname: string;

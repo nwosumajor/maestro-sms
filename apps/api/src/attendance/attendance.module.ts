@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { AttendanceController } from "./attendance.controller";
 import { AttendanceService } from "./attendance.service";
+import { AttendanceRollupService } from "./attendance-rollup.service";
 import { NotificationModule } from "../notifications/notification.module";
 import { WorkflowModule } from "../workflow/workflow.module";
 
@@ -9,7 +10,7 @@ import { WorkflowModule } from "../workflow/workflow.module";
 @Module({
   imports: [NotificationModule, WorkflowModule],
   controllers: [AttendanceController],
-  providers: [AttendanceService],
-  exports: [AttendanceService],
+  providers: [AttendanceService, AttendanceRollupService],
+  exports: [AttendanceService, AttendanceRollupService],
 })
 export class AttendanceModule {}
