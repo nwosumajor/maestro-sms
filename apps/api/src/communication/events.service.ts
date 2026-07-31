@@ -12,7 +12,7 @@ import {
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
 
-const STAFF = new Set(["school_admin", "principal", "accountant", "hr_clerk", "board", "teacher", "super_admin"]);
+const STAFF = new Set(["school_admin", "principal", "accountant", "hr_clerk", "board", "teacher"]);
 /** Default calendar window when the caller doesn't name one. */
 const DEFAULT_WINDOW_DAYS = 120;
 /** How far before the window a one-off event may start and still overlap it. */

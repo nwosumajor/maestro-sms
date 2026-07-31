@@ -52,7 +52,7 @@ import {
 import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 
-const SCHOOL_WIDE_ROLES = new Set(["school_admin", "super_admin"]);
+const SCHOOL_WIDE_ROLES = new Set(["school_admin"]);
 
 interface ComponentInput {
   exam?: number | null;

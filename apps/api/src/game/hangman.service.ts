@@ -57,7 +57,7 @@ import {
 import { effectiveGameSettings } from "./game-settings.util";
 import { GameEventsService } from "./game-events.service";
 
-const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal", "super_admin"]);
+const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal"]);
 
 /** Built-in curriculum-neutral word bank, banded by difficulty word-length. A
  *  host may override with their own word (e.g. a spelling-list term). */

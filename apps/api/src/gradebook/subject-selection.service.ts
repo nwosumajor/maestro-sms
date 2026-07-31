@@ -38,7 +38,7 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 
-const SCHOOL_WIDE_ROLES = new Set(["school_admin", "super_admin", "principal"]);
+const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal"]);
 
 interface SelectionRow {
   id: string;

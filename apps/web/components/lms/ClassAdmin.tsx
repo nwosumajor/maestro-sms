@@ -2,6 +2,7 @@
 
 import type { IdNameDto, UserSummaryDto, Serialized } from "@sms/types";
 import { StudentPicker } from "@/components/people/StudentPicker";
+import { UserPicker } from "@/components/people/UserPicker";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -26,7 +27,6 @@ export function ClassAdmin({
   const router = useRouter();
   const [msg, setMsg] = React.useState<string | null>(null);
   const teachers = users.filter((u) => u.roles.includes("teacher"));
-  const parents = users.filter((u) => u.roles.includes("parent"));
   const sel = "h-9 rounded-md border border-input bg-background px-3 text-sm";
 
   const post = async (path: string, body: unknown, ok: string) => {
@@ -45,7 +45,7 @@ export function ClassAdmin({
   // enroll
   const [en, setEn] = React.useState({ classId: classes[0]?.id ?? "", studentId: students[0]?.id ?? "" });
   // link guardian
-  const [lg, setLg] = React.useState({ parentId: parents[0]?.id ?? "", studentId: students[0]?.id ?? "" });
+  const [lg, setLg] = React.useState({ parentId: "", studentId: students[0]?.id ?? "" });
 
   return (
     <Card>
@@ -98,9 +98,11 @@ export function ClassAdmin({
           className="flex flex-wrap items-end gap-2 border-t border-border pt-4"
         >
           <Label className="w-full">Link guardian</Label>
-          <select aria-label="Parent" value={lg.parentId} onChange={(e) => setLg({ ...lg, parentId: e.target.value })} className={sel}>
-            {parents.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
+          {/* Searched, not enumerated — this control used to be the reason the page
+              fetched every guardian in the school on every load. */}
+          <div className="w-56">
+            <UserPicker kind="parent" value={lg.parentId} onChange={(id) => setLg({ ...lg, parentId: id })} placeholder="Search guardians…" />
+          </div>
           <div className="w-56"><StudentPicker value={lg.studentId} onChange={(id) => setLg({ ...lg, studentId: id })} seed={students} /></div>
           <Button type="submit" size="sm" variant="outline" disabled={!lg.parentId || !lg.studentId}>Link</Button>
         </form>

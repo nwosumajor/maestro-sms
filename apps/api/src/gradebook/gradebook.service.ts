@@ -25,7 +25,7 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 
-const SCHOOL_WIDE_ROLES = new Set(["school_admin", "super_admin"]);
+const SCHOOL_WIDE_ROLES = new Set(["school_admin"]);
 
 interface GradeInput {
   score: number;

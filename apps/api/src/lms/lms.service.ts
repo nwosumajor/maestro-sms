@@ -12,7 +12,17 @@
 // =============================================================================
 
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { NON_STAFF_ROLE_NAMES, ROSTER_CAP, SEARCH_CAP, normaliseEntityCode, uniqueEntityCode, type UserKind } from "@sms/types";
+// VALUE import: Prisma.sql/join only resolve as values, not types (CLAUDE.md).
+import { Prisma } from "@sms/db";
+import {
+  NON_STAFF_ROLE_NAMES,
+  ROSTER_CAP,
+  SEARCH_CAP,
+  normaliseEntityCode,
+  uniqueEntityCode,
+  type ClassOverviewDto,
+  type UserKind,
+} from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -31,7 +41,6 @@ import {
 // relationship path: classes-they-teach + their-children = none).
 const ROSTER_WIDE_ROLES = new Set([
   "school_admin",
-  "super_admin",
   "principal",
   "hr_manager",
   "hr_clerk",
@@ -504,7 +513,19 @@ export class LmsService {
   // --- relationship-scoped reads --------------------------------------------
   /** Classes the caller may see, narrowed by their role + memberships. */
   async listMyClasses(p: Principal) {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    return this.db.runAsTenant(this.ctx(p), (tx) => this.visibleClasses(tx, p));
+  }
+
+  /**
+   * THE definition of "classes this caller may see", shared by the plain list and
+   * the overview.
+   *
+   * It lives in one place deliberately: two copies of a visibility rule drift, and
+   * when a scoping rule drifts the failure is silent — one page shows a teacher a
+   * class the other hides, and neither looks broken.
+   */
+  private async visibleClasses(tx: TenantTx, p: Principal) {
+    {
       // principal / school_admin / HR see every class (to pick one + view its roster).
       if (this.isRosterWide(p)) {
         return tx.class.findMany({ orderBy: { name: "asc" } });
@@ -547,6 +568,86 @@ export class LmsService {
       }
       if (classIds.size === 0) return [];
       return tx.class.findMany({ where: { id: { in: [...classIds] } }, orderBy: { name: "asc" } });
+    }
+  }
+
+  /**
+   * The caller's classes, each with the figures somebody manages a school by.
+   *
+   * The classes page rendered a class name and its raw UUID. A UUID is not a fact
+   * about a class — it told a head of school nothing about who is responsible for
+   * the room, how many children are in it, or whether it is over capacity. This is
+   * the same relationship scoping as listMyClasses, with the numbers attached.
+   *
+   * FOUR grouped queries for the whole page, whatever the class count: roll,
+   * teachers, subjects, and supervisor names. Counting by looping the classes and
+   * asking per class is how this page would become slow at exactly the schools
+   * large enough to need it.
+   */
+  async listClassOverview(p: Principal): Promise<ClassOverviewDto[]> {
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      const classes = (await this.visibleClasses(tx, p)) as Array<{
+        id: string;
+        name: string;
+        code: string | null;
+        level: number | null;
+        capacity: number | null;
+        nextClassId: string | null;
+        supervisorId: string | null;
+      }>;
+      if (classes.length === 0) return [];
+      const ids = classes.map((c) => c.id);
+
+      const [rolls, teachers, offerings, supervisors] = await Promise.all([
+        // ACTIVE only: a promoted or withdrawn pupil is not in the room, and a roll
+        // that counts them makes capacity meaningless.
+        tx.enrollment.groupBy({
+          by: ["classId"],
+          where: { classId: { in: ids }, status: "ACTIVE" },
+          _count: { _all: true },
+        } as never) as unknown as Promise<Array<{ classId: string; _count: { _all: number } }>>,
+        tx.classTeacher.groupBy({
+          by: ["classId"],
+          where: { classId: { in: ids } },
+          _count: { _all: true },
+        } as never) as unknown as Promise<Array<{ classId: string; _count: { _all: number } }>>,
+        // DISTINCT subjects: one subject taught by two teachers is one offering on
+        // the timetable, not two.
+        tx.$queryRaw`
+          SELECT "classId", count(DISTINCT "subjectId")::int AS subjects
+          FROM class_subject_teacher
+          WHERE "schoolId" = ${p.schoolId}::uuid
+            AND "classId" = ANY(ARRAY[${Prisma.join(ids)}]::uuid[])
+          GROUP BY "classId"
+        ` as Promise<Array<{ classId: string; subjects: number }>>,
+        (async () => {
+          const supIds = [...new Set(classes.map((c) => c.supervisorId).filter((x): x is string => !!x))];
+          if (supIds.length === 0) return [] as Array<{ id: string; name: string }>;
+          return (await tx.user.findMany({
+            where: { id: { in: supIds } },
+            select: { id: true, name: true },
+          })) as Array<{ id: string; name: string }>;
+        })(),
+      ]);
+
+      const rollBy = new Map(rolls.map((r) => [r.classId, r._count._all]));
+      const teachBy = new Map(teachers.map((r) => [r.classId, r._count._all]));
+      const subjBy = new Map(offerings.map((r) => [r.classId, r.subjects]));
+      const supBy = new Map(supervisors.map((u) => [u.id, u.name]));
+
+      return classes.map((c) => ({
+        id: c.id,
+        name: c.name,
+        code: c.code,
+        level: c.level,
+        nextClassId: c.nextClassId,
+        supervisorId: c.supervisorId,
+        supervisorName: c.supervisorId ? supBy.get(c.supervisorId) ?? null : null,
+        students: rollBy.get(c.id) ?? 0,
+        capacity: c.capacity,
+        teachers: teachBy.get(c.id) ?? 0,
+        subjects: subjBy.get(c.id) ?? 0,
+      }));
     });
   }
 
@@ -650,7 +751,7 @@ export class LmsService {
    *  `kind` narrows by role CATEGORY server-side so a staff/teacher picker never
    *  mixes in students or parents: "staff" = any role except student/parent
    *  (data-driven — a new seeded staff role is automatically included). */
-  async listUsers(p: Principal, kind?: UserKind) {
+  async listUsers(p: Principal, kind?: UserKind, q?: string) {
     const roleFilter =
       kind === "teacher"
         ? { some: { role: { name: "teacher" } } }
@@ -659,12 +760,28 @@ export class LmsService {
           : kind === "staff"
             ? { some: { role: { name: { notIn: [...NON_STAFF_ROLE_NAMES] } } } }
             : undefined;
+    const needle = q?.trim();
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const [users, roles] = await Promise.all([
         tx.user.findMany({
-          where: roleFilter ? { roles: roleFilter } : undefined,
+          where: {
+            ...(roleFilter ? { roles: roleFilter } : {}),
+            ...(needle
+              ? {
+                  OR: [
+                    { name: { contains: needle, mode: "insensitive" as const } },
+                    { email: { contains: needle, mode: "insensitive" as const } },
+                  ],
+                }
+              : {}),
+          },
           select: { id: true, name: true, email: true, roles: { select: { roleId: true } } },
           orderBy: { name: "asc" },
+          // BOUNDED. This was uncapped, which is fine for ~80 staff and not fine for
+          // the parent directory: a 3,000-pupil school has thousands of guardians,
+          // and the classes page fetched every one of them on every load to fill a
+          // single dropdown. Searching (`?q=`) is how you reach the rest.
+          take: needle ? SEARCH_CAP : ROSTER_CAP,
         }),
         tx.role.findMany({ select: { id: true, name: true } }),
       ]);

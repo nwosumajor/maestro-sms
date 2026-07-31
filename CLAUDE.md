@@ -95,6 +95,18 @@ conflicts with it, flag the conflict before proceeding.
 - Relationship scoping beyond role IS IMPLEMENTED (LmsService is the reference):
   teacher→their classes, student→enrolled, parent→their children. Coarse
   permission gates the endpoint; membership joins narrow the rows; RLS backstops.
+- **`super_admin` holds NO standing role scope over a tenant's data.** Each service
+  keeps its own "sees everything" set (`SCHOOL_WIDE_ROLES` / `ROSTER_WIDE` /
+  `STAFF_WIDE`); 26 of them listed `super_admin`, each copied from the last. It was
+  defence in depth rather than a live hole — a platform user's JWT carries the
+  PLATFORM org's school_id, so RLS confines them to an org with no pupils, and
+  impersonation mints the TARGET user's roles, never super_admin — but it became
+  real the moment anyone granted super_admin inside a school. All 31 occurrences are
+  gone and `test/security/no-standing-superadmin.spec.ts` fails the build if one
+  returns, naming the file and constant. The supported route to tenant data is
+  impersonation: step-up gated, time limited, audited against the operator by name.
+  Attendance goes further — `REGISTER_COVER_ROLES` (who may TAKE a register) is
+  `school_admin` only, since the register records who physically looked at the room.
 
 ## Subscription / module entitlements (platform billing layer) — BUILT
 - A SECOND, orthogonal gate above RBAC: which product MODULES a school's

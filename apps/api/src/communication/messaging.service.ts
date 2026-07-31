@@ -13,7 +13,7 @@ import { NotificationService } from "../notifications/notification.service";
 import { Prisma } from "@sms/db";
 import { decodeCursor, pageLimit, seekWhere, toPage } from "../common/keyset-cursor";
 
-const STAFF = new Set(["school_admin", "principal", "super_admin"]);
+const STAFF = new Set(["school_admin", "principal"]);
 const STAFF_OR_TEACHER = new Set(["teacher", "school_admin", "principal", "accountant", "hr_clerk", "board"]);
 /** Safety cap on messages returned for a single thread (most-recent-first). */
 const MESSAGE_PAGE = 500;

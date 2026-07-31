@@ -43,7 +43,7 @@ import { NotificationService } from "../notifications/notification.service";
 // the PermissionGuard blocks the medical endpoints before this check runs.
 // Matches SearchService.ROSTER_WIDE, which already treats junior_admin as
 // whole-school.
-const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal", "super_admin", "junior_admin"]);
+const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal", "junior_admin"]);
 
 export interface ProfileInput {
   admissionNumber?: string | null;

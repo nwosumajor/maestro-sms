@@ -75,7 +75,7 @@ import {
 import { isJoinable, normalizeJoinUrl } from "./lms-live.util";
 import { TermResultService } from "../gradebook/term-result.service";
 
-const SCHOOL_WIDE_ROLES = new Set(["school_admin", "super_admin"]);
+const SCHOOL_WIDE_ROLES = new Set(["school_admin"]);
 const CONTENT_TYPES = new Set<LmsContentType>(["MATERIAL", "LESSON", "QUIZ", "FORUM_THREAD", "VIDEO", "ASSIGNMENT"]);
 // Only these two content types can be tagged with a (subject, term) and pulled
 // into the report card — the rest aren't numerically graded.

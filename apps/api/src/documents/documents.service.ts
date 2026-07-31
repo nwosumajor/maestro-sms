@@ -36,7 +36,6 @@ const STAFF_WIDE_ROLES = new Set([
   "principal",
   "accountant",
   "board",
-  "super_admin",
   "junior_admin",
 ]);
 /** Document types whose upload notifies the student's guardians. */

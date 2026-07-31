@@ -55,7 +55,7 @@ import {
 import { effectiveGameSettings } from "./game-settings.util";
 import { GameEventsService } from "./game-events.service";
 
-const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal", "super_admin"]);
+const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal"]);
 
 /** Built-in passages banded by difficulty (length/punctuation profile). A host
  *  may override with their own passage (e.g. a set text). */

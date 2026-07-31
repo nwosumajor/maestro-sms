@@ -1,4 +1,6 @@
 import type { AttendanceRecordDto, IdNameDto, Serialized } from "@sms/types";
+import Link from "next/link";
+import { buttonVariants } from "@/components/ui/button";
 import { hasPermission } from "@/lib/permissions";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
@@ -18,6 +20,10 @@ export const dynamic = "force-dynamic";
 type Student = Serialized<IdNameDto>;
 type ClassRow = Serialized<IdNameDto>;
 type Record_ = Serialized<AttendanceRecordDto>;
+/** A page of history plus the TRUE total — the total is what makes five years of
+ *  records navigable instead of silently ending after the first. */
+type History = { records: Record_[]; page: number; pageSize: number; total: number };
+const PAGE_SIZE = 100;
 type Summary = {
   from: string | null;
   to: string | null;
@@ -39,7 +45,7 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "
 export default async function AttendancePage({
   searchParams,
 }: {
-  searchParams: { studentId?: string };
+  searchParams: { studentId?: string; page?: string; classId?: string };
 }) {
   const session = await auth();
   const user = session!.user;
@@ -56,12 +62,16 @@ export default async function AttendancePage({
 
   const list = students ?? [];
   const selectedId = searchParams.studentId ?? list[0]?.id;
-  const [records, summary] = selectedId
+  const page = Math.max(Number(searchParams.page ?? 1) || 1, 1);
+  const [history, summary] = selectedId
     ? await Promise.all([
-        apiGet<Record_[]>(`/students/${selectedId}/attendance`),
+        apiGet<History>(`/students/${selectedId}/attendance?page=${page}&pageSize=${PAGE_SIZE}`),
         apiGet<Summary>(`/students/${selectedId}/attendance/summary`),
       ])
-    : [[], null];
+    : [null, null];
+  const records = history?.records ?? (history === null && selectedId ? null : []);
+  const total = history?.total ?? 0;
+  const pages = Math.max(Math.ceil(total / PAGE_SIZE), 1);
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="attendance" permissions={user.permissions}>
@@ -86,7 +96,7 @@ export default async function AttendancePage({
               <CardDescription>Pick a class and date. Today defaults everyone Present — mark the exceptions and save. Pick a past date (or a register below) to view or correct any day&apos;s register.</CardDescription>
             </CardHeader>
             <CardContent>
-              <TakeRegister classes={classes} lockBeforeDate={termLock?.lockBeforeDate ?? null} />
+              <TakeRegister classes={classes} lockBeforeDate={termLock?.lockBeforeDate ?? null} initialClassId={searchParams.classId} />
             </CardContent>
           </Card>
         )}
@@ -143,6 +153,40 @@ export default async function AttendancePage({
                     ))}
                   </tbody>
                 </table>
+                {/* The history used to stop at 200 rows — about one school year —
+                    with nothing to say the rest existed. The total is stated, and
+                    every page of it is reachable. */}
+                {total > PAGE_SIZE && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-3 text-sm">
+                    <span className="text-muted-foreground tabular-nums">
+                      Days {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} of {total}
+                    </span>
+                    <div className="flex gap-2">
+                      <Link
+                        href={`/attendance?studentId=${selectedId}&page=${page - 1}`}
+                        aria-disabled={page <= 1}
+                        className={buttonVariants({
+                          size: "sm",
+                          variant: "outline",
+                          className: page <= 1 ? "pointer-events-none opacity-50" : "",
+                        })}
+                      >
+                        Newer
+                      </Link>
+                      <Link
+                        href={`/attendance?studentId=${selectedId}&page=${page + 1}`}
+                        aria-disabled={page >= pages}
+                        className={buttonVariants({
+                          size: "sm",
+                          variant: "outline",
+                          className: page >= pages ? "pointer-events-none opacity-50" : "",
+                        })}
+                      >
+                        Older
+                      </Link>
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           )}

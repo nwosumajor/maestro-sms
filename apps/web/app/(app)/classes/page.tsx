@@ -1,19 +1,13 @@
-import type { AcademicSessionDto, ClassDto, PromotionBatchDto, SchoolHolidayDto, SubjectDto, Serialized } from "@sms/types";
+import type { AcademicSessionDto, ClassDto, ClassOverviewDto, PromotionBatchDto, SchoolHolidayDto, SubjectDto, Serialized } from "@sms/types";
 import Link from "next/link";
 import { hasPermission } from "@/lib/permissions";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
 import { ClassAdmin } from "@/components/lms/ClassAdmin";
+import { ClassGrid } from "@/components/lms/ClassGrid";
 import { ClassSubjectsAdmin } from "@/components/lms/ClassSubjectsAdmin";
 import { PromotionManager } from "@/components/lms/PromotionManager";
 import { AcademicCalendar } from "@/components/lms/AcademicCalendar";
@@ -34,12 +28,16 @@ export default async function ClassesPage() {
   // Server-side kind filtering: staff for teacher/supervisor pickers, parents for
   // guardian linking — students never pollute a staff picker (and the payload
   // stays small in a large school).
-  const [classes, students, staff, parents, subjects, promotions, sessions, rooms, holidays] = await Promise.all([
-    apiGet<ClassDto[]>("/classes/mine"),
+  const [overview, students, staff, subjects, promotions, sessions, rooms, holidays] = await Promise.all([
+    // ONE request carries the class list AND the figures it is managed by; the
+    // counts are grouped server-side, so this costs the same at sixty classes.
+    apiGet<Serialized<ClassOverviewDto>[]>("/classes/overview"),
     // Roster no longer prefetched: the enrol/link controls search on demand.
     Promise.resolve(null),
     canWrite ? apiGet<{ id: string; name: string; roles: string[] }[]>("/users?kind=staff") : Promise.resolve(null),
-    canWrite ? apiGet<{ id: string; name: string; roles: string[] }[]>("/users?kind=parent") : Promise.resolve(null),
+    // The guardian directory is no longer fetched at all. It existed to fill one
+    // dropdown, and in a large school that is thousands of rows shipped on every
+    // visit; the picker searches the server instead.
     canManageSubjects ? apiGet<SubjectDto[]>("/subjects") : Promise.resolve(null),
     canPromote ? apiGet<Serialized<PromotionBatchDto>[]>("/promotions") : Promise.resolve(null),
     canManageAcademic ? apiGet<Serialized<AcademicSessionDto>[]>("/academic/sessions") : Promise.resolve(null),
@@ -47,6 +45,17 @@ export default async function ClassesPage() {
     canManageSubjects ? apiGet<{ id: string; name: string }[]>("/timetable/rooms") : Promise.resolve(null),
     canManageAcademic ? apiGet<Serialized<SchoolHolidayDto>[]>("/academic/holidays") : Promise.resolve(null),
   ]);
+
+  // The admin panels only need id/name/level/nextClassId/supervisorId — all of which
+  // the overview already carries, so the page no longer fetches the class list twice.
+  const classes: Serialized<ClassDto>[] | null =
+    overview?.map((c) => ({
+      id: c.id,
+      name: c.name,
+      level: c.level,
+      nextClassId: c.nextClassId,
+      supervisorId: c.supervisorId,
+    })) ?? null;
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="classes" permissions={user.permissions}>
@@ -63,7 +72,7 @@ export default async function ClassesPage() {
         </div>
 
         {canWrite && classes && students && staff && (
-          <ClassAdmin classes={classes} students={students} users={[...staff, ...(parents ?? [])]} />
+          <ClassAdmin classes={classes} students={students} users={staff} />
         )}
 
         {canManageSubjects && classes && staff && subjects && (
@@ -81,7 +90,7 @@ export default async function ClassesPage() {
           />
         )}
 
-        {classes === null ? (
+        {overview === null ? (
           <Alert variant="info">
             <AlertTitle>No access</AlertTitle>
             <AlertDescription>
@@ -89,7 +98,7 @@ export default async function ClassesPage() {
               expired.
             </AlertDescription>
           </Alert>
-        ) : classes.length === 0 ? (
+        ) : overview.length === 0 ? (
           <Alert variant="info">
             <AlertTitle>No classes yet</AlertTitle>
             <AlertDescription>
@@ -97,41 +106,7 @@ export default async function ClassesPage() {
             </AlertDescription>
           </Alert>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2">
-            {classes.map((c) => (
-              <Card key={c.id}>
-                <CardHeader>
-                  <CardTitle className="text-base">{c.name}</CardTitle>
-                  {c.level != null && <CardDescription>Level {c.level}</CardDescription>}
-                </CardHeader>
-                <CardContent className="flex items-center justify-between gap-2">
-                  <code className="text-xs text-muted-foreground">{c.id}</code>
-                  <div className="flex gap-2">
-                    <Link
-                      href={`/classes/${c.id}/info`}
-                      className={buttonVariants({ size: "sm", variant: "outline" })}
-                    >
-                      Info
-                    </Link>
-                    {hasPermission(user.permissions, "enrollment.read") && (
-                      <Link
-                        href={`/classes/${c.id}/roster`}
-                        className={buttonVariants({ size: "sm", variant: "outline" })}
-                      >
-                        Roster
-                      </Link>
-                    )}
-                    <Link
-                      href={`/classes/${c.id}/content`}
-                      className={buttonVariants({ size: "sm", variant: "outline" })}
-                    >
-                      Content
-                    </Link>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+          <ClassGrid classes={overview} canEnrol={hasPermission(user.permissions, "enrollment.read")} />
         )}
       </div>
     </AppShell>

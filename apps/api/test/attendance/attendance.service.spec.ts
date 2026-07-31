@@ -40,6 +40,9 @@ function makeService(f: Fakes) {
     },
     attendanceRecord: {
       findMany: jest.fn().mockResolvedValue([]),
+      // The history is paged, so the TOTAL is counted rather than measured off the
+      // returned page — a length is only ever the size of the cap.
+      count: jest.fn().mockResolvedValue(0),
     },
     term: { findFirst: jest.fn().mockResolvedValue(f.currentTerm ?? null) },
     schoolHoliday: { findFirst: jest.fn().mockResolvedValue(f.holidays?.[0] ?? null) },
@@ -250,6 +253,30 @@ describe("AttendanceService scoping", () => {
     const { service, tx } = makeService({ parentChild: { id: "link-1" } });
     await service.getStudentAttendance(principal(["parent"]), "child-1");
     expect((tx.attendanceRecord.findMany as jest.Mock)).toHaveBeenCalled();
+  });
+
+  it("reports the FULL history size, not the size of the page it returned", async () => {
+    // The regression this guards: the history was `take: 200` and nothing else, so
+    // a pupil in their fifth year had four years of records that no page could
+    // reach and nothing on screen said existed. A count that came from the page
+    // would report 100 here and look perfectly healthy.
+    const { service, tx } = makeService({});
+    (tx.attendanceRecord.count as jest.Mock).mockResolvedValue(940);
+    (tx.attendanceRecord.findMany as jest.Mock).mockResolvedValue(new Array(100).fill({ id: "r" }));
+
+    const out = await service.getStudentAttendance(principal(["student"], "stu-self"), "stu-self", { page: 3 });
+    expect(out.total).toBe(940);
+    expect(out.records).toHaveLength(100);
+    // Page 3 must SKIP the first two pages, or "Older" would re-serve page one
+    // forever and the earlier years would still be unreachable.
+    expect((tx.attendanceRecord.findMany as jest.Mock).mock.calls[0][0]).toMatchObject({ skip: 200, take: 100 });
+  });
+
+  it("bounds the page size a caller can ask for", async () => {
+    // Otherwise ?pageSize=100000 turns a paged endpoint back into an unbounded one.
+    const { service, tx } = makeService({});
+    await service.getStudentAttendance(principal(["student"], "stu-self"), "stu-self", { pageSize: 100_000 });
+    expect((tx.attendanceRecord.findMany as jest.Mock).mock.calls[0][0].take).toBe(200);
   });
 
   it("a student reads their OWN attendance", async () => {
