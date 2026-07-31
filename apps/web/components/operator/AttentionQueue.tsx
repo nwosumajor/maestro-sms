@@ -23,7 +23,7 @@ const naira = (minor: number) =>
   `₦${(minor / 100).toLocaleString("en-NG", { maximumFractionDigits: 0 })}`;
 
 /**
- * The schools that need a DECISION — the operator console's front door.
+ * The schools that need a DECISION.
  *
  * A console that renders five thousand schools accurately is still a console nobody
  * can act on: the owner cannot review them by scrolling, so the important question
@@ -31,41 +31,28 @@ const naira = (minor: number) =>
  * is a condition somebody has to decide about, with the figure behind it, ranked
  * worst-first and then by what is at stake.
  *
+ * The data arrives as a PROP from the server component that renders it — this used
+ * to fetch on mount, which meant the rows landed a round trip after the page and,
+ * worse, ran the fleet-wide scan on every visit to the operator hub whether or not
+ * anyone was triaging. Filtering stays here, client-side over rows already in hand:
+ * hiding some rows is a visual change and should not cost a request.
+ *
  * Aggregates only. School names, counts and money — never a pupil or a staff member.
  */
-export function AttentionQueue() {
-  const [data, setData] = React.useState<Queue | null>(null);
-  const [failed, setFailed] = React.useState(false);
+export function AttentionQueue({ queue: data }: { queue: Queue }) {
   const [kind, setKind] = React.useState<string>("");
 
-  React.useEffect(() => {
-    let live = true;
-    (async () => {
-      const res = await fetch("/api/sms/operator/attention");
-      if (!live) return;
-      if (res.ok) setData((await res.json()) as Queue);
-      else setFailed(true);
-    })();
-    return () => {
-      live = false;
-    };
-  }, []);
-
   const rows: Row[] = React.useMemo(
-    () => (!data ? [] : kind ? data.rows.filter((r) => r.signals.some((s) => s.kind === kind)) : data.rows),
+    () => (kind ? data.rows.filter((r) => r.signals.some((s) => s.kind === kind)) : data.rows),
     [data, kind],
   );
-
-  if (failed) return null;
 
   return (
     <Card>
       <CardHeader className="pb-3">
         <CardTitle className="text-base">Needs a decision</CardTitle>
         <CardDescription>
-          {!data ? (
-            "Checking the fleet…"
-          ) : data.total === 0 ? (
+          {data.total === 0 ? (
             `All ${data.scanned} schools are paying, active and in use.`
           ) : (
             <>
@@ -78,7 +65,7 @@ export function AttentionQueue() {
         </CardDescription>
       </CardHeader>
 
-      {data && data.total > 0 && (
+      {data.total > 0 && (
         <CardContent className="space-y-3">
           <div className="flex flex-wrap gap-1.5">
             <Button size="sm" variant={kind === "" ? "default" : "outline"} onClick={() => setKind("")}>
