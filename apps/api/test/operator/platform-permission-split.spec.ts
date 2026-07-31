@@ -16,7 +16,11 @@ import type { Reflector } from "@nestjs/core";
 import {
   ALL_PLATFORM_PERMISSIONS,
   DELEGABLE_PLATFORM_PERMISSIONS,
+  LENDABLE_PLATFORM_PERMISSIONS,
   OPERATOR_PERMISSIONS,
+  PLATFORM_STAFF_BASELINE_PERMISSIONS,
+  ROLE_PERMISSIONS,
+  isDelegatablePlatformPermission,
   isElevatable,
 } from "@sms/types";
 
@@ -64,6 +68,46 @@ describe("platform permission split", () => {
     const classified = new Set([...DELEGABLE_PLATFORM_PERMISSIONS, ...OWNER_ONLY]);
     expect(ALL_PLATFORM_PERMISSIONS.filter((p) => !classified.has(p))).toEqual([]);
   });
+
+  // --- the third tier: LENDABLE but never STANDING ---------------------------
+  // "A role carries this permanently" and "the owner lent it for eleven days, with
+  // a reason, revocable in one click, and logged at every use" are different risks.
+  // Conflating them is what made time-bound delegation pointless: the manager
+  // already held everything it could grant.
+  it("the higher tier is lendable but NEVER a standing role permission", () => {
+    for (const perm of [OPERATOR_PERMISSIONS.PLATFORM_TENANTS_STATUS, OPERATOR_PERMISSIONS.PLATFORM_SUBSCRIPTION_MANAGE]) {
+      expect(LENDABLE_PLATFORM_PERMISSIONS).toContain(perm); // may be lent, briefly
+      expect(DELEGABLE_PLATFORM_PERMISSIONS).not.toContain(perm); // never by role
+      expect(ROLE_PERMISSIONS.manager_admin).not.toContain(perm); // and not in the seed
+    }
+  });
+
+  it("total control is lendable at NO duration", () => {
+    // The four that stay with the owner whatever the mechanism: lending one of
+    // these for a week is indistinguishable from giving it away.
+    for (const perm of [
+      OPERATOR_PERMISSIONS.PLATFORM_OPERATE,
+      OPERATOR_PERMISSIONS.PLATFORM_IMPERSONATE,
+      OPERATOR_PERMISSIONS.PLATFORM_USER_CREDENTIALS,
+      OPERATOR_PERMISSIONS.PLATFORM_PRICING_MANAGE,
+      OPERATOR_PERMISSIONS.PLATFORM_STUDENT_READ,
+      OPERATOR_PERMISSIONS.PLATFORM_STAFF_MANAGE,
+    ]) {
+      expect(LENDABLE_PLATFORM_PERMISSIONS).not.toContain(perm);
+      expect(isDelegatablePlatformPermission(perm)).toBe(false);
+    }
+  });
+
+  it("a manager's STANDING role is the bare floor — everything else is lent", () => {
+    // The regression that made this feature a no-op: manager_admin used to carry
+    // all eight delegable duties permanently, so there was nothing left to lend.
+    expect([...ROLE_PERMISSIONS.manager_admin].sort()).toEqual(["notification.read", "platform.tenants.read"]);
+    // And the floor must be a strict subset of what can be lent, or the role would
+    // grant something delegation could never take back.
+    for (const perm of PLATFORM_STAFF_BASELINE_PERMISSIONS) {
+      expect(LENDABLE_PLATFORM_PERMISSIONS).toContain(perm);
+    }
+  });
 });
 
 // --- the guard actually enforces it -----------------------------------------
@@ -71,7 +115,9 @@ const managerPrincipal = {
   userId: "mgr-1",
   schoolId: "platform",
   roles: ["manager_admin"],
-  permissions: [...DELEGABLE_PLATFORM_PERMISSIONS],
+  // The manager's REAL standing permissions now — the bare floor. Duties beyond
+  // it arrive only as a live delegation, which this fixture deliberately has none of.
+  permissions: [...ROLE_PERMISSIONS.manager_admin],
 };
 jest.mock("../../src/auth/jwt", () => ({ verifyToken: () => managerPrincipal }));
 
@@ -109,8 +155,63 @@ describe("PermissionGuard — manager_admin boundary", () => {
     await expect(guard.canActivate(ctx())).rejects.toThrow(ForbiddenException);
   });
 
-  it.each([...DELEGABLE_PLATFORM_PERMISSIONS])("allows a manager_admin on delegable %s", async (perm) => {
-    const guard = new PermissionGuard(reflector(perm), noGrantDb as never, {} as never, {} as never, { forRoles: jest.fn().mockResolvedValue([]) } as never, allowRate as never);
+  it("allows a manager_admin on the standing floor without any delegation", async () => {
+    const guard = new PermissionGuard(reflector(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ), noGrantDb as never, {} as never, {} as never, { forRoles: jest.fn().mockResolvedValue([]) } as never, allowRate as never);
     await expect(guard.canActivate(ctx())).resolves.toBe(true);
+  });
+
+  // The delegation contract, at the guard. A manager holds NONE of these by role
+  // any more, so each is 403 until the owner lends it — and allowed the moment they
+  // do, on the SAME token, because the guard reads the delegation table rather than
+  // the JWT. That is also why a hand-back takes effect immediately.
+  const lendableBeyondFloor = LENDABLE_PLATFORM_PERMISSIONS.filter(
+    (p) => !ROLE_PERMISSIONS.manager_admin.includes(p),
+  );
+
+  it.each(lendableBeyondFloor)("403s a manager_admin on %s with NO delegation", async (perm) => {
+    const guard = new PermissionGuard(reflector(perm), noGrantDb as never, {} as never, {} as never, { forRoles: jest.fn().mockResolvedValue([]) } as never, allowRate as never);
+    await expect(guard.canActivate(ctx())).rejects.toThrow(ForbiddenException);
+  });
+
+  it.each(lendableBeyondFloor)("ALLOWS a manager_admin on %s once the owner has lent it", async (perm) => {
+    // A tx whose delegation lookup finds a live loan, and whose audit record
+    // succeeds — the guard audits every USE, not merely the grant.
+    const lentDb = {
+      runAsTenant: async (_c: unknown, fn: (tx: unknown) => Promise<unknown>) =>
+        fn({
+          platformDelegation: { findFirst: async () => ({ id: "live" }) },
+          privilegeGrant: { findFirst: async () => null },
+          auditLog: { create: async () => ({}) },
+        }),
+      runAsTenantReadOnly: async () => false,
+    };
+    const guard = new PermissionGuard(
+      reflector(perm),
+      lentDb as never,
+      { record: jest.fn() } as never,
+      {} as never,
+      { forRoles: jest.fn().mockResolvedValue([]) } as never,
+      allowRate as never,
+    );
+    await expect(guard.canActivate(ctx())).resolves.toBe(true);
+  });
+
+  it("a lent loan can NEVER carry an owner-only power, whatever the row says", async () => {
+    // Defence in depth: even a tampered or legacy row claiming platform.impersonate
+    // is refused, because the guard re-checks the lendable set before it looks.
+    const lentDb = {
+      runAsTenant: async (_c: unknown, fn: (tx: unknown) => Promise<unknown>) =>
+        fn({ platformDelegation: { findFirst: async () => ({ id: "tampered" }) }, privilegeGrant: { findFirst: async () => null } }),
+      runAsTenantReadOnly: async () => false,
+    };
+    const guard = new PermissionGuard(
+      reflector(OPERATOR_PERMISSIONS.PLATFORM_IMPERSONATE),
+      lentDb as never,
+      { record: jest.fn() } as never,
+      {} as never,
+      { forRoles: jest.fn().mockResolvedValue([]) } as never,
+      allowRate as never,
+    );
+    await expect(guard.canActivate(ctx())).rejects.toThrow(ForbiddenException);
   });
 });

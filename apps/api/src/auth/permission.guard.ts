@@ -11,13 +11,14 @@ import {
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import type { Request, Response } from "express";
-import { isElevatable, type ModuleKey } from "@sms/types";
+import { isDelegatablePlatformPermission, isElevatable, type ModuleKey } from "@sms/types";
 import { PERMISSION_KEY } from "./require-permission.decorator";
 import { MODULE_KEY } from "./require-module.decorator";
 import { STEPUP_KEY } from "./require-stepup.decorator";
 import { PUBLIC_KEY } from "./public.decorator";
 import { verifyToken } from "./jwt";
 import { verifyStepUp } from "./stepup";
+import { hasLiveDelegation } from "./platform-delegation.util";
 import type { Principal } from "./principal";
 import {
   AUDIT_LOG_SERVICE,
@@ -118,11 +119,14 @@ export class PermissionGuard implements CanActivate {
       context.getHandler(),
       context.getClass(),
     ]);
-    // Permission gate: role permission, or an active JIT elevation grant.
+    // Permission gate, in order of decreasing durability: the role permission in the
+    // verified JWT, then an active JIT elevation grant (bottom-up, never platform.*),
+    // then a live owner-granted platform delegation (top-down, delegable subset only).
     if (
       required &&
       !principal.permissions.includes(required) &&
-      !(await this.hasActiveGrant(principal, required))
+      !(await this.hasActiveGrant(principal, required)) &&
+      !(await this.hasPlatformDelegation(principal, required))
     ) {
       throw new ForbiddenException();
     }
@@ -150,6 +154,48 @@ export class PermissionGuard implements CanActivate {
       return verifyToken(header.slice("Bearer ".length));
     }
     throw new UnauthorizedException("Missing bearer token");
+  }
+
+  /**
+   * True if the platform OWNER has lent this duty to this manager and it is still
+   * live. Read from the DB on every miss rather than from the token, which is what
+   * makes a hand-back take effect immediately instead of whenever a session expires.
+   *
+   * Restricted to DELEGABLE_PLATFORM_PERMISSIONS at the service — impersonation,
+   * pricing, credentials and student PII are not lendable at any duration, and that
+   * is re-checked here rather than trusted from the row.
+   */
+  private async hasPlatformDelegation(principal: Principal, permission: string): Promise<boolean> {
+    // Cheap exit for the overwhelmingly common case: this is a per-request DB read,
+    // and almost every permission in the product is not a lendable platform duty.
+    if (!isDelegatablePlatformPermission(permission)) return false;
+    try {
+      return await this.db.runAsTenant(
+        { schoolId: principal.schoolId, userId: principal.userId },
+        async (tx) => {
+          const held = await hasLiveDelegation(tx, principal.userId, permission);
+          if (!held) return false;
+          // Audited at USE, not merely at grant: "who had the duty" is a weaker
+          // question than "what did they do with it".
+          await this.audit.record(
+            {
+              actorId: principal.userId,
+              action: "platform.delegation.use",
+              entity: "permission",
+              entityId: permission,
+              schoolId: principal.schoolId,
+              metadata: { permission },
+            },
+            tx,
+          );
+          return true;
+        },
+      );
+    } catch {
+      // A failed lookup denies. Delegation is additive: falling back to "no" leaves
+      // the caller exactly where their JWT put them.
+      return false;
+    }
   }
 
   /** True if an ACTIVE, unexpired grant for `permission` exists; audits the use. */

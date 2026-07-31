@@ -95,6 +95,24 @@ conflicts with it, flag the conflict before proceeding.
 - Relationship scoping beyond role IS IMPLEMENTED (LmsService is the reference):
   teacher→their classes, student→enrolled, parent→their children. Coarse
   permission gates the endpoint; membership joins narrow the rows; RLS backstops.
+- **Platform duties are LENT, not held.** `manager_admin`'s standing role is the bare
+  floor (`platform.tenants.read` + `notification.read`). Every real duty —
+  provisioning, onboarding triage, audit reads, account lookup/unlock, grace,
+  feedback, plus a higher tier (`platform.tenants.status`,
+  `platform.subscription.manage`) — is LENT by the owner for a bounded window via
+  `platform_delegation` (migration `20261115000000`, rls/99, owner-only behind
+  `platform.staff.manage` + step-up, never self-granted, ≤90 days, audited at grant,
+  USE and revoke). The guard reads the table on a permission MISS, so a hand-back
+  applies on the manager's very next request rather than when their session ends.
+  THREE tiers, and the distinction is the point: `PLATFORM_STAFF_BASELINE_PERMISSIONS`
+  (standing) ⊂ `DELEGABLE_PLATFORM_PERMISSIONS` (may be a role permission) ⊂
+  `LENDABLE_PLATFORM_PERMISSIONS` (may be lent briefly). Impersonation,
+  platform.operate, plan credentials, pricing, student records and hiring platform
+  staff are in NONE of them — lending one for a week is giving it away. Deliberately
+  NOT the JIT-elevation path, which is bottom-up and closed to every platform.*
+  permission. // GOTCHA: narrowing the role only takes effect when the SEED RE-RUNS
+  (it reconciles role→permissions with a deleteMany), and the seed needs the
+  PRIVILEGED URL — the app role is SELECT-only on `school`.
 - **`super_admin` holds NO standing role scope over a tenant's data.** Each service
   keeps its own "sees everything" set (`SCHOOL_WIDE_ROLES` / `ROSTER_WIDE` /
   `STAFF_WIDE`); 26 of them listed `super_admin`, each copied from the last. It was

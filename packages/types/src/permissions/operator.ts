@@ -78,8 +78,31 @@ export const PLATFORM_STAFF_ROLE = "manager_admin";
 /** Every platform permission — all cross-tenant, therefore all non-elevatable. */
 export const ALL_PLATFORM_PERMISSIONS: readonly string[] = Object.values(OPERATOR_PERMISSIONS);
 
-/** The subset delegable to platform STAFF (manager_admin). Everything absent from
- *  this list stays with the owner. Keep in sync with seed.ts's manager_admin. */
+/**
+ * What a platform manager holds PERMANENTLY, by virtue of the role.
+ *
+ * Deliberately tiny: see the registry, and read your own inbox. Everything else a
+ * manager does is a duty the owner LENDS them, with an expiry date — which is only
+ * meaningful if the standing role does not already include it. It previously
+ * included all eight delegable duties, which made time-bound delegation a no-op:
+ * there was nothing left to lend.
+ *
+ * Keep in sync with seed.ts's manager_admin.
+ */
+export const PLATFORM_STAFF_BASELINE_PERMISSIONS: readonly string[] = [
+  OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ,
+];
+
+/**
+ * The subset that may be a manager's STANDING role permission — oversight and
+ * day-to-day operations. Everything absent stays with the owner as a standing power.
+ *
+ * Unchanged, deliberately: `platform.tenants.status` and
+ * `platform.subscription.manage` are still never granted by a ROLE, because taking
+ * a paying school offline and giving away revenue are not things anyone should hold
+ * by default. See LENDABLE_PLATFORM_PERMISSIONS for the separate question of what
+ * the owner may lend for a fortnight.
+ */
 export const DELEGABLE_PLATFORM_PERMISSIONS: readonly string[] = [
   OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ,
   OPERATOR_PERMISSIONS.PLATFORM_TENANTS_WRITE,
@@ -89,4 +112,26 @@ export const DELEGABLE_PLATFORM_PERMISSIONS: readonly string[] = [
   OPERATOR_PERMISSIONS.PLATFORM_USER_UNLOCK,
   OPERATOR_PERMISSIONS.PLATFORM_GRACE_MANAGE,
   OPERATOR_PERMISSIONS.PLATFORM_FEEDBACK_REVIEW,
+];
+
+/**
+ * What the owner may LEND to a platform manager for a bounded, audited, revocable
+ * window (PlatformDelegation) — a strictly different question from what a ROLE may
+ * carry, and the distinction is the point.
+ *
+ * "Standing" and "for eleven days, with a reason, revocable in one click, and
+ * logged at every use" are not the same risk. So this set is the delegable duties
+ * PLUS a higher tier that must never be standing:
+ *
+ *   platform.tenants.status       — an outage for one school; instantly reversible
+ *   platform.subscription.manage  — comp or extend; loud in the audit trail
+ *
+ * Still absent, at any duration: impersonation, platform.operate, plan credentials,
+ * pricing, student records and hiring platform staff. Lending one of those for a
+ * week is indistinguishable from giving it away, so they are not lent at all.
+ */
+export const LENDABLE_PLATFORM_PERMISSIONS: readonly string[] = [
+  ...DELEGABLE_PLATFORM_PERMISSIONS,
+  OPERATOR_PERMISSIONS.PLATFORM_TENANTS_STATUS,
+  OPERATOR_PERMISSIONS.PLATFORM_SUBSCRIPTION_MANAGE,
 ];

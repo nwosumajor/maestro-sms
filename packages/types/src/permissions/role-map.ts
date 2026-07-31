@@ -44,15 +44,17 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
   //   rbac.manage .......... would let it grant itself roles
   // All of the above are ALSO non-elevatable, so it cannot JIT-elevate into them.
   // Every action it takes is audited and attributed to it, exactly like the owner's.
+  // A platform manager holds almost nothing permanently. Every real duty —
+  // provisioning, onboarding triage, audit reads, account lookup and unlock, grace
+  // extension, feedback, and the higher tier — is LENT by the owner with an expiry
+  // date (PlatformDelegation), so responsibility can be handed over for a trip and
+  // handed back on return without anyone editing a role.
+  //
+  // This role used to carry all eight delegable duties permanently, which made
+  // time-bound delegation a no-op: there was nothing left to lend. Narrowing it is
+  // what turns the feature from machinery into control.
   manager_admin: [
-    "platform.tenants.read", // registry, analytics, billing alerts
-    "platform.tenants.write", // onboard schools + add their admins
-    "platform.onboarding.review", // triage public signup requests
-    "platform.audit.read", // see what's happening platform-wide
-    "platform.user.read", // support triage: look up an account
-    "platform.user.unlock", // support: clear a lockout (grants no access)
-    "platform.grace.manage", // extend a late payer's grace (hard-capped => not a comp)
-    "platform.feedback.review", // triage the platform-feedback inbox (support)
+    "platform.tenants.read", // see the registry; the floor for doing any platform job
     "notification.read", // own inbox (onboarding alerts)
   ],
   // Board: read-only oversight + ultimate veto on workflows.

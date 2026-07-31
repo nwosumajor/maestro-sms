@@ -66,6 +66,7 @@ d("RLS cross-tenant isolation", () => {
   const examInvigilatorA = randomUUID();
   const examAttendanceA = randomUUID();
   const attendanceRollupA = randomUUID();
+  const platformDelegationA = randomUUID();
   const scanEventA = randomUUID();
   const teacherUnavailA = randomUUID();
   const grantA = randomUUID();
@@ -720,6 +721,13 @@ d("RLS cross-tenant isolation", () => {
        VALUES ($1,$2,$3,$4,$5,10,1,0,0,11)`,
       [attendanceRollupA, A, termA, classA, userA],
     );
+    // Owner-granted, time-bound platform duty. Tenant-scoped to its org exactly
+    // like every other table, which is the point of storing it this way.
+    await a.query(
+      `INSERT INTO platform_delegation (id,"schoolId","userId",permission,reason,"grantedById","expiresAt","updatedAt")
+       VALUES ($1,$2,$3,'platform.onboarding.review','cover',$3,now() + interval '7 days',now())`,
+      [platformDelegationA, A, userA],
+    );
     // Term-weighted subject result (student userA, subjectA, termA/sessionA).
     await a.query(
       `INSERT INTO subject_result (id,"schoolId","sessionId","termId","classId","subjectId","studentId",exam,total,grade,status,"updatedAt")
@@ -1228,6 +1236,7 @@ d("RLS cross-tenant isolation", () => {
       "teacher_unavailability",
       "scan_event",
       "attendance_term_rollup",
+      "platform_delegation",
       "exam_attendance",
       "exam_invigilator",
       "exam_seat",
@@ -1345,6 +1354,7 @@ d("RLS cross-tenant isolation", () => {
     ["platform_feedback_message", platformFeedbackMessageA],
     ["exam_sitting", examSittingA],
     ["attendance_term_rollup", attendanceRollupA],
+    ["platform_delegation", platformDelegationA],
     ["exam_attendance", examAttendanceA],
     ["exam_seat", examSeatA],
     ["exam_invigilator", examInvigilatorA],

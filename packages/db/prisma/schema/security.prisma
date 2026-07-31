@@ -47,3 +47,63 @@ model PrivilegeGrant {
   @@index([schoolId, userId, status])
   @@map("privilege_grant")
 }
+
+// =============================================================================
+// PlatformDelegation — the OWNER lends a duty to a platform manager, for a while
+// =============================================================================
+// Deliberately NOT the PrivilegeGrant path above, and the difference is the whole
+// safety argument:
+//
+//   PrivilegeGrant is BOTTOM-UP — a holder asks for more power and a peer approves.
+//   Every platform.* permission is excluded from it (NON_ELEVATABLE_PERMISSIONS),
+//   because a manager_admin requesting platform.tenants.write and another
+//   manager_admin approving it would make the owner/staff split theatre.
+//
+//   This is TOP-DOWN — the platform OWNER hands a specific duty to a specific
+//   manager, for a bounded window. No escalation is possible by construction: the
+//   grantor already holds everything they can give away, so nobody gains anything
+//   the granting identity did not already have.
+//
+// Only DELEGABLE_PLATFORM_PERMISSIONS may be lent — enforced when the row is
+// written AND again when it is used, so a legacy or tampered row still cannot
+// carry impersonation, pricing, credentials or student PII. Those stay with the
+// owner permanently and are not lendable at any duration.
+//
+// Tenant-scoped to the PLATFORM org (schoolId = the isPlatform=true school), so it
+// is covered by ordinary RLS like every other table rather than needing a bespoke
+// global posture. Rows are never hard-deleted: a revoked delegation is history of
+// who could do what, and when.
+// =============================================================================
+model PlatformDelegation {
+  id       String @id @default(uuid()) @db.Uuid
+  /// The platform org. Present so RLS applies unchanged (Golden Rule #1).
+  schoolId String @db.Uuid
+
+  /// The platform manager receiving the duty (DB FK to user; scalar, no relation).
+  userId     String @db.Uuid
+  /// One delegable platform permission, e.g. "platform.onboarding.review".
+  permission String
+  /// Why — read back in the audit trail and shown on the console.
+  reason     String
+
+  /// Who lent it. ALWAYS the owner; never equal to userId (no self-grant).
+  grantedById String   @db.Uuid
+  /// When it stops being honoured. Required: an open-ended delegation is just a
+  /// role change wearing a different name.
+  expiresAt   DateTime
+
+  /// Set on an early hand-back. Revocation is immediate because the guard reads
+  /// this table on every miss — it does not wait for a token to expire.
+  revokedAt   DateTime?
+  revokedById String?   @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId])
+  /// The guard's hot path: is there a live grant of THIS permission for THIS user.
+  @@index([schoolId, userId, permission])
+  @@map("platform_delegation")
+}

@@ -77,6 +77,7 @@ export * from "./dto/notifications";
 export * from "./dto/security";
 export * from "./dto/privacy";
 export * from "./dto/operator";
+export * from "./dto/platform-delegation";
 export * from "./dto/public";
 export * from "./dto/billing";
 export * from "./dto/admissions";

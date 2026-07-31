@@ -151,7 +151,8 @@ model School {
   examInvigilators ExamInvigilator[]
 
   // Security relations
-  privilegeGrants PrivilegeGrant[]
+  privilegeGrants     PrivilegeGrant[]
+  platformDelegations PlatformDelegation[]
 
   // Privacy relations
   erasureRequests ErasureRequest[]
