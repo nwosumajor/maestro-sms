@@ -33,6 +33,7 @@ import {
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
+import { headcountBySchool, headcountInTenant, type SchoolHeadcount } from "./operator-people";
 import { ModuleEntitlementService } from "../foundation/module-entitlement.service";
 
 const IMPERSONATION_TTL = 900; // 15 min
@@ -189,11 +190,38 @@ export class OperatorService {
           total: await tx.school.count({ where }),
           schools: await tx.school.findMany(query),
         }));
+    const rows = schools as Array<{ id: string; name: string; slug: string; status: string; createdAt: Date }>;
+
+    // Headcount for the WHOLE page in one grouped query, replacing a per-school
+    // `user.count()` inside the loop. It also splits what used to be a single
+    // lumped `users` figure: students, staff and guardians added together told you
+    // nothing — a 900-pupil school and one with 900 guardian accounts read the same.
+    // Aggregates only; no name or id of any person crosses a tenant boundary.
+    const headcounts = await headcountBySchool(
+      this.privileged.client ?? (undefined as never),
+      this.privileged.client ? rows.map((s) => s.id) : [],
+    ).catch(() => new Map<string, SchoolHeadcount>());
+
     const out = [];
-    for (const s of schools as Array<{ id: string; name: string; slug: string; status: string; createdAt: Date }>) {
-      const users = await this.db.runAsTenant({ schoolId: s.id, userId: p.userId }, (tx) => tx.user.count());
-      const ent = await this.entitlements.resolve(s.id);
-      out.push({ ...s, users, plan: ent.plan, moduleCount: ent.modules.length, graceDays: ent.graceDays, subscriptionStatus: ent.status });
+    for (const s of rows) {
+      const ent = await this.entitlements.resolve(s.id); // cached per school (30s)
+      const head =
+        headcounts.get(s.id) ??
+        // No privileged client (or the grouped read failed): fall back to counting
+        // under the school's own GUC. Slower, never wrong, never zero — a headcount
+        // that silently reported 0 would read as "this school has no pupils".
+        (await this.db.runAsTenant({ schoolId: s.id, userId: p.userId }, (tx) => headcountInTenant(tx, s.id)));
+      out.push({
+        ...s,
+        users: head.students + head.staff + head.parents,
+        students: head.students,
+        staff: head.staff,
+        parents: head.parents,
+        plan: ent.plan,
+        moduleCount: ent.modules.length,
+        graceDays: ent.graceDays,
+        subscriptionStatus: ent.status,
+      });
     }
     return { tenants: out, total, page, pageSize };
   }

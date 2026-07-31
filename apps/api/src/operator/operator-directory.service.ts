@@ -30,6 +30,7 @@ import {
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
+import { headcountInTenant } from "./operator-people";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import { ModuleEntitlementService } from "../foundation/module-entitlement.service";
 
@@ -136,9 +137,11 @@ export class OperatorDirectoryService {
     const row = await this.enrichRow(p, school);
     const detail = await this.db.runAsTenant({ schoolId, userId: p.userId }, async (tx) => {
       const contacts = await this.contactsIn(tx);
-      const staff = await tx.userRole.count({
-        where: { role: { name: { notIn: ["student", "parent"] } } },
-      });
+      // Counts PEOPLE, not role assignments. This was `userRole.count()`, which
+      // counted a head teacher who also teaches twice — and the staff chain in this
+      // product makes holding two roles normal, so the figure was reliably inflated
+      // on exactly the schools an operator would look at hardest.
+      const head = await headcountInTenant(tx, schoolId);
       const sub = await tx.schoolSubscription.findFirst({
         where: { schoolId },
         select: {
@@ -158,7 +161,7 @@ export class OperatorDirectoryService {
         orderBy: { createdAt: "desc" },
         take: 12,
       });
-      return { contacts, staff, sub, payments };
+      return { contacts, head, sub, payments };
     });
     // Referrer name lives on ANOTHER tenant's registry row — global table read.
     const referredBy = detail.sub?.referredBySchoolId
@@ -172,7 +175,9 @@ export class OperatorDirectoryService {
       ...row,
       admins: detail.contacts.admins,
       principals: detail.contacts.principals,
-      staff: detail.staff,
+      staff: detail.head.staff,
+      students: detail.head.students,
+      parents: detail.head.parents,
       billingCycle: detail.sub?.billingCycle ?? "TERM",
       seats: detail.sub?.seats ?? null,
       priceMinor: detail.sub?.priceMinor ?? null,
@@ -196,8 +201,9 @@ export class OperatorDirectoryService {
   private async enrichRow(p: Principal, s: SchoolRow): Promise<SchoolDirectoryRowDto> {
     const e = await this.db.runAsTenant({ schoolId: s.id, userId: p.userId }, async (tx) => {
       const contacts = await this.contactsIn(tx);
-      const students = await tx.userRole.count({ where: { role: { name: "student" } } });
-      const users = await tx.user.count();
+      // One grouped headcount replaces a students count plus a total-users count,
+      // and gives the row a staff figure it never had.
+      const head = await headcountInTenant(tx, s.id);
       const sub = await tx.schoolSubscription.findFirst({
         where: { schoolId: s.id },
         select: { plan: true, status: true, currentPeriodEnd: true, seatArrearsMinor: true },
@@ -207,7 +213,7 @@ export class OperatorDirectoryService {
         select: { paidAt: true, createdAt: true },
         orderBy: { createdAt: "desc" },
       });
-      return { contacts, students, users, sub, lastPaid };
+      return { contacts, head, sub, lastPaid };
     });
     return {
       id: s.id,
@@ -225,8 +231,10 @@ export class OperatorDirectoryService {
       currentPeriodEnd: e.sub?.currentPeriodEnd ?? null,
       lastPaymentAt: e.lastPaid?.paidAt ?? e.lastPaid?.createdAt ?? null,
       outstandingMinor: e.sub?.seatArrearsMinor ?? 0,
-      students: e.students,
-      users: e.users,
+      students: e.head.students,
+      staff: e.head.staff,
+      parents: e.head.parents,
+      users: e.head.students + e.head.staff + e.head.parents,
     };
   }
 

@@ -30,7 +30,10 @@ import {
   normalizeGender,
   resolveModules,
 } from "@sms/types";
+// VALUE import: Prisma.sql/join only resolve as values, not types (CLAUDE.md).
+import { Prisma } from "@sms/db";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
+import { headcountBySchool } from "./operator-people";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -39,17 +42,6 @@ import {
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
 
-const STAFF_ROLES = new Set([
-  "school_admin",
-  "principal",
-  "teacher",
-  "accountant",
-  "board",
-  "hr_clerk",
-  "hr_manager",
-  "head_teacher",
-  "head_admin",
-]);
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 @Injectable()
@@ -87,24 +79,33 @@ export class PlatformAnalyticsService {
     const subBySchool = new Map(subs.map((s) => [s.schoolId, s]));
 
     // --- people (students + staff), plus students-per-school for MRR seats + top schools ---
-    const roleRows = await client.userRole.findMany({
-      where: { schoolId: { in: customerIds } },
-      select: { userId: true, schoolId: true, role: { select: { name: true } } },
-    });
-    const studentUsers = new Set<string>();
-    const staffUsers = new Set<string>();
+    // COUNTED, not scanned. This used to fetch EVERY user_role row for EVERY
+    // customer school into Node and tally them here — unbounded, and at the
+    // 5,000-school target that is tens of millions of rows crossing the wire to
+    // produce a dozen numbers. It also used a hand-written list of nine staff roles
+    // that omitted warden, driver, head_warden, head_driver, librarian and
+    // junior_admin, so the fleet staff figure quietly under-reported every boarding
+    // school. One grouped query, one shared definition (see operator-people.ts).
+    const headcounts = await headcountBySchool(client, customerIds);
     const studentsBySchool = new Map<string, number>();
-    for (const r of roleRows) {
-      if (r.role.name === "student") {
-        studentUsers.add(r.userId);
-        studentsBySchool.set(r.schoolId, (studentsBySchool.get(r.schoolId) ?? 0) + 1);
-      } else if (STAFF_ROLES.has(r.role.name)) {
-        staffUsers.add(r.userId);
-      }
+    let studentTotal = 0;
+    let staffTotal = 0;
+    for (const [schoolId, h] of headcounts) {
+      studentsBySchool.set(schoolId, h.students);
+      studentTotal += h.students;
+      staffTotal += h.staff;
     }
-    const studentCreatedAt = studentUsers.size
-      ? await client.user.findMany({ where: { id: { in: [...studentUsers] } }, select: { createdAt: true } })
-      : [];
+    // Enrolment by month for the growth chart — a grouped date_trunc rather than
+    // pulling every student row back to read one timestamp off each.
+    const studentCreatedAt = await client.$queryRaw<Array<{ month: Date; count: number }>>(Prisma.sql`
+      SELECT date_trunc('month', u."createdAt") AS month, count(*)::int AS count
+      FROM "user" u
+      JOIN user_role ur ON ur."userId" = u.id
+      JOIN role r ON r.id = ur."roleId"
+      WHERE r.name = 'student'
+        AND u."schoolId" = ANY(ARRAY[${Prisma.join(customerIds)}]::uuid[])
+      GROUP BY 1
+    `);
 
     // --- per-school roll-up: effective plan, seats, MRR, effective modules ---
     const perSeatMonthly = (plan: Plan): number => PLAN_PRICING[plan]?.perSeatMonthlyMinor ?? 0;
@@ -195,9 +196,11 @@ export class PlatformAnalyticsService {
       const i = bucketOf.get(keyFor(s.createdAt));
       if (i !== undefined) buckets[i].schools += 1;
     }
-    for (const u of studentCreatedAt) {
-      const i = bucketOf.get(keyFor(u.createdAt));
-      if (i !== undefined) buckets[i].students += 1;
+    // Already aggregated per month by the query — add the bucket's count rather
+    // than incrementing once per student row.
+    for (const m of studentCreatedAt) {
+      const i = bucketOf.get(keyFor(m.month));
+      if (i !== undefined) buckets[i].students += m.count;
     }
     for (const pay of payments) {
       const i = bucketOf.get(keyFor(pay.createdAt));
@@ -228,7 +231,7 @@ export class PlatformAnalyticsService {
       schools: schoolStatus,
       schoolsByPlan,
       schoolsByStatus,
-      people: { students: studentUsers.size, staff: staffUsers.size },
+      people: { students: studentTotal, staff: staffTotal },
       revenue: { paidTotalMinor, payments: payments.length, last30dMinor },
       onboardingPipeline,
       recentPayments,
@@ -249,7 +252,7 @@ export class PlatformAnalyticsService {
       moduleAdoption,
       topSchools,
       averages: {
-        studentsPerSchool: schools.length ? Math.round(studentUsers.size / schools.length) : 0,
+        studentsPerSchool: schools.length ? Math.round(studentTotal / schools.length) : 0,
         modulesPerSchool: schools.length ? Math.round(modulesSum / schools.length) : 0,
       },
       demographics: { profiled: profiles.length, gender: genderMix, ageBand: ageMix },

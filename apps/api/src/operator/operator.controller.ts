@@ -12,6 +12,7 @@ import type {
   PlatformAuditPageDto,
   SubscriptionDto,
   TenantNameDto,
+  AttentionQueueDto,
   TenantPageDto,
 } from "@sms/types";
 import { z } from "zod";
@@ -37,6 +38,7 @@ import { OperatorService } from "./operator.service";
 import { OperatorProvisioningService } from "./operator-provisioning.service";
 import { OperatorUserService } from "./operator-user.service";
 import { OperatorExportService } from "./operator-export.service";
+import { OperatorAttentionService } from "./operator-attention.service";
 import { OperatorDirectoryService } from "./operator-directory.service";
 import { PlatformAnalyticsService } from "./platform-analytics.service";
 import { PlatformAuditService, type PlatformAuditFilter } from "./platform-audit.service";
@@ -187,6 +189,7 @@ export class OperatorController {
     private readonly users: OperatorUserService,
     private readonly exporter: OperatorExportService,
     private readonly directorySvc: OperatorDirectoryService,
+    private readonly attentionSvc: OperatorAttentionService,
     private readonly analyticsSvc: PlatformAnalyticsService,
     private readonly auditSvc: PlatformAuditService,
     private readonly pricing: PlanPricingService,
@@ -320,6 +323,16 @@ export class OperatorController {
     @Param("schoolId") schoolId: string,
   ): Promise<SchoolProfileDto> {
     return this.directorySvc.schoolProfile(p, schoolId);
+  }
+
+  /** The schools that need a DECISION, ranked worst-first — six conditions with
+   *  the figure behind each. Aggregates only; no pupil or staff member is named.
+   *  This is the answer to "how do I review 5,000 schools": you do not browse
+   *  them, the console names the ones in trouble. */
+  @Get("attention")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
+  attention(@CurrentPrincipal() p: Principal): Promise<AttentionQueueDto> {
+    return this.attentionSvc.queue(p);
   }
 
   /** Lightweight id+name list for pickers (add-admin etc.). */

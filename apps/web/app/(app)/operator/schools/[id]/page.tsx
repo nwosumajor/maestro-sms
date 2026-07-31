@@ -78,7 +78,28 @@ export default async function OperatorSchoolProfilePage({ params }: { params: { 
               <Field label="Owner's phone">{s.ownerPhone ?? "—"}</Field>
               <Field label="Address">{s.address ?? "—"}</Field>
               <Field label="People">
-                {s.students} students · {s.staff} staff · {s.users} accounts
+                <span className="tabular-nums">{s.students.toLocaleString()}</span> students ·{" "}
+                {/* Staff counts PEOPLE. It used to count role assignments, so a head
+                    teacher who also taught was two members of staff. */}
+                <span className="tabular-nums">{s.staff.toLocaleString()}</span> staff ·{" "}
+                <span className="tabular-nums">{s.parents.toLocaleString()}</span> guardians
+              </Field>
+              <Field label="Billed seats">
+                {s.seats == null || s.seats === 0 ? (
+                  <span className="text-muted-foreground">not seat-billed (trial or comp)</span>
+                ) : (
+                  <>
+                    <span className="tabular-nums">{s.seats.toLocaleString()}</span>
+                    {/* Enrolment above billed seats is revenue the dunning sweep is
+                        already accruing as arrears; showing the gap is what makes
+                        that visible before renewal rather than at it. */}
+                    {s.students > s.seats && (
+                      <Badge variant="destructive" className="ml-2">
+                        {(s.students - s.seats).toLocaleString()} over
+                      </Badge>
+                    )}
+                  </>
+                )}
               </Field>
               {s.referredBy && <Field label="Referred by">{s.referredBy}</Field>}
             </CardContent>

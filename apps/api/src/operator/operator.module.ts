@@ -8,6 +8,7 @@ import { OperatorService } from "./operator.service";
 import { OperatorProvisioningService } from "./operator-provisioning.service";
 import { OperatorUserService } from "./operator-user.service";
 import { OperatorExportService } from "./operator-export.service";
+import { OperatorAttentionService } from "./operator-attention.service";
 import { OperatorDirectoryService } from "./operator-directory.service";
 import { PlatformAnalyticsService } from "./platform-analytics.service";
 import { PlatformAuditService } from "./platform-audit.service";
@@ -21,7 +22,8 @@ import { OperatorCreditsService } from "./operator-credits.service";
 @Module({
   imports: [BillingModule, NotificationModule, PrivacyModule, GroupModule],
   controllers: [OperatorController],
-  providers: [OperatorService, OperatorProvisioningService, OperatorUserService, OperatorExportService, OperatorDirectoryService, PlatformAnalyticsService, PlatformAuditService, OperatorCreditsService],
+  providers: [OperatorService, OperatorProvisioningService, OperatorUserService, OperatorExportService, OperatorDirectoryService,
+    OperatorAttentionService, PlatformAnalyticsService, PlatformAuditService, OperatorCreditsService],
   exports: [OperatorService, OperatorProvisioningService, OperatorUserService],
 })
 export class OperatorModule {}

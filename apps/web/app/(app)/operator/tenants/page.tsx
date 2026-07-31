@@ -93,7 +93,12 @@ export default async function OperatorTenantsPage({
                 <div>
                   <CardTitle className="text-base">{t.name}</CardTitle>
                   <p className="mt-0.5 text-xs text-muted-foreground">
-                    <span className="font-mono">{t.slug}</span> · {t.users} users · since {shortDate(t.createdAt)}
+                    {/* Split, not lumped: "900 users" read the same for a
+                        900-pupil school and one with 900 guardian accounts. The
+                        pupil figure is the billing seat definition, so it
+                        reconciles against what the school is charged. */}
+                    <span className="font-mono">{t.slug}</span> · <span className="tabular-nums">{t.students.toLocaleString()}</span> pupils ·{" "}
+                    <span className="tabular-nums">{t.staff.toLocaleString()}</span> staff · since {shortDate(t.createdAt)}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">

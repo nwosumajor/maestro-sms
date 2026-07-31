@@ -6,6 +6,23 @@
  *  driver, librarian, hr_clerk, …) is a staff role. */
 export const NON_STAFF_ROLE_NAMES = ["student", "parent"] as const;
 
+/** Platform-level roles: they belong to the operator's own org, never to a
+ *  customer school, so a school's headcount must never include them. */
+export const PLATFORM_ROLE_NAMES = ["super_admin", "manager_admin"] as const;
+
+/**
+ * Roles excluded from a SCHOOL's staff headcount.
+ *
+ * "Staff" is defined by EXCLUSION on purpose: a role added to the seed tomorrow is
+ * staff without a code change. The operator console previously carried its OWN
+ * hand-written allow-list of nine role names, which silently omitted warden,
+ * driver, head_warden, head_driver, librarian and junior_admin — so every boarding
+ * school and every school with a librarian reported fewer staff than it employed,
+ * and nothing looked broken. An audit figure that quietly under-reports is worse
+ * than no figure, because it gets believed.
+ */
+export const NON_SCHOOL_STAFF_ROLE_NAMES = [...NON_STAFF_ROLE_NAMES, ...PLATFORM_ROLE_NAMES] as const;
+
 /** Categories accepted by `GET /users?kind=` — server-side picker filtering so
  *  a staff picker never mixes in students/parents (and vice versa). */
 export const USER_KINDS = ["staff", "teacher", "parent"] as const;
