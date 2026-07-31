@@ -2,8 +2,6 @@ import type {
   OnboardingRequestDto,
   OperatorAdminAppointmentDto,
   OperatorBillingAlertDto,
-  PlanPriceDto,
-  PlatformFeeConfig,
   Serialized,
   TenantNameDto,
 } from "@sms/types";
@@ -18,9 +16,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Provisioning } from "@/components/operator/Provisioning";
 import { OnboardingRequests } from "@/components/operator/OnboardingRequests";
-import { PricingManager } from "@/components/operator/PricingManager";
-import { PlatformFeeManager } from "@/components/operator/PlatformFeeManager";
-import { GrowthManager } from "@/components/operator/GrowthManager";
 import { GroupsManager } from "@/components/operator/GroupsManager";
 import { PlatformStaff } from "@/components/operator/PlatformStaff";
 import { PageHeader } from "@/components/shell/PageHeader";
@@ -47,23 +42,15 @@ export default async function OperatorPage({
   const canManageStaff = hasPermission(user.permissions, "platform.staff.manage");
   const canAdminScholarships = hasPermission(user.permissions, "scholarship.admin");
 
-  const [names, onboarding, pricing, billingAlerts, platformFees, adminAppointments] = await Promise.all([
+  // Plan pricing, the fee take rate and growth (promos/agents/commissions) moved to
+  // /operator/pricing: five API calls and three heavy editors that this page paid
+  // for on every visit, for controls revisited monthly at most.
+  const [names, onboarding, billingAlerts, adminAppointments] = await Promise.all([
     apiGet<TenantNameDto[]>("/operator/tenant-names"),
     apiGet<Serialized<OnboardingRequestDto>[]>("/operator/onboarding-requests"),
-    apiGet<PlanPriceDto[]>("/operator/pricing"),
     apiGet<Serialized<OperatorBillingAlertDto>[]>("/operator/billing-alerts"),
-    apiGet<PlatformFeeConfig>("/operator/platform-fees"),
     apiGet<Serialized<OperatorAdminAppointmentDto>[]>("/operator/admin-appointments"),
   ]);
-  // Growth data is owner-surface; fetched separately so a 503 (no privileged DB)
-  // never blanks the rest of the console.
-  const [promos, agents, commissions] = canManagePricing
-    ? await Promise.all([
-        apiGet<never[]>("/operator/promos").then((r) => r ?? []),
-        apiGet<never[]>("/operator/agents").then((r) => r ?? []),
-        apiGet<never[]>("/operator/commissions").then((r) => r ?? []),
-      ])
-    : [[], [], []];
   const groups = canManageSubscription ? await apiGet<never[]>("/operator/groups").then((r) => r ?? []) : [];
 
   // "Approve & provision" deep-link: pre-fill the onboarding form from the
@@ -87,9 +74,9 @@ export default async function OperatorPage({
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="operator" permissions={user.permissions}>
       <div className="space-y-6">
         <div className="flex flex-wrap items-end justify-between gap-3">
-          <PageHeader title={<>Operator console</>} subtitle={<>Provision schools, set platform pricing and fees, review onboarding and run growth. Manage each
-              school in the Tenant registry, message-credit balances in Message credits, and platform-sponsored
-              scholarships in Scholarship admin.</>} />
+          <PageHeader title={<>Operator console</>} subtitle={<>Provision schools and review onboarding. Triage in Needs a decision, manage each school in the
+              Tenant registry, set what the platform charges in Pricing &amp; growth, and handle message credits
+              and platform-sponsored scholarships on their own pages.</>} />
           <Link href="/dashboard"><Button variant="outline">Platform analytics →</Button></Link>
         </div>
 
@@ -100,6 +87,9 @@ export default async function OperatorPage({
               every visit to this hub was work nobody had asked for. */}
           <Link href="/operator/attention"><Button size="sm">Needs a decision →</Button></Link>
           <Link href="/operator/tenants"><Button variant="outline" size="sm">Tenant registry →</Button></Link>
+          {canManagePricing && (
+            <Link href="/operator/pricing"><Button variant="outline" size="sm">Pricing &amp; growth →</Button></Link>
+          )}
           <Link href="/operator/schools"><Button variant="outline" size="sm">School directory →</Button></Link>
           <Link href="/operator/message-credits"><Button variant="outline" size="sm">Message credits →</Button></Link>
           {canAdminScholarships && (
@@ -186,9 +176,6 @@ export default async function OperatorPage({
         {/* Keyed on the request id so entering/leaving prefill re-initialises the form. */}
         {canProvision && <Provisioning key={prefill?.requestId ?? "blank"} tenants={names ?? []} prefill={prefill} />}
 
-        {pricing && canManagePricing && <PricingManager initial={pricing} />}
-        {platformFees && canManagePricing && <PlatformFeeManager initial={platformFees} />}
-        {canManagePricing && <GrowthManager promos={promos} agents={agents} commissions={commissions} />}
         {canManageSubscription && (
           <GroupsManager groups={groups} schools={(names ?? []).map((n) => ({ id: n.id, name: n.name }))} />
         )}
