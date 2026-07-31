@@ -39,8 +39,11 @@ const naira = (minor: number) =>
  *
  * Aggregates only. School names, counts and money — never a pupil or a staff member.
  */
-export function AttentionQueue({ queue: data }: { queue: Queue }) {
-  const [kind, setKind] = React.useState<string>("");
+export function AttentionQueue({ queue: data, initialKind = "" }: { queue: Queue; initialKind?: string }) {
+  // Arriving from the hub's past-due banner lands on that filter already applied —
+  // the click said which problem you came for, so the page should not make you say
+  // it twice.
+  const [kind, setKind] = React.useState<string>(initialKind);
 
   const rows: Row[] = React.useMemo(
     () => (kind ? data.rows.filter((r) => r.signals.some((s) => s.kind === kind)) : data.rows),

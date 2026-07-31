@@ -108,6 +108,30 @@ describe("OperatorAttentionService.queue", () => {
     expect(beta.signals.find((s) => s.kind === "PAST_DUE")!.detail).toMatch(/9 days/);
   });
 
+  it("says whether a past-due school is still in grace or already downgraded", async () => {
+    // This distinction is load-bearing: it is the one thing the console's red banner
+    // carried that the queue did not, and reducing that banner to a single line is
+    // only safe because it lives here now. "Chase the payment" and "their modules
+    // are already gone" are two different phone calls.
+    const { svc, client } = makeService();
+
+    // 9 days over, generous 30-day grace -> still in the window.
+    client.schoolSubscription.findMany.mockResolvedValue([
+      { schoolId: B, plan: "PREMIUM", status: "PAST_DUE", currentPeriodEnd: day(-9), graceDays: 30, seats: 500, seatArrearsMinor: 0 },
+    ]);
+    let out = await svc.queue(owner);
+    expect(out.rows.find((r) => r.schoolName === "Beta Academy")!.signals.find((s) => s.kind === "PAST_DUE")!.detail)
+      .toMatch(/grace window/);
+
+    // Same 9 days, 3-day grace -> the plan has actually dropped.
+    client.schoolSubscription.findMany.mockResolvedValue([
+      { schoolId: B, plan: "PREMIUM", status: "PAST_DUE", currentPeriodEnd: day(-9), graceDays: 3, seats: 500, seatArrearsMinor: 0 },
+    ]);
+    out = await svc.queue(owner);
+    expect(out.rows.find((r) => r.schoolName === "Beta Academy")!.signals.find((s) => s.kind === "PAST_DUE")!.detail)
+      .toMatch(/downgraded/);
+  });
+
   it("a FAILED probe accuses nobody", async () => {
     // The bug this exists for: the probes drive NEGATIVE signals — a school is
     // dormant because it is ABSENT from the result — so returning an empty set on

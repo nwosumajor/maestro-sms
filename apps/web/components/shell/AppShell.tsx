@@ -42,6 +42,7 @@ import {
   CircleHelpIcon,
   TriangleAlertIcon,
   TagIcon,
+  NetworkIcon,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -113,6 +114,7 @@ type NavKey =
   | "operator"
   | "operatorattention"
   | "operatorpricing"
+  | "operatorgroups"
   | "operatortenants"
   | "operatorscholarships"
   | "operatoraudit"
@@ -146,6 +148,7 @@ const NAV: {
   { key: "operator", label: "Operator", icon: Building2Icon, href: "/operator", perm: "platform.tenants.read" },
   { key: "operatorattention", label: "Needs a decision", icon: TriangleAlertIcon, href: "/operator/attention", perm: "platform.tenants.read" },
   { key: "operatorpricing", label: "Pricing & growth", icon: TagIcon, href: "/operator/pricing", perm: "platform.pricing.manage" },
+  { key: "operatorgroups", label: "School groups", icon: NetworkIcon, href: "/operator/groups", perm: "platform.subscription.manage" },
   { key: "operatortenants", label: "Tenant registry", icon: ServerIcon, href: "/operator/tenants", perm: "platform.tenants.read" },
   { key: "operatorscholarships", label: "Scholarship admin", icon: AwardIcon, href: "/operator/scholarships", perm: "scholarship.admin" },
   { key: "operatoraudit", label: "Platform audit", icon: ScrollTextIcon, href: "/operator/audit", perm: "platform.audit.read" },
@@ -237,6 +240,7 @@ const PLATFORM_OWNER_NAV = new Set<NavKey>([
   "operator",
   "operatorattention",
   "operatorpricing",
+  "operatorgroups",
   "operatortenants",
   "operatorscholarships",
   "operatoraudit",
@@ -273,7 +277,7 @@ const NAV_GROUP: Record<NavKey, string> = {
   workflows: "operations", tasks: "operations", scholarships: "operations",
   discussion: "community", polls: "community", forms: "community", discipline: "community",
   games: "community", ultimate: "community",
-  operator: "platform", operatorattention: "platform", operatorpricing: "platform", operatortenants: "platform", operatorscholarships: "platform",
+  operator: "platform", operatorattention: "platform", operatorpricing: "platform", operatorgroups: "platform", operatortenants: "platform", operatorscholarships: "platform",
   operatoraudit: "platform", directory: "platform", admin: "platform", account: "platform",
   feedback: "platform", operatorfeedback: "platform",
   help: "platform",

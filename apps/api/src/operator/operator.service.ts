@@ -274,7 +274,11 @@ export class OperatorService {
     });
     if (lapsed.length === 0) return [];
     const schools = await client.school.findMany({
-      where: { id: { in: lapsed.map((s) => s.schoolId) }, isPlatform: false },
+      // ACTIVE only, matching the attention queue exactly. A school the operator
+      // has themselves DISABLED needs no payment chased, and previously it appeared
+      // here but not in the queue — so the console's count disagreed with the list
+      // it linked to, which reads as one of them being broken.
+      where: { id: { in: lapsed.map((s) => s.schoolId) }, isPlatform: false, status: "ACTIVE" },
       select: { id: true, name: true, slug: true },
     });
     const byId = new Map(schools.map((s) => [s.id, s]));
