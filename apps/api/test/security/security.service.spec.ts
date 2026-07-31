@@ -15,7 +15,10 @@ function makeService(grant?: Record<string, unknown> | null) {
       update: jest.fn(({ data }: { data: Record<string, unknown> }) => Promise.resolve({ ...created, ...grant, ...data })),
     },
     auditLog: { create: jest.fn().mockResolvedValue({}) },
-    user: { findMany: jest.fn().mockResolvedValue([{ id: "u-1", name: "Alice" }]) },
+    user: {
+      findMany: jest.fn().mockResolvedValue([{ id: "u-1", name: "Alice" }]),
+      findFirst: jest.fn().mockResolvedValue({ id: "u-2", name: "Bola" }),
+    },
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
@@ -90,5 +93,108 @@ describe("SecurityService elevation", () => {
     expect(page.entries[0].actorName).toBe("Alice");
     // One row returned, well under the default page size ⇒ no further page.
     expect(page.nextCursor).toBeNull();
+  });
+});
+
+// =============================================================================
+// HANDOVER — a senior lends a duty they already hold, without being asked
+// =============================================================================
+// The requested path is bottom-up and needs a DIFFERENT approver. This is top-down
+// and needs a different RECIPIENT. The single check that makes it safe is that the
+// granter must ALREADY HOLD the permission — without it, "delegation" becomes a way
+// to mint authority, and the first test here is the one that would catch that.
+// =============================================================================
+
+describe("SecurityService.delegateElevation", () => {
+  const senior = (perms: string[]) => principal("u-1", perms);
+
+  it("REFUSES to hand over a permission the granter does not hold", async () => {
+    // The load-bearing test. A school_admin must not be able to hand out authority
+    // nobody gave them: a handover moves authority sideways, never manufactures it.
+    const { service, tx } = makeService();
+    await expect(
+      service.delegateElevation(senior(["security.elevation.approve"]), {
+        userId: "u-2",
+        permission: "certificate.issue",
+        reason: "cover while I travel",
+      }),
+    ).rejects.toThrow(/do not hold it yourself/i);
+    expect(tx.privilegeGrant.create).not.toHaveBeenCalled();
+  });
+
+  it("hands over a permission the granter DOES hold, active immediately", async () => {
+    const { service, tx } = makeService();
+    const out = await service.delegateElevation(senior(["certificate.issue"]), {
+      userId: "u-2",
+      permission: "certificate.issue",
+      reason: "cover while I travel",
+      hours: 48,
+    });
+    expect(out).toMatchObject({ status: "ACTIVE", delegated: true, userId: "u-2" });
+    // Recorded as a handover, not as a self-approved break-glass — they mean
+    // different things to whoever reads this later.
+    expect(tx.privilegeGrant.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ delegated: true, breakGlass: false }) }),
+    );
+  });
+
+  it("refuses the maker-checker authorities, whoever asks", async () => {
+    // Lending the "checker" half of a maker-checker rule does not delegate a duty;
+    // it removes the second pair of eyes. Even a granter who holds it cannot pass
+    // it on — which is exactly the case the check above would otherwise allow.
+    for (const permission of ["fee.approve", "hr.salary.approve", "rbac.manage", "security.elevation.approve"]) {
+      const { service, tx } = makeService();
+      await expect(
+        service.delegateElevation(senior([permission]), { userId: "u-2", permission, reason: "cover" }),
+      ).rejects.toThrow(/cannot be delegated/i);
+      expect(tx.privilegeGrant.create).not.toHaveBeenCalled();
+    }
+  });
+
+  it("refuses a handover to yourself", async () => {
+    const { service } = makeService();
+    await expect(
+      service.delegateElevation(senior(["certificate.issue"]), {
+        userId: "u-1",
+        permission: "certificate.issue",
+        reason: "cover",
+      }),
+    ).rejects.toThrow(/someone else/i);
+  });
+
+  it("is always bounded", async () => {
+    const { service } = makeService();
+    const base = { userId: "u-2", permission: "certificate.issue", reason: "cover" };
+    await expect(service.delegateElevation(senior(["certificate.issue"]), { ...base, hours: 0 })).rejects.toThrow();
+    await expect(
+      service.delegateElevation(senior(["certificate.issue"]), { ...base, hours: 24 * 61 }),
+    ).rejects.toThrow();
+    await expect(
+      service.delegateElevation(senior(["certificate.issue"]), { ...base, hours: 24 * 60 }),
+    ).resolves.toMatchObject({ status: "ACTIVE" });
+  });
+
+  it("requires a reason", async () => {
+    const { service } = makeService();
+    await expect(
+      service.delegateElevation(senior(["certificate.issue"]), { userId: "u-2", permission: "certificate.issue", reason: " " }),
+    ).rejects.toThrow();
+  });
+
+  it("audits the handover with the recipient and the window", async () => {
+    const { service, audit } = makeService();
+    await service.delegateElevation(senior(["certificate.issue"]), {
+      userId: "u-2",
+      permission: "certificate.issue",
+      reason: "cover while I travel",
+      hours: 24,
+    });
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "security.elevation.delegate",
+        metadata: expect.objectContaining({ permission: "certificate.issue", toUserId: "u-2", hours: 24 }),
+      }),
+      expect.anything(),
+    );
   });
 });

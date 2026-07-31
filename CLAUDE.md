@@ -95,6 +95,22 @@ conflicts with it, flag the conflict before proceeding.
 - Relationship scoping beyond role IS IMPLEMENTED (LmsService is the reference):
   teacher→their classes, student→enrolled, parent→their children. Coarse
   permission gates the endpoint; membership joins narrow the rows; RLS backstops.
+- **Inside a school, duties move BOTH ways.** Bottom-up (existing): a junior_admin
+  REQUESTS a permission, a DIFFERENT senior approves, it auto-expires — 49 of the 54
+  permissions school_admin holds and junior_admin lacks are reachable this way.
+  Top-down (new): `SecurityService.delegateElevation` lets a senior HAND OVER a duty
+  they already hold, unasked, for cover — `POST /security/elevation/delegate`
+  (`security.elevation.approve`), `privilege_grant.delegated = true`, ACTIVE at once,
+  revocable via the existing revoke, audited. Reuses privilege_grant, so it inherits
+  that table's RLS and the guard's `hasActiveGrant`. **The check that makes top-down
+  safe: the granter must ALREADY HOLD the permission** — a handover moves authority
+  sideways, never manufactures it. `isElevatable` still applies, so the maker-checker
+  authorities (`fee.approve`, `hr.salary.approve`, `rbac.manage`,
+  `security.elevation.approve`, `billing.manage`) can be lent by nobody, to nobody,
+  for any duration: lending the approving half of a two-person rule removes the
+  control rather than sharing the work. `HandoverPanel` on /admin/security offers
+  only the caller's OWN permissions, and names the unlendable ones rather than
+  hiding them.
 - **Platform duties are LENT, not held.** `manager_admin`'s standing role is the bare
   floor (`platform.tenants.read` + `notification.read`). Every real duty —
   provisioning, onboarding triage, audit reads, account lookup/unlock, grace,
