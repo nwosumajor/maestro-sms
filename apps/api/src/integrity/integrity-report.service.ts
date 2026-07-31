@@ -40,7 +40,7 @@ const SEVERITY_ORDER: IntegritySignalSeverity[] = [
 // integrity.exemption.write, so it sees integrity reports school-wide like
 // school_admin — otherwise the grant is dead (it reviews only assessments it
 // personally created, which is ~none). teacher stays relationship-scoped.
-const SCHOOL_WIDE_ROLES = new Set(["school_admin", "super_admin", "principal"]);
+const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal"]);
 
 @Injectable()
 export class IntegrityReportService {

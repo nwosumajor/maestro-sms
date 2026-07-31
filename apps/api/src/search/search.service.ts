@@ -20,8 +20,8 @@ import {
 } from "../integrity/integrity.foundation";
 
 const PER_CATEGORY = 6;
-const ROSTER_WIDE = new Set(["school_admin", "principal", "super_admin", "board", "accountant", "hr_clerk", "hr_manager", "junior_admin"]);
-const STAFF_WIDE = new Set(["school_admin", "principal", "super_admin"]);
+const ROSTER_WIDE = new Set(["school_admin", "principal", "board", "accountant", "hr_clerk", "hr_manager", "junior_admin"]);
+const STAFF_WIDE = new Set(["school_admin", "principal"]);
 
 @Injectable()
 export class SearchService {

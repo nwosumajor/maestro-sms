@@ -24,7 +24,7 @@ import {
 } from "../integrity/integrity.foundation";
 import { NotificationService } from "../notifications/notification.service";
 
-const STAFF_WIDE = new Set(["school_admin", "principal", "super_admin"]);
+const STAFF_WIDE = new Set(["school_admin", "principal"]);
 
 @Injectable()
 export class MeetingService {

@@ -8,6 +8,35 @@ export interface ClassDto {
   supervisorId: string | null;
 }
 
+/**
+ * A class with the figures somebody actually manages it by.
+ *
+ * The classes page used to render a name and the class's raw UUID, which told a
+ * head of school nothing: not how many children are in it, not who is responsible
+ * for it, not whether it is over capacity. Every count here is produced by a
+ * grouped query over all classes at once — never one query per card.
+ */
+export interface ClassOverviewDto {
+  id: string;
+  name: string;
+  code: string | null;
+  level: number | null;
+  /** The class pupils promote INTO; null = terminal. Carried so the page can drive
+   *  its admin panels from this one response instead of also fetching /classes/mine. */
+  nextClassId: string | null;
+  /** Named form teacher — the person accountable for the class. */
+  supervisorId: string | null;
+  supervisorName: string | null;
+  /** ACTIVE enrolments only: a promoted or withdrawn pupil is not in the room. */
+  students: number;
+  /** Max ACTIVE enrolments, or null when the school has not set one. */
+  capacity: number | null;
+  /** Assigned class teachers (not counting subject-only teachers). */
+  teachers: number;
+  /** Distinct subject offerings defined for the class. */
+  subjects: number;
+}
+
 /** A subject in the school's catalog. */
 export interface SubjectDto {
   id: string;

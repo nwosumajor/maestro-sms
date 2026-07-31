@@ -43,7 +43,7 @@ import { GameEventsService } from "./game-events.service";
 // Oversight viewers (spec §8): school leadership sees any match; teachers reach
 // non-own matches through game.match.moderate. Neither can act as a player —
 // buildGameView serializes no secrets, so viewing leaks nothing.
-const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal", "super_admin"]);
+const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal"]);
 const MODERATE_PERMISSION = "game.match.moderate";
 
 @Injectable()

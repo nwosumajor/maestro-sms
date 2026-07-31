@@ -35,12 +35,18 @@ const today = () => new Date().toISOString().slice(0, 10);
 export function TakeRegister({
   classes,
   lockBeforeDate,
+  initialClassId,
 }: {
   classes: { id: string; name: string }[];
   /** Dates before this (the current term's start) are read-only. */
   lockBeforeDate: string | null;
+  /** Class to open on arrival, from the class board's Take-register link. Ignored
+   *  when the caller cannot see it, so a bad link falls back rather than breaking. */
+  initialClassId?: string;
 }) {
-  const [classId, setClassId] = React.useState(classes[0]?.id ?? "");
+  const [classId, setClassId] = React.useState(
+    (initialClassId && classes.some((c) => c.id === initialClassId) ? initialClassId : classes[0]?.id) ?? "",
+  );
   const [date, setDate] = React.useState(today());
   const [roster, setRoster] = React.useState<Student[] | null>(null);
   const [marks, setMarks] = React.useState<Record<string, Status>>({});

@@ -59,7 +59,7 @@ import {
 import { effectiveGameSettings } from "./game-settings.util";
 import { GameEventsService } from "./game-events.service";
 
-const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal", "super_admin"]);
+const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal"]);
 /** How many leaderboard rows the live view returns. */
 const LEADERBOARD_SIZE = 20;
 

@@ -34,14 +34,13 @@ import {
 const REVIEWER_ROLES = new Set([
   "principal",
   "school_admin",
-  "super_admin",
   "board",
   "head_teacher",
   "head_admin",
   "hr_manager",
 ]);
 /** Roles that see every class — mirrors LmsService.isRosterWide. */
-const ROSTER_WIDE_ROLES = new Set(["principal", "school_admin", "super_admin", "hr_manager", "hr_clerk"]);
+const ROSTER_WIDE_ROLES = new Set(["principal", "school_admin", "hr_manager", "hr_clerk"]);
 
 @Injectable()
 export class DashboardService {

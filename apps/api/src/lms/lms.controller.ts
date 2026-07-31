@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Header, Param, Post, Put, Query } from "@nestjs/common";
 import { MODULES, USER_KINDS, type UserKind } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
-import type { AcademicSessionDto, ClassDto, ClassEligibilityDto, ClassInfoDto, ClassSubjectDto, IdNameDto, PromotionBatchDto, SchoolHolidayDto, SubjectDto, UserWithEmailDto } from "@sms/types";
+import type { AcademicSessionDto, ClassDto, ClassEligibilityDto, ClassInfoDto, ClassOverviewDto, ClassSubjectDto, IdNameDto, PromotionBatchDto, SchoolHolidayDto, SubjectDto, UserWithEmailDto } from "@sms/types";
 import { z } from "zod";
 import { LMS_PERMISSIONS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -292,8 +292,18 @@ export class LmsController {
   users(
     @CurrentPrincipal() p: Principal,
     @Query("kind", new ZodValidationPipe(z.enum(USER_KINDS).optional())) kind?: UserKind,
+    @Query("q") q?: string,
   ): Promise<UserWithEmailDto[]> {
-    return this.lms.listUsers(p, kind);
+    return this.lms.listUsers(p, kind, q);
+  }
+
+  /** The caller's classes with roll / capacity / supervisor / teaching counts —
+   *  what the classes page is actually managed by. Same relationship scoping as
+   *  /classes/mine; all counts come from grouped queries, never one per class. */
+  @Get("classes/overview")
+  @RequirePermission(LMS_PERMISSIONS.CLASS_READ)
+  classOverview(@CurrentPrincipal() p: Principal): Promise<ClassOverviewDto[]> {
+    return this.lms.listClassOverview(p);
   }
 
   @Get("classes/:classId")

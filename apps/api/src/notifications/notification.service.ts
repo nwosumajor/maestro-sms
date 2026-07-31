@@ -38,7 +38,7 @@ import {
   type NotificationChannelProvider,
 } from "./notification.constants";
 
-const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal", "super_admin"]);
+const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal"]);
 
 export interface NotificationInput {
   recipientId: string;

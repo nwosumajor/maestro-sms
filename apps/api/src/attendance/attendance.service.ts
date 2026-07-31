@@ -3,7 +3,7 @@
 // =============================================================================
 // Coarse permissions gate the endpoints; this service narrows ROWS by
 // relationship (same model as LMS/SIS):
-//   - school staff (school_admin / principal / super_admin) -> any class/student
+//   - school staff (school_admin / principal / junior_admin) -> any class/student
 //   - teacher -> classes they teach (write + read), students in those classes
 //   - parent  -> their own children's records (read)
 //   - student -> their own records (read)
@@ -35,7 +35,7 @@ import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 // 404'd on every register, so it belongs in the school-wide set. It lacks
 // attendance.amend.review, so stale (>7-day) edits still route through
 // maker-checker like any non-approver. Mirrors the SIS fix.
-const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal", "super_admin", "junior_admin"]);
+const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal", "junior_admin"]);
 /**
  * Roles that may take ANY class's register, to cover an absent supervisor.
  *
@@ -43,8 +43,14 @@ const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal", "super_admin", "
  * head teacher and junior_admin see every register and can no longer write one:
  * the register is a record of who physically looked at the room, and cover is an
  * administrative act with a named owner rather than something seniority confers.
+ *
+ * super_admin is deliberately in NEITHER set. A platform operator has no business
+ * recording, or reading, which named child was in a classroom on a given morning;
+ * when support genuinely needs to see it they impersonate a member of the school's
+ * own staff, which is step-up gated and audited against the operator by name.
+ * See test/security/no-standing-superadmin.spec.ts.
  */
-const REGISTER_COVER_ROLES = new Set(["school_admin", "super_admin"]);
+const REGISTER_COVER_ROLES = new Set(["school_admin"]);
 /** Edits to a register older than this (days) need maker-checker approval. */
 const STALE_REGISTER_DAYS = 7;
 /** Statuses that notify the student's guardians. */
@@ -196,20 +202,134 @@ export class AttendanceService {
     });
   }
 
-  /** A student's attendance history (records + their session context). */
-  async getStudentAttendance(p: Principal, studentId: string) {
+  /**
+   * A student's attendance history — PAGED, with the true total.
+   *
+   * This used to be `take: 200` and nothing else. At roughly 190 school days a year
+   * that is about ONE year, so a pupil in their fifth year had four years of history
+   * that no page could reach and nothing on screen said so — the reader simply saw
+   * the list end. A principal asked to account for a leaver's attendance record got
+   * a confidently-presented fraction of it.
+   *
+   * Offset paging (rather than a cursor) is the right tool here precisely because
+   * this history is IMMUTABLE: the term lock freezes every register before the
+   * current term, so pages cannot shift under the reader the way a live financial
+   * list can. It also gives a total, which is what makes "5 years" navigable at all.
+   */
+  async getStudentAttendance(
+    p: Principal,
+    studentId: string,
+    opts: { page?: number; pageSize?: number; from?: string; to?: string } = {},
+  ): Promise<{
+    records: unknown[];
+    page: number;
+    pageSize: number;
+    total: number;
+    from: string | null;
+    to: string | null;
+  }> {
+    const pageSize = Math.min(Math.max(opts.pageSize ?? 100, 1), 200);
+    const page = Math.max(opts.page ?? 1, 1);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.assertCanAccessStudent(tx, p, studentId);
-      return tx.attendanceRecord.findMany({
-        where: { studentId },
-        // Order by the DAY THE REGISTER IS FOR, not when the row was written.
-        // Ordering by createdAt meant correcting a month-old register today put it
-        // at the TOP of the history, above this week — so a parent reading down the
-        // list saw an out-of-sequence date and no way to tell why.
-        orderBy: [{ session: { date: "desc" } }, { createdAt: "desc" }],
-        include: { session: { select: { classId: true, date: true } } },
-        take: 200,
-      });
+      // An optional window so a reader can ask for one school year out of five
+      // rather than paging back through all of them.
+      const sessionWhere =
+        opts.from || opts.to
+          ? {
+              date: {
+                ...(opts.from ? { gte: new Date(`${opts.from}T00:00:00.000Z`) } : {}),
+                ...(opts.to ? { lte: new Date(`${opts.to}T00:00:00.000Z`) } : {}),
+              },
+            }
+          : undefined;
+      const where = { studentId, ...(sessionWhere ? { session: sessionWhere } : {}) };
+
+      const [records, total] = await Promise.all([
+        tx.attendanceRecord.findMany({
+          where,
+          // Order by the DAY THE REGISTER IS FOR, not when the row was written.
+          // Ordering by createdAt meant correcting a month-old register today put it
+          // at the TOP of the history, above this week — so a parent reading down the
+          // list saw an out-of-sequence date and no way to tell why.
+          orderBy: [{ session: { date: "desc" } }, { createdAt: "desc" }],
+          include: { session: { select: { classId: true, date: true } } },
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+        }),
+        // COUNTED, not measured off the page. Every under-reported figure found in
+        // this codebase came from taking `.length` of a capped list.
+        tx.attendanceRecord.count({ where }),
+      ]);
+      return { records, page, pageSize, total, from: opts.from ?? null, to: opts.to ?? null };
+    });
+  }
+
+  /**
+   * The school's terms, newest first, each flagged with whether its attendance has
+   * been rolled up. Feeds the term selector on the class board.
+   *
+   * Small and unpaged by nature: three terms a year means fifteen rows after five
+   * years. It is listed under attendance.read rather than academic.manage because
+   * a head teacher needs to CHOOSE a past term without being able to edit the
+   * academic calendar.
+   */
+  async listTerms(p: Principal): Promise<
+    Array<{
+      id: string;
+      name: string;
+      sessionName: string;
+      startDate: string | null;
+      endDate: string | null;
+      isCurrent: boolean;
+      ended: boolean;
+      rolledUp: boolean;
+    }>
+  > {
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      const terms = (await tx.term.findMany({
+        orderBy: [{ startDate: "desc" }, { sequence: "desc" }],
+        select: {
+          id: true,
+          name: true,
+          sequence: true,
+          isCurrent: true,
+          startDate: true,
+          endDate: true,
+          session: { select: { name: true } },
+        },
+      })) as Array<{
+        id: string;
+        name: string;
+        sequence: number;
+        isCurrent: boolean;
+        startDate: Date | null;
+        endDate: Date | null;
+        session: { name: string } | null;
+      }>;
+      if (terms.length === 0) return [];
+
+      // ONE grouped read tells us which terms are rolled up — never one query
+      // per term.
+      const rolled = (await tx.attendanceTermRollup.groupBy({
+        by: ["termId"],
+        where: { termId: { in: terms.map((t) => t.id) } },
+        _count: { _all: true },
+      } as never)) as unknown as Array<{ termId: string }>;
+      const have = new Set(rolled.map((r) => r.termId));
+
+      const today = new Date();
+      today.setUTCHours(0, 0, 0, 0);
+      return terms.map((t) => ({
+        id: t.id,
+        name: t.name,
+        sessionName: t.session?.name ?? "",
+        startDate: t.startDate ? t.startDate.toISOString().slice(0, 10) : null,
+        endDate: t.endDate ? t.endDate.toISOString().slice(0, 10) : null,
+        isCurrent: t.isCurrent,
+        ended: !!t.endDate && t.endDate < today,
+        rolledUp: have.has(t.id),
+      }));
     });
   }
 
@@ -381,10 +501,13 @@ export class AttendanceService {
    */
   async getClassAttendance_Grouped(
     p: Principal,
-    opts: { from?: string; to?: string } = {},
+    opts: { from?: string; to?: string; termId?: string } = {},
   ): Promise<{
     from: string;
     to: string;
+    termId: string | null;
+    termName: string | null;
+    source: "rollup" | "live";
     classes: Array<{
       classId: string;
       className: string;
@@ -401,13 +524,31 @@ export class AttendanceService {
     }>;
   }> {
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      // A named term wins over raw dates: it is what leadership actually asks for
+      // ("how was Term 2 of 2021/22"), and it is the only window the rollup can
+      // serve, because a rollup row IS a term.
+      const term = opts.termId
+        ? ((await tx.term.findFirst({
+            where: { id: opts.termId },
+            select: { id: true, name: true, startDate: true, endDate: true },
+          })) as { id: string; name: string; startDate: Date | null; endDate: Date | null } | null)
+        : null;
+      if (opts.termId && !term) throw new NotFoundException("Term not found");
+
       // Default window: the current term, so this agrees with the report card and
       // with the analytics page rather than quietly using a different period.
       const termStart = await this.currentTermStart(tx);
-      const from = opts.from
-        ? new Date(`${opts.from}T00:00:00.000Z`)
-        : (termStart ?? new Date(Date.now() - 30 * 86_400_000));
-      const to = opts.to ? new Date(`${opts.to}T00:00:00.000Z`) : new Date();
+      const from =
+        term?.startDate ??
+        (opts.from ? new Date(`${opts.from}T00:00:00.000Z`) : (termStart ?? new Date(Date.now() - 30 * 86_400_000)));
+      const to = term?.endDate ?? (opts.to ? new Date(`${opts.to}T00:00:00.000Z`) : new Date());
+
+      // An ENDED term is immutable under the term lock, so its rollup can be read
+      // instead of scanning the registers — the whole point of building it. The
+      // current term never reads the rollup, however recently it was computed.
+      const today = new Date();
+      today.setUTCHours(0, 0, 0, 0);
+      const endedTerm = !!term?.endDate && term.endDate < today;
 
       // Which classes may this caller SEE? Same rule as everywhere else here.
       const visible = this.isSchoolWide(p)
@@ -432,15 +573,48 @@ export class AttendanceService {
               select: { id: true, name: true, supervisorId: true },
             })) as Array<{ id: string; name: string; supervisorId: string | null }>;
           })();
+      const base = {
+        from: from.toISOString().slice(0, 10),
+        to: to.toISOString().slice(0, 10),
+        termId: term?.id ?? null,
+        termName: term?.name ?? null,
+      };
       if (visible.length === 0) {
-        return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10), classes: [] };
+        return { ...base, source: "live" as const, classes: [] };
       }
       const classIds = visible.map((c) => c.id);
+
+      // An ended term reads its precomputed per-class totals; anything else groups
+      // the registers themselves. Same shape either way, so nothing downstream
+      // knows or cares which ran — and a term that has ended but has not been
+      // rolled up yet simply falls through to the live path below.
+      const rolled = endedTerm
+        ? ((await tx.attendanceTermRollup.groupBy({
+            by: ["classId"],
+            where: { termId: term!.id, classId: { in: classIds } },
+            _sum: { present: true, absent: true, late: true, excused: true, total: true },
+          } as never)) as unknown as Array<{
+            classId: string;
+            _sum: { present: number | null; absent: number | null; late: number | null; excused: number | null; total: number | null };
+          }>)
+        : [];
+      const useRollup = rolled.length > 0;
 
       // ONE pivot over the window for every visible class, plus one count of the
       // registers actually taken. Never a query per class.
       const [stats, registers, supervisors] = await Promise.all([
-        tx.$queryRaw`
+        useRollup
+          ? Promise.resolve(
+              rolled.map((r) => ({
+                classId: r.classId,
+                present: r._sum.present ?? 0,
+                absent: r._sum.absent ?? 0,
+                late: r._sum.late ?? 0,
+                excused: r._sum.excused ?? 0,
+                total: r._sum.total ?? 0,
+              })),
+            )
+          : (tx.$queryRaw`
           SELECT s."classId",
                  count(*) FILTER (WHERE r.status = 'PRESENT')::int AS present,
                  count(*) FILTER (WHERE r.status = 'ABSENT')::int  AS absent,
@@ -453,7 +627,7 @@ export class AttendanceService {
             AND s."classId" = ANY(ARRAY[${Prisma.join(classIds)}]::uuid[])
             AND s.date BETWEEN ${from}::date AND ${to}::date
           GROUP BY s."classId"
-        ` as Promise<Array<{ classId: string; present: number; absent: number; late: number; excused: number; total: number }>>,
+        ` as Promise<Array<{ classId: string; present: number; absent: number; late: number; excused: number; total: number }>>),
         tx.attendanceSession.groupBy({
           by: ["classId"],
           where: { classId: { in: classIds }, date: { gte: from, lte: to } },
@@ -475,8 +649,8 @@ export class AttendanceService {
       const cover = p.roles.some((r) => REGISTER_COVER_ROLES.has(r));
 
       return {
-        from: from.toISOString().slice(0, 10),
-        to: to.toISOString().slice(0, 10),
+        ...base,
+        source: useRollup ? ("rollup" as const) : ("live" as const),
         classes: visible.map((c) => {
           const s = statBy.get(c.id) ?? { present: 0, absent: 0, late: 0, excused: 0, total: 0 };
           // LATE and EXCUSED count as attending — the pupil was in school, or the
@@ -696,19 +870,5 @@ export class AttendanceService {
       if (enrolled) return;
     }
     throw new NotFoundException("Student not found");
-  }
-
-  private async log(
-    tx: TenantTx,
-    p: Principal,
-    action: string,
-    entity: string,
-    entityId: string,
-    metadata?: Record<string, unknown>,
-  ) {
-    await this.audit.record(
-      { actorId: p.userId, action, entity, entityId, schoolId: p.schoolId, metadata },
-      tx,
-    );
   }
 }

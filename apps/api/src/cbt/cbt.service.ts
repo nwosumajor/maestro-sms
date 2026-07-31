@@ -63,7 +63,7 @@ const SUBMIT_GRACE_MS = 30_000;
 
 /** Roles whose CBT authoring is school-wide; every other cbt.manage holder
  *  (i.e. a teacher) is scoped to the subjects/classes they actually teach. */
-const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal", "super_admin"]);
+const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal"]);
 
 interface QuestionInput {
   prompt: string;

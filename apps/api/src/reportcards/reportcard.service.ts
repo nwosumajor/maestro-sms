@@ -31,7 +31,7 @@ import { TermResultService } from "../gradebook/term-result.service";
 import { computeTermSubjectGrade, gradeLetter, averageOf } from "@sms/types";
 import type { TermSubjectRowDto } from "@sms/types";
 
-const STAFF_WIDE = new Set(["school_admin", "principal", "super_admin"]);
+const STAFF_WIDE = new Set(["school_admin", "principal"]);
 
 @Injectable()
 export class ReportCardService {

@@ -55,7 +55,7 @@ interface GradeBandRow {
 // belongs here so it sees the school aggregate instead of an empty "family" view
 // (mirrors attendance's SCHOOL_WIDE_ROLES, and closes the same dead-grant gap the
 // SIS pass fixed). Roles NOT here (teacher, HR, warden…) get no analytics nav.
-const STAFF_WIDE = new Set(["school_admin", "principal", "accountant", "board", "super_admin", "junior_admin"]);
+const STAFF_WIDE = new Set(["school_admin", "principal", "accountant", "board", "junior_admin"]);
 
 @Injectable()
 export class AnalyticsService {

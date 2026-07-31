@@ -51,7 +51,7 @@ import {
 } from "../integrity/integrity.foundation";
 import { GameEventsService } from "./game-events.service";
 
-const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal", "super_admin"]);
+const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal"]);
 /** Graduated timeout rule (spec §4): skip the first two, forfeit on the third. */
 const MAX_TIMEOUTS = 3;
 const MIN_PLAYERS = 3;

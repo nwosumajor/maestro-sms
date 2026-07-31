@@ -42,7 +42,6 @@ const BILLING_WIDE_ROLES = new Set([
   "school_admin",
   "principal",
   "board",
-  "super_admin",
 ]);
 
 export interface FeeItemInput {

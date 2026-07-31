@@ -23,7 +23,7 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 
-const STAFF_WIDE = new Set(["school_admin", "principal", "super_admin"]);
+const STAFF_WIDE = new Set(["school_admin", "principal"]);
 
 type RemarkRow = {
   studentId: string;

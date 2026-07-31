@@ -65,7 +65,7 @@ import {
 import { effectiveGameSettings } from "./game-settings.util";
 import { GameEventsService } from "./game-events.service";
 
-const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal", "super_admin"]);
+const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal"]);
 /** First N finishers who win (spec §5: 1st/2nd/3rd places). */
 const WINNERS = 3;
 

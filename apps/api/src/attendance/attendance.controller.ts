@@ -10,6 +10,9 @@ import type { Principal } from "../integrity/integrity.foundation";
 import { AttendanceService } from "./attendance.service";
 import { AttendanceRollupService } from "./attendance-rollup.service";
 
+/** Query-string numbers arrive as strings; coerce and bound them at the boundary. */
+const pageSchema = z.coerce.number().int().min(1).max(100_000).optional();
+
 const markSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   records: z
@@ -70,15 +73,29 @@ export class AttendanceController {
 
   /** Attendance BY CLASS over a window — the senior-staff overview. Each row says
    *  whether THIS caller may take that class's register, so the UI never offers a
-   *  button the API would refuse. */
+   *  button the API would refuse.
+   *
+   *  `?termId=` names a term (including one from years ago); an ENDED term is served
+   *  from the rollup rather than by scanning its registers. Raw `from`/`to` still
+   *  work for an arbitrary window and are always computed live. */
   @Get("attendance/by-class")
   @RequirePermission(ATTENDANCE_PERMISSIONS.ATTENDANCE_READ)
   byClass(
     @CurrentPrincipal() p: Principal,
     @Query("from") from?: string,
     @Query("to") to?: string,
+    @Query("termId") termId?: string,
   ) {
-    return this.attendance.getClassAttendance_Grouped(p, { from, to });
+    return this.attendance.getClassAttendance_Grouped(p, { from, to, termId });
+  }
+
+  /** The school's terms, newest first, flagged with whether each is rolled up.
+   *  Feeds the term selector — this is what makes a register from five years ago
+   *  reachable at all. */
+  @Get("attendance/terms")
+  @RequirePermission(ATTENDANCE_PERMISSIONS.ATTENDANCE_READ)
+  terms(@CurrentPrincipal() p: Principal) {
+    return this.attendance.listTerms(p);
   }
 
   /** Which of the caller's classes have no register for ?date= (default today).
@@ -89,14 +106,20 @@ export class AttendanceController {
     return this.attendance.getRegisterStatus(p, date);
   }
 
-  /** A student's attendance history. Relationship-scoped (staff/teacher/parent/self). */
+  /** A student's attendance history, PAGED with the true total. Relationship-scoped
+   *  (staff/teacher/parent/self). Was capped at 200 rows — about one school year —
+   *  with nothing on screen to say the rest existed. */
   @Get("students/:studentId/attendance")
   @RequirePermission(ATTENDANCE_PERMISSIONS.ATTENDANCE_READ)
   studentAttendance(
     @CurrentPrincipal() p: Principal,
     @Param("studentId") studentId: string,
+    @Query("page", new ZodValidationPipe(pageSchema)) page?: number,
+    @Query("pageSize", new ZodValidationPipe(pageSchema)) pageSize?: number,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
   ) {
-    return this.attendance.getStudentAttendance(p, studentId);
+    return this.attendance.getStudentAttendance(p, studentId, { page, pageSize, from, to });
   }
 
   /** A student's current-term totals (% present, absences, lates). Same scoping. */
