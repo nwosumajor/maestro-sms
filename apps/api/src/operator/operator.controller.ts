@@ -13,11 +13,14 @@ import type {
   SubscriptionDto,
   TenantNameDto,
   AttentionQueueDto,
+  PlatformDelegationDto,
   TenantPageDto,
 } from "@sms/types";
 import { z } from "zod";
 import {
+  DEFAULT_DELEGATION_DAYS,
   GRACE_DAYS_MAX,
+  MAX_DELEGATION_DAYS,
   OPERATOR_PERMISSIONS,
   PLANS,
   SUBSCRIPTION_STATUS,
@@ -39,6 +42,7 @@ import { OperatorProvisioningService } from "./operator-provisioning.service";
 import { OperatorUserService } from "./operator-user.service";
 import { OperatorExportService } from "./operator-export.service";
 import { OperatorAttentionService } from "./operator-attention.service";
+import { PlatformDelegationService } from "./platform-delegation.service";
 import { OperatorDirectoryService } from "./operator-directory.service";
 import { PlatformAnalyticsService } from "./platform-analytics.service";
 import { PlatformAuditService, type PlatformAuditFilter } from "./platform-audit.service";
@@ -47,6 +51,15 @@ import { PlatformFeeService } from "../billing/platform-fee.service";
 import { GrowthService } from "../billing/growth.service";
 import { GroupService } from "../group/group.service";
 import { OperatorCreditsService } from "./operator-credits.service";
+
+/** Delegation input. `days` is bounded here AND in the service — the boundary
+ *  rejects nonsense, the service owns the rule. */
+const delegationSchema = z.object({
+  userId: z.string().uuid(),
+  permission: z.string().min(1).max(64),
+  reason: z.string().min(3).max(300),
+  days: z.coerce.number().int().min(1).max(MAX_DELEGATION_DAYS).optional(),
+});
 
 const platformStaffSchema = z.object({
   email: z.string().email(),
@@ -189,6 +202,7 @@ export class OperatorController {
     private readonly users: OperatorUserService,
     private readonly exporter: OperatorExportService,
     private readonly directorySvc: OperatorDirectoryService,
+    private readonly delegations: PlatformDelegationService,
     private readonly attentionSvc: OperatorAttentionService,
     private readonly analyticsSvc: PlatformAnalyticsService,
     private readonly auditSvc: PlatformAuditService,
@@ -259,6 +273,46 @@ export class OperatorController {
     @Body(new ZodValidationPipe(platformStaffSchema)) body: z.infer<typeof platformStaffSchema>,
   ): Promise<PlatformStaffDto> {
     return this.provisioning.createPlatformStaff(p, body);
+  }
+
+  /** Which platform duties may be LENT at all. Rendered by the console so its list
+   *  can never drift from what the API accepts. */
+  @Get("platform-delegations/lendable")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_STAFF_MANAGE)
+  lendableDuties(): { permissions: string[]; maxDays: number; defaultDays: number } {
+    return { permissions: this.delegations.lendable(), maxDays: MAX_DELEGATION_DAYS, defaultDays: DEFAULT_DELEGATION_DAYS };
+  }
+
+  /** Every duty lent to a platform manager — live, expired and handed back. The
+   *  expired ones stay: they are the answer to "who had this access in March". */
+  @Get("platform-delegations")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_STAFF_MANAGE)
+  listDelegations(@CurrentPrincipal() p: Principal): Promise<PlatformDelegationDto[]> {
+    return this.delegations.list(p);
+  }
+
+  /** Lend one duty to one platform manager, for a bounded window.
+   *
+   *  Gated platform.staff.manage — the same non-delegable owner authority that
+   *  hires platform staff, because handing someone a duty is the same class of act
+   *  as hiring them. Step-up: it changes who can reach tenants. */
+  @Post("platform-delegations")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_STAFF_MANAGE)
+  @RequireStepUp()
+  grantDelegation(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(delegationSchema)) body: z.infer<typeof delegationSchema>,
+  ): Promise<PlatformDelegationDto> {
+    return this.delegations.grant(p, body);
+  }
+
+  /** Take a duty back early. Effective on the manager's NEXT request — the guard
+   *  reads the delegation table, so nothing waits for their session to expire.
+   *  No step-up: removing access should never be harder than granting it. */
+  @Post("platform-delegations/:id/revoke")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_STAFF_MANAGE)
+  revokeDelegation(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<{ revoked: true }> {
+    return this.delegations.revoke(p, id);
   }
 
   /** Revoke / reinstate a platform manager. Step-up: destructive. */

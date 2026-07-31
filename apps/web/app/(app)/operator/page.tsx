@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Provisioning } from "@/components/operator/Provisioning";
 import { OnboardingRequests } from "@/components/operator/OnboardingRequests";
 import { PlatformStaff } from "@/components/operator/PlatformStaff";
+import { PlatformDelegations } from "@/components/operator/PlatformDelegations";
 import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
@@ -44,11 +45,16 @@ export default async function OperatorPage({
   // Plan pricing, the fee take rate and growth (promos/agents/commissions) moved to
   // /operator/pricing: five API calls and three heavy editors that this page paid
   // for on every visit, for controls revisited monthly at most.
-  const [names, onboarding, billingAlerts, adminAppointments] = await Promise.all([
+  const [names, onboarding, billingAlerts, adminAppointments, platformStaff] = await Promise.all([
     apiGet<TenantNameDto[]>("/operator/tenant-names"),
     apiGet<Serialized<OnboardingRequestDto>[]>("/operator/onboarding-requests"),
     apiGet<Serialized<OperatorBillingAlertDto>[]>("/operator/billing-alerts"),
     apiGet<Serialized<OperatorAdminAppointmentDto>[]>("/operator/admin-appointments"),
+    // Owner-only, and only to fill the delegate picker — a manager_admin never
+    // fetches it, so this costs nothing on the delegated path.
+    canManageStaff
+      ? apiGet<{ id: string; name: string; email: string }[]>("/operator/platform-staff")
+      : Promise.resolve(null),
   ]);
 
   // "Approve & provision" deep-link: pre-fill the onboarding form from the
@@ -165,6 +171,9 @@ export default async function OperatorPage({
 
         {canReviewOnboarding && <OnboardingRequests requests={onboarding ?? []} />}
         {canManageStaff && <PlatformStaff />}
+        {/* Beside hiring, because it is the same job: who works here, and what may
+            they do this month. */}
+        {canManageStaff && <PlatformDelegations staff={platformStaff ?? []} />}
       </div>
     </AppShell>
   );
