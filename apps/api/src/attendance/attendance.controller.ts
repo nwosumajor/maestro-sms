@@ -8,6 +8,7 @@ import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { AttendanceService } from "./attendance.service";
+import { AttendanceRollupService } from "./attendance-rollup.service";
 
 const markSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -25,7 +26,10 @@ const markSchema = z.object({
 @RequireModule(MODULES.ATTENDANCE)
 @Controller()
 export class AttendanceController {
-  constructor(private readonly attendance: AttendanceService) {}
+  constructor(
+    private readonly attendance: AttendanceService,
+    private readonly rollup: AttendanceRollupService,
+  ) {}
 
   /** Take/correct a class register for a date. Teacher-of-class scoped. */
   @Post("classes/:classId/attendance")
@@ -53,6 +57,28 @@ export class AttendanceController {
     @Query("date") date?: string,
   ) {
     return this.attendance.getClassAttendance(p, classId, date);
+  }
+
+  /** Roll up every ENDED term that has no rollup yet. Idempotent — a term already
+   *  rolled up is skipped, so re-running is free. Ended terms are immutable under
+   *  the term lock, which is why this can never produce a stale figure. */
+  @Post("attendance/rollup/refresh")
+  @RequirePermission(ATTENDANCE_PERMISSIONS.ATTENDANCE_WRITE)
+  refreshRollup(@CurrentPrincipal() p: Principal) {
+    return this.rollup.refreshEndedTerms(p);
+  }
+
+  /** Attendance BY CLASS over a window — the senior-staff overview. Each row says
+   *  whether THIS caller may take that class's register, so the UI never offers a
+   *  button the API would refuse. */
+  @Get("attendance/by-class")
+  @RequirePermission(ATTENDANCE_PERMISSIONS.ATTENDANCE_READ)
+  byClass(
+    @CurrentPrincipal() p: Principal,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+  ) {
+    return this.attendance.getClassAttendance_Grouped(p, { from, to });
   }
 
   /** Which of the caller's classes have no register for ?date= (default today).

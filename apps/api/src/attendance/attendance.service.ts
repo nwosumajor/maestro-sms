@@ -12,7 +12,7 @@
 // =============================================================================
 
 import { randomUUID } from "node:crypto";
-import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 // VALUE import: Prisma.sql/join only resolve as values, not types (CLAUDE.md).
 import { Prisma } from "@sms/db";
 import type { AttendanceStatusValue } from "@sms/types";
@@ -36,6 +36,15 @@ import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 // attendance.amend.review, so stale (>7-day) edits still route through
 // maker-checker like any non-approver. Mirrors the SIS fix.
 const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal", "super_admin", "junior_admin"]);
+/**
+ * Roles that may take ANY class's register, to cover an absent supervisor.
+ *
+ * Deliberately narrower than SCHOOL_WIDE_ROLES, which governs VIEWING. Principal,
+ * head teacher and junior_admin see every register and can no longer write one:
+ * the register is a record of who physically looked at the room, and cover is an
+ * administrative act with a named owner rather than something seniority confers.
+ */
+const REGISTER_COVER_ROLES = new Set(["school_admin", "super_admin"]);
 /** Edits to a register older than this (days) need maker-checker approval. */
 const STALE_REGISTER_DAYS = 7;
 /** Statuses that notify the student's guardians. */
@@ -93,7 +102,9 @@ export class AttendanceService {
     // attendance.amend.review) edit stale registers directly.
     if (stale && !isApprover) {
       await this.db.runAsTenant(this.ctx(p), async (tx) => {
-        await this.assertTeacherOfClass(tx, p, classId);
+        // Write intent, so the WRITE guard — raising an amendment for a class you
+        // may not take is just a slower rejection.
+        await this.assertCanTakeRegister(tx, p, classId);
         await this.assertNotHoliday(tx, date);
         const lockBefore = await this.currentTermStart(tx);
         if (lockBefore && date < lockBefore) {
@@ -114,7 +125,7 @@ export class AttendanceService {
     }
 
     const { session, alerts } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
-      await this.assertTeacherOfClass(tx, p, classId);
+      await this.assertCanTakeRegister(tx, p, classId);
       await this.assertNotHoliday(tx, date);
       // TERM LOCK: a register in a term that has ENDED is read-only for everyone,
       // including leadership — the authoritative check (the UI also greys it out).
@@ -352,6 +363,142 @@ export class AttendanceService {
    * Scoped exactly like every other read here: whole-school staff see every class,
    * a teacher only the classes they teach.
    */
+  /**
+   * Attendance BY CLASS for a window — the senior-staff view.
+   *
+   * One row per class: its attendance rate, how many registers were taken, and who
+   * owns it. Senior staff open this to see the school class by class and drill into
+   * the one that looks wrong; a school administrator gets the same rows plus the
+   * ability to take a register when a supervisor is out.
+   *
+   * Computed as TWO grouped queries regardless of how many classes exist — thirty
+   * classes cost the same as three. It deliberately never loads a roster: the
+   * question here is "how is each class doing", and answering it by fetching
+   * thousands of pupils to count them in Node is how this page would get slow.
+   *
+   * `canTake` is returned per row so the UI never has to re-derive the rule and
+   * cannot drift from what the server will actually allow.
+   */
+  async getClassAttendance_Grouped(
+    p: Principal,
+    opts: { from?: string; to?: string } = {},
+  ): Promise<{
+    from: string;
+    to: string;
+    classes: Array<{
+      classId: string;
+      className: string;
+      supervisorId: string | null;
+      supervisorName: string | null;
+      canTake: boolean;
+      present: number;
+      absent: number;
+      late: number;
+      excused: number;
+      total: number;
+      ratePct: number | null;
+      registersTaken: number;
+    }>;
+  }> {
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      // Default window: the current term, so this agrees with the report card and
+      // with the analytics page rather than quietly using a different period.
+      const termStart = await this.currentTermStart(tx);
+      const from = opts.from
+        ? new Date(`${opts.from}T00:00:00.000Z`)
+        : (termStart ?? new Date(Date.now() - 30 * 86_400_000));
+      const to = opts.to ? new Date(`${opts.to}T00:00:00.000Z`) : new Date();
+
+      // Which classes may this caller SEE? Same rule as everywhere else here.
+      const visible = this.isSchoolWide(p)
+        ? ((await tx.class.findMany({
+            orderBy: { name: "asc" },
+            select: { id: true, name: true, supervisorId: true },
+          })) as Array<{ id: string; name: string; supervisorId: string | null }>)
+        : await (async () => {
+            const taught = (await tx.classTeacher.findMany({
+              where: { teacherId: p.userId },
+              select: { classId: true },
+            })) as Array<{ classId: string }>;
+            const supervised = (await tx.class.findMany({
+              where: { supervisorId: p.userId },
+              select: { id: true },
+            })) as Array<{ id: string }>;
+            const ids = [...new Set([...taught.map((x) => x.classId), ...supervised.map((x) => x.id)])];
+            if (ids.length === 0) return [] as Array<{ id: string; name: string; supervisorId: string | null }>;
+            return (await tx.class.findMany({
+              where: { id: { in: ids } },
+              orderBy: { name: "asc" },
+              select: { id: true, name: true, supervisorId: true },
+            })) as Array<{ id: string; name: string; supervisorId: string | null }>;
+          })();
+      if (visible.length === 0) {
+        return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10), classes: [] };
+      }
+      const classIds = visible.map((c) => c.id);
+
+      // ONE pivot over the window for every visible class, plus one count of the
+      // registers actually taken. Never a query per class.
+      const [stats, registers, supervisors] = await Promise.all([
+        tx.$queryRaw`
+          SELECT s."classId",
+                 count(*) FILTER (WHERE r.status = 'PRESENT')::int AS present,
+                 count(*) FILTER (WHERE r.status = 'ABSENT')::int  AS absent,
+                 count(*) FILTER (WHERE r.status = 'LATE')::int    AS late,
+                 count(*) FILTER (WHERE r.status = 'EXCUSED')::int AS excused,
+                 count(*)::int                                     AS total
+          FROM attendance_record r
+          JOIN attendance_session s ON s.id = r."sessionId"
+          WHERE r."schoolId" = ${p.schoolId}::uuid
+            AND s."classId" = ANY(ARRAY[${Prisma.join(classIds)}]::uuid[])
+            AND s.date BETWEEN ${from}::date AND ${to}::date
+          GROUP BY s."classId"
+        ` as Promise<Array<{ classId: string; present: number; absent: number; late: number; excused: number; total: number }>>,
+        tx.attendanceSession.groupBy({
+          by: ["classId"],
+          where: { classId: { in: classIds }, date: { gte: from, lte: to } },
+          _count: { _all: true },
+        } as never) as unknown as Promise<Array<{ classId: string; _count: { _all: number } }>>,
+        (async () => {
+          const ids = [...new Set(visible.map((c) => c.supervisorId).filter((x): x is string => !!x))];
+          if (ids.length === 0) return [] as Array<{ id: string; name: string }>;
+          return (await tx.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } })) as Array<{
+            id: string;
+            name: string;
+          }>;
+        })(),
+      ]);
+
+      const statBy = new Map(stats.map((s) => [s.classId, s]));
+      const regBy = new Map(registers.map((r) => [r.classId, r._count._all]));
+      const supBy = new Map(supervisors.map((u) => [u.id, u.name]));
+      const cover = p.roles.some((r) => REGISTER_COVER_ROLES.has(r));
+
+      return {
+        from: from.toISOString().slice(0, 10),
+        to: to.toISOString().slice(0, 10),
+        classes: visible.map((c) => {
+          const s = statBy.get(c.id) ?? { present: 0, absent: 0, late: 0, excused: 0, total: 0 };
+          // LATE and EXCUSED count as attending — the pupil was in school, or the
+          // absence was authorised. Same rule as the report card.
+          const ratePct = s.total > 0 ? Math.round(((s.present + s.late + s.excused) / s.total) * 100) : null;
+          return {
+            classId: c.id,
+            className: c.name,
+            supervisorId: c.supervisorId,
+            supervisorName: c.supervisorId ? supBy.get(c.supervisorId) ?? null : null,
+            // Exactly the server's own rule, so the UI cannot offer a button the
+            // API will refuse.
+            canTake: cover || (!!c.supervisorId && c.supervisorId === p.userId),
+            ...s,
+            ratePct,
+            registersTaken: regBy.get(c.id) ?? 0,
+          };
+        }),
+      };
+    });
+  }
+
   async getRegisterStatus(
     p: Principal,
     dateStr?: string,
@@ -472,16 +619,58 @@ export class AttendanceService {
     });
   }
 
+  /**
+   * VIEW a class's register. Broad: whole-school staff, anyone who teaches the class,
+   * and its supervisor. Unchanged — senior staff must be able to see every register,
+   * which is the whole point of the class-grouped view.
+   */
   private async assertTeacherOfClass(tx: TenantTx, p: Principal, classId: string) {
-    const cls = await tx.class.findFirst({ where: { id: classId }, select: { id: true } });
+    const cls = await tx.class.findFirst({ where: { id: classId }, select: { id: true, supervisorId: true } });
     if (!cls) throw new NotFoundException("Class not found");
     if (this.isSchoolWide(p)) return;
+    if (cls.supervisorId && cls.supervisorId === p.userId) return;
     const teaches = await tx.classTeacher.findFirst({
       where: { classId, teacherId: p.userId },
       select: { id: true },
     });
     // SECURITY: 404 (not 403) — don't reveal a class the caller can't see.
     if (!teaches) throw new NotFoundException("Class not found");
+  }
+
+  /**
+   * TAKE or correct a class's register. Deliberately NARROWER than viewing it.
+   *
+   * The register is a legal record of where a child was, signed by the person who
+   * actually looked at the room. So the right to write it follows RESPONSIBILITY for
+   * the class, not seniority:
+   *
+   *   - the class SUPERVISOR (form teacher) — their own class, and only theirs
+   *   - school_admin / super_admin — any class, to cover an absent supervisor
+   *
+   * Everyone else views. That removes write from roles that had it before —
+   * principal, head teacher, junior_admin, and subject teachers who happen to teach
+   * the class — which is the point: a subject teacher seeing a class for one period
+   * is not the person who should be recording whether a child was in school that
+   * day, and a principal recording it for a class they never entered is a record
+   * nobody can stand behind.
+   *
+   * 403, not 404, when the caller can SEE the class but may not write it: hiding a
+   * class they are looking at would read as a bug rather than a rule.
+   */
+  private async assertCanTakeRegister(tx: TenantTx, p: Principal, classId: string) {
+    const cls = (await tx.class.findFirst({
+      where: { id: classId },
+      select: { id: true, name: true, supervisorId: true },
+    })) as { id: string; name: string; supervisorId: string | null } | null;
+    if (!cls) throw new NotFoundException("Class not found");
+    if (p.roles.some((r) => REGISTER_COVER_ROLES.has(r))) return;
+    if (cls.supervisorId && cls.supervisorId === p.userId) return;
+
+    // Can they at least SEE it? If not, keep the 404 so nothing is disclosed.
+    await this.assertTeacherOfClass(tx, p, classId);
+    throw new ForbiddenException(
+      `Only ${cls.name}'s supervisor takes its register — ask a school administrator to cover it`,
+    );
   }
 
   /** school staff / self / parent-of-child / teacher-of-the-student. 404 else. */

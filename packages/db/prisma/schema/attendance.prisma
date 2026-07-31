@@ -47,6 +47,53 @@ model AttendanceSession {
   @@map("attendance_session")
 }
 
+/// Per-term attendance totals, precomputed. One row per (term, class, student).
+///
+/// WHY THIS IS SAFE, which is the whole design: a term that has ENDED is immutable.
+/// AttendanceService refuses every write to a register dated before the current
+/// term's start — locked for everyone, including leadership, with no approval path.
+/// So a rollup of an ended term can never drift from the records it summarises.
+/// Only ENDED terms are ever stored here; the current term is always computed live,
+/// so today's figure is never stale. That is why there is no staleness field and no
+/// "refresh before reading" dance.
+///
+/// Grain is (term, class, student) rather than a school total, because the same rows
+/// then answer three questions — the school's term attendance, a class's, and a
+/// pupil's — and it stays small: 3,000 pupils x 3 terms is ~9,000 rows a year, versus
+/// the ~540,000 raw records those terms contain.
+model AttendanceTermRollup {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  termId    String @db.Uuid
+  classId   String @db.Uuid
+  /// Student (DB FK to user; scalar, keeping the User model lean).
+  studentId String @db.Uuid
+
+  present Int @default(0)
+  absent  Int @default(0)
+  late    Int @default(0)
+  excused Int @default(0)
+  /// Registers this pupil appears in for the term (the denominator).
+  total   Int @default(0)
+
+  /// When this row was computed. Informational — an ended term cannot change, so
+  /// this is provenance, not a cache-invalidation signal.
+  computedAt DateTime @default(now())
+
+  school School @relation(fields: [schoolId], references: [id])
+  term   Term   @relation(fields: [termId], references: [id], onDelete: Cascade)
+  class  Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  /// One row per pupil per class per term — the upsert key, so a recompute
+  /// replaces rather than duplicates.
+  @@unique([termId, classId, studentId])
+  @@index([schoolId])
+  @@index([schoolId, termId])
+  @@index([schoolId, termId, classId])
+  @@map("attendance_term_rollup")
+}
+
 /// One student's status within a session.
 model AttendanceRecord {
   id        String @id @default(uuid()) @db.Uuid

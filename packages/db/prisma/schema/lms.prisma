@@ -42,11 +42,12 @@ model Class {
   subjectTeachers    ClassSubjectTeacher[]
   examSittings       ExamSitting[]
 
-  nextClass       Class?           @relation("ClassProgression", fields: [nextClassId], references: [id])
-  previousClasses Class[]          @relation("ClassProgression")
-  supervisor      User?            @relation("ClassSupervisor", fields: [supervisorId], references: [id])
-  promotionsFrom  PromotionBatch[] @relation("PromotionSource")
-  promotionsTo    PromotionBatch[] @relation("PromotionTarget")
+  nextClass         Class?                 @relation("ClassProgression", fields: [nextClassId], references: [id])
+  previousClasses   Class[]                @relation("ClassProgression")
+  supervisor        User?                  @relation("ClassSupervisor", fields: [supervisorId], references: [id])
+  promotionsFrom    PromotionBatch[]       @relation("PromotionSource")
+  promotionsTo      PromotionBatch[]       @relation("PromotionTarget")
+  attendanceRollups AttendanceTermRollup[]
 
   // Identity integrity: no two classes in a school share a name or code, so a
   // student or teacher can never be assigned to an ambiguous class.
