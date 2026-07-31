@@ -25,6 +25,7 @@ import { Prisma } from "@sms/db";
 import {
   DEFAULT_PLAN,
   PLAN_PRICING,
+  SUBSCRIPTION_GRACE_DAYS,
   SUBSCRIPTION_STATUS,
   effectivePlan,
   isPlan,
@@ -142,7 +143,19 @@ export class OperatorAttentionService {
         const overdue = sub?.currentPeriodEnd
           ? Math.max(0, Math.floor((now.getTime() - sub.currentPeriodEnd.getTime()) / DAY_MS))
           : 0;
-        add("PAST_DUE", `Payment overdue ${overdue} day${overdue === 1 ? "" : "s"}`, 3);
+        // Whether the grace window has ELAPSED is the difference between "chase the
+        // payment" and "their modules are already gone" — two different phone calls.
+        // The console's red banner carried this distinction; the queue now does, so
+        // that banner could be reduced to a link without losing anything.
+        const grace = sub?.graceDays ?? SUBSCRIPTION_GRACE_DAYS;
+        const downgraded = overdue > grace;
+        add(
+          "PAST_DUE",
+          downgraded
+            ? `Payment overdue ${overdue} days — already downgraded to Standard`
+            : `Payment overdue ${overdue} day${overdue === 1 ? "" : "s"} — still in the ${grace}-day grace window`,
+          3,
+        );
       } else if (sub?.currentPeriodEnd) {
         const daysLeft = Math.ceil((sub.currentPeriodEnd.getTime() - now.getTime()) / DAY_MS);
         // Never paid + period ending = the trial conversation, and it has a date.

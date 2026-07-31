@@ -16,7 +16,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Provisioning } from "@/components/operator/Provisioning";
 import { OnboardingRequests } from "@/components/operator/OnboardingRequests";
-import { GroupsManager } from "@/components/operator/GroupsManager";
 import { PlatformStaff } from "@/components/operator/PlatformStaff";
 import { PageHeader } from "@/components/shell/PageHeader";
 
@@ -51,7 +50,6 @@ export default async function OperatorPage({
     apiGet<Serialized<OperatorBillingAlertDto>[]>("/operator/billing-alerts"),
     apiGet<Serialized<OperatorAdminAppointmentDto>[]>("/operator/admin-appointments"),
   ]);
-  const groups = canManageSubscription ? await apiGet<never[]>("/operator/groups").then((r) => r ?? []) : [];
 
   // "Approve & provision" deep-link: pre-fill the onboarding form from the
   // request (contact person becomes the school_admin; wish plan/modules applied).
@@ -90,6 +88,9 @@ export default async function OperatorPage({
           {canManagePricing && (
             <Link href="/operator/pricing"><Button variant="outline" size="sm">Pricing &amp; growth →</Button></Link>
           )}
+          {canManageSubscription && (
+            <Link href="/operator/groups"><Button variant="outline" size="sm">School groups →</Button></Link>
+          )}
           <Link href="/operator/schools"><Button variant="outline" size="sm">School directory →</Button></Link>
           <Link href="/operator/message-credits"><Button variant="outline" size="sm">Message credits →</Button></Link>
           {canAdminScholarships && (
@@ -97,37 +98,23 @@ export default async function OperatorPage({
           )}
         </div>
 
-        {/* RED ALERT: every school past its paid period, most overdue first. The
-            controls live on each tenant card in the Tenant registry (restore/
-            extend/comp via the subscription editor) — this banner makes sure
-            none sits unnoticed. */}
+        {/* The alarm stays on the page opened daily — but as ONE line, not a
+            restatement of the queue. It costs a single indexed query (past-due
+            subscriptions), never the fleet scan, and the DETAIL now lives in one
+            place: the queue says whether each school is still in its grace window
+            or already downgraded. Two places showing the same fact is how they
+            drift apart. Scope matches the queue exactly (active schools only), so
+            this count can never exceed the list it links to. */}
         {(billingAlerts?.length ?? 0) > 0 && (
-          <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4">
-            <p className="text-sm font-semibold text-destructive">
+          <Link
+            href="/operator/attention?kind=PAST_DUE"
+            className="flex flex-wrap items-center gap-2 rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm hover:bg-destructive/15"
+          >
+            <span className="font-semibold text-destructive">
               ⚠ {billingAlerts!.length} school{billingAlerts!.length === 1 ? "" : "s"} past their subscription period
-            </p>
-            <ul className="mt-2 space-y-1 text-sm">
-              {billingAlerts!.map((a) => (
-                <li key={a.schoolId} className="flex flex-wrap items-center gap-2">
-                  <Link href={`/operator/tenants?billing=PAST_DUE&q=${encodeURIComponent(a.name)}`} className="font-medium hover:underline">
-                    {a.name}
-                  </Link>
-                  <span className="text-muted-foreground">({a.plan})</span>
-                  <Badge variant="destructive">{a.daysPastDue} day{a.daysPastDue === 1 ? "" : "s"} past due</Badge>
-                  {a.downgraded ? (
-                    <Badge variant="destructive">DOWNGRADED to Standard</Badge>
-                  ) : (
-                    <Badge variant="outline">in grace window</Badge>
-                  )}
-                </li>
-              ))}
-            </ul>
-            <p className="mt-2 text-xs text-muted-foreground">
-              Open the school in the{" "}
-              <Link href="/operator/tenants?billing=PAST_DUE" className="underline">Tenant registry</Link>{" "}
-              to extend the period, comp, or restore — paying restores the plan automatically.
-            </p>
-          </div>
+            </span>
+            <span className="text-muted-foreground">— review in Needs a decision →</span>
+          </Link>
         )}
 
         {/* Cross-tenant oversight of the junior-admin maker-checker: who is
@@ -175,10 +162,6 @@ export default async function OperatorPage({
 
         {/* Keyed on the request id so entering/leaving prefill re-initialises the form. */}
         {canProvision && <Provisioning key={prefill?.requestId ?? "blank"} tenants={names ?? []} prefill={prefill} />}
-
-        {canManageSubscription && (
-          <GroupsManager groups={groups} schools={(names ?? []).map((n) => ({ id: n.id, name: n.name }))} />
-        )}
 
         {canReviewOnboarding && <OnboardingRequests requests={onboarding ?? []} />}
         {canManageStaff && <PlatformStaff />}

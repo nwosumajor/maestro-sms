@@ -28,7 +28,11 @@ import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
 
-export default async function OperatorAttentionPage() {
+export default async function OperatorAttentionPage({
+  searchParams,
+}: {
+  searchParams: { kind?: string };
+}) {
   const session = await auth();
   const user = session!.user;
   if (!hasPermission(user.permissions, "platform.tenants.read")) redirect("/dashboard");
@@ -70,7 +74,7 @@ export default async function OperatorAttentionPage() {
             </AlertDescription>
           </Alert>
         ) : (
-          <AttentionQueue queue={queue} />
+          <AttentionQueue queue={queue} initialKind={searchParams.kind ?? ""} />
         )}
       </div>
     </AppShell>
