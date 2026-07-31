@@ -40,6 +40,7 @@ import {
   WalletIcon,
   ScrollTextIcon,
   CircleHelpIcon,
+  TriangleAlertIcon,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -109,6 +110,7 @@ type NavKey =
   | "games"
   | "ultimate"
   | "operator"
+  | "operatorattention"
   | "operatortenants"
   | "operatorscholarships"
   | "operatoraudit"
@@ -140,6 +142,7 @@ const NAV: {
   // "family" scope, so the link is hidden from them rather than showing zeros.
   { key: "analytics", label: "Analytics", icon: BarChart3Icon, href: "/analytics", perm: "fee.read", module: MODULES.ANALYTICS },
   { key: "operator", label: "Operator", icon: Building2Icon, href: "/operator", perm: "platform.tenants.read" },
+  { key: "operatorattention", label: "Needs a decision", icon: TriangleAlertIcon, href: "/operator/attention", perm: "platform.tenants.read" },
   { key: "operatortenants", label: "Tenant registry", icon: ServerIcon, href: "/operator/tenants", perm: "platform.tenants.read" },
   { key: "operatorscholarships", label: "Scholarship admin", icon: AwardIcon, href: "/operator/scholarships", perm: "scholarship.admin" },
   { key: "operatoraudit", label: "Platform audit", icon: ScrollTextIcon, href: "/operator/audit", perm: "platform.audit.read" },
@@ -229,6 +232,7 @@ const NAV: {
 const PLATFORM_OWNER_NAV = new Set<NavKey>([
   "dashboard",
   "operator",
+  "operatorattention",
   "operatortenants",
   "operatorscholarships",
   "operatoraudit",
@@ -265,7 +269,7 @@ const NAV_GROUP: Record<NavKey, string> = {
   workflows: "operations", tasks: "operations", scholarships: "operations",
   discussion: "community", polls: "community", forms: "community", discipline: "community",
   games: "community", ultimate: "community",
-  operator: "platform", operatortenants: "platform", operatorscholarships: "platform",
+  operator: "platform", operatorattention: "platform", operatortenants: "platform", operatorscholarships: "platform",
   operatoraudit: "platform", directory: "platform", admin: "platform", account: "platform",
   feedback: "platform", operatorfeedback: "platform",
   help: "platform",

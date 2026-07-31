@@ -23,7 +23,6 @@ import { PlatformFeeManager } from "@/components/operator/PlatformFeeManager";
 import { GrowthManager } from "@/components/operator/GrowthManager";
 import { GroupsManager } from "@/components/operator/GroupsManager";
 import { PlatformStaff } from "@/components/operator/PlatformStaff";
-import { AttentionQueue } from "@/components/operator/AttentionQueue";
 import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
@@ -96,6 +95,10 @@ export default async function OperatorPage({
 
         {/* Quick links to the pages the registry + scholarship management moved to. */}
         <div className="flex flex-wrap gap-2">
+          {/* First, deliberately: triage before administration. The queue lives on
+              its own page because it scans every active school, and running that on
+              every visit to this hub was work nobody had asked for. */}
+          <Link href="/operator/attention"><Button size="sm">Needs a decision →</Button></Link>
           <Link href="/operator/tenants"><Button variant="outline" size="sm">Tenant registry →</Button></Link>
           <Link href="/operator/schools"><Button variant="outline" size="sm">School directory →</Button></Link>
           <Link href="/operator/message-credits"><Button variant="outline" size="sm">Message credits →</Button></Link>
@@ -103,12 +106,6 @@ export default async function OperatorPage({
             <Link href="/operator/scholarships"><Button variant="outline" size="sm">Scholarship admin →</Button></Link>
           )}
         </div>
-
-        {/* The console's front door: the schools that need a DECISION, ranked.
-            The red banner below covers billing alone; this covers the other five
-            ways a school gets into trouble — including the ones that predict churn
-            long before the money stops. */}
-        <AttentionQueue />
 
         {/* RED ALERT: every school past its paid period, most overdue first. The
             controls live on each tenant card in the Tenant registry (restore/
