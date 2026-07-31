@@ -26,14 +26,17 @@ function makeClient() {
         // s2 has no subscription row -> fail-closed to the STANDARD floor (DEFAULT_PLAN).
       ]),
     },
-    userRole: {
-      findMany: jest.fn().mockResolvedValue([
-        { userId: "u1", schoolId: "s1", role: { name: "student" } },
-        { userId: "u2", schoolId: "s1", role: { name: "student" } },
-        { userId: "u3", schoolId: "s1", role: { name: "teacher" } },
-        { userId: "u3", schoolId: "s1", role: { name: "principal" } }, // same staff user, 2 roles -> counted once
-      ]),
-    },
+    // People are COUNTED in Postgres now, not fetched and tallied in Node — the
+    // scan this replaced pulled every user_role row for every customer school.
+    // u3 holds teacher AND principal and is ONE member of staff: the SQL says
+    // count(DISTINCT "userId"), so the mock returns the already-deduplicated 1.
+    $queryRaw: jest.fn(async (q: unknown) => {
+      const sql = JSON.stringify(q);
+      if (sql.includes("date_trunc")) {
+        return [{ month: now, count: 2 }]; // both students enrolled this month
+      }
+      return [{ schoolId: "s1", students: 2, staff: 1, parents: 0 }];
+    }),
     user: {
       findMany: jest.fn().mockResolvedValue([{ createdAt: now }, { createdAt: now }]),
     },

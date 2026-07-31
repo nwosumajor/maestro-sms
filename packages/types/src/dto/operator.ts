@@ -6,7 +6,18 @@ export interface TenantDto {
   slug: string;
   status: string;
   createdAt: Date;
+  /** Everyone with an account: students + staff + guardians. Kept for continuity,
+   *  but it is the least useful of the four — a 900-pupil school and one with 900
+   *  guardian accounts produce the same number. */
   users: number;
+  /** Pupils holding the student ROLE — the SAME definition as the billing seat
+   *  count, so this figure reconciles against what the school is charged for. */
+  students: number;
+  /** DISTINCT staff: everyone whose role is not student/parent. Counts people, not
+   *  role assignments — a head teacher who also teaches is one member of staff. */
+  staff: number;
+  /** Guardian accounts. */
+  parents: number;
   /** Subscription plan (STANDARD | PREMIUM | ULTIMATE | ENTERPRISE). */
   plan: string;
   /** Count of subscription-enabled modules. */
@@ -215,7 +226,15 @@ export interface SchoolDirectoryRowDto {
   /** Outstanding metered seat arrears (kobo) — usage above the billed seat
    *  count, collected at next checkout/renewal. */
   outstandingMinor: number;
+  /** Pupils holding the student ROLE — the same definition as the billing seat
+   *  count, so the two reconcile. */
   students: number;
+  /** DISTINCT staff: everyone whose role is not student/parent, counted as PEOPLE
+   *  rather than role assignments. A head teacher who also teaches is one person. */
+  staff: number;
+  /** Guardian accounts. */
+  parents: number;
+  /** students + staff + parents. */
   users: number;
 }
 
@@ -242,6 +261,7 @@ export interface SchoolProfileDto extends SchoolDirectoryRowDto {
   /** ALL admin/principal accounts (the row shows only the first of each). */
   admins: SchoolContactDto[];
   principals: SchoolContactDto[];
+  /** DISTINCT staff — people, not role assignments (see `SchoolDirectoryRowDto`). */
   staff: number;
   /** Subscription detail. */
   billingCycle: string;
@@ -262,6 +282,66 @@ export interface SchoolProfileDto extends SchoolDirectoryRowDto {
   referredBy: string | null;
   /** Recent platform-subscription payments, newest first. */
   payments: SchoolProfilePaymentDto[];
+}
+
+// --- Operator attention queue ------------------------------------------------
+
+/** Why a school is on the operator's attention queue. Each is a condition somebody
+ *  has to DECIDE about, not merely a statistic. */
+export const ATTENTION_KINDS = [
+  /** Billing lapsed — modules already downgraded or about to be. */
+  "PAST_DUE",
+  /** Trial or paid period ends soon and the school has never paid. */
+  "TRIAL_ENDING",
+  /** Enrolment has grown past the billed seat count; arrears are accruing. */
+  "SEAT_ARREARS",
+  /** No audited activity at all recently — nobody is using the product. */
+  "DORMANT",
+  /** Registers have stopped being taken: the daily workflow has been abandoned. */
+  "REGISTERS_STOPPED",
+  /** No school_admin or principal account exists — provisioning never completed. */
+  "NO_ADMIN",
+] as const;
+export type AttentionKind = (typeof ATTENTION_KINDS)[number];
+
+/** One reason a school needs a decision, with the number behind it. */
+export interface AttentionSignalDto {
+  kind: AttentionKind;
+  /** Plain-language statement of the condition, including its figure. */
+  detail: string;
+  /** 1 = worth knowing, 2 = should act this week, 3 = acting late already. */
+  severity: 1 | 2 | 3;
+}
+
+/** A school that needs the operator's attention, with every reason it does. */
+export interface AttentionRowDto {
+  schoolId: string;
+  schoolName: string;
+  plan: string;
+  subscriptionStatus: string;
+  students: number;
+  staff: number;
+  /** Monthly run-rate at stake if this school lapses (kobo/cents). */
+  mrrMinor: number;
+  /** Highest severity among the signals — what the sort is on. */
+  severity: 1 | 2 | 3;
+  signals: AttentionSignalDto[];
+}
+
+/** The queue itself. Deliberately RANKED and BOUNDED: nobody reviews 5,000 schools
+ *  by browsing, so the console's job is to name the ones that need a decision. */
+export interface AttentionQueueDto {
+  rows: AttentionRowDto[];
+  /** Schools with at least one signal (may exceed `rows.length` — see `shown`). */
+  total: number;
+  /** How many rows were returned. Stated so a truncated queue never reads as a
+   *  complete one — a capped list that looks complete is how things get missed. */
+  shown: number;
+  /** Customer schools examined. */
+  scanned: number;
+  /** Count of schools carrying each signal, across the WHOLE fleet — not just the
+   *  page — so the headline figures are never the size of the cap. */
+  byKind: Record<string, number>;
 }
 
 // --- Message-credit (SMS/WhatsApp) oversight (operator) ----------------------
