@@ -9,7 +9,18 @@
 // The overview carries AGGREGATES ONLY (counts and sums) — never student PII.
 
 import { Inject, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
-import type { GroupOverviewDto, GroupSchoolStatsDto } from "@sms/types";
+import type {
+  GroupFlag,
+  GroupMoneyDto,
+  GroupOverviewDto,
+  GroupRefDto,
+  GroupSchoolDetailDto,
+  GroupSchoolStatsDto,
+  GroupTrendPointDto,
+} from "@sms/types";
+// VALUE import: Prisma.sql only resolves as a value, not a type (CLAUDE.md).
+import { Prisma } from "@sms/db";
+import { headcountBySchool } from "../operator/operator-people";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -18,6 +29,9 @@ import {
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
+
+/** Below this, a campus's attendance is worth the director's attention. */
+const LOW_ATTENDANCE_PCT = 85;
 
 @Injectable()
 export class GroupService {
@@ -33,144 +47,427 @@ export class GroupService {
     return c;
   }
 
-  /** The caller's group dashboard (their FIRST directed group in v1). */
-  async overview(p: Principal): Promise<GroupOverviewDto> {
-    const client = this.client();
-    const directorship = await client.schoolGroupDirector.findFirst({
-      where: { userId: p.userId },
+  /** Every group this user directs. Empty = not a director. */
+  private async directedGroups(userId: string) {
+    return this.client().schoolGroupDirector.findMany({
+      where: { userId },
       include: { group: { include: { members: true } } },
+      orderBy: { group: { name: "asc" } },
     });
+  }
+
+  /**
+   * Resolve the reporting window.
+   *
+   * The console used to report attendance for TODAY and nothing else, which made it
+   * blank on a weekend, on a holiday, and every morning before registers were taken
+   * — on the page a proprietor opens first. A period is now chosen, and the label
+   * travels with the figures so nobody has to guess what they are looking at.
+   */
+  private resolvePeriod(key?: string): { from: Date; to: Date; label: string; key: string } {
+    const to = new Date();
+    const from = new Date();
+    from.setHours(0, 0, 0, 0);
+    switch (key) {
+      case "today":
+        return { from, to, label: "Today", key: "today" };
+      case "week":
+        from.setDate(from.getDate() - 6);
+        return { from, to, label: "Last 7 days", key: "week" };
+      case "term":
+        // A term is per-school and they need not align across campuses, so the
+        // group view uses a fixed 90-day window rather than pretending otherwise.
+        from.setDate(from.getDate() - 89);
+        return { from, to, label: "Last 90 days", key: "term" };
+      case "month":
+      default:
+        from.setDate(1);
+        return { from, to, label: "This month", key: "month" };
+    }
+  }
+
+  /** Money per campus per CURRENCY. Never summed across currencies. */
+  private async moneyByCampus(
+    schoolIds: string[],
+    from: Date,
+    to: Date,
+  ): Promise<Map<string, GroupMoneyDto[]>> {
+    const client = this.client();
+    // A payment carries no currency of its own — it inherits its INVOICE's. So the
+    // collected figures join through to the invoice rather than assuming NGN, which
+    // is precisely the assumption that made the old totals wrong.
+    const [paid, invoiced, collected] = await Promise.all([
+      client.$queryRaw<Array<{ schoolId: string; currency: string; total: number }>>(Prisma.sql`
+        SELECT p."schoolId", i.currency, SUM(p."amountMinor")::float8 AS total
+        FROM payment p JOIN invoice i ON i.id = p."invoiceId"
+        WHERE p."schoolId" = ANY(ARRAY[${Prisma.join(schoolIds)}]::uuid[])
+          AND p.status = 'POSTED' AND p.kind = 'PAYMENT'
+          AND p."paidAt" >= ${from} AND p."paidAt" <= ${to}
+        GROUP BY 1, 2
+      `),
+      client.$queryRaw<Array<{ schoolId: string; currency: string; total: number }>>(Prisma.sql`
+        SELECT i."schoolId", i.currency, SUM(i."totalMinor")::float8 AS total
+        FROM invoice i
+        WHERE i."schoolId" = ANY(ARRAY[${Prisma.join(schoolIds)}]::uuid[])
+          AND i.status IN ('ISSUED', 'PARTIALLY_PAID')
+        GROUP BY 1, 2
+      `),
+      client.$queryRaw<Array<{ schoolId: string; currency: string; total: number }>>(Prisma.sql`
+        SELECT p."schoolId", i.currency, SUM(p."amountMinor")::float8 AS total
+        FROM payment p JOIN invoice i ON i.id = p."invoiceId"
+        WHERE p."schoolId" = ANY(ARRAY[${Prisma.join(schoolIds)}]::uuid[])
+          AND p.status = 'POSTED' AND p.kind = 'PAYMENT'
+          AND i.status IN ('ISSUED', 'PARTIALLY_PAID')
+        GROUP BY 1, 2
+      `),
+    ]);
+
+    const out = new Map<string, Map<string, GroupMoneyDto>>();
+    const slot = (schoolId: string, currency: string): GroupMoneyDto => {
+      let per = out.get(schoolId);
+      if (!per) out.set(schoolId, (per = new Map()));
+      let row = per.get(currency);
+      if (!row) per.set(currency, (row = { currency, collectedMinor: 0, outstandingMinor: 0 }));
+      return row;
+    };
+    // float8 rather than int: a lifetime kobo total overflows int4, and int8 comes
+    // back as BigInt which will not serialise to JSON (CLAUDE.md).
+    for (const r of paid) slot(r.schoolId, r.currency).collectedMinor += Math.round(r.total);
+    for (const r of invoiced) slot(r.schoolId, r.currency).outstandingMinor += Math.round(r.total);
+    for (const r of collected) {
+      const row = slot(r.schoolId, r.currency);
+      row.outstandingMinor = Math.max(0, row.outstandingMinor - Math.round(r.total));
+    }
+    return new Map([...out].map(([k, v]) => [k, [...v.values()].sort((a, b) => a.currency.localeCompare(b.currency))]));
+  }
+
+  /** Conditions a director should act on, worst first. */
+  private flagsFor(x: {
+    active: boolean;
+    subscriptionStatus: string;
+    students: number;
+    staff: number;
+    registersTaken: number;
+    attendancePct: number | null;
+  }): GroupFlag[] {
+    const flags: GroupFlag[] = [];
+    if (!x.active) flags.push("DISABLED");
+    if (x.subscriptionStatus !== "ACTIVE") flags.push("BILLING");
+    if (x.students > 0 && x.staff === 0) flags.push("NO_STAFF");
+    // Only meaningful where there are pupils to register.
+    if (x.students > 0 && x.registersTaken === 0) flags.push("NO_REGISTERS");
+    else if (x.attendancePct != null && x.attendancePct < LOW_ATTENDANCE_PCT) flags.push("LOW_ATTENDANCE");
+    return flags;
+  }
+
+  /**
+   * The caller's group dashboard.
+   *
+   * `groupId` selects among the groups they direct; omitted picks the first. Every
+   * figure is an aggregate, computed as ONE grouped query per metric across all
+   * campuses at once — never a query per school.
+   */
+  async overview(p: Principal, opts: { groupId?: string; period?: string } = {}): Promise<GroupOverviewDto> {
+    const client = this.client();
+    const directorships = await this.directedGroups(p.userId);
     // 404-not-403: a non-director learns nothing about groups existing.
-    if (!directorship) throw new NotFoundException("Not found");
+    if (directorships.length === 0) throw new NotFoundException("Not found");
 
-    const group = directorship.group;
+    const chosen = opts.groupId
+      ? directorships.find((d) => d.groupId === opts.groupId)
+      : directorships[0];
+    // Asking for a group you do not direct is indistinguishable from one that does
+    // not exist.
+    if (!chosen) throw new NotFoundException("Not found");
+
+    const group = chosen.group;
     const schoolIds = group.members.map((m) => m.schoolId);
-    const schools = await client.school.findMany({
-      where: { id: { in: schoolIds } },
-      select: { id: true, name: true, slug: true, status: true },
-      orderBy: { name: "asc" },
-    });
-    const subs = await client.schoolSubscription.findMany({
-      where: { schoolId: { in: schoolIds } },
-      select: { schoolId: true, plan: true, status: true, currentPeriodEnd: true },
-    });
+    const period = this.resolvePeriod(opts.period);
+
+    const groups: GroupRefDto[] = directorships.map((d) => ({
+      id: d.group.id,
+      name: d.group.name,
+      schools: d.group.members.length,
+    }));
+    if (schoolIds.length === 0) {
+      return {
+        groupId: group.id,
+        groupName: group.name,
+        groups,
+        period,
+        schools: [],
+        totals: { students: 0, staff: 0, byCurrency: {} },
+        flagged: 0,
+      };
+    }
+
+    const [schools, subs, headcounts, attTotalGroups, attPresentGroups, registerGroups, money] = await Promise.all([
+      client.school.findMany({
+        where: { id: { in: schoolIds } },
+        select: { id: true, name: true, slug: true, status: true },
+        orderBy: { name: "asc" },
+      }),
+      client.schoolSubscription.findMany({
+        where: { schoolId: { in: schoolIds } },
+        select: { schoolId: true, plan: true, status: true, currentPeriodEnd: true },
+      }),
+      // The SHARED headcount: students and staff by the same definition the
+      // operator console and the school analytics use. Staff used to be a count of
+      // `employee` ROWS, so a campus that had not filled in its HR register showed
+      // zero staff while employing forty.
+      headcountBySchool(client, schoolIds),
+      client.attendanceRecord.groupBy({
+        by: ["schoolId"],
+        where: { schoolId: { in: schoolIds }, session: { date: { gte: period.from, lte: period.to } } },
+        _count: { _all: true },
+      }),
+      client.attendanceRecord.groupBy({
+        by: ["schoolId"],
+        where: {
+          schoolId: { in: schoolIds },
+          // LATE and EXCUSED count as attending — the same rule as the report card,
+          // so a campus's figure here matches the one its own staff see.
+          status: { in: ["PRESENT", "LATE", "EXCUSED"] },
+          session: { date: { gte: period.from, lte: period.to } },
+        },
+        _count: { _all: true },
+      }),
+      client.attendanceSession.groupBy({
+        by: ["schoolId"],
+        where: { schoolId: { in: schoolIds }, date: { gte: period.from, lte: period.to } },
+        _count: { _all: true },
+      }),
+      this.moneyByCampus(schoolIds, period.from, period.to),
+    ]);
+
     const subOf = new Map(subs.map((s) => [s.schoolId, s]));
-
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-    const startOfMonth = new Date(startOfDay);
-    startOfMonth.setDate(1);
-
-    // ONE grouped query per METRIC across every campus, instead of seven queries
-    // per school inside a sequential loop. A 20-school group was 140 round trips
-    // taken one school at a time — the group console is the page a director opens
-    // first, and it got slower with every campus they added.
-    //
-    // Every one of these is still an aggregate: nothing loads rows to count them in
-    // Node, which the student tally previously did (findMany + distinct, then
-    // `.length`).
-    const [studentGroups, staffGroups, attTotalGroups, attPresentGroups, paidGroups, invoicedGroups, collectedGroups] =
-      await Promise.all([
-        client.userRole.groupBy({
-          by: ["schoolId"],
-          where: { schoolId: { in: schoolIds }, role: { name: "student" } },
-          _count: { userId: true },
-        }),
-        client.employee.groupBy({ by: ["schoolId"], where: { schoolId: { in: schoolIds } }, _count: { _all: true } }),
-        client.attendanceRecord.groupBy({
-          by: ["schoolId"],
-          where: { schoolId: { in: schoolIds }, session: { date: { gte: startOfDay } } },
-          _count: { _all: true },
-        }),
-        client.attendanceRecord.groupBy({
-          by: ["schoolId"],
-          where: { schoolId: { in: schoolIds }, status: "PRESENT", session: { date: { gte: startOfDay } } },
-          _count: { _all: true },
-        }),
-        client.payment.groupBy({
-          by: ["schoolId"],
-          where: { schoolId: { in: schoolIds }, status: "POSTED", kind: "PAYMENT", paidAt: { gte: startOfMonth } },
-          _sum: { amountMinor: true },
-        }),
-        client.invoice.groupBy({
-          by: ["schoolId"],
-          where: { schoolId: { in: schoolIds }, status: { in: ["ISSUED", "PARTIALLY_PAID"] } },
-          _sum: { totalMinor: true },
-        }),
-        client.payment.groupBy({
-          by: ["schoolId"],
-          where: {
-            schoolId: { in: schoolIds },
-            status: "POSTED",
-            kind: "PAYMENT",
-            invoice: { status: { in: ["ISSUED", "PARTIALLY_PAID"] } },
-          },
-          _sum: { amountMinor: true },
-        }),
-      ]);
-
-    const countBy = (rows: Array<{ schoolId: string; _count: { _all?: number; userId?: number } }>): Map<string, number> =>
-      new Map(rows.map((r) => [r.schoolId, r._count._all ?? r._count.userId ?? 0]));
-    const sumBy = (
-      rows: Array<{ schoolId: string; _sum: { amountMinor?: number | null; totalMinor?: number | null } }>,
-    ): Map<string, number> =>
-      new Map(rows.map((r) => [r.schoolId, r._sum.amountMinor ?? r._sum.totalMinor ?? 0]));
-
-    const students = countBy(studentGroups as never);
-    const staff = countBy(staffGroups as never);
+    const countBy = (rows: Array<{ schoolId: string; _count: { _all: number } }>) =>
+      new Map(rows.map((r) => [r.schoolId, r._count._all]));
     const attTotal = countBy(attTotalGroups as never);
     const attPresent = countBy(attPresentGroups as never);
-    const paid = sumBy(paidGroups as never);
-    const invoiced = sumBy(invoicedGroups as never);
-    const collected = sumBy(collectedGroups as never);
+    const registers = countBy(registerGroups as never);
 
     // Built from `schools`, so a campus with no data at all still appears — an
     // absent school reads as a problem, not as a school with nothing to report.
     const perSchool: GroupSchoolStatsDto[] = schools.map((school) => {
       const sub = subOf.get(school.id);
+      const head = headcounts.get(school.id) ?? { students: 0, staff: 0, parents: 0 };
       const total = attTotal.get(school.id) ?? 0;
+      const base = {
+        active: school.status === "ACTIVE",
+        subscriptionStatus: sub?.status ?? "ACTIVE",
+        students: head.students,
+        staff: head.staff,
+        registersTaken: registers.get(school.id) ?? 0,
+        attendancePct: total > 0 ? Math.round(((attPresent.get(school.id) ?? 0) / total) * 100) : null,
+      };
       return {
         schoolId: school.id,
         name: school.name,
         slug: school.slug,
-        active: school.status === "ACTIVE",
-        students: students.get(school.id) ?? 0,
-        staff: staff.get(school.id) ?? 0,
-        attendanceTodayPct: total > 0 ? Math.round(((attPresent.get(school.id) ?? 0) / total) * 100) : null,
-        collectedThisMonthMinor: paid.get(school.id) ?? 0,
-        outstandingFeesMinor: Math.max(0, (invoiced.get(school.id) ?? 0) - (collected.get(school.id) ?? 0)),
+        ...base,
+        money: money.get(school.id) ?? [],
         plan: sub?.plan ?? "STANDARD",
-        subscriptionStatus: sub?.status ?? "ACTIVE",
         currentPeriodEnd: sub?.currentPeriodEnd ?? null,
+        flags: this.flagsFor(base),
       };
     });
 
-    // Group reads touch every campus — audited in the DIRECTOR's own tenant.
-    await this.db.runAsTenant({ schoolId: p.schoolId, userId: p.userId }, (tx) =>
-      this.audit.record(
-        {
-          actorId: p.userId,
-          action: "group.overview.read",
-          entity: "school_group",
-          entityId: group.id,
-          schoolId: p.schoolId,
-          metadata: { group: group.name, schools: schoolIds.length },
-        },
-        tx,
-      ),
+    // Worst first: the reason to open this page is to find the campus that needs
+    // attention, not to read an alphabetical list.
+    perSchool.sort(
+      (a, b) =>
+        b.flags.length - a.flags.length ||
+        (a.attendancePct ?? 101) - (b.attendancePct ?? 101) ||
+        a.name.localeCompare(b.name),
     );
+
+    const byCurrency: Record<string, { collectedMinor: number; outstandingMinor: number }> = {};
+    for (const s of perSchool) {
+      for (const m of s.money) {
+        const slot = (byCurrency[m.currency] ??= { collectedMinor: 0, outstandingMinor: 0 });
+        slot.collectedMinor += m.collectedMinor;
+        slot.outstandingMinor += m.outstandingMinor;
+      }
+    }
+
+    await this.logRead(p, "group.overview.read", group.id, {
+      group: group.name,
+      schools: schoolIds.length,
+      period: period.key,
+    });
 
     return {
       groupId: group.id,
       groupName: group.name,
+      groups,
+      period,
       schools: perSchool,
       totals: {
         students: perSchool.reduce((n, s) => n + s.students, 0),
         staff: perSchool.reduce((n, s) => n + s.staff, 0),
-        collectedThisMonthMinor: perSchool.reduce((n, s) => n + s.collectedThisMonthMinor, 0),
-        outstandingFeesMinor: perSchool.reduce((n, s) => n + s.outstandingFeesMinor, 0),
+        byCurrency,
       },
+      flagged: perSchool.filter((s) => s.flags.length > 0).length,
     };
+  }
+
+  /**
+   * ONE campus, in depth — why a row on the overview looks wrong.
+   *
+   * Still aggregates only. A director is not staff at that campus: they see monthly
+   * totals, status counts and headcount, never a named pupil, an invoice or a
+   * record. Those stay behind that school's own permissions, where they belong.
+   */
+  async schoolDetail(p: Principal, schoolId: string): Promise<GroupSchoolDetailDto> {
+    const client = this.client();
+    const directorships = await this.directedGroups(p.userId);
+    // The campus must be in a group this person directs. Anything else is 404 —
+    // never 403, which would confirm the school exists.
+    const owning = directorships.find((d) => d.group.members.some((m) => m.schoolId === schoolId));
+    if (!owning) throw new NotFoundException("Not found");
+
+    const school = await client.school.findFirst({
+      where: { id: schoolId },
+      select: { id: true, name: true, slug: true, status: true },
+    });
+    if (!school) throw new NotFoundException("Not found");
+
+    const now = new Date();
+    const trendFrom = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    const [headcounts, classes, sub, invoiceStatuses, money, monthlyPaid, monthlyAtt] = await Promise.all([
+      headcountBySchool(client, [schoolId]),
+      client.class.count({ where: { schoolId } }),
+      client.schoolSubscription.findFirst({
+        where: { schoolId },
+        select: { plan: true, status: true, currentPeriodEnd: true },
+      }),
+      client.invoice.groupBy({ by: ["status"], where: { schoolId }, _count: { _all: true } }),
+      this.moneyByCampus([schoolId], monthStart, now),
+      // Monthly collection, grouped in SQL rather than by pulling payments back.
+      client.$queryRaw<Array<{ month: Date; total: number }>>(Prisma.sql`
+        SELECT date_trunc('month', p."paidAt") AS month, SUM(p."amountMinor")::float8 AS total
+        FROM payment p
+        WHERE p."schoolId" = ${schoolId}::uuid AND p.status = 'POSTED' AND p.kind = 'PAYMENT'
+          AND p."paidAt" >= ${trendFrom}
+        GROUP BY 1 ORDER BY 1
+      `),
+      client.$queryRaw<Array<{ month: Date; present: number; total: number }>>(Prisma.sql`
+        SELECT date_trunc('month', s.date) AS month,
+               count(*) FILTER (WHERE r.status IN ('PRESENT','LATE','EXCUSED'))::int AS present,
+               count(*)::int AS total
+        FROM attendance_record r
+        JOIN attendance_session s ON s.id = r."sessionId"
+        WHERE r."schoolId" = ${schoolId}::uuid AND s.date >= ${trendFrom}
+        GROUP BY 1 ORDER BY 1
+      `),
+    ]);
+
+    const head = headcounts.get(schoolId) ?? { students: 0, staff: 0, parents: 0 };
+    const key = (d: Date) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+    const paidBy = new Map(monthlyPaid.map((r) => [key(new Date(r.month)), r.total]));
+    const attBy = new Map(monthlyAtt.map((r) => [key(new Date(r.month)), r]));
+    const trend: GroupTrendPointDto[] = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const a = attBy.get(k);
+      trend.push({
+        month: k,
+        collectedMinor: Math.round(paidBy.get(k) ?? 0),
+        attendancePct: a && a.total > 0 ? Math.round((a.present / a.total) * 100) : null,
+      });
+    }
+
+    const registersTaken = monthlyAtt.reduce((n, r) => n + r.total, 0);
+    const latest = trend.at(-1);
+    const base = {
+      active: school.status === "ACTIVE",
+      subscriptionStatus: sub?.status ?? "ACTIVE",
+      students: head.students,
+      staff: head.staff,
+      registersTaken,
+      attendancePct: latest?.attendancePct ?? null,
+    };
+
+    await this.logRead(p, "group.school.read", schoolId, { group: owning.group.name, school: school.name });
+
+    return {
+      schoolId: school.id,
+      name: school.name,
+      slug: school.slug,
+      active: base.active,
+      groupName: owning.group.name,
+      students: head.students,
+      staff: head.staff,
+      parents: head.parents,
+      classes,
+      trend,
+      invoicesByStatus: Object.fromEntries(
+        (invoiceStatuses as Array<{ status: string; _count: { _all: number } }>).map((r) => [r.status, r._count._all]),
+      ),
+      money: money.get(schoolId) ?? [],
+      plan: sub?.plan ?? "STANDARD",
+      subscriptionStatus: base.subscriptionStatus,
+      currentPeriodEnd: sub?.currentPeriodEnd ?? null,
+      flags: this.flagsFor(base),
+    };
+  }
+
+  /**
+   * The overview as CSV, for a board pack.
+   *
+   * Built from the SAME `overview()` call the screen renders, so the export can
+   * never disagree with what the director just looked at — and it carries the same
+   * audit entry, because an export is a read, not a lesser thing. One row per
+   * campus per currency: a single "collected" column would have to add naira to
+   * dollars, which is the bug this whole change exists to remove.
+   */
+  async overviewCsv(p: Principal, opts: { groupId?: string; period?: string } = {}): Promise<string> {
+    const data = await this.overview(p, opts);
+    const header = [
+      "School", "Status", "Students", "Staff", "Attendance %", "Registers taken",
+      "Currency", "Collected (minor)", "Outstanding (minor)", "Plan", "Billing", "Flags",
+    ];
+    const rows: string[][] = [];
+    for (const s of data.schools) {
+      // A campus with no invoices still gets a row — an absent school reads as a
+      // problem, not as one with nothing to report.
+      const money = s.money.length > 0 ? s.money : [{ currency: "", collectedMinor: 0, outstandingMinor: 0 }];
+      for (const m of money) {
+        rows.push([
+          s.name,
+          s.active ? "ACTIVE" : "DISABLED",
+          String(s.students),
+          String(s.staff),
+          s.attendancePct == null ? "" : String(s.attendancePct),
+          String(s.registersTaken),
+          m.currency,
+          String(m.collectedMinor),
+          String(m.outstandingMinor),
+          s.plan,
+          s.subscriptionStatus,
+          s.flags.join(" "),
+        ]);
+      }
+    }
+    return [
+      `# ${data.groupName} — ${data.period.label}`,
+      header.map(csvCell).join(","),
+      ...rows.map((r) => r.map(csvCell).join(",")),
+    ].join("\n");
+  }
+
+  /** Group reads touch every campus — audited in the DIRECTOR's own tenant. */
+  private async logRead(p: Principal, action: string, entityId: string, metadata: Record<string, unknown>) {
+    await this.db.runAsTenant({ schoolId: p.schoolId, userId: p.userId }, (tx) =>
+      this.audit.record(
+        { actorId: p.userId, action, entity: "school_group", entityId, schoolId: p.schoolId, metadata },
+        tx,
+      ),
+    );
   }
 
   // --- operator management (privileged, audited) ------------------------------
@@ -248,4 +545,12 @@ export class GroupService {
       ),
     );
   }
+}
+
+/** Formula-injection guard: a leading =, +, -, @ or control character makes a
+ *  spreadsheet execute the cell. Same helper as the fees and audit exports. */
+function csvCell(v: unknown): string {
+  let s = v == null ? "" : String(v);
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
