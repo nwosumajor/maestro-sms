@@ -30,6 +30,13 @@ model PrivilegeGrant {
   status     GrantStatus @default(PENDING)
   /// Emergency self-grant: ACTIVE immediately, flagged for alerting.
   breakGlass Boolean     @default(false)
+  /// TOP-DOWN handover: a senior who ALREADY HOLDS this permission lent it to
+  /// someone else (cover for leave), rather than the holder requesting it.
+  /// ACTIVE immediately, and legitimately so — nobody gained anything the granting
+  /// identity did not already have, and the grantee is never the granter. The
+  /// requested path still needs a DIFFERENT approver; this one needs a different
+  /// RECIPIENT, which is the same protection pointed the other way.
+  delegated  Boolean     @default(false)
 
   /// Who asked (DB FK to user; audit field).
   requestedById String    @db.Uuid

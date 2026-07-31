@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { ElevationPanel, type Grant } from "@/components/security/ElevationPanel";
+import { HandoverPanel } from "@/components/security/HandoverPanel";
 import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
@@ -20,8 +21,9 @@ export default async function SecurityPage() {
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="admin" permissions={user.permissions}>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <PageHeader title={<>Access elevation</>} subtitle={<>Just-in-time, time-boxed privilege grants. Separation of duties on
-              approval; every step is audit-logged.</>} />
+          <PageHeader title={<>Access elevation</>} subtitle={<>Time-boxed privilege grants, in both directions: a colleague REQUESTS one and a
+              different senior approves, or a senior HANDS OVER a duty they already hold. Separation of
+              duties either way; every step is audit-logged.</>} />
           <Link href="/admin" className="text-sm text-muted-foreground hover:underline">← Admin</Link>
         </div>
 
@@ -30,6 +32,12 @@ export default async function SecurityPage() {
           userId={user.id}
           canApprove={hasPermission(user.permissions, "security.elevation.approve")}
         />
+
+        {/* The same authority as approving someone's request, pointed the other
+            way: arrange cover before you go, rather than waiting to be asked. */}
+        {hasPermission(user.permissions, "security.elevation.approve") && (
+          <HandoverPanel myPermissions={user.permissions} />
+        )}
       </div>
     </AppShell>
   );

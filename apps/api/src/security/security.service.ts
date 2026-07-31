@@ -25,6 +25,11 @@ import {
 } from "../integrity/integrity.foundation";
 
 const MAX_MINUTES = 480; // an elevation can last at most 8 hours
+// A HANDOVER covers absence — a trip, a term of leave — so it is measured in days
+// rather than the hours a requested elevation lasts. Still bounded: an unbounded
+// handover is a role change nobody remembered to review.
+const MAX_DELEGATION_HOURS = 24 * 60; // 60 days
+const DEFAULT_DELEGATION_HOURS = 24 * 7; // a week of cover
 
 export interface AuditFilter {
   actorId?: string;
@@ -135,6 +140,79 @@ export class SecurityService {
         grant.id,
         { permission: input.permission, minutes },
       );
+      return grant;
+    });
+  }
+
+  /**
+   * HAND OVER a duty: a senior who already holds `permission` lends it to a
+   * colleague for a bounded window, without waiting to be asked.
+   *
+   * The requested path (requestElevation) is bottom-up and needs a DIFFERENT
+   * approver. This is top-down and needs a different RECIPIENT — the same
+   * protection pointed the other way. What makes it safe is one check that must
+   * never be removed: THE GRANTER MUST ALREADY HOLD THE PERMISSION. Nobody can
+   * hand over what they do not have, so a handover moves authority sideways and
+   * can never manufacture it.
+   *
+   * `isElevatable` still applies, so the maker-checker authorities — fee.approve,
+   * hr.salary.approve, rbac.manage, security.elevation.approve — cannot be lent by
+   * anyone, to anyone, for any length of time. Lending the "checker" half of a
+   * maker-checker rule does not delegate a duty; it removes the second pair of eyes.
+   */
+  async delegateElevation(
+    p: Principal,
+    input: { userId: string; permission: string; reason: string; hours?: number },
+  ) {
+    const permission = input.permission?.trim();
+    const reason = input.reason?.trim();
+    if (!permission || !reason) throw new BadRequestException("permission and reason are required");
+    if (!isElevatable(permission)) {
+      throw new ForbiddenException(`"${permission}" cannot be delegated`);
+    }
+    // THE check. Without it a school_admin could hand out authority they were never
+    // given, and "delegation" would become a way to mint permissions.
+    if (!p.permissions.includes(permission)) {
+      throw new ForbiddenException(`You cannot hand over "${permission}" — you do not hold it yourself`);
+    }
+    if (input.userId === p.userId) {
+      throw new BadRequestException("A duty is handed to someone else. To raise your own, use break-glass.");
+    }
+    const hours = Math.floor(input.hours ?? DEFAULT_DELEGATION_HOURS);
+    if (!Number.isFinite(hours) || hours < 1 || hours > MAX_DELEGATION_HOURS) {
+      throw new BadRequestException(`Choose between 1 and ${MAX_DELEGATION_HOURS} hours`);
+    }
+    const expiresAt = new Date(Date.now() + hours * 3_600_000);
+
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      // RLS confines this to the granter's own school, so someone in another
+      // tenant is simply not found — 404, never a cross-tenant disclosure.
+      const target = await tx.user.findFirst({ where: { id: input.userId }, select: { id: true, name: true } });
+      if (!target) throw new NotFoundException("Colleague not found");
+
+      const grant = await tx.privilegeGrant.create({
+        data: {
+          schoolId: p.schoolId,
+          userId: input.userId,
+          permission,
+          reason,
+          // ACTIVE at once, and legitimately: the second-pair-of-eyes requirement
+          // is satisfied by the granter and the grantee being different people.
+          status: "ACTIVE",
+          delegated: true,
+          breakGlass: false,
+          requestedById: p.userId,
+          approvedById: p.userId,
+          expiresAt,
+        },
+      });
+      await this.log(tx, p, "security.elevation.delegate", grant.id, {
+        permission,
+        to: target.name,
+        toUserId: input.userId,
+        hours,
+        reason,
+      });
       return grant;
     });
   }

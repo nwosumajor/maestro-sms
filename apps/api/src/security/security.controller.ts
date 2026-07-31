@@ -15,6 +15,14 @@ const requestSchema = z.object({
   minutes: z.number().int().min(1).max(480).optional(),
   breakGlass: z.boolean().optional(),
 });
+/** Handover input. Hours, not minutes: this covers absence, not a task. */
+const delegateSchema = z.object({
+  userId: z.string().uuid(),
+  permission: z.string().min(1).max(64),
+  reason: z.string().min(3).max(300),
+  hours: z.coerce.number().int().min(1).max(24 * 60).optional(),
+});
+
 const codeSchema = z.object({ code: z.string().regex(/^\d{6}$/) });
 const stepUpSchema = z.object({ password: z.string().min(1) });
 
@@ -75,6 +83,22 @@ export class SecurityController {
     @Body(new ZodValidationPipe(requestSchema)) body: z.infer<typeof requestSchema>,
   ) {
     return this.security.requestElevation(p, body);
+  }
+
+  /** HAND OVER a duty you already hold to a colleague, for a bounded window —
+   *  cover for leave, without waiting to be asked.
+   *
+   *  Gated on elevation.approve: the authority to hand a duty over is the same
+   *  authority as approving someone's request for one. The service additionally
+   *  refuses to hand over anything the granter does not hold themselves, which is
+   *  what stops a handover from manufacturing authority. */
+  @Post("elevation/delegate")
+  @RequirePermission(SECURITY_PERMISSIONS.ELEVATION_APPROVE)
+  delegate(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(delegateSchema)) body: z.infer<typeof delegateSchema>,
+  ) {
+    return this.security.delegateElevation(p, body);
   }
 
   /** Approve a pending request (must differ from the requester). */
