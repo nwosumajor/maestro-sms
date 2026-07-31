@@ -44,8 +44,11 @@ export default async function AttendancePage({
   const user = session!.user;
   const canWrite = hasPermission(user.permissions, "attendance.write");
 
-  const [students, classes, termLock] = await Promise.all([
+  const [students, count, classes, termLock] = await Promise.all([
+    // A PAGE of the register (bounded), plus the true total so the picker can say
+    // what it is not showing and search the server for the rest.
     apiGet<Student[]>("/students"),
+    apiGet<{ students: number }>("/students/count"),
     canWrite ? apiGet<ClassRow[]>("/classes/mine") : Promise.resolve(null),
     canWrite ? apiGet<{ lockBeforeDate: string | null }>("/attendance/term-lock") : Promise.resolve(null),
   ]);
@@ -83,7 +86,7 @@ export default async function AttendancePage({
         )}
 
         <div className="space-y-3">
-          <StudentPicker students={list} selectedId={selectedId} />
+          <StudentPicker students={list} selectedId={selectedId} total={count?.students} />
 
           {/* Totals before the log. Nobody reads 200 rows to work out whether a
               child is attending, and this figure is term-scoped the same way the
