@@ -23,6 +23,7 @@ import { randomUUID } from "node:crypto";
 import {
   coverageFor,
   coverageOf,
+  minorUnits,
   normaliseMsisdn,
   type MobileMoneyChargeDto,
   type MobileMoneyOptionDto,
@@ -55,6 +56,7 @@ type IntentRow = {
   currency: string;
   payerId: string | null;
   status: string;
+  providerRef: string | null;
 };
 
 @Injectable()
@@ -145,8 +147,23 @@ export class MobileMoneyService {
           where: { invoiceId: inv.id, status: "POSTED" },
           _sum: { amountMinor: true },
         } as never)) as unknown as { _sum: { amountMinor: number | null } };
-        const outstanding = Math.max(0, inv.totalMinor - (paid._sum.amountMinor ?? 0));
+        let outstanding = Math.max(0, inv.totalMinor - (paid._sum.amountMinor ?? 0));
         if (outstanding <= 0) throw new BadRequestException("This invoice is already settled.");
+
+        // A rail that only takes whole units (M-Pesa) gets a whole-unit ask, floored.
+        // FLOORED, never rounded: rounding up debits the payer more than we credit
+        // them, and the difference is invisible on both sides. Flooring leaves the
+        // fraction outstanding on the invoice, where it is visible and payable.
+        if (provider.wholeUnitsOnly) {
+          const step = minorUnits(inv.currency);
+          const whole = Math.floor(outstanding / step) * step;
+          if (whole <= 0) {
+            throw new BadRequestException(
+              `The balance is less than the smallest amount ${cover.label} accepts. Please pay it another way.`,
+            );
+          }
+          outstanding = whole;
+        }
 
         // OUR figure, written before the prompt goes out. The callback can never
         // change it.
@@ -207,8 +224,11 @@ export class MobileMoneyService {
     if (!provider) return { ok: true };
 
     const reading = provider.readCallback(body);
-    if (!reading.reference) {
-      this.logger.warn(`${providerKey} callback with no recoverable reference`);
+    // A rail may identify the charge by OUR reference or by ITS OWN id, and M-Pesa
+    // only does the latter — Daraja's callback carries CheckoutRequestID and never
+    // echoes the account reference we sent. Either is enough to find the intent.
+    if (!reading.reference && !reading.providerRef) {
+      this.logger.warn(`${providerKey} callback identifies no charge`);
       return { ok: true };
     }
 
@@ -221,10 +241,14 @@ export class MobileMoneyService {
       return { ok: true };
     }
     const intent = (await client.mobileMoneyIntent.findFirst({
-      where: { reference: reading.reference },
+      where: reading.reference
+        ? { reference: reading.reference }
+        : { providerRef: reading.providerRef!, provider: providerKey.toUpperCase() },
     })) as IntentRow | null;
     if (!intent) {
-      this.logger.warn(`${providerKey} callback for unknown reference ${reading.reference}`);
+      this.logger.warn(
+        `${providerKey} callback for unknown charge (ref=${reading.reference} providerRef=${reading.providerRef})`,
+      );
       return { ok: true };
     }
 
@@ -238,7 +262,7 @@ export class MobileMoneyService {
       schoolId: intent.schoolId,
       gateway: intent.provider as "MPESA" | "MTN_MOMO" | "AIRTEL",
       eventType: `mobile_money.${reading.outcome.toLowerCase()}`,
-      reference: reading.reference,
+      reference: reading.reference ?? intent.reference,
       payload: body,
     });
 

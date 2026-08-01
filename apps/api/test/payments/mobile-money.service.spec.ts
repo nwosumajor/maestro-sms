@@ -54,26 +54,26 @@ function makeService(over: Record<string, unknown> = {}) {
   const region = { forSchool: jest.fn().mockResolvedValue({ country: (over.country as string) ?? "KE" }) };
   const settlement = { applyOnlinePayment: jest.fn().mockResolvedValue("posted") };
   const events = { record: jest.fn() };
+  const privilegedFind = jest.fn().mockResolvedValue((over.intent as unknown) ?? null);
   const privileged = {
-    client: over.noPrivileged
-      ? null
-      : { mobileMoneyIntent: { findFirst: jest.fn().mockResolvedValue((over.intent as unknown) ?? null) } },
+    client: over.noPrivileged ? null : { mobileMoneyIntent: { findFirst: privilegedFind } },
   };
   const charge = jest.fn().mockResolvedValue({ providerRef: "ws_CO_1", instruction: "Check your phone" });
   const mpesa = {
     key: "MPESA" as const,
+    wholeUnitsOnly: over.wholeUnitsOnly !== false,
     isConfigured: () => over.mpesaConfigured !== false,
     charge,
     readCallback: (b: unknown) => (over.reading as never) ?? { reference: (b as { ref?: string })?.ref ?? null, outcome: "SUCCEEDED" },
   };
-  const mtn = { key: "MTN_MOMO" as const, isConfigured: () => false, charge: jest.fn(), readCallback: () => ({ reference: null, outcome: "PENDING" as const }) };
-  const airtel = { key: "AIRTEL" as const, isConfigured: () => false, charge: jest.fn(), readCallback: () => ({ reference: null, outcome: "PENDING" as const }) };
+  const mtn = { key: "MTN_MOMO" as const, wholeUnitsOnly: false, isConfigured: () => false, charge: jest.fn(), readCallback: () => ({ reference: null, outcome: "PENDING" as const }) };
+  const airtel = { key: "AIRTEL" as const, wholeUnitsOnly: false, isConfigured: () => false, charge: jest.fn(), readCallback: () => ({ reference: null, outcome: "PENDING" as const }) };
 
   const svc = new MobileMoneyService(
     db as never, region as never, settlement as never, events as never, privileged as never,
     mpesa as never, mtn as never, airtel as never,
   );
-  return { svc, tx, settlement, events, charge, intentUpdate };
+  return { svc, tx, settlement, events, charge, intentUpdate, privilegedFind };
 }
 
 describe("options — what a school's payers can use", () => {
@@ -159,6 +159,39 @@ describe("charge", () => {
     expect(out.status).toBe("PENDING"); // an acknowledgement, never a receipt
   });
 
+  it("FLOORS the ask to whole units on a rail that cannot take fractions", async () => {
+    // KES 500.50 outstanding on M-Pesa, which rejects decimals. Ask for 500, credit
+    // 500, leave 0.50 on the invoice. Rounding UP would debit the payer 501 against
+    // a 500.50 credit — 0.50 of their money with nothing in the ledger recording it.
+    const { svc, tx } = makeService();
+    (tx.invoice.findFirst as jest.Mock).mockResolvedValue({
+      id: "inv-1", totalMinor: 50_050, currency: "KES", status: "ISSUED", studentId: "st-1",
+    });
+    await svc.charge(payer, { invoiceId: "inv-1", provider: "MPESA", phone: "0712345678" });
+    expect((tx.mobileMoneyIntent.create as jest.Mock).mock.calls[0][0].data.amountMinor).toBe(50_000);
+  });
+
+  it("does NOT floor a rail that accepts fractions", async () => {
+    // The constraint is M-Pesa's, not mobile money's. MTN MoMo takes decimals, and
+    // flooring there would leave a permanently unpayable remainder on the invoice.
+    const { svc, tx } = makeService({ wholeUnitsOnly: false });
+    (tx.invoice.findFirst as jest.Mock).mockResolvedValue({
+      id: "inv-1", totalMinor: 50_050, currency: "KES", status: "ISSUED", studentId: "st-1",
+    });
+    await svc.charge(payer, { invoiceId: "inv-1", provider: "MPESA", phone: "0712345678" });
+    expect((tx.mobileMoneyIntent.create as jest.Mock).mock.calls[0][0].data.amountMinor).toBe(50_050);
+  });
+
+  it("refuses a balance below the smallest whole unit rather than asking for zero", async () => {
+    const { svc, tx } = makeService();
+    (tx.invoice.findFirst as jest.Mock).mockResolvedValue({
+      id: "inv-1", totalMinor: 50, currency: "KES", status: "ISSUED", studentId: "st-1", // KES 0.50
+    });
+    await expect(
+      svc.charge(payer, { invoiceId: "inv-1", provider: "MPESA", phone: "0712345678" }),
+    ).rejects.toThrow(/less than the smallest amount/);
+  });
+
   it("marks the intent FAILED when the rail refuses, rather than leaving it pending forever", async () => {
     const { svc, charge, intentUpdate } = makeService();
     charge.mockRejectedValue(new Error("STK push refused"));
@@ -235,6 +268,27 @@ describe("callback — unsigned, so it is a doorbell and not a statement of fact
 
     const badRail = makeService();
     await expect(badRail.svc.handleCallback("not_a_rail", {})).resolves.toEqual({ ok: true });
+  });
+
+  it("finds the charge by the RAIL'S OWN id when it does not echo ours", async () => {
+    // M-Pesa never echoes our reference — its callback carries only
+    // CheckoutRequestID. If the service can only look up by our reference, every
+    // real payment is debited from the payer and never credited. This is the
+    // service-side half of that fix; the adapter half is in mpesa-wire.spec.ts.
+    const { svc, settlement, privilegedFind } = makeService({
+      intent: { ...INTENT, providerRef: "ws_CO_191220191020363925" },
+      reading: { reference: null, providerRef: "ws_CO_191220191020363925", outcome: "SUCCEEDED" },
+    });
+    await svc.handleCallback("mpesa", {});
+    // The callback arrives unauthenticated, so the school is not known yet and the
+    // lookup runs on the privileged client — the same shape the Paystack webhook uses.
+    expect(privilegedFind.mock.calls[0][0].where).toEqual({
+      providerRef: "ws_CO_191220191020363925",
+      provider: "MPESA",
+    });
+    expect(settlement.applyOnlinePayment).toHaveBeenCalledWith(
+      expect.objectContaining({ creditMinor: 50_000, reference: "MM-ABC123" }),
+    );
   });
 
   it("ignores a still-PENDING notification", async () => {

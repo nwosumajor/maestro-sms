@@ -48,6 +48,16 @@ export interface CallbackReading {
 
 export interface MobileMoneyProvider {
   readonly key: MobileMoneyProviderKey;
+  /**
+   * True when the rail can only be asked for WHOLE currency units.
+   *
+   * Daraja rejects a decimal Amount outright. The naive handling — round in the
+   * adapter — charges the payer 501 for a 500.50 balance while the ledger credits
+   * 500.50, so the payer is 0.50 out of pocket with nothing recording it. The
+   * service instead floors the ASK to whole units before writing the intent, so
+   * what we request, what the payer approves and what we credit are one number.
+   */
+  readonly wholeUnitsOnly: boolean;
   /** False when the platform holds no credentials for this rail. A provider is
    *  DISABLED, never half-working. */
   isConfigured(): boolean;
@@ -72,6 +82,7 @@ function at(o: unknown, ...path: (string | number)[]): unknown {
 @Injectable()
 export class MpesaProvider implements MobileMoneyProvider {
   readonly key = "MPESA" as const;
+  readonly wholeUnitsOnly = true;
   private readonly logger = new Logger("M-Pesa");
 
   isConfigured(): boolean {
@@ -111,10 +122,13 @@ export class MpesaProvider implements MobileMoneyProvider {
     const ts = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
     const password = Buffer.from(`${shortcode}${process.env.MPESA_PASSKEY}${ts}`).toString("base64");
 
-    // Daraja rejects decimals: the amount is whole shillings. Rounding UP would
-    // overcharge, so it rounds to nearest and the ledger is credited with what we
-    // actually asked for — the intent records the rounded figure, not the invoice's.
-    const amount = Math.round(toMajor(req.amountMinor, req.currency));
+    // Daraja rejects decimals. The service has already floored the ask to whole
+    // units (wholeUnitsOnly), so this is a whole number by construction — asserted
+    // rather than rounded, because rounding HERE is what silently overcharges.
+    const amount = toMajor(req.amountMinor, req.currency);
+    if (!Number.isInteger(amount)) {
+      throw new ServiceUnavailableException("M-Pesa accepts whole shillings only");
+    }
 
     const res = await fetch(`${this.base()}/mpesa/stkpush/v1/processrequest`, {
       method: "POST",
@@ -150,9 +164,19 @@ export class MpesaProvider implements MobileMoneyProvider {
   readCallback(body: unknown): CallbackReading {
     const cb = at(body, "Body", "stkCallback");
     const code = at(cb, "ResultCode");
-    // Our reference comes back in the metadata we sent, NOT from a trusted field —
-    // which is fine, because it is only used to LOOK UP the intent. The amount is
-    // read from that intent, never from here.
+
+    // MATCHED ON CheckoutRequestID, NOT on our AccountReference.
+    //
+    // Daraja does NOT echo AccountReference back. Its CallbackMetadata carries
+    // Amount, MpesaReceiptNumber, TransactionDate and PhoneNumber — nothing else.
+    // An earlier version of this adapter looked for AccountReference, found
+    // nothing, and would have dropped EVERY real callback: the payer debited, the
+    // invoice never credited. CheckoutRequestID is what Daraja returns on the STK
+    // push AND on the callback, so it is the join.
+    const providerRef = typeof at(cb, "CheckoutRequestID") === "string" ? String(at(cb, "CheckoutRequestID")) : null;
+
+    // Some aggregators fronting Daraja DO echo the account reference; take it when
+    // present, as a second way to find the intent. Never as the only way.
     const items = at(cb, "CallbackMetadata", "Item");
     let reference: string | null = null;
     if (Array.isArray(items)) {
@@ -160,7 +184,6 @@ export class MpesaProvider implements MobileMoneyProvider {
         if (at(it, "Name") === "AccountReference") reference = String(at(it, "Value") ?? "") || null;
       }
     }
-    const providerRef = typeof at(cb, "CheckoutRequestID") === "string" ? String(at(cb, "CheckoutRequestID")) : null;
     if (code === undefined) return { reference, outcome: "PENDING", providerRef };
     const ok = Number(code) === 0;
     return {
@@ -179,6 +202,7 @@ export class MpesaProvider implements MobileMoneyProvider {
 @Injectable()
 export class MtnMomoProvider implements MobileMoneyProvider {
   readonly key = "MTN_MOMO" as const;
+  readonly wholeUnitsOnly = false;
   private readonly logger = new Logger("MTN MoMo");
 
   isConfigured(): boolean {
@@ -283,6 +307,7 @@ export class MtnMomoProvider implements MobileMoneyProvider {
 @Injectable()
 export class AirtelProvider implements MobileMoneyProvider {
   readonly key = "AIRTEL" as const;
+  readonly wholeUnitsOnly = false;
   isConfigured(): boolean {
     return false;
   }
