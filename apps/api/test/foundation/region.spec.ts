@@ -12,6 +12,7 @@
 
 import {
   COUNTRIES,
+  hasPayrollPack,
   DEFAULT_COUNTRY,
   countryProfile,
   resolveRegion,
@@ -114,11 +115,23 @@ describe("the country catalogue", () => {
     }
   });
 
+  it("every declared payroll pack ACTUALLY EXISTS", () => {
+    // The invariant that survives adding countries: a country either names a pack
+    // that is implemented, or declares null. A country naming a pack that does not
+    // exist would pass region validation and then throw at payroll time, which is
+    // the wrong place to find out.
+    for (const [code, c] of Object.entries(COUNTRIES)) {
+      expect({ code, ok: c.payrollPack === null || hasPayrollPack(c.payrollPack) }).toEqual({ code, ok: true });
+    }
+  });
+
   it("declares payroll UNSUPPORTED wherever we do not know the tax law", () => {
-    // The load-bearing null: emitting Nigerian PAYE for a British employee would
-    // be worse than refusing, so every country without a pack says so.
+    // The load-bearing null: emitting Nigerian PAYE for an Emirati employee would
+    // be worse than refusing, so every country without a pack says so. Nigeria and
+    // the UK are implemented; the rest are not, and say it.
     expect(COUNTRIES.NG.payrollPack).toBe("NG");
-    for (const code of ["GB", "US", "AE", "GH", "KE", "SG"]) {
+    expect(COUNTRIES.GB.payrollPack).toBe("GB");
+    for (const code of ["US", "AE", "GH", "KE", "SG", "IN", "CA", "ZA", "IE", "SA"]) {
       expect({ code, pack: COUNTRIES[code].payrollPack }).toEqual({ code, pack: null });
     }
   });

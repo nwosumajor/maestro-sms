@@ -53,7 +53,7 @@ export const COUNTRIES: Record<string, CountryProfile> = {
   GH: { code: "GH", name: "Ghana", timezone: "Africa/Accra", locale: "en-GH", currency: "GHS", compliance: "NONE", payrollPack: null },
   KE: { code: "KE", name: "Kenya", timezone: "Africa/Nairobi", locale: "en-KE", currency: "KES", compliance: "NONE", payrollPack: null },
   ZA: { code: "ZA", name: "South Africa", timezone: "Africa/Johannesburg", locale: "en-ZA", currency: "ZAR", compliance: "NONE", payrollPack: null },
-  GB: { code: "GB", name: "United Kingdom", timezone: "Europe/London", locale: "en-GB", currency: "GBP", compliance: "GDPR", payrollPack: null },
+  GB: { code: "GB", name: "United Kingdom", timezone: "Europe/London", locale: "en-GB", currency: "GBP", compliance: "GDPR", payrollPack: "GB" },
   IE: { code: "IE", name: "Ireland", timezone: "Europe/Dublin", locale: "en-IE", currency: "EUR", compliance: "GDPR", payrollPack: null },
   AE: { code: "AE", name: "United Arab Emirates", timezone: "Asia/Dubai", locale: "en-AE", currency: "AED", compliance: "NONE", payrollPack: null },
   SA: { code: "SA", name: "Saudi Arabia", timezone: "Asia/Riyadh", locale: "en-SA", currency: "SAR", compliance: "NONE", payrollPack: null },

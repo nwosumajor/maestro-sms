@@ -254,6 +254,20 @@ describe("payroll refuses a country whose tax law we do not implement", () => {
     ).rejects.toThrow(/not available for GB/i);
   });
 
+  it("turns a pack's REFUSAL into a legible 400, not a 500", async () => {
+    // The UK pack refuses a period whose tax year it has no rates for. That must
+    // reach the bursar as an explanation of what to do — "internal server error"
+    // sends them to support instead of to whoever updates the rates.
+    const { service } = makeService({
+      country: "GB",
+      payrollPack: "GB",
+      employees: [{ userId: "u1", salaryEnc: null, status: "ACTIVE" }],
+    });
+    await expect(
+      service.createRun({ schoolId: "s1", userId: "u1", roles: ["hr_manager"], permissions: [] } as never, 2099, 6),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
   it("still runs for a country that HAS a pack", async () => {
     const { service } = makeService({ employees: [] });
     await expect(
