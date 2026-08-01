@@ -143,6 +143,25 @@ conflicts with it, flag the conflict before proceeding.
   only true timestamps convert. Invoice/payment money already carried its OWN
   currency per row and still does — an NGN invoice prints in naira whatever the
   school's currency is; only NEW invoices default to the school's.
+- **MOBILE MONEY — BUILT** (`apps/api/src/payments/mobile-money.*`, `mobile_money_intent`,
+  migration `20261120000000`, rls/101, web `MobileMoneyButton`). M-Pesa (Daraja STK
+  push) and MTN MoMo (Collections); Airtel declared in coverage but reports itself
+  DISABLED. `MOBILE_MONEY_COVERAGE` in `@sms/types` is a DATA table — a new country
+  is a row, never a branch — and the school's REGION picks the rails.
+  // GOTCHA, and the reason the intent table exists: **M-Pesa and MTN callbacks are
+  UNSIGNED**, unlike Paystack/Stripe. A callback is a doorbell, never a source of
+  amounts: we write `MobileMoneyIntent` (school, invoice, amount) BEFORE the prompt
+  goes out and settle from OUR figure. Settlement goes through the existing
+  `InvoiceSettlementService` — no second posting path — so it is idempotent on our
+  reference and cannot disagree with the card rail. Callbacks ALWAYS answer 2xx; a
+  non-2xx makes a rail retry forever.
+  // GOTCHA #2: it lives in its OWN module. `NotificationModule` imports
+  `PaymentsModule`, so a rail in PaymentsModule that imports `SettlementModule`
+  (which imports NotificationModule) is a CYCLE and Nest will not boot — and 1,402
+  unit tests, the typecheck and the web build all stayed green, because none of them
+  builds the module graph. `test/payments/module-graph.spec.ts` now pins it.
+  // GOTCHA #3: `/api/health` is the WEB tier's probe and answers 200 with the API
+  DOWN. Use `/api/public/plan-pricing` to prove the API is actually up.
 - **Money is scaled by the CURRENCY, never by 100** (`packages/types/src/currency.ts`).
   The platform stored integer minor units and divided by 100 everywhere — right for
   NGN/GHS/KES/ZAR/USD/GBP, and 100× WRONG for the CFA franc and every other

@@ -17,6 +17,7 @@ import { money, shortDate, dateTime, titleCase } from "@/lib/format";
 import { RecordPaymentForm } from "@/components/fees/RecordPaymentForm";
 import { InvoiceActions } from "@/components/fees/InvoiceActions";
 import { PayOnlineButton } from "@/components/fees/PayOnlineButton";
+import { MobileMoneyButton } from "@/components/fees/MobileMoneyButton";
 import { VerifyPaymentBanner } from "@/components/fees/VerifyPaymentBanner";
 import { VirtualAccountCard } from "@/components/fees/VirtualAccountCard";
 import { PaymentPlanCard } from "@/components/fees/PaymentPlanCard";
@@ -167,6 +168,9 @@ export default async function InvoiceDetailPage({ params }: { params: { id: stri
             </CardHeader>
             <CardContent>
               <PayOnlineButton invoiceId={inv.id} />
+              {/* Renders itself only where a rail operates AND is enabled — most
+                  of Africa pays school fees from a phone, not a card. */}
+              <MobileMoneyButton invoiceId={inv.id} />
             </CardContent>
           </Card>
         )}

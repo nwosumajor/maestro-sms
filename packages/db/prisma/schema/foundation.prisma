@@ -183,6 +183,7 @@ model School {
   privilegeGrants     PrivilegeGrant[]
   platformDelegations PlatformDelegation[]
   breachIncidents     DataBreachIncident[]
+  mobileMoneyIntents  MobileMoneyIntent[]
 
   // Privacy relations
   erasureRequests ErasureRequest[]
