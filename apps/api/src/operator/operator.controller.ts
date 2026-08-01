@@ -14,8 +14,7 @@ import type {
   TenantNameDto,
   AttentionQueueDto,
   PlatformDelegationDto,
-  TenantPageDto,
-} from "@sms/types";
+  TenantPageDto, PlatformStaffInviteDto } from "@sms/types";
 import { z } from "zod";
 import {
   COUNTRIES,
@@ -276,15 +275,40 @@ export class OperatorController {
   }
 
   /** Hire a platform manager (manager_admin). Step-up: creates an identity with
-   *  cross-tenant reach. Invite-link only — no password is ever returned. */
+   *  cross-tenant reach. Invite-link only — no password is ever returned, but the
+   *  LINK is, because the owner may be the only delivery path (see the service). */
   @Post("platform-staff")
   @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_STAFF_MANAGE)
   @RequireStepUp()
   createPlatformStaff(
     @CurrentPrincipal() p: Principal,
     @Body(new ZodValidationPipe(platformStaffSchema)) body: z.infer<typeof platformStaffSchema>,
-  ): Promise<PlatformStaffDto> {
+  ): Promise<PlatformStaffInviteDto> {
     return this.provisioning.createPlatformStaff(p, body);
+  }
+
+  /** Re-issue a manager's set-password link (expired, lost, or never delivered).
+   *  Step-up: it mints a credential-setting link, the same class of act as hiring. */
+  @Post("platform-staff/:userId/invite")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_STAFF_MANAGE)
+  @RequireStepUp()
+  reissuePlatformStaffInvite(
+    @CurrentPrincipal() p: Principal,
+    @Param("userId") userId: string,
+  ): Promise<PlatformStaffInviteDto> {
+    return this.provisioning.reissuePlatformStaffInvite(p, userId);
+  }
+
+  /** Hand back EVERY duty lent to one manager at once — the leaver / lost-laptop
+   *  button. Separate from disabling the account: either can be right alone. */
+  @Post("platform-staff/:userId/revoke-duties")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_STAFF_MANAGE)
+  @RequireStepUp()
+  revokeAllDuties(
+    @CurrentPrincipal() p: Principal,
+    @Param("userId") userId: string,
+  ): Promise<{ revoked: number }> {
+    return this.provisioning.revokeAllDuties(p, userId);
   }
 
   /** Which platform duties may be LENT at all. Rendered by the console so its list

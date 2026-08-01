@@ -166,10 +166,10 @@ export class AuthService {
         // and the school row are known — mfaEnrollRequired is finalized there).
         let mfaEnrollRequired = sec?.mfaRequired === true && !sec?.mfaEnabled;
 
-        // Success: clear the failure counters and resolve the claims.
+        // Success: clear the failure counters, stamp the sign-in, resolve claims.
         await tx.user.update({
           where: { id: user.id },
-          data: { failedLoginCount: 0, locked: false, lockedUntil: null },
+          data: { failedLoginCount: 0, locked: false, lockedUntil: null, lastLoginAt: new Date() },
         });
         const userRoles = await tx.userRole.findMany({
           where: { userId: user.id },

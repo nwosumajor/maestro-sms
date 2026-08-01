@@ -556,6 +556,10 @@ model User {
   disabledAt          DateTime?
   /// Brute-force protection: consecutive failed logins. On the 3rd miss the account
   /// is LOCKED (permanent — cleared only by a super_admin). lockedUntil records when.
+  /// Last SUCCESSFUL sign-in. Nothing audited logins, so "this manager still
+  /// holds duties but has not signed in for three months" was unanswerable — the
+  /// single most useful signal on a staff-oversight console.
+  lastLoginAt         DateTime?
   failedLoginCount    Int       @default(0)
   lockedUntil         DateTime?
   /// True once locked out; only a super_admin (operator console) can reactivate.
