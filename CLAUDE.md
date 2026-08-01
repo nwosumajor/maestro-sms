@@ -126,6 +126,19 @@ conflicts with it, flag the conflict before proceeding.
   FOUR_QUARTER / TRIMESTER) and grade weighting (must total 100, else the default is
   used) are per-school. Region is operator-set: `PUT /operator/tenants/:id/region`
   (platform.tenants.write + step-up, privileged write, invalidates the cache).
+- **Web display follows the SCHOOL, not the platform.** `lib/format.ts` pinned
+  `en-NG`/`Africa/Lagos` for everyone; the region now rides the session
+  (`user.locale/timezone/currency`, +85 bytes on the cookie) and `AppShell` publishes
+  it via `RegionProvider` — client islands use `useFormat()`, server components
+  `regionOf(session.user)`. It MUST come from the session, not the runtime: a
+  Node-vs-browser default is a React hydration mismatch, which a user sees as a blank
+  page. // GOTCHA: **a `@db.Date` is a DAY, not an instant.** It serialises as
+  midnight UTC, so rendering it in a zone west of UTC shows the PREVIOUS day — a
+  naive "use the school's timezone" would have dated every Toronto register a day
+  early. `isCalendarDate` detects exact-UTC-midnight and renders those in UTC;
+  only true timestamps convert. Invoice/payment money already carried its OWN
+  currency per row and still does — an NGN invoice prints in naira whatever the
+  school's currency is; only NEW invoices default to the school's.
 - **GDPR mode — BUILT** (`apps/api/src/privacy/compliance.*`, `data_breach_incident`,
   migration `20261119000000`, rls/100, web `/admin/compliance`). Art. 33's 72-hour
   clock runs from `discoveredAt` — when the school BECAME AWARE — which is captured

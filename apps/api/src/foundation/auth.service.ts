@@ -1,7 +1,7 @@
 import { BadRequestException, Inject, Injectable, UnauthorizedException } from "@nestjs/common";
 import bcrypt from "bcryptjs";
 import { prisma } from "@sms/db";
-import { effectivePermissions } from "@sms/types";
+import { effectivePermissions, resolveRegion } from "@sms/types";
 import { verifyTotp } from "../auth/totp";
 import { ModuleEntitlementService } from "./module-entitlement.service";
 import {
@@ -9,6 +9,14 @@ import {
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
+
+/** The three region facts the web needs to format identically on server and
+ *  client. Derived from the school row through the same resolver the API uses, so
+ *  a school with nothing set gets the platform's home region — unchanged. */
+function regionClaims(school: { country?: string | null; timezone?: string | null; locale?: string | null; currency?: string | null } | null) {
+  const r = resolveRegion(school ?? {});
+  return { timezone: r.timezone, locale: r.locale, currency: r.currency };
+}
 
 export interface LoginResult {
   userId: string;
@@ -19,6 +27,14 @@ export interface LoginResult {
   permissions: string[];
   /** The school's subscription-enabled modules — drives the web nav. */
   modules: string[];
+  /** WHERE THE SCHOOL IS — IANA zone, BCP-47 locale, ISO fee currency. Carried in
+   *  the session because the web must format identically during the server render
+   *  and the client hydration: a runtime-default locale differs between Node and
+   *  the browser, which is a React hydration mismatch, not a cosmetic difference.
+   *  Three short strings; the session cookie has ample headroom. */
+  timezone: string;
+  locale: string;
+  currency: string;
   /** super_admin mandated MFA but the user hasn't enrolled — web forces /account. */
   mfaEnrollRequired: boolean;
   /** Password is older than the max age (or admin-reset) — web forces a change. */
@@ -200,6 +216,7 @@ export class AuthService {
             name: user.name,
             roles,
             permissions,
+            ...regionClaims(school),
             mfaEnrollRequired,
             passwordExpired,
           },
@@ -291,6 +308,9 @@ export class AuthService {
             schoolName: school?.name ?? "",
             roles,
             permissions,
+            // Refreshed too, so moving a school's region takes effect on the next
+            // session refresh rather than only at the next sign-in.
+            ...regionClaims(school),
             mfaEnrollRequired: u.mfaRequired === true && !u.mfaEnabled,
             passwordExpired: isPasswordExpired(u.passwordChangedAt, isSuperAdmin),
           },

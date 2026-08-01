@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { useFormat } from "@/components/shell/RegionProvider";
 
 // Common Nigerian bank codes for the picker; "Other" allows any code.
 const BANKS: [string, string][] = [
@@ -31,6 +32,7 @@ const BANKS: [string, string][] = [
 ];
 
 export function SettlementAccountCard({ initial }: { initial: SettlementAccountDto }) {
+  const { money: fmtMoney } = useFormat();
   const router = useRouter();
   const [bankCode, setBankCode] = React.useState(initial.bankCode ?? BANKS[0][0]);
   const [accountNumber, setAccountNumber] = React.useState("");
@@ -112,7 +114,7 @@ export function SettlementAccountCard({ initial }: { initial: SettlementAccountD
             <p className="text-sm font-medium">Online-payment convenience fee</p>
             <p className="mt-1 text-xs text-muted-foreground">
               A platform fee applies to each online payment (about{" "}
-              {new Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN" }).format(initial.sampleFeeMinor / 100)}{" "}
+              {fmtMoney(initial.sampleFeeMinor)}{" "}
               on a ₦10,000 payment). Choose who bears it:
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
