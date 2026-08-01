@@ -14,6 +14,7 @@ import {
   computeBonusPayslip,
   computeFullPayslip,
   computeMonthlyPayslip,
+  hasPayrollPack,
   employerPensionMinor,
   type FullPayslipBreakdown,
   type MyPayslipDto,
@@ -29,12 +30,14 @@ import {
   type TenantContext,
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
+import { SchoolRegionService } from "../foundation/school-region.service";
 
 @Injectable()
 export class PayrollService {
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
+    private readonly region: SchoolRegionService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -57,6 +60,18 @@ export class PayrollService {
     if (runType === "BONUS" && (!bonusPercent || bonusPercent < 1 || bonusPercent > 1000)) {
       throw new BadRequestException("bonus percent must be 1–1000");
     }
+    // STATUTORY PAYROLL IS COUNTRY LAW. A school in a country we have not
+    // implemented gets a clear refusal rather than Nigerian PAYE bands applied to
+    // a foreign salary — a payslip that is confidently wrong about tax is handed
+    // to an employee AND to a revenue authority.
+    const region = await this.region.forSchool(p.schoolId);
+    if (!hasPayrollPack(region.payrollPack)) {
+      throw new BadRequestException(
+        `Statutory payroll is not available for ${region.country} yet. ` +
+          `Tax rules differ by country and this school's are not implemented, so payroll is disabled rather than computed with another country's bands.`,
+      );
+    }
+
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const dup = await tx.payrollRun.findFirst({ where: { periodYear, periodMonth, runType } });
       if (dup) throw new ConflictException("A payroll run of that type already exists for that period");

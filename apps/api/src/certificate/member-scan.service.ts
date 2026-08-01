@@ -29,12 +29,14 @@ import {
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
+import { SchoolRegionService } from "../foundation/school-region.service";
 
 @Injectable()
 export class MemberScanService {
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
+    private readonly region: SchoolRegionService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -87,8 +89,10 @@ export class MemberScanService {
           if (!enrolment) {
             attendanceNote = "No active class — attendance not marked.";
           } else {
-            const today = new Date();
-            today.setUTCHours(0, 0, 0, 0);
+            // The SCHOOL's calendar day. A gate scan at 07:30 in Singapore is
+            // 23:30 the previous day in UTC — it was marking pupils present for
+            // yesterday, on the one record that says who was physically there.
+            const today = await this.region.todayInTx(tx, p.schoolId);
             const session = await tx.attendanceSession.upsert({
               where: { classId_date: { classId: enrolment.classId, date: today } },
               update: {},

@@ -12,8 +12,11 @@ import { BadRequestException, Inject, Injectable, Logger, NotFoundException, Ser
 import jwt from "jsonwebtoken";
 import { Prisma } from "@sms/db";
 import {
+  COMPLIANCE_REGIMES,
+  COUNTRIES,
   SUBSCRIPTION_GRACE_DAYS,
   SUBSCRIPTION_STATUS,
+  resolveRegion,
   isModuleKey,
   isPlan,
   isSubscriptionStatus,
@@ -34,6 +37,7 @@ import {
 } from "../integrity/integrity.foundation";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import { headcountBySchool, headcountInTenant, type SchoolHeadcount } from "./operator-people";
+import { SchoolRegionService } from "../foundation/school-region.service";
 import { ModuleEntitlementService } from "../foundation/module-entitlement.service";
 
 const IMPERSONATION_TTL = 900; // 15 min
@@ -46,6 +50,7 @@ export class OperatorService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly entitlements: ModuleEntitlementService,
+    private readonly regions: SchoolRegionService,
     private readonly privileged: PrivilegedDatabaseService,
   ) {}
 
@@ -224,6 +229,77 @@ export class OperatorService {
       });
     }
     return { tenants: out, total, page, pageSize };
+  }
+
+  /**
+   * Set a school's REGION — country, and optional overrides for timezone, locale,
+   * fee currency and compliance regime.
+   *
+   * Operator-owned rather than school-owned, deliberately: country decides the
+   * privacy regime, whether statutory payroll may run at all, and what currency a
+   * school bills in. Those are commercial and legal facts about the account, not
+   * a preference its own staff should be able to flip.
+   *
+   * The registry is GLOBAL and the app role is SELECT-only on it, so this writes
+   * through the privileged client (503 when unconfigured, like provisioning).
+   */
+  async setSchoolRegion(
+    p: Principal,
+    schoolId: string,
+    input: { country?: string; timezone?: string; locale?: string; currency?: string; complianceRegime?: string },
+  ) {
+    const client = this.privileged.client;
+    if (!client) throw new ServiceUnavailableException("Region administration requires the privileged database configuration");
+    const school = await client.school.findFirst({ where: { id: schoolId, isPlatform: false }, select: { id: true, name: true } });
+    if (!school) throw new NotFoundException("School not found");
+
+    const country = input.country?.toUpperCase();
+    if (country && !COUNTRIES[country]) {
+      throw new BadRequestException(`Unsupported country "${country}". Supported: ${Object.keys(COUNTRIES).join(", ")}`);
+    }
+    // An invalid IANA zone would make every date at that school unformattable, so
+    // it is rejected here rather than discovered by a teacher taking a register.
+    if (input.timezone) {
+      try {
+        new Intl.DateTimeFormat("en-CA", { timeZone: input.timezone }).format(new Date());
+      } catch {
+        throw new BadRequestException(`"${input.timezone}" is not a valid IANA timezone`);
+      }
+    }
+    if (input.complianceRegime && !(COMPLIANCE_REGIMES as readonly string[]).includes(input.complianceRegime)) {
+      throw new BadRequestException(`Compliance regime must be one of ${COMPLIANCE_REGIMES.join(", ")}`);
+    }
+
+    await client.school.update({
+      where: { id: schoolId },
+      data: {
+        ...(country ? { country } : {}),
+        // An empty string clears an override back to the country default.
+        ...(input.timezone !== undefined ? { timezone: input.timezone || null } : {}),
+        ...(input.locale !== undefined ? { locale: input.locale || null } : {}),
+        ...(input.currency !== undefined ? { currency: input.currency ? input.currency.toUpperCase() : null } : {}),
+        ...(input.complianceRegime !== undefined ? { complianceRegime: input.complianceRegime || null } : {}),
+      },
+    });
+    // The region is cached on the hot path of every register write; a stale entry
+    // would keep filing against the old zone for up to a minute.
+    this.regions.invalidate(schoolId);
+
+    await this.db.runAsTenant(this.ctx(p), (tx) =>
+      this.audit.record(
+        {
+          actorId: p.userId,
+          action: "operator.school.region",
+          entity: "school",
+          entityId: schoolId,
+          schoolId: p.schoolId,
+          metadata: { school: school.name, ...input },
+        },
+        tx,
+      ),
+    );
+    const region = resolveRegion({ ...input, country: country ?? null });
+    return { schoolId, ...region };
   }
 
   /** Lightweight id+name list for pickers (single query; no per-school work). */

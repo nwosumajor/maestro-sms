@@ -14,12 +14,21 @@ afterAll(() => {
   delete process.env.DATA_ENCRYPTION_KEY;
 });
 
+/** Where the school is. Nigeria by default, so every existing assertion here is
+ *  unchanged; `country` puts it somewhere payroll is not implemented. */
+const regionFake = (country = "NG", payrollPack: string | null = "NG") => ({
+  forSchool: jest.fn().mockResolvedValue({ country, payrollPack, timezone: "Africa/Lagos" }),
+});
+
 function makeService(over: {
   dup?: Record<string, unknown> | null;
   employees?: Array<Record<string, unknown>>;
   run?: Record<string, unknown> | null;
   components?: Array<Record<string, unknown>>;
   users?: Array<{ id: string; name: string }>;
+  /** Where the school is. Defaults to Nigeria, so existing assertions stand. */
+  country?: string;
+  payrollPack?: string | null;
 } = {}) {
   const payslipCreate = jest.fn().mockResolvedValue({});
   const runUpdate = jest.fn((args: { data: Record<string, unknown> }) => Promise.resolve({ id: "run1", periodYear: 2026, periodMonth: 1, status: "DRAFT", totalGrossMinor: 0, totalNetMinor: 0, createdAt: new Date(), finalizedAt: null, ...args.data }));
@@ -42,7 +51,8 @@ function makeService(over: {
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
-  return { service: new PayrollService(db as never, audit as never), payslipCreate, runUpdate };
+  const region = regionFake(over.country ?? "NG", over.payrollPack === undefined ? "NG" : over.payrollPack);
+  return { service: new PayrollService(db as never, audit as never, region as never), payslipCreate, runUpdate, region };
 }
 
 const p = (userId = "hr1"): Principal => ({ schoolId: "A", userId, roles: [], permissions: [] });
@@ -231,5 +241,23 @@ describe("computeFinalSettlement (exit, pure)", () => {
     expect(s.loanRecoveredMinor).toBe(10_000_000);
     expect(s.loanUnrecoveredMinor).toBe(89_000_000);
     expect(s.netMinor).toBe(0);
+  });
+});
+
+describe("payroll refuses a country whose tax law we do not implement", () => {
+  it("REFUSES rather than applying Nigerian PAYE to a foreign salary", async () => {
+    // The safe failure. A payslip is handed to an employee and to a revenue
+    // authority; being confidently wrong about tax is worse than being unavailable.
+    const { service } = makeService({ country: "GB", payrollPack: null });
+    await expect(
+      service.createRun({ schoolId: "s1", userId: "u1", roles: ["hr_manager"], permissions: [] } as never, 2026, 1),
+    ).rejects.toThrow(/not available for GB/i);
+  });
+
+  it("still runs for a country that HAS a pack", async () => {
+    const { service } = makeService({ employees: [] });
+    await expect(
+      service.createRun({ schoolId: "s1", userId: "u1", roles: ["hr_manager"], permissions: [] } as never, 2026, 1),
+    ).resolves.toBeDefined();
   });
 });

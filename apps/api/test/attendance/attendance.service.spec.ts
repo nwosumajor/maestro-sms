@@ -2,6 +2,7 @@
 // AttendanceService — relationship-scoping unit tests (in-memory fakes, no DB)
 // =============================================================================
 
+import { schoolToday } from "@sms/types";
 import { AttendanceService } from "../../src/attendance/attendance.service";
 import type { Principal, TenantContext, TenantTx } from "../../src/integrity/integrity.foundation";
 
@@ -15,12 +16,15 @@ interface Fakes {
   enrollmentForStudent?: { id: string } | null;
   currentTerm?: { startDate: Date | null } | null;
   holidays?: { name: string; startDate: Date; endDate: Date }[];
+  /** Where the school IS. Defaults to the platform's home zone, so every existing
+   *  test keeps asserting exactly what it asserted before. */
+  timezone?: string;
 }
 
 function makeService(f: Fakes) {
   const session = { id: "sess-1" };
   const tx = {
-    class: { findFirst: jest.fn().mockResolvedValue(f.classRow ?? null) },
+    class: { findFirst: jest.fn().mockResolvedValue(f.classRow ?? null), findMany: jest.fn().mockResolvedValue([]) },
     classTeacher: {
       findFirst: jest.fn().mockResolvedValue(f.classTeacher ?? null),
       findMany: jest.fn().mockResolvedValue(f.classTeacherMany ?? []),
@@ -51,7 +55,10 @@ function makeService(f: Fakes) {
     $executeRaw: jest.fn().mockResolvedValue(1),
   } as unknown as TenantTx;
 
-  const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
+  const db = {
+    runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
+    runAsTenantReadOnly: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
+  };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const notifications = {
     enqueue: jest.fn().mockResolvedValue({ id: "n-1" }),
@@ -62,8 +69,17 @@ function makeService(f: Fakes) {
   };
   const workflow = { createRequest: jest.fn().mockResolvedValue({ id: "wf-1" }), submit: jest.fn().mockResolvedValue({ id: "wf-1" }) };
   const hooks = { onFinalized: jest.fn() };
-  const service = new AttendanceService(db as never, audit as never, notifications as never, workflow as never, hooks as never);
-  return { service, tx, audit, notifications, workflow, hooks };
+  // The school's region decides what day it is. `f.timezone` lets a test put the
+  // school somewhere other than West Africa, which is the whole point of the fix.
+  const region = {
+    forSchool: jest.fn().mockResolvedValue({ timezone: f.timezone ?? "Africa/Lagos" }),
+    inTx: jest.fn().mockResolvedValue({ timezone: f.timezone ?? "Africa/Lagos" }),
+    todayInTx: jest.fn(async () => schoolToday(f.timezone ?? "Africa/Lagos")),
+  };
+  const service = new AttendanceService(
+    db as never, audit as never, notifications as never, workflow as never, region as never, hooks as never,
+  );
+  return { service, tx, audit, notifications, workflow, hooks, region };
 }
 
 const principal = (roles: string[], userId = "u-1"): Principal => ({
@@ -389,5 +405,58 @@ describe("AttendanceService — stale-register maker-checker (>7 days)", () => {
     });
     await service.markAttendance(principal(["teacher"]), "c-1", rec(new Date().toISOString().slice(0, 10)));
     expect(workflow.createRequest).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================================
+// The register files on the SCHOOL's day, not the server's
+// =============================================================================
+// This is the defect that made the product unusable outside West Africa without
+// anyone noticing: the day a register belongs to was decided in UTC.
+// =============================================================================
+
+describe("AttendanceService — school-local dates", () => {
+  it("asks the SCHOOL what day it is before deciding a register is stale", async () => {
+    // The stale rule is what routes an edit into maker-checker. Measured against
+    // the server's UTC day, a register west of UTC counted as a day older than it
+    // really was for part of every day — sending an ordinary same-week correction
+    // to an approver a day early.
+    const { service, region } = makeService({
+      classRow: { id: "c-1", supervisorId: "u-1" },
+      enrollmentRows: [{ studentId: "stu-1" }],
+      timezone: "America/Toronto",
+    });
+    await service.markAttendance(principal(["teacher"]), "c-1", {
+      date: recent(),
+      records: [{ studentId: "stu-1", status: "PRESENT" }],
+    });
+    expect(region.forSchool).toHaveBeenCalledWith("school-A");
+  });
+
+  it("defaults the register board to the SCHOOL's today", async () => {
+    // getRegisterStatus with no date used the server's UTC day, so a Singapore
+    // school opening the board at 07:30 was shown YESTERDAY's registers and told
+    // none had been taken.
+    const { service, region } = makeService({ timezone: "Asia/Singapore" });
+    await service.getRegisterStatus(principal(["school_admin"]));
+    expect(region.todayInTx).toHaveBeenCalled();
+  });
+
+  it("uses the school's day for the term lock", async () => {
+    // The lock boundary is the current term's start. Deciding "which term contains
+    // today" in UTC moves the boundary by a day for every school not on UTC.
+    const { service, region } = makeService({
+      classRow: { id: "c-1", supervisorId: "u-1" },
+      enrollmentRows: [{ studentId: "stu-1" }],
+      currentTerm: null,
+      timezone: "Asia/Dubai",
+    });
+    await service.markAttendance(principal(["teacher"]), "c-1", {
+      date: recent(),
+      records: [{ studentId: "stu-1", status: "PRESENT" }],
+    });
+    // currentTermStart falls back to "the term containing today" when no term is
+    // flagged current — and that today must be the school's.
+    expect(region.todayInTx).toHaveBeenCalled();
   });
 });

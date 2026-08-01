@@ -16,7 +16,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Inject, Inj
 // VALUE import: Prisma.sql/join only resolve as values, not types (CLAUDE.md).
 import { Prisma } from "@sms/db";
 import type { AttendanceStatusValue } from "@sms/types";
-import { ATTENDANCE_AMENDMENT_CHAIN, dayUtc, WORKFLOW_PERMISSIONS } from "@sms/types";
+import { ATTENDANCE_AMENDMENT_CHAIN, dayUtc, schoolToday, WORKFLOW_PERMISSIONS } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -29,6 +29,7 @@ import {
 import { NotificationService } from "../notifications/notification.service";
 import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
+import { SchoolRegionService } from "../foundation/school-region.service";
 
 // junior_admin is the operational tier that owns attendance (CLAUDE.md) and holds
 // attendance.write; without a class relationship to fall back on it would be
@@ -70,6 +71,7 @@ export class AttendanceService {
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly notifications: NotificationService,
     private readonly workflow: WorkflowService,
+    private readonly region: SchoolRegionService,
     hooks: WorkflowHooksService,
   ) {
     // Maker-checker reactor: when a head teacher / school admin / principal (a
@@ -100,7 +102,12 @@ export class AttendanceService {
   async markAttendance(p: Principal, classId: string, input: MarkInput) {
     const date = new Date(input.date);
     const isApprover = p.permissions.includes(WORKFLOW_PERMISSIONS.ATTENDANCE_AMEND_REVIEW);
-    const stale = this.daysSince(date) > STALE_REGISTER_DAYS;
+    // "Older than seven days" means seven of the SCHOOL's days. Measured against
+    // the server's UTC day, a register west of UTC counted as a day older than it
+    // was for part of every day — pushing an ordinary correction into
+    // maker-checker a day early.
+    const schoolNow = schoolToday((await this.region.forSchool(p.schoolId)).timezone);
+    const stale = this.daysSince(date, schoolNow) > STALE_REGISTER_DAYS;
 
     // MAKER-CHECKER on a STALE register (>7 days old): a plain teacher's edit is
     // not applied directly — it raises an ATTENDANCE_AMENDMENT a head teacher /
@@ -112,7 +119,7 @@ export class AttendanceService {
         // may not take is just a slower rejection.
         await this.assertCanTakeRegister(tx, p, classId);
         await this.assertNotHoliday(tx, date);
-        const lockBefore = await this.currentTermStart(tx);
+        const lockBefore = await this.currentTermStart(tx, p.schoolId);
         if (lockBefore && date < lockBefore) {
           throw new ConflictException(
             "This register is locked: it falls in a term that has ended. Past-term registers are read-only.",
@@ -135,7 +142,7 @@ export class AttendanceService {
       await this.assertNotHoliday(tx, date);
       // TERM LOCK: a register in a term that has ENDED is read-only for everyone,
       // including leadership — the authoritative check (the UI also greys it out).
-      const lockBefore = await this.currentTermStart(tx);
+      const lockBefore = await this.currentTermStart(tx, p.schoolId);
       if (lockBefore && date < lockBefore) {
         throw new ConflictException(
           "This register is locked: it falls in a term that has ended. Past-term registers are read-only.",
@@ -318,8 +325,7 @@ export class AttendanceService {
       } as never)) as unknown as Array<{ termId: string }>;
       const have = new Set(rolled.map((r) => r.termId));
 
-      const today = new Date();
-      today.setUTCHours(0, 0, 0, 0);
+      const today = await this.region.todayInTx(tx, p.schoolId);
       return terms.map((t) => ({
         id: t.id,
         name: t.name,
@@ -348,12 +354,16 @@ export class AttendanceService {
   }
 
   /** school-wide staff, or a teacher assigned to THIS class. 404 otherwise. */
-  /** Whole days between a register date and today (both at UTC midnight). */
-  private daysSince(date: Date): number {
+  /**
+   * Whole days between a register date and TODAY AT THE SCHOOL.
+   *
+   * The server's UTC day is not the school's day. Using it meant a register was
+   * "one day older" than it really was for part of every day west of UTC — enough
+   * to push an edit over the 7-day line and into maker-checker a day early.
+   */
+  private daysSince(date: Date, today: Date): number {
     const d = new Date(date);
     d.setUTCHours(0, 0, 0, 0);
-    const today = new Date();
-    today.setUTCHours(0, 0, 0, 0);
     return Math.floor((today.getTime() - d.getTime()) / 86_400_000);
   }
 
@@ -457,11 +467,11 @@ export class AttendanceService {
    * Returns null when terms/dates are not configured (fail-open — an unset-up
    * school must never have attendance blocked).
    */
-  private async currentTermStart(tx: TenantTx): Promise<Date | null> {
+  private async currentTermStart(tx: TenantTx, schoolId: string): Promise<Date | null> {
     const marked = await tx.term.findFirst({ where: { isCurrent: true }, select: { startDate: true } });
     if (marked?.startDate) return marked.startDate;
-    const today = new Date();
-    today.setUTCHours(0, 0, 0, 0);
+    // The school's day, so a term boundary flips at midnight WHERE THE SCHOOL IS.
+    const today = await this.region.todayInTx(tx, schoolId);
     const containing = await tx.term.findFirst({
       where: { startDate: { lte: today }, endDate: { gte: today } },
       orderBy: { startDate: "desc" },
@@ -537,7 +547,7 @@ export class AttendanceService {
 
       // Default window: the current term, so this agrees with the report card and
       // with the analytics page rather than quietly using a different period.
-      const termStart = await this.currentTermStart(tx);
+      const termStart = await this.currentTermStart(tx, p.schoolId);
       const from =
         term?.startDate ??
         (opts.from ? new Date(`${opts.from}T00:00:00.000Z`) : (termStart ?? new Date(Date.now() - 30 * 86_400_000)));
@@ -546,8 +556,7 @@ export class AttendanceService {
       // An ENDED term is immutable under the term lock, so its rollup can be read
       // instead of scanning the registers — the whole point of building it. The
       // current term never reads the rollup, however recently it was computed.
-      const today = new Date();
-      today.setUTCHours(0, 0, 0, 0);
+      const today = await this.region.todayInTx(tx, p.schoolId);
       const endedTerm = !!term?.endDate && term.endDate < today;
 
       // Which classes may this caller SEE? Same rule as everywhere else here.
@@ -680,7 +689,10 @@ export class AttendanceService {
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       // dayUtc returns a TIMESTAMP, not a Date — wrap it so the column comparison
       // gets a Date and the label is UTC-midnight, matching the @db.Date column.
-      const date = dateStr ? new Date(`${dateStr}T00:00:00.000Z`) : new Date(dayUtc(new Date()));
+      // Defaults to the SCHOOL's today, not the server's.
+      const date = dateStr
+        ? new Date(`${dateStr}T00:00:00.000Z`)
+        : await this.region.todayInTx(tx, p.schoolId);
       const iso = date.toISOString().slice(0, 10);
 
       // The caller's classes, by the same relationship rule as the rest of the file.
@@ -788,7 +800,7 @@ export class AttendanceService {
   /** The lock boundary for the UI: dates before this are read-only. */
   async getTermLock(p: Principal): Promise<{ lockBeforeDate: string | null }> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const start = await this.currentTermStart(tx);
+      const start = await this.currentTermStart(tx, p.schoolId);
       return { lockBeforeDate: start ? start.toISOString().slice(0, 10) : null };
     });
   }

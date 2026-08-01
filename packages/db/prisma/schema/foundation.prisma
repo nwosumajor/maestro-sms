@@ -10,16 +10,37 @@
 
 /// GLOBAL (RLS-exempt): the tenant registry.
 model School {
-  id                     String   @id @default(uuid()) @db.Uuid
-  name                   String
-  slug                   String   @unique
-  status                 String   @default("ACTIVE")
+  id         String  @id @default(uuid()) @db.Uuid
+  name       String
+  slug       String  @unique
+  status     String  @default("ACTIVE")
   /// TRUE only for the single platform-owner organization ("SMS Platform") that
   /// hosts super_admin(s). It is NOT a customer tenant: excluded from the public
   /// school directory, the operator tenant list, cross-school directory search and
   /// platform billing. Lets the super_admin be a platform identity (not a member
   /// of any customer school) while keeping user.schoolId non-null + RLS intact.
-  isPlatform             Boolean  @default(false)
+  isPlatform Boolean @default(false)
+
+  /// --- REGION: where this school actually is ---------------------------------
+  /// ISO 3166-1 alpha-2. Drives timezone, locale, fee currency, privacy regime and
+  /// whether statutory payroll is even available. Null = the platform's home
+  /// country, so nothing changes for a school already live.
+  country                String?
+  /// IANA zone (e.g. Asia/Dubai). THE field that decides what "today" means for a
+  /// register: the server's UTC day is the wrong day for most of the world.
+  timezone               String?
+  /// BCP-47, for date and number formatting.
+  locale                 String?
+  /// ISO 4217 — the currency this school charges FEES in (distinct from what it
+  /// pays the platform in).
+  currency               String?
+  /// NDPR | GDPR | NONE. Overrides the country default when a school needs a
+  /// stricter regime than its country requires.
+  complianceRegime       String?
+  /// Data-protection officer, required under GDPR Art. 37 for public authorities
+  /// and large-scale processing of children's data — which is what a school is.
+  dpoName                String?
+  dpoEmail               String?
   /// Paystack SPLIT settlement for parent fee payments: when set, every fee
   /// charge carries this subaccount so the money settles to the SCHOOL's own
   /// bank (platform keeps only the configured commission %). Managed by the

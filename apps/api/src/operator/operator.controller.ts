@@ -18,6 +18,7 @@ import type {
 } from "@sms/types";
 import { z } from "zod";
 import {
+  COUNTRIES,
   DEFAULT_DELEGATION_DAYS,
   GRACE_DAYS_MAX,
   MAX_DELEGATION_DAYS,
@@ -54,6 +55,17 @@ import { OperatorCreditsService } from "./operator-credits.service";
 
 /** Delegation input. `days` is bounded here AND in the service — the boundary
  *  rejects nonsense, the service owns the rule. */
+/** Region input. Country is validated against the catalogue in the service; the
+ *  empty string is meaningful here — it CLEARS an override back to the country
+ *  default, which `.optional()` alone could not express. */
+const regionSchema = z.object({
+  country: z.string().length(2).optional(),
+  timezone: z.string().max(64).optional(),
+  locale: z.string().max(16).optional(),
+  currency: z.string().max(3).optional(),
+  complianceRegime: z.string().max(16).optional(),
+});
+
 const delegationSchema = z.object({
   userId: z.string().uuid(),
   permission: z.string().min(1).max(64),
@@ -394,6 +406,32 @@ export class OperatorController {
   @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
   tenantNames(@CurrentPrincipal() p: Principal): Promise<TenantNameDto[]> {
     return this.operator.listTenantNames(p);
+  }
+
+  /** Set a school's REGION: country, and optional timezone / locale / fee-currency
+   *  / compliance overrides.
+   *
+   *  Operator-owned because country decides the privacy regime, whether statutory
+   *  payroll may run at all, and what currency the school bills in — commercial
+   *  and legal facts about the account, not a preference its staff should flip.
+   *  Step-up: it changes what day a register belongs to. */
+  @Put("tenants/:schoolId/region")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_WRITE)
+  @RequireStepUp()
+  setRegion(
+    @CurrentPrincipal() p: Principal,
+    @Param("schoolId") schoolId: string,
+    @Body(new ZodValidationPipe(regionSchema)) body: z.infer<typeof regionSchema>,
+  ) {
+    return this.operator.setSchoolRegion(p, schoolId, body);
+  }
+
+  /** The countries the platform is set up to serve, with their defaults. Rendered
+   *  by the console so its list can never drift from what the API accepts. */
+  @Get("countries")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
+  countries() {
+    return Object.values(COUNTRIES);
   }
 
   /** Enable/disable a SCHOOL — the hard deactivation lever (blocks every member

@@ -26,8 +26,46 @@ const PIT_BANDS: Array<[number, number]> = [
   [Number.POSITIVE_INFINITY, 0.24],
 ];
 
-/** Compute a monthly payslip breakdown from the monthly gross (minor units). */
-export function computeMonthlyPayslip(grossMonthlyMinor: number): PayslipBreakdown {
+/**
+ * Statutory payroll is COUNTRY LAW, not configuration.
+ *
+ * This file implements Nigeria: PIT bands, the Consolidated Relief Allowance, and
+ * the 8% pension contribution. None of it is right for Ghana, the UK, the UAE or
+ * anywhere else, and a payslip that is confidently wrong about tax is worse than
+ * no payslip — it is a filing a school hands to an employee and to a revenue
+ * authority.
+ *
+ * So a country either has a PACK here or payroll REFUSES to run for it. Refusing
+ * is the safe failure; computing Nigerian PAYE for a British teacher is not.
+ */
+export const PAYROLL_PACKS: Record<string, (grossMonthlyMinor: number) => PayslipBreakdown> = {
+  NG: computeNigerianPayslip,
+};
+
+/** Is statutory payroll implemented for this country's pack? */
+export function hasPayrollPack(packKey: string | null | undefined): boolean {
+  return !!packKey && packKey in PAYROLL_PACKS;
+}
+
+/**
+ * Compute a monthly payslip using the given country pack.
+ *
+ * `packKey` comes from the school's region. Defaults to Nigeria so every existing
+ * caller and every school already live behaves exactly as before.
+ */
+export function computeMonthlyPayslip(grossMonthlyMinor: number, packKey = "NG"): PayslipBreakdown {
+  const pack = PAYROLL_PACKS[packKey];
+  if (!pack) {
+    // Never silently substitute another country's tax law.
+    throw new Error(
+      `No statutory payroll pack for "${packKey}". Payroll is unavailable for this country until one is implemented.`,
+    );
+  }
+  return pack(grossMonthlyMinor);
+}
+
+/** Nigeria: PIT bands + Consolidated Relief Allowance + 8% pension. */
+function computeNigerianPayslip(grossMonthlyMinor: number): PayslipBreakdown {
   const gross = Math.max(0, Math.round(grossMonthlyMinor));
   const grossAnnual = gross * 12;
   const pensionAnnual = Math.round(grossAnnual * 0.08);
@@ -97,10 +135,10 @@ export function employerPensionMinor(grossMinor: number): number {
  * that gross); pension is NOT deducted (it applies to monthly emoluments),
  * and no components/loans touch a bonus. Pure.
  */
-export function computeBonusPayslip(baseMinor: number, percent: number): FullPayslipBreakdown {
+export function computeBonusPayslip(baseMinor: number, percent: number, payrollPack = "NG"): FullPayslipBreakdown {
   const pct = Math.min(1000, Math.max(0, Math.round(percent)));
   const gross = Math.round((Math.max(0, Math.round(baseMinor)) * pct) / 100);
-  const statutory = computeMonthlyPayslip(gross);
+  const statutory = computeMonthlyPayslip(gross, payrollPack);
   return {
     baseMinor: gross,
     allowances: [],
@@ -120,6 +158,10 @@ export function computeFullPayslip(input: {
   otherDeductions?: PayLine[];
   /** Requested recovery per loan this month (already capped at loan balance). */
   loanInstallments?: LoanInstallmentLine[];
+  /** Statutory pack for the school's country. Defaults to Nigeria so every
+   *  existing caller behaves exactly as before; an unsupported country throws
+   *  rather than borrowing another country's tax law. */
+  payrollPack?: string;
 }): FullPayslipBreakdown {
   const base = Math.max(0, Math.round(input.baseMinor));
   const allowances = (input.allowances ?? [])
@@ -129,7 +171,7 @@ export function computeFullPayslip(input: {
     .map((d) => ({ name: d.name, amountMinor: Math.max(0, Math.round(d.amountMinor)) }))
     .filter((d) => d.amountMinor > 0);
   const gross = base + allowances.reduce((s, a) => s + a.amountMinor, 0);
-  const statutory = computeMonthlyPayslip(gross);
+  const statutory = computeMonthlyPayslip(gross, input.payrollPack ?? "NG");
   const otherTotal = otherDeductions.reduce((s, d) => s + d.amountMinor, 0);
   // Recoverable this month: what's left after statutory + other deductions.
   let available = Math.max(0, gross - statutory.deductionsMinor - otherTotal);

@@ -18,7 +18,8 @@ function makeService(over: {
     $executeRaw: execRaw,
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
-  return { service: new MemberScanService(db as never, audit as never), audit, tx, scanEventCreate, sessionUpsert, execRaw };
+    const region = { todayInTx: jest.fn(async () => new Date(new Date().toISOString().slice(0, 10) + "T00:00:00.000Z")) };
+  return { service: new MemberScanService(db as never, audit as never, region as never), audit, tx, scanEventCreate, sessionUpsert, execRaw };
 }
 
 const staff: Principal = { schoolId: "S", userId: "u-staff", roles: ["teacher"], permissions: ["member.scan"] };
