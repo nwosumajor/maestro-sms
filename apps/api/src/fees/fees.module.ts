@@ -5,6 +5,7 @@ import { FeesService } from "./fees.service";
 import { PaymentGatewayService } from "./payment-gateway.service";
 import { DisputesModule } from "./disputes.module";
 import { SettlementModule } from "./settlement.module";
+import { MobileMoneyModule } from "../payments/mobile-money.module";
 import { FEE_RECONCILE_QUEUE, PaymentReconciliationService } from "./reconciliation.service";
 import { PaymentReconciliationScheduler } from "./reconciliation.scheduler";
 import { PaymentReconciliationProcessor } from "./reconciliation.processor";
@@ -33,6 +34,7 @@ import { AdmissionsModule } from "../admissions/admissions.module";
     AdmissionsModule,
     DisputesModule,
     SettlementModule,
+    MobileMoneyModule,
     BullModule.registerQueue({ name: FEE_RECONCILE_QUEUE }),
     BullModule.registerQueue({ name: FEE_OPS_QUEUE }),
   ],

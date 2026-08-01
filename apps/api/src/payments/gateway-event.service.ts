@@ -17,7 +17,9 @@ export class GatewayEventService {
   private readonly logger = new Logger("GatewayEvents");
 
   async record(input: {
-    gateway: "PAYSTACK" | "STRIPE";
+    /** The rail. Mobile-money entries are logged here too, so one table answers
+     *  "what did a gateway tell us and when" whatever the rail. */
+    gateway: "PAYSTACK" | "STRIPE" | "MPESA" | "MTN_MOMO" | "AIRTEL";
     eventType: string;
     reference?: string | null;
     schoolId?: string | null;

@@ -343,3 +343,57 @@ model InvoiceAdjustment {
   @@index([schoolId, status])
   @@map("invoice_adjustment")
 }
+
+// =============================================================================
+// MobileMoneyIntent — what WE asked for, so an unsigned callback cannot lie
+// =============================================================================
+// SECURITY, and the reason this table exists at all. Paystack and Stripe sign
+// their webhooks, so their payload can be trusted after verification. M-Pesa's
+// Daraja callback and MTN's Collections callback are NOT signed: anyone who
+// learns a callback URL can POST to it.
+//
+// So the callback is treated as a NOTIFICATION, never as a source of amounts.
+// When a charge is initiated we record here what we asked for — which school,
+// which invoice, how much. When a callback arrives we look the reference up and
+// settle with OUR figure. The callback can tell us a payment succeeded; it can
+// never tell us how much, or on whose invoice.
+//
+// Append-mostly: an intent is never deleted, and its amount is never edited, so
+// "what did we ask this payer for" survives any later dispute.
+// =============================================================================
+model MobileMoneyIntent {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  /// OUR reference — the idempotency key, and what a callback is matched on.
+  reference   String  @unique
+  /// MPESA | MTN_MOMO | AIRTEL.
+  provider    String
+  invoiceId   String  @db.Uuid
+  /// What we asked the payer for, in the invoice's currency, minor units.
+  /// NEVER re-read from a callback.
+  amountMinor Int
+  currency    String
+  /// Normalised MSISDN the prompt was sent to.
+  msisdn      String
+  /// The signed-in user who started it, when known (gets the receipt).
+  payerId     String? @db.Uuid
+
+  /// PENDING | SUCCEEDED | FAILED | EXPIRED.
+  status        String    @default("PENDING")
+  /// The provider's own id for the request (CheckoutRequestID / X-Reference-Id),
+  /// kept for support and for the reconciliation sweep.
+  providerRef   String?
+  /// Provider's failure text, shown to the payer so "it failed" is actionable.
+  failureReason String?
+  settledAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, status])
+  @@map("mobile_money_intent")
+}

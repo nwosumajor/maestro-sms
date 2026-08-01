@@ -68,6 +68,7 @@ d("RLS cross-tenant isolation", () => {
   const attendanceRollupA = randomUUID();
   const platformDelegationA = randomUUID();
   const breachIncidentA = randomUUID();
+  const mmIntentA = randomUUID();
   const scanEventA = randomUUID();
   const teacherUnavailA = randomUUID();
   const grantA = randomUUID();
@@ -735,6 +736,13 @@ d("RLS cross-tenant isolation", () => {
        VALUES ($1,$2,'Test incident','desc',now(),$3,now())`,
       [breachIncidentA, A, userA],
     );
+    // Mobile-money intent: what WE asked a payer for. Tenant-scoped like every
+    // other financial record.
+    await a.query(
+      `INSERT INTO mobile_money_intent (id,"schoolId",reference,provider,"invoiceId","amountMinor",currency,msisdn,"updatedAt")
+       VALUES ($1,$2,$3,'MPESA',$4,50000,'KES','254712345678',now())`,
+      [mmIntentA, A, "MM-RLS-" + mmIntentA.slice(0, 8), invoiceA],
+    );
     // Term-weighted subject result (student userA, subjectA, termA/sessionA).
     await a.query(
       `INSERT INTO subject_result (id,"schoolId","sessionId","termId","classId","subjectId","studentId",exam,total,grade,status,"updatedAt")
@@ -1245,6 +1253,7 @@ d("RLS cross-tenant isolation", () => {
       "attendance_term_rollup",
       "platform_delegation",
       "data_breach_incident",
+      "mobile_money_intent",
       "exam_attendance",
       "exam_invigilator",
       "exam_seat",
@@ -1364,6 +1373,7 @@ d("RLS cross-tenant isolation", () => {
     ["attendance_term_rollup", attendanceRollupA],
     ["platform_delegation", platformDelegationA],
     ["data_breach_incident", breachIncidentA],
+    ["mobile_money_intent", mmIntentA],
     ["exam_attendance", examAttendanceA],
     ["exam_seat", examSeatA],
     ["exam_invigilator", examInvigilatorA],

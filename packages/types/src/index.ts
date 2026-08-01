@@ -7,6 +7,7 @@ export * from "./modules";
 export * from "./notifications";
 export * from "./pagination";
 export * from "./currency";
+export * from "./mobile-money";
 export * from "./region";
 export * from "./roles";
 export * from "./school-email";
