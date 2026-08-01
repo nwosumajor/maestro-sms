@@ -190,6 +190,8 @@ export class MobileMoneyService {
         amountMinor: intent.amountMinor,
         currency: intent.currency,
         msisdn,
+        country: cover.country,
+        dialCode: cover.dialCode,
         narrative,
         callbackUrl: `${process.env.PUBLIC_API_URL ?? ""}/payments/mobile-money/callback/${cover.provider.toLowerCase()}`,
       });
