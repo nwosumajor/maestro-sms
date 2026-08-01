@@ -30,6 +30,10 @@ const OWNER_ONLY = [
   OPERATOR_PERMISSIONS.PLATFORM_IMPERSONATE, // becomes any user
   OPERATOR_PERMISSIONS.PLATFORM_USER_CREDENTIALS, // temp password = a login for that account
   OPERATOR_PERMISSIONS.PLATFORM_TENANTS_STATUS, // takes a paying school offline
+  // A region change flips the privacy regime, disables statutory payroll and moves
+  // every register's day boundary — and does all of it SILENTLY, where disabling a
+  // school is noticed within the hour.
+  OPERATOR_PERMISSIONS.PLATFORM_TENANTS_REGION,
   OPERATOR_PERMISSIONS.PLATFORM_SUBSCRIPTION_MANAGE, // revenue
   OPERATOR_PERMISSIONS.PLATFORM_PRICING_MANAGE, // revenue
   OPERATOR_PERMISSIONS.PLATFORM_STUDENT_READ, // minors' PII, cross-tenant
@@ -75,7 +79,11 @@ describe("platform permission split", () => {
   // Conflating them is what made time-bound delegation pointless: the manager
   // already held everything it could grant.
   it("the higher tier is lendable but NEVER a standing role permission", () => {
-    for (const perm of [OPERATOR_PERMISSIONS.PLATFORM_TENANTS_STATUS, OPERATOR_PERMISSIONS.PLATFORM_SUBSCRIPTION_MANAGE]) {
+    for (const perm of [
+      OPERATOR_PERMISSIONS.PLATFORM_TENANTS_STATUS,
+      OPERATOR_PERMISSIONS.PLATFORM_SUBSCRIPTION_MANAGE,
+      OPERATOR_PERMISSIONS.PLATFORM_TENANTS_REGION,
+    ]) {
       expect(LENDABLE_PLATFORM_PERMISSIONS).toContain(perm); // may be lent, briefly
       expect(DELEGABLE_PLATFORM_PERMISSIONS).not.toContain(perm); // never by role
       expect(ROLE_PERMISSIONS.manager_admin).not.toContain(perm); // and not in the seed
