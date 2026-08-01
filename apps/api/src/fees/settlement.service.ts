@@ -12,7 +12,8 @@
 // BillingModule; imports neither).
 // =============================================================================
 
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
+import { formatMoney } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -32,6 +33,15 @@ export interface OnlinePaymentInput {
   chargedMinor: number;
   /** Gateway reference — THE idempotency key. */
   reference: string;
+  /**
+   * ISO 4217 the payer was ACTUALLY charged in. Required, and checked against the
+   * invoice before anything posts.
+   *
+   * Not defaulted, ever: the whole class of bug this guards against is a rail
+   * quietly using its own currency when nobody named one. A default here would
+   * reintroduce it at the last place able to catch it.
+   */
+  currency: string;
   /** The signed-in user who initiated checkout, when known (gets the receipt). */
   payerId?: string;
   platformFeeMinor?: number;
@@ -42,10 +52,11 @@ export interface OnlinePaymentInput {
   method?: "CARD" | "BANK_TRANSFER";
 }
 
-export type SettlementOutcome = "posted" | "duplicate" | "invoice_missing";
+export type SettlementOutcome = "posted" | "duplicate" | "invoice_missing" | "currency_mismatch";
 
 @Injectable()
 export class InvoiceSettlementService {
+  private readonly logger = new Logger("Settlement");
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
@@ -58,6 +69,17 @@ export class InvoiceSettlementService {
     const receipt = await this.db.runAsTenant({ schoolId, userId: SYSTEM_ACTOR_ID }, async (tx) => {
       const inv = await tx.invoice.findFirst({ where: { id: invoiceId } });
       if (!inv) return "invoice_missing" as const;
+
+      // CURRENCY MUST MATCH, and this is the ONE place that can enforce it for
+      // every rail at once — card, mobile money, virtual account, verify-on-return
+      // and the reconciliation sweep all post through here.
+      //
+      // A charge in one currency credited against an invoice in another is not an
+      // approximation, it is a wrong number: NGN 5,000 against a GHS 5,000 invoice
+      // marked it PAID while the school received about a tenth. Refusing leaves the
+      // invoice OPEN and the payment unposted, which is recoverable — posting it
+      // silently is not, because nothing downstream ever revisits a settled invoice.
+      if (inv.currency !== input.currency) return "currency_mismatch" as const;
       // IDEMPOTENCY: the gateway RETRIES a webhook on any non-2xx / timeout
       // (and can double-deliver), and verify-on-return / reconciliation can
       // race the webhook. Without this guard each path would insert ANOTHER
@@ -136,11 +158,23 @@ export class InvoiceSettlementService {
 
     if (receipt === "invoice_missing") return "invoice_missing";
     if (receipt === "duplicate") return "duplicate";
+    if (receipt === "currency_mismatch") {
+      // Loud: money reached a gateway that we are declining to post. Someone must
+      // reconcile it by hand, so it cannot be a debug line.
+      this.logger.error(
+        `settlement REFUSED ${input.reference}: charge in ${input.currency} against ` +
+          `invoice ${input.invoiceId} — currency mismatch. Payment NOT posted.`,
+      );
+      return "currency_mismatch";
+    }
 
     // Receipt AFTER the committed write — a notification failure never undoes
     // a recorded payment. Every online payment gets one, partial or full.
-    const fmt = (minor: number) =>
-      new Intl.NumberFormat("en-NG", { style: "currency", currency: receipt.currency }).format(minor / 100);
+    // formatMoney asks the CURRENCY how many decimals it has. The old
+    // `minor / 100` under a hard-coded en-NG printed a CFA-franc receipt at a
+    // HUNDREDTH of its value — the same divide-by-100 bug the currency work
+    // removed platform-wide, still live on the one path every payer sees.
+    const fmt = (minor: number) => formatMoney(minor, receipt.currency);
     const balanceLine =
       receipt.balanceAfter <= 0
         ? "The invoice is now fully paid. Thank you."

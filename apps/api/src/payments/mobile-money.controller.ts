@@ -81,6 +81,17 @@ export class MobileMoneyController {
     return this.mm.handleCallback(provider, body);
   }
 
+  /**
+   * Run the recovery sweep now. Same permission as the card reconciliation sweep
+   * (`fee.reconcile.run`, super_admin-only): it is a cross-tenant operation that
+   * settles money, so it is not a school-level button.
+   */
+  @Post("recovery/run")
+  @RequirePermission(FEES_PERMISSIONS.FEE_RECONCILE_RUN)
+  runRecovery() {
+    return this.mm.recoverPending("MANUAL");
+  }
+
   /** @see callback — MTN MoMo delivers the same payload as a PUT. */
   @Public()
   @Put("callback/:provider")

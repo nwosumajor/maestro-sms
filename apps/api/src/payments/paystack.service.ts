@@ -254,6 +254,9 @@ export class PaystackService {
   async verifyTransaction(reference: string): Promise<{
     status: string;
     amountMinor: number;
+    /** What the payer was ACTUALLY charged in — checked against the invoice
+     *  before settlement posts anything. */
+    currency: string;
     metadata: Record<string, unknown>;
   } | null> {
     const secret = process.env.PAYSTACK_SECRET_KEY;
@@ -264,12 +267,13 @@ export class PaystackService {
       });
       if (!res.ok) return null;
       const json = (await res.json()) as {
-        data?: { status?: string; amount?: number; metadata?: Record<string, unknown> | null };
+        data?: { status?: string; amount?: number; currency?: string; metadata?: Record<string, unknown> | null };
       };
       if (!json.data?.status) return null;
       return {
         status: json.data.status,
         amountMinor: json.data.amount ?? 0,
+        currency: (json.data.currency ?? "").toUpperCase(),
         metadata: json.data.metadata ?? {},
       };
     } catch (err) {
@@ -286,21 +290,29 @@ export class PaystackService {
   async listSuccessfulTransactions(
     from: Date,
     maxPages = 10,
-  ): Promise<Array<{ reference: string; amountMinor: number; metadata: Record<string, unknown> }>> {
+  ): Promise<Array<{ reference: string; amountMinor: number; currency: string; metadata: Record<string, unknown> }>> {
     const secret = process.env.PAYSTACK_SECRET_KEY;
     if (!secret) return [];
-    const out: Array<{ reference: string; amountMinor: number; metadata: Record<string, unknown> }> = [];
+    const out: Array<{ reference: string; amountMinor: number; currency: string; metadata: Record<string, unknown> }> = [];
     try {
       for (let page = 1; page <= maxPages; page++) {
         const url = `${PAYSTACK}/transaction?status=success&perPage=100&page=${page}&from=${encodeURIComponent(from.toISOString())}`;
         const res = await fetch(url, { headers: { Authorization: `Bearer ${secret}` } });
         if (!res.ok) break;
         const json = (await res.json()) as {
-          data?: Array<{ reference?: string; amount?: number; metadata?: Record<string, unknown> | null }>;
+          data?: Array<{ reference?: string; amount?: number; currency?: string; metadata?: Record<string, unknown> | null }>;
         };
         const rows = json.data ?? [];
         for (const r of rows) {
-          if (r.reference) out.push({ reference: r.reference, amountMinor: r.amount ?? 0, metadata: r.metadata ?? {} });
+          if (r.reference)
+            out.push({
+              reference: r.reference,
+              amountMinor: r.amount ?? 0,
+              // Reconciliation posts against an invoice, so it must know what the
+              // payer was charged IN — not assume the account default.
+              currency: (r.currency ?? "").toUpperCase(),
+              metadata: r.metadata ?? {},
+            });
         }
         if (rows.length < 100) break;
       }

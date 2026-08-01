@@ -72,6 +72,21 @@ export interface MobileMoneyProvider {
   isConfigured(): boolean;
   charge(req: ChargeRequest): Promise<ChargeAck>;
   readCallback(body: unknown): CallbackReading;
+  /**
+   * Ask the rail what became of a charge.
+   *
+   * THE REASON THIS EXISTS: a mobile-money callback is the only thing that tells
+   * us a payment succeeded, it is unsigned, and it is delivered exactly once on a
+   * best-effort basis. Lose it to a deploy, a 5xx or a network blip and the payer
+   * has been debited while the invoice stays open forever — the same failure the
+   * card rails have a reconciliation sweep to prevent. Polling is that sweep's
+   * missing half.
+   *
+   * Takes the intent's own identifiers so each rail can use whichever it is keyed
+   * on: M-Pesa queries by CheckoutRequestID, MTN by the X-Reference-Id it was
+   * given, Airtel by our transaction id.
+   */
+  getStatus(ref: { reference: string; providerRef: string | null }): Promise<CallbackReading>;
 }
 
 /** Pull a nested value without a cast-fest at every call site. */
@@ -168,6 +183,45 @@ export class MpesaProvider implements MobileMoneyProvider {
       providerRef: typeof body.CheckoutRequestID === "string" ? body.CheckoutRequestID : null,
       instruction: "Check your phone and enter your M-Pesa PIN to approve the payment.",
     };
+  }
+
+  async getStatus(ref: { reference: string; providerRef: string | null }): Promise<CallbackReading> {
+    // Daraja's STK query is keyed ONLY on CheckoutRequestID. Without one there is
+    // nothing to ask about, and guessing would be worse than waiting.
+    if (!this.isConfigured() || !ref.providerRef) return { reference: ref.reference, outcome: "PENDING" };
+    const shortcode = process.env.MPESA_SHORTCODE!;
+    const ts = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
+    const password = Buffer.from(`${shortcode}${process.env.MPESA_PASSKEY}${ts}`).toString("base64");
+    try {
+      const res = await fetch(`${this.base()}/mpesa/stkpushquery/v1/query`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${await this.token()}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          BusinessShortCode: shortcode,
+          Password: password,
+          Timestamp: ts,
+          CheckoutRequestID: ref.providerRef,
+        }),
+      });
+      const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      // ResultCode 0 = paid. 1032 = cancelled, 1037 = timed out, etc. Anything we
+      // cannot read stays PENDING: "we do not know" must never settle or fail a
+      // charge, because both are one-way.
+      const code = body.ResultCode;
+      if (code === undefined || code === null) return { reference: ref.reference, outcome: "PENDING", providerRef: ref.providerRef };
+      // 500.001.1001 means the transaction is still being processed.
+      if (String(code) === "500.001.1001") return { reference: ref.reference, outcome: "PENDING", providerRef: ref.providerRef };
+      const ok = Number(code) === 0;
+      return {
+        reference: ref.reference,
+        outcome: ok ? "SUCCEEDED" : "FAILED",
+        providerRef: ref.providerRef,
+        failureReason: ok ? null : String(body.ResultDesc ?? "Payment was not completed"),
+      };
+    } catch (err) {
+      this.logger.warn(`STK query failed for ${ref.providerRef}: ${(err as Error).message}`);
+      return { reference: ref.reference, outcome: "PENDING", providerRef: ref.providerRef };
+    }
   }
 
   readCallback(body: unknown): CallbackReading {
@@ -309,6 +363,28 @@ export class MtnMomoProvider implements MobileMoneyProvider {
     };
   }
 
+  async getStatus(ref: { reference: string; providerRef: string | null }): Promise<CallbackReading> {
+    if (!this.isConfigured()) return { reference: ref.reference, outcome: "PENDING" };
+    // Keyed on the X-Reference-Id we generated at charge time — which is exactly
+    // why that id had to be DERIVED from our reference and a well-formed UUID.
+    const id = ref.providerRef ?? mtnReferenceId(ref.reference);
+    try {
+      const res = await fetch(`${this.base()}/collection/v1_0/requesttopay/${encodeURIComponent(id)}`, {
+        headers: {
+          Authorization: `Bearer ${await this.token()}`,
+          "X-Target-Environment": this.target(),
+          "Ocp-Apim-Subscription-Key": process.env.MTN_MOMO_SUBSCRIPTION_KEY!,
+        },
+      });
+      if (!res.ok) return { reference: ref.reference, outcome: "PENDING", providerRef: id };
+      // Same body shape as the callback, so one reader serves both.
+      return { ...this.readCallback(await res.json()), providerRef: id };
+    } catch (err) {
+      this.logger.warn(`MoMo status failed for ${id}: ${(err as Error).message}`);
+      return { reference: ref.reference, outcome: "PENDING", providerRef: id };
+    }
+  }
+
   readCallback(body: unknown): CallbackReading {
     // MoMo posts the request's final state; externalId is the reference WE set.
     const reference = typeof at(body, "externalId") === "string" ? String(at(body, "externalId")) : null;
@@ -432,6 +508,30 @@ export class AirtelProvider implements MobileMoneyProvider {
       providerRef: typeof id === "string" ? id : null,
       instruction: "Approve the payment request on your phone to complete this payment.",
     };
+  }
+
+  async getStatus(ref: { reference: string; providerRef: string | null }): Promise<CallbackReading> {
+    if (!this.isConfigured()) return { reference: ref.reference, outcome: "PENDING" };
+    // Airtel's enquiry is keyed on the transaction id WE sent, not on its own —
+    // the opposite of M-Pesa, and the reason this takes both identifiers.
+    try {
+      const res = await fetch(`${this.base()}/standard/v1/payments/${encodeURIComponent(ref.reference)}`, {
+        headers: {
+          Authorization: `Bearer ${await this.token()}`,
+          Accept: "*/*",
+          "X-Country": (process.env.AIRTEL_COUNTRY ?? "").toUpperCase(),
+          "X-Currency": (process.env.AIRTEL_CURRENCY ?? "").toUpperCase(),
+        },
+      });
+      if (!res.ok) return { reference: ref.reference, outcome: "PENDING", providerRef: ref.providerRef };
+      const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      // The enquiry nests the transaction one level deeper than the callback does.
+      const tx = at(body, "data", "transaction");
+      return this.readCallback({ transaction: { ...(tx as object), id: ref.reference } });
+    } catch (err) {
+      this.logger.warn(`Airtel status failed for ${ref.reference}: ${(err as Error).message}`);
+      return { reference: ref.reference, outcome: "PENDING", providerRef: ref.providerRef };
+    }
   }
 
   readCallback(body: unknown): CallbackReading {

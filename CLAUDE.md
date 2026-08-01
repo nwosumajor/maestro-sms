@@ -200,6 +200,36 @@ conflicts with it, flag the conflict before proceeding.
   not at seven call sites. // GOTCHA: making `currency` a required field is what
   found them — a required parameter is a search for every caller that was
   relying on a default.
+- **EVERY rail is reconciled, and settlement REFUSES a currency mismatch.**
+  `InvoiceSettlementService.applyOnlinePayment` takes a required `currency` and
+  compares it to the invoice BEFORE posting (before the idempotency check, so a
+  mismatch is never masked as a duplicate). It is the ONE posting path, so this one
+  guard covers card, mobile money, dedicated-NUBAN, both verify-on-return paths,
+  the reconciliation sweep and any rail not yet written. A refusal leaves the
+  invoice OPEN and logs at ERROR — recoverable; posting is not, since nothing
+  revisits a settled invoice. Both gateway LISTINGS and verifies now report the
+  charge currency (they did not, so reconciliation could not have checked even if
+  it wanted to). // GOTCHA: **Stripe reports currency lower-case** (`"usd"`); the
+  adapters uppercase at the boundary. // GOTCHA: the receipt formatter still did
+  `minor / 100` under a hard-coded `en-NG`, printing a CFA-franc receipt at a
+  HUNDREDTH of its value — on the one path every payer reads. Uses `formatMoney`.
+- **MOBILE MONEY HAS A RECOVERY SWEEP** (`MobileMoneyService.recoverPending`,
+  hourly BullMQ + `POST /payments/mobile-money/recovery/run` behind
+  `fee.reconcile.run`). A mobile-money callback is unsigned, delivered ONCE,
+  best-effort, and is the only thing that says a payment succeeded — lose one and
+  the payer is debited while the invoice stays open FOREVER. The card rails had a
+  reconciliation sweep for exactly this; mobile money, the less reliable rail, had
+  none, and no contract test would ever find it. Each adapter implements
+  `getStatus` (Daraja `stkpushquery`, MTN `GET /requesttopay/{id}` — which is WHY
+  the X-Reference-Id had to be a derived, valid UUID — Airtel's enquiry, keyed on
+  OUR id). Rules: PENDING means ask again, never settle or fail; > 3 days is
+  EXPIRED (not FAILED — money may still have moved) and expiry runs BEFORE the
+  rail check, or intents on a decommissioned rail never close; recovery and the
+  callback share ONE `applyReading`, so they cannot disagree; one rail being down
+  does not stall the others. Hourly, not daily, because a card gateway retries a
+  failed webhook for days and a mobile-money rail does not retry at all.
+  Migration `20261121000000` adds the `(status, createdAt)` index the cross-tenant
+  sweep needs — verified as an Index Scan, not a seq scan.
 - **Webhook signatures: the security properties are in `card-rails-wire.spec.ts`.**
   Paystack HMAC-SHA512s the RAW BODY (`rawBody: true` in `main.ts` +
   `RawBodyRequest`; verifying a re-serialised JSON silently breaks). Stripe

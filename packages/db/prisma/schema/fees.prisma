@@ -395,5 +395,9 @@ model MobileMoneyIntent {
 
   @@index([schoolId])
   @@index([schoolId, status])
+  /// The recovery sweep is CROSS-TENANT: it looks for PENDING intents old enough
+  /// to chase, across every school. Without this it seq-scans a table that only
+  /// grows, on a schedule.
+  @@index([status, createdAt])
   @@map("mobile_money_intent")
 }

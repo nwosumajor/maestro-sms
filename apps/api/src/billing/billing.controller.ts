@@ -131,6 +131,7 @@ export class BillingController {
       invoiceId: meta.invoiceId,
       creditMinor: credit,
       chargedMinor: charged,
+      currency: (obj.currency ?? "").toUpperCase(),
       reference,
       payerId: meta.payerId,
       note: "Online (Stripe, USD)",
