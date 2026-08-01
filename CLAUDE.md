@@ -139,6 +139,18 @@ conflicts with it, flag the conflict before proceeding.
   only true timestamps convert. Invoice/payment money already carried its OWN
   currency per row and still does — an NGN invoice prints in naira whatever the
   school's currency is; only NEW invoices default to the school's.
+- **Money is scaled by the CURRENCY, never by 100** (`packages/types/src/currency.ts`).
+  The platform stored integer minor units and divided by 100 everywhere — right for
+  NGN/GHS/KES/ZAR/USD/GBP, and 100× WRONG for the CFA franc and every other
+  zero-decimal currency: 11 of the 29 African countries in the catalogue. Use
+  `formatMoney` / `toMajor` / `toMinor`; `minorUnits()` asks Intl rather than a
+  hand-kept table. // GOTCHA: `CURRENCIES` (what the platform can EXPRESS for its
+  own billing) is NOT the same question as `planCurrencies()` (what it can SELL in
+  — needs a price list AND a rail). `PLAN_PRICING_BY_CURRENCY` is PARTIAL, an
+  operator `plan_price` row can open a new currency, and `PlanPricingService
+  .effective()` refuses a currency with no prices rather than quoting zero. A
+  school's FEE currency is a free-form ISO code on `school.currency` and is a
+  separate thing again.
 - **Payroll packs are VERSIONED BY TAX YEAR** (`payroll-uk.ts`). UK thresholds move
   every 6 April, so a pack that hard-codes one year is a bug with a start date.
   `UK_TAX_YEARS` is a table; the year is chosen from the period being PAID (so

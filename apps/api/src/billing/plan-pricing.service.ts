@@ -78,7 +78,16 @@ export class PlanPricingService implements OnModuleInit {
   /** Effective per-tier pricing for ONE currency (operator rows over defaults).
    *  Defaults to NGN so existing single-currency callers keep working. */
   async effective(currency: Currency = CURRENCIES.NGN): Promise<PlanPricing> {
-    return (await this.resolve()).pricing[currency];
+    const table = (await this.resolve()).pricing[currency];
+    // A currency the platform can EXPRESS but has no price list for. Refusing is
+    // the point: quoting a tier at zero, or silently at the naira price, is worse
+    // than saying the market is not open yet.
+    if (!table) {
+      throw new ServiceUnavailableException(
+        `No plan pricing for ${currency}. Set prices for it in the operator pricing console before selling in this currency.`,
+      );
+    }
+    return table;
   }
 
   /** All currencies at once (quote fan-out). */
@@ -94,7 +103,7 @@ export class PlanPricingService implements OnModuleInit {
       planCurrencies(plan).map((currency) => ({
         plan,
         currency,
-        perSeatMonthlyMinor: pricing[currency][plan].perSeatMonthlyMinor,
+        perSeatMonthlyMinor: pricing[currency]?.[plan].perSeatMonthlyMinor ?? 0,
         isDefault: !overridden.has(`${plan}:${currency}`),
         modulesIncluded: PLAN_MODULES[plan].length,
       })),
@@ -175,7 +184,10 @@ export class PlanPricingService implements OnModuleInit {
     const overridden = new Set<string>();
     for (const r of rows) {
       if (isPlan(r.plan) && isCurrency(r.currency)) {
-        pricing[r.currency][r.plan] = { perSeatMonthlyMinor: r.perSeatMonthlyMinor };
+        // An operator row can OPEN a currency the defaults do not cover — pricing
+        // Ghana is a price list, not a deploy. The table is created on first row.
+        const table = (pricing[r.currency] ??= { ...PLAN_PRICING_BY_CURRENCY.NGN });
+        table[r.plan] = { perSeatMonthlyMinor: r.perSeatMonthlyMinor };
         overridden.add(`${r.plan}:${r.currency}`);
       }
     }

@@ -51,6 +51,7 @@ import {
   PLANS as PLAN_KEYS,
   PLAN_MODULES,
   PLAN_PRICING_BY_CURRENCY,
+  toMajor as minorToMajor,
   applyCycleDiscountMinor,
   defaultCurrencyFor,
   type Plan,
@@ -287,10 +288,15 @@ async function effectivePlans() {
     // (USD-only — it targets international schools). Rows are per-currency.
     const currency = defaultCurrencyFor(plan);
     const row = rows?.find((r) => r.plan === plan && r.currency === currency);
-    const fallback = PLAN_PRICING_BY_CURRENCY[currency][plan].perSeatMonthlyMinor;
+    // The pricing table is PARTIAL — a currency the platform can express is not
+    // automatically one it has prices for. Falls back to the naira table rather
+    // than rendering a blank price on the public page.
+    const fallback = (PLAN_PRICING_BY_CURRENCY[currency] ?? PLAN_PRICING_BY_CURRENCY.NGN)[plan].perSeatMonthlyMinor;
     const perSeatMinor = row?.perSeatMonthlyMinor ?? fallback;
     // Cycle marketing: the SAME discount rule checkout charges with (one source).
-    const toMajor = (minor: number) => Math.round((minor / 100) * 100) / 100;
+    // Scaled by the CURRENCY, not by 100 — the shared helper, so this page cannot
+    // drift from what checkout charges.
+    const toMajor = (minor: number) => Math.round(minorToMajor(minor, currency) * 100) / 100;
     const perStudent = (cycle: keyof typeof CYCLE_MONTHS) =>
       toMajor(applyCycleDiscountMinor(perSeatMinor * CYCLE_MONTHS[cycle], cycle));
     return {

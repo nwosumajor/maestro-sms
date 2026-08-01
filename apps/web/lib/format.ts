@@ -22,6 +22,8 @@
 // zone. See `isCalendarDate`.
 // =============================================================================
 
+import { formatMoney } from "@sms/types";
+
 export interface DisplayRegion {
   locale: string;
   timezone: string;
@@ -53,15 +55,16 @@ function isCalendarDate(d: Date): boolean {
   return d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0 && d.getUTCMilliseconds() === 0;
 }
 
-/** Money stored as integer minor units -> a display string in the given currency. */
+/**
+ * Money stored as integer minor units -> a display string in the given currency.
+ *
+ * Divides by the CURRENCY'S OWN scale, not by 100. The CFA franc has no centime,
+ * and so do the Rwandan and Ugandan shilling and several others — dividing those
+ * by 100 showed a hundredth of the real amount across roughly twenty African
+ * countries. `formatMoney` in @sms/types is the single implementation.
+ */
 export function money(amountMinor: number, currency = PLATFORM_REGION.currency, locale = PLATFORM_REGION.locale): string {
-  const major = (amountMinor ?? 0) / 100;
-  try {
-    return new Intl.NumberFormat(locale, { style: "currency", currency }).format(major);
-  } catch {
-    // An unknown currency or locale must still render a number, not blank.
-    return `${currency} ${major.toFixed(2)}`;
-  }
+  return formatMoney(amountMinor, currency, locale);
 }
 
 /** ISO date/datetime -> a short date. Calendar dates render in UTC; timestamps in

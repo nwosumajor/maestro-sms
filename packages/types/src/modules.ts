@@ -259,20 +259,31 @@ export function isSubscriptionStatus(value: string): value is SubscriptionStatus
 }
 
 // --- Currency (dual-gateway billing: NGN via Paystack, USD via Stripe) -------
-export const CURRENCIES = {
-  NGN: "NGN",
-  USD: "USD",
-} as const;
-export type Currency = (typeof CURRENCIES)[keyof typeof CURRENCIES];
-export function isCurrency(v: unknown): v is Currency {
-  return v === CURRENCIES.NGN || v === CURRENCIES.USD;
-}
-export const CURRENCY_SYMBOL: Record<Currency, string> = { NGN: "₦", USD: "$" };
+// Currencies and their minor-unit scale now live in `currency.ts` — the platform
+// bills in more than two, and the CFA franc has no subdivision at all, which the
+// old `/ 100` everywhere got wrong by a factor of a hundred.
+export { CURRENCIES, isCurrency, type Currency } from "./currency";
+import { CURRENCIES, type Currency } from "./currency";
+/** Symbols for the currencies the platform bills in. Kept for the few places that
+ *  want a bare glyph; anywhere formatting a real AMOUNT should use `formatMoney`,
+ *  which gets the symbol AND the right number of decimals from the currency. */
+export const CURRENCY_SYMBOL: Record<Currency, string> = {
+  NGN: "₦",
+  USD: "$",
+  GHS: "₵",
+  KES: "KSh",
+  ZAR: "R",
+  GBP: "£",
+  EUR: "€",
+};
 
 /** Which currencies a tier may be quoted/sold in. ENTERPRISE is USD-ONLY — it
  *  targets international schools and is indicated in dollars EVERYWHERE
  *  (homepage, quotes, checkout, operator pricing). */
 export function planCurrencies(plan: Plan): Currency[] {
+  // Only what the platform can price AND settle today. The type permits more so a
+  // new market is a price list rather than a code change; offering a currency with
+  // no price would produce a checkout that cannot complete.
   return plan === PLANS.ENTERPRISE ? [CURRENCIES.USD] : [CURRENCIES.NGN, CURRENCIES.USD];
 }
 /** The currency a tier is DISPLAYED in by default (₦ locally, $ for ENTERPRISE). */
@@ -282,8 +293,16 @@ export function defaultCurrencyFor(plan: Plan): Currency {
 
 /** Per-seat monthly pricing by tier, in ONE currency's minor unit (kobo/cents). */
 export type PlanPricing = Record<Plan, { perSeatMonthlyMinor: number }>;
-/** Per-currency pricing tables. */
-export type MultiCurrencyPlanPricing = Record<Currency, PlanPricing>;
+/**
+ * Per-currency pricing tables.
+ *
+ * PARTIAL deliberately: a currency the platform can *express* is not automatically
+ * a currency it can *charge in* — that needs a price list and a settlement rail.
+ * Adding one is: a default price here (or an operator row in `plan_price`), and it
+ * appears in checkout. Until then it is absent, and `planCurrencies` will not offer
+ * it, rather than offering a tier with no price.
+ */
+export type MultiCurrencyPlanPricing = Partial<Record<Currency, PlanPricing>>;
 
 /**
  * DEFAULT per-seat (per active student) price each MONTH, in kobo, by tier.
@@ -311,7 +330,13 @@ export const PLAN_PRICING_USD: PlanPricing = {
   ENTERPRISE: { perSeatMonthlyMinor: 100 }, // $1.00 / student / month
 };
 
-export const PLAN_PRICING_BY_CURRENCY: MultiCurrencyPlanPricing = {
+/** The currencies the platform ships prices for. Typed so NGN and USD are
+ *  GUARANTEED present — code may rely on those two without a null check, while a
+ *  new market is still just another key. */
+export const PLAN_PRICING_BY_CURRENCY: MultiCurrencyPlanPricing & {
+  NGN: PlanPricing;
+  USD: PlanPricing;
+} = {
   NGN: PLAN_PRICING,
   USD: PLAN_PRICING_USD,
 };
