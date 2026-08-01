@@ -63,7 +63,7 @@ export function PlatformStaff() {
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [invite, setInvite] = useState<Invite | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"link" | "password" | null>(null);
 
   async function load() {
     const res = await fetch("/api/sms/operator/platform-staff");
@@ -82,6 +82,12 @@ export function PlatformStaff() {
     const t = setTimeout(() => setInvite(null), 10 * 60_000);
     return () => clearTimeout(t);
   }, [invite]);
+
+  function copy(value: string, which: "link" | "password") {
+    void navigator.clipboard.writeText(value);
+    setCopied(which);
+    setTimeout(() => setCopied(null), 2000);
+  }
 
   async function add(e: React.FormEvent) {
     e.preventDefault();
@@ -200,20 +206,35 @@ export function PlatformStaff() {
               size="sm"
               variant="outline"
               className="h-7"
-              onClick={() => {
-                void navigator.clipboard.writeText(invite.inviteLink);
-                setCopied(true);
-                setTimeout(() => setCopied(false), 2000);
-              }}
+              onClick={() => copy(invite.inviteLink, "link")}
             >
-              {copied ? "Copied" : "Copy link"}
+              {copied === "link" ? "Copied" : "Copy link"}
             </Button>
             <Button size="sm" variant="ghost" className="h-7" onClick={() => setInvite(null)}>
               Hide
             </Button>
           </div>
+
+          {/* The fallback. A link is long, chat clients mangle it, and it is
+              useless if the console URL is misconfigured — a short password can
+              be read down a phone. Either route lands on the same screen. */}
+          <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-border/70 pt-2">
+            <span className="text-xs text-muted-foreground">or a one-time password:</span>
+            <code className="rounded bg-background px-2 py-1 text-xs font-medium">{invite.tempPassword}</code>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7"
+              onClick={() => copy(invite.tempPassword, "password")}
+            >
+              {copied === "password" ? "Copied" : "Copy password"}
+            </Button>
+            <span className="text-xs text-muted-foreground">with {invite.staff.email}</span>
+          </div>
+
           <p className="mt-2 text-xs text-muted-foreground">
-            Single use, valid 7 days. It sets a password only — it is not a sign-in, and it expires the moment it is used.
+            Both are single use and expire in 7 days. The password grants a session and nothing else — they are held on
+            the change-password screen until they set their own. Neither is a lasting credential.
           </p>
         </div>
       )}

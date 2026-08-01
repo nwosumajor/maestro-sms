@@ -674,10 +674,17 @@ export class OperatorProvisioningService {
     const roleRow = await db.role.findFirst({ where: { name: PLATFORM_STAFF_ROLE } });
     if (!roleRow) throw new BadRequestException(`role ${PLATFORM_STAFF_ROLE} is not seeded`);
 
-    // No password is ever returned or emailed (the onboarding posture: send the
-    // link, never the secret). An unguessable hash parks the account until the
-    // invite is used; passwordChangedAt=null forces a set-password on first login.
-    const passwordHash = await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10);
+    // A ONE-TIME temp password, returned to the owner as the fallback when the
+    // link cannot be used — a link is long, chat clients mangle it, and it is
+    // useless if PUBLIC_WEB_URL is wrong. This used to hash 32 random bytes and
+    // THROW THEM AWAY, which is why an account with no working email was
+    // unreachable by any route at all.
+    //
+    // It is not a lasting credential: passwordChangedAt stays null so login
+    // reports passwordExpired and the web holds them on change-password, and
+    // tempPasswordSetAt makes it go stale in 7 days like the link.
+    const tempPassword = this.genPassword();
+    const passwordHash = await bcrypt.hash(tempPassword, 10);
     const staff = await db.$transaction(async (tx) => {
       const u = await tx.user.create({
         data: {
@@ -686,6 +693,7 @@ export class OperatorProvisioningService {
           name: input.name,
           passwordHash,
           passwordChangedAt: null,
+          tempPasswordSetAt: new Date(),
           // Platform staff can onboard schools and read the whole platform audit
           // trail — MFA is mandatory, not a preference.
           mfaRequired: true,
@@ -721,6 +729,7 @@ export class OperatorProvisioningService {
       },
       inviteLink: invite.link,
       emailDelivered: invite.emailDelivered,
+      tempPassword,
     };
   }
 
@@ -751,6 +760,29 @@ export class OperatorProvisioningService {
       throw new BadRequestException("Reinstate this manager before re-issuing their invite.");
     }
 
+    // A FRESH temp password, and the old one dies with it. Re-issuing only the
+    // link would leave the previous password valid on its own older clock —
+    // two credentials for one account, expiring at different times, which is
+    // exactly the sort of thing nobody remembers when revoking access.
+    //
+    // passwordChangedAt is reset to null as well: re-issuing is "this person
+    // cannot get in", so whatever password they had must stop working, and the
+    // web must hold them on change-password after they use the temp one.
+    const tempPassword = this.genPassword();
+    await db.user.update({
+      where: { id: target.id },
+      data: {
+        passwordHash: await bcrypt.hash(tempPassword, 10),
+        passwordChangedAt: null,
+        tempPasswordSetAt: new Date(),
+        // A re-issue is the recovery path for a locked-out manager, so it clears
+        // the lockout too — otherwise the new credential works and login still refuses.
+        failedLoginCount: 0,
+        locked: false,
+        lockedUntil: null,
+      },
+    });
+
     const invite = await this.buildAndSendInvite(target.id, target.email, org.id, org.name, org.slug);
     await this.auditInOperatorTenant(p, "operator.platform.staff.invite_reissue", "user", target.id, {
       email: target.email,
@@ -766,15 +798,21 @@ export class OperatorProvisioningService {
         name: target.name,
         status: target.status,
         mfaEnabled: target.mfaEnabled,
-        activated: target.passwordChangedAt !== null,
+        // FALSE by construction: re-issuing reset passwordChangedAt, so the
+        // account is back to "invited, not yet activated" whatever it was before.
+        // Reporting the pre-update value here would show a manager as activated
+        // while they are actually holding an unused temp password.
+        activated: false,
         disabledAt: target.disabledAt,
         createdAt: target.createdAt,
         lastLoginAt: target.lastLoginAt,
-        locked: target.locked,
+        locked: false, // the re-issue cleared it
+
         duties: [],
       },
       inviteLink: invite.link,
       emailDelivered: invite.emailDelivered,
+      tempPassword,
     };
   }
 

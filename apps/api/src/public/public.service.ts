@@ -165,7 +165,9 @@ export class PublicService {
         if (!user || user.status !== "ACTIVE" || user.passwordChangedAt !== null) return null;
         await tx.user.update({
           where: { id: user.id },
-          data: { passwordHash, passwordChangedAt: new Date() },
+          // Any outstanding temp credential is now dead — clear its marker so the
+          // staleness check is not left watching a password that no longer exists.
+          data: { passwordHash, passwordChangedAt: new Date(), tempPasswordSetAt: null },
         });
         const school = await tx.school.findFirst({ where: { id: invite.schoolId }, select: { slug: true } });
         return { email: user.email, schoolSlug: school?.slug ?? "" };
@@ -224,7 +226,10 @@ export class PublicService {
       });
       if (!user || user.status !== "ACTIVE") return null;
       if ((user.passwordChangedAt?.getTime() ?? 0) !== reset.pca) return null; // used / superseded
-      await tx.user.update({ where: { id: user.id }, data: { passwordHash, passwordChangedAt: new Date() } });
+      await tx.user.update({
+        where: { id: user.id },
+        data: { passwordHash, passwordChangedAt: new Date(), tempPasswordSetAt: null },
+      });
       const school = await tx.school.findFirst({ where: { id: reset.schoolId }, select: { slug: true } });
       return { email: user.email, schoolSlug: school?.slug ?? "" };
     });

@@ -68,6 +68,7 @@ function makeService(over: Record<string, unknown> = {}) {
   };
 
   const created = { id: "u-mgr", email: STAFF_ROW.email, name: STAFF_ROW.name, status: "ACTIVE", createdAt: STAFF_ROW.createdAt };
+  const txUserCreate = jest.fn().mockResolvedValue(created);
   const db = {
     school: { findFirst: jest.fn().mockResolvedValue(ORG) },
     role: { findFirst: jest.fn().mockResolvedValue({ id: "role-mgr" }) },
@@ -83,8 +84,9 @@ function makeService(over: Record<string, unknown> = {}) {
       updateMany: jest.fn().mockResolvedValue({ count: (over.revokedCount as number) ?? 0 }),
     },
     $transaction: jest.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
-      fn({ user: { create: jest.fn().mockResolvedValue(created) }, userRole: { create: jest.fn() } }),
+      fn({ user: { create: txUserCreate }, userRole: { create: jest.fn() } }),
     ),
+    txUserCreate,
   };
 
   const privileged = { client: db };
@@ -148,13 +150,47 @@ describe("hiring a platform manager", () => {
     expect(sent[0].to).toBe(STAFF_ROW.email);
   });
 
-  it("still never returns or emails a PASSWORD", async () => {
-    // The posture is unchanged: send links, never secrets. The link is single-use
-    // and expiring; a password is neither.
+  it("returns a BOUNDED credential, not a lasting one", async () => {
+    // The posture moved deliberately: the console now shows a temp password as
+    // the link's fallback, because a link alone left the owner with no route when
+    // email is unconfigured. What must NOT change is that neither artefact is a
+    // durable credential — both expire, and the password forces a change on use.
+    const { svc, db, sent } = makeService({ emailConfigured: true });
+    const out = await svc.createPlatformStaff(OWNER, { email: STAFF_ROW.email, name: STAFF_ROW.name });
+    const data = (db.txUserCreate as jest.Mock).mock.calls[0][0].data;
+    expect(data.passwordChangedAt).toBeNull();     // login reports passwordExpired
+    expect(data.tempPasswordSetAt).toBeInstanceOf(Date); // and it goes stale
+    // The EMAIL still carries only the link. Email is the untrusted channel; it is
+    // the reason the fallback exists, so the fallback must not travel on it.
+    expect(sent[0].text).not.toContain(out.tempPassword);
+    expect(sent[0].text).not.toMatch(/temporary password|your password is/i);
+  });
+
+  it("returns a USABLE temp password as the link's fallback", async () => {
+    // A link is long and chat clients mangle it; it is also useless if
+    // PUBLIC_WEB_URL is misconfigured. A short password can be read down a phone.
+    const { svc } = makeService();
+    const out = await svc.createPlatformStaff(OWNER, { email: STAFF_ROW.email, name: STAFF_ROW.name });
+    expect(typeof out.tempPassword).toBe("string");
+    expect(out.tempPassword.length).toBeGreaterThanOrEqual(8);
+  });
+
+  it("stamps tempPasswordSetAt so the password can GO STALE", async () => {
+    // Without the marker the fallback is a credential that never expires — the
+    // exact flaw in the school-admin flow this one is modelled on.
+    const { svc, db } = makeService();
+    await svc.createPlatformStaff(OWNER, { email: STAFF_ROW.email, name: STAFF_ROW.name });
+    const data = (db.txUserCreate as jest.Mock).mock.calls[0][0].data;
+    expect(data.tempPasswordSetAt).toBeInstanceOf(Date);
+    expect(data.passwordChangedAt).toBeNull(); // forces a change on first login
+  });
+
+  it("never emails the temp password — only the link travels", async () => {
+    // Email is the untrusted channel here: it is why the link exists. Putting the
+    // password in it would defeat the point of having two routes.
     const { svc, sent } = makeService({ emailConfigured: true });
     const out = await svc.createPlatformStaff(OWNER, { email: STAFF_ROW.email, name: STAFF_ROW.name });
-    expect(JSON.stringify(out)).not.toMatch(/password/i);
-    expect(sent[0].text).not.toMatch(/temporary password|your password is/i);
+    expect(sent[0].text).not.toContain(out.tempPassword);
   });
 
   it("refuses an email already in use", async () => {
@@ -170,6 +206,37 @@ describe("re-issuing an invite", () => {
     const { svc } = makeService({ existingUser: STAFF_ROW });
     const out = await svc.reissuePlatformStaffInvite(OWNER, "u-mgr");
     expect(out.inviteLink).toContain("/welcome?token=");
+  });
+
+  it("mints a fresh PASSWORD too, killing the old one", async () => {
+    // Re-issuing only the link would leave the previous password valid on its own
+    // older clock — two credentials for one account, expiring at different times,
+    // which is exactly what nobody remembers when revoking access.
+    const { svc, db } = makeService({ existingUser: STAFF_ROW });
+    const out = await svc.reissuePlatformStaffInvite(OWNER, "u-mgr");
+    expect(typeof out.tempPassword).toBe("string");
+    const data = (db.user.update as jest.Mock).mock.calls[0][0].data;
+    expect(data.passwordHash).toEqual(expect.any(String));
+    expect(data.tempPasswordSetAt).toBeInstanceOf(Date);
+    expect(data.passwordChangedAt).toBeNull();
+  });
+
+  it("clears a LOCKOUT, since re-issue is the recovery path", async () => {
+    // Otherwise the new credential is correct and login still refuses it, which
+    // reads to the owner as "the fix did not work".
+    const { svc, db } = makeService({ existingUser: { ...STAFF_ROW, locked: true } });
+    await svc.reissuePlatformStaffInvite(OWNER, "u-mgr");
+    const data = (db.user.update as jest.Mock).mock.calls[0][0].data;
+    expect(data).toMatchObject({ locked: false, failedLoginCount: 0, lockedUntil: null });
+  });
+
+  it("reports the manager as NOT activated afterwards", async () => {
+    // Re-issue nulls passwordChangedAt, so an already-activated manager is back to
+    // "invited, holding an unused temp password". Reporting the pre-update value
+    // would show them as activated while they cannot actually get in.
+    const { svc } = makeService({ existingUser: { ...STAFF_ROW, passwordChangedAt: new Date() } });
+    const out = await svc.reissuePlatformStaffInvite(OWNER, "u-mgr");
+    expect(out.staff.activated).toBe(false);
   });
 
   it("404s an id that is not a platform manager", async () => {

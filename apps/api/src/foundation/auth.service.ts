@@ -63,6 +63,37 @@ const SUPER_ADMIN_LOCK_MS = 15 * 60 * 1000;
 const PASSWORD_MAX_AGE_DAYS = 30;
 const PASSWORD_MAX_AGE_MS = PASSWORD_MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
 
+/**
+ * How long a one-time TEMP PASSWORD stays usable if nobody uses it.
+ *
+ * The same 7 days as the invite link it accompanies, and for the same reason: an
+ * unused credential that never goes stale is a standing password living in
+ * whatever chat it was pasted into. Matching the link's life also means "the
+ * invite expired" is ONE fact rather than two that can disagree.
+ */
+const TEMP_PASSWORD_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * True when an unused temp password has gone stale.
+ *
+ * Only applies while the account has NEVER been activated (passwordChangedAt is
+ * null). Once the user sets their own password this is irrelevant, and
+ * `tempPasswordSetAt` is cleared anyway.
+ *
+ * NULL `tempPasswordSetAt` means UNLIMITED, not expired — those rows predate the
+ * column and carry temp passwords issued under the old rules. Failing them closed
+ * would lock out every not-yet-activated admin on an existing database, turning a
+ * hardening change into an outage.
+ */
+export function isTempPasswordStale(
+  tempPasswordSetAt: Date | null | undefined,
+  passwordChangedAt: Date | null | undefined,
+): boolean {
+  if (passwordChangedAt) return false;
+  if (!tempPasswordSetAt) return false;
+  return Date.now() - tempPasswordSetAt.getTime() > TEMP_PASSWORD_MAX_AGE_MS;
+}
+
 /** True when a non-super_admin's password is null-dated or older than the max age. */
 export function isPasswordExpired(passwordChangedAt: Date | null | undefined, isSuperAdmin: boolean): boolean {
   if (isSuperAdmin) return false;
@@ -113,6 +144,7 @@ export class AuthService {
             mfaSecret: true,
             mfaRequired: true,
             passwordChangedAt: true,
+            tempPasswordSetAt: true,
           },
         });
 
@@ -149,6 +181,14 @@ export class AuthService {
             },
           });
           return nowLocked ? { status: "LOCKED" as const } : { status: "BAD_PASSWORD" as const };
+        }
+
+        // The password is CORRECT. If it is a temp credential that was never used
+        // and has gone stale, refuse it here — after the match, so a stale
+        // credential does not consume a failed-login attempt or lock the account,
+        // and before any session is granted.
+        if (isTempPasswordStale(sec?.tempPasswordSetAt, sec?.passwordChangedAt)) {
+          return { status: "TEMP_EXPIRED" as const };
         }
 
         if (sec?.mfaEnabled) {
@@ -226,6 +266,12 @@ export class AuthService {
 
     if (outcome.status === "LOCKED") {
       throw new UnauthorizedException("ACCOUNT_LOCKED");
+    }
+    if (outcome.status === "TEMP_EXPIRED") {
+      // Said plainly, and distinctly from "wrong password": the person is holding
+      // a credential that WAS right. Telling them it is invalid sends them to
+      // reset-password, which cannot help — someone must re-issue the invite.
+      throw new UnauthorizedException("TEMP_PASSWORD_EXPIRED");
     }
     if (outcome.status === "BAD_PASSWORD") throw new UnauthorizedException("Invalid credentials");
     if (outcome.status === "MFA_REQUIRED") throw new UnauthorizedException("MFA_REQUIRED");
@@ -343,7 +389,10 @@ export class AuthService {
       const passwordHash = await bcrypt.hash(newPassword, 10);
       await tx.user.update({
         where: { id: userId },
-        data: { passwordHash, passwordChangedAt: new Date(), failedLoginCount: 0 },
+        // Clearing tempPasswordSetAt matters: the account now has a real
+        // password, and leaving the marker would keep the staleness check looking
+        // at a credential that no longer exists.
+        data: { passwordHash, passwordChangedAt: new Date(), failedLoginCount: 0, tempPasswordSetAt: null },
       });
     });
   }

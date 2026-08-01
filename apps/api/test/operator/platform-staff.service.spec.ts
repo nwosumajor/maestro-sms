@@ -82,12 +82,15 @@ describe("createPlatformStaff", () => {
     });
   });
 
-  it("never returns a password — the invite link is the only way in", async () => {
+  it("returns a link AND a one-time password, neither of them durable", async () => {
     const { svc } = makeService();
     const out = await svc.createPlatformStaff(owner as never, { email: "m@x.io", name: "M" });
-    expect(Object.keys(out)).not.toContain("tempPassword");
-    expect(JSON.stringify(out)).not.toMatch(/password/i);
     expect(out.staff).toMatchObject({ activated: false });
+    // The temp password is the FALLBACK for when the link cannot be used — a link
+    // is long, chat clients mangle it, and it is useless if PUBLIC_WEB_URL is
+    // wrong. It is not a lasting credential: the account stays unactivated, so
+    // login reports passwordExpired and the web forces a change immediately.
+    expect(typeof out.tempPassword).toBe("string");
     // The LINK is returned — without it the account is unreachable wherever email
     // is unconfigured, which is the default. A link is not a password: single
     // use, 7 days, and it only sets a credential rather than being one.
