@@ -20,6 +20,7 @@
 
 import { BadRequestException, Inject, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import type { CreditBalanceDto, InstallmentDto, PaymentPlanDto } from "@sms/types";
+import { SchoolRegionService } from "../foundation/school-region.service";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -42,6 +43,7 @@ export class PaymentPlansService {
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly notifications: NotificationService,
     private readonly paystack: PaystackService,
+    private readonly region: SchoolRegionService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -197,9 +199,14 @@ export class PaymentPlansService {
       return u?.email ?? "payer@school";
     });
     const reference = `PRE-${studentId.slice(0, 8)}-${Date.now()}`;
+    // Prepayment becomes a student CREDIT in the school's own currency, so the
+    // charge must be raised in it — crediting a ledger in one currency from a
+    // charge in another is a balance that silently drifts.
+    const { currency } = await this.region.forSchool(p.schoolId);
     const { authorizationUrl } = await this.paystack.initialize({
       email,
       amountMinor,
+      currency,
       reference,
       metadata: { kind: "prepay", schoolId: p.schoolId, studentId, payerId: p.userId },
       callbackUrl: `${process.env.PUBLIC_WEB_URL ?? "http://localhost:3000"}/fees?prepaid=1`,

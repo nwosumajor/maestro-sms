@@ -80,7 +80,7 @@ d("PaymentPlansService installments + credit (real Postgres)", () => {
     const audit = new AuditLogService();
     const queue = { add: jest.fn().mockResolvedValue(undefined) };
     const notifications = new NotificationService(tenant, audit, queue as never);
-    svc = new PaymentPlansService(tenant, audit, notifications, { isConfigured: () => true } as never);
+    svc = new PaymentPlansService(tenant, audit, notifications, { isConfigured: () => true } as never, { forSchool: async () => ({ currency: "NGN" }) } as never);
   });
 
   afterAll(async () => {

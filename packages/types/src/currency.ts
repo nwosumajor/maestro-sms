@@ -103,3 +103,45 @@ export function formatMoney(amountMinor: number, currency: string, locale = "en"
     return `${currency} ${major.toFixed(currencyDecimals(currency))}`;
   }
 }
+
+// =============================================================================
+// What each CARD rail can actually settle
+// =============================================================================
+// A gateway charges in ITS OWN account currency when you do not name one. That is
+// not a rounding error: a Ghanaian school raising a GHS 5,000 invoice had the
+// parent charged NGN 5,000 — about a tenth of the value — while the ledger
+// recorded the invoice as settled. The school is underpaid and nothing says so.
+//
+// So the currency is always sent EXPLICITLY, and a currency a rail cannot settle
+// is REFUSED rather than silently charged in the wrong one. Same posture as the
+// payroll packs and plan pricing: refuse, never approximate.
+// =============================================================================
+
+/** Currencies Paystack can settle. An account is additionally enabled per
+ *  currency, so this is the ceiling, not a guarantee. */
+export const PAYSTACK_CURRENCIES = ["NGN", "GHS", "ZAR", "KES", "USD"] as const;
+
+/** Stripe settles far more, but the platform only raises USD on it today. */
+export const STRIPE_CURRENCIES = ["USD"] as const;
+
+export function paystackCanSettle(currency: string): boolean {
+  return (PAYSTACK_CURRENCIES as readonly string[]).includes(currency.toUpperCase());
+}
+
+/**
+ * Stripe's zero-decimal currencies: the amount is in the MAJOR unit, not cents.
+ * Sending 500000 for JPY 5,000 charges a hundred times too much. The platform is
+ * USD-only on Stripe today, so this exists to make the next currency safe rather
+ * than to fix a live bug — `toMinor`/`minorUnits` already model this correctly for
+ * the rest of the platform, and a rail must not disagree with them.
+ */
+export const STRIPE_ZERO_DECIMAL = [
+  "BIF", "CLP", "DJF", "GNF", "JPY", "KMF", "KRW", "MGA", "PYG",
+  "RWF", "UGX", "VND", "VUV", "XAF", "XOF", "XPF",
+] as const;
+
+export function stripeAmountFor(amountMinor: number, currency: string): number {
+  return (STRIPE_ZERO_DECIMAL as readonly string[]).includes(currency.toUpperCase())
+    ? toMajor(amountMinor, currency)
+    : amountMinor;
+}

@@ -187,6 +187,30 @@ conflicts with it, flag the conflict before proceeding.
   .effective()` refuses a currency with no prices rather than quoting zero. A
   school's FEE currency is a free-form ISO code on `school.currency` and is a
   separate thing again.
+- **A GATEWAY IS ALWAYS TOLD THE CURRENCY** (`PAYSTACK_CURRENCIES` /
+  `paystackCanSettle` in `currency.ts`). Omit it and the rail charges in ITS OWN
+  account currency: `transaction/initialize` was never sent one, and **27 of the
+  29 catalogued currencies routed to Paystack**, so a Ghanaian school's GHS 5,000
+  invoice charged the parent **NGN 5,000** — about a tenth — while settlement
+  marked the invoice PAID. School underpaid, ledger says otherwise, nothing
+  logged. `PaystackService` now REFUSES a currency the rail cannot settle
+  (NGN/GHS/ZAR/KES/USD) instead of defaulting, and names it on every call
+  including saved-card renewals; the refusal points the payer at mobile money,
+  which covers most of the countries it rejects. The check lives in the SERVICE,
+  not at seven call sites. // GOTCHA: making `currency` a required field is what
+  found them — a required parameter is a search for every caller that was
+  relying on a default.
+- **Webhook signatures: the security properties are in `card-rails-wire.spec.ts`.**
+  Paystack HMAC-SHA512s the RAW BODY (`rawBody: true` in `main.ts` +
+  `RawBodyRequest`; verifying a re-serialised JSON silently breaks). Stripe
+  HMAC-SHA256s `${t}.${rawBody}` and the timestamp is INSIDE the signature — the
+  staleness check is the only replay protection, since a captured event stays
+  validly signed forever. // GOTCHA: **Stripe sends MULTIPLE `v1` signatures
+  during a webhook-secret rotation** (`t=…,v1=new,v1=old`); reading the header
+  into a `Map` keeps only the LAST, so every payment in the rotation window was
+  rejected as a bad signature. Accept the event if ANY `v1` matches. Both rails
+  length-guard before `timingSafeEqual`, which THROWS on a length mismatch —
+  unguarded, a short signature is a 500 rather than a 401.
 - **Payroll packs are VERSIONED BY TAX YEAR** (`payroll-uk.ts`). UK thresholds move
   every 6 April, so a pack that hard-codes one year is a bug with a start date.
   `UK_TAX_YEARS` is a table; the year is chosen from the period being PAID (so

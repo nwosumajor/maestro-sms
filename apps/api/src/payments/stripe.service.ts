@@ -216,30 +216,39 @@ export class StripeService {
     if (!secret || !rawBody) return null; // disabled / nothing to verify
     if (!signatureHeader) throw new UnauthorizedException("Missing signature");
 
-    const parts = new Map(
-      signatureHeader.split(",").map((p) => {
-        const i = p.indexOf("=");
-        return [p.slice(0, i).trim(), p.slice(i + 1)] as const;
-      }),
-    );
-    const t = parts.get("t");
-    const v1 = parts.get("v1");
-    if (!t || !v1) throw new UnauthorizedException("Bad signature");
+    // EVERY v1, not just one. During a webhook-secret rotation Stripe signs the
+    // event with BOTH secrets and sends `t=…,v1=<new>,v1=<old>`. Reading the
+    // header into a Map keeps only the LAST v1, so if our current secret produced
+    // the first one, verification fails for the whole rotation window — every
+    // paid invoice in it goes uncredited. Accept the event if ANY v1 matches.
+    const pairs = signatureHeader.split(",").map((p) => {
+      const i = p.indexOf("=");
+      return [p.slice(0, i).trim(), p.slice(i + 1)] as const;
+    });
+    const t = pairs.find(([k]) => k === "t")?.[1];
+    const signatures = pairs.filter(([k]) => k === "v1").map(([, v]) => v);
+    if (!t || signatures.length === 0) throw new UnauthorizedException("Bad signature");
 
     const age = Math.abs(Date.now() / 1000 - Number(t));
     if (!Number.isFinite(age) || age > SIGNATURE_TOLERANCE_SECONDS) {
       throw new UnauthorizedException("Stale signature");
     }
 
+    // HMAC the BYTES. Round-tripping the body through a utf8 string would corrupt
+    // any byte sequence that is not valid utf8, and the signature is over what
+    // Stripe sent, not over what survives a decode.
     const expected = crypto
       .createHmac("sha256", secret)
-      .update(`${t}.${rawBody.toString("utf8")}`)
+      .update(Buffer.concat([Buffer.from(`${t}.`, "utf8"), rawBody]))
       .digest("hex");
     const a = Buffer.from(expected);
-    const b = Buffer.from(v1);
-    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
-      throw new UnauthorizedException("Bad signature");
-    }
+    const ok = signatures.some((sig) => {
+      const b = Buffer.from(sig);
+      // Length-guarded: timingSafeEqual THROWS on a length mismatch rather than
+      // returning false, so a short signature would 500 instead of 401.
+      return a.length === b.length && crypto.timingSafeEqual(a, b);
+    });
+    if (!ok) throw new UnauthorizedException("Bad signature");
     return JSON.parse(rawBody.toString("utf8")) as StripeEvent;
   }
 }

@@ -9,6 +9,7 @@
 // initialize and `verify` returns null (disabled), never a crash.
 // =============================================================================
 
+import { PAYSTACK_CURRENCIES, paystackCanSettle } from "@sms/types";
 import { Injectable, Logger, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
 import crypto from "node:crypto";
 
@@ -44,6 +45,33 @@ export interface PaystackEvent {
   };
 }
 
+/**
+ * A gateway amount is an integer count of minor units. A fractional one is either
+ * rejected outright or silently truncated, and truncation is a charge that does
+ * not match the invoice. Asserted rather than rounded — rounding at the rail is
+ * what overcharged a payer on the M-Pesa rail.
+ */
+function assertPaystackCurrency(currency: string): string {
+  const c = (currency ?? "").toUpperCase();
+  if (!paystackCanSettle(c)) {
+    // REFUSED, not defaulted. Falling back to the account currency is what
+    // charged a Ghanaian parent NGN 5,000 for a GHS 5,000 invoice. Mobile money
+    // covers most of the countries this rejects, so the message says so.
+    throw new ServiceUnavailableException(
+      `Card payments are not available in ${c} — this school's card rail settles ` +
+        `${PAYSTACK_CURRENCIES.join(", ")}. Use mobile money, or ask the operator to enable ${c}.`,
+    );
+  }
+  return c;
+}
+
+function assertMinorInteger(amountMinor: number, rail: string): number {
+  if (!Number.isInteger(amountMinor) || amountMinor < 0) {
+    throw new ServiceUnavailableException(`${rail} needs a whole number of minor units`);
+  }
+  return amountMinor;
+}
+
 @Injectable()
 export class PaystackService {
   private readonly logger = new Logger("Paystack");
@@ -73,6 +101,8 @@ export class PaystackService {
     subaccount?: string;
     bearer?: "account" | "subaccount";
     transactionChargeMinor?: number;
+    /** ISO 4217. Never defaulted — see the body below. */
+    currency: string;
     /** Where Paystack sends the payer after the charge (it appends
      *  ?reference=… — the verify-on-return hook). Falls back to the
      *  dashboard-configured URL when unset. */
@@ -84,7 +114,12 @@ export class PaystackService {
       headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         email: input.email,
-        amount: input.amountMinor,
+        amount: assertMinorInteger(input.amountMinor, "Paystack"),
+        // NAMED, ALWAYS. Omitting it charges in the ACCOUNT's currency, so a GHS
+        // 5,000 invoice became an NGN 5,000 charge — the school underpaid by ~90%
+        // with the ledger recording it settled. The caller has already refused a
+        // currency this rail cannot settle; this makes sure the rail is told.
+        currency: assertPaystackCurrency(input.currency),
         reference: input.reference,
         metadata: input.metadata,
         ...(input.callbackUrl ? { callback_url: input.callbackUrl } : {}),
@@ -113,6 +148,7 @@ export class PaystackService {
     reference: string;
     authorizationCode: string;
     metadata: Record<string, unknown>;
+    currency: string;
   }): Promise<{ ok: boolean; status?: string }> {
     const secret = this.secret();
     const res = await fetch(`${PAYSTACK}/transaction/charge_authorization`, {
@@ -120,7 +156,8 @@ export class PaystackService {
       headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         email: input.email,
-        amount: input.amountMinor,
+        amount: assertMinorInteger(input.amountMinor, "Paystack"),
+        currency: assertPaystackCurrency(input.currency),
         reference: input.reference,
         authorization_code: input.authorizationCode,
         metadata: input.metadata,

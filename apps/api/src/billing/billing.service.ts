@@ -306,6 +306,7 @@ export class BillingService {
         : await this.paystack.initialize({
             email: prep.email,
             amountMinor,
+            currency,
             reference,
             metadata: { kind: "subscription", schoolId: p.schoolId, paymentId, reference },
           });
@@ -464,7 +465,7 @@ export class BillingService {
             description: `SMS ${plan} plan — ${seats} students, ${billingCycle.toLowerCase()} billing`,
             metadata: { kind: "subscription", schoolId: p.schoolId, paymentId, reference },
           })
-        : await this.paystack.initialize({ email, amountMinor, reference, metadata });
+        : await this.paystack.initialize({ email, amountMinor, currency, reference, metadata });
     return { authorizationUrl, reference };
   }
 
