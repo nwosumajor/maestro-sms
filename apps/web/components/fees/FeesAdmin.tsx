@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { money } from "@/lib/format";
+import { useFormat } from "@/components/shell/RegionProvider";
 import { readApiError } from "@/lib/api-error";
 
 type Student = Serialized<IdNameDto>;
@@ -24,8 +25,10 @@ export function FeesAdmin({ students, items }: { students: Student[]; items: Fee
   // --- new invoice ---
   const [studentId, setStudentId] = React.useState(students[0]?.id ?? "");
   const [dueDate, setDueDate] = React.useState("");
-  // Currency: NGN settles via Paystack, USD via Stripe (international schools).
-  const [currency, setCurrency] = React.useState("NGN");
+  // Currency defaults to the SCHOOL's, not the platform's. A school billing in
+  // pounds could previously only raise naira invoices — the option was not there.
+  const { region, money: fmtMoney } = useFormat();
+  const [currency, setCurrency] = React.useState(region.currency);
   const [lines, setLines] = React.useState<Line[]>([{ description: "", amountMajor: "", quantity: 1 }]);
   const [invBusy, setInvBusy] = React.useState(false);
   const [invMsg, setInvMsg] = React.useState<string | null>(null);
@@ -105,12 +108,15 @@ export function FeesAdmin({ students, items }: { students: Student[]; items: Fee
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="inv-ccy">Currency</Label>
-                {/* NGN → Paystack, USD → Stripe. Amounts are entered in the major
-                    unit of the chosen currency (₦ / $). */}
+                {/* The school's own currency first, then the two the payment rails
+                    settle: NGN → Paystack, USD → Stripe. A school billing in a third
+                    currency can still RAISE the invoice; only online settlement is
+                    limited to those two, which is a gateway fact, not a display one. */}
                 <select id="inv-ccy" value={currency} onChange={(e) => setCurrency(e.target.value)}
                   className="h-9 rounded-md border border-input bg-background px-2 text-sm">
-                  <option value="NGN">₦ NGN</option>
-                  <option value="USD">$ USD</option>
+                  {[...new Set([region.currency, "NGN", "USD"])].map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
                 </select>
               </div>
             </div>

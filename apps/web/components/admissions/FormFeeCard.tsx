@@ -11,8 +11,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { useFormat } from "@/components/shell/RegionProvider";
 
 export function FormFeeCard({ initialMinor, canManage }: { initialMinor: number; canManage: boolean }) {
+  const { money: fmtMoney } = useFormat();
   const [major, setMajor] = React.useState(initialMinor > 0 ? String(initialMinor / 100) : "");
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
@@ -59,7 +61,7 @@ export function FormFeeCard({ initialMinor, canManage }: { initialMinor: number;
         ) : (
           <p className="text-sm text-muted-foreground">
             {initialMinor > 0
-              ? `Applicants currently pay ${new Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN" }).format(initialMinor / 100)} per application.`
+              ? `Applicants currently pay ${fmtMoney(initialMinor)} per application.`
               : "Applications are currently free. A finance manager can set a form fee here."}
           </p>
         )}

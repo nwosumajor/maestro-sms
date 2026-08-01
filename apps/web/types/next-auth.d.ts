@@ -11,6 +11,12 @@ declare module "next-auth" {
       permissions: string[];
       /** Subscription-enabled modules — drives nav visibility. */
       modules: string[];
+      /** WHERE THE SCHOOL IS. Carried in the session so the server render and the
+       *  client hydration format from the SAME values — a runtime default differs
+       *  between Node and the browser, which is a hydration mismatch. */
+      timezone: string;
+      locale: string;
+      currency: string;
       /** super_admin mandated MFA but the user hasn't enrolled — gate to /account. */
       mfaEnrollRequired: boolean;
       /** Password older than 30 days (non-super_admin) — gate to /account/password. */
@@ -30,6 +36,9 @@ declare module "next-auth/jwt" {
     roles?: string[];
     permissions?: string[];
     modules?: string[];
+    timezone?: string;
+    locale?: string;
+    currency?: string;
     mfaEnrollRequired?: boolean;
     impersonatedBy?: string;
     passwordExpired?: boolean;

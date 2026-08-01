@@ -11,6 +11,7 @@ import NextAuth from "next-auth";
 import type { JWT } from "next-auth/jwt";
 import Credentials from "next-auth/providers/credentials";
 import jwt from "jsonwebtoken";
+import { PLATFORM_REGION } from "@/lib/format";
 import { permissionsForRoles } from "@sms/types";
 
 const API_BASE = process.env.API_BASE_URL ?? "http://localhost:3001";
@@ -39,6 +40,9 @@ interface RefreshedClaims {
   roles: string[];
   permissions: string[];
   modules: string[];
+  timezone: string;
+  locale: string;
+  currency: string;
   mfaEnrollRequired: boolean;
   passwordExpired: boolean;
 }
@@ -79,6 +83,9 @@ interface ImpersonationClaims {
   school_id: string;
   name?: string;
   schoolName?: string;
+  timezone?: string;
+  locale?: string;
+  currency?: string;
   roles?: string[];
   permissions?: string[];
   modules?: string[];
@@ -93,6 +100,11 @@ interface LoginResult {
   roles: string[];
   permissions: string[];
   modules: string[];
+  /** The school's region — see the session augmentation. Optional so a web build
+   *  running against an older API still signs people in. */
+  timezone?: string;
+  locale?: string;
+  currency?: string;
   mfaEnrollRequired?: boolean;
   passwordExpired?: boolean;
 }
@@ -138,6 +150,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           email,
           schoolId: u.schoolId,
           schoolName: u.schoolName,
+          timezone: u.timezone,
+          locale: u.locale,
+          currency: u.currency,
           roles: u.roles,
           permissions: u.permissions,
           modules: u.modules ?? [],
@@ -185,6 +200,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           email: "",
           schoolId: claims.school_id,
           schoolName: claims.schoolName ?? "",
+          timezone: claims.timezone,
+          locale: claims.locale,
+          currency: claims.currency,
           roles: claims.roles ?? [],
           permissions: claims.permissions ?? [],
           modules: claims.modules ?? [],
@@ -210,6 +228,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           roles: string[];
           permissions: string[];
           modules: string[];
+          timezone?: string;
+          locale?: string;
+          currency?: string;
           mfaEnrollRequired: boolean;
           passwordExpired: boolean;
           impersonatedBy?: string;
@@ -228,6 +249,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         // out of PRE-EXISTING cookies on their first refresh.
         token.permissions = undefined;
         token.modules = u.modules; // bounded by the module catalog (small)
+        // Three short strings — the school's region. Needed on BOTH the server
+        // render and the client hydration, and identical on each, or React throws
+        // a hydration mismatch. The cookie has ample headroom (smoke asserts 3 KB).
+        token.timezone = u.timezone;
+        token.locale = u.locale;
+        token.currency = u.currency;
         token.mfaEnrollRequired = u.mfaEnrollRequired;
         token.passwordExpired = u.passwordExpired;
         // Present ONLY for a session minted by the impersonate provider. It must
@@ -280,6 +307,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       // are ignored in favour of the derivation (consistency over legacy).
       session.user.permissions = permissionsForRoles((token.roles as string[]) ?? []);
       session.user.modules = (token.modules as string[]) ?? [];
+      // Region: defaults keep an OLD session (minted before this existed) rendering
+      // exactly as it did, rather than blank.
+      session.user.timezone = (token.timezone as string) || PLATFORM_REGION.timezone;
+      session.user.locale = (token.locale as string) || PLATFORM_REGION.locale;
+      session.user.currency = (token.currency as string) || PLATFORM_REGION.currency;
       session.user.mfaEnrollRequired = (token.mfaEnrollRequired as boolean) ?? false;
       session.user.passwordExpired = (token.passwordExpired as boolean) ?? false;
       session.user.impersonatedBy = (token.impersonatedBy as string | undefined) ?? undefined;

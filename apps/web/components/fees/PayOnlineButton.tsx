@@ -3,8 +3,10 @@
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { readApiError } from "@/lib/api-error";
+import { useFormat } from "@/components/shell/RegionProvider";
 
 export function PayOnlineButton({ invoiceId }: { invoiceId: string }) {
+  const { money: fmtMoney } = useFormat();
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
 
@@ -16,7 +18,8 @@ export function PayOnlineButton({ invoiceId }: { invoiceId: string }) {
       // Transparency before the redirect: when a payer-borne convenience fee
       // applies, say so (the gateway page shows only the total).
       if (data.feeMinor && data.feeMinor > 0 && data.chargedMinor) {
-        const fmt = (n: number) => new Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN" }).format(n / 100);
+        // The SCHOOL's currency — a parent paying a British school saw a naira sign.
+        const fmt = (n: number) => fmtMoney(n);
         setMsg(`Includes a ${fmt(data.feeMinor)} platform convenience fee — total ${fmt(data.chargedMinor)}. Redirecting…`);
       }
       window.location.href = data.authorizationUrl;

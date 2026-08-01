@@ -48,6 +48,8 @@ import {
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { auth } from "@/lib/auth";
+import { regionOf } from "@/lib/format";
+import { RegionProvider } from "./RegionProvider";
 import { ImpersonationBanner } from "./ImpersonationBanner";
 import { SessionIdleGuard } from "./SessionIdleGuard";
 import { CredentialPromptHost } from "@/components/security/CredentialPrompt";
@@ -383,10 +385,17 @@ export async function AppShell({
   // current legal-pack version.
   let legalPrompt: { version: string } | null = null;
   if (legal && !legal.accepted) legalPrompt = { version: legal.currentVersion };
+  // The school's locale/timezone/currency, published to every client island below.
+  // Taken from the SAME session the server render used, so the two format
+  // identically — a divergence here is a hydration mismatch, which a user sees as
+  // a blank page rather than a wrong date.
+  const region = regionOf(session?.user);
+
   return (
     // Theme is owned by the html-level ThemeScript + the topbar ThemeToggle
     // (defaulting to the graphite dark console). Public pages pin themselves
     // light via .force-light, so the toggle only ever restyles the app.
+    <RegionProvider region={region}>
     <div data-tenant style={brandStyle(theme, fontFamily)} className="min-h-screen bg-background text-foreground">
       <SessionIdleGuard />
       <CredentialPromptHost />
@@ -524,5 +533,6 @@ export async function AppShell({
         </main>
       </div>
     </div>
+    </RegionProvider>
   );
 }
