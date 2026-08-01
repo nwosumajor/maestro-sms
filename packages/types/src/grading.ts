@@ -90,15 +90,70 @@ export function gradeLetter(total: number): string {
  * is always meaningful; `complete` flags whether the teacher has entered all
  * four (i.e. whether the total is final).
  */
-export function computeTermSubjectGrade(c: TermGradeComponents): TermGradeResult {
-  const complete = GRADE_COMPONENTS.every((comp) => {
+export function computeTermSubjectGrade(
+  c: TermGradeComponents,
+  /** The school's weighting. Defaults to the platform's, so every existing caller
+   *  and every school already live is unchanged. */
+  components: ReadonlyArray<{ key: GradeComponentKey; max: number }> = GRADE_COMPONENTS,
+): TermGradeResult {
+  const complete = components.every((comp) => {
     const v = c[comp.key];
     return v !== null && v !== undefined;
   });
-  const total = round2(
-    GRADE_COMPONENTS.reduce((sum, comp) => sum + clampMark(c[comp.key], comp.max), 0),
-  );
+  const total = round2(components.reduce((sum, comp) => sum + clampMark(c[comp.key], comp.max), 0));
   return { total, complete, grade: gradeLetter(total) };
+}
+
+// =============================================================================
+// Per-school grading weighting
+// =============================================================================
+// 60/20/10/10 is one country's convention. An IB, A-Level or GPA school weights
+// coursework and examination differently, and until now could not say so.
+//
+// The COMPONENTS are fixed (exam, midterm, assignment, class note) — changing
+// those would change what a teacher is asked to enter, and every stored mark. Only
+// their WEIGHTS move, and they must still total 100 so a term mark remains
+// comparable across schools and across years.
+// =============================================================================
+
+/** A school's weighting: the same four components, different maxima. */
+export interface GradingPolicy {
+  components: ReadonlyArray<{ key: GradeComponentKey; label: string; max: number }>;
+}
+
+export const DEFAULT_GRADING_POLICY: GradingPolicy = { components: GRADE_COMPONENTS };
+
+/** Named starting points a school can pick rather than typing four numbers. */
+export const GRADING_PRESETS: Record<string, { label: string; weights: Record<GradeComponentKey, number> }> = {
+  EXAM_HEAVY: { label: "Exam-weighted (60/20/10/10)", weights: { exam: 60, midterm: 20, assignment: 10, classNote: 10 } },
+  BALANCED: { label: "Balanced (50/20/20/10)", weights: { exam: 50, midterm: 20, assignment: 20, classNote: 10 } },
+  COURSEWORK_HEAVY: { label: "Coursework-weighted (40/20/30/10)", weights: { exam: 40, midterm: 20, assignment: 30, classNote: 10 } },
+};
+
+/**
+ * Build a policy from stored weights, falling back to the platform default.
+ *
+ * REFUSES a weighting that does not total 100 — silently rescaling would make one
+ * school's 72% mean something different from another's, which is exactly the kind
+ * of quiet divergence that ends up in a transcript.
+ */
+export function resolveGradingPolicy(stored: unknown): GradingPolicy {
+  const w = (stored as { weights?: Partial<Record<GradeComponentKey, number>> } | null)?.weights;
+  if (!w) return DEFAULT_GRADING_POLICY;
+  const components = GRADE_COMPONENTS.map((c) => ({
+    key: c.key,
+    label: c.label,
+    max: typeof w[c.key] === "number" && w[c.key]! >= 0 ? Math.round(w[c.key]!) : c.max,
+  }));
+  const total = components.reduce((s, c) => s + c.max, 0);
+  return total === 100 ? { components } : DEFAULT_GRADING_POLICY;
+}
+
+/** Do these weights form a usable policy? Used at the API boundary so a bad
+ *  weighting is refused loudly rather than silently ignored on read. */
+export function isValidGradingWeights(w: Partial<Record<GradeComponentKey, number>>): boolean {
+  const total = GRADE_COMPONENTS.reduce((s, c) => s + (typeof w[c.key] === "number" ? Math.round(w[c.key]!) : c.max), 0);
+  return total === 100 && GRADE_COMPONENTS.every((c) => (w[c.key] ?? c.max) >= 0);
 }
 
 /** Average of a set of per-term totals (e.g. a session's three terms). */

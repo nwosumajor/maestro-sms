@@ -222,3 +222,88 @@ export function countTeachingDays(
   }
   return n;
 }
+
+// =============================================================================
+// Calendar TEMPLATES — the year is not three terms everywhere
+// =============================================================================
+// `standardTermDates` lays out the Nigerian three-term year, and for a long time
+// that was the only shape the product could express. A school running two
+// semesters or four quarters had to hand-build every period and hand-name it.
+//
+// A template is a NAME and a rhythm, nothing more: the dates it produces are a
+// starting point a school edits, exactly as the three-term generator always was.
+// =============================================================================
+
+export interface CalendarTemplate {
+  key: string;
+  label: string;
+  /** Period names, in order. Length is the number of periods in a year. */
+  periodNames: readonly string[];
+  /** Teaching days per period. */
+  periodDays: number;
+  /** Days between periods. */
+  breakDays: number;
+}
+
+export const CALENDAR_TEMPLATES: Record<string, CalendarTemplate> = {
+  THREE_TERM: {
+    key: "THREE_TERM",
+    label: "Three terms (Nigeria, UK, Commonwealth)",
+    periodNames: ["First Term", "Second Term", "Third Term"],
+    periodDays: 90,
+    breakDays: 21,
+  },
+  TWO_SEMESTER: {
+    key: "TWO_SEMESTER",
+    label: "Two semesters (United States, and much of Europe)",
+    periodNames: ["Fall Semester", "Spring Semester"],
+    periodDays: 135,
+    breakDays: 28,
+  },
+  FOUR_QUARTER: {
+    key: "FOUR_QUARTER",
+    label: "Four quarters",
+    periodNames: ["First Quarter", "Second Quarter", "Third Quarter", "Fourth Quarter"],
+    periodDays: 63,
+    breakDays: 14,
+  },
+  TRIMESTER: {
+    key: "TRIMESTER",
+    label: "Three trimesters",
+    periodNames: ["First Trimester", "Second Trimester", "Third Trimester"],
+    periodDays: 84,
+    breakDays: 21,
+  },
+};
+
+/** The platform's home shape. A school that has never chosen gets this, so
+ *  nothing changes for anyone already live. */
+export const DEFAULT_CALENDAR_TEMPLATE = "THREE_TERM";
+
+export function calendarTemplate(key: string | null | undefined): CalendarTemplate {
+  return CALENDAR_TEMPLATES[key ?? DEFAULT_CALENDAR_TEMPLATE] ?? CALENDAR_TEMPLATES[DEFAULT_CALENDAR_TEMPLATE];
+}
+
+/**
+ * Lay out an academic year from a template. Pure and deterministic — no Date.now().
+ *
+ * `standardTermDates` is now this, with the three-term template; it is kept so
+ * every existing caller and test is untouched.
+ */
+export function generateCalendar(templateKey: string | null | undefined, yearStart: string | Date): GeneratedTerm[] {
+  const t = calendarTemplate(templateKey);
+  const out: GeneratedTerm[] = [];
+  let cursor = new Date(dayUtc(yearStart));
+  for (let i = 0; i < t.periodNames.length; i += 1) {
+    const periodStart = cursor;
+    const periodEnd = addDays(periodStart, t.periodDays - 1);
+    out.push({
+      name: t.periodNames[i],
+      sequence: i + 1,
+      startDate: periodStart.toISOString().slice(0, 10),
+      endDate: periodEnd.toISOString().slice(0, 10),
+    });
+    cursor = addDays(periodEnd, t.breakDays + 1);
+  }
+  return out;
+}

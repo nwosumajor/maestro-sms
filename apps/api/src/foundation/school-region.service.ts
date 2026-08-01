@@ -16,14 +16,29 @@
 // =============================================================================
 
 import { Inject, Injectable } from "@nestjs/common";
-import { DEFAULT_COUNTRY, resolveRegion, schoolToday, type RegionProfile } from "@sms/types";
+import {
+  DEFAULT_CALENDAR_TEMPLATE,
+  DEFAULT_COUNTRY,
+  resolveGradingPolicy,
+  resolveRegion,
+  schoolToday,
+  type GradingPolicy,
+  type RegionProfile,
+} from "@sms/types";
 import { TENANT_DATABASE, type TenantDatabase, type TenantTx } from "../integrity/integrity.foundation";
 
 const TTL_MS = 60_000;
 
+/** A school's academic shape — how its year is divided, and how a term mark is
+ *  weighted. Both were platform constants until now. */
+export interface AcademicProfile {
+  calendarTemplate: string;
+  grading: GradingPolicy;
+}
+
 @Injectable()
 export class SchoolRegionService {
-  private readonly cache = new Map<string, { at: number; region: RegionProfile }>();
+  private readonly cache = new Map<string, { at: number; region: RegionProfile; academic: AcademicProfile }>();
 
   constructor(@Inject(TENANT_DATABASE) private readonly db: TenantDatabase) {}
 
@@ -44,19 +59,36 @@ export class SchoolRegionService {
     if (hit && Date.now() - hit.at < TTL_MS) return hit.region;
     const row = (await tx.school.findFirst({
       where: { id: schoolId },
-      select: { country: true, timezone: true, locale: true, currency: true, complianceRegime: true },
+      select: {
+        country: true,
+        timezone: true,
+        locale: true,
+        currency: true,
+        complianceRegime: true,
+        calendarTemplate: true,
+        gradingPolicy: true,
+      },
     })) as {
       country: string | null;
       timezone: string | null;
       locale: string | null;
       currency: string | null;
       complianceRegime: string | null;
+      calendarTemplate: string | null;
+      gradingPolicy: unknown;
     } | null;
     // A school we cannot read is the platform's home region, not an error: the
     // caller is taking a register, and refusing one because a lookup missed would
     // be a worse outcome than a date in the default zone.
     const region = resolveRegion(row ?? { country: DEFAULT_COUNTRY });
-    this.cache.set(schoolId, { at: Date.now(), region });
+    const academic: AcademicProfile = {
+      calendarTemplate: row?.calendarTemplate || DEFAULT_CALENDAR_TEMPLATE,
+      // resolveGradingPolicy REFUSES a weighting that does not total 100 and falls
+      // back to the platform default — a silently rescaled mark would mean one
+      // school's 72% differed from another's.
+      grading: resolveGradingPolicy(row?.gradingPolicy),
+    };
+    this.cache.set(schoolId, { at: Date.now(), region, academic });
     return region;
   }
 
@@ -65,6 +97,17 @@ export class SchoolRegionService {
     const hit = this.cache.get(schoolId);
     if (hit && Date.now() - hit.at < TTL_MS) return hit.region;
     return this.db.runAsTenantReadOnly({ schoolId, userId: "system" }, (tx) => this.inTx(tx, schoolId));
+  }
+
+  /** The school's academic shape: calendar template and grade weighting. */
+  async academicInTx(tx: TenantTx, schoolId: string): Promise<AcademicProfile> {
+    await this.inTx(tx, schoolId); // populates the cache entry
+    return this.cache.get(schoolId)!.academic;
+  }
+
+  async academicForSchool(schoolId: string): Promise<AcademicProfile> {
+    await this.forSchool(schoolId);
+    return this.cache.get(schoolId)!.academic;
   }
 
   /** The school's current calendar day, as the UTC-midnight Date every `@db.Date`

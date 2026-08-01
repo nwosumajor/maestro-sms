@@ -67,6 +67,7 @@ d("RLS cross-tenant isolation", () => {
   const examAttendanceA = randomUUID();
   const attendanceRollupA = randomUUID();
   const platformDelegationA = randomUUID();
+  const breachIncidentA = randomUUID();
   const scanEventA = randomUUID();
   const teacherUnavailA = randomUUID();
   const grantA = randomUUID();
@@ -728,6 +729,12 @@ d("RLS cross-tenant isolation", () => {
        VALUES ($1,$2,$3,'platform.onboarding.review','cover',$3,now() + interval '7 days',now())`,
       [platformDelegationA, A, userA],
     );
+    // GDPR breach register: the 72-hour clock is per-school, like everything else.
+    await a.query(
+      `INSERT INTO data_breach_incident (id,"schoolId",title,description,"discoveredAt","reportedById","updatedAt")
+       VALUES ($1,$2,'Test incident','desc',now(),$3,now())`,
+      [breachIncidentA, A, userA],
+    );
     // Term-weighted subject result (student userA, subjectA, termA/sessionA).
     await a.query(
       `INSERT INTO subject_result (id,"schoolId","sessionId","termId","classId","subjectId","studentId",exam,total,grade,status,"updatedAt")
@@ -1237,6 +1244,7 @@ d("RLS cross-tenant isolation", () => {
       "scan_event",
       "attendance_term_rollup",
       "platform_delegation",
+      "data_breach_incident",
       "exam_attendance",
       "exam_invigilator",
       "exam_seat",
@@ -1355,6 +1363,7 @@ d("RLS cross-tenant isolation", () => {
     ["exam_sitting", examSittingA],
     ["attendance_term_rollup", attendanceRollupA],
     ["platform_delegation", platformDelegationA],
+    ["data_breach_incident", breachIncidentA],
     ["exam_attendance", examAttendanceA],
     ["exam_seat", examSeatA],
     ["exam_invigilator", examInvigilatorA],
