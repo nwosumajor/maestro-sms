@@ -155,11 +155,20 @@ describe("currency rules", () => {
     expect(defaultCurrencyFor(PLANS.STANDARD)).toBe(CURRENCIES.NGN);
   });
 
-  it("isCurrency accepts only NGN/USD", () => {
-    expect(isCurrency("NGN")).toBe(true);
-    expect(isCurrency("USD")).toBe(true);
-    expect(isCurrency("EUR")).toBe(false);
+  it("separates what the platform can EXPRESS from what it can SELL IN", () => {
+    // Two different questions, and conflating them ships a checkout that cannot
+    // complete. `isCurrency` is the type gate — currencies the rails could settle;
+    // `planCurrencies` is what actually has a price list today.
+    for (const c of ["NGN", "USD", "GHS", "KES", "ZAR", "GBP", "EUR"]) {
+      expect({ c, expressible: isCurrency(c) }).toEqual({ c, expressible: true });
+    }
+    expect(isCurrency("XOF")).toBe(false); // a FEE currency, not a billing one
     expect(isCurrency(undefined)).toBe(false);
+
+    // Still only two are SOLD in, because only two have prices. Opening a market
+    // is a price list, not a code change.
+    expect(planCurrencies(PLANS.STANDARD).sort()).toEqual(["NGN", "USD"]);
+    expect(planCurrencies(PLANS.ENTERPRISE)).toEqual(["USD"]);
   });
 
   it("USD pricing computes in cents with the USD table", () => {
