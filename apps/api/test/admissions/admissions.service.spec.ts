@@ -55,7 +55,8 @@ function makeService(app: Row) {
   const paystack = { isConfigured: () => false } as never;
   const platformFees = { effective: jest.fn().mockResolvedValue({ flatMinor: 0, percentBp: 0, capMinor: null, bearer: "PARENT" }) } as never;
   const privileged = { client: null } as never;
-  const service = new AdmissionsService(db as never, audit as never, channel as never, paystack, platformFees, privileged);
+  const region = { forSchool: jest.fn().mockResolvedValue({ currency: "NGN" }) } as never;
+  const service = new AdmissionsService(db as never, audit as never, channel as never, paystack, platformFees, privileged, region);
   return { service, update, audit, channel, state };
 }
 

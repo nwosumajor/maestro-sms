@@ -287,6 +287,10 @@ export class BillingDunningService {
       const charge = await this.paystack.chargeAuthorization({
         email: admin.user.email,
         amountMinor,
+        // The same currency the PlatformSubscriptionPayment row above records.
+        // A renewal that charges in a different currency from the one it books is
+        // a reconciliation problem nobody would find until year end.
+        currency: CURRENCIES.NGN,
         reference,
         authorizationCode: decryptField(s.paystackAuthorizationEnc!, s.schoolId)!,
         metadata: { kind: "subscription", schoolId: s.schoolId, reference, auto: true },

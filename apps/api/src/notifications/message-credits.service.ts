@@ -9,7 +9,7 @@
 // in-app are never affected.
 
 import { BadRequestException, Inject, Injectable, ServiceUnavailableException } from "@nestjs/common";
-import { MESSAGE_CREDIT_BUNDLES } from "@sms/types";
+import { MESSAGE_CREDIT_BUNDLES, CURRENCIES } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -73,6 +73,8 @@ export class MessageCreditsService {
     const { authorizationUrl } = await this.paystack.initialize({
       email,
       amountMinor: bundle.priceMinor,
+      // MESSAGE_CREDIT_BUNDLES are priced in NGN, so the charge is too.
+      currency: CURRENCIES.NGN,
       reference,
       metadata: { kind: "credits", schoolId: p.schoolId, bundleId: bundle.id },
     });

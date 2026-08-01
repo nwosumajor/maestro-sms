@@ -22,6 +22,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { Prisma } from "@sms/db";
+import { SchoolRegionService } from "../foundation/school-region.service";
 import {
   ADMISSION_REVIEW_CHAIN,
   type AdmissionApplicationDto,
@@ -91,6 +92,7 @@ export class AdmissionsService {
     private readonly paystack: PaystackService,
     private readonly platformFees: PlatformFeeService,
     private readonly privileged: PrivilegedDatabaseService,
+    private readonly region: SchoolRegionService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -192,9 +194,13 @@ export class AdmissionsService {
     const cfg = await this.platformFees.effective();
     const platformTake = subaccount ? computePlatformFeeMinor(feeMinor, cfg) : 0;
     const reference = `ADM-${applicationId.slice(0, 8)}-${Date.now()}`;
+    // The SCHOOL's currency — the admission fee is the school's money, and
+    // `school.admissionFormFeeMinor` is denominated in it.
+    const { currency } = await this.region.forSchool(schoolId);
     const { authorizationUrl } = await this.paystack.initialize({
       email,
       amountMinor: feeMinor,
+      currency,
       reference,
       metadata: { kind: "admission_form", applicationId, schoolId },
       subaccount: subaccount ?? undefined,

@@ -110,7 +110,7 @@ d("VirtualAccountsService dedicated NUBAN (real Postgres)", () => {
         },
       },
     };
-    const paymentPlans = new PaymentPlansService(tenant, audit, notifications, paystack as never);
+    const paymentPlans = new PaymentPlansService(tenant, audit, notifications, paystack as never, { forSchool: async () => ({ currency: "NGN" }) } as never);
     svc = new VirtualAccountsService(tenant, audit, paystack as never, privileged as never, notifications, settlement, paymentPlans);
   });
 

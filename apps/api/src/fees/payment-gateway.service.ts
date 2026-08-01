@@ -144,6 +144,9 @@ export class PaymentGatewayService {
     const { authorizationUrl } = await this.paystack.initialize({
       email,
       amountMinor: chargedMinor,
+      // The INVOICE's currency. Anything Paystack cannot settle is refused by the
+      // service rather than silently charged in the account's own currency.
+      currency,
       reference,
       // Verify-on-return: Paystack sends the payer back here with ?reference=…
       // and the invoice page confirms the charge against the gateway directly —
