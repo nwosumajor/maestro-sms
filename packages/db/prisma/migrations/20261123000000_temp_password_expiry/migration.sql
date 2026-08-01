@@ -1,0 +1,14 @@
+-- A one-time temp password is a WORKING CREDENTIAL. The existing school-admin
+-- flow hands one to the console and it stays valid until used — for ever, if it
+-- never is. That is a standing password sitting in whatever chat it was pasted
+-- into, and platform staff (manager_admin) carry cross-tenant reach.
+--
+-- This column records when a temp password was issued so login can refuse one
+-- that has gone stale, and clears when the user sets their own.
+--
+-- NULL is deliberately UNLIMITED, not expired: rows that predate this column
+-- have outstanding temp passwords issued under the old rules, and failing those
+-- closed would lock out every school admin who has not activated yet. The
+-- restrictive default is the right instinct in general and the wrong one here,
+-- because it turns a hardening change into an outage.
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "tempPasswordSetAt" TIMESTAMP(3);

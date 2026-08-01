@@ -556,6 +556,12 @@ model User {
   disabledAt          DateTime?
   /// Brute-force protection: consecutive failed logins. On the 3rd miss the account
   /// is LOCKED (permanent — cleared only by a super_admin). lockedUntil records when.
+  /// When a one-time TEMP PASSWORD was issued for this account, if one was.
+  /// Cleared the moment the user sets their own. Combined with a null
+  /// passwordChangedAt it means "issued and not yet used", which is what the
+  /// login expiry check reads. NULL = no temp credential is outstanding, or one
+  /// was issued before this column existed (legacy: no expiry enforced).
+  tempPasswordSetAt   DateTime?
   /// Last SUCCESSFUL sign-in. Nothing audited logins, so "this manager still
   /// holds duties but has not signed in for three months" was unanswerable — the
   /// single most useful signal on a staff-oversight console.

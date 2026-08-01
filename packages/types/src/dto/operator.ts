@@ -227,6 +227,20 @@ export interface PlatformStaffInviteDto {
    *  False means "you must deliver this link yourself" — said plainly, because
    *  silently pretending is how the account became unreachable. */
   emailDelivered: boolean;
+  /**
+   * One-time temporary password — the fallback when the link cannot be used.
+   *
+   * A link is long and gets mangled by chat clients, and it is useless if
+   * PUBLIC_WEB_URL is misconfigured. A short password can be read down a phone.
+   * It grants a session and NOTHING else: `passwordChangedAt` is null, so login
+   * returns `passwordExpired` and the web holds the user on the change-password
+   * screen until they set their own.
+   *
+   * Expires with the link (7 days). The school-admin flow's equivalent does not,
+   * which leaves a working credential valid for ever in whatever chat it was
+   * pasted into — worse here, since platform staff carry cross-tenant reach.
+   */
+  tempPassword: string;
 }
 
 // --- School directory (operator) ---------------------------------------------
