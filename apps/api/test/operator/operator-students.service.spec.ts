@@ -34,7 +34,7 @@ function makeService() {
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const entitlements = {} as never;
-  const service = new OperatorService(db as never, audit as never, entitlements, { client: null } as never);
+  const service = new OperatorService(db as never, audit as never, entitlements, { invalidate: jest.fn(), forSchool: jest.fn().mockResolvedValue({ country: "NG", timezone: "Africa/Lagos", payrollPack: "NG" }) } as never, { client: null } as never);
   return { service, audit };
 }
 

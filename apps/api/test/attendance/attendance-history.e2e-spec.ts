@@ -25,6 +25,7 @@ import { randomUUID } from "node:crypto";
 import { prisma } from "@sms/db";
 import { AttendanceService } from "../../src/attendance/attendance.service";
 import { AttendanceRollupService } from "../../src/attendance/attendance-rollup.service";
+import { SchoolRegionService } from "../../src/foundation/school-region.service";
 import { PrismaTenantService } from "../../src/foundation/prisma-tenant.service";
 import { AuditLogService } from "../../src/foundation/audit-log.service";
 import type { Principal } from "../../src/integrity/integrity.foundation";
@@ -148,7 +149,8 @@ d("Five years of attendance history (real Postgres)", () => {
     const tenantDb = new PrismaTenantService();
     const audit = new AuditLogService();
     rollup = new AttendanceRollupService(tenantDb, audit);
-    svc = new AttendanceService(tenantDb, audit, { notifyMany: jest.fn() } as never, {} as never, {
+    const region = new SchoolRegionService(tenantDb);
+    svc = new AttendanceService(tenantDb, audit, { notifyMany: jest.fn() } as never, {} as never, region, {
       onFinalized: jest.fn(),
     } as never);
   }, 120_000);

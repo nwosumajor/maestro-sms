@@ -163,7 +163,11 @@ describe("GroupService.overview", () => {
     const { svc } = makeService();
     const out = await svc.overview(director);
     expect(out.period.key).toBe("month");
-    expect(out.period.to.getTime() - out.period.from.getTime()).toBeGreaterThan(24 * 3600_000);
+    // Asserted on the WINDOW's start, not its length: on the 1st of a month the
+    // month-to-date window is only a few hours long, so a duration assertion here
+    // fails once a month for a reason that has nothing to do with the behaviour.
+    expect(out.period.from.getDate()).toBe(1);
+    expect(out.period.from.getHours()).toBe(0);
   });
 
   it("returns an empty group without querying campuses", async () => {

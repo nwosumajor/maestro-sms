@@ -46,7 +46,7 @@ d("Subscription / module entitlements (RLS, plan tiers, overrides)", () => {
     );
     const tenant = new PrismaTenantService() as never;
     entitlements = new ModuleEntitlementService(tenant);
-    svc = new OperatorService(tenant, new AuditLogService() as never, entitlements, { client: null } as never);
+    svc = new OperatorService(tenant, new AuditLogService() as never, entitlements, { invalidate: jest.fn(), forSchool: jest.fn().mockResolvedValue({ country: "NG", timezone: "Africa/Lagos", payrollPack: "NG" }) } as never, { client: null } as never);
   });
 
   afterAll(async () => {

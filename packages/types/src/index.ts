@@ -6,6 +6,7 @@ export * from "./integrity-report";
 export * from "./modules";
 export * from "./notifications";
 export * from "./pagination";
+export * from "./region";
 export * from "./roles";
 export * from "./school-email";
 export * from "./academic-progression";

@@ -29,7 +29,7 @@ function makeService(rows: Record<string, unknown>[] | null) {
   const audit = { record: jest.fn() };
   const entitlements = {};
   const privileged = { client };
-  const service = new OperatorService(db as never, audit as never, entitlements as never, privileged as never);
+  const service = new OperatorService(db as never, audit as never, entitlements as never, { invalidate: jest.fn(), forSchool: jest.fn().mockResolvedValue({ country: "NG", timezone: "Africa/Lagos", payrollPack: "NG" }) } as never, privileged as never);
   return { service, findMany };
 }
 
