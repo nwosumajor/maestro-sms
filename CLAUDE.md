@@ -124,8 +124,12 @@ conflicts with it, flag the conflict before proceeding.
   else `payrollPack: null` and `createRun` REFUSES — a payslip wrong about tax goes to an
   employee and a revenue authority. Calendar templates (THREE_TERM / TWO_SEMESTER /
   FOUR_QUARTER / TRIMESTER) and grade weighting (must total 100, else the default is
-  used) are per-school. Region is operator-set: `PUT /operator/tenants/:id/region`
-  (platform.tenants.write + step-up, privileged write, invalidates the cache).
+  used) are per-school. Region is operator-set: `PUT /operator/tenants/:id/region` behind its OWN
+  permission `platform.tenants.region` (+ step-up, privileged write, invalidates
+  the cache). NOT `tenants.write` — that is day-to-day provisioning a manager may
+  hold STANDING, and a region change silently flips the privacy regime, disables
+  statutory payroll and moves every register's day boundary. Lendable for a
+  bounded window, never standing — the same tier as `tenants.status`.
 - **Web display follows the SCHOOL, not the platform.** `lib/format.ts` pinned
   `en-NG`/`Africa/Lagos` for everyone; the region now rides the session
   (`user.locale/timezone/currency`, +85 bytes on the cookie) and `AppShell` publishes

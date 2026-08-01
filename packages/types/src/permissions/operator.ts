@@ -56,6 +56,14 @@ export const OPERATOR_PERMISSIONS = {
   PLATFORM_USER_CREDENTIALS: "platform.user.credentials",
   /** Enable/disable a SCHOOL — blocks every member from logging in. */
   PLATFORM_TENANTS_STATUS: "platform.tenants.status",
+  /** Set a school's REGION — country, timezone, locale, fee currency, compliance
+   *  regime. Deliberately NOT part of tenants.write, which is day-to-day
+   *  provisioning a manager may hold standing. A region change flips the privacy
+   *  regime, turns statutory payroll on or off for the whole school, and moves what
+   *  "today" means for every register — SILENTLY. Disabling a school is louder than
+   *  that (every login fails and somebody rings within the hour) and is already held
+   *  to the higher tier, so this belongs there too. */
+  PLATFORM_TENANTS_REGION: "platform.tenants.region",
   /** Change a tenant's plan/status/period — comps and overrides. Revenue. */
   PLATFORM_SUBSCRIPTION_MANAGE: "platform.subscription.manage",
   /** Set platform-wide tier pricing — what every customer pays. Revenue. */
@@ -134,4 +142,5 @@ export const LENDABLE_PLATFORM_PERMISSIONS: readonly string[] = [
   ...DELEGABLE_PLATFORM_PERMISSIONS,
   OPERATOR_PERMISSIONS.PLATFORM_TENANTS_STATUS,
   OPERATOR_PERMISSIONS.PLATFORM_SUBSCRIPTION_MANAGE,
+  OPERATOR_PERMISSIONS.PLATFORM_TENANTS_REGION,
 ];

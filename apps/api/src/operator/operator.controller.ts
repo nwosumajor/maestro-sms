@@ -414,9 +414,13 @@ export class OperatorController {
    *  Operator-owned because country decides the privacy regime, whether statutory
    *  payroll may run at all, and what currency the school bills in — commercial
    *  and legal facts about the account, not a preference its staff should flip.
-   *  Step-up: it changes what day a register belongs to. */
+   *
+   *  Its OWN permission rather than tenants.write: that is day-to-day provisioning
+   *  a manager may hold standing, and a region change silently flips the privacy
+   *  regime, disables statutory payroll and moves every register's day boundary.
+   *  Lendable for a bounded window, never standing. Step-up on top. */
   @Put("tenants/:schoolId/region")
-  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_WRITE)
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_REGION)
   @RequireStepUp()
   setRegion(
     @CurrentPrincipal() p: Principal,

@@ -22,7 +22,7 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
   super_admin: [
     // Owner identity + EVERY platform power, including the ones never delegated.
     "platform.operate",
-    "platform.tenants.read", "platform.tenants.write", "platform.onboarding.review",
+    "platform.tenants.read", "platform.tenants.write", "platform.tenants.region", "platform.onboarding.review",
     "platform.audit.read", "platform.user.read", "platform.user.unlock", "platform.grace.manage",
     "platform.feedback.review",
     "platform.impersonate", "platform.user.credentials", "platform.tenants.status",
