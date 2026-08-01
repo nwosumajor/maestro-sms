@@ -189,6 +189,44 @@ export interface PlatformStaffDto {
   /** When access was revoked — null while active. Kept (not deleted) so
    *  "who had access, and until when" stays answerable. */
   disabledAt: Date | null;
+  /** Last SUCCESSFUL sign-in. Null means "not since sign-in tracking shipped",
+   *  which is NOT the same as never — the console says which. */
+  lastLoginAt: Date | null;
+  /** Locked out by failed logins; only the owner can reactivate. */
+  locked: boolean;
+  /** Duties currently LENT to this manager — the whole point of the console.
+   *  Standing role permissions are the bare floor and are not listed here. */
+  duties: PlatformStaffDutyDto[];
+}
+
+/** One live delegation, as the staff console shows it. */
+export interface PlatformStaffDutyDto {
+  id: string;
+  permission: string;
+  reason: string;
+  expiresAt: Date;
+  /** Negative once elapsed; the console flags those rather than hiding them. */
+  daysLeft: number;
+}
+
+/**
+ * What the owner gets back after hiring, or after re-issuing an invite.
+ *
+ * The LINK is returned deliberately. Hiring used to send an email and return
+ * nothing usable — and `EmailService` reports success when it is unconfigured, so
+ * a manager could be created that nobody on earth could sign in as, with every
+ * step reporting success. The owner is step-up authenticated and is the one
+ * person entitled to hand this over, so they get it. Still never a password: the
+ * link is single-use and expires.
+ */
+export interface PlatformStaffInviteDto {
+  staff: PlatformStaffDto;
+  /** One-time set-password link, valid 7 days. */
+  inviteLink: string;
+  /** TRUE only if an email provider is configured AND the send succeeded.
+   *  False means "you must deliver this link yourself" — said plainly, because
+   *  silently pretending is how the account became unreachable. */
+  emailDelivered: boolean;
 }
 
 // --- School directory (operator) ---------------------------------------------

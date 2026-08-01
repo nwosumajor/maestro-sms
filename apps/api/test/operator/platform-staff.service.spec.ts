@@ -52,6 +52,14 @@ function makeService(over: Partial<Record<string, unknown>> = {}) {
   return { svc, client, created };
 }
 
+beforeAll(() => {
+  // The invite link is a SIGNED token. This used to be unnecessary because the
+  // mint happened inside a catch-all that swallowed the failure — so a missing
+  // secret produced no invite at all, silently. It is now a loud failure.
+  process.env.AUTH_SECRET = "test-secret-for-invite-signing";
+});
+afterAll(() => delete process.env.AUTH_SECRET);
+
 describe("createPlatformStaff", () => {
   it("mints manager_admin — the role is pinned, never taken from the caller", async () => {
     const { svc, client } = makeService();
@@ -79,7 +87,11 @@ describe("createPlatformStaff", () => {
     const out = await svc.createPlatformStaff(owner as never, { email: "m@x.io", name: "M" });
     expect(Object.keys(out)).not.toContain("tempPassword");
     expect(JSON.stringify(out)).not.toMatch(/password/i);
-    expect(out).toMatchObject({ activated: false });
+    expect(out.staff).toMatchObject({ activated: false });
+    // The LINK is returned — without it the account is unreachable wherever email
+    // is unconfigured, which is the default. A link is not a password: single
+    // use, 7 days, and it only sets a credential rather than being one.
+    expect(out.inviteLink).toContain("/welcome?token=");
   });
 
   it("409s a duplicate email rather than hijacking an existing account", async () => {

@@ -26,7 +26,7 @@ import {
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import { Prisma, type PrismaClient } from "@sms/db";
-import type { MisplacedPlatformRoleDto } from "@sms/types";
+import type { MisplacedPlatformRoleDto, PlatformStaffDutyDto, PlatformStaffInviteDto } from "@sms/types";
 import { MAX_SCHOOL_SLUG_LENGTH } from "@sms/types";
 import { allocateSchoolSlug } from "../foundation/login-email";
 import {
@@ -378,6 +378,40 @@ export class OperatorProvisioningService {
     }
   }
 
+  /**
+   * Build the one-time invite link and try to email it, reporting BOTH.
+   *
+   * `EmailService.send` answers ok:true when it is UNCONFIGURED — it logs an
+   * `[email-stub]` line and sends nothing — so "we called send and it did not
+   * throw" is no evidence a human received anything. Any caller whose account has
+   * NO other activation route (platform staff get no temp password) must be told
+   * the difference, and must be handed the link itself.
+   */
+  private async buildAndSendInvite(
+    userId: string,
+    email: string,
+    schoolId: string,
+    schoolName: string,
+    slug: string,
+  ): Promise<{ link: string; emailDelivered: boolean }> {
+    const base = process.env.PUBLIC_WEB_URL ?? "http://localhost:3000";
+    const link = `${base}/welcome?token=${encodeURIComponent(mintInviteToken(userId, schoolId))}`;
+    try {
+      const res = await this.email.send(
+        email,
+        `Activate your ${schoolName} account`,
+        `Hello,\n\nAn account has been created for you on the SMS platform for ${schoolName}. ` +
+          `Set your password using this one-time link (valid for 7 days):\n\n${link}\n\n` +
+          `After that, sign in any time at ${base}/login?school=${slug}.\n\n— The SMS Platform team`,
+      );
+      // BOTH conditions: a configured provider returning ok is a real send; an
+      // unconfigured one returning ok is a stub pretending.
+      return { link, emailDelivered: this.email.isConfigured() && res.ok };
+    } catch {
+      return { link, emailDelivered: false };
+    }
+  }
+
   /** Add another admin user to an EXISTING school. Returns one-time creds. */
   async createAdmin(p: Principal, schoolId: string, input: AdminInput) {
     const db = this.client();
@@ -500,9 +534,41 @@ export class OperatorProvisioningService {
     const org = await this.platformOrg(db);
     const rows = await db.user.findMany({
       where: { schoolId: org.id, roles: { some: { role: { name: PLATFORM_STAFF_ROLE } } } },
-      select: { id: true, email: true, name: true, status: true, mfaEnabled: true, passwordChangedAt: true, createdAt: true, disabledAt: true },
+      select: {
+        id: true, email: true, name: true, status: true, mfaEnabled: true,
+        passwordChangedAt: true, createdAt: true, disabledAt: true,
+        lastLoginAt: true, locked: true,
+      },
       orderBy: { createdAt: "desc" },
     });
+
+    // ONE query for every manager's live duties, not one per row. The console is
+    // the place you look when something is wrong; it must not be the slowest page
+    // on the platform.
+    const now = new Date();
+    const grants = await db.platformDelegation.findMany({
+      where: {
+        schoolId: org.id,
+        userId: { in: rows.map((u) => u.id) },
+        revokedAt: null,
+        expiresAt: { gt: now },
+      },
+      select: { id: true, userId: true, permission: true, reason: true, expiresAt: true },
+      orderBy: { expiresAt: "asc" },
+    });
+    const byUser = new Map<string, PlatformStaffDutyDto[]>();
+    for (const g of grants) {
+      const list = byUser.get(g.userId) ?? [];
+      list.push({
+        id: g.id,
+        permission: g.permission,
+        reason: g.reason,
+        expiresAt: g.expiresAt,
+        daysLeft: Math.ceil((g.expiresAt.getTime() - now.getTime()) / 86_400_000),
+      });
+      byUser.set(g.userId, list);
+    }
+
     return rows.map((u) => ({
       id: u.id,
       email: u.email,
@@ -514,6 +580,9 @@ export class OperatorProvisioningService {
       activated: u.passwordChangedAt !== null,
       createdAt: u.createdAt,
       disabledAt: u.disabledAt,
+      lastLoginAt: u.lastLoginAt,
+      locked: u.locked,
+      duties: byUser.get(u.id) ?? [],
     }));
   }
 
@@ -583,8 +652,18 @@ export class OperatorProvisioningService {
     return { revoked: res.count > 0 };
   }
 
-  /** Hire a platform manager. Invite-link only — we never hand out a password. */
-  async createPlatformStaff(p: Principal, input: { email: string; name: string }): Promise<PlatformStaffDto> {
+  /**
+   * Hire a platform manager. Invite-link only — we never hand out a password.
+   *
+   * The LINK COMES BACK TO THE OWNER, and so does whether the email genuinely
+   * went out. Previously this emailed the link and returned nothing usable, while
+   * `EmailService` reports success when unconfigured — so on any deployment
+   * without an email provider (the default), hiring created an account that
+   * NOBODY could ever sign in as, with every step reporting success and no resend
+   * path to recover. The owner is step-up authenticated and is the person meant
+   * to hand this over; withholding it from them protected nothing.
+   */
+  async createPlatformStaff(p: Principal, input: { email: string; name: string }): Promise<PlatformStaffInviteDto> {
     const db = this.client();
     const org = await this.platformOrg(db);
     if (await db.user.findFirst({ where: { email: input.email } })) {
@@ -620,17 +699,117 @@ export class OperatorProvisioningService {
       email: input.email,
       role: PLATFORM_STAFF_ROLE,
     });
-    await this.sendInviteEmail(staff.id, input.email, org.id, org.name, org.slug);
+    const invite = await this.buildAndSendInvite(staff.id, input.email, org.id, org.name, org.slug);
+    if (!invite.emailDelivered) {
+      this.logger.warn(
+        `platform staff ${input.email} created but the invite email was NOT delivered — the owner must pass the link on`,
+      );
+    }
     return {
-      id: staff.id,
-      email: staff.email,
-      name: staff.name,
-      status: staff.status,
-      mfaEnabled: false,
-      activated: false,
-      disabledAt: null,
-      createdAt: staff.createdAt,
+      staff: {
+        id: staff.id,
+        email: staff.email,
+        name: staff.name,
+        status: staff.status,
+        mfaEnabled: false,
+        activated: false,
+        disabledAt: null,
+        createdAt: staff.createdAt,
+        lastLoginAt: null,
+        locked: false,
+        duties: [],
+      },
+      inviteLink: invite.link,
+      emailDelivered: invite.emailDelivered,
     };
+  }
+
+  /**
+   * Re-issue a manager's invite: a fresh 7-day single-use link.
+   *
+   * Without this, a link that expired, went to a mistyped address or was simply
+   * lost had NO recovery — email is globally unique, so the owner could not even
+   * re-hire the same person. Minting a new token does not invalidate anything
+   * else: `acceptInvite` already refuses once a password is set, and refuses a
+   * non-ACTIVE account, so a disabled manager cannot be revived through here.
+   */
+  async reissuePlatformStaffInvite(p: Principal, userId: string): Promise<PlatformStaffInviteDto> {
+    const db = this.client();
+    const org = await this.platformOrg(db);
+    // Scoped to platform-org managers — 404 not 403, exactly like the status route:
+    // an unscoped userId here would mint a login link for ANY account, including
+    // the owner's. That is the single most dangerous thing this file could do.
+    const target = await db.user.findFirst({
+      where: { id: userId, schoolId: org.id, roles: { some: { role: { name: PLATFORM_STAFF_ROLE } } } },
+      select: {
+        id: true, email: true, name: true, status: true, mfaEnabled: true,
+        passwordChangedAt: true, createdAt: true, disabledAt: true, lastLoginAt: true, locked: true,
+      },
+    });
+    if (!target) throw new NotFoundException("Platform staff member not found");
+    if (target.status !== "ACTIVE") {
+      throw new BadRequestException("Reinstate this manager before re-issuing their invite.");
+    }
+
+    const invite = await this.buildAndSendInvite(target.id, target.email, org.id, org.name, org.slug);
+    await this.auditInOperatorTenant(p, "operator.platform.staff.invite_reissue", "user", target.id, {
+      email: target.email,
+      emailDelivered: invite.emailDelivered,
+      // Whether they had already activated: re-issuing for an ACTIVATED account is
+      // effectively a password reset, and the audit trail should say which it was.
+      wasActivated: target.passwordChangedAt !== null,
+    });
+    return {
+      staff: {
+        id: target.id,
+        email: target.email,
+        name: target.name,
+        status: target.status,
+        mfaEnabled: target.mfaEnabled,
+        activated: target.passwordChangedAt !== null,
+        disabledAt: target.disabledAt,
+        createdAt: target.createdAt,
+        lastLoginAt: target.lastLoginAt,
+        locked: target.locked,
+        duties: [],
+      },
+      inviteLink: invite.link,
+      emailDelivered: invite.emailDelivered,
+    };
+  }
+
+  /**
+   * Hand back EVERY duty currently lent to one manager, in one act.
+   *
+   * The per-grant revoke already exists, but "this person is leaving / their
+   * laptop is missing" is a single decision and must be a single click. Revoking
+   * duties one at a time under pressure is how one gets missed — and the guard
+   * reads this table on every permission miss, so the last one still open is a
+   * live permission.
+   *
+   * Deliberately SEPARATE from disabling the account: a manager can be stripped
+   * back to the standing floor without being locked out, and can be locked out
+   * without anyone remembering to revoke. Both, in either order, are one click.
+   */
+  async revokeAllDuties(p: Principal, userId: string): Promise<{ revoked: number }> {
+    const db = this.client();
+    const org = await this.platformOrg(db);
+    const target = await db.user.findFirst({
+      where: { id: userId, schoolId: org.id, roles: { some: { role: { name: PLATFORM_STAFF_ROLE } } } },
+      select: { id: true, email: true },
+    });
+    if (!target) throw new NotFoundException("Platform staff member not found");
+
+    const now = new Date();
+    const res = await db.platformDelegation.updateMany({
+      where: { schoolId: org.id, userId, revokedAt: null, expiresAt: { gt: now } },
+      data: { revokedAt: now, revokedById: p.userId },
+    });
+    await this.auditInOperatorTenant(p, "operator.platform.duties.revoke_all", "user", userId, {
+      email: target.email,
+      revoked: res.count,
+    });
+    return { revoked: res.count };
   }
 
   /** Revoke (DISABLED blocks every login) or reinstate a platform manager. */
@@ -659,7 +838,10 @@ export class OperatorProvisioningService {
       data: revoking
         ? { status, mfaEnabled: false, mfaSecret: null, disabledAt: new Date() }
         : { status, disabledAt: null },
-      select: { id: true, email: true, name: true, status: true, mfaEnabled: true, passwordChangedAt: true, createdAt: true, disabledAt: true },
+      select: {
+        id: true, email: true, name: true, status: true, mfaEnabled: true,
+        passwordChangedAt: true, createdAt: true, disabledAt: true, lastLoginAt: true, locked: true,
+      },
     });
     await this.auditInOperatorTenant(p, "operator.platform.staff.status", "user", userId, {
       status,
@@ -674,6 +856,12 @@ export class OperatorProvisioningService {
       activated: updated.passwordChangedAt !== null,
       createdAt: updated.createdAt,
       disabledAt: updated.disabledAt,
+      lastLoginAt: updated.lastLoginAt,
+      locked: updated.locked,
+      // Duties are listed by the console's own query; a status change never
+      // implies anything about what is lent — revoking those is a SEPARATE,
+      // deliberate act (revokeAllDuties).
+      duties: [],
     };
   }
 }
