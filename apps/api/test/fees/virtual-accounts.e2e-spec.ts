@@ -159,7 +159,7 @@ d("VirtualAccountsService dedicated NUBAN (real Postgres)", () => {
   it("a transfer credits the OLDEST open invoice via the shared settlement path", async () => {
     await svc.applyDedicatedCredit({
       event: "charge.success",
-      data: { amount: 30_000, reference: "VA-TRF-1", channel: "dedicated_nuban", customer: { customer_code: CUS } },
+      data: { amount: 30_000, currency: "NGN", reference: "VA-TRF-1", channel: "dedicated_nuban", customer: { customer_code: CUS } },
     } as never);
     const oldPay = await admin.query(`SELECT method,status FROM payment WHERE "invoiceId" = $1`, [oldInvoice]);
     expect(oldPay.rowCount).toBe(1);
@@ -176,7 +176,7 @@ d("VirtualAccountsService dedicated NUBAN (real Postgres)", () => {
     await admin.query(`UPDATE invoice SET status = 'PAID' WHERE id = $1`, [newInvoice]);
     const evt = {
       event: "charge.success",
-      data: { amount: 10_000, reference: "VA-TRF-2", channel: "dedicated_nuban", customer: { customer_code: CUS } },
+      data: { amount: 10_000, currency: "NGN", reference: "VA-TRF-2", channel: "dedicated_nuban", customer: { customer_code: CUS } },
     } as never;
     await svc.applyDedicatedCredit(evt);
     await svc.applyDedicatedCredit(evt); // gateway retry — must not double-credit

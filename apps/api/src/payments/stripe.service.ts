@@ -140,7 +140,7 @@ export class StripeService {
    */
   async retrieveCheckoutSession(
     sessionId: string,
-  ): Promise<{ paymentStatus: string; clientReferenceId: string; amountTotal: number; metadata: Record<string, string> } | null> {
+  ): Promise<{ paymentStatus: string; clientReferenceId: string; amountTotal: number; currency: string; metadata: Record<string, string> } | null> {
     const secret = process.env.STRIPE_SECRET_KEY;
     if (!secret) return null;
     try {
@@ -151,11 +151,13 @@ export class StripeService {
         this.logger.warn(`Stripe session fetch failed: ${res.status} (${sessionId})`);
         return null;
       }
-      const j = (await res.json()) as { payment_status?: string; client_reference_id?: string; amount_total?: number; metadata?: Record<string, string> };
+      const j = (await res.json()) as { payment_status?: string; client_reference_id?: string; amount_total?: number; currency?: string; metadata?: Record<string, string> };
       return {
         paymentStatus: j.payment_status ?? "",
         clientReferenceId: j.client_reference_id ?? "",
         amountTotal: j.amount_total ?? 0,
+        // Stripe reports currency lower-case; the invoice stores it upper.
+        currency: (j.currency ?? "").toUpperCase(),
         metadata: j.metadata ?? {},
       };
     } catch (err) {
@@ -170,16 +172,16 @@ export class StripeService {
    * per sweep window; overlapping windows are safe — settlement is idempotent on
    * the reference). One list call per page, never per-invoice. Best-effort: [].
    */
-  async listRecentPaidSessions(from: Date): Promise<Array<{ reference: string; amountMinor: number; metadata: Record<string, string> }>> {
+  async listRecentPaidSessions(from: Date): Promise<Array<{ reference: string; amountMinor: number; currency: string; metadata: Record<string, string> }>> {
     const secret = process.env.STRIPE_SECRET_KEY;
     if (!secret) return [];
-    const out: Array<{ reference: string; amountMinor: number; metadata: Record<string, string> }> = [];
+    const out: Array<{ reference: string; amountMinor: number; currency: string; metadata: Record<string, string> }> = [];
     const createdGte = Math.floor(from.getTime() / 1000);
     let startingAfter: string | undefined;
     for (let page = 0; page < 10; page += 1) {
       const params = new URLSearchParams({ "created[gte]": String(createdGte), limit: "100" });
       if (startingAfter) params.set("starting_after", startingAfter);
-      let json: { data?: Array<{ id: string; payment_status?: string; client_reference_id?: string; amount_total?: number; metadata?: Record<string, string> }>; has_more?: boolean };
+      let json: { data?: Array<{ id: string; payment_status?: string; client_reference_id?: string; amount_total?: number; currency?: string; metadata?: Record<string, string> }>; has_more?: boolean };
       try {
         const res = await fetch(`${STRIPE}/v1/checkout/sessions?${params.toString()}`, {
           headers: { Authorization: `Bearer ${secret}` },
@@ -196,7 +198,15 @@ export class StripeService {
       const data = json.data ?? [];
       for (const s of data) {
         if (s.payment_status === "paid" && s.client_reference_id) {
-          out.push({ reference: s.client_reference_id, amountMinor: s.amount_total ?? 0, metadata: s.metadata ?? {} });
+          out.push({
+            reference: s.client_reference_id,
+            amountMinor: s.amount_total ?? 0,
+            // UPPERCASED: Stripe reports currency in lower case ("usd"), and the
+            // invoice stores it upper. Comparing them raw never matches, so the
+            // currency guard would reject every Stripe settlement.
+            currency: (s.currency ?? "").toUpperCase(),
+            metadata: s.metadata ?? {},
+          });
         }
       }
       if (!json.has_more || data.length === 0) break;

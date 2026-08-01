@@ -38,8 +38,7 @@ import {
   AirtelProvider,
   MpesaProvider,
   MtnMomoProvider,
-  type MobileMoneyProvider,
-} from "./mobile-money.provider";
+  type MobileMoneyProvider, type CallbackReading } from "./mobile-money.provider";
 import {
   TENANT_DATABASE,
   type Principal,
@@ -57,7 +56,34 @@ type IntentRow = {
   payerId: string | null;
   status: string;
   providerRef: string | null;
+  createdAt: Date;
 };
+
+/** How long after a charge begins before it is worth asking the rail. The payer's
+ *  own screen polls for 3 minutes, so this starts where that gives up. */
+const MOBILE_MONEY_POLL_AFTER_MS = 4 * 60 * 1000;
+/** Past this, stop polling and close the intent. Rails do not keep a charge
+ *  queryable forever, and an intent that can never resolve must not circulate. */
+const MOBILE_MONEY_ABANDON_MS = 3 * 24 * 60 * 60 * 1000;
+/** Bounded so one sweep cannot run unboundedly long; a truncated run is LOGGED. */
+const MOBILE_MONEY_SWEEP_LIMIT = 500;
+
+export const MM_RECOVERY_QUEUE = "mobile-money-recovery";
+export const MM_RECOVERY_JOB = "mobile-money-recovery";
+export const MM_RECOVERY_SCHEDULER_ID = "mobile-money-recovery-scheduler";
+/** Hourly, not daily. The card sweep runs daily because a card webhook that fails
+ *  is retried by the gateway for days; a mobile-money callback is delivered ONCE,
+ *  so a lost one is lost until we ask. An hour is the longest a parent should sit
+ *  looking at an unpaid invoice they have already paid. */
+export const DEFAULT_MM_RECOVERY_CRON = "17 * * * *";
+
+export interface MobileMoneyRecoveryResult {
+  scanned: number;
+  settled: number;
+  failed: number;
+  stillPending: number;
+  expired: number;
+}
 
 @Injectable()
 export class MobileMoneyService {
@@ -254,9 +280,25 @@ export class MobileMoneyService {
       return { ok: true };
     }
 
+    await this.applyReading(intent, reading, body);
+    return { ok: true };
+  }
+
+  /**
+   * Apply a rail's verdict to an intent. THE one place a mobile-money charge
+   * resolves, whether we heard it from a callback or asked for it ourselves.
+   *
+   * Deliberately shared: a recovery sweep that reimplemented this would be a
+   * second posting path, which is the thing InvoiceSettlementService exists to
+   * prevent. Both triggers land here, and both are idempotent — on the intent's
+   * PENDING status first, and on the gateway reference inside settlement.
+   */
+  private async applyReading(intent: IntentRow, reading: CallbackReading, payload: unknown): Promise<void> {
     // Idempotent: a rail that re-notifies a settled charge changes nothing.
-    if (intent.status !== "PENDING") return { ok: true };
-    if (reading.outcome === "PENDING") return { ok: true };
+    if (intent.status !== "PENDING") return;
+    // "We do not know" is not an outcome. Leaving it PENDING means the sweep will
+    // ask again; settling or failing it here would be a one-way guess.
+    if (reading.outcome === "PENDING") return;
 
     // Logged in the SAME append-only gateway_event table as Paystack and Stripe:
     // one place answers "what did a rail tell us, and when", whatever the rail.
@@ -265,44 +307,161 @@ export class MobileMoneyService {
       gateway: intent.provider as "MPESA" | "MTN_MOMO" | "AIRTEL",
       eventType: `mobile_money.${reading.outcome.toLowerCase()}`,
       reference: reading.reference ?? intent.reference,
-      payload: body,
+      payload,
     });
 
+    const ctx = { schoolId: intent.schoolId, userId: intent.payerId ?? SYSTEM_ACTOR_ID };
+
     if (reading.outcome === "FAILED") {
-      await this.db.runAsTenant({ schoolId: intent.schoolId, userId: intent.payerId ?? SYSTEM_ACTOR_ID }, (tx) =>
+      await this.db.runAsTenant(ctx, (tx) =>
         tx.mobileMoneyIntent.update({
           where: { id: intent.id },
           data: { status: "FAILED", failureReason: reading.failureReason ?? "Payment was not completed" },
         }),
       );
-      return { ok: true };
+      return;
     }
 
     // SUCCEEDED. Credit OUR recorded amount through the one settlement path, which
-    // is itself idempotent on the reference — so a callback racing the
-    // reconciliation sweep posts once, not twice.
+    // is itself idempotent on the reference — so a callback racing the recovery
+    // sweep posts once, not twice.
     const outcome = await this.settlement.applyOnlinePayment({
       schoolId: intent.schoolId,
       invoiceId: intent.invoiceId,
       creditMinor: intent.amountMinor,
       chargedMinor: intent.amountMinor,
+      currency: intent.currency,
       reference: intent.reference,
       payerId: intent.payerId ?? undefined,
       note: `Mobile money (${intent.provider})`,
       method: "BANK_TRANSFER",
     });
-    await this.db.runAsTenant({ schoolId: intent.schoolId, userId: intent.payerId ?? SYSTEM_ACTOR_ID }, (tx) =>
+    // A currency mismatch means money moved that we are refusing to post. The
+    // intent must NOT read as settled, or nothing will ever revisit it.
+    if (outcome === "currency_mismatch") {
+      this.logger.error(
+        `mobile money ${intent.reference}: charged ${intent.currency} against a different-currency invoice — NOT posted`,
+      );
+      await this.db.runAsTenant(ctx, (tx) =>
+        tx.mobileMoneyIntent.update({
+          where: { id: intent.id },
+          data: { status: "FAILED", failureReason: "Currency mismatch — needs manual reconciliation" },
+        }),
+      );
+      return;
+    }
+    await this.db.runAsTenant(ctx, (tx) =>
       tx.mobileMoneyIntent.update({
         where: { id: intent.id },
         data: {
           status: "SUCCEEDED",
           settledAt: new Date(),
-          providerRef: reading.providerRef ?? intent.provider,
+          providerRef: reading.providerRef ?? intent.providerRef ?? intent.provider,
           ...(outcome === "invoice_missing" ? { failureReason: "Invoice no longer exists" } : {}),
         },
       }),
     );
-    return { ok: true };
+  }
+
+  /**
+   * RECOVERY SWEEP — ask the rails about charges we never heard back about.
+   *
+   * A mobile-money callback is unsigned, delivered once, best-effort, and is the
+   * ONLY thing that tells us a payment succeeded. Lose one to a deploy, a 5xx or a
+   * network blip and the payer has been debited while the invoice stays open
+   * forever. The card rails have had a reconciliation sweep for exactly this since
+   * the payments-completion program; mobile money — the LESS reliable rail — had
+   * none. This is that missing half.
+   *
+   * It is also what makes the payer-facing message honest. The checkout screen
+   * gives up after three minutes with "if your phone was debited, the payment will
+   * appear shortly" — a promise nothing was keeping.
+   *
+   * Cross-tenant by nature (a rail's charges span schools), so it runs on the
+   * PRIVILEGED client to FIND intents, exactly like dunning and reconciliation —
+   * but every WRITE goes back through the tenant-scoped path under that intent's
+   * own school, so RLS still governs the ledger.
+   */
+  async recoverPending(trigger: "SCHEDULED" | "MANUAL"): Promise<MobileMoneyRecoveryResult> {
+    const result: MobileMoneyRecoveryResult = { scanned: 0, settled: 0, failed: 0, stillPending: 0, expired: 0 };
+    const client = this.privileged.client;
+    if (!client) {
+      if (trigger === "SCHEDULED") this.logger.log("mobile-money recovery skipped (no privileged client)");
+      return result;
+    }
+
+    const now = Date.now();
+    // Only charges old enough that a callback SHOULD have arrived — polling a
+    // 10-second-old prompt just races the payer's own handset.
+    const before = new Date(now - MOBILE_MONEY_POLL_AFTER_MS);
+    // And not so old the rail has forgotten them. Past this, a still-PENDING
+    // intent is closed as expired rather than polled forever.
+    const floor = new Date(now - MOBILE_MONEY_ABANDON_MS);
+
+    const pending = (await client.mobileMoneyIntent.findMany({
+      where: { status: "PENDING", createdAt: { lt: before } },
+      orderBy: { createdAt: "asc" },
+      take: MOBILE_MONEY_SWEEP_LIMIT,
+    })) as IntentRow[];
+    result.scanned = pending.length;
+    // NO SILENT CAP: if the sweep is truncating, say so — a capped sweep that
+    // looks complete is how a backlog hides.
+    if (pending.length === MOBILE_MONEY_SWEEP_LIMIT) {
+      this.logger.warn(`mobile-money recovery hit its ${MOBILE_MONEY_SWEEP_LIMIT}-intent cap; more remain`);
+    }
+
+    for (const intent of pending) {
+      // Abandon FIRST, before even looking at the rail. A charge this old is
+      // closed because nobody will ever answer for it — which is just as true, and
+      // more so, when the rail has since been decommissioned or its credentials
+      // pulled. Checking isConfigured first would strand those intents PENDING for
+      // ever, on exactly the rails least likely to come back.
+      if (intent.createdAt < floor) {
+        result.expired++;
+        await this.db.runAsTenant(
+          { schoolId: intent.schoolId, userId: intent.payerId ?? SYSTEM_ACTOR_ID },
+          (tx) =>
+            tx.mobileMoneyIntent.update({
+              where: { id: intent.id },
+              data: {
+                // EXPIRED, not FAILED: the rail never told us it failed — we
+                // stopped asking. The distinction matters to whoever reconciles
+                // it, because an EXPIRED charge may still have taken money.
+                status: "EXPIRED",
+                failureReason: "No confirmation received — please check with your provider before paying again.",
+              },
+            }),
+        );
+        continue;
+      }
+
+      const provider = this.providers.get(intent.provider as MobileMoneyProviderKey);
+      if (!provider?.isConfigured()) continue;
+
+      let reading: CallbackReading;
+      try {
+        reading = await provider.getStatus({ reference: intent.reference, providerRef: intent.providerRef });
+      } catch (err) {
+        // One rail being down must not stop the sweep for the others.
+        this.logger.warn(`recovery poll failed for ${intent.reference}: ${(err as Error).message}`);
+        result.stillPending++;
+        continue;
+      }
+      if (reading.outcome === "PENDING") {
+        result.stillPending++;
+        continue;
+      }
+      await this.applyReading(intent, reading, { source: "recovery-sweep", reading });
+      if (reading.outcome === "SUCCEEDED") {
+        result.settled++;
+        // A recovered payment means a callback WAS lost. Say so — the money is
+        // right now, but the delivery path is not.
+        this.logger.warn(`recovery: settled ${intent.reference} that no callback ever arrived for`);
+      } else {
+        result.failed++;
+      }
+    }
+    return result;
   }
 
   /** A payer polling their own charge — mobile money is asynchronous, so the

@@ -103,18 +103,34 @@ export class PaymentReconciliationService {
     }
     const from = new Date(Date.now() - RECONCILE_WINDOW_DAYS * 86_400_000);
 
-    // Gather settled charges from BOTH gateways — one list call each (Paystack in
-    // NGN, Stripe in USD). Normalised to a common candidate shape so the ledger
-    // check and settlement are identical for either currency.
-    type Candidate = { reference: string; amountMinor: number; note: string; meta: CandidateMeta };
+    // Gather settled charges from BOTH gateways — one list call each. Each
+    // candidate CARRIES ITS OWN CURRENCY: Paystack settles five (NGN/GHS/ZAR/
+    // KES/USD), so "Paystack means NGN" stopped being true the moment schools
+    // outside Nigeria went live. Settlement checks it against the invoice and
+    // refuses a mismatch rather than crediting the wrong number.
+    type Candidate = { reference: string; amountMinor: number; currency: string; note: string; meta: CandidateMeta };
     const candidates: Candidate[] = [];
     if (this.paystack.isConfigured()) {
       const txs = await this.paystack.listSuccessfulTransactions(from);
-      for (const t of txs) candidates.push({ reference: t.reference, amountMinor: t.amountMinor, note: "Online (Paystack) · recovered by reconciliation", meta: t.metadata as CandidateMeta });
+      for (const t of txs)
+        candidates.push({
+          reference: t.reference,
+          amountMinor: t.amountMinor,
+          currency: t.currency,
+          note: "Online (Paystack) · recovered by reconciliation",
+          meta: t.metadata as CandidateMeta,
+        });
     }
     if (this.stripe.isConfigured()) {
       const sessions = await this.stripe.listRecentPaidSessions(from);
-      for (const s of sessions) candidates.push({ reference: s.reference, amountMinor: s.amountMinor, note: "Online (Stripe, USD) · recovered by reconciliation", meta: s.metadata as CandidateMeta });
+      for (const s of sessions)
+        candidates.push({
+          reference: s.reference,
+          amountMinor: s.amountMinor,
+          currency: s.currency,
+          note: `Online (Stripe, ${s.currency}) · recovered by reconciliation`,
+          meta: s.metadata as CandidateMeta,
+        });
     }
     const result: ReconcileResult = { ...zero, scanned: candidates.length };
 
@@ -143,6 +159,7 @@ export class PaymentReconciliationService {
         invoiceId: c.meta.invoiceId as string,
         creditMinor,
         chargedMinor: c.amountMinor,
+        currency: c.currency,
         reference: c.reference,
         payerId: c.meta.payerId,
         platformFeeMinor: Number.isFinite(platformFeeMinor) ? platformFeeMinor : 0,

@@ -185,6 +185,7 @@ export class VirtualAccountsService {
         invoiceId: target.invoiceId,
         creditMinor: event.data.amount,
         chargedMinor: event.data.amount,
+        currency: (event.data.currency ?? "").toUpperCase(),
         reference: event.data.reference,
         note: "Bank transfer (dedicated account)",
         method: "BANK_TRANSFER",

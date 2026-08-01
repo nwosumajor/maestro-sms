@@ -97,6 +97,7 @@ d("Online settlement, verify-on-return and reconciliation (real Postgres)", () =
       invoiceId,
       creditMinor: 15_000,
       chargedMinor: 15_000,
+      currency: "NGN",
       reference: "REC-REF-1",
       payerId: PARENT,
       note: "Online (Paystack)",
@@ -107,6 +108,7 @@ d("Online settlement, verify-on-return and reconciliation (real Postgres)", () =
       invoiceId,
       creditMinor: 15_000,
       chargedMinor: 15_000,
+      currency: "NGN",
       reference: "REC-REF-1",
       payerId: PARENT,
       note: "Online (Paystack)",
@@ -121,7 +123,7 @@ d("Online settlement, verify-on-return and reconciliation (real Postgres)", () =
   it("verify-on-return posts a gateway-confirmed charge the webhook missed; mismatched metadata is refused", async () => {
     const paystack = {
       isConfigured: () => true,
-      verifyTransaction: jest.fn().mockResolvedValue({ status: "success", amountMinor: 25_000, metadata: meta({ invoiceAmountMinor: 25_000 }) }),
+      verifyTransaction: jest.fn().mockResolvedValue({ status: "success", amountMinor: 25_000, currency: "NGN", metadata: meta({ invoiceAmountMinor: 25_000 }) }),
     };
     const tenant = new PrismaTenantService() as never;
     const gateway = new PaymentGatewayService(
@@ -155,6 +157,7 @@ d("Online settlement, verify-on-return and reconciliation (real Postgres)", () =
     paystack.verifyTransaction.mockResolvedValue({
       status: "success",
       amountMinor: 25_000,
+      currency: "NGN",
       metadata: meta({ schoolId: randomUUID() }),
     });
     const refused = await gateway.confirmInvoicePayment(parent(), invoiceId, "REC-REF-EVIL");
@@ -213,6 +216,7 @@ d("Online settlement, verify-on-return and reconciliation (real Postgres)", () =
         paymentStatus: "paid",
         clientReferenceId: "USD-CONFIRM-1",
         amountTotal: 80_000,
+        currency: "USD",
         metadata: { kind: "invoice", invoiceId: usdInvoice, schoolId: SA, payerId: PARENT, invoiceAmountMinor: "80000" },
       }),
     };
@@ -242,9 +246,9 @@ d("Online settlement, verify-on-return and reconciliation (real Postgres)", () =
       listSuccessfulTransactions: jest
         .fn()
         .mockResolvedValue([
-          { reference: "REC-REF-1", amountMinor: 15_000, metadata: meta() }, // already posted
-          { reference: "REC-REF-3", amountMinor: 5_000, metadata: meta({ invoiceAmountMinor: 5_000 }) }, // missed
-          { reference: "OTHER", amountMinor: 1_000, metadata: { kind: "subscription" } }, // not an invoice charge
+          { reference: "REC-REF-1", amountMinor: 15_000, currency: "NGN", metadata: meta() }, // already posted
+          { reference: "REC-REF-3", amountMinor: 5_000, currency: "NGN", metadata: meta({ invoiceAmountMinor: 5_000 }) }, // missed
+          { reference: "OTHER", amountMinor: 1_000, currency: "NGN", metadata: { kind: "subscription" } }, // not an invoice charge
         ]),
     };
     // Stripe unconfigured here — this case exercises the Paystack pass only.
@@ -292,11 +296,22 @@ d("Online settlement, verify-on-return and reconciliation (real Postgres)", () =
     // Paystack off, Stripe on: a paid USD checkout session with no ledger payment
     // is recovered exactly like a Paystack one. Stripe metadata is all STRINGS —
     // the amount must still coerce to a number for the credit.
+    //
+    // The charge settles a USD INVOICE. It used to point at the suite's NGN one,
+    // and passed — because nothing compared the two. That is the bug the currency
+    // guard exists for, sitting undetected in the test fixture for the sweep whose
+    // whole job is recovering money correctly.
+    const usdInvoice = randomUUID();
+    await admin.query(
+      `INSERT INTO invoice (id,"schoolId","studentId",reference,status,currency,"totalMinor","dueDate","createdById","updatedAt")
+       VALUES ($1,$2,$3,'INV-REC-USD3','ISSUED','USD',40000,now(),$4,now())`,
+      [usdInvoice, SA, STUDENT, STAFF],
+    );
     const paystack = { isConfigured: () => false, listSuccessfulTransactions: jest.fn().mockResolvedValue([]) };
     const stripe = {
       isConfigured: () => true,
       listRecentPaidSessions: jest.fn().mockResolvedValue([
-        { reference: "STRIPE-REC-1", amountMinor: 40_000, metadata: { kind: "invoice", invoiceId, schoolId: SA, payerId: PARENT, invoiceAmountMinor: "40000" } },
+        { reference: "STRIPE-REC-1", amountMinor: 40_000, currency: "USD", metadata: { kind: "invoice", invoiceId: usdInvoice, schoolId: SA, payerId: PARENT, invoiceAmountMinor: "40000" } },
       ]),
     };
     const privileged = {
@@ -319,5 +334,37 @@ d("Online settlement, verify-on-return and reconciliation (real Postgres)", () =
     const posted = await admin.query(`SELECT "amountMinor" FROM payment WHERE reference = $1`, ["STRIPE-REC-1"]);
     expect(posted.rowCount).toBe(1);
     expect((posted.rows[0] as { amountMinor: number }).amountMinor).toBe(40_000); // string "40000" coerced
+    // Child rows BEFORE parents — payment references invoice.
+    await admin.query(`DELETE FROM payment WHERE "invoiceId" = $1`, [usdInvoice]);
+    await admin.query(`DELETE FROM audit_log WHERE "entityId" = $1`, [usdInvoice]);
+    await admin.query(`DELETE FROM invoice WHERE id = $1`, [usdInvoice]);
+  });
+
+  it("REFUSES to recover a charge whose currency disagrees with the invoice", async () => {
+    // The sweep is the LAST line of defence for lost webhooks, so it must not be
+    // the place a wrong-currency charge finally sneaks in. It reports the charge
+    // as missing (it genuinely is) but posts nothing, leaving the invoice open for
+    // a human rather than marking it PAID for a tenth of the money.
+    const paystack = {
+      isConfigured: () => true,
+      listSuccessfulTransactions: jest.fn().mockResolvedValue([
+        { reference: "REC-WRONG-CCY", amountMinor: 5_000, currency: "GHS", metadata: meta({ invoiceAmountMinor: 5_000 }) },
+      ]),
+    };
+    const stripe = { isConfigured: () => false, listRecentPaidSessions: jest.fn().mockResolvedValue([]) };
+    const privileged = {
+      client: {
+        payment: { findMany: jest.fn().mockResolvedValue([]) },
+        user: { findMany: jest.fn().mockResolvedValue([{ id: STAFF, schoolId: SA }]) },
+      },
+    };
+    const reconcile = new PaymentReconciliationService(
+      new PrismaTenantService() as never, new AuditLogService(), paystack as never, stripe as never,
+      privileged as never, notifications, settlement,
+    );
+    const r = await reconcile.sweep("SCHEDULED");
+    expect(r).toMatchObject({ missing: 1, posted: 0 });
+    const rows = await admin.query(`SELECT 1 FROM payment WHERE reference = $1`, ["REC-WRONG-CCY"]);
+    expect(rows.rowCount).toBe(0);
   });
 });

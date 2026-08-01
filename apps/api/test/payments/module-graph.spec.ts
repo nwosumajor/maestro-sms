@@ -51,8 +51,25 @@ describe("MobileMoneyModule is wired like DisputesModule", () => {
   it("imports the two it needs and is imported by Fees", () => {
     // The established shape for a feature that spans gateways and settlement:
     // its own module, importing both, imported by FeesModule, imported BY neither.
-    expect(importsOf("payments/mobile-money.module.ts").sort()).toEqual(["PaymentsModule", "SettlementModule"]);
+    //
+    // Asserted as a SUBSET plus an explicit deny-list, not as an exact array: it
+    // also registers a BullMQ queue for the recovery sweep, and infrastructure
+    // modules like BullModule carry no cycle risk. An exact-match assertion here
+    // fails on every such addition, which trains people to loosen it — the one
+    // outcome that would let a real cycle back in.
+    const imports = importsOf("payments/mobile-money.module.ts");
+    expect(imports).toEqual(expect.arrayContaining(["PaymentsModule", "SettlementModule"]));
     expect(importsOf("fees/fees.module.ts")).toContain("MobileMoneyModule");
+  });
+
+  it("imports no FEATURE module beyond those two", () => {
+    // The deny-list half. Anything reaching NotificationModule closes the cycle
+    // that stopped Nest booting; FeesModule imports THIS, so importing it back is
+    // the other direction of the same mistake.
+    const imports = importsOf("payments/mobile-money.module.ts");
+    for (const forbidden of ["NotificationModule", "FeesModule", "BillingModule", "MobileMoneyModule"]) {
+      expect({ forbidden, present: imports.includes(forbidden) }).toEqual({ forbidden, present: false });
+    }
   });
 
   it("does not import NotificationModule directly — settlement owns the receipts", () => {
