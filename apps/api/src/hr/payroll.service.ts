@@ -105,6 +105,20 @@ export class PayrollService {
       // components exceed their pay. Loans are already clamped (they never push
       // net below zero); a negative net can only come from over-large DEDUCTION
       // components, which is an admin data-entry error, not a pay instruction.
+      // A statutory pack REFUSES a period it has no rates for — the UK's thresholds
+      // move every 6 April, so a period beyond the loaded years is unavailable
+      // rather than computed with the previous year's figures. That refusal must
+      // reach the school as a legible 400 explaining what to do, not as a 500:
+      // "internal server error" tells a bursar nothing and sends them to support
+      // instead of to the person who updates the rates.
+      const priced = (fn: () => FullPayslipBreakdown): FullPayslipBreakdown => {
+        try {
+          return fn();
+        } catch (err) {
+          throw new BadRequestException((err as Error).message);
+        }
+      };
+
       // Nothing is persisted until this passes (the tx rolls back on throw).
       const computed = employees.map((e) => {
         const base = e.salaryEnc ? Number(decryptField(e.salaryEnc, p.schoolId)) : 0;
@@ -114,7 +128,7 @@ export class PayrollService {
         // clamped so net never goes negative. THIRTEENTH/BONUS: percent of basic,
         // PAYE-only — pure, see @sms/types.
         const bd = monthly
-          ? computeFullPayslip({
+          ? priced(() => computeFullPayslip({
               baseMinor: base,
               allowances: mine.filter((c) => c.kind === "ALLOWANCE").map((c) => ({ name: c.name, amountMinor: c.amountMinor })),
               otherDeductions: mine.filter((c) => c.kind === "DEDUCTION").map((c) => ({ name: c.name, amountMinor: c.amountMinor })),
@@ -125,8 +139,20 @@ export class PayrollService {
                   Number(decryptField(l.balanceEnc, p.schoolId)),
                 ),
               })),
-            })
-          : computeBonusPayslip(base, bonusPercent ?? 100);
+              payrollPack: region.payrollPack ?? undefined,
+              // The month being PAID, not today: re-running an old period must use
+              // that period's rules, which is what makes a country with annual
+              // thresholds (the UK) correct rather than merely recent.
+              period: new Date(Date.UTC(periodYear, periodMonth - 1, 15)),
+            }))
+          : priced(() =>
+              computeBonusPayslip(
+                base,
+                bonusPercent ?? 100,
+                region.payrollPack ?? undefined,
+                new Date(Date.UTC(periodYear, periodMonth - 1, 15)),
+              ),
+            );
         return { e, bd };
       });
 
@@ -434,7 +460,17 @@ export class PayrollService {
       return { run, name: user?.name ?? "Staff", school: school?.name ?? "School", bd };
     });
     const bd = data.bd;
-    const naira = (m: number) => `NGN ${(m / 100).toLocaleString("en-NG", { minimumFractionDigits: 2 })}`;
+    // The SCHOOL's currency and locale, not the platform's. A British payslip
+    // printed "NGN" beside every figure and called the deduction "Pension (8%)",
+    // which is a Nigerian rate on a British salary.
+    const region = await this.region.forSchool(p.schoolId);
+    const cash = (m: number) => {
+      try {
+        return new Intl.NumberFormat(region.locale, { style: "currency", currency: region.currency }).format(m / 100);
+      } catch {
+        return `${region.currency} ${(m / 100).toFixed(2)}`;
+      }
+    };
     const buffer = await new Promise<Buffer>((resolve, reject) => {
       const doc = new PDFDocument({ size: "A4", margin: 50 });
       const chunks: Buffer[] = [];
@@ -448,18 +484,23 @@ export class PayrollService {
       doc.moveDown(0.5).fontSize(11).text(`Employee: ${data.name}`);
       doc.moveDown(1);
       const line = (label: string, val: string) => doc.fontSize(11).text(label, { continued: true }).text(val, { align: "right" });
-      line("Basic salary", naira(bd.baseMinor));
-      for (const a of bd.allowances) line(`${a.name} (allowance)`, naira(a.amountMinor));
+      line("Basic salary", cash(bd.baseMinor));
+      for (const a of bd.allowances) line(`${a.name} (allowance)`, cash(a.amountMinor));
       doc.moveDown(0.2);
-      line("Gross pay", naira(bd.grossMinor));
+      line("Gross pay", cash(bd.grossMinor));
       doc.moveDown(0.4);
-      line("PAYE (income tax)", `- ${naira(bd.payeMinor)}`);
-      line("Pension (8%)", `- ${naira(bd.pensionMinor)}`);
-      for (const d of bd.otherDeductions) line(d.name, `- ${naira(d.amountMinor)}`);
-      for (const l of bd.loans) line("Loan repayment", `- ${naira(l.installmentMinor)}`);
+      line("PAYE (income tax)", `- ${cash(bd.payeMinor)}`);
+      // National Insurance is a separate line where a country has one; countries
+      // that fold it into the pension contribution simply have no such line.
+      if (bd.niMinor) line("National Insurance", `- ${cash(bd.niMinor)}`);
+      // No rate in the label: the percentage differs by country and by year, and a
+      // wrong one printed on a payslip is worse than none.
+      line("Pension", `- ${cash(bd.pensionMinor)}`);
+      for (const d of bd.otherDeductions) line(d.name, `- ${cash(d.amountMinor)}`);
+      for (const l of bd.loans) line("Loan repayment", `- ${cash(l.installmentMinor)}`);
       doc.moveDown(0.3);
-      doc.fontSize(12).text("Net pay", { continued: true }).text(naira(bd.netMinor), { align: "right" });
-      doc.moveDown(2).fontSize(8).fillColor("#666").text("Generated by the School Management System. Figures in NGN.");
+      doc.fontSize(12).text("Net pay", { continued: true }).text(cash(bd.netMinor), { align: "right" });
+      doc.moveDown(2).fontSize(8).fillColor("#666").text(`Generated by the School Management System. Figures in ${region.currency}.`);
       doc.end();
     });
     return { buffer, filename: `payslip-${data.run.periodYear}-${String(data.run.periodMonth).padStart(2, "0")}-${userId.slice(0, 8)}.pdf` };

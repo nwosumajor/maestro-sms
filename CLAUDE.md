@@ -120,8 +120,8 @@ conflicts with it, flag the conflict before proceeding.
   server's UTC day — `schoolToday(tz)`. The register, the gate-scan check-in, the term
   lock and the 7-day stale rule all use it; deciding in UTC filed a Singapore morning
   register against Sunday and a Toronto evening one against Tuesday. Statutory payroll
-  is COUNTRY PACKS (`PAYROLL_PACKS`): Nigeria implemented, everything else
-  `payrollPack: null` and `createRun` REFUSES — a payslip wrong about tax goes to an
+  is COUNTRY PACKS (`PAYROLL_PACKS`): **Nigeria and the UK** implemented, everything
+  else `payrollPack: null` and `createRun` REFUSES — a payslip wrong about tax goes to an
   employee and a revenue authority. Calendar templates (THREE_TERM / TWO_SEMESTER /
   FOUR_QUARTER / TRIMESTER) and grade weighting (must total 100, else the default is
   used) are per-school. Region is operator-set: `PUT /operator/tenants/:id/region`
@@ -139,6 +139,21 @@ conflicts with it, flag the conflict before proceeding.
   only true timestamps convert. Invoice/payment money already carried its OWN
   currency per row and still does — an NGN invoice prints in naira whatever the
   school's currency is; only NEW invoices default to the school's.
+- **Payroll packs are VERSIONED BY TAX YEAR** (`payroll-uk.ts`). UK thresholds move
+  every 6 April, so a pack that hard-codes one year is a bug with a start date.
+  `UK_TAX_YEARS` is a table; the year is chosen from the period being PAID (so
+  re-running an old month uses that month's rules); a period with no rates is
+  REFUSED, never computed with the nearest year. Adding a year = one array entry,
+  nothing else. Three things keep it from rotting: payslips are SNAPSHOTS
+  (`breakdownEnc`, never recomputed) so history never moves; `payroll-uk.spec.ts`
+  FAILS once the current date has no rates — a deliberate early warning, months
+  before a school hits it; and a pack's throw is converted to a 400 in
+  `PayrollService.createRun`, because "internal server error" sends a bursar to
+  support instead of to whoever updates the rates. SCOPE: England/Wales/NI only —
+  Scotland's bands differ and are deliberately unimplemented
+  (`SCOTTISH_RATES_UNSUPPORTED`); non-cumulative (Month-1 basis), not HMRC-exact
+  across a year of changing pay. Figures must be verified against HMRC before a
+  real run.
 - **GDPR mode — BUILT** (`apps/api/src/privacy/compliance.*`, `data_breach_incident`,
   migration `20261119000000`, rls/100, web `/admin/compliance`). Art. 33's 72-hour
   clock runs from `discoveredAt` — when the school BECAME AWARE — which is captured

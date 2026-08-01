@@ -1,3 +1,4 @@
+import { computeUkPayslip, latestUkTaxYear, ukTaxYearFor } from "./payroll-uk";
 // =============================================================================
 // Payroll computation — pure, testable. Nigerian PAYE (PIT) + pension.
 // =============================================================================
@@ -12,6 +13,11 @@ export interface PayslipBreakdown {
   grossMinor: number;
   pensionMinor: number;
   payeMinor: number;
+  /** National Insurance (UK) or the country's equivalent social contribution.
+   *  Absent where a country has none as a separate line — Nigeria folds its
+   *  contribution into `pensionMinor`. Included in `deductionsMinor` either way,
+   *  so net pay is right whether or not a caller knows about this field. */
+  niMinor?: number;
   deductionsMinor: number;
   netMinor: number;
 }
@@ -38,8 +44,34 @@ const PIT_BANDS: Array<[number, number]> = [
  * So a country either has a PACK here or payroll REFUSES to run for it. Refusing
  * is the safe failure; computing Nigerian PAYE for a British teacher is not.
  */
-export const PAYROLL_PACKS: Record<string, (grossMonthlyMinor: number) => PayslipBreakdown> = {
-  NG: computeNigerianPayslip,
+export const PAYROLL_PACKS: Record<string, PayrollPack> = {
+  NG: {
+    key: "NG",
+    label: "Nigeria — PAYE (PIT) + 8% pension",
+    // Nigeria's bands have been stable across the period this platform has run,
+    // so this pack takes no period. If they change, it grows a tax-year table the
+    // way the UK pack has one — the interface already allows for it.
+    compute: (gross) => computeNigerianPayslip(gross),
+  },
+  GB: {
+    key: "GB",
+    label: "United Kingdom — PAYE, National Insurance, auto-enrolment",
+    compute: (gross, period) => {
+      // UK thresholds change every 6 April. The year comes from the period being
+      // PAID, so re-running an old month uses that month's rules, and a period we
+      // have no bands for is REFUSED rather than computed with the nearest year.
+      const at = period ?? new Date();
+      const year = ukTaxYearFor(at);
+      if (!year) {
+        throw new Error(
+          `No UK tax-year rates for ${at.toISOString().slice(0, 10)}. ` +
+            `The latest year loaded is ${latestUkTaxYear().year}; add the new thresholds to UK_TAX_YEARS before running payroll for this period. ` +
+            `Payroll is unavailable rather than computed with the previous year's figures.`,
+        );
+      }
+      return computeUkPayslip(gross, year);
+    },
+  },
 };
 
 /** Is statutory payroll implemented for this country's pack? */
@@ -48,12 +80,29 @@ export function hasPayrollPack(packKey: string | null | undefined): boolean {
 }
 
 /**
+ * A country's statutory rules.
+ *
+ * `period` is the month being PAID, not today: re-running an old month must use
+ * that month's rules, and a country whose thresholds move annually needs it to
+ * pick the right year at all.
+ */
+export interface PayrollPack {
+  key: string;
+  label: string;
+  compute: (grossMonthlyMinor: number, period?: Date) => PayslipBreakdown;
+}
+
+/**
  * Compute a monthly payslip using the given country pack.
  *
  * `packKey` comes from the school's region. Defaults to Nigeria so every existing
  * caller and every school already live behaves exactly as before.
  */
-export function computeMonthlyPayslip(grossMonthlyMinor: number, packKey = "NG"): PayslipBreakdown {
+export function computeMonthlyPayslip(
+  grossMonthlyMinor: number,
+  packKey = "NG",
+  period?: Date,
+): PayslipBreakdown {
   const pack = PAYROLL_PACKS[packKey];
   if (!pack) {
     // Never silently substitute another country's tax law.
@@ -61,7 +110,7 @@ export function computeMonthlyPayslip(grossMonthlyMinor: number, packKey = "NG")
       `No statutory payroll pack for "${packKey}". Payroll is unavailable for this country until one is implemented.`,
     );
   }
-  return pack(grossMonthlyMinor);
+  return pack.compute(grossMonthlyMinor, period);
 }
 
 /** Nigeria: PIT bands + Consolidated Relief Allowance + 8% pension. */
@@ -109,6 +158,9 @@ export interface FullPayslipBreakdown {
   grossMinor: number;
   payeMinor: number;
   pensionMinor: number;
+  /** National Insurance or equivalent, where the country has one as a separate
+   *  line. Included in `deductionsMinor` regardless. */
+  niMinor?: number;
   otherDeductions: PayLine[];
   loans: LoanInstallmentLine[];
   /** Statutory + other + loan recovery. */
@@ -135,10 +187,10 @@ export function employerPensionMinor(grossMinor: number): number {
  * that gross); pension is NOT deducted (it applies to monthly emoluments),
  * and no components/loans touch a bonus. Pure.
  */
-export function computeBonusPayslip(baseMinor: number, percent: number, payrollPack = "NG"): FullPayslipBreakdown {
+export function computeBonusPayslip(baseMinor: number, percent: number, payrollPack = "NG", period?: Date): FullPayslipBreakdown {
   const pct = Math.min(1000, Math.max(0, Math.round(percent)));
   const gross = Math.round((Math.max(0, Math.round(baseMinor)) * pct) / 100);
-  const statutory = computeMonthlyPayslip(gross, payrollPack);
+  const statutory = computeMonthlyPayslip(gross, payrollPack, period);
   return {
     baseMinor: gross,
     allowances: [],
@@ -162,6 +214,9 @@ export function computeFullPayslip(input: {
    *  existing caller behaves exactly as before; an unsupported country throws
    *  rather than borrowing another country's tax law. */
   payrollPack?: string;
+  /** The month being PAID. Needed by any country whose thresholds move annually:
+   *  re-running an old period must use that period's rules, not this year's. */
+  period?: Date;
 }): FullPayslipBreakdown {
   const base = Math.max(0, Math.round(input.baseMinor));
   const allowances = (input.allowances ?? [])
@@ -171,7 +226,7 @@ export function computeFullPayslip(input: {
     .map((d) => ({ name: d.name, amountMinor: Math.max(0, Math.round(d.amountMinor)) }))
     .filter((d) => d.amountMinor > 0);
   const gross = base + allowances.reduce((s, a) => s + a.amountMinor, 0);
-  const statutory = computeMonthlyPayslip(gross, input.payrollPack ?? "NG");
+  const statutory = computeMonthlyPayslip(gross, input.payrollPack ?? "NG", input.period);
   const otherTotal = otherDeductions.reduce((s, d) => s + d.amountMinor, 0);
   // Recoverable this month: what's left after statutory + other deductions.
   let available = Math.max(0, gross - statutory.deductionsMinor - otherTotal);
@@ -191,6 +246,7 @@ export function computeFullPayslip(input: {
     allowances,
     grossMinor: gross,
     payeMinor: statutory.payeMinor,
+    ...(statutory.niMinor ? { niMinor: statutory.niMinor } : {}),
     pensionMinor: statutory.pensionMinor,
     otherDeductions,
     loans,

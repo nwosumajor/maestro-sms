@@ -112,6 +112,7 @@ export * from "./dto/checkers";
 export * from "./dto/chess";
 export * from "./dto/ultimate";
 export * from "./payroll";
+export * from "./payroll-uk";
 export * from "./elevation";
 export * from "./dto/assessment";
 export * from "./dto/branding";
