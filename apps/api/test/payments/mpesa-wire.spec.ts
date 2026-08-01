@@ -70,6 +70,8 @@ const REQUEST = {
   amountMinor: 50_000, // KES 500.00
   currency: "KES",
   msisdn: TEST_MSISDN,
+  country: "KE",
+  dialCode: "254",
   narrative: "School fees for the second term",
   callbackUrl: "https://school.example/payments/mobile-money/callback/mpesa",
 };

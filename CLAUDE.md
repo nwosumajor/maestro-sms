@@ -145,9 +145,22 @@ conflicts with it, flag the conflict before proceeding.
   school's currency is; only NEW invoices default to the school's.
 - **MOBILE MONEY — BUILT** (`apps/api/src/payments/mobile-money.*`, `mobile_money_intent`,
   migration `20261120000000`, rls/101, web `MobileMoneyButton`). M-Pesa (Daraja STK
-  push) and MTN MoMo (Collections); Airtel declared in coverage but reports itself
-  DISABLED. `MOBILE_MONEY_COVERAGE` in `@sms/types` is a DATA table — a new country
-  is a row, never a branch — and the school's REGION picks the rails.
+  push), MTN MoMo (Collections) and Airtel Money (Airtel Africa Open API) — all
+  three implemented. `MOBILE_MONEY_COVERAGE` in `@sms/types` is a DATA table — a new
+  country is a row, never a branch — and the school's REGION picks the rails.
+  // GOTCHA #0, and the reason `*-wire.spec.ts` exists: **NO PROVIDER SANDBOX HAS
+  EVER BEEN EXERCISED** (no credentials, no public callback URL). The rails are
+  instead pinned against each provider's PUBLISHED contract, using their real
+  documented callback bodies. Doing that found six money-losing defects that every
+  unit test had passed over, because a fixture shaped like our own code only proves
+  the code is self-consistent. **The three rails disagree about almost everything,
+  and each disagreement was a bug:** Daraja never echoes `AccountReference` (match
+  on `CheckoutRequestID`), MTN does echo it (`externalId`) and calls back by **PUT**,
+  Airtel wants a **NATIONAL** msisdn while the other two want international, MTN
+  authenticates with Basic and Airtel with a JSON POST, MTN's success is **202 with
+  an empty body** and Airtel's is a **200 carrying `success:false`** on failure.
+  Assume nothing carries across rails. Before switching a school on, run that
+  provider's sandbox — the wire tests are necessary, not sufficient.
   // GOTCHA, and the reason the intent table exists: **M-Pesa and MTN callbacks are
   UNSIGNED**, unlike Paystack/Stripe. A callback is a doorbell, never a source of
   amounts: we write `MobileMoneyIntent` (school, invoice, amount) BEFORE the prompt

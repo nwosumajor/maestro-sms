@@ -23,6 +23,15 @@ export interface ChargeRequest {
   currency: string;
   /** Normalised MSISDN (country code, no plus, no trunk zero). */
   msisdn: string;
+  /** ISO 3166-1 alpha-2 of the school. Airtel requires it as a header AND in the
+   *  body; the others do not need it. Carried for all rails so no adapter has to
+   *  reverse-engineer a country from a dialling prefix. */
+  country: string;
+  /** The dialling code `msisdn` was normalised with. Airtel wants the NATIONAL
+   *  number, so it is the only way to take the prefix back off correctly — Kenya's
+   *  254 and Uganda's 256 are both three digits, but guessing a length is how a
+   *  Cameroonian (237) number silently loses a digit. */
+  dialCode: string;
   /** Shown on the payer's handset. Rails truncate this hard. */
   narrative: string;
   /** Where the rail should notify us. */
@@ -199,6 +208,26 @@ export class MpesaProvider implements MobileMoneyProvider {
 // MTN MoMo — Collections (requesttopay)
 // =============================================================================
 
+/**
+ * MTN's `X-Reference-Id` — the transaction's identity and its idempotency key.
+ *
+ * DERIVED from our reference rather than freshly random, so that retrying the
+ * same charge is idempotent at MTN's end too: a second requesttopay with a
+ * reference-id MTN has already seen is rejected as a duplicate instead of
+ * prompting the payer twice for one invoice.
+ *
+ * It must also be a WELL-FORMED UUIDv4. MTN types the field as a uuid, and the
+ * earlier derivation left whatever nibbles fell out of our reference in the
+ * version and variant positions — `…-5D06-CA00-…`, which is not a v4 and which a
+ * strict validator refuses. Pinning nibble 13 to `4` and nibble 17 into `[89ab]`
+ * costs nothing and is still fully determined by the reference.
+ */
+export function mtnReferenceId(reference: string): string {
+  const hex = reference.replace(/[^a-f0-9]/gi, "").toLowerCase().padEnd(32, "0").slice(0, 32);
+  const v4 = `${hex.slice(0, 12)}4${hex.slice(13, 16)}${"89ab"[parseInt(hex[16], 16) % 4]}${hex.slice(17, 32)}`;
+  return `${v4.slice(0, 8)}-${v4.slice(8, 12)}-${v4.slice(12, 16)}-${v4.slice(16, 20)}-${v4.slice(20, 32)}`;
+}
+
 @Injectable()
 export class MtnMomoProvider implements MobileMoneyProvider {
   readonly key = "MTN_MOMO" as const;
@@ -240,14 +269,14 @@ export class MtnMomoProvider implements MobileMoneyProvider {
 
   async charge(req: ChargeRequest): Promise<ChargeAck> {
     if (!this.isConfigured()) throw new ServiceUnavailableException("MTN Mobile Money is not configured");
-    // MTN's X-Reference-Id IS the idempotency key and must be a UUID. Ours is a
-    // reference string, so it travels in externalId and the UUID is derived —
-    // meaning a retry of the same charge is idempotent at MTN's end too.
-    const xRef = req.reference.replace(/[^a-f0-9]/gi, "").padEnd(32, "0").slice(0, 32);
-    const uuid = `${xRef.slice(0, 8)}-${xRef.slice(8, 12)}-${xRef.slice(12, 16)}-${xRef.slice(16, 20)}-${xRef.slice(20, 32)}`;
+    const uuid = mtnReferenceId(req.reference);
     // MoMo takes the MAJOR unit as a string. `toMajor` asks the currency, so a
     // zero-decimal currency (XAF, XOF, RWF, UGX) is not divided by 100.
     const amount = toMajor(req.amountMinor, req.currency).toString();
+    // THE SANDBOX ONLY SETTLES EUR. Sending the school's real currency there is
+    // rejected, which reads as "our integration is broken" when it is the sandbox
+    // being the sandbox. Production sends the actual currency.
+    const currency = this.target() === "sandbox" ? "EUR" : req.currency;
 
     const res = await fetch(`${this.base()}/collection/v1_0/requesttopay`, {
       method: "POST",
@@ -261,7 +290,7 @@ export class MtnMomoProvider implements MobileMoneyProvider {
       },
       body: JSON.stringify({
         amount,
-        currency: req.currency,
+        currency,
         externalId: req.reference,
         payer: { partyIdType: "MSISDN", partyId: req.msisdn },
         payerMessage: req.narrative.slice(0, 160),
@@ -299,24 +328,130 @@ export class MtnMomoProvider implements MobileMoneyProvider {
 }
 
 // =============================================================================
-// Airtel Money — declared in coverage, adapter not written
+// Airtel Money — Collections (Airtel Africa Open API)
 // =============================================================================
-// Present so the coverage table can be honest about where Airtel operates while
-// the rail reports itself DISABLED. That is the same posture as an unimplemented
-// payroll country: visible, and refusing, rather than absent and mysterious.
+// Written from Airtel's published API. It differs from the other two rails in
+// three ways that each break a charge silently if assumed away:
+//
+//   1. AUTH IS A JSON POST, not HTTP Basic. Credentials go in the body.
+//   2. THE MSISDN IS NATIONAL, not international. Airtel takes the country
+//      separately (header AND body) and wants the subscriber number WITHOUT its
+//      dialling code — the exact opposite of M-Pesa and MTN.
+//   3. THE CALLBACK URL IS CONFIGURED IN AIRTEL'S PORTAL, not sent per charge.
+//      Nothing we pass here changes where the notification lands.
+//
+// Like the others: no credentials ⇒ DISABLED, never half-working.
+// =============================================================================
+
+/** Airtel wants the national significant number — the dial code taken back off. */
+export function airtelNationalMsisdn(msisdn: string, dialCode: string): string {
+  return msisdn.startsWith(dialCode) ? msisdn.slice(dialCode.length) : msisdn;
+}
+
 @Injectable()
 export class AirtelProvider implements MobileMoneyProvider {
   readonly key = "AIRTEL" as const;
-  readonly wholeUnitsOnly = false;
+  // Airtel's published examples are whole-unit amounts, and its markets (UGX, TZS,
+  // KES) are transacted in whole units in practice. Conservative by choice: a
+  // whole-unit ask can only UNDER-charge, leaving the fraction visible on the
+  // invoice, where over-asking would take money the ledger never credits.
+  readonly wholeUnitsOnly = true;
+  private readonly logger = new Logger("Airtel Money");
+
   isConfigured(): boolean {
-    return false;
+    return !!(process.env.AIRTEL_CLIENT_ID && process.env.AIRTEL_CLIENT_SECRET);
   }
-  async charge(): Promise<ChargeAck> {
-    throw new ServiceUnavailableException(
-      "Airtel Money is not implemented yet. Choose another provider, or ask the platform operator to enable one.",
-    );
+
+  private base(): string {
+    // UAT by default, for the same reason the other two default to sandbox: a
+    // deployment that is misconfigured must not move real money.
+    return process.env.AIRTEL_ENV === "production"
+      ? "https://openapi.airtel.africa"
+      : "https://openapiuat.airtel.africa";
   }
-  readCallback(): CallbackReading {
-    return { reference: null, outcome: "PENDING" };
+
+  private async token(): Promise<string> {
+    // NOT Basic auth — Airtel takes the credentials as a JSON body.
+    const res = await fetch(`${this.base()}/auth/oauth2/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "*/*" },
+      body: JSON.stringify({
+        client_id: process.env.AIRTEL_CLIENT_ID,
+        client_secret: process.env.AIRTEL_CLIENT_SECRET,
+        grant_type: "client_credentials",
+      }),
+    });
+    if (!res.ok) throw new ServiceUnavailableException("Airtel Money authentication failed");
+    const body = (await res.json()) as { access_token?: string };
+    if (!body.access_token) throw new ServiceUnavailableException("Airtel Money returned no access token");
+    return body.access_token;
+  }
+
+  async charge(req: ChargeRequest): Promise<ChargeAck> {
+    if (!this.isConfigured()) throw new ServiceUnavailableException("Airtel Money is not configured");
+
+    // Whole units by construction (wholeUnitsOnly), so this asserts rather than
+    // rounds — rounding here is what overcharged a payer on the M-Pesa rail.
+    const amount = toMajor(req.amountMinor, req.currency);
+    if (!Number.isInteger(amount)) {
+      throw new ServiceUnavailableException("Airtel Money accepts whole units only");
+    }
+    const country = req.country.toUpperCase();
+    const msisdn = airtelNationalMsisdn(req.msisdn, req.dialCode);
+
+    const res = await fetch(`${this.base()}/merchant/v1/payments/`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${await this.token()}`,
+        "Content-Type": "application/json",
+        Accept: "*/*",
+        // Mandatory. Airtel routes on these, not on the number's prefix.
+        "X-Country": country,
+        "X-Currency": req.currency,
+      },
+      body: JSON.stringify({
+        reference: req.narrative.slice(0, 100),
+        subscriber: { country, currency: req.currency, msisdn },
+        // transaction.id is OUR reference, and Airtel echoes it on the callback —
+        // so unlike M-Pesa, this rail CAN be matched on our own id.
+        transaction: { amount, country, currency: req.currency, id: req.reference },
+      }),
+    });
+    const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    // Airtel answers 200 with success:false. The HTTP status alone is not the
+    // outcome — trusting it reports a prompt as sent that never left Airtel.
+    if (!res.ok || at(body, "status", "success") !== true) {
+      const message = at(body, "status", "message");
+      this.logger.warn(`Airtel collection refused: ${JSON.stringify(body).slice(0, 300)}`);
+      throw new ServiceUnavailableException(
+        typeof message === "string" && message ? message : "Airtel Money refused the request",
+      );
+    }
+    const id = at(body, "data", "transaction", "id");
+    return {
+      providerRef: typeof id === "string" ? id : null,
+      instruction: "Approve the payment request on your phone to complete this payment.",
+    };
+  }
+
+  readCallback(body: unknown): CallbackReading {
+    // Airtel's callback nests the transaction and reports a two-letter code:
+    // TS = success, TF = failed, TA = ambiguous (treated as still pending, because
+    // "we do not know" must never post money).
+    const tx = at(body, "transaction");
+    const reference = typeof at(tx, "id") === "string" ? String(at(tx, "id")) : null;
+    const providerRef =
+      typeof at(tx, "airtel_money_id") === "string" ? String(at(tx, "airtel_money_id")) : null;
+    const code = String(at(tx, "status_code") ?? "").toUpperCase();
+    if (code === "TS") return { reference, outcome: "SUCCEEDED", providerRef };
+    if (code === "TF") {
+      return {
+        reference,
+        outcome: "FAILED",
+        providerRef,
+        failureReason: String(at(tx, "message") ?? "") || "Payment was not completed",
+      };
+    }
+    return { reference, outcome: "PENDING", providerRef };
   }
 }

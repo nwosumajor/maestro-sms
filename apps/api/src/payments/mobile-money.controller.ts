@@ -6,7 +6,7 @@
 // charge began. It always answers 200, because a non-2xx makes a rail retry
 // forever and no retry can fix a payload we cannot read.
 
-import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Put, Query } from "@nestjs/common";
 import { z } from "zod";
 import { FEES_PERMISSIONS, MOBILE_MONEY_PROVIDERS } from "@sms/types";
 import type { MobileMoneyChargeDto, MobileMoneyOptionDto } from "@sms/types";
@@ -57,10 +57,34 @@ export class MobileMoneyController {
     return this.mm.status(p, reference);
   }
 
-  /** The rail's notification. Public, unsigned, always 200. */
+  /**
+   * The rail's notification. Public, unsigned, always 200.
+   *
+   * BOTH VERBS, deliberately. Paystack and Stripe POST; MTN MoMo's documented
+   * callback for `requesttopay` is a PUT of the transaction object. A route that
+   * accepts only POST answers 404 to it, and a 404 to a callback has exactly the
+   * failure shape we already fixed once on M-Pesa — the payer is debited, the
+   * invoice is never credited, and nothing but an access log records it.
+   *
+   * Accepting both costs nothing: the handler is idempotent and reads the body,
+   * never the verb. It also stops this being a question anyone has to be right
+   * about, which matters more than knowing which verb MTN uses this year.
+   *
+   * TWO HANDLERS, not two decorators on one. Nest's @Post/@Put both write the
+   * same METHOD_METADATA key, so stacking them registers only the lower one and
+   * silently drops the other — which would have looked exactly like a fix while
+   * leaving the bug in place.
+   */
   @Public()
   @Post("callback/:provider")
   callback(@Param("provider") provider: string, @Body() body: unknown): Promise<{ ok: true }> {
+    return this.mm.handleCallback(provider, body);
+  }
+
+  /** @see callback — MTN MoMo delivers the same payload as a PUT. */
+  @Public()
+  @Put("callback/:provider")
+  callbackPut(@Param("provider") provider: string, @Body() body: unknown): Promise<{ ok: true }> {
     return this.mm.handleCallback(provider, body);
   }
 }
