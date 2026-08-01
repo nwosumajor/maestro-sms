@@ -38,3 +38,58 @@ model ErasureRequest {
   @@index([schoolId, status])
   @@map("erasure_request")
 }
+
+// =============================================================================
+// DataBreachIncident — GDPR Art. 33/34, the 72-hour clock
+// =============================================================================
+// A school under GDPR must notify its supervisory authority within 72 HOURS of
+// becoming aware of a personal-data breach (Art. 33), and must tell the affected
+// people themselves without undue delay when the risk to them is high (Art. 34).
+// A school holding children's data is exactly the case the regulation is written
+// for.
+//
+// The deadline is computed from `discoveredAt` — when the school BECAME AWARE —
+// not from when the breach happened or when this row was created. Those are
+// different moments and only one of them starts the clock.
+//
+// Append-mostly: an incident is never deleted, and its discovery time is never
+// edited, because the whole value of the record is that it fixes when the clock
+// started. Status moves forward; the history stays.
+// =============================================================================
+model DataBreachIncident {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  title          String
+  description    String
+  /// When the school BECAME AWARE. Starts the 72-hour clock (Art. 33(1)).
+  discoveredAt   DateTime
+  /// OPEN | ASSESSED | NOTIFIED | CLOSED.
+  status         String   @default("OPEN")
+  /// LOW | HIGH. HIGH additionally requires telling the data subjects (Art. 34).
+  riskLevel      String   @default("HIGH")
+  /// Rough count of people affected — a figure the authority asks for first.
+  affectedCount  Int      @default(0)
+  /// Free-text categories of data involved (e.g. "names, addresses, medical").
+  dataCategories String?
+
+  /// When the supervisory authority was notified (Art. 33).
+  notifiedAuthorityAt  DateTime?
+  /// When the affected people were told (Art. 34) — required when risk is HIGH.
+  notifiedSubjectsAt   DateTime?
+  /// Why notification was NOT required, when it was not (Art. 33(1) proviso).
+  noNotificationReason String?
+
+  reportedById String    @db.Uuid
+  closedAt     DateTime?
+  closedById   String?   @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, status])
+  @@map("data_breach_incident")
+}

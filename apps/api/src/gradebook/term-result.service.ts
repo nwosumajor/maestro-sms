@@ -27,6 +27,7 @@ import {
 import PDFDocument from "pdfkit";
 import {
   computeTermSubjectGrade,
+  type GradingPolicy,
   averageOf,
   gradeComponentMax,
   GRADE_COMPONENTS,
@@ -51,6 +52,7 @@ import {
 } from "../integrity/integrity.foundation";
 import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
+import { SchoolRegionService } from "../foundation/school-region.service";
 
 const SCHOOL_WIDE_ROLES = new Set(["school_admin"]);
 
@@ -75,6 +77,7 @@ export class TermResultService {
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly workflow: WorkflowService,
     hooks: WorkflowHooksService,
+    private readonly region: SchoolRegionService,
   ) {
     // Maker-checker reactor: when the head-teacher→principal GRADE_PUBLISH
     // chain finalizes, flip the batch in the SAME tenant tx as the transition
@@ -151,15 +154,19 @@ export class TermResultService {
   }
 
   /** Recompute total/grade from components; validate each mark against ITS OWN
-   *  maximum (exam ≤ 60, midterm ≤ 20, assignment ≤ 10, class note ≤ 10) so a
-   *  teacher can't award more than a component is worth. */
-  private applyComponents(c: ComponentInput) {
+   *  maximum so a teacher can't award more than a component is worth.
+   *
+   *  The maxima come from the SCHOOL's weighting, not a platform constant: a school
+   *  that weights coursework at 30 must accept a 30-mark assignment, and one that
+   *  weights it at 10 must still refuse an 11. */
+  private applyComponents(c: ComponentInput, policy?: GradingPolicy) {
+    const comps = policy?.components ?? GRADE_COMPONENTS;
     const label: Record<GradeComponentKey, string> =
-      Object.fromEntries(GRADE_COMPONENTS.map((g) => [g.key, g.label])) as Record<GradeComponentKey, string>;
-    for (const key of GRADE_COMPONENTS.map((g) => g.key)) {
+      Object.fromEntries(comps.map((g) => [g.key, g.label])) as Record<GradeComponentKey, string>;
+    for (const key of comps.map((g) => g.key)) {
       const v = c[key];
       if (v === null || v === undefined) continue;
-      const max = gradeComponentMax(key);
+      const max = comps.find((g) => g.key === key)?.max ?? gradeComponentMax(key);
       if (v < 0 || v > max) {
         throw new BadRequestException(`${label[key]} must be between 0 and ${max}`);
       }
@@ -171,7 +178,7 @@ export class TermResultService {
       classNote: c.classNote ?? null,
     };
     const anyEntered = Object.values(components).some((v) => v !== null);
-    const { total, grade } = computeTermSubjectGrade(components);
+    const { total, grade } = computeTermSubjectGrade(components, policy?.components);
     return {
       ...components,
       // total/grade only meaningful once at least one component is entered.
@@ -184,20 +191,28 @@ export class TermResultService {
    *  report is correct even if the denormalised `total` column was written under
    *  an older scoring rule (or left stale). Returns null total when nothing is
    *  entered yet. */
-  private recomputeTotal(row: {
-    exam: number | null;
-    midterm: number | null;
-    assignment: number | null;
-    classNote: number | null;
-  }): { total: number | null; grade: string | null } {
+  private recomputeTotal(
+    row: {
+      exam: number | null;
+      midterm: number | null;
+      assignment: number | null;
+      classNote: number | null;
+    },
+    /** The SCHOOL's weighting. Omitted = the platform default, which is what every
+     *  school already live uses. */
+    policy?: GradingPolicy,
+  ): { total: number | null; grade: string | null } {
     const anyEntered = [row.exam, row.midterm, row.assignment, row.classNote].some((v) => v !== null);
     if (!anyEntered) return { total: null, grade: null };
-    const { total, grade } = computeTermSubjectGrade({
-      exam: row.exam,
-      midterm: row.midterm,
-      assignment: row.assignment,
-      classNote: row.classNote,
-    });
+    const { total, grade } = computeTermSubjectGrade(
+      {
+        exam: row.exam,
+        midterm: row.midterm,
+        assignment: row.assignment,
+        classNote: row.classNote,
+      },
+      policy?.components,
+    );
     return { total, grade };
   }
 
@@ -384,7 +399,7 @@ export class TermResultService {
       // hidden from families again until it goes back through the publish chain.
       const unpublished = existing?.status === "PUBLISHED";
 
-      const scored = this.applyComponents(input);
+      const scored = this.applyComponents(input, (await this.region.academicInTx(tx, p.schoolId)).grading);
       const data = { ...scored, gradedById: p.userId, gradedAt: new Date() };
       const row = await tx.subjectResult.upsert({
         where: { sessionId_termId_subjectId_studentId: { sessionId: term.sessionId, termId, subjectId, studentId } },
@@ -462,12 +477,15 @@ export class TermResultService {
       }
       const unpublished = existing?.status === "PUBLISHED";
       // MERGE: keep the other three components; only the exam slice changes.
-      const scored = this.applyComponents({
-        exam,
-        midterm: existing?.midterm ?? null,
-        assignment: existing?.assignment ?? null,
-        classNote: existing?.classNote ?? null,
-      });
+      const scored = this.applyComponents(
+        {
+          exam,
+          midterm: existing?.midterm ?? null,
+          assignment: existing?.assignment ?? null,
+          classNote: existing?.classNote ?? null,
+        },
+        (await this.region.academicInTx(tx, p.schoolId)).grading,
+      );
       const data = { ...scored, gradedById: p.userId, gradedAt: new Date() };
       const row = await tx.subjectResult.upsert({
         where: { sessionId_termId_subjectId_studentId: { sessionId: term.sessionId, termId, subjectId, studentId } },
@@ -522,12 +540,15 @@ export class TermResultService {
       }
       const unpublished = existing?.status === "PUBLISHED";
       // MERGE: keep the other three components; only the assignment slice changes.
-      const scored = this.applyComponents({
-        exam: existing?.exam ?? null,
-        midterm: existing?.midterm ?? null,
-        assignment,
-        classNote: existing?.classNote ?? null,
-      });
+      const scored = this.applyComponents(
+        {
+          exam: existing?.exam ?? null,
+          midterm: existing?.midterm ?? null,
+          assignment,
+          classNote: existing?.classNote ?? null,
+        },
+        (await this.region.academicInTx(tx, p.schoolId)).grading,
+      );
       const data = { ...scored, gradedById: p.userId, gradedAt: new Date() };
       const row = await tx.subjectResult.upsert({
         where: { sessionId_termId_subjectId_studentId: { sessionId: term.sessionId, termId, subjectId, studentId } },

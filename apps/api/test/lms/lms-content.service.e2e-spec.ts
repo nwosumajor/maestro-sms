@@ -1,3 +1,4 @@
+import { GRADE_COMPONENTS } from "@sms/types";
 // =============================================================================
 // LmsContentService integration — real DB, app role, RLS, approval workflow
 // =============================================================================
@@ -87,7 +88,7 @@ d("LmsContentService integration (authoring, approval, quiz, forum, RLS)", () =>
     const notifier = { enqueue: async () => undefined } as never;
     const hooks = new WorkflowHooksService();
     const workflow = new WorkflowService(tenant, hooks);
-    const termResults = new TermResultService(tenant, new AuditLogService() as never, workflow, hooks);
+    const termResults = new TermResultService(tenant, new AuditLogService() as never, workflow, hooks, { academicInTx: async () => ({ calendarTemplate: "THREE_TERM", grading: { components: GRADE_COMPONENTS } }), academicForSchool: async () => ({ calendarTemplate: "THREE_TERM", grading: { components: GRADE_COMPONENTS } }) } as never);
     svc = new LmsContentService(
       tenant,
       new AuditLogService() as never,

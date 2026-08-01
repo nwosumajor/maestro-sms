@@ -1,3 +1,4 @@
+import { GRADE_COMPONENTS } from "@sms/types";
 // =============================================================================
 // TermResultService — term-weighted grading scope + server-side computation +
 // the GRADE_PUBLISH maker-checker (head teacher → principal).
@@ -77,7 +78,7 @@ function makeService(over: {
   // Capture the finalized reactor so tests can invoke it directly.
   let finalized: FinalizedHandler | undefined;
   const hooks = { onFinalized: (h: FinalizedHandler) => { finalized = h; } };
-  const service = new TermResultService(db as never, audit as never, workflow as never, hooks as never);
+  const service = new TermResultService(db as never, audit as never, workflow as never, hooks as never, { academicInTx: async () => ({ calendarTemplate: "THREE_TERM", grading: { components: GRADE_COMPONENTS } }), academicForSchool: async () => ({ calendarTemplate: "THREE_TERM", grading: { components: GRADE_COMPONENTS } }) } as never);
   return { service, tx, upsert, updateMany, audit, workflow, finalized: finalized! };
 }
 

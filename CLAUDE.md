@@ -111,6 +111,33 @@ conflicts with it, flag the conflict before proceeding.
   control rather than sharing the work. `HandoverPanel` on /admin/security offers
   only the caller's OWN permissions, and names the unlendable ones rather than
   hiding them.
+- **Schools have a REGION, and academic shape is per-school.**
+  `school.country/timezone/locale/currency/complianceRegime/calendarTemplate/gradingPolicy`
+  (migrations `20261117000000`, `20261118000000`), all nullable — null means the
+  platform's home country, so schools already live are unchanged. `@sms/types/region.ts`
+  holds a 12-country catalogue; `SchoolRegionService` (foundation, @Global, 60s cache)
+  resolves and caches it. // GOTCHA: **"today" is the SCHOOL's calendar day**, not the
+  server's UTC day — `schoolToday(tz)`. The register, the gate-scan check-in, the term
+  lock and the 7-day stale rule all use it; deciding in UTC filed a Singapore morning
+  register against Sunday and a Toronto evening one against Tuesday. Statutory payroll
+  is COUNTRY PACKS (`PAYROLL_PACKS`): Nigeria implemented, everything else
+  `payrollPack: null` and `createRun` REFUSES — a payslip wrong about tax goes to an
+  employee and a revenue authority. Calendar templates (THREE_TERM / TWO_SEMESTER /
+  FOUR_QUARTER / TRIMESTER) and grade weighting (must total 100, else the default is
+  used) are per-school. Region is operator-set: `PUT /operator/tenants/:id/region`
+  (platform.tenants.write + step-up, privileged write, invalidates the cache).
+- **GDPR mode — BUILT** (`apps/api/src/privacy/compliance.*`, `data_breach_incident`,
+  migration `20261119000000`, rls/100, web `/admin/compliance`). Art. 33's 72-hour
+  clock runs from `discoveredAt` — when the school BECAME AWARE — which is captured
+  explicitly and is **never updatable**, since a register whose start time moves proves
+  nothing. Not notifying is lawful only as a RECORDED decision, so silence past 72h is
+  `overdue`. Art. 34 is tracked separately (`subjectsUnnotified`): telling the regulator
+  and stopping there must not read as done, and a HIGH-risk breach cannot be CLOSED
+  until the people were told or a reason is recorded. The posture screen states what is
+  MISSING (absent DPO, consent coverage) as loudly as what is present. Perm
+  `privacy.compliance.manage`. // GOTCHA: `PRIVACY_ROLE_PERMISSIONS` in
+  `permissions/privacy.ts` is ORPHANED — `role-map.ts` hard-codes the privacy keys and
+  is what the seed actually reads.
 - **Platform duties are LENT, not held.** `manager_admin`'s standing role is the bare
   floor (`platform.tenants.read` + `notification.read`). Every real duty —
   provisioning, onboarding triage, audit reads, account lookup/unlock, grace,

@@ -41,6 +41,14 @@ model School {
   /// and large-scale processing of children's data — which is what a school is.
   dpoName                String?
   dpoEmail               String?
+  /// --- ACADEMIC SHAPE --------------------------------------------------------
+  /// Calendar template key (THREE_TERM | TWO_SEMESTER | FOUR_QUARTER | TRIMESTER).
+  /// Null = the platform's three-term default.
+  calendarTemplate       String?
+  /// Per-school grade WEIGHTING: { weights: { exam, midterm, assignment, classNote } }
+  /// summing to 100. Null = the platform default (60/20/10/10). The components
+  /// themselves are fixed; only their weights move.
+  gradingPolicy          Json?
   /// Paystack SPLIT settlement for parent fee payments: when set, every fee
   /// charge carries this subaccount so the money settles to the SCHOOL's own
   /// bank (platform keeps only the configured commission %). Managed by the
@@ -174,6 +182,7 @@ model School {
   // Security relations
   privilegeGrants     PrivilegeGrant[]
   platformDelegations PlatformDelegation[]
+  breachIncidents     DataBreachIncident[]
 
   // Privacy relations
   erasureRequests ErasureRequest[]

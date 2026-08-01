@@ -1,3 +1,4 @@
+import { GRADE_COMPONENTS } from "@sms/types";
 // =============================================================================
 // ReportCardService — Document Vault persistence integration (real DB)
 // =============================================================================
@@ -78,7 +79,7 @@ d("ReportCardService generate() persists to the Document Vault (real Postgres)",
     const remarks = new ReportCardRemarkService(tenant, audit);
     const workflow = { createRequest: jest.fn(), submit: jest.fn() } as never;
     const hooks = { onFinalized: jest.fn() } as never;
-    const termResults = new TermResultService(tenant, audit, workflow, hooks);
+    const termResults = new TermResultService(tenant, audit, workflow, hooks, { academicInTx: async () => ({ calendarTemplate: "THREE_TERM", grading: { components: GRADE_COMPONENTS } }), academicForSchool: async () => ({ calendarTemplate: "THREE_TERM", grading: { components: GRADE_COMPONENTS } }) } as never);
     reportCards = new ReportCardService(tenant, audit, branding, documents, remarks, termResults);
   });
 
