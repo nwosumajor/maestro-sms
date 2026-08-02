@@ -97,7 +97,20 @@ d("RingService integration (Elimination Ring, RLS, server authority)", () => {
     // Join order U1→U2→U3→U1; U1 starts.
     expect(ring.currentTurnPlayerId).toBe(playerId(ring, U1));
     // SECURITY: no secret leaks in the live view.
-    const json = JSON.stringify(ring);
+    //
+    // Scanned with OPAQUE IDS AND TIMESTAMPS REMOVED. A UUID is 32 hex chars, so
+    // a 4-digit secret collides with one by chance in ~0.7% of runs — this test
+    // failed CI on `90129b75-…` matching the secret "9012", which is not a leak
+    // and cannot be distinguished from one by a raw substring scan. A test that
+    // fails one run in 145 for no reason teaches people to re-run CI, which is
+    // how a real failure eventually gets waved through.
+    //
+    // Ids and dates cannot carry a secret — they are server-generated and never
+    // derived from one — so removing them narrows the scan to exactly the fields
+    // where a leak could actually appear, without weakening the assertion.
+    const json = JSON.stringify(ring)
+      .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, "<id>")
+      .replace(/\d{4}-\d{2}-\d{2}T[\d:.]+Z/g, "<ts>");
     for (const s of ["1234", "5678", "9012"]) expect(json).not.toContain(s);
 
     // Turn order: U2 cannot guess on U1's turn.
