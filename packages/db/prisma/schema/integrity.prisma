@@ -325,6 +325,11 @@ model IntegrityRetentionRun {
   signalsDeleted   Int
   draftsDeleted    Int
   telemetryDeleted Int
+  /// xAPI learning statements and ID-card scan events purged in the same run.
+  /// Default 0 so historical run records stay readable — those runs genuinely
+  /// deleted none of these, because the sweep did not cover them yet.
+  xapiDeleted      Int @default(0)
+  scansDeleted     Int @default(0)
 
   /// SCHEDULED (cron worker) | MANUAL (admin-triggered).
   trigger   String
