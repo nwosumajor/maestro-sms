@@ -11,6 +11,8 @@ export interface SchoolRetentionResult {
   signalsDeleted: number;
   draftsDeleted: number;
   telemetryDeleted: number;
+  xapiDeleted: number;
+  scansDeleted: number;
   /** Set when nothing was purged for a non-error reason. */
   skipped?: "DISABLED" | "NO_DB";
 }
@@ -51,7 +53,8 @@ export class IntegrityRetentionService {
       results.push(await this.purgeSchool(s.id, s.integrityRetentionDays, trigger));
     }
     const purged = results.reduce(
-      (n, r) => n + r.signalsDeleted + r.draftsDeleted + r.telemetryDeleted,
+      // EVERY stream, or the reported total quietly under-counts what was purged.
+      (n, r) => n + r.signalsDeleted + r.draftsDeleted + r.telemetryDeleted + r.xapiDeleted + r.scansDeleted,
       0,
     );
     this.logger.log(
@@ -74,6 +77,8 @@ export class IntegrityRetentionService {
         retentionDays,
         cutoff: new Date().toISOString(),
         signalsDeleted: 0,
+        xapiDeleted: 0,
+        scansDeleted: 0,
         draftsDeleted: 0,
         telemetryDeleted: 0,
         skipped: "NO_DB",
@@ -86,6 +91,8 @@ export class IntegrityRetentionService {
         retentionDays,
         cutoff: new Date().toISOString(),
         signalsDeleted: 0,
+        xapiDeleted: 0,
+        scansDeleted: 0,
         draftsDeleted: 0,
         telemetryDeleted: 0,
         skipped: "DISABLED",
@@ -104,6 +111,18 @@ export class IntegrityRetentionService {
       const signals = await tx.integritySignal.deleteMany({ where });
       const drafts = await tx.submissionDraft.deleteMany({ where });
       const telemetry = await tx.submissionTelemetry.deleteMany({ where });
+      // The other two streams of behavioural telemetry about children, governed
+      // by the SAME window rather than one of their own: a school that has
+      // decided how long it keeps observations of its pupils has decided it for
+      // all of them, and three separate dials would only ever drift apart.
+      // The app role is INSERT/SELECT on both, so this sweep is the only thing
+      // that can ever make them smaller.
+      // NOTE the different column: an xAPI statement records when it was STORED,
+      // not created — the two are not the same for a record that can arrive late.
+      const xapi = await tx.xapiStatement.deleteMany({
+        where: { schoolId, storedAt: { lt: cutoff } },
+      });
+      const scans = await tx.scanEvent.deleteMany({ where });
       await tx.integrityRetentionRun.create({
         data: {
           schoolId,
@@ -112,17 +131,20 @@ export class IntegrityRetentionService {
           signalsDeleted: signals.count,
           draftsDeleted: drafts.count,
           telemetryDeleted: telemetry.count,
+          xapiDeleted: xapi.count,
+          scansDeleted: scans.count,
           trigger,
           startedAt,
         },
       });
-      return { signals: signals.count, drafts: drafts.count, telemetry: telemetry.count };
+      return { signals: signals.count, drafts: drafts.count, telemetry: telemetry.count, xapi: xapi.count, scans: scans.count };
     });
 
     // Counts only — never the purged evidence/content (no PII in logs).
     this.logger.log(
       `school=${schoolId} cutoff=${cutoff.toISOString()} purged ` +
-        `signals=${counts.signals} drafts=${counts.drafts} telemetry=${counts.telemetry}`,
+        `signals=${counts.signals} drafts=${counts.drafts} telemetry=${counts.telemetry} ` +
+        `xapi=${counts.xapi} scans=${counts.scans}`,
     );
     return {
       schoolId,
@@ -131,6 +153,8 @@ export class IntegrityRetentionService {
       signalsDeleted: counts.signals,
       draftsDeleted: counts.drafts,
       telemetryDeleted: counts.telemetry,
+      xapiDeleted: counts.xapi,
+      scansDeleted: counts.scans,
     };
   }
 }

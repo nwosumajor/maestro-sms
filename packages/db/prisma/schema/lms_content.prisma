@@ -262,6 +262,9 @@ model XapiStatement {
   @@index([schoolId])
   @@index([schoolId, classId])
   @@index([schoolId, actorId])
+  /// The retention sweep filters on (schoolId, storedAt). Without this it walks
+  /// every statement a school ever recorded, on a schedule, to find the old ones.
+  @@index([schoolId, storedAt])
   @@map("xapi_statement")
 }
 
