@@ -186,6 +186,8 @@ model LmsContentRevision {
 
   @@index([schoolId])
   @@index([schoolId, contentId])
+  /// The per-item version cap ranks by (contentId, version DESC).
+  @@index([contentId, version(sort: Desc)])
   @@map("lms_content_revision")
 }
 

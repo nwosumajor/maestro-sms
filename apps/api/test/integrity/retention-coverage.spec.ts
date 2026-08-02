@@ -52,6 +52,9 @@ function makeService(counts: Record<string, number>) {
   const client = {
     school: { findMany: jest.fn().mockResolvedValue([{ id: "s-1", integrityRetentionDays: 30 }]) },
     $transaction: jest.fn(async (fn: (t: unknown) => Promise<unknown>) => fn(tx)),
+    // The two PLATFORM-WIDE streams, swept once per run rather than per school.
+    gatewayEvent: { deleteMany: jest.fn().mockResolvedValue({ count: counts.gatewayEvent ?? 0 }) },
+    $executeRaw: jest.fn().mockResolvedValue(counts.lmsContentRevision ?? 0),
   };
   const db = { client };
   const svc = new IntegrityRetentionService(db as never);
@@ -131,6 +134,60 @@ describe("the sweep clears every telemetry stream", () => {
     const summary = logged.find((l) => l.includes("rows purged"));
     expect(summary).toBeDefined();
     expect(summary).toContain("93 rows purged");
+  });
+});
+
+describe("the platform-wide streams — not about pupils, still unbounded", () => {
+  it("purges gateway events on receivedAt ALONE, so orphans go too", async () => {
+    // gateway_event.schoolId is NULLABLE by documented design: a webhook can
+    // arrive before we know whose it is. Scoping the delete by schoolId would
+    // leave every unmatched event behind for ever — exactly the set that
+    // accumulates. So this one delete is deliberately not tenant-bounded.
+    const { svc, client } = makeService({});
+    await svc.purgeAllSchools("SCHEDULED");
+    const where = (client.gatewayEvent.deleteMany as jest.Mock).mock.calls[0][0].where;
+    expect(Object.keys(where)).toEqual(["receivedAt"]);
+    expect(where.receivedAt.lt).toBeInstanceOf(Date);
+    // Two years: past the ~540-day window a card scheme allows for a chargeback,
+    // because the first question in a dispute is what the gateway told us.
+    const days = Math.round((Date.now() - where.receivedAt.lt.getTime()) / 86_400_000);
+    expect(days).toBeGreaterThanOrEqual(540);
+  });
+
+  it("caps content revisions PER ITEM, not by age", async () => {
+    // Age is the wrong bound both ways: a lesson untouched for three years would
+    // lose its only history, while a lesson edited two hundred times this month —
+    // the real growth risk — would lose nothing.
+    const { svc, client } = makeService({});
+    await svc.purgeAllSchools("SCHEDULED");
+    const sql = (client.$executeRaw as jest.Mock).mock.calls[0][0].join("?");
+    expect(sql).toContain("lms_content_revision");
+    expect(sql).toContain("PARTITION BY");
+    expect(sql).toContain("contentId");
+    expect(sql).not.toMatch(/createdAt|storedAt/);
+  });
+
+  it("runs them ONCE per sweep, not once per school", async () => {
+    // Per-school would delete the same platform-wide rows N times over and report
+    // a wildly inflated count.
+    const { svc, client } = makeService({});
+    (client.school.findMany as jest.Mock).mockResolvedValue([
+      { id: "s-1", integrityRetentionDays: 30 },
+      { id: "s-2", integrityRetentionDays: 30 },
+      { id: "s-3", integrityRetentionDays: 30 },
+    ]);
+    await svc.purgeAllSchools("SCHEDULED");
+    expect(client.gatewayEvent.deleteMany).toHaveBeenCalledTimes(1);
+    expect(client.$executeRaw).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps them OUT of the per-school run record", async () => {
+    // That record is per school; attributing a platform-wide delete to one
+    // school would misrepresent what happened.
+    const { svc, tx } = makeService({ gatewayEvent: 99, lmsContentRevision: 99 });
+    await svc.purgeAllSchools("SCHEDULED");
+    const data = tx.integrityRetentionRun.create.mock.calls[0][0].data;
+    expect(JSON.stringify(data)).not.toContain("99");
   });
 });
 
