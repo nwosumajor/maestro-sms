@@ -38,5 +38,8 @@ model GatewayEvent {
   @@index([gateway, eventType])
   @@index([reference])
   @@index([schoolId])
+  /// The retention sweep filters on receivedAt alone (it must also reach the
+  /// school-less events), and none of the other indexes serves that.
+  @@index([receivedAt])
   @@map("gateway_event")
 }
