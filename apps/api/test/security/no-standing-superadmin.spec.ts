@@ -36,10 +36,18 @@ function tsFiles(dir: string): string[] {
 }
 
 /**
- * `const SOMETHING = new Set([...])` — the shape every one of these role scopes
- * uses. Matched across newlines, since several are formatted one role per line.
+ * `const SOMETHING = new Set([...])` OR `const SOMETHING = [...]` — role scopes
+ * are written BOTH ways in this codebase. Matched across newlines, since several
+ * are formatted one role per line.
+ *
+ * The array form was originally missed, and `fees/payment-plans.service.ts` was
+ * carrying `STAFF_WIDE = ["accountant", "school_admin", "principal",
+ * "super_admin"]` — a standing super_admin scope over a tenant's payment plans,
+ * invisible to this gate while it passed green. That is the exact "green test
+ * worse than no test" failure the second case below was written to prevent,
+ * reached through a hole in the SHAPE rather than rot in the regex.
  */
-const ROLE_SET = /const\s+(\w+)\s*=\s*new Set\(\s*\[([\s\S]*?)\]\s*\)/g;
+const ROLE_SET = /const\s+(\w+)\s*=\s*(?:new Set\(\s*)?\[([\s\S]*?)\]\s*\)?/g;
 
 describe("super_admin has no standing role scope over tenant data", () => {
   it("appears in no service's role set", () => {
