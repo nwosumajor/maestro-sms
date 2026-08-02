@@ -249,7 +249,18 @@ export class OperatorProvisioningService {
         const u = await tx.user.create({
           // passwordChangedAt: null = the forced-first-reset state — it makes the
           // temp password single-session AND arms the emailed set-password invite.
-          data: { schoolId: school.id, email: a.email, name: a.name, passwordHash: a.passwordHash, passwordChangedAt: null },
+          // passwordChangedAt: null forces the first-login reset; tempPasswordSetAt
+          // makes the temp credential GO STALE in 7 days, matching the invite link
+          // these admins are also sent. Without it the password is valid for ever
+          // if never used — a standing credential in whatever channel it travelled.
+          data: {
+            schoolId: school.id,
+            email: a.email,
+            name: a.name,
+            passwordHash: a.passwordHash,
+            passwordChangedAt: null,
+            tempPasswordSetAt: new Date(),
+          },
         });
         await tx.userRole.create({ data: { schoolId: school.id, userId: u.id, roleId: a.roleId } });
         created.push({ id: u.id, email: a.email, role: a.role, tempPassword: a.tempPassword });
@@ -431,7 +442,15 @@ export class OperatorProvisioningService {
     const admin = await db.$transaction(async (tx) => {
       const u = await tx.user.create({
         // Same forced-first-reset posture as provisionSchool (arms the invite).
-        data: { schoolId, email: input.email, name: input.name, passwordHash, passwordChangedAt: null },
+        data: {
+          schoolId,
+          email: input.email,
+          name: input.name,
+          passwordHash,
+          passwordChangedAt: null,
+          // Bounded like the invite link that accompanies it — see above.
+          tempPasswordSetAt: new Date(),
+        },
       });
       await tx.userRole.create({ data: { schoolId, userId: u.id, roleId: roleRow.id } });
       return u;

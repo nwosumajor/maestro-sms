@@ -139,8 +139,18 @@ export class OperatorUserService {
     await this.client().user.update({
       where: { id: userId },
       // Temp password: null passwordChangedAt forces a change on first login. Also
-      // clears any lockout so the user can actually use the temp credential.
-      data: { passwordHash, failedLoginCount: 0, locked: false, lockedUntil: null, passwordChangedAt: null },
+      // clears any lockout so the user can actually use the temp credential, and
+      // stamps tempPasswordSetAt so an UNUSED reset goes stale in 7 days rather
+      // than leaving a working password for an account someone was worried enough
+      // about to reset.
+      data: {
+        passwordHash,
+        failedLoginCount: 0,
+        locked: false,
+        lockedUntil: null,
+        passwordChangedAt: null,
+        tempPasswordSetAt: new Date(),
+      },
     });
     await this.auditInOperatorTenant(p, "operator.user.password_reset", userId, {
       targetSchoolId: schoolId,
