@@ -42,7 +42,8 @@ function svc(tx: TenantTx) {
   const db = { runAsTenant: run, runAsTenantReadOnly: run };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const storage = { presignUpload: jest.fn(), presignDownload: jest.fn(), delete: jest.fn() };
-  return new DisciplineService(db as never, audit as never, storage as never);
+  const notifications = { enqueue: jest.fn().mockResolvedValue(undefined), enqueueMany: jest.fn().mockResolvedValue(undefined) };
+  return new DisciplineService(db as never, audit as never, storage as never, notifications as never);
 }
 
 describe("DisciplineService", () => {
