@@ -331,6 +331,7 @@
       <li><a href="#rails">The safety rails</a></li>
       <li><a href="#fees">Money in: school fees</a></li>
       <li><a href="#subscription">Money out: your subscription</a></li>
+      <li><a href="#international">If your school is outside Nigeria</a></li>
       <li><a href="#academic">The academic core</a></li>
       <li><a href="#people">Staff, parents &amp; communication</a></li>
       <li><a href="#rhythm">Your operating rhythm</a></li>
@@ -674,10 +675,13 @@
       <h3>How parents pay</h3>
       <ul>
         <li><strong>Card, online</strong> — the parent pays from their own portal. Funds settle to <em>your</em> registered bank account.</li>
+        <li><strong>Mobile money</strong> — where your country has it: M-Pesa (Kenya, Tanzania), MTN MoMo (Ghana, Uganda, Cameroon, Côte d'Ivoire, Rwanda, Zambia) and Airtel Money (Kenya, Uganda, Tanzania). The parent picks a provider on the invoice, enters their number, and approves the prompt on their handset. Only the rails that actually work in your country are offered.</li>
         <li><strong>Bank transfer</strong> — each student can be issued a dedicated account number. A transfer into it is matched to the student and applied to their oldest open invoice automatically.</li>
         <li><strong>Cash or in-person</strong> — recorded by your accountant, subject to the ₦50,000 two-person rule.</li>
       </ul>
       <p>Every posted payment sends a receipt to the payer, the guardians and the student, showing the remaining balance. Numbered PDF receipts can be downloaded at any time.</p>
+      <p>An invoice is only ever settled in the currency it was raised in. If a payment route cannot handle that currency it refuses the charge and says so, rather than billing the right number in the wrong money and marking the invoice paid. Where cards cannot reach your currency, mobile money usually can.</p>
+      <p>Mobile-money confirmations are delivered once and are not retried by the networks, so the platform re-checks unconfirmed payments with the provider every hour. If a parent is ever debited and the invoice still reads unpaid, tell them <em>not</em> to pay again — it settles itself, and a duplicate payment becomes a refund you have to process.</p>
 
       <h3>Payment plans and credit</h3>
       <p>An invoice can be split into instalments that must sum exactly to the total. The plan itself never moves money — each tranche simply reads as paid, due, overdue or upcoming based on what has actually been received.</p>
@@ -738,12 +742,46 @@
     </section>
 
     <!-- ================================================================= -->
+    <section id="international">
+      <div class="sec-label">Operations</div>
+      <h2 class="sec-title">If your school is outside Nigeria</h2>
+
+      <p>The platform adapts to your country in the places it matters, and deliberately refuses to guess in the places where a guess would be worse than a gap.</p>
+
+      <h3>What follows your country automatically</h3>
+      <ul>
+        <li><strong>Your calendar day.</strong> &ldquo;Today&rdquo; means today where your school is. Registers, check-ins and term boundaries all use your local date rather than the server's.</li>
+        <li><strong>Money, dates and numbers</strong> display in your currency and locale for everyone in your school. Fees are raised and settled in your currency.</li>
+        <li><strong>The shape of your academic year</strong> — three terms, two semesters, four quarters or trimesters — and how a subject grade is weighted across exam, mid-term, assignment and note.</li>
+        <li><strong>How parents can pay.</strong> Card where cards reach your currency, mobile money across most of the continent. See <a href="#fees">Money in</a>.</li>
+      </ul>
+
+      <h3>What is set for you, not by you</h3>
+      <p>Country, timezone, currency, privacy regime, calendar template and grade weighting live on your school record and are set by us, not from inside the app. Changing a region moves every register's day boundary and switches which privacy law applies — it is not a setting to discover by accident. Ask support and we will change it.</p>
+
+      <h3>Where we stop</h3>
+      <ul>
+        <li><strong>Payroll</strong> is implemented for Nigeria and the United Kingdom only; elsewhere a run is refused rather than computed wrongly. Run payroll outside the platform until your country is added.</li>
+        <li><strong>Card payments</strong> reach a limited set of currencies. Where yours is not one, the charge is refused with an explanation rather than billed in ours — and mobile money usually covers the same country.</li>
+      </ul>
+
+      <h3>If you are under GDPR</h3>
+      <p>A compliance console appears under Admin. It runs the 72-hour breach clock from the moment your school <em>became aware</em> — captured once and never editable, because a start time that can move proves nothing. It tracks telling the people affected as a duty separate from telling the regulator, and it states what is missing (no data protection officer, gaps in consent) as plainly as what is in place.</p>
+    </section>
+
+    <!-- ================================================================= -->
     <section id="academic">
       <div class="sec-label">Operations</div>
       <h2 class="sec-title">The academic core</h2>
 
       <h3>Attendance</h3>
       <p>Teachers take a daily register per class. Marking a student absent or late notifies their guardians automatically — which is both a safeguarding measure and, in practice, the feature parents notice first.</p>
+      <p><strong>Registers are not freely rewritable, by design.</strong> A teacher may correct their own register for seven days. After that, within the current term, the correction becomes a request that a head teacher or administrator approves. Once a term has <em>ended</em>, its registers are closed permanently — no one can amend them, with or without approval. A register records who physically looked at the room, and an attendance figure that can be edited months later is not evidence of anything.</p>
+      <p>&ldquo;Today&rdquo; means today at <em>your</em> school, not on the server, so a register taken in the evening still files against the correct local date.</p>
+
+      <h3>Keeping records complete</h3>
+      <p>Each student profile carries a completion figure showing what is still missing — contacts, medical information, a linked guardian. A daily reminder goes out until the profile is submitted, after which a supervisor and an administrator review it. It is the least interesting screen in the system and the one that decides whether you can reach a parent in an emergency.</p>
+      <p>When a term ends, roll the school on to the next one from Classes. It moves the <em>current</em> pointer only: past terms, their registers and their results are untouched. If you forget, a daily sweep does it for you.</p>
 
       <h3>Grades and report cards</h3>
       <p>Teachers enter marks for their own classes. Results are weighted per term, and <strong>publishing them requires approval</strong> — a teacher cannot release results to parents alone.</p>
@@ -752,8 +790,8 @@
       <h3>Examinations</h3>
       <p>Two separate things share the word "exam":</p>
       <ul>
-        <li><strong>Exams</strong> — the logistics of physical examinations: halls, dates, seat allocation and invigilator rosters.</li>
-        <li><strong>CBT exams</strong> — computer-based tests sat in the system. The clock is enforced by the server, correct answers are withheld until a sitting closes, and answer release is gated to the principal. Automatic marks are presented as figures for staff to review, never as a final result.</li>
+        <li><strong>Exams</strong> — the logistics of physical examinations: halls, dates, seat allocation and invigilator rosters. Editing a scheduled sitting is non-destructive, clashes are detected before you commit, and a hall pack (seating chart plus attendance sheet) prints for the invigilator. Students and parents see only their own hall, time and seat.</li>
+        <li><strong>CBT exams</strong> — computer-based tests sat in the system. The clock is enforced by the server, correct answers are withheld until a sitting closes, and answer release is gated to the principal. Automatic marks are presented as figures for staff to review, never as a final result. Theory questions are supported alongside objective ones and are marked by a human, anonymously — the marker does not see whose script they are marking.</li>
       </ul>
 
       <h3>Cover for absent teachers</h3>
@@ -774,7 +812,7 @@
       <h2 class="sec-title">Staff, parents and communication</h2>
 
       <h3>HR and payroll</h3>
-      <p><strong>HR</strong> holds employment records. Salaries are encrypted, and every read of them is logged — including the list view. Payroll runs snapshot each active employee's pay, calculate PAYE and pension, and must be finalised by someone other than whoever created the run. Payslips are available as PDFs, and there is a bank transfer export.</p>
+      <p><strong>HR</strong> holds employment records. Salaries are encrypted, and every read of them is logged — including the list view. Payroll runs snapshot each active employee's pay, calculate statutory deductions, and must be finalised by someone other than whoever created the run. <strong>Statutory payroll is implemented for Nigeria (PAYE and pension) and the United Kingdom (PAYE, National Insurance and auto-enrolment, versioned by tax year).</strong> Anywhere else a run is refused outright rather than computed with the wrong rules — a payslip that is wrong about tax reaches both an employee and a revenue authority. Payslips are available as PDFs, and there is a bank transfer export.</p>
       <p>The module also covers recruitment, onboarding and offboarding checklists, document expiry reminders, appraisals, disciplinary case files, and final settlement when someone leaves.</p>
 
       <h3>Leave</h3>
