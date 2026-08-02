@@ -82,7 +82,7 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     "document.read", "document.write",
     "timetable.read", "timetable.write", "meeting.host", "exam.manage", "exam.release",
     "security.audit.read", "security.elevation.request", "security.elevation.approve",
-    "privacy.erasure.review", "privacy.compliance.manage", "message.read", "message.send", "event.read", "announcement.read", "event.write",
+    "privacy.erasure.review", "privacy.compliance.manage", "privacy.archive.manage", "message.read", "message.send", "event.read", "announcement.read", "event.write",
     "hr.read", "hr.self", "hr.write", "hr.salary.approve", "hr.payroll.run", "hr.appraisal.manage", "hr.disciplinary.manage", "hr.recruit.manage", "school.branding.manage", "rbac.manage", "admission.review", "directory.search", "announcement.manage", "announcement.read",
     "game.league.create", "game.leaderboard.read",
     "game.race.open", "game.race.tournament", "game.match.moderate", "game.quiz.host", "game.hangman.host", "game.typing.host",
@@ -112,7 +112,7 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     "document.read", "document.write",
     "timetable.read", "timetable.write", "meeting.host", "exam.manage", "exam.release",
     "security.audit.read", "security.elevation.request", "security.elevation.approve",
-    "privacy.erasure.review", "privacy.compliance.manage", "message.read", "message.send", "event.read", "announcement.read", "event.write",
+    "privacy.erasure.review", "privacy.compliance.manage", "privacy.archive.manage", "message.read", "message.send", "event.read", "announcement.read", "event.write",
     "hr.read", "hr.self", "hr.write", "hr.salary.approve", "hr.appraisal.manage", "hr.disciplinary.manage", "hr.recruit.manage", "school.branding.manage", "rbac.manage", "admission.review", "directory.search", "announcement.manage", "announcement.read",
     // School admin approves end-of-session promotions (maker-checker checker).
     "class.promote.approve",

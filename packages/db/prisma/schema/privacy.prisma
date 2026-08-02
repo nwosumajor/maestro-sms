@@ -93,3 +93,50 @@ model DataBreachIncident {
   @@index([schoolId, status])
   @@map("data_breach_incident")
 }
+
+/// A point-in-time archive of the school's whole institutional record for one
+/// academic session — the artifact a principal produces so that a question asked
+/// in ten years can still be answered.
+///
+/// WHY THIS EXISTS RATHER THAN "restore a backup": a backup is disaster
+/// recovery. Answering one question about one pupil from 2018 by restoring a
+/// database is a multi-hour operation needing spare infrastructure, and the
+/// off-site archives only reach 365 days. This is a retrieval artifact instead:
+/// one object, downloadable through the vault's normal audited path.
+///
+/// It is also the ONLY thing that survives retention. The telemetry sweeps
+/// deliberately delete on a schedule; whatever is not archived is genuinely gone.
+///
+/// NEVER AUTO-DELETED. A retention rule that removed these would defeat the sole
+/// purpose of having them. Removing one is a deliberate, audited act.
+model SchoolArchive {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  /// The academic session archived, and a human label ("2025/2026").
+  sessionId    String? @db.Uuid
+  label        String
+  /// Object-storage key for the archive body.
+  storageKey   String  @unique
+  /// SHA-256 of the stored bytes. An archive someone could have edited is worth
+  /// little in an investigation, so its integrity is checkable on retrieval.
+  checksum     String
+  sizeBytes    Int
+  /// Row counts per section, so "what is in here" is answerable without
+  /// downloading it — and so a suspiciously empty archive is visible.
+  sections     Json
+  /// CONTAINS DECRYPTED STAFF SALARIES. Recorded explicitly because it governs
+  /// who may download it: field encryption uses a key that may be rotated or
+  /// gone in ten years, so an archive of ciphertext would be useless — the
+  /// figures are decrypted at archive time and the artifact is gated instead.
+  containsHrPii Boolean @default(true)
+
+  createdById String   @db.Uuid
+  createdAt   DateTime @default(now())
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, createdAt])
+  @@map("school_archive")
+}

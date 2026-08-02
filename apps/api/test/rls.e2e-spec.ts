@@ -69,6 +69,7 @@ d("RLS cross-tenant isolation", () => {
   const platformDelegationA = randomUUID();
   const breachIncidentA = randomUUID();
   const mmIntentA = randomUUID();
+const schoolArchiveA = randomUUID();
   const scanEventA = randomUUID();
   const teacherUnavailA = randomUUID();
   const grantA = randomUUID();
@@ -743,6 +744,12 @@ d("RLS cross-tenant isolation", () => {
        VALUES ($1,$2,$3,'MPESA',$4,50000,'KES','254712345678',now())`,
       [mmIntentA, A, "MM-RLS-" + mmIntentA.slice(0, 8), invoiceA],
     );
+    // A year archive for school A — the long-term retrieval artifact.
+    await a.query(
+      `INSERT INTO school_archive (id,"schoolId",label,"storageKey",checksum,"sizeBytes",sections,"createdById")
+       VALUES ($1,$2,'2025/2026',$3,'deadbeef',1024,'{}'::jsonb,$4)`,
+      [schoolArchiveA, A, "schools/" + A + "/archives/rls-" + schoolArchiveA.slice(0, 8) + ".json", userA],
+    );
     // Term-weighted subject result (student userA, subjectA, termA/sessionA).
     await a.query(
       `INSERT INTO subject_result (id,"schoolId","sessionId","termId","classId","subjectId","studentId",exam,total,grade,status,"updatedAt")
@@ -1254,6 +1261,7 @@ d("RLS cross-tenant isolation", () => {
       "platform_delegation",
       "data_breach_incident",
       "mobile_money_intent",
+      "school_archive",
       "exam_attendance",
       "exam_invigilator",
       "exam_seat",
@@ -1374,6 +1382,7 @@ d("RLS cross-tenant isolation", () => {
     ["platform_delegation", platformDelegationA],
     ["data_breach_incident", breachIncidentA],
     ["mobile_money_intent", mmIntentA],
+    ["school_archive", schoolArchiveA],
     ["exam_attendance", examAttendanceA],
     ["exam_seat", examSeatA],
     ["exam_invigilator", examInvigilatorA],
