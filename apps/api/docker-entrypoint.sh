@@ -171,6 +171,7 @@ apply_rls packages/db/prisma/rls/98_attendance_rollup_rls.sql attendance_term_ro
 apply_rls packages/db/prisma/rls/99_platform_delegation_rls.sql platform_delegation_update
 apply_rls packages/db/prisma/rls/100_data_breach_rls.sql data_breach_incident_update
 apply_rls packages/db/prisma/rls/101_mobile_money_rls.sql mobile_money_intent_update
+apply_rls packages/db/prisma/rls/102_school_archive_rls.sql school_archive_insert
 
 # Seed on first provision (compose: SEED_ON_START=true; cloud migrate task: always).
 if [ "${SEED_ON_START}" = "true" ] || [ "$MODE" = "migrate" ]; then

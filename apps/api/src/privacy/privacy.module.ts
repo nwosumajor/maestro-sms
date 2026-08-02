@@ -3,6 +3,8 @@ import { PrivacyController } from "./privacy.controller";
 import { ComplianceService } from "./compliance.service";
 import { ComplianceController } from "./compliance.controller";
 import { PrivacyService } from "./privacy.service";
+import { SchoolArchiveService } from "./archive.service";
+import { SchoolArchiveController } from "./archive.controller";
 import { STORAGE_PROVIDER, StubStorageProvider } from "../documents/storage.provider";
 import { S3StorageProvider } from "../documents/s3-storage.provider";
 
@@ -12,13 +14,13 @@ import { S3StorageProvider } from "../documents/s3-storage.provider";
 // delete the subject's uploaded submission files (STORAGE_PROVIDER=s3 -> real
 // presigner/deleter; otherwise the local stub).
 @Module({
-  controllers: [PrivacyController, ComplianceController],
+  controllers: [PrivacyController, ComplianceController, SchoolArchiveController],
   providers: [
     PrivacyService,
     {
       provide: STORAGE_PROVIDER,
       useClass: process.env.STORAGE_PROVIDER === "s3" ? S3StorageProvider : StubStorageProvider,
-    }, ComplianceService],
+    }, ComplianceService, SchoolArchiveService],
   exports: [PrivacyService],
 })
 export class PrivacyModule {}

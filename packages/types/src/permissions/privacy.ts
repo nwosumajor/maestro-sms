@@ -14,6 +14,16 @@ export const PRIVACY_PERMISSIONS = {
    *  Separate from erasure review because the people who answer a DPO are not
    *  necessarily the people who decide an individual's erasure request. */
   COMPLIANCE_MANAGE: "privacy.compliance.manage",
+  /**
+   * Produce and retrieve a year's institutional archive.
+   *
+   * ITS OWN PERMISSION, not folded into compliance.manage: an archive carries
+   * the WHOLE record for a year — every pupil's file plus staff employment and
+   * DECRYPTED salaries — in a single downloadable object. That is a wider blast
+   * radius than anything else one permission grants, so it is held deliberately
+   * rather than inherited by whoever happens to handle breach paperwork.
+   */
+  ARCHIVE_MANAGE: "privacy.archive.manage",
 } as const;
 
 export type PrivacyPermission =

@@ -336,6 +336,7 @@ model School {
   // daily class register above: this is who sat an exam, not who was in school.
   examAttendance           ExamAttendance[]
   AttendanceTermRollup     AttendanceTermRollup[]
+  archives             SchoolArchive[]
 
   @@map("school")
 }
