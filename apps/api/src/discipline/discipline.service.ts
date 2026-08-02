@@ -13,6 +13,7 @@ import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundEx
 import type { DisciplineComplaintDto, DisciplineEvidencePresignDto, IdNameDto, PageDto } from "@sms/types";
 import { decodeCursor, pageLimit, seekWhere, toPage } from "../common/keyset-cursor";
 import { STORAGE_PROVIDER, type StorageProvider } from "../documents/storage.provider";
+import { NotificationService } from "../notifications/notification.service";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -33,6 +34,7 @@ export class DisciplineService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     @Inject(STORAGE_PROVIDER) private readonly storage: StorageProvider,
+    private readonly notifications: NotificationService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -102,18 +104,100 @@ export class DisciplineService {
   }
 
   /** Record an action/resolution + status. Human decision only (Golden Rule #8). */
+  /**
+   * Record the human decision on a complaint.
+   *
+   * TWO THINGS THIS DELIBERATELY DOES BEYOND WRITING THE ROW.
+   *
+   * 1. IT TELLS THE FAMILY. A disciplinary outcome is a permanent record against
+   *    a child's name, and until now nothing in this module notified anyone at
+   *    all — a sanction could be recorded, and later revised, with the guardians
+   *    never told. Notified on the DECISION, not on filing: a complaint is an
+   *    allegation nobody has reviewed yet, and alerting a parent the instant
+   *    anyone files one would both pre-judge it and hand a malicious filer a way
+   *    to upset a family at will.
+   *
+   * 2. IT KEEPS THE PREVIOUS DECISION. `resolution` is a mutable column, so a
+   *    recorded outcome could be overwritten and the earlier one would simply be
+   *    gone. Any change to an already-decided complaint now writes an APPEND-ONLY
+   *    entry naming what it was, what it became and who changed it. The entry
+   *    table cannot be edited, so the history of a child's record is
+   *    tamper-evident even though the current value is not immutable.
+   */
   async resolve(p: Principal, complaintId: string, input: { status: string; resolution?: string }): Promise<DisciplineComplaintDto> {
     this.requireManage(p);
     if (!STATUSES.includes(input.status)) throw new BadRequestException("invalid status");
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      await this.requireComplaint(tx, complaintId);
+    const outcome = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const before = (await tx.disciplineComplaint.findFirst({
+        where: { id: complaintId },
+        select: { status: true, resolution: true, againstId: true, againstType: true, subject: true },
+      })) as {
+        status: string; resolution: string | null; againstId: string; againstType: string; subject: string;
+      } | null;
+      if (!before) throw new NotFoundException("Not found");
+
+      // Revising a decision that was already recorded: keep the old one.
+      const wasDecided = before.status === "RESOLVED" || before.status === "DISMISSED";
+      const resolutionChanged =
+        input.resolution !== undefined && (before.resolution ?? "") !== input.resolution;
+      if (wasDecided && (before.status !== input.status || resolutionChanged)) {
+        await tx.disciplineEntry.create({
+          data: {
+            schoolId: p.schoolId,
+            complaintId,
+            authorId: p.userId,
+            body:
+              `Decision revised: ${before.status} → ${input.status}.` +
+              (resolutionChanged ? ` Previous outcome recorded: "${before.resolution ?? "(none)"}".` : ""),
+          },
+        });
+      }
+
       await tx.disciplineComplaint.update({
         where: { id: complaintId },
         data: { status: input.status, ...(input.resolution !== undefined ? { resolution: input.resolution } : {}) },
       });
-      await this.log(tx, p, "discipline.resolve", complaintId, { status: input.status });
-      return this.complaintDto(tx, complaintId);
+      await this.log(tx, p, "discipline.resolve", complaintId, {
+        status: input.status,
+        previousStatus: before.status,
+        revisedDecision: wasDecided,
+      });
+
+      // Who to tell. A student's guardians as well as the student; a teacher only
+      // themselves — a colleague's disciplinary matter is not the school's news.
+      let recipients: string[] = [];
+      if (before.againstType === "STUDENT") {
+        const guardians = (await tx.parentChild.findMany({
+          where: { studentId: before.againstId },
+          select: { parentId: true },
+        })) as Array<{ parentId: string }>;
+        recipients = [...new Set([before.againstId, ...guardians.map((g) => g.parentId)])];
+      } else {
+        recipients = [before.againstId];
+      }
+      const dto = await this.complaintDto(tx, complaintId);
+      return { dto, recipients, before, decided: input.status === "RESOLVED" || input.status === "DISMISSED" };
     });
+
+    // AFTER the committed write, like every other notify path here: a delivery
+    // failure must never undo a recorded decision.
+    if (outcome.decided && outcome.recipients.length > 0) {
+      const title =
+        outcome.before.againstType === "STUDENT"
+          ? "A disciplinary matter has been concluded"
+          : "A disciplinary matter concerning you has been concluded";
+      try {
+        await this.notifications.enqueueMany(this.ctx(p), outcome.recipients, {
+          type: "DISCIPLINE_OUTCOME",
+          title,
+          body: `"${outcome.before.subject}" was concluded. Please contact the school office for the details.`,
+          data: { complaintId },
+        });
+      } catch {
+        // Best effort — see above.
+      }
+    }
+    return outcome.dto;
   }
 
   // --- evidence -------------------------------------------------------------

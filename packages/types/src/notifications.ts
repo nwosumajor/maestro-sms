@@ -17,6 +17,10 @@ export const ESSENTIAL_NOTIFICATION_TYPES = [
   "OPERATOR_ALERT",
   "ADMIN_APPOINTMENT",
   "ONBOARDING",
+  // A recorded disciplinary outcome concerning a child. ESSENTIAL deliberately:
+  // a guardian must not be able to mute, by accident or otherwise, the message
+  // telling them a sanction was recorded against their child's name.
+  "DISCIPLINE_OUTCOME",
 ] as const;
 
 /** The noisy, opt-out-able types offered as per-type mute toggles in the UI.
