@@ -34,7 +34,12 @@ import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
 import { NotificationService } from "../notifications/notification.service";
 import { PaystackService, type PaystackEvent } from "../payments/paystack.service";
 
-const STAFF_WIDE = ["accountant", "school_admin", "principal", "super_admin"];
+// SECURITY: no super_admin. A platform user has NO standing role scope over a
+// tenant's data — the supported route to it is impersonation, which is step-up
+// gated, time limited and audited against the operator by name. This set was the
+// last survivor of the 31 that were removed, missed because it is a plain array
+// while the gate only matched `new Set([...])`.
+const STAFF_WIDE = ["accountant", "school_admin", "principal"];
 
 @Injectable()
 export class PaymentPlansService {
