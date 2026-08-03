@@ -9,7 +9,7 @@
 
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { AcademicSessionDto, CalendarSession, CalendarTerm, SchoolHolidayDto, TermDto } from "@sms/types";
-import { dayUtc, pickNextTerm, standardTermDates, termHasElapsed, validateSessionDates, validateTermDates } from "@sms/types";
+import { assessCalendar, dayUtc, pickNextTerm, standardTermDates, termHasElapsed, validateSessionDates, validateTermDates, type CalendarFinding } from "@sms/types";
 
 interface HolidayRow {
   id: string;
@@ -141,6 +141,34 @@ export class AcademicService {
 
   private ctx(p: Principal): TenantContext {
     return { schoolId: p.schoolId, userId: p.userId };
+  }
+
+  /**
+   * What is wrong with this school's calendar, and what it has switched off.
+   *
+   * Reads the SAME shape listSessions returns, so the panel can never disagree
+   * with the screen it sits on. Pure assessment: it refuses nothing, because a
+   * school mid-setup is legitimately incomplete — it only removes the silence.
+   */
+  async calendarHealth(p: Principal): Promise<CalendarFinding[]> {
+    const sessions = await this.listSessions(p);
+    return assessCalendar(
+      sessions.map((s) => ({
+        id: s.id,
+        name: s.name,
+        isCurrent: s.isCurrent,
+        startDate: s.startDate as string | Date | null,
+        endDate: s.endDate as string | Date | null,
+        terms: s.terms.map((t) => ({
+          id: t.id,
+          name: t.name,
+          sequence: t.sequence,
+          isCurrent: t.isCurrent,
+          startDate: t.startDate as string | Date | null,
+          endDate: t.endDate as string | Date | null,
+        })),
+      })),
+    );
   }
 
   async listSessions(p: Principal): Promise<AcademicSessionDto[]> {

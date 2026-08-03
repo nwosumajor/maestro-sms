@@ -1,4 +1,4 @@
-import type { AcademicSessionDto, ClassDto, ClassOverviewDto, PromotionBatchDto, SchoolHolidayDto, SubjectDto, Serialized } from "@sms/types";
+import type { AcademicSessionDto, ClassDto, ClassOverviewDto, PromotionBatchDto, SchoolHolidayDto, SubjectDto, Serialized, CalendarFinding } from "@sms/types";
 import Link from "next/link";
 import { hasPermission } from "@/lib/permissions";
 import { auth } from "@/lib/auth";
@@ -11,6 +11,7 @@ import { ClassGrid } from "@/components/lms/ClassGrid";
 import { ClassSubjectsAdmin } from "@/components/lms/ClassSubjectsAdmin";
 import { PromotionManager } from "@/components/lms/PromotionManager";
 import { AcademicCalendar } from "@/components/lms/AcademicCalendar";
+import { CalendarHealth } from "@/components/lms/CalendarHealth";
 import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
@@ -28,7 +29,7 @@ export default async function ClassesPage() {
   // Server-side kind filtering: staff for teacher/supervisor pickers, parents for
   // guardian linking — students never pollute a staff picker (and the payload
   // stays small in a large school).
-  const [overview, students, staff, subjects, promotions, sessions, rooms, holidays] = await Promise.all([
+  const [overview, students, staff, subjects, promotions, sessions, rooms, holidays, calendarFindings] = await Promise.all([
     // ONE request carries the class list AND the figures it is managed by; the
     // counts are grouped server-side, so this costs the same at sixty classes.
     apiGet<Serialized<ClassOverviewDto>[]>("/classes/overview"),
@@ -44,6 +45,9 @@ export default async function ClassesPage() {
     // Offering fixed-room picker (CSP input); null (no timetable.read) hides it.
     canManageSubjects ? apiGet<{ id: string; name: string }[]>("/timetable/rooms") : Promise.resolve(null),
     canManageAcademic ? apiGet<Serialized<SchoolHolidayDto>[]>("/academic/holidays") : Promise.resolve(null),
+    // What an incomplete calendar has switched off. Same source as the sessions
+    // above, so the panel cannot disagree with the editor beside it.
+    canManageAcademic ? apiGet<CalendarFinding[]>("/academic/health") : Promise.resolve(null),
   ]);
 
   // The admin panels only need id/name/level/nextClassId/supervisorId — all of which
@@ -79,6 +83,7 @@ export default async function ClassesPage() {
           <ClassSubjectsAdmin classes={classes} subjects={subjects} users={staff} rooms={rooms ?? []} />
         )}
 
+        {canManageAcademic && <CalendarHealth findings={calendarFindings ?? []} />}
         {canManageAcademic && sessions && <AcademicCalendar sessions={sessions} holidays={holidays ?? []} />}
 
         {canPromote && classes && promotions && (
