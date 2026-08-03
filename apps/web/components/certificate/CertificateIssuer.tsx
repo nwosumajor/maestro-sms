@@ -4,6 +4,10 @@
 // generated PDF (the POST streams a PDF, so we fetch as a blob and save it).
 
 import * as React from "react";
+
+// /certificates/history/:subjectId existed with no screen, so a clerk could
+// issue a duplicate certificate to the same pupil with nothing to warn them.
+type Issued = { id: string; type: string; title: string | null; serial: string; issuedAt: string };
 import { StudentPicker } from "@/components/people/StudentPicker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +25,18 @@ export function CertificateIssuer({ staff, students = [] }: { staff: Person[]; s
   const [category, setCategory] = React.useState<"STUDENT" | "STAFF">("STUDENT");
   const people = category === "STUDENT" ? students : staff;
   const [subjectId, setSubjectId] = React.useState(students[0]?.id ?? "");
+  const [history, setHistory] = React.useState<Issued[]>([]);
+  React.useEffect(() => {
+    if (!subjectId) return void setHistory([]);
+    let live = true;
+    void (async () => {
+      const r = await fetch(`/api/sms/certificates/history/${subjectId}`);
+      if (live && r.ok) setHistory((await r.json()) as Issued[]);
+    })();
+    return () => {
+      live = false;
+    };
+  }, [subjectId]);
   const [title, setTitle] = React.useState("");
   const [body, setBody] = React.useState("");
   const [busy, setBusy] = React.useState(false);
@@ -94,6 +110,24 @@ export function CertificateIssuer({ staff, students = [] }: { staff: Person[]; s
           <div className="flex flex-wrap items-end gap-2">
             <div className="space-y-1.5"><Label>Title (optional)</Label><Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Certificate of Completion" /></div>
             <div className="space-y-1.5 flex-1 min-w-60"><Label>Body (optional)</Label><Input value={body} onChange={(e) => setBody(e.target.value)} placeholder="has successfully completed…" /></div>
+          </div>
+        )}
+
+        {/* Already issued to this person. Shown BEFORE the issue button is
+            pressed, because the point is to prevent the duplicate, not to
+            explain it afterwards. */}
+        {history.length > 0 && (
+          <div className="mt-3 rounded-md border border-border bg-muted/40 p-2">
+            <div className="mb-1 text-xs font-medium">
+              Already issued to this person ({history.length})
+            </div>
+            <ul className="space-y-0.5">
+              {history.slice(0, 6).map((h) => (
+                <li key={h.id} className="text-xs text-muted-foreground">
+                  {h.title || h.type} · {h.serial} · {new Date(h.issuedAt).toLocaleDateString()}
+                </li>
+              ))}
+            </ul>
           </div>
         )}
       </CardContent>

@@ -2,6 +2,7 @@ import type { AcademicSessionDto, IdNameDto, StudentSessionReportDto, Serialized
 import { hasPermission } from "@/lib/permissions";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
+import { MyMarks } from "@/components/gradebook/MyMarks";
 import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { GradingConsole } from "@/components/gradebook/GradingConsole";
@@ -59,6 +60,11 @@ export default async function GradebookPage() {
         <PageHeader title={<>Grades</>} subtitle={<>{canGrade
               ? "Enter each student's exam, midterm, assignment and class-note scores for a subject and term; the weighted total (exam 60% · midterm 20% · assignment 10% · class note 10%) is calculated automatically. Submitting for publication routes through head-teacher and principal approval before families see the grades."
               : "Your published results for each subject, term by term, across the session."}</>} />
+
+        {/* A pupil's own marks, assessment by assessment. The report card is
+            term-WEIGHTED and shows a total; this is the detail behind it, and
+            /grades/mine had no page fetching it. */}
+        {!isStaff && <MyMarks />}
 
         {canPickSubjects && <SubjectPicker />}
         {showReviewPanel && <SelectionReview userId={user.id} canApproveFinal={canApproveSelections} />}
