@@ -2,8 +2,8 @@
   "generatedFrom": "753 routes",
   "routes": {
     "DELETE /academic/holidays/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in app/(app)/calendar/page.tsx builds this path"
     },
     "DELETE /admin/users/:p/roles/:p": {
       "kind": "ui",
@@ -14,8 +14,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "DELETE /awards/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: reached from components/lms/Awards.tsx"
     },
     "DELETE /classes/:p": {
       "kind": "ui",
@@ -30,20 +30,20 @@
       "note": "referenced by a literal path in apps/web"
     },
     "DELETE /discussion/comments/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: reached from components/discussion/DiscussionHub.tsx"
     },
     "DELETE /discussion/posts/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/discussion/DiscussionHub.tsx builds this path"
     },
     "DELETE /documents/:p": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
     "DELETE /events/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/calendar/EventForm.tsx builds this path"
     },
     "DELETE /exams/:p": {
       "kind": "ui",
@@ -62,20 +62,20 @@
       "note": "referenced by a literal path in apps/web"
     },
     "DELETE /hr/attendance/devices/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: reached from components/hr/AttendanceAdmin.tsx"
     },
     "DELETE /hr/attendance/enrollments/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: reached from components/hr/AttendanceAdmin.tsx"
     },
     "DELETE /hr/components/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: reached from components/hr/CompensationPanel.tsx"
     },
     "DELETE /hr/duty/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: reached from components/hr/DutyRoster.tsx"
     },
     "DELETE /library/books/:p": {
       "kind": "ui",
@@ -90,12 +90,12 @@
       "note": "referenced by a literal path in apps/web"
     },
     "DELETE /modules/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: reached from components/workflow/OtherApprovals.tsx"
     },
     "DELETE /operator/platform-role-audit/:p/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "gap",
+      "note": "revokes a misplaced platform role \u2014 no screen; the audit that surfaces them has none either"
     },
     "DELETE /quizzes/:p": {
       "kind": "ui",
@@ -110,8 +110,8 @@
       "note": "reached via a runtime-built path (web builds \"/students/:p/contacts\")"
     },
     "DELETE /subjects/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in app/(app)/classes/page.tsx builds this path"
     },
     "DELETE /timetable/cover/:p": {
       "kind": "ui",
@@ -134,20 +134,20 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /admin/export/staff.csv": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "gap",
+      "note": "staff CSV export with no download link on any page"
     },
     "GET /admin/export/students.csv": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "gap",
+      "note": "student roster CSV with no download link on any page"
     },
     "GET /admin/parents/import": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
     "GET /admin/parents/import/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in app/(app)/admin/parents/page.tsx builds this path"
     },
     "GET /admin/parents/import/template": {
       "kind": "ui",
@@ -166,8 +166,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /admin/students/import/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/admin/SisImport.tsx builds this path"
     },
     "GET /admin/students/import/template": {
       "kind": "ui",
@@ -182,8 +182,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /admissions/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/admissions/AdmissionsReview.tsx builds this path"
     },
     "GET /admissions/settings/form-fee": {
       "kind": "ui",
@@ -198,8 +198,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /analytics/overview.csv": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: reached from app/(app)/analytics/page.tsx"
     },
     "GET /announcements": {
       "kind": "ui",
@@ -226,12 +226,12 @@
       "note": "reached via a runtime-built path (web builds \"/assessments/:p/submissions\")"
     },
     "GET /assessments/:p/take": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/assessment/CreateAssessment.tsx builds this path"
     },
     "GET /attendance/by-class": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: reached from components/attendance/ClassAttendanceBoard.tsx"
     },
     "GET /attendance/registers": {
       "kind": "ui",
@@ -246,8 +246,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /auth/refresh": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "system",
+      "note": "Auth.js session refresh \u2014 called by the session layer, never by a person"
     },
     "GET /billing": {
       "kind": "ui",
@@ -274,8 +274,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /cbt/banks/:p/availability": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in app/(app)/cbt/page.tsx builds this path"
     },
     "GET /cbt/banks/:p/questions": {
       "kind": "ui",
@@ -286,8 +286,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /cbt/exams/:p/integrity": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in app/(app)/cbt/page.tsx builds this path"
     },
     "GET /cbt/exams/:p/marking": {
       "kind": "ui",
@@ -310,8 +310,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /certificates/history/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "gap",
+      "note": "per-member certificate history \u2014 no screen"
     },
     "GET /checkers": {
       "kind": "ui",
@@ -446,12 +446,12 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /discipline/complaints/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/discipline/DisciplineRoom.tsx builds this path"
     },
     "GET /discipline/complaints/:p/evidence/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/discipline/DisciplineRoom.tsx builds this path"
     },
     "GET /discipline/file-targets": {
       "kind": "ui",
@@ -466,8 +466,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /discussion/search": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "gap",
+      "note": "discussion search \u2014 the hub has no search box"
     },
     "GET /documents": {
       "kind": "ui",
@@ -478,8 +478,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /documents/:p/download": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/documents/DocumentUpload.tsx builds this path"
     },
     "GET /documents/:p/file": {
       "kind": "ui",
@@ -530,8 +530,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /feedback/:p/thread": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/feedback/FeedbackClient.tsx builds this path"
     },
     "GET /feedback/mine": {
       "kind": "ui",
@@ -542,8 +542,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /fees/disputes/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/fees/DisputeRespondForm.tsx builds this path"
     },
     "GET /fees/export/journal.csv": {
       "kind": "ui",
@@ -590,12 +590,12 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /grades/mine": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "gap",
+      "note": "a student's own grades \u2014 no page fetches it"
     },
     "GET /group/overview": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: reached from components/group/GroupBoard.tsx"
     },
     "GET /group/overview.csv": {
       "kind": "ui",
@@ -615,7 +615,7 @@
     },
     "GET /health": {
       "kind": "system",
-      "note": "liveness probe — infrastructure, not a screen"
+      "note": "liveness probe \u2014 infrastructure, not a screen"
     },
     "GET /hostels": {
       "kind": "ui",
@@ -654,12 +654,12 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /hr/attendance/devices": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: reached from components/hr/AttendanceAdmin.tsx"
     },
     "GET /hr/attendance/enrollments": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: reached from components/hr/AttendanceAdmin.tsx"
     },
     "GET /hr/attendance/kiosk": {
       "kind": "ui",
@@ -686,8 +686,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /hr/duty": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in app/(app)/leave/page.tsx builds this path"
     },
     "GET /hr/duty/me": {
       "kind": "ui",
@@ -770,24 +770,24 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /hr/payroll/runs/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/hr/PayrollManager.tsx builds this path"
     },
     "GET /hr/payroll/runs/:p/bank-export": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
     "GET /hr/payroll/runs/:p/payslips/:p/pdf": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in app/(app)/hr/payroll/page.tsx builds this path"
     },
     "GET /hr/payroll/runs/:p/remittance": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
     "GET /hr/recruitment/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: reached from components/hr/RecruitmentManager.tsx"
     },
     "GET /hr/recruitment/applicants": {
       "kind": "ui",
@@ -818,8 +818,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /integrity/retention/runs": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "gap",
+      "note": "retention run history \u2014 nothing shows an operator what was purged"
     },
     "GET /invoices": {
       "kind": "ui",
@@ -854,20 +854,20 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /library/books/export.csv": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/library/LibraryManager.tsx builds this path"
     },
     "GET /library/loans": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
     "GET /library/report": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "gap",
+      "note": "library report \u2014 the library page does not render it"
     },
     "GET /live/:p/attendance": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: components/lms/LiveSessions.tsx builds this via its local req() helper"
     },
     "GET /meetings/bookings/mine": {
       "kind": "ui",
@@ -890,8 +890,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /messages/search": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "gap",
+      "note": "message search \u2014 the thread list has no search box"
     },
     "GET /messages/threads": {
       "kind": "ui",
@@ -903,7 +903,7 @@
     },
     "GET /metrics": {
       "kind": "system",
-      "note": "Prometheus scrape — token-gated, not a screen"
+      "note": "Prometheus scrape \u2014 token-gated, not a screen"
     },
     "GET /my/learning": {
       "kind": "ui",
@@ -954,8 +954,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /operator/countries": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "gap",
+      "note": "region catalogue for a picker that was never built"
     },
     "GET /operator/directory": {
       "kind": "ui",
@@ -966,8 +966,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /operator/feedback/:p/thread": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/feedback/FeedbackInbox.tsx builds this path"
     },
     "GET /operator/feedback/stats": {
       "kind": "ui",
@@ -1006,8 +1006,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /operator/platform-role-audit": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "gap",
+      "note": "security finding report \u2014 no operator screen renders it"
     },
     "GET /operator/platform-staff": {
       "kind": "ui",
@@ -1086,20 +1086,20 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /promotions/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/lms/PromotionManager.tsx builds this path"
     },
     "GET /public/plan-pricing": {
       "kind": "system",
-      "note": "public read (plan pricing, directory) — consumed by marketing pages"
+      "note": "public read (plan pricing, directory) \u2014 consumed by marketing pages"
     },
     "GET /public/schools": {
       "kind": "system",
-      "note": "public read (plan pricing, directory) — consumed by marketing pages"
+      "note": "public read (plan pricing, directory) \u2014 consumed by marketing pages"
     },
     "GET /public/schools/:p/branding": {
       "kind": "system",
-      "note": "public read (plan pricing, directory) — consumed by marketing pages"
+      "note": "public read (plan pricing, directory) \u2014 consumed by marketing pages"
     },
     "GET /quiz-sessions": {
       "kind": "ui",
@@ -1118,8 +1118,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /race-tournaments/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "gap",
+      "note": "cross-class race tournament \u2014 the games hub lists races, not tournaments"
     },
     "GET /races": {
       "kind": "ui",
@@ -1234,16 +1234,16 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /submissions/:p/grade": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: reached from components/gradebook/GradingConsole.tsx"
     },
     "GET /tasks": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
     "GET /tasks/:p/assignments/:p/attachment": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/task/TaskBoard.tsx builds this path"
     },
     "GET /term-results/broadsheet": {
       "kind": "ui",
@@ -1366,8 +1366,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /workflows/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in app/(app)/admin/page.tsx builds this path"
     },
     "GET /workflows/approvers": {
       "kind": "ui",
@@ -1382,8 +1382,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "PATCH /fees/items/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/fees/FeesAdmin.tsx builds this path"
     },
     "PATCH /students/:p/contacts/:p": {
       "kind": "ui",
@@ -1398,8 +1398,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "PATCH /timetable/rooms/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/timetable/TimetableAdmin.tsx builds this path"
     },
     "POST /academic/advance-term": {
       "kind": "ui",
@@ -1411,23 +1411,23 @@
     },
     "POST /academic/progression/run": {
       "kind": "system",
-      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
+      "note": "manual trigger for a SCHEDULED job \u2014 ops/runbook surface, not day-to-day UI"
     },
     "POST /academic/sessions": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
     "POST /academic/sessions/:p/terms": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in app/(app)/gradebook/page.tsx builds this path"
     },
     "POST /academic/sessions/standard": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in app/(app)/gradebook/page.tsx builds this path"
     },
     "POST /academic/sync-current": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: reached from components/lms/AcademicCalendar.tsx"
     },
     "POST /admin/import/students": {
       "kind": "ui",
@@ -1442,28 +1442,28 @@
       "note": "referenced by a literal path in apps/web"
     },
     "POST /admin/parents/import/:p/approve": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in app/(app)/admin/parents/page.tsx builds this path"
     },
     "POST /admin/parents/import/:p/reject": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in app/(app)/admin/parents/page.tsx builds this path"
     },
     "POST /admin/sis/nudge/run": {
       "kind": "system",
-      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
+      "note": "manual trigger for a SCHEDULED job \u2014 ops/runbook surface, not day-to-day UI"
     },
     "POST /admin/students/import": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
     "POST /admin/students/import/:p/approve": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/admin/SisImport.tsx builds this path"
     },
     "POST /admin/students/import/:p/reject": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/admin/SisImport.tsx builds this path"
     },
     "POST /admin/users": {
       "kind": "ui",
@@ -1522,20 +1522,20 @@
       "note": "reached via a runtime-built path (web builds \"/assessments/:p/submissions\")"
     },
     "POST /attempts/:p/grade-essays": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: reached from components/lms/ContentDetail.tsx"
     },
     "POST /attendance/rollup/refresh": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "system",
+      "note": "manual trigger for a SCHEDULED rollup \u2014 ops/runbook surface"
     },
     "POST /auth/change-password": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
     "POST /auth/login": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "system",
+      "note": "Auth.js session layer (apps/web/lib/auth.ts) \u2014 the login PAGE is the surface; this is its plumbing"
     },
     "POST /billing/checkout/init": {
       "kind": "ui",
@@ -1547,7 +1547,7 @@
     },
     "POST /billing/dunning/run": {
       "kind": "system",
-      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
+      "note": "manual trigger for a SCHEDULED job \u2014 ops/runbook surface, not day-to-day UI"
     },
     "POST /billing/referral/code": {
       "kind": "ui",
@@ -1555,7 +1555,7 @@
     },
     "POST /billing/stripe/webhook": {
       "kind": "system",
-      "note": "gateway callback — the caller is the payment provider"
+      "note": "gateway callback \u2014 the caller is the payment provider"
     },
     "POST /billing/true-up/init": {
       "kind": "ui",
@@ -1574,16 +1574,16 @@
       "note": "referenced by a literal path in apps/web"
     },
     "POST /cbt/exams/:p/record-grades": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in app/(app)/cbt/page.tsx builds this path"
     },
     "POST /cbt/exams/:p/request-answer-release": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in app/(app)/cbt/page.tsx builds this path"
     },
     "POST /cbt/exams/:p/request-publish": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in app/(app)/cbt/page.tsx builds this path"
     },
     "POST /cbt/exams/:p/start": {
       "kind": "ui",
@@ -1658,8 +1658,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "POST /classes": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/gradebook/GradingConsole.tsx builds this path"
     },
     "POST /classes/:p/attendance": {
       "kind": "ui",
@@ -1774,12 +1774,12 @@
       "note": "referenced by a literal path in apps/web"
     },
     "POST /discipline/complaints/:p/evidence/confirm": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/discipline/DisciplineRoom.tsx builds this path"
     },
     "POST /discipline/complaints/:p/evidence/presign": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/discipline/DisciplineRoom.tsx builds this path"
     },
     "POST /discipline/complaints/:p/resolve": {
       "kind": "ui",
@@ -1802,8 +1802,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "POST /documents/:p/confirm": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/documents/DocumentUpload.tsx builds this path"
     },
     "POST /documents/:p/upload-bytes": {
       "kind": "ui",
@@ -1850,8 +1850,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "POST /feedback/:p/reply": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/feedback/FeedbackClient.tsx builds this path"
     },
     "POST /fees/adjustments/:p/decide": {
       "kind": "ui",
@@ -1867,11 +1867,11 @@
     },
     "POST /fees/reconciliation/run": {
       "kind": "system",
-      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
+      "note": "manual trigger for a SCHEDULED job \u2014 ops/runbook surface, not day-to-day UI"
     },
     "POST /fees/reminders/run": {
       "kind": "system",
-      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
+      "note": "manual trigger for a SCHEDULED job \u2014 ops/runbook surface, not day-to-day UI"
     },
     "POST /forms": {
       "kind": "ui",
@@ -1910,8 +1910,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "POST /guardians": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: reached from components/admin/CreateUserForm.tsx"
     },
     "POST /hangman": {
       "kind": "ui",
@@ -1954,24 +1954,24 @@
       "note": "referenced by a literal path in apps/web"
     },
     "POST /hostels/allocations/transfer": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/hostel/HostelOps.tsx builds this path"
     },
     "POST /hostels/exeats": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
     "POST /hostels/exeats/:p/decide": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/hostel/HostelOps.tsx builds this path"
     },
     "POST /hostels/exeats/:p/depart": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/hostel/HostelOps.tsx builds this path"
     },
     "POST /hostels/exeats/:p/return": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/hostel/HostelOps.tsx builds this path"
     },
     "POST /hostels/fees/schedule": {
       "kind": "ui",
@@ -1986,8 +1986,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "POST /hr/appraisals/:p/submit": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in app/(app)/hr/staff/[userId]/page.tsx builds this path"
     },
     "POST /hr/attendance/:p/events": {
       "kind": "ui",
@@ -1998,28 +1998,28 @@
       "note": "referenced by a literal path in apps/web"
     },
     "POST /hr/attendance/devices": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: reached from components/hr/AttendanceAdmin.tsx"
     },
     "POST /hr/attendance/enrollments": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: reached from components/hr/AttendanceAdmin.tsx"
     },
     "POST /hr/attendance/mark": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: reached from components/hr/AttendanceAdmin.tsx"
     },
     "POST /hr/disciplinary/:p/entries": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in app/(app)/hr/staff/[userId]/page.tsx builds this path"
     },
     "POST /hr/disciplinary/:p/status": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in app/(app)/hr/staff/[userId]/page.tsx builds this path"
     },
     "POST /hr/duty": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in app/(app)/leave/page.tsx builds this path"
     },
     "POST /hr/employees/:p/components": {
       "kind": "ui",
@@ -2030,8 +2030,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "POST /hr/employment/changes/:p/decide": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in app/(app)/hr/staff/[userId]/page.tsx builds this path"
     },
     "POST /hr/exits": {
       "kind": "ui",
@@ -2066,32 +2066,32 @@
       "note": "referenced by a literal path in apps/web"
     },
     "POST /hr/payroll/runs/:p/finalize": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in app/(app)/hr/payroll/page.tsx builds this path"
     },
     "POST /hr/recruitment/:p/apply": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: reached from public /careers/[slug] page"
     },
     "POST /hr/recruitment/applicants/:p/convert": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
     "POST /hr/recruitment/applicants/:p/stage": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in app/(app)/hr/recruitment/page.tsx builds this path"
     },
     "POST /hr/recruitment/requisitions": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
     "POST /hr/recruitment/requisitions/:p/applicants": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in app/(app)/hr/recruitment/page.tsx builds this path"
     },
     "POST /hr/recruitment/requisitions/:p/status": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in app/(app)/hr/recruitment/page.tsx builds this path"
     },
     "POST /hr/salary/changes/:p/decide": {
       "kind": "ui",
@@ -2122,16 +2122,16 @@
       "note": "reached via a runtime-built path (web builds \"/hr/staff/:p\")"
     },
     "POST /hr/staff/checklist-items/:p/toggle": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: reached from components/hr/StaffLifecyclePanel.tsx"
     },
     "POST /hr/staff/documents/reminders/run": {
       "kind": "system",
-      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
+      "note": "manual trigger for a SCHEDULED job \u2014 ops/runbook surface, not day-to-day UI"
     },
     "POST /integrity/retention/run": {
       "kind": "system",
-      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
+      "note": "manual trigger for a SCHEDULED job \u2014 ops/runbook surface, not day-to-day UI"
     },
     "POST /invoices": {
       "kind": "ui",
@@ -2194,8 +2194,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "POST /live/:p/join": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: components/lms/LiveSessions.tsx builds this via its local req() helper"
     },
     "POST /meetings/bookings": {
       "kind": "ui",
@@ -2234,8 +2234,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "POST /operator/feedback/:p/reply": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/feedback/FeedbackInbox.tsx builds this path"
     },
     "POST /operator/feedback/:p/review": {
       "kind": "ui",
@@ -2247,7 +2247,7 @@
     },
     "POST /operator/feedback/digest/run": {
       "kind": "system",
-      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
+      "note": "manual trigger for a SCHEDULED job \u2014 ops/runbook surface, not day-to-day UI"
     },
     "POST /operator/groups": {
       "kind": "ui",
@@ -2302,28 +2302,28 @@
       "note": "referenced by a literal path in apps/web"
     },
     "POST /operator/tenants/:p/users/:p/mfa/reset": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/operator/OperatorUsers.tsx builds this path"
     },
     "POST /operator/tenants/:p/users/:p/reset-password": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/operator/OperatorUsers.tsx builds this path"
     },
     "POST /operator/tenants/:p/users/:p/unlock": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/operator/OperatorUsers.tsx builds this path"
     },
     "POST /payments/:p/approve": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: reached from components/fees/PendingPayments.tsx (action is a variable)"
     },
     "POST /payments/:p/reject": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: reached from components/fees/PendingPayments.tsx (action is a variable)"
     },
     "POST /payments/mobile-money/callback/:p": {
       "kind": "system",
-      "note": "rail callback — the caller is the payment provider"
+      "note": "rail callback \u2014 the caller is the payment provider"
     },
     "POST /payments/mobile-money/charge": {
       "kind": "ui",
@@ -2331,11 +2331,11 @@
     },
     "POST /payments/mobile-money/recovery/run": {
       "kind": "system",
-      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
+      "note": "manual trigger for a SCHEDULED job \u2014 ops/runbook surface, not day-to-day UI"
     },
     "POST /payments/webhook": {
       "kind": "system",
-      "note": "gateway callback — the caller is the payment provider"
+      "note": "gateway callback \u2014 the caller is the payment provider"
     },
     "POST /polls": {
       "kind": "ui",
@@ -2358,8 +2358,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "POST /privacy/archives/run-term-sweep": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "system",
+      "note": "manual trigger for a SCHEDULED job \u2014 ops/runbook surface"
     },
     "POST /privacy/compliance/breaches": {
       "kind": "ui",
@@ -2378,36 +2378,36 @@
       "note": "referenced by a literal path in apps/web"
     },
     "POST /promotions/:p/approve": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/lms/PromotionManager.tsx builds this path"
     },
     "POST /promotions/:p/reject": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/lms/PromotionManager.tsx builds this path"
     },
     "POST /public/admissions": {
       "kind": "system",
-      "note": "public intake (applications, careers, invites) — its own unauthenticated pages"
+      "note": "public intake (applications, careers, invites) \u2014 its own unauthenticated pages"
     },
     "POST /public/admissions/:p/pay/init": {
       "kind": "system",
-      "note": "public intake (applications, careers, invites) — its own unauthenticated pages"
+      "note": "public intake (applications, careers, invites) \u2014 its own unauthenticated pages"
     },
     "POST /public/invite/accept": {
       "kind": "system",
-      "note": "public intake (applications, careers, invites) — its own unauthenticated pages"
+      "note": "public intake (applications, careers, invites) \u2014 its own unauthenticated pages"
     },
     "POST /public/onboarding-requests": {
       "kind": "system",
-      "note": "public intake (applications, careers, invites) — its own unauthenticated pages"
+      "note": "public intake (applications, careers, invites) \u2014 its own unauthenticated pages"
     },
     "POST /public/password-reset/confirm": {
       "kind": "system",
-      "note": "public intake (applications, careers, invites) — its own unauthenticated pages"
+      "note": "public intake (applications, careers, invites) \u2014 its own unauthenticated pages"
     },
     "POST /public/password-reset/request": {
       "kind": "system",
-      "note": "public intake (applications, careers, invites) — its own unauthenticated pages"
+      "note": "public intake (applications, careers, invites) \u2014 its own unauthenticated pages"
     },
     "POST /quiz-sessions": {
       "kind": "ui",
@@ -2434,8 +2434,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "POST /race-tournaments": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "gap",
+      "note": "create a race tournament \u2014 no screen"
     },
     "POST /races": {
       "kind": "ui",
@@ -2538,12 +2538,12 @@
       "note": "referenced by a literal path in apps/web"
     },
     "POST /security/elevation/:p/approve": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in app/(app)/admin/security/page.tsx builds this path"
     },
     "POST /security/elevation/:p/revoke": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in app/(app)/admin/security/page.tsx builds this path"
     },
     "POST /security/elevation/delegate": {
       "kind": "ui",
@@ -2574,8 +2574,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "POST /students/:p/prepay/init": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/attendance/StudentPicker.tsx builds this path"
     },
     "POST /students/:p/profile/approve": {
       "kind": "ui",
@@ -2606,20 +2606,20 @@
       "note": "referenced by a literal path in apps/web"
     },
     "POST /submissions/:p/grade": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: reached from components/gradebook/GradingConsole.tsx"
     },
     "POST /tasks": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
     "POST /tasks/:p/attachment/confirm": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/task/TaskBoard.tsx builds this path"
     },
     "POST /tasks/:p/attachment/presign": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/task/TaskBoard.tsx builds this path"
     },
     "POST /tasks/:p/comments": {
       "kind": "ui",
@@ -2666,8 +2666,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "POST /transport/assignments/:p/change-route": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "gap",
+      "note": "move a pupil between bus routes \u2014 no screen"
     },
     "POST /transport/boardings": {
       "kind": "ui",
@@ -2734,8 +2734,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "POST /ultimate/competitions/:p/cancel": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/game/UltimateAdmin.tsx builds this path"
     },
     "POST /ultimate/competitions/:p/enroll": {
       "kind": "ui",
@@ -2754,32 +2754,32 @@
       "note": "referenced by a literal path in apps/web"
     },
     "POST /workflows/:p/review": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in app/(app)/admin/page.tsx builds this path"
     },
     "POST /workflows/:p/submit": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in app/(app)/admin/page.tsx builds this path"
     },
     "POST /workflows/:p/veto": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in app/(app)/admin/page.tsx builds this path"
     },
     "POST /xapi/statements": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
     "PUT /academic/sessions/:p/current": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in app/(app)/gradebook/page.tsx builds this path"
     },
     "PUT /academic/terms/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: reached from components/lms/AcademicCalendar.tsx"
     },
     "PUT /academic/terms/:p/current": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: reached from components/lms/AcademicCalendar.tsx"
     },
     "PUT /admin/security/mfa-policy": {
       "kind": "ui",
@@ -2790,20 +2790,20 @@
       "note": "referenced by a literal path in apps/web"
     },
     "PUT /alumni/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/alumni/AlumniManager.tsx builds this path"
     },
     "PUT /assessments/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/assessment/CreateAssessment.tsx builds this path"
     },
     "PUT /billing/auto-renew": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
     "PUT /cbt/exams/:p/status": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in app/(app)/cbt/page.tsx builds this path"
     },
     "PUT /classes/:p": {
       "kind": "ui",
@@ -2842,16 +2842,16 @@
       "note": "referenced by a literal path in apps/web"
     },
     "PUT /hostels/incidents/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/hostel/HostelOps.tsx builds this path"
     },
     "PUT /hostels/rooms/:p": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
     "PUT /hr/appraisals/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/hr/MyAppraisals.tsx builds this path"
     },
     "PUT /hr/attendance/kiosk": {
       "kind": "ui",
@@ -2874,12 +2874,12 @@
       "note": "referenced by a literal path in apps/web"
     },
     "PUT /live/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: components/lms/LiveSessions.tsx builds this via its local req() helper"
     },
     "PUT /modules/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: reached from components/workflow/OtherApprovals.tsx"
     },
     "PUT /notifications/me/phone": {
       "kind": "ui",
@@ -2922,12 +2922,12 @@
       "note": "referenced by a literal path in apps/web"
     },
     "PUT /operator/tenants/:p/region": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/operator/Provisioning.tsx builds this path"
     },
     "PUT /operator/tenants/:p/roles/:p/mfa-required": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/operator/Provisioning.tsx builds this path"
     },
     "PUT /operator/tenants/:p/status": {
       "kind": "ui",
@@ -2938,16 +2938,16 @@
       "note": "referenced by a literal path in apps/web"
     },
     "PUT /operator/tenants/:p/users/:p/mfa-required": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/operator/OperatorUsers.tsx builds this path"
     },
     "PUT /operator/tenants/:p/users/:p/status": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/operator/OperatorUsers.tsx builds this path"
     },
     "PUT /payments/mobile-money/callback/:p": {
       "kind": "system",
-      "note": "rail callback — the caller is the payment provider"
+      "note": "rail callback \u2014 the caller is the payment provider"
     },
     "PUT /privacy/compliance/breaches/:p": {
       "kind": "ui",
@@ -2958,16 +2958,16 @@
       "note": "referenced by a literal path in apps/web"
     },
     "PUT /reportcards/:p/remarks/class-teacher": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/reportcards/RemarksEditor.tsx builds this path"
     },
     "PUT /reportcards/:p/remarks/head": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/reportcards/RemarksEditor.tsx builds this path"
     },
     "PUT /scholarships/applications/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: reached from components/scholarship/ScholarshipPortal.tsx"
     },
     "PUT /scholarships/programs/:p": {
       "kind": "ui",
@@ -2982,8 +2982,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "PUT /subjects/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in app/(app)/classes/page.tsx builds this path"
     },
     "PUT /tasks/:p/me": {
       "kind": "ui",
@@ -3002,8 +3002,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "PUT /transport/trips/:p": {
-      "kind": "UNCLASSIFIED",
-      "note": ""
+      "kind": "ui",
+      "note": "reviewed: a call in components/transport/TransportOps.tsx builds this path"
     },
     "PUT /transport/vehicles/:p": {
       "kind": "ui",

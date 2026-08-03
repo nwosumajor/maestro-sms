@@ -48,12 +48,14 @@ const routes = extractRoutes(API_SRC);
 /**
  * How many routes may still be awaiting a human decision.
  *
- * A RATCHET, not a target. It exists so this gate could be committed before all
- * 753 were reviewed, without the review quietly never happening — every batch
- * classified lowers it, and it can never rise. Setting it to 0 is the goal and
- * the point at which the surface is fully known.
+ * A RATCHET, not a target. It was 131 when this gate shipped, so it could land
+ * before the review was done without the review quietly never happening.
+ *
+ * IT IS NOW ZERO: every route has a decision. Raising it again would mean
+ * shipping an endpoint nobody could say how to reach, which is the exact thing
+ * this file exists to prevent.
  */
-const UNCLASSIFIED_BUDGET = 131;
+const UNCLASSIFIED_BUDGET = 0;
 
 describe("every API route has a decided answer to 'how is this reached?'", () => {
   it("has a registry entry for every route the API serves", () => {
