@@ -2773,6 +2773,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "PUT /academic/sessions/:p": {
+      "kind": "ui",
+      "note": "reviewed: the session name and start/end inputs in components/lms/AcademicCalendar.tsx save to this on blur"
+    },
     "PUT /academic/sessions/:p/current": {
       "kind": "ui",
       "note": "reviewed: a call in app/(app)/gradebook/page.tsx builds this path"

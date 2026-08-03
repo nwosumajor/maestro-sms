@@ -176,3 +176,66 @@ describe("a term without dates cannot BE the current term", () => {
     expect(msg).toMatch(/never rolls forward|never roll/i);
   });
 });
+
+// =============================================================================
+// The mid-year mismatch — pointer says one term, the calendar says another
+// =============================================================================
+// The state a school lands in when it onboards partway through a session and the
+// current-term pointer is set to the wrong term. Everything keeps working, which
+// is the problem: registers file against the wrong term, report cards are headed
+// with it, and the past-term lock reads the wrong window.
+
+describe("the current term does not contain today", () => {
+  const feb = new Date("2027-02-10T09:00:00Z");
+  const threeTerms = (currentIdx: number) =>
+    session({
+      terms: [
+        term({ id: "t1", name: "First Term", sequence: 1, isCurrent: currentIdx === 0, startDate: "2026-09-01", endDate: "2026-12-15" }),
+        term({ id: "t2", name: "Second Term", sequence: 2, isCurrent: currentIdx === 1, startDate: "2027-01-05", endDate: "2027-04-01" }),
+        term({ id: "t3", name: "Third Term", sequence: 3, isCurrent: currentIdx === 2, startDate: "2027-04-20", endDate: "2027-07-24" }),
+      ],
+    });
+
+  it("is CRITICAL when another term contains today", () => {
+    // February, pointed at First Term. The exact mid-year onboarding mistake.
+    const f = assessCalendar([threeTerms(0)], feb);
+    const hit = f.find((x) => x.title.includes("Today falls in"));
+    expect(hit?.severity).toBe("critical");
+    expect(hit?.title).toMatch(/"Second Term".*pointed at "First Term"/);
+  });
+
+  it("names the recovery, not just the fault", () => {
+    // A finding that only says something is wrong gets acknowledged and left.
+    const f = assessCalendar([threeTerms(0)], feb);
+    expect(f.find((x) => x.title.includes("Today falls in"))?.consequence).toMatch(/Sync to today/);
+  });
+
+  it("says NOTHING when the pointer is right", () => {
+    expect(assessCalendar([threeTerms(1)], feb).filter((x) => x.title.includes("Today falls in"))).toEqual([]);
+  });
+
+  it("says nothing during a holiday between terms — that is not a mismatch", () => {
+    // 10 April: after Second Term, before Third. The pointer is legitimately on
+    // the term that just ended. Flagging this would train people to ignore it.
+    const f = assessCalendar([threeTerms(1)], new Date("2027-04-10T09:00:00Z"));
+    expect(f.filter((x) => x.title.includes("Today falls in"))).toEqual([]);
+  });
+
+  it("warns — not critical — when the year is over and no term covers today", () => {
+    // Nothing to switch to, so it is a prompt to add next year, not a misfiling.
+    const f = assessCalendar([threeTerms(2)], new Date("2027-09-01T09:00:00Z"));
+    const hit = f.find((x) => x.title.includes("has not moved on"));
+    expect(hit?.severity).toBe("warning");
+  });
+
+  it("stays quiet on a session set up in advance for next year", () => {
+    // Created in August for a September start: today precedes the whole session.
+    const f = assessCalendar([threeTerms(0)], new Date("2026-08-01T09:00:00Z"));
+    expect(f.filter((x) => x.title.includes("Today falls in") || x.title.includes("has not moved on"))).toEqual([]);
+  });
+
+  it("cannot fire on an undated current term — that is already reported", () => {
+    const f = assessCalendar([session({ terms: [term({ startDate: null, endDate: null })] })], feb);
+    expect(f.filter((x) => x.title.includes("Today falls in"))).toEqual([]);
+  });
+});

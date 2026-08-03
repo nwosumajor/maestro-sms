@@ -28,7 +28,7 @@ import { BrandingService } from "../branding/branding.service";
 import { DocumentsService } from "../documents/documents.service";
 import { ReportCardRemarkService } from "./report-card-remark.service";
 import { TermResultService } from "../gradebook/term-result.service";
-import { computeTermSubjectGrade, gradeLetter, averageOf } from "@sms/types";
+import { computeTermSubjectGrade, gradeLetter, averageOf, sessionAverageScope } from "@sms/types";
 import type { TermSubjectRowDto } from "@sms/types";
 
 const STAFF_WIDE = new Set(["school_admin", "principal"]);
@@ -67,12 +67,21 @@ export class ReportCardService {
     let subjectRows: TermSubjectRowDto[] = [];
     let termAverage: number | null = null;
     let sessionAverage: number | null = null;
+    // How many of the session's terms the cumulative average actually covers.
+    // `getStudentSessionReport` averages only terms that HAVE marks, which is the
+    // right arithmetic — but the label said "all terms so far", which is a lie for
+    // any school that joined mid-session. A parent reading a Term 3 card sees one
+    // number and assumes the whole year is in it.
+    let sessionTermsCounted = 0;
+    let sessionTermsTotal = 0;
     if (term) {
       const report = await this.termResults.getStudentSessionReport(p, { studentId, sessionId: term.sessionId });
       const tr = report.terms.find((t) => t.termId === term.id);
       subjectRows = tr?.subjects ?? [];
       termAverage = tr?.average ?? null;
       sessionAverage = report.sessionAverage;
+      sessionTermsTotal = report.terms.length;
+      sessionTermsCounted = report.terms.filter((t) => t.average !== null).length;
     }
 
     const data = await this.db.runAsTenant(this.ctx(p), async (tx) => {
@@ -150,6 +159,8 @@ export class ReportCardService {
         position,
         classSize,
         sessionAverage,
+        sessionTermsCounted,
+        sessionTermsTotal,
         att,
         remarks,
       };
@@ -194,6 +205,8 @@ export class ReportCardService {
       position: number | null;
       classSize: number | null;
       sessionAverage: number | null;
+      sessionTermsCounted: number;
+      sessionTermsTotal: number;
       att: Record<string, number>;
       remarks: { classTeacher: string | null; head: string | null };
     },
@@ -254,7 +267,11 @@ export class ReportCardService {
         doc.font("Helvetica").text(`Position in class: ${d.position} of ${d.classSize}`, startX);
       }
       if (d.sessionAverage !== null) {
-        doc.font("Helvetica").fillColor("#666").text(`Cumulative session average (all terms so far): ${d.sessionAverage}`, startX).fillColor("#000");
+        // Name the terms it covers rather than claiming "all terms so far". A
+        // school that onboarded in Term 2 has no Term 1 marks, and a cumulative
+        // average over 2 of 3 terms must not be read as a full-year figure.
+        const scope = sessionAverageScope(d.sessionTermsCounted, d.sessionTermsTotal);
+        doc.font("Helvetica").fillColor("#666").text(`Cumulative session average (${scope}): ${d.sessionAverage}`, startX).fillColor("#000");
       }
 
       // Attendance (term-scoped).

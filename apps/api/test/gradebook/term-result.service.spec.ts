@@ -1,3 +1,4 @@
+import { sessionAverageScope } from "@sms/types";
 import { GRADE_COMPONENTS } from "@sms/types";
 // =============================================================================
 // TermResultService — term-weighted grading scope + server-side computation +
@@ -388,5 +389,37 @@ describe("TermResultService — report read scope", () => {
     await service.getStudentSessionReport(p(["school_admin"], "admin-1"), { studentId: "stu1", sessionId: "sess1" });
     const callArg = allFindMany.mock.calls[0][0] as { where: Record<string, unknown> };
     expect(callArg.where.status).toBeUndefined();
+  });
+});
+
+// =============================================================================
+// What the cumulative session average CLAIMS to cover
+// =============================================================================
+// getStudentSessionReport averages only terms that have marks — correct, since
+// averaging in an empty term would drag a mid-year school's figures toward
+// nothing. The report card, though, labelled that figure "all terms so far",
+// which is false for any school that onboarded partway through a session: the
+// number covers 2 of 3 terms and reads as a full year.
+//
+// A parent cannot know when their school joined the platform. The label has to
+// say so itself.
+
+describe("sessionAverageScope", () => {
+  it("says how many terms are in it when the session is only partly recorded", () => {
+    expect(sessionAverageScope(2, 3)).toBe("2 of 3 terms recorded");
+  });
+
+  it("does NOT hedge when every term is in it", () => {
+    // A full-year card that reads "3 of 3 terms recorded" invites the question
+    // of what is missing, on the one document where nothing is.
+    expect(sessionAverageScope(3, 3)).toBe("all 3 terms");
+  });
+
+  it("handles the first term of a brand-new school", () => {
+    expect(sessionAverageScope(1, 3)).toBe("1 of 3 terms recorded");
+  });
+
+  it("never claims coverage it cannot substantiate when the total is unknown", () => {
+    expect(sessionAverageScope(0, 0)).toBe("all 0 terms");
   });
 });

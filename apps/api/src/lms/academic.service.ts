@@ -242,6 +242,70 @@ export class AcademicService {
     });
   }
 
+  /**
+   * Edit a session's name and window.
+   *
+   * There was no way to do this at all: sessions could be created and made
+   * current, never corrected. A school that mistyped a year's dates — or, far
+   * more commonly, created a session before knowing them — had no route back.
+   *
+   * The window must still CONTAIN every term in it. Narrowing a session under
+   * its own terms would leave terms outside their session, which every date rule
+   * here validates against and none would notice afterwards.
+   */
+  async updateSession(
+    p: Principal,
+    sessionId: string,
+    input: { name?: string; startDate?: string | null; endDate?: string | null },
+  ) {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const session = (await tx.academicSession.findFirst({
+        where: { id: sessionId },
+        select: { id: true, name: true, startDate: true, endDate: true },
+      })) as { id: string; name: string; startDate: Date | null; endDate: Date | null } | null;
+      if (!session) throw new NotFoundException("Session not found");
+
+      const merged = {
+        startDate: input.startDate === undefined ? session.startDate : input.startDate,
+        endDate: input.endDate === undefined ? session.endDate : input.endDate,
+      };
+      const bad = validateSessionDates(merged);
+      if (bad) throw new BadRequestException(bad);
+
+      const terms = (await tx.term.findMany({
+        where: { sessionId },
+        select: { name: true, startDate: true, endDate: true },
+      })) as Array<{ name: string; startDate: Date | null; endDate: Date | null }>;
+      const sStart = merged.startDate ? dayUtc(merged.startDate) : null;
+      const sEnd = merged.endDate ? dayUtc(merged.endDate) : null;
+      for (const t of terms) {
+        const ts = t.startDate ? dayUtc(t.startDate) : null;
+        const te = t.endDate ? dayUtc(t.endDate) : null;
+        if (sStart !== null && ts !== null && ts < sStart) {
+          throw new BadRequestException(
+            `"${t.name}" starts before this window. Move the term first, or widen the session.`,
+          );
+        }
+        if (sEnd !== null && te !== null && te > sEnd) {
+          throw new BadRequestException(
+            `"${t.name}" ends after this window. Move the term first, or widen the session.`,
+          );
+        }
+      }
+
+      await tx.academicSession.update({
+        where: { id: sessionId },
+        data: {
+          ...(input.name !== undefined ? { name: input.name } : {}),
+          ...(input.startDate !== undefined ? { startDate: input.startDate ? new Date(input.startDate) : null } : {}),
+          ...(input.endDate !== undefined ? { endDate: input.endDate ? new Date(input.endDate) : null } : {}),
+        },
+      });
+      await this.log(tx, p, "academic.session.update", "academic_session", sessionId, { name: input.name });
+      return { id: sessionId };
+    });
+  }
+
   /** Edit a term. Absent fields are unchanged; a null date clears it. Setting
    *  endDate is what enables the automatic end-of-term progression sweep. */
   async updateTerm(
@@ -366,7 +430,29 @@ export class AcademicService {
         })),
       });
       if (input.makeCurrent) {
-        const first = await tx.term.findFirst({ where: { sessionId: s.id }, orderBy: { sequence: "asc" }, select: { id: true } });
+        // MID-YEAR ONBOARDING. This used to take the FIRST term unconditionally,
+        // which is right only for a school that joins in September. A school
+        // onboarding in February got "First Term" marked current, and everything
+        // downstream believed it: the past-term register lock read Term 1's start
+        // date, so registers from a term that had already closed stayed editable;
+        // every register and mark taken filed against Term 1; and report cards
+        // were headed with the wrong term. Nothing announced any of it.
+        //
+        // The term CONTAINING TODAY is the correct answer in both cases — it
+        // gives a September school Term 1 exactly as before — so the mid-year
+        // case needs no extra step and cannot be forgotten.
+        const today = new Date();
+        today.setUTCHours(0, 0, 0, 0);
+        const containing = await tx.term.findFirst({
+          where: { sessionId: s.id, startDate: { lte: today }, endDate: { gte: today } },
+          orderBy: { sequence: "asc" },
+          select: { id: true },
+        });
+        // Falls back to the first term when today is outside the whole session —
+        // a school setting NEXT year up over the holidays asked for it explicitly.
+        const first =
+          containing ??
+          (await tx.term.findFirst({ where: { sessionId: s.id }, orderBy: { sequence: "asc" }, select: { id: true } }));
         await tx.term.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
         await tx.academicSession.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
         await tx.academicSession.update({ where: { id: s.id }, data: { isCurrent: true } });
