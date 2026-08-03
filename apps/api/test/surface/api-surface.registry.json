@@ -1,0 +1,3017 @@
+{
+  "generatedFrom": "753 routes",
+  "routes": {
+    "DELETE /academic/holidays/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "DELETE /admin/users/:p/roles/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "DELETE /announcements/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "DELETE /awards/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "DELETE /classes/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "DELETE /classes/:p/subjects/:p": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/classes/:p\")"
+    },
+    "DELETE /content/:p/complete": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "DELETE /discussion/comments/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "DELETE /discussion/posts/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "DELETE /documents/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "DELETE /events/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "DELETE /exams/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "DELETE /exams/:p/invigilators/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "DELETE /hostels/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "DELETE /hostels/rooms/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "DELETE /hr/attendance/devices/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "DELETE /hr/attendance/enrollments/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "DELETE /hr/components/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "DELETE /hr/duty/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "DELETE /library/books/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "DELETE /meetings/bookings/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "DELETE /meetings/slots/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "DELETE /modules/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "DELETE /operator/platform-role-audit/:p/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "DELETE /quizzes/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "DELETE /schools/branding/logo": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "DELETE /students/:p/contacts/:p": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/students/:p/contacts\")"
+    },
+    "DELETE /subjects/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "DELETE /timetable/cover/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "DELETE /timetable/entries/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "DELETE /transport/vehicles/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /academic/holidays": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /academic/sessions": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /admin/export/staff.csv": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /admin/export/students.csv": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /admin/parents/import": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /admin/parents/import/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /admin/parents/import/template": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /admin/roles": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /admin/security/mfa-policy": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /admin/students/import": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /admin/students/import/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /admin/students/import/template": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /admin/users": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /admissions": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /admissions/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /admissions/settings/form-fee": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /alumni": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /analytics/overview": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /analytics/overview.csv": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /announcements": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /approvals/pending": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /assessments": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /assessments/:p/submissions": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /assessments/:p/submissions/:p/file": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /assessments/:p/submissions/:p/integrity-report": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/assessments/:p/submissions\")"
+    },
+    "GET /assessments/:p/take": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /attendance/by-class": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /attendance/registers": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /attendance/term-lock": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /attendance/terms": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /auth/refresh": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /billing": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /billing/credits": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /billing/referral": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /billing/status": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /cbt/authoring-options": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /cbt/banks": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /cbt/banks/:p/availability": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /cbt/banks/:p/questions": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /cbt/exams": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /cbt/exams/:p/integrity": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /cbt/exams/:p/marking": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /cbt/exams/:p/marking/progress": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /cbt/exams/:p/results": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /cbt/exams/all": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /cbt/sittings/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /certificates/history/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /checkers": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /checkers/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /chess": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /chess/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /classes/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /classes/:p/analytics": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /classes/:p/attendance": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /classes/:p/awards": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/classes/:p\")"
+    },
+    "GET /classes/:p/content": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/classes/:p\")"
+    },
+    "GET /classes/:p/eligibility": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /classes/:p/info": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /classes/:p/live": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/classes/:p\")"
+    },
+    "GET /classes/:p/lms-grades": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/classes/:p\")"
+    },
+    "GET /classes/:p/modules": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /classes/:p/progress": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /classes/:p/roster.csv": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /classes/:p/subjects": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /classes/mine": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /classes/overview": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /competitions": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /competitions/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /content/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /content/:p/attempts": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /content/:p/download": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/content/:p\")"
+    },
+    "GET /content/:p/forum": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /content/:p/quiz/me": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /content/:p/revisions": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/content/:p\")"
+    },
+    "GET /content/:p/submission/me": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /content/:p/submissions": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /content/approvals/pending": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /dashboard/summary": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /directory/search": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /discipline/complaints": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /discipline/complaints/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /discipline/complaints/:p/evidence/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /discipline/file-targets": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /discussion/groups": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /discussion/groups/:p/posts": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /discussion/search": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /documents": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /documents/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /documents/:p/download": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /documents/:p/file": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /events": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /exams": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /exams/:p/attendance": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /exams/:p/attendance.pdf": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /exams/:p/invigilators": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /exams/:p/seats": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /exams/day": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /exams/invigilations/mine": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /exams/mine": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /exams/schedules": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /family/overview": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /feedback/:p/thread": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /feedback/mine": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /fees/disputes": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /fees/disputes/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /fees/export/journal.csv": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /fees/items": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /fees/late-fee-config": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /fees/payments/pending": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /fees/reports": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /fees/settlement": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /forms": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /forms/:p/responses": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /game-settings": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /games/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /games/open": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /grades/mine": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /group/overview": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /group/overview.csv": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /group/schools/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hangman": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hangman/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /health": {
+      "kind": "system",
+      "note": "liveness probe — infrastructure, not a screen"
+    },
+    "GET /hostels": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hostels/:p/attendance": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hostels/allocations": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hostels/exeats": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hostels/incidents": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hostels/summary": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/analytics": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/appraisals": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/appraisals/me": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/attendance/devices": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /hr/attendance/enrollments": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /hr/attendance/kiosk": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/attendance/kiosk/code": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/hr/attendance/kiosk\")"
+    },
+    "GET /hr/attendance/me": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/attendance/register/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/attendance/summary": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/disciplinary": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/duty": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /hr/duty/me": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/employees": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/employees/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/employees/:p/components": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/employment/changes": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/exits": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/leave/balances/me": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/leave/calendar": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/leave/requests": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/leave/requests/me": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/leave/types": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/letters/:p/pdf": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/loans": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/loans/me": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/me": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/me/export": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/org": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/payroll/me/payslips": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/payroll/me/payslips/:p/pdf": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/payroll/runs": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/payroll/runs/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /hr/payroll/runs/:p/bank-export": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/payroll/runs/:p/payslips/:p/pdf": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /hr/payroll/runs/:p/remittance": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/recruitment/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /hr/recruitment/applicants": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/recruitment/applicants/:p/cv": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/recruitment/requisitions": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/salary/changes": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/staff/checklists": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/staff/documents": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /hr/staff/training": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /integrity/retention/runs": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /invoices": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /invoices/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /invoices/:p/adjustments": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /invoices/:p/payments": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /invoices/:p/plan": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /invoices/summary": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /legal/acceptance/status": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /library/books": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /library/books/export.csv": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /library/loans": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /library/report": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /live/:p/attendance": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /meetings/bookings/mine": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /meetings/slots/mine": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /meetings/slots/open": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /members/scan/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /messages/contacts": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /messages/search": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /messages/threads": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /messages/threads/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /metrics": {
+      "kind": "system",
+      "note": "Prometheus scrape — token-gated, not a screen"
+    },
+    "GET /my/learning": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /notifications": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /notifications/me/phone": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /notifications/me/preferences": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /operator/admin-appointments": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /operator/agents": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /operator/analytics": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /operator/attention": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /operator/audit": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /operator/audit/export.csv": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /operator/billing-alerts": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /operator/commissions": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /operator/countries": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /operator/directory": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /operator/feedback": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /operator/feedback/:p/thread": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /operator/feedback/stats": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /operator/games-analytics": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /operator/groups": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /operator/message-credits": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /operator/message-credits/:p/ledger": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /operator/onboarding-requests": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /operator/platform-delegations": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /operator/platform-delegations/lendable": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /operator/platform-fees": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /operator/platform-role-audit": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /operator/platform-staff": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /operator/pricing": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /operator/promos": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /operator/schools/:p/profile": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /operator/tenant-names": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /operator/tenants": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /operator/tenants/:p/students": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /operator/tenants/:p/subscription": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /operator/tenants/:p/users": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /payments/:p/receipt.pdf": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /payments/mobile-money/options": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /payments/mobile-money/status": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /polls": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /privacy/archives": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /privacy/compliance/breaches": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /privacy/compliance/posture": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /privacy/erasure": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /privacy/export/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /promotions": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /promotions/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /public/plan-pricing": {
+      "kind": "system",
+      "note": "public read (plan pricing, directory) — consumed by marketing pages"
+    },
+    "GET /public/schools": {
+      "kind": "system",
+      "note": "public read (plan pricing, directory) — consumed by marketing pages"
+    },
+    "GET /public/schools/:p/branding": {
+      "kind": "system",
+      "note": "public read (plan pricing, directory) — consumed by marketing pages"
+    },
+    "GET /quiz-sessions": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /quiz-sessions/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /quizzes": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /quizzes/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /race-tournaments/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /races": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /races/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /reportcards/:p/remarks": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /rings/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /scholarships/applications": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /scholarships/portal": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /scholarships/programs": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /schools/branding": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /schools/branding/me": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /search": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /security/anomalies": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /security/audit": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /security/elevation": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /security/mfa/status": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /security/recertification": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /students": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /students/:p/attendance": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /students/:p/attendance/summary": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /students/:p/contacts": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /students/:p/credit": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /students/:p/medical": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /students/:p/profile": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /students/:p/profile/completion": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/students/:p/profile\")"
+    },
+    "GET /students/:p/virtual-account": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /students/count": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /subject-selections": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /subject-selections/options": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /subjects": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /submissions/:p/grade": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /tasks": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /tasks/:p/assignments/:p/attachment": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /term-results/broadsheet": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /term-results/report/:p/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /term-results/report/:p/:p/:p/pdf": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /term-results/report/:p/:p/session-pdf": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /term-results/roster": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /timetable/availability": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /timetable/classes/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /timetable/cover": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /timetable/cover/mine": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/timetable/cover\")"
+    },
+    "GET /timetable/entries": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /timetable/load": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /timetable/periods": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /timetable/print.pdf": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /timetable/rooms": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /timetable/view": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /transport/assignments": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /transport/boardings": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /transport/locations": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /transport/maintenance": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /transport/routes": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /transport/summary": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /transport/trips": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /transport/vehicles": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /typing-races": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /typing-races/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /ultimate/competitions": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /ultimate/competitions/:p/leaderboard": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /ultimate/competitions/:p/me": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /users": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /workflows": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /workflows/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "GET /workflows/approvers": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /xapi/statements": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PATCH /exams/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PATCH /fees/items/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "PATCH /students/:p/contacts/:p": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/students/:p/contacts\")"
+    },
+    "PATCH /timetable/entries/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PATCH /timetable/periods/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PATCH /timetable/rooms/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /academic/advance-term": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /academic/holidays": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /academic/progression/run": {
+      "kind": "system",
+      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
+    },
+    "POST /academic/sessions": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /academic/sessions/:p/terms": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /academic/sessions/standard": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /academic/sync-current": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /admin/import/students": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /admin/parents": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /admin/parents/import": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /admin/parents/import/:p/approve": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /admin/parents/import/:p/reject": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /admin/sis/nudge/run": {
+      "kind": "system",
+      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
+    },
+    "POST /admin/students/import": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /admin/students/import/:p/approve": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /admin/students/import/:p/reject": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /admin/users": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /admin/users/:p/roles": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /admissions/:p/exam": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /admissions/:p/review": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /alumni": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /alumni/broadcast": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /announcements": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /assessments": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /assessments/:p/submissions/:p/autosave": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/assessments/:p/submissions\")"
+    },
+    "POST /assessments/:p/submissions/:p/file/confirm": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/assessments/:p/submissions\")"
+    },
+    "POST /assessments/:p/submissions/:p/file/presign": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/assessments/:p/submissions\")"
+    },
+    "POST /assessments/:p/submissions/:p/signals": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/assessments/:p/submissions\")"
+    },
+    "POST /assessments/:p/submissions/:p/start": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/assessments/:p/submissions\")"
+    },
+    "POST /assessments/:p/submissions/:p/submit": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/assessments/:p/submissions\")"
+    },
+    "POST /attempts/:p/grade-essays": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /attendance/rollup/refresh": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /auth/change-password": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /auth/login": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /billing/checkout/init": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /billing/credits/checkout": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /billing/dunning/run": {
+      "kind": "system",
+      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
+    },
+    "POST /billing/referral/code": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /billing/stripe/webhook": {
+      "kind": "system",
+      "note": "gateway callback — the caller is the payment provider"
+    },
+    "POST /billing/true-up/init": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /cbt/banks": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /cbt/banks/:p/questions": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /cbt/exams": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /cbt/exams/:p/record-grades": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /cbt/exams/:p/request-answer-release": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /cbt/exams/:p/request-publish": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /cbt/exams/:p/start": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /cbt/marking/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /cbt/sittings/:p/answer": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /cbt/sittings/:p/answer-theory": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /cbt/sittings/:p/integrity": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /cbt/sittings/:p/submit": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /certificates/issue": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /certificates/issue-class": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /checkers": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /checkers/:p/claim-time": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /checkers/:p/join": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /checkers/:p/move": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /checkers/:p/resign": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /chess": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /chess/:p/claim-time": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /chess/:p/join": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /chess/:p/move": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /chess/:p/resign": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /classes": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /classes/:p/attendance": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /classes/:p/awards": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/classes/:p\")"
+    },
+    "POST /classes/:p/content": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/classes/:p\")"
+    },
+    "POST /classes/:p/enrollments": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/classes/:p\")"
+    },
+    "POST /classes/:p/enrollments/bulk": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/classes/:p\")"
+    },
+    "POST /classes/:p/live": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/classes/:p\")"
+    },
+    "POST /classes/:p/lms-grades/apply": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/classes/:p\")"
+    },
+    "POST /classes/:p/modules": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /classes/:p/subjects": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /classes/:p/subjects/bulk": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/classes/:p\")"
+    },
+    "POST /classes/:p/teachers": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/classes/:p\")"
+    },
+    "POST /competitions": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /competitions/:p/cancel": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/competitions/:p\")"
+    },
+    "POST /competitions/:p/start": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/competitions/:p\")"
+    },
+    "POST /competitions/:p/sweep": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/competitions/:p\")"
+    },
+    "POST /content/:p/clone": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/content/:p\")"
+    },
+    "POST /content/:p/complete": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /content/:p/forum": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /content/:p/quiz/attempt": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/content/:p\")"
+    },
+    "POST /content/:p/revert/:p": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/content/:p\")"
+    },
+    "POST /content/:p/review": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /content/:p/submission": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/content/:p\")"
+    },
+    "POST /content/:p/submit": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/content/:p\")"
+    },
+    "POST /content/:p/upload": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/content/:p\")"
+    },
+    "POST /content/:p/upload/confirm": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/content/:p\")"
+    },
+    "POST /discipline/complaints": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /discipline/complaints/:p/assign": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /discipline/complaints/:p/entries": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /discipline/complaints/:p/evidence/confirm": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /discipline/complaints/:p/evidence/presign": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /discipline/complaints/:p/resolve": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /discussion/groups": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /discussion/groups/:p/posts": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /discussion/posts/:p/comments": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /documents": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /documents/:p/confirm": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /documents/:p/upload-bytes": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /events": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /exams": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /exams/:p/attendance": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /exams/:p/invigilators": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /exams/:p/release": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /exams/:p/seats": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /exams/schedules": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /exams/schedules/:p/seat": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /exams/schedules/:p/submit": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /feedback": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /feedback/:p/reply": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /fees/adjustments/:p/decide": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /fees/disputes/:p/respond": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /fees/items": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /fees/reconciliation/run": {
+      "kind": "system",
+      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
+    },
+    "POST /fees/reminders/run": {
+      "kind": "system",
+      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
+    },
+    "POST /forms": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /forms/:p/close": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /forms/:p/respond": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /games": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /games/:p/end": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /games/:p/forfeit": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /games/:p/guess": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /games/:p/join": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /games/:p/secret": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /guardians": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /hangman": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /hangman/:p/end": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /hangman/:p/guess": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /hangman/:p/join": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /hangman/:p/start": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /hostels": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /hostels/:p/attendance": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /hostels/:p/rooms": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /hostels/allocations": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /hostels/allocations/:p/vacate": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /hostels/allocations/transfer": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /hostels/exeats": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /hostels/exeats/:p/decide": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /hostels/exeats/:p/depart": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /hostels/exeats/:p/return": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /hostels/fees/schedule": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /hostels/incidents": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /hr/appraisals/:p/acknowledge": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /hr/appraisals/:p/submit": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /hr/attendance/:p/events": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/hr/attendance/:p\")"
+    },
+    "POST /hr/attendance/clock-in": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /hr/attendance/devices": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /hr/attendance/enrollments": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /hr/attendance/mark": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /hr/disciplinary/:p/entries": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /hr/disciplinary/:p/status": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /hr/duty": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /hr/employees/:p/components": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /hr/employment/changes": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /hr/employment/changes/:p/decide": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /hr/exits": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /hr/exits/:p/decide": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/hr/exits\")"
+    },
+    "POST /hr/leave/requests": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /hr/leave/types": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /hr/loans": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /hr/loans/:p/decide": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /hr/me/erase-personal": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /hr/payroll/runs": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /hr/payroll/runs/:p/finalize": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /hr/recruitment/:p/apply": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /hr/recruitment/applicants/:p/convert": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /hr/recruitment/applicants/:p/stage": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /hr/recruitment/requisitions": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /hr/recruitment/requisitions/:p/applicants": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /hr/recruitment/requisitions/:p/status": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /hr/salary/changes/:p/decide": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /hr/salary/employees/:p/changes": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /hr/staff/:p/appraisals": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/hr/staff/:p\")"
+    },
+    "POST /hr/staff/:p/checklists": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/hr/staff/:p\")"
+    },
+    "POST /hr/staff/:p/disciplinary": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/hr/staff/:p\")"
+    },
+    "POST /hr/staff/:p/documents": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/hr/staff/:p\")"
+    },
+    "POST /hr/staff/:p/training": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/hr/staff/:p\")"
+    },
+    "POST /hr/staff/checklist-items/:p/toggle": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /hr/staff/documents/reminders/run": {
+      "kind": "system",
+      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
+    },
+    "POST /integrity/retention/run": {
+      "kind": "system",
+      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
+    },
+    "POST /invoices": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /invoices/:p/adjustments": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /invoices/:p/apply-credit": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/invoices/:p\")"
+    },
+    "POST /invoices/:p/cancel": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/invoices/:p\")"
+    },
+    "POST /invoices/:p/issue": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/invoices/:p\")"
+    },
+    "POST /invoices/:p/overpayment-to-credit": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/invoices/:p\")"
+    },
+    "POST /invoices/:p/pay/confirm": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /invoices/:p/pay/init": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /invoices/:p/payments": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /legal/acceptance": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /library/books": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /library/loans/:p/pay-fine": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /library/loans/:p/renew": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /library/loans/:p/return": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /library/loans/issue": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /live/:p/join": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /meetings/bookings": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /meetings/slots": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /members/scan/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /messages/threads": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /messages/threads/:p/reply": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /notifications": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /notifications/:p/read": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /operator/agents": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /operator/commissions/:p/paid": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /operator/feedback/:p/reply": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /operator/feedback/:p/review": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /operator/feedback/bulk-review": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /operator/feedback/digest/run": {
+      "kind": "system",
+      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
+    },
+    "POST /operator/groups": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /operator/impersonate": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /operator/message-credits/:p/adjust": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /operator/onboarding-requests/:p/status": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /operator/platform-delegations": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /operator/platform-delegations/:p/revoke": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /operator/platform-staff": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /operator/platform-staff/:p/invite": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /operator/platform-staff/:p/revoke-duties": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /operator/promos": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /operator/tenants": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /operator/tenants/:p/admins": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /operator/tenants/:p/students/export": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /operator/tenants/:p/users/:p/mfa/reset": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /operator/tenants/:p/users/:p/reset-password": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /operator/tenants/:p/users/:p/unlock": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /payments/:p/approve": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /payments/:p/reject": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /payments/mobile-money/callback/:p": {
+      "kind": "system",
+      "note": "rail callback — the caller is the payment provider"
+    },
+    "POST /payments/mobile-money/charge": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /payments/mobile-money/recovery/run": {
+      "kind": "system",
+      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
+    },
+    "POST /payments/webhook": {
+      "kind": "system",
+      "note": "gateway callback — the caller is the payment provider"
+    },
+    "POST /polls": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /polls/:p/close": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /polls/:p/vote": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /privacy/archives": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /privacy/archives/:p/download": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /privacy/archives/run-term-sweep": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /privacy/compliance/breaches": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /privacy/erasure": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /privacy/erasure/:p/review": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /promotions": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /promotions/:p/approve": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /promotions/:p/reject": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /public/admissions": {
+      "kind": "system",
+      "note": "public intake (applications, careers, invites) — its own unauthenticated pages"
+    },
+    "POST /public/admissions/:p/pay/init": {
+      "kind": "system",
+      "note": "public intake (applications, careers, invites) — its own unauthenticated pages"
+    },
+    "POST /public/invite/accept": {
+      "kind": "system",
+      "note": "public intake (applications, careers, invites) — its own unauthenticated pages"
+    },
+    "POST /public/onboarding-requests": {
+      "kind": "system",
+      "note": "public intake (applications, careers, invites) — its own unauthenticated pages"
+    },
+    "POST /public/password-reset/confirm": {
+      "kind": "system",
+      "note": "public intake (applications, careers, invites) — its own unauthenticated pages"
+    },
+    "POST /public/password-reset/request": {
+      "kind": "system",
+      "note": "public intake (applications, careers, invites) — its own unauthenticated pages"
+    },
+    "POST /quiz-sessions": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /quiz-sessions/:p/answer": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /quiz-sessions/:p/end": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /quiz-sessions/:p/join": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /quiz-sessions/:p/next": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /quizzes": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /race-tournaments": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /races": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /races/:p/end": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /races/:p/guess": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /races/:p/join": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /races/:p/start": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /reportcards/:p/generate": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /rings": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /rings/:p/end": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /rings/:p/forfeit": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/rings/:p\")"
+    },
+    "POST /rings/:p/guess": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /rings/:p/join": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /rings/:p/secret": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /rings/:p/start": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /rings/:p/timeout": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /scholarships/applications": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /scholarships/applications/:p/award": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /scholarships/applications/:p/consent": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /scholarships/applications/:p/decision": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /scholarships/applications/:p/review": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /scholarships/applications/:p/submit": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /scholarships/programs": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /scholarships/programs/:p/announce-exam": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /scholarships/programs/:p/collect-results": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /schools/branding/logo": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /schools/branding/theme": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /security/elevation/:p/approve": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /security/elevation/:p/revoke": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /security/elevation/delegate": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /security/elevation/request": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /security/mfa/disable": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /security/mfa/enroll": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /security/mfa/verify": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /security/stepup": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /students/:p/contacts": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /students/:p/prepay/init": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /students/:p/profile/approve": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/students/:p/profile\")"
+    },
+    "POST /students/:p/profile/submit": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/students/:p/profile\")"
+    },
+    "POST /students/:p/profile/supervisor-review": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/students/:p/profile\")"
+    },
+    "POST /students/:p/virtual-account": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /subject-selections": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /subject-selections/:p/review": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /subjects": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /submissions/:p/grade": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /tasks": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /tasks/:p/attachment/confirm": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /tasks/:p/attachment/presign": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /tasks/:p/comments": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /term-results": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /term-results/publish": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /timetable/cover": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /timetable/entries": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /timetable/generate": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /timetable/periods": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /timetable/periods/generate": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /timetable/rooms": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /transport/assignments": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /transport/assignments/:p/cancel": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /transport/assignments/:p/change-route": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /transport/boardings": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /transport/fees/schedule": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /transport/locations": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /transport/maintenance": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /transport/routes": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /transport/routes/:p/retire": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /transport/routes/:p/stops": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /transport/routes/:p/stops/reorder": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /transport/trips": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /transport/vehicles": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /typing-races": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /typing-races/:p/end": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /typing-races/:p/join": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /typing-races/:p/progress": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /typing-races/:p/start": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /ultimate/competitions": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /ultimate/competitions/:p/cancel": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /ultimate/competitions/:p/enroll": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /ultimate/competitions/:p/enter": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /ultimate/competitions/:p/guess": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /workflows": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /workflows/:p/review": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /workflows/:p/submit": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /workflows/:p/veto": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "POST /xapi/statements": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /academic/sessions/:p/current": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "PUT /academic/terms/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "PUT /academic/terms/:p/current": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "PUT /admin/security/mfa-policy": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /admissions/settings/form-fee": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /alumni/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "PUT /assessments/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "PUT /billing/auto-renew": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /cbt/exams/:p/status": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "PUT /classes/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /classes/:p/enrollments/:p/status": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /content/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /content/:p/module": {
+      "kind": "ui",
+      "note": "reached via a runtime-built path (web builds \"/content/:p\")"
+    },
+    "PUT /fees/late-fee-config": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /fees/settlement": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /fees/settlement/fee-bearer": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /game-settings": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /hostels/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /hostels/incidents/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "PUT /hostels/rooms/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /hr/appraisals/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "PUT /hr/attendance/kiosk": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /hr/employees/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /hr/me": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /invoices/:p/plan": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /library/books/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /live/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "PUT /modules/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "PUT /notifications/me/phone": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /notifications/me/preferences": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /operator/agents/:p/active": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /operator/groups/:p/directors": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /operator/groups/:p/members": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /operator/platform-fees": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /operator/platform-staff/:p/status": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /operator/pricing": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /operator/promos/:p/active": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /operator/tenants/:p/grace": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /operator/tenants/:p/region": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "PUT /operator/tenants/:p/roles/:p/mfa-required": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "PUT /operator/tenants/:p/status": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /operator/tenants/:p/subscription": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /operator/tenants/:p/users/:p/mfa-required": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "PUT /operator/tenants/:p/users/:p/status": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "PUT /payments/mobile-money/callback/:p": {
+      "kind": "system",
+      "note": "rail callback — the caller is the payment provider"
+    },
+    "PUT /privacy/compliance/breaches/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /quizzes/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /reportcards/:p/remarks/class-teacher": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "PUT /reportcards/:p/remarks/head": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "PUT /scholarships/applications/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "PUT /scholarships/programs/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /students/:p/medical": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /students/:p/profile": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /subjects/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "PUT /tasks/:p/me": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /tasks/:p/status": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /timetable/availability/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /transport/routes/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /transport/trips/:p": {
+      "kind": "UNCLASSIFIED",
+      "note": ""
+    },
+    "PUT /transport/vehicles/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /ultimate/consent": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    }
+  }
+}
