@@ -11,6 +11,7 @@ import { dateTime } from "@/lib/format";
 import { Composer } from "@/components/messaging/Composer";
 import { ReplyBox } from "@/components/messaging/ReplyBox";
 import { PageHeader } from "@/components/shell/PageHeader";
+import { MessageSearch } from "@/components/messaging/MessageSearch";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +36,8 @@ export default async function MessagesPage({ searchParams }: { searchParams: { t
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <PageHeader title={<>Messages</>} />
+          {/* /messages/search existed and had nowhere to type. */}
+          <MessageSearch />
           {canSend && contacts && <Composer contacts={contacts} />}
         </div>
 

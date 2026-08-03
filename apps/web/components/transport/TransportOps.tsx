@@ -84,6 +84,25 @@ function BoardingPanel({ routes, assignments, onMsg }: { routes: Route[]; assign
                 <span className="flex gap-1">
                   <Button size="sm" variant={st === "BOARDED" ? "secondary" : "outline"} className="h-7" onClick={() => record(a.passengerId, "BOARDED")}>Boarded</Button>
                   <Button size="sm" variant="ghost" className="h-7" onClick={() => record(a.passengerId, "ABSENT")}>Absent</Button>
+                  {/* Move a pupil to another route. The endpoint existed with no
+                      control, so the only way was to cancel and re-assign —
+                      which loses the assignment's history. */}
+                  <select
+                    className={sel + " h-7"}
+                    value=""
+                    aria-label={`Move ${a.passengerName} to another route`}
+                    onChange={async (e) => {
+                      const to = e.target.value;
+                      if (!to) return;
+                      const r = await send("POST", `/transport/assignments/${a.id}/change-route`, { routeId: to });
+                      onMsg(r.ok ? `${a.passengerName} moved.` : r.error ?? "Could not move.");
+                    }}
+                  >
+                    <option value="">Move to…</option>
+                    {routes.filter((r) => r.id !== routeId).map((r) => (
+                      <option key={r.id} value={r.id}>{r.name}</option>
+                    ))}
+                  </select>
                 </span>
               </div>
             );

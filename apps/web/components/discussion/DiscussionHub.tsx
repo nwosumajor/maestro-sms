@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { InlineSearch } from "@/components/common/InlineSearch";
 
 type Group = Serialized<DiscussionGroupDto>;
 type Post = Serialized<DiscussionPostDto>;
@@ -68,6 +69,24 @@ export function DiscussionHub({ groups, canModerate }: { groups: Group[]; canMod
           </CardContent>
         </Card>
       )}
+
+      {/* /discussion/search existed with no search box. A pointer to the post,
+          not the post — the group page is where you read it. */}
+      <InlineSearch<{ id: string; groupId: string; body: string; groupName: string }>
+        path="discussion/search"
+        placeholder="Search discussions…"
+        emptyLabel="No post matched."
+        render={(hits) => (
+          <ul className="divide-y divide-border/70 rounded-md border border-border">
+            {hits.map((h) => (
+              <li key={h.id} className="p-2 text-sm">
+                <span className="font-medium">{h.groupName}</span>
+                <p className="truncate text-xs text-muted-foreground">{h.body}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+      />
 
       {groups.map((g) => (
         <Card key={g.id}>

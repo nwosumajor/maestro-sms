@@ -310,8 +310,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /certificates/history/:p": {
-      "kind": "gap",
-      "note": "per-member certificate history \u2014 no screen"
+      "kind": "ui",
+      "note": "FIXED: now reached from components/certificate/CertificateIssuer.tsx"
     },
     "GET /checkers": {
       "kind": "ui",
@@ -466,8 +466,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /discussion/search": {
-      "kind": "gap",
-      "note": "discussion search \u2014 the hub has no search box"
+      "kind": "ui",
+      "note": "FIXED: now reached from components/discussion/DiscussionHub.tsx"
     },
     "GET /documents": {
       "kind": "ui",
@@ -590,8 +590,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /grades/mine": {
-      "kind": "gap",
-      "note": "a student's own grades \u2014 no page fetches it"
+      "kind": "ui",
+      "note": "FIXED: now reached from components/gradebook/MyMarks.tsx"
     },
     "GET /group/overview": {
       "kind": "ui",
@@ -818,8 +818,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /integrity/retention/runs": {
-      "kind": "gap",
-      "note": "retention run history \u2014 nothing shows an operator what was purged"
+      "kind": "ui",
+      "note": "FIXED: now reached from app/(app)/admin/privacy/page.tsx"
     },
     "GET /invoices": {
       "kind": "ui",
@@ -862,8 +862,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /library/report": {
-      "kind": "gap",
-      "note": "library report \u2014 the library page does not render it"
+      "kind": "ui",
+      "note": "FIXED: now reached from app/(app)/library/page.tsx"
     },
     "GET /live/:p/attendance": {
       "kind": "ui",
@@ -890,8 +890,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /messages/search": {
-      "kind": "gap",
-      "note": "message search \u2014 the thread list has no search box"
+      "kind": "ui",
+      "note": "FIXED: now reached from components/messaging/MessageSearch.tsx"
     },
     "GET /messages/threads": {
       "kind": "ui",
@@ -1119,7 +1119,7 @@
     },
     "GET /race-tournaments/:p": {
       "kind": "gap",
-      "note": "cross-class race tournament \u2014 the games hub lists races, not tournaments"
+      "note": "the read side of the same unlaunched tournament mode \u2014 see POST /race-tournaments"
     },
     "GET /races": {
       "kind": "ui",
@@ -2435,7 +2435,7 @@
     },
     "POST /race-tournaments": {
       "kind": "gap",
-      "note": "create a race tournament \u2014 no screen"
+      "note": "cross-class race tournament \u2014 a game MODE that was never launched. Not a missing screen: building one would ship an unreviewed feature. Delete the endpoints or launch the mode; either is a product decision."
     },
     "POST /races": {
       "kind": "ui",
@@ -2666,8 +2666,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "POST /transport/assignments/:p/change-route": {
-      "kind": "gap",
-      "note": "move a pupil between bus routes \u2014 no screen"
+      "kind": "ui",
+      "note": "FIXED: now reached from components/transport/TransportOps.tsx"
     },
     "POST /transport/boardings": {
       "kind": "ui",
