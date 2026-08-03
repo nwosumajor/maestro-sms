@@ -45,6 +45,15 @@ export class SchoolArchiveController {
     return this.archives.create(p, body);
   }
 
+  /** Run the term sweep now — for an operator verifying it, or catching up after
+   *  an outage. Idempotent: a term already archived is skipped by the database. */
+  @Post("run-term-sweep")
+  @RequirePermission(PRIVACY_PERMISSIONS.ARCHIVE_MANAGE)
+  @RequireStepUp()
+  runTermSweep(): Promise<{ scanned: number; archived: number; skipped: number }> {
+    return this.archives.archiveEndedTerms("MANUAL");
+  }
+
   /**
    * A time-limited link to the archive body, plus the checksum recorded when it
    * was made — so whoever receives it can prove the bytes were not altered in

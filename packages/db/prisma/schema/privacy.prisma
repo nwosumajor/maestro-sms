@@ -115,6 +115,10 @@ model SchoolArchive {
 
   /// The academic session archived, and a human label ("2025/2026").
   sessionId    String? @db.Uuid
+  /// The TERM archived, when this was produced at a term boundary. Unique per
+  /// school, so the scheduled sweep can only ever archive a term ONCE however
+  /// many times it runs — the idempotency that makes a daily job safe.
+  termId       String? @db.Uuid
   label        String
   /// Object-storage key for the archive body.
   storageKey   String  @unique
@@ -138,5 +142,8 @@ model SchoolArchive {
 
   @@index([schoolId])
   @@index([schoolId, createdAt])
+  /// The scheduler's guard: one archive per term, enforced by the database
+  /// rather than by the sweep remembering.
+  @@unique([schoolId, termId])
   @@map("school_archive")
 }
