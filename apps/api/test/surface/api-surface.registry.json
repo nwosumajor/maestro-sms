@@ -94,8 +94,8 @@
       "note": "reviewed: reached from components/workflow/OtherApprovals.tsx"
     },
     "DELETE /operator/platform-role-audit/:p/:p": {
-      "kind": "gap",
-      "note": "revokes a misplaced platform role \u2014 no screen; the audit that surfaces them has none either"
+      "kind": "ui",
+      "note": "FIXED: now reached from components/operator/PlatformRoleAudit.tsx"
     },
     "DELETE /quizzes/:p": {
       "kind": "ui",
@@ -134,12 +134,12 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /admin/export/staff.csv": {
-      "kind": "gap",
-      "note": "staff CSV export with no download link on any page"
+      "kind": "ui",
+      "note": "FIXED: now reached from app/(app)/admin/page.tsx"
     },
     "GET /admin/export/students.csv": {
-      "kind": "gap",
-      "note": "student roster CSV with no download link on any page"
+      "kind": "ui",
+      "note": "FIXED: now reached from app/(app)/admin/page.tsx"
     },
     "GET /admin/parents/import": {
       "kind": "ui",
@@ -954,8 +954,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /operator/countries": {
-      "kind": "gap",
-      "note": "region catalogue for a picker that was never built"
+      "kind": "ui",
+      "note": "FIXED: now reached from app/(app)/operator/schools/[id]/page.tsx"
     },
     "GET /operator/directory": {
       "kind": "ui",
@@ -1006,8 +1006,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /operator/platform-role-audit": {
-      "kind": "gap",
-      "note": "security finding report \u2014 no operator screen renders it"
+      "kind": "ui",
+      "note": "FIXED: now reached from app/(app)/operator/page.tsx"
     },
     "GET /operator/platform-staff": {
       "kind": "ui",

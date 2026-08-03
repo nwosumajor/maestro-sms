@@ -3,8 +3,7 @@ import type {
   OperatorAdminAppointmentDto,
   OperatorBillingAlertDto,
   Serialized,
-  TenantNameDto,
-} from "@sms/types";
+  TenantNameDto, MisplacedPlatformRoleDto } from "@sms/types";
 import Link from "next/link";
 import { hasPermission } from "@/lib/permissions";
 import { redirect } from "next/navigation";
@@ -15,6 +14,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Provisioning } from "@/components/operator/Provisioning";
+import { PlatformRoleAudit } from "@/components/operator/PlatformRoleAudit";
 import { OnboardingRequests } from "@/components/operator/OnboardingRequests";
 import { PlatformStaff } from "@/components/operator/PlatformStaff";
 import { PlatformDelegations } from "@/components/operator/PlatformDelegations";
@@ -45,11 +45,14 @@ export default async function OperatorPage({
   // Plan pricing, the fee take rate and growth (promos/agents/commissions) moved to
   // /operator/pricing: five API calls and three heavy editors that this page paid
   // for on every visit, for controls revisited monthly at most.
-  const [names, onboarding, billingAlerts, adminAppointments, platformStaff] = await Promise.all([
+  const [names, onboarding, billingAlerts, adminAppointments, roleAudit, platformStaff] = await Promise.all([
     apiGet<TenantNameDto[]>("/operator/tenant-names"),
     apiGet<Serialized<OnboardingRequestDto>[]>("/operator/onboarding-requests"),
     apiGet<Serialized<OperatorBillingAlertDto>[]>("/operator/billing-alerts"),
     apiGet<Serialized<OperatorAdminAppointmentDto>[]>("/operator/admin-appointments"),
+    // A security finding report that had no screen at all. Empty is the expected
+    // state, and the panel renders nothing when it is.
+    apiGet<Serialized<MisplacedPlatformRoleDto>[]>("/operator/platform-role-audit"),
     // Owner-only, and only to fill the delegate picker — a manager_admin never
     // fetches it, so this costs nothing on the delegated path.
     canManageStaff
@@ -169,6 +172,9 @@ export default async function OperatorPage({
         {/* Keyed on the request id so entering/leaving prefill re-initialises the form. */}
         {canProvision && <Provisioning key={prefill?.requestId ?? "blank"} tenants={names ?? []} prefill={prefill} />}
 
+        {/* Above the routine work: a platform role inside a customer school is a
+            security finding, not a queue item. Renders nothing when clean. */}
+        <PlatformRoleAudit initial={roleAudit ?? []} />
         {canReviewOnboarding && <OnboardingRequests requests={onboarding ?? []} />}
         {canManageStaff && <PlatformStaff />}
         {/* Beside hiring, because it is the same job: who works here, and what may

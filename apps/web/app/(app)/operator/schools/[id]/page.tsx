@@ -8,6 +8,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
+import { RegionEditor } from "@/components/operator/RegionEditor";
 import { hasPermission } from "@/lib/permissions";
 import { AppShell } from "@/components/shell/AppShell";
 import { Badge } from "@/components/ui/badge";
@@ -49,6 +50,15 @@ export default async function OperatorSchoolProfilePage({ params }: { params: { 
 
   const s = await apiGet<Profile>(`/operator/schools/${params.id}/profile`);
   if (!s) notFound();
+  // The region editor is owner-tier: changing a country moves every register's
+  // day boundary and switches the privacy regime, so it is gated on its own
+  // permission rather than on the read that got you onto this page.
+  const canSetRegion = hasPermission(user.permissions, "platform.tenants.region");
+  const countries = canSetRegion
+    ? ((await apiGet<
+        { code: string; name: string; timezone: string; locale: string; currency: string; complianceRegime: string; payrollPack?: string | null }[]
+      >("/operator/countries")) ?? [])
+    : [];
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="operator" permissions={user.permissions}>
@@ -69,6 +79,20 @@ export default async function OperatorSchoolProfilePage({ params }: { params: { 
             </div>
           }
         />
+
+        {canSetRegion && countries.length > 0 && (
+          <RegionEditor
+            schoolId={params.id}
+            schoolName={s.name}
+            current={{
+              country: (s as unknown as { country?: string | null }).country ?? null,
+              timezone: (s as unknown as { timezone?: string | null }).timezone ?? null,
+              currency: (s as unknown as { currency?: string | null }).currency ?? null,
+              complianceRegime: (s as unknown as { complianceRegime?: string | null }).complianceRegime ?? null,
+            }}
+            countries={countries}
+          />
+        )}
 
         <div className="grid gap-4 lg:grid-cols-2">
           <Card>

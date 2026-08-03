@@ -62,6 +62,10 @@ export default async function AdminPage() {
     { label: "Erasure requests", href: "/admin/privacy", perm: "privacy.erasure.review", desc: "NDPR right-to-erasure review" },
     { label: "Data protection", href: "/admin/compliance", perm: "privacy.compliance.manage", desc: "Regime, DPO, breach register" },
     { label: "Long-term archives", href: "/admin/archives", perm: "privacy.archive.manage", desc: "Year snapshots for a records request years later" },
+    // Two CSV exports that existed with no download link anywhere — a leader
+    // could not get their own roster out of the product without an API call.
+    { label: "Student roster (CSV)", href: "/api/sms/admin/export/students.csv", perm: "rbac.manage", desc: "Every student, for a spreadsheet or a return", download: true },
+    { label: "Staff list (CSV)", href: "/api/sms/admin/export/staff.csv", perm: "rbac.manage", desc: "Every staff member and their roles", download: true },
     { label: "Create profiles", href: "/admin/users", perm: "rbac.manage", desc: "Add staff, teachers, parents, students" },
     { label: "Roles & access", href: "/admin/roles", perm: "rbac.manage", desc: "Assign roles to users" },
     { label: "Bulk student onboarding", href: "/admin/import", perm: "student.import", desc: "SIS roster upload (maker-checker)" },
@@ -69,7 +73,7 @@ export default async function AdminPage() {
     { label: "Finance reports", href: "/fees/reports", perm: "fee.manage", desc: "Receivables aging + collection" },
     { label: "Admissions", href: "/admin/admissions", perm: "admission.review", desc: "Review public applications" },
     { label: "School branding", href: "/admin/branding", perm: "school.branding.manage", desc: "Logo + brand colour (login, certificates, ID cards)" },
-  ] satisfies { label: string; href: string; perm: Permission; desc: string }[]).filter(
+  ] satisfies { label: string; href: string; perm: Permission; desc: string; download?: boolean }[]).filter(
     (a) => user.permissions.includes(a.perm),
   );
 
@@ -94,16 +98,27 @@ export default async function AdminPage() {
         <div>
           <h2 className="mb-3 text-sm font-semibold text-muted-foreground">Quick actions</h2>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {actions.map((a) => (
-              <Link key={a.label} href={a.href}>
+            {actions.map((a) => {
+              const card = (
                 <Card className="transition-colors hover:border-primary/40">
                   <CardContent className="p-4">
                     <div className="font-medium text-primary">{a.label} →</div>
                     <p className="mt-0.5 text-sm text-muted-foreground">{a.desc}</p>
                   </CardContent>
                 </Card>
-              </Link>
-            ))}
+              );
+              // A file download must be a real anchor: next/link would attempt a
+              // client-side navigation to a CSV and simply do nothing visible.
+              return "download" in a && a.download ? (
+                <a key={a.label} href={a.href} download>
+                  {card}
+                </a>
+              ) : (
+                <Link key={a.label} href={a.href}>
+                  {card}
+                </Link>
+              );
+            })}
           </div>
         </div>
       </div>
