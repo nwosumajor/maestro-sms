@@ -30,6 +30,7 @@ import { cn } from "@/lib/utils";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { StartDuelButton, StartRingButton } from "@/components/game/HubActions";
 import { OpenRaceForm } from "@/components/game/OpenRaceForm";
+import { OpenTournamentForm } from "@/components/game/OpenTournamentForm";
 import { CreateLeagueForm } from "@/components/game/CreateLeagueForm";
 import { GameSettingsForm } from "@/components/game/GameSettingsForm";
 import { PageHeader } from "@/components/shell/PageHeader";
@@ -81,6 +82,7 @@ export default async function GamesPage() {
   const user = session!.user;
   const canPlay = hasPermission(user.permissions, "game.play");
   const canRaceOpen = hasPermission(user.permissions, "game.race.open");
+  const canRaceTournament = hasPermission(user.permissions, "game.race.tournament");
   const canLeague = hasPermission(user.permissions, "game.league.create");
   const canSettings = hasPermission(user.permissions, "game.settings.manage");
   const canQuizHost = hasPermission(user.permissions, "game.quiz.host");
@@ -287,6 +289,17 @@ export default async function GamesPage() {
                 <div className="border-t border-border pt-4">
                   <p className="mb-3 text-sm font-medium">Open a race</p>
                   <OpenRaceForm classes={classes} />
+                </div>
+              )}
+              {/* The cross-class tournament: leadership-only, and a separate
+                  permission from opening a single class race. */}
+              {canRaceTournament && classes && (
+                <div className="border-t border-border pt-4">
+                  <p className="mb-1 text-sm font-medium">Open a cross-class tournament</p>
+                  <p className="mb-3 text-xs text-muted-foreground">
+                    One race per class, each with its own secret number, ranked on a combined board.
+                  </p>
+                  <OpenTournamentForm classes={classes} />
                 </div>
               )}
             </CardContent>
