@@ -15,7 +15,7 @@
 // someone checks and finds the claim false, they stop believing the whole panel.
 // =============================================================================
 
-import { assessCalendar, calendarIsSound, termHasElapsed, type CalendarSessionInput } from "@sms/types";
+import { assessCalendar, calendarIsSound, currentTermBlocker, termHasElapsed, type CalendarSessionInput } from "@sms/types";
 
 const term = (over: Partial<CalendarSessionInput["terms"][number]> = {}) => ({
   id: "t-1",
@@ -145,5 +145,34 @@ describe("ordering", () => {
       }),
     ]);
     expect(f[0].severity).toBe("critical");
+  });
+});
+
+describe("a term without dates cannot BE the current term", () => {
+  // The one advisory finding promoted to a refusal, because this is the state
+  // where failing open costs the past-term register lock.
+
+  it("allows a fully dated term", () => {
+    expect(currentTermBlocker({ name: "First Term", startDate: "2026-09-01", endDate: "2026-12-15" })).toBeNull();
+  });
+
+  it("names BOTH missing dates in one message, not one at a time", () => {
+    // Two round-trips to learn two things about the same form is how people give
+    // up halfway and leave the term half-configured.
+    const msg = currentTermBlocker({ name: "First Term", startDate: null, endDate: null });
+    expect(msg).toMatch(/start and end dates/);
+  });
+
+  it("names only the one that is missing", () => {
+    expect(currentTermBlocker({ name: "T", startDate: "2026-09-01", endDate: null })).toMatch(/needs end date/);
+    expect(currentTermBlocker({ name: "T", startDate: null, endDate: "2026-12-15" })).toMatch(/needs start date/);
+  });
+
+  it("says WHY, not just what", () => {
+    // A refusal without a reason gets worked around — someone deletes the term
+    // and makes a new one, losing its history.
+    const msg = currentTermBlocker({ name: "T", startDate: null, endDate: null })!;
+    expect(msg).toMatch(/register lock is off/i);
+    expect(msg).toMatch(/never rolls forward|never roll/i);
   });
 });

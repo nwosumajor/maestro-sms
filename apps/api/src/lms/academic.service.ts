@@ -9,7 +9,7 @@
 
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { AcademicSessionDto, CalendarSession, CalendarTerm, SchoolHolidayDto, TermDto } from "@sms/types";
-import { assessCalendar, dayUtc, pickNextTerm, standardTermDates, termHasElapsed, validateSessionDates, validateTermDates, type CalendarFinding } from "@sms/types";
+import { assessCalendar, currentTermBlocker, dayUtc, pickNextTerm, standardTermDates, termHasElapsed, validateSessionDates, validateTermDates, type CalendarFinding } from "@sms/types";
 
 interface HolidayRow {
   id: string;
@@ -93,6 +93,13 @@ export async function advanceTermInTx(
     };
   }
   const nextTerm = terms.find((t) => t.id === target.termId);
+  // The automatic path REPORTS rather than throws. A sweep that refuses would
+  // leave the school stuck on a term that has already ended, which is worse than
+  // the state it is trying to avoid — and nobody is watching a cron job's error.
+  const nextBlocker = nextTerm ? currentTermBlocker(nextTerm) : null;
+  if (nextBlocker) {
+    return { advanced: false, reason: nextBlocker };
+  }
   const nextSession = sessions.find((s) => s.id === target.sessionId);
   // Clear-then-set (both statements atomic within the tx; the partial unique
   // index tolerates the momentary gap but never two current rows at commit).
@@ -245,9 +252,22 @@ export class AcademicService {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const term = (await tx.term.findFirst({
         where: { id: termId },
-        select: { id: true, sessionId: true, sequence: true, startDate: true, endDate: true },
+        select: { id: true, sessionId: true, sequence: true, startDate: true, endDate: true, name: true, isCurrent: true },
       })) as CalendarTermRow | null;
       if (!term) throw new NotFoundException("Term not found");
+      // Clearing a date on the CURRENT term is the same act as making a dateless
+      // term current, arrived at from the other direction — so it is refused the
+      // same way rather than leaving a back door into the unguarded state.
+      const isCurrentTerm = (term as { isCurrent?: boolean }).isCurrent === true;
+      if (isCurrentTerm) {
+        const merged = {
+          name: (term as unknown as { name?: string }).name ?? "This term",
+          startDate: input.startDate === undefined ? term.startDate : input.startDate,
+          endDate: input.endDate === undefined ? term.endDate : input.endDate,
+        };
+        const blocker = currentTermBlocker(merged);
+        if (blocker) throw new BadRequestException(blocker);
+      }
       // Validate the EFFECTIVE (merged) dates/sequence against the session window
       // and the OTHER terms in the same session — a half-edit can't slip past.
       const session = (await tx.academicSession.findFirst({
@@ -299,8 +319,15 @@ export class AcademicService {
    *  session (an inconsistency the rest of the app reads from). */
   async setCurrentTerm(p: Principal, termId: string) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const term = await tx.term.findFirst({ where: { id: termId }, select: { id: true, sessionId: true } });
+      const term = await tx.term.findFirst({
+        where: { id: termId },
+        select: { id: true, sessionId: true, name: true, startDate: true, endDate: true },
+      });
       if (!term) throw new NotFoundException("Term not found");
+      // REFUSED, not warned about: this is the one state where failing open
+      // costs the past-term register lock.
+      const blocker = currentTermBlocker(term as { name: string; startDate: Date | null; endDate: Date | null });
+      if (blocker) throw new BadRequestException(blocker);
       await tx.term.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
       await tx.term.update({ where: { id: termId }, data: { isCurrent: true } });
       // Keep the current-session pointer in lock-step with the current term.

@@ -196,3 +196,32 @@ export function assessCalendar(sessions: CalendarSessionInput[]): CalendarFindin
 export function calendarIsSound(findings: CalendarFinding[]): boolean {
   return !findings.some((f) => f.severity === "critical");
 }
+
+// -----------------------------------------------------------------------------
+// The one state that is refused rather than warned about
+// -----------------------------------------------------------------------------
+// Everything above is advisory: a school mid-setup is legitimately incomplete.
+// This is the exception, because it is the state where failing open costs the
+// past-term register lock — the control that makes attendance evidential.
+//
+// Enforced at the point a term BECOMES current, and at the point its dates would
+// be cleared WHILE current. Deliberately NOT enforced retroactively: a school
+// already sitting in this state must not be locked out of its own calendar
+// while fixing it. They keep the warning; they cannot make it worse.
+
+/** Why a term may not be made (or remain) the current one. Null when it may. */
+export function currentTermBlocker(term: {
+  name: string;
+  startDate?: string | Date | null;
+  endDate?: string | Date | null;
+}): string | null {
+  const missing: string[] = [];
+  if (!term.startDate) missing.push("start");
+  if (!term.endDate) missing.push("end");
+  if (missing.length === 0) return null;
+  return (
+    `"${term.name}" needs ${missing.join(" and ")} ${missing.length === 1 ? "date" : "dates"} before it can be the current term. ` +
+    `Without a start date the past-term register lock is off, so closed terms stay editable; ` +
+    `without an end date the school never rolls forward on its own and the term is never archived.`
+  );
+}

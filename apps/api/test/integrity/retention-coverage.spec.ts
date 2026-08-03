@@ -184,10 +184,19 @@ describe("the platform-wide streams — not about pupils, still unbounded", () =
   it("keeps them OUT of the per-school run record", async () => {
     // That record is per school; attributing a platform-wide delete to one
     // school would misrepresent what happened.
+    //
+    // Asserted on the FIELDS, not by scanning the serialised row for the number.
+    // The first version did `expect(JSON.stringify(data)).not.toContain("99")`
+    // and failed on a day whose timestamp happened to read `…45.990Z` — the same
+    // coincidental-substring trap as matching a secret against a UUID, made by
+    // the same hand that had just fixed it.
     const { svc, tx } = makeService({ gatewayEvent: 99, lmsContentRevision: 99 });
     await svc.purgeAllSchools("SCHEDULED");
-    const data = tx.integrityRetentionRun.create.mock.calls[0][0].data;
-    expect(JSON.stringify(data)).not.toContain("99");
+    const data = tx.integrityRetentionRun.create.mock.calls[0][0].data as Record<string, unknown>;
+    expect(Object.keys(data)).not.toContain("gatewayEventsDeleted");
+    expect(Object.keys(data)).not.toContain("contentRevisionsDeleted");
+    // And every count it DOES record is a per-school one, all zero here.
+    expect(data).toMatchObject({ signalsDeleted: 0, draftsDeleted: 0, telemetryDeleted: 0, xapiDeleted: 0, scansDeleted: 0 });
   });
 });
 
