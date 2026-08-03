@@ -1,0 +1,198 @@
+// =============================================================================
+// Calendar health — what a half-configured academic year silently switches off
+// =============================================================================
+// Setting up the year is the most consequential data entry a school does, and
+// the least obviously so. Term dates are OPTIONAL in the schema, every date rule
+// is "only enforced when both ends are dated", and three separate safety
+// mechanisms read those dates and FAIL OPEN when they are missing:
+//
+//   • The past-term register lock. `markAttendance` reads the current term's
+//     startDate; if it is null the lock is skipped entirely and registers from
+//     any closed term become editable again. The control that makes attendance
+//     evidential is the one a missing date removes.
+//   • Automatic term roll-over. `termHasElapsed` returns false without an
+//     endDate, so the school never advances and every "current term" report
+//     keeps describing last term.
+//   • The term archive sweep, which selects on `endDate IS NOT NULL`. An undated
+//     term is never archived — so the year you most need in a records request is
+//     the one that was never captured.
+//
+// None of that announces itself. Everything keeps working; it just stops
+// protecting anything. That is the ambiguity worth removing: not whether a
+// single term is valid — the per-term rules are already strict — but whether the
+// calendar AS A WHOLE is complete enough for the things that depend on it.
+//
+// This is a pure assessment. It changes nothing and refuses nothing: a school
+// mid-setup must be allowed to have an incomplete calendar. It states, in the
+// school's own terms, what is missing and what that missing thing has turned off.
+// =============================================================================
+
+export type CalendarSeverity = "critical" | "warning" | "info";
+
+export interface CalendarFinding {
+  severity: CalendarSeverity;
+  /** What is wrong, in a sentence a head teacher can act on. */
+  title: string;
+  /** What this has ACTUALLY disabled. The whole value of the check. */
+  consequence: string;
+  /** The term or session at fault, when one thing is. */
+  subject?: string;
+}
+
+export interface CalendarTermInput {
+  id: string;
+  name: string;
+  sequence: number;
+  isCurrent: boolean;
+  startDate: string | Date | null;
+  endDate: string | Date | null;
+}
+
+export interface CalendarSessionInput {
+  id: string;
+  name: string;
+  isCurrent: boolean;
+  startDate: string | Date | null;
+  endDate: string | Date | null;
+  terms: CalendarTermInput[];
+}
+
+const day = (d: string | Date | null | undefined): number | null => {
+  if (!d) return null;
+  const t = typeof d === "string" ? new Date(`${d.slice(0, 10)}T00:00:00Z`) : new Date(d);
+  const ms = t.getTime();
+  return Number.isFinite(ms) ? ms : null;
+};
+const DAY_MS = 86_400_000;
+const fmt = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+
+/**
+ * Assess a school's calendar.
+ *
+ * Ordered most-consequential first, because a list that opens with a cosmetic
+ * gap while the register lock is off will be read as cosmetic.
+ */
+export function assessCalendar(sessions: CalendarSessionInput[]): CalendarFinding[] {
+  const out: CalendarFinding[] = [];
+
+  if (sessions.length === 0) {
+    return [
+      {
+        severity: "critical",
+        title: "No academic session has been created.",
+        consequence:
+          "Terms, report cards, promotion and the past-term register lock all hang off a session. Until one exists, none of them can work.",
+      },
+    ];
+  }
+
+  const current = sessions.filter((s) => s.isCurrent);
+  if (current.length === 0) {
+    out.push({
+      severity: "critical",
+      title: "No session is marked as the current one.",
+      consequence:
+        "Nothing knows which year 'now' belongs to, so report cards and progression cannot tell this year's data from last year's.",
+    });
+  } else if (current.length > 1) {
+    out.push({
+      severity: "critical",
+      title: `${current.length} sessions are marked current at once.`,
+      consequence: "Which year a new record belongs to becomes arbitrary — whichever row is read first wins.",
+      subject: current.map((s) => s.name).join(", "),
+    });
+  }
+
+  const allTerms = sessions.flatMap((s) => s.terms);
+  const currentTerms = allTerms.filter((t) => t.isCurrent);
+
+  if (allTerms.length === 0) {
+    out.push({
+      severity: "critical",
+      title: "The session has no terms.",
+      consequence: "Attendance, grading and report cards are all scoped to a term. With none, they have nothing to scope to.",
+    });
+  } else if (currentTerms.length === 0) {
+    out.push({
+      severity: "critical",
+      title: "No term is marked as the current one.",
+      consequence:
+        "The past-term register lock is OFF — registers from closed terms can be edited — and nothing rolls the school forward automatically.",
+    });
+  } else if (currentTerms.length > 1) {
+    out.push({
+      severity: "critical",
+      title: `${currentTerms.length} terms are marked current at once.`,
+      consequence: "Which term a register or a mark belongs to becomes arbitrary.",
+      subject: currentTerms.map((t) => t.name).join(", "),
+    });
+  }
+
+  // THE ONE THAT MATTERS MOST: the current term's dates drive the lock and the
+  // roll-over, and their absence is completely silent.
+  for (const t of currentTerms) {
+    if (day(t.startDate) === null) {
+      out.push({
+        severity: "critical",
+        title: `The current term "${t.name}" has no start date.`,
+        consequence:
+          "The past-term register lock is OFF. Anyone who can edit a register can change one from a term that closed months ago, and nothing records that the term had ended.",
+        subject: t.name,
+      });
+    }
+    if (day(t.endDate) === null) {
+      out.push({
+        severity: "warning",
+        title: `The current term "${t.name}" has no end date.`,
+        consequence:
+          "The school will never roll into the next term on its own, and this term will never be archived — so it cannot be produced for a records request later.",
+        subject: t.name,
+      });
+    }
+  }
+
+  // Any other undated term: quieter, but the same archival consequence.
+  const undated = allTerms.filter((t) => !t.isCurrent && (day(t.startDate) === null || day(t.endDate) === null));
+  if (undated.length > 0) {
+    out.push({
+      severity: "warning",
+      title: `${undated.length} term${undated.length === 1 ? " has" : "s have"} incomplete dates.`,
+      consequence:
+        "An undated term is never archived and cannot scope a report card's attendance figures, so those terms are invisible to anything asked about them later.",
+      subject: undated.map((t) => t.name).join(", "),
+    });
+  }
+
+  // Gaps: a school day that belongs to no term. Report-card windows are
+  // inclusive date ranges, so a day in no term is counted by nothing.
+  for (const s of sessions) {
+    const dated = s.terms
+      .filter((t) => day(t.startDate) !== null && day(t.endDate) !== null)
+      .sort((a, b) => (day(a.startDate) ?? 0) - (day(b.startDate) ?? 0));
+    for (let i = 1; i < dated.length; i++) {
+      const prevEnd = day(dated[i - 1].endDate)!;
+      const nextStart = day(dated[i].startDate)!;
+      const gapDays = Math.round((nextStart - prevEnd) / DAY_MS) - 1;
+      // One clear day between terms is a boundary, not a gap — the validator
+      // requires terms not to share a day. More than a fortnight is a holiday.
+      // Anything between is likely a typo.
+      if (gapDays > 1 && gapDays < 14) {
+        out.push({
+          severity: "info",
+          title: `${gapDays} days fall between "${dated[i - 1].name}" and "${dated[i].name}".`,
+          consequence:
+            "Attendance taken on those days belongs to no term, so it is counted in no report card. Fine if it is a holiday; a typo if it is not.",
+          subject: `${fmt(prevEnd)} → ${fmt(nextStart)}`,
+        });
+      }
+    }
+  }
+
+  const order = { critical: 0, warning: 1, info: 2 } as const;
+  return out.sort((a, b) => order[a.severity] - order[b.severity]);
+}
+
+/** True when nothing critical is outstanding — the calendar can be relied on. */
+export function calendarIsSound(findings: CalendarFinding[]): boolean {
+  return !findings.some((f) => f.severity === "critical");
+}

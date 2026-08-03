@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "753 routes",
+  "generatedFrom": "754 routes",
   "routes": {
     "DELETE /academic/holidays/:p": {
       "kind": "ui",
@@ -125,6 +125,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "GET /academic/health": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
     "GET /academic/holidays": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
@@ -247,7 +251,7 @@
     },
     "GET /auth/refresh": {
       "kind": "system",
-      "note": "Auth.js session refresh \u2014 called by the session layer, never by a person"
+      "note": "Auth.js session refresh — called by the session layer, never by a person"
     },
     "GET /billing": {
       "kind": "ui",
@@ -615,7 +619,7 @@
     },
     "GET /health": {
       "kind": "system",
-      "note": "liveness probe \u2014 infrastructure, not a screen"
+      "note": "liveness probe — infrastructure, not a screen"
     },
     "GET /hostels": {
       "kind": "ui",
@@ -903,7 +907,7 @@
     },
     "GET /metrics": {
       "kind": "system",
-      "note": "Prometheus scrape \u2014 token-gated, not a screen"
+      "note": "Prometheus scrape — token-gated, not a screen"
     },
     "GET /my/learning": {
       "kind": "ui",
@@ -1091,15 +1095,15 @@
     },
     "GET /public/plan-pricing": {
       "kind": "system",
-      "note": "public read (plan pricing, directory) \u2014 consumed by marketing pages"
+      "note": "public read (plan pricing, directory) — consumed by marketing pages"
     },
     "GET /public/schools": {
       "kind": "system",
-      "note": "public read (plan pricing, directory) \u2014 consumed by marketing pages"
+      "note": "public read (plan pricing, directory) — consumed by marketing pages"
     },
     "GET /public/schools/:p/branding": {
       "kind": "system",
-      "note": "public read (plan pricing, directory) \u2014 consumed by marketing pages"
+      "note": "public read (plan pricing, directory) — consumed by marketing pages"
     },
     "GET /quiz-sessions": {
       "kind": "ui",
@@ -1411,7 +1415,7 @@
     },
     "POST /academic/progression/run": {
       "kind": "system",
-      "note": "manual trigger for a SCHEDULED job \u2014 ops/runbook surface, not day-to-day UI"
+      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
     },
     "POST /academic/sessions": {
       "kind": "ui",
@@ -1451,7 +1455,7 @@
     },
     "POST /admin/sis/nudge/run": {
       "kind": "system",
-      "note": "manual trigger for a SCHEDULED job \u2014 ops/runbook surface, not day-to-day UI"
+      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
     },
     "POST /admin/students/import": {
       "kind": "ui",
@@ -1527,7 +1531,7 @@
     },
     "POST /attendance/rollup/refresh": {
       "kind": "system",
-      "note": "manual trigger for a SCHEDULED rollup \u2014 ops/runbook surface"
+      "note": "manual trigger for a SCHEDULED rollup — ops/runbook surface"
     },
     "POST /auth/change-password": {
       "kind": "ui",
@@ -1535,7 +1539,7 @@
     },
     "POST /auth/login": {
       "kind": "system",
-      "note": "Auth.js session layer (apps/web/lib/auth.ts) \u2014 the login PAGE is the surface; this is its plumbing"
+      "note": "Auth.js session layer (apps/web/lib/auth.ts) — the login PAGE is the surface; this is its plumbing"
     },
     "POST /billing/checkout/init": {
       "kind": "ui",
@@ -1547,7 +1551,7 @@
     },
     "POST /billing/dunning/run": {
       "kind": "system",
-      "note": "manual trigger for a SCHEDULED job \u2014 ops/runbook surface, not day-to-day UI"
+      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
     },
     "POST /billing/referral/code": {
       "kind": "ui",
@@ -1555,7 +1559,7 @@
     },
     "POST /billing/stripe/webhook": {
       "kind": "system",
-      "note": "gateway callback \u2014 the caller is the payment provider"
+      "note": "gateway callback — the caller is the payment provider"
     },
     "POST /billing/true-up/init": {
       "kind": "ui",
@@ -1867,11 +1871,11 @@
     },
     "POST /fees/reconciliation/run": {
       "kind": "system",
-      "note": "manual trigger for a SCHEDULED job \u2014 ops/runbook surface, not day-to-day UI"
+      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
     },
     "POST /fees/reminders/run": {
       "kind": "system",
-      "note": "manual trigger for a SCHEDULED job \u2014 ops/runbook surface, not day-to-day UI"
+      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
     },
     "POST /forms": {
       "kind": "ui",
@@ -2127,11 +2131,11 @@
     },
     "POST /hr/staff/documents/reminders/run": {
       "kind": "system",
-      "note": "manual trigger for a SCHEDULED job \u2014 ops/runbook surface, not day-to-day UI"
+      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
     },
     "POST /integrity/retention/run": {
       "kind": "system",
-      "note": "manual trigger for a SCHEDULED job \u2014 ops/runbook surface, not day-to-day UI"
+      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
     },
     "POST /invoices": {
       "kind": "ui",
@@ -2247,7 +2251,7 @@
     },
     "POST /operator/feedback/digest/run": {
       "kind": "system",
-      "note": "manual trigger for a SCHEDULED job \u2014 ops/runbook surface, not day-to-day UI"
+      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
     },
     "POST /operator/groups": {
       "kind": "ui",
@@ -2323,7 +2327,7 @@
     },
     "POST /payments/mobile-money/callback/:p": {
       "kind": "system",
-      "note": "rail callback \u2014 the caller is the payment provider"
+      "note": "rail callback — the caller is the payment provider"
     },
     "POST /payments/mobile-money/charge": {
       "kind": "ui",
@@ -2331,11 +2335,11 @@
     },
     "POST /payments/mobile-money/recovery/run": {
       "kind": "system",
-      "note": "manual trigger for a SCHEDULED job \u2014 ops/runbook surface, not day-to-day UI"
+      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
     },
     "POST /payments/webhook": {
       "kind": "system",
-      "note": "gateway callback \u2014 the caller is the payment provider"
+      "note": "gateway callback — the caller is the payment provider"
     },
     "POST /polls": {
       "kind": "ui",
@@ -2359,7 +2363,7 @@
     },
     "POST /privacy/archives/run-term-sweep": {
       "kind": "system",
-      "note": "manual trigger for a SCHEDULED job \u2014 ops/runbook surface"
+      "note": "manual trigger for a SCHEDULED job — ops/runbook surface"
     },
     "POST /privacy/compliance/breaches": {
       "kind": "ui",
@@ -2387,27 +2391,27 @@
     },
     "POST /public/admissions": {
       "kind": "system",
-      "note": "public intake (applications, careers, invites) \u2014 its own unauthenticated pages"
+      "note": "public intake (applications, careers, invites) — its own unauthenticated pages"
     },
     "POST /public/admissions/:p/pay/init": {
       "kind": "system",
-      "note": "public intake (applications, careers, invites) \u2014 its own unauthenticated pages"
+      "note": "public intake (applications, careers, invites) — its own unauthenticated pages"
     },
     "POST /public/invite/accept": {
       "kind": "system",
-      "note": "public intake (applications, careers, invites) \u2014 its own unauthenticated pages"
+      "note": "public intake (applications, careers, invites) — its own unauthenticated pages"
     },
     "POST /public/onboarding-requests": {
       "kind": "system",
-      "note": "public intake (applications, careers, invites) \u2014 its own unauthenticated pages"
+      "note": "public intake (applications, careers, invites) — its own unauthenticated pages"
     },
     "POST /public/password-reset/confirm": {
       "kind": "system",
-      "note": "public intake (applications, careers, invites) \u2014 its own unauthenticated pages"
+      "note": "public intake (applications, careers, invites) — its own unauthenticated pages"
     },
     "POST /public/password-reset/request": {
       "kind": "system",
-      "note": "public intake (applications, careers, invites) \u2014 its own unauthenticated pages"
+      "note": "public intake (applications, careers, invites) — its own unauthenticated pages"
     },
     "POST /quiz-sessions": {
       "kind": "ui",
@@ -2947,7 +2951,7 @@
     },
     "PUT /payments/mobile-money/callback/:p": {
       "kind": "system",
-      "note": "rail callback \u2014 the caller is the payment provider"
+      "note": "rail callback — the caller is the payment provider"
     },
     "PUT /privacy/compliance/breaches/:p": {
       "kind": "ui",

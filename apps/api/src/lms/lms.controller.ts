@@ -352,6 +352,14 @@ export class LmsController {
   }
 
   // --- academic calendar (sessions + terms) ----------------------------------
+  /** What is wrong with the calendar, and what each thing has disabled. Read by
+   *  anyone who can see the calendar — the consequences are not secret. */
+  @Get("academic/health")
+  @RequirePermission(LMS_PERMISSIONS.CLASS_READ)
+  calendarHealth(@CurrentPrincipal() p: Principal) {
+    return this.academic.calendarHealth(p);
+  }
+
   @Get("academic/sessions")
   @RequirePermission(LMS_PERMISSIONS.CLASS_READ)
   sessions(@CurrentPrincipal() p: Principal): Promise<AcademicSessionDto[]> {
