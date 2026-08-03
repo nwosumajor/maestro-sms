@@ -1118,8 +1118,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /race-tournaments/:p": {
-      "kind": "gap",
-      "note": "the read side of the same unlaunched tournament mode \u2014 see POST /race-tournaments"
+      "kind": "ui",
+      "note": "LAUNCHED: components/game/TournamentView.tsx at /games/tournament/[id]"
     },
     "GET /races": {
       "kind": "ui",
@@ -2434,8 +2434,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "POST /race-tournaments": {
-      "kind": "gap",
-      "note": "cross-class race tournament \u2014 a game MODE that was never launched. Not a missing screen: building one would ship an unreviewed feature. Delete the endpoints or launch the mode; either is a product decision."
+      "kind": "ui",
+      "note": "LAUNCHED: components/game/OpenTournamentForm.tsx (games hub, game.race.tournament)"
     },
     "POST /races": {
       "kind": "ui",
