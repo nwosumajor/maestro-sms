@@ -30,6 +30,13 @@ import { PrismaTenantService } from "../../src/foundation/prisma-tenant.service"
 import { AuditLogService } from "../../src/foundation/audit-log.service";
 import type { Principal } from "../../src/integrity/integrity.foundation";
 
+// This suite SEEDS FIVE YEARS of attendance before it asserts anything, then runs
+// alongside 158 others competing for the same Postgres. Jest's 5s default is a
+// number nobody chose for this: it passes in ~0.4s alone and times out under
+// load, which reads as a flaky failure and trains people to re-run the suite
+// rather than read it. The work is real; the budget was not.
+jest.setTimeout(60_000);
+
 const APP_URL = process.env.TEST_DATABASE_URL;
 const ADMIN_URL = process.env.TEST_ADMIN_URL;
 const d = APP_URL && ADMIN_URL ? describe : describe.skip;

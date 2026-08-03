@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { CalendarTimeline } from "./CalendarTimeline";
 import { readApiError } from "@/lib/api-error";
 
 type Session = Serialized<AcademicSessionDto>;
@@ -105,6 +106,11 @@ export function AcademicCalendar({ sessions, holidays }: { sessions: Session[]; 
           </div>
         </div>
 
+        {/* The year as a shape. Placed ABOVE the editors deliberately: the
+            question "is my calendar right?" should be answerable before anyone
+            scrolls into a column of date fields. */}
+        <CalendarTimeline sessions={sessions} />
+
         {/* Quick-create: a whole standard 3-term session from one date. */}
         <form
           onSubmit={async (e) => {
@@ -173,11 +179,28 @@ export function AcademicCalendar({ sessions, holidays }: { sessions: Session[]; 
                 <div className="mt-2 space-y-1.5">
                   {s.terms.map((tm) => (
                     <div key={tm.id} className="flex flex-wrap items-center gap-2">
+                      {/* The most consequential control here was a bare badge
+                          that gave no hint it was a button, and no hint that a
+                          dateless term will be refused. Both are now stated. */}
                       <button
                         onClick={() => send("PUT", `/academic/terms/${tm.id}/current`, undefined, "Current term set.")}
-                        title="Set current term"
+                        title={
+                          tm.isCurrent
+                            ? "This is the current term"
+                            : tm.startDate && tm.endDate
+                              ? `Make "${tm.name}" the current term`
+                              : "Set this term's start and end dates first — a term without both cannot be made current"
+                        }
+                        className="rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       >
-                        <Badge variant={tm.isCurrent ? "secondary" : "outline"}>{tm.sequence}. {tm.name}{tm.isCurrent ? " ✓" : ""}</Badge>
+                        <Badge
+                          variant={tm.isCurrent ? "secondary" : "outline"}
+                          className={tm.isCurrent ? "" : "cursor-pointer hover:border-primary"}
+                        >
+                          {tm.sequence}. {tm.name}
+                          {tm.isCurrent ? " ✓ current" : ""}
+                          {!tm.isCurrent && (!tm.startDate || !tm.endDate) ? " · needs dates" : ""}
+                        </Badge>
                       </button>
                       {/* Start date drives the term-lock boundary AND term-scoped
                           report-card attendance (which needs BOTH dates); end date
