@@ -161,15 +161,50 @@ export function AcademicCalendar({ sessions, holidays }: { sessions: Session[]; 
             const t = term[s.id] ?? { name: "", sequence: "", startDate: "", endDate: "" };
             return (
               <div key={s.id} className="rounded-md border border-border p-3">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-medium">
-                    {s.name} {s.isCurrent && <Badge variant="secondary">current</Badge>}
-                    {(s.startDate || s.endDate) && (
-                      <span className="ml-2 text-xs font-normal text-muted-foreground">
-                        {s.startDate ? String(s.startDate).slice(0, 10) : "?"} – {s.endDate ? String(s.endDate).slice(0, 10) : "?"}
-                      </span>
-                    )}
-                  </p>
+                {/* The session header was read-only: a session could be created
+                    and never corrected, so a mistyped year was permanent and the
+                    only way out was a second session competing with the first.
+                    Editing sits here, inline, on the same blur-to-save rule the
+                    terms below use — one place to change a date, one behaviour. */}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Input
+                      aria-label={`Name of session ${s.name}`}
+                      defaultValue={s.name}
+                      onBlur={(e) => {
+                        const v = e.target.value.trim();
+                        if (v && v !== s.name) void send("PUT", `/academic/sessions/${s.id}`, { name: v }, "Session renamed.");
+                      }}
+                      className="h-8 w-36 text-sm font-medium"
+                    />
+                    {s.isCurrent && <Badge variant="secondary">current</Badge>}
+                    <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                      runs
+                      <Input
+                        type="date"
+                        aria-label={`Start of session ${s.name}`}
+                        defaultValue={s.startDate ? String(s.startDate).slice(0, 10) : ""}
+                        onBlur={(e) => {
+                          const v = e.target.value || null;
+                          if (v !== (s.startDate ? String(s.startDate).slice(0, 10) : null))
+                            void send("PUT", `/academic/sessions/${s.id}`, { startDate: v }, "Session start saved.");
+                        }}
+                        className="h-8 w-36"
+                      />
+                      to
+                      <Input
+                        type="date"
+                        aria-label={`End of session ${s.name}`}
+                        defaultValue={s.endDate ? String(s.endDate).slice(0, 10) : ""}
+                        onBlur={(e) => {
+                          const v = e.target.value || null;
+                          if (v !== (s.endDate ? String(s.endDate).slice(0, 10) : null))
+                            void send("PUT", `/academic/sessions/${s.id}`, { endDate: v }, "Session end saved.");
+                        }}
+                        className="h-8 w-36"
+                      />
+                    </label>
+                  </div>
                   {!s.isCurrent && (
                     <Button size="sm" variant="ghost" className="h-7" onClick={() => send("PUT", `/academic/sessions/${s.id}/current`, undefined, "Current session set.")}>
                       Set current

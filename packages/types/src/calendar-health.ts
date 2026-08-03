@@ -72,7 +72,7 @@ const fmt = (ms: number) => new Date(ms).toISOString().slice(0, 10);
  * Ordered most-consequential first, because a list that opens with a cosmetic
  * gap while the register lock is off will be read as cosmetic.
  */
-export function assessCalendar(sessions: CalendarSessionInput[]): CalendarFinding[] {
+export function assessCalendar(sessions: CalendarSessionInput[], now: Date = new Date()): CalendarFinding[] {
   const out: CalendarFinding[] = [];
 
   if (sessions.length === 0) {
@@ -148,6 +148,44 @@ export function assessCalendar(sessions: CalendarSessionInput[]): CalendarFindin
           "The school will never roll into the next term on its own, and this term will never be archived — so it cannot be produced for a records request later.",
         subject: t.name,
       });
+    }
+  }
+
+  // THE MID-YEAR MISMATCH: the pointer says one term, the date says another.
+  //
+  // A school that joins in February and creates a standard session is pointed at
+  // whichever term the creator picked. If that is not the term they are actually
+  // sitting in, nothing complains — but the past-term register lock uses the
+  // WRONG term's start date, every register and mark files against the wrong
+  // term, and report cards are headed with it. The timeline draws this (today's
+  // line falls outside the outlined bar); this states it in words, because the
+  // drawing only helps someone already looking at the calendar.
+  const todayMs = day(now);
+  if (currentTerms.length === 1 && todayMs !== null) {
+    const cur = currentTerms[0];
+    const cs = day(cur.startDate);
+    const ce = day(cur.endDate);
+    if (cs !== null && ce !== null && (todayMs < cs || todayMs > ce)) {
+      const holding = allTerms.find(
+        (t) => t.id !== cur.id && day(t.startDate) !== null && day(t.endDate) !== null && todayMs >= day(t.startDate)! && todayMs <= day(t.endDate)!,
+      );
+      if (holding) {
+        out.push({
+          severity: "critical",
+          title: `Today falls in "${holding.name}", but the school is pointed at "${cur.name}".`,
+          consequence:
+            "Registers and marks entered now are filed against the wrong term, report cards are headed with it, and the past-term register lock is using the wrong window. Use \u201cSync to today\u201d to correct the pointer.",
+          subject: holding.name,
+        });
+      } else if (todayMs > ce) {
+        out.push({
+          severity: "warning",
+          title: `"${cur.name}" ended on ${fmt(ce)} and the school has not moved on.`,
+          consequence:
+            "No later term covers today, so nothing could roll forward. Add the next term's dates, or the school stays in a term that has finished.",
+          subject: cur.name,
+        });
+      }
     }
   }
 

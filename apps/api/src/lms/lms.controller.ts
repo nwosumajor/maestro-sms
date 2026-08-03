@@ -34,6 +34,12 @@ const sessionSchema = z.object({
   endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
 });
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish();
+/** Every field optional: an edit that only renames must not require the dates. */
+const sessionUpdateSchema = z.object({
+  name: z.string().min(1).max(60).optional(),
+  startDate: isoDate,
+  endDate: isoDate,
+});
 const termSchema = z.object({
   name: z.string().min(1).max(60),
   sequence: z.number().int().min(1).max(6),
@@ -373,6 +379,18 @@ export class LmsController {
     @Body(new ZodValidationPipe(sessionSchema)) body: z.infer<typeof sessionSchema>,
   ) {
     return this.academic.createSession(p, body);
+  }
+
+  /** Correct a session's name or window. There was no way to do this before —
+   *  a session could be created and never fixed. */
+  @Put("academic/sessions/:id")
+  @RequirePermission(LMS_PERMISSIONS.CLASS_WRITE)
+  updateSession(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(sessionUpdateSchema)) body: z.infer<typeof sessionUpdateSchema>,
+  ) {
+    return this.academic.updateSession(p, id, body);
   }
 
   @Post("academic/sessions/:id/terms")

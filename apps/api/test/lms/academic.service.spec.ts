@@ -127,3 +127,140 @@ describe("AcademicService.setCurrentTerm refuses a dateless term", () => {
     expect((tx.term.update as jest.Mock)).not.toHaveBeenCalled();
   });
 });
+
+// =============================================================================
+// Onboarding part-way through a session
+// =============================================================================
+// A school does not always join in September. When one onboards in February and
+// uses the quick-create, the term that is current has to be the term they are
+// actually IN — the pointer drives the past-term register lock, which term every
+// register and mark files against, and the term named on every report card.
+// Getting it wrong is silent in all three places.
+
+describe("AcademicService.createStandardSession — which term becomes current", () => {
+  /** Builds a tx whose term.findFirst answers the "contains today" query with
+   *  `containing`, and any other findFirst (the fallback) with `firstTerm`. */
+  function txFor(containing: { id: string } | null, firstTerm: { id: string }) {
+    const termUpdate = jest.fn().mockResolvedValue({});
+    const findFirst = jest.fn().mockImplementation((q: { where?: Record<string, unknown> }) =>
+      Promise.resolve(q?.where?.startDate ? containing : firstTerm),
+    );
+    const tx = {
+      academicSession: {
+        create: jest.fn().mockResolvedValue({ id: "s1" }),
+        findFirstOrThrow: jest.fn().mockResolvedValue({
+          id: "s1", name: "2025/2026", isCurrent: true, startDate: new Date(), endDate: new Date(),
+        }),
+        updateMany: jest.fn().mockResolvedValue({}),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      term: { createMany: jest.fn().mockResolvedValue({ count: 3 }), findFirst, findMany: jest.fn().mockResolvedValue([]), updateMany: jest.fn().mockResolvedValue({}), update: termUpdate },
+    } as unknown as TenantTx;
+    return { tx, termUpdate, findFirst };
+  }
+
+  it("marks the term CONTAINING TODAY current, not simply the first one", async () => {
+    // The mid-year case. Before this, a February onboarding got First Term, and
+    // the register lock then used First Term's start date — leaving registers
+    // from a term that had already closed editable by anyone.
+    const { tx, termUpdate } = txFor({ id: "t2-second" }, { id: "t1-first" });
+    await svc(tx).service.createStandardSession(p, { name: "2025/2026", yearStart: "2025-09-01", makeCurrent: true });
+    expect(termUpdate).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "t2-second" } }));
+    expect(termUpdate).not.toHaveBeenCalledWith(expect.objectContaining({ where: { id: "t1-first" } }));
+  });
+
+  it("still queries by a date window rather than by sequence", async () => {
+    // Guards the mechanism, not just the outcome: an implementation that ordered
+    // by sequence and happened to return the right row would pass the test above.
+    const { tx, findFirst } = txFor({ id: "t2" }, { id: "t1" });
+    await svc(tx).service.createStandardSession(p, { name: "2025/2026", yearStart: "2025-09-01", makeCurrent: true });
+    const q = findFirst.mock.calls[0][0] as { where: { startDate?: unknown; endDate?: unknown } };
+    expect(q.where.startDate).toBeDefined();
+    expect(q.where.endDate).toBeDefined();
+  });
+
+  it("falls back to the first term when today is outside the whole session", async () => {
+    // Setting NEXT year up over the holidays. They asked for it explicitly with
+    // makeCurrent, so refusing would be worse than picking the opening term.
+    const { tx, termUpdate } = txFor(null, { id: "t1-first" });
+    await svc(tx).service.createStandardSession(p, { name: "2026/2027", yearStart: "2026-09-01", makeCurrent: true });
+    expect(termUpdate).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "t1-first" } }));
+  });
+
+  it("marks no term current at all when makeCurrent was not asked for", async () => {
+    const { tx, termUpdate } = txFor({ id: "t2" }, { id: "t1" });
+    await svc(tx).service.createStandardSession(p, { name: "2026/2027", yearStart: "2026-09-01" });
+    expect(termUpdate).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================================
+// Editing a session
+// =============================================================================
+// There was no route for this at all: a session could be created and made
+// current, never corrected. The risk it introduces is narrowing a session under
+// its own terms, which leaves terms outside their session — a state every date
+// rule validates against and none would notice after the fact.
+
+describe("AcademicService.updateSession", () => {
+  function txWith(terms: Array<{ name: string; startDate: Date | null; endDate: Date | null }>) {
+    const update = jest.fn().mockResolvedValue({});
+    const tx = {
+      academicSession: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: "s1", name: "2025/2026", startDate: new Date("2025-09-01"), endDate: new Date("2026-07-31"),
+        }),
+        update,
+      },
+      term: { findMany: jest.fn().mockResolvedValue(terms) },
+    } as unknown as TenantTx;
+    return { tx, update };
+  }
+
+  const term = (name: string, s: string, e: string) => ({ name, startDate: new Date(s), endDate: new Date(e) });
+
+  it("applies a widened window", async () => {
+    const { tx, update } = txWith([term("First Term", "2025-09-08", "2025-12-19")]);
+    await svc(tx).service.updateSession(p, "s1", { startDate: "2025-08-01", endDate: "2026-08-31" });
+    expect(update).toHaveBeenCalled();
+  });
+
+  it("refuses a window that would start AFTER one of its terms", async () => {
+    const { tx, update } = txWith([term("First Term", "2025-09-08", "2025-12-19")]);
+    await expect(
+      svc(tx).service.updateSession(p, "s1", { startDate: "2025-10-01" }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("refuses a window that would end BEFORE one of its terms", async () => {
+    const { tx, update } = txWith([term("Third Term", "2026-04-20", "2026-07-24")]);
+    await expect(
+      svc(tx).service.updateSession(p, "s1", { endDate: "2026-05-01" }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("names the term that blocks it, so the message says what to move", async () => {
+    const { tx } = txWith([term("Third Term", "2026-04-20", "2026-07-24")]);
+    await expect(svc(tx).service.updateSession(p, "s1", { endDate: "2026-05-01" })).rejects.toThrow(/Third Term/);
+  });
+
+  it("ignores undated terms — they occupy no part of the year to fall outside", async () => {
+    const { tx, update } = txWith([{ name: "Second Term", startDate: null, endDate: null }]);
+    await svc(tx).service.updateSession(p, "s1", { startDate: "2025-10-01" });
+    expect(update).toHaveBeenCalled();
+  });
+
+  it("renames without requiring the dates to be resent", async () => {
+    // A rename that demanded both dates would make the common edit the risky one.
+    const { tx, update } = txWith([term("First Term", "2025-09-08", "2025-12-19")]);
+    await svc(tx).service.updateSession(p, "s1", { name: "2025/2026 (revised)" });
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ data: { name: "2025/2026 (revised)" } }));
+  });
+
+  it("404s an unknown session rather than reporting success", async () => {
+    const tx = { academicSession: { findFirst: jest.fn().mockResolvedValue(null) } } as unknown as TenantTx;
+    await expect(svc(tx).service.updateSession(p, "nope", { name: "x" })).rejects.toThrow(/not found/i);
+  });
+});

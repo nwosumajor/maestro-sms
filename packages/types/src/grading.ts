@@ -350,3 +350,18 @@ export interface ClassBroadsheetDto {
   subjects: { id: string; name: string }[];
   rows: BroadsheetRowDto[];
 }
+
+// -----------------------------------------------------------------------------
+// What a cumulative session average actually covers
+// -----------------------------------------------------------------------------
+// The session average is computed over terms that HAVE marks, which is correct
+// arithmetic — averaging in a term with no data would drag every mid-year
+// school's figures toward nothing. But the report card labelled it "all terms so
+// far", and for a school that onboarded in Term 2 that is false: the number
+// covers 2 of 3 terms and reads as a full year.
+//
+// So the label states the coverage. A parent can then see that the figure is
+// partial without having to know when the school joined the platform.
+export function sessionAverageScope(counted: number, total: number): string {
+  return total > 0 && counted < total ? `${counted} of ${total} terms recorded` : `all ${counted} terms`;
+}
