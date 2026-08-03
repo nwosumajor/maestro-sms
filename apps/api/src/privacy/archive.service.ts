@@ -39,6 +39,17 @@ import {
 } from "../integrity/integrity.foundation";
 import { STORAGE_PROVIDER, type StorageProvider } from "../documents/storage.provider";
 import { decryptField } from "../foundation/field-crypto";
+import { PrivilegedDatabaseService } from "../common/privileged-database.service";
+import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
+
+/** Days after a term ends before it is archived, so late marks and corrections
+ *  entered in the final week are inside the snapshot rather than outside it. */
+const TERM_ARCHIVE_GRACE_DAYS = Number(process.env.TERM_ARCHIVE_GRACE_DAYS ?? 7);
+export const TERM_ARCHIVE_QUEUE = "term-archive";
+export const TERM_ARCHIVE_JOB = "term-archive";
+export const TERM_ARCHIVE_SCHEDULER_ID = "term-archive-scheduler";
+/** Daily. It does nothing on almost every day; the cost of checking is a query. */
+export const DEFAULT_TERM_ARCHIVE_CRON = "40 2 * * *";
 
 /** Rows read per page from the large sections. */
 const PAGE = 1_000;
@@ -63,6 +74,7 @@ export class SchoolArchiveService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     @Inject(STORAGE_PROVIDER) private readonly storage: StorageProvider,
+    private readonly privileged: PrivilegedDatabaseService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -96,7 +108,7 @@ export class SchoolArchiveService {
    * school — the archive cannot accidentally contain another school's rows even
    * if a query forgot its filter.
    */
-  async create(p: Principal, input: { label: string; sessionId?: string }): Promise<ArchiveSummary> {
+  async create(p: Principal, input: { label: string; sessionId?: string; termId?: string }): Promise<ArchiveSummary> {
     const label = input.label.trim();
     if (!label) throw new BadRequestException("An archive needs a label, e.g. 2025/2026.");
 
@@ -114,6 +126,7 @@ export class SchoolArchiveService {
         data: {
           schoolId: p.schoolId,
           sessionId: input.sessionId ?? null,
+          termId: input.termId ?? null,
           label,
           storageKey,
           checksum,
@@ -286,5 +299,80 @@ export class SchoolArchiveService {
     });
     // Returned so the recipient can verify the bytes are the bytes we recorded.
     return { url, checksum: rec.checksum };
+  }
+
+  /**
+   * ARCHIVE EVERY TERM THAT HAS ENDED AND IS NOT YET ARCHIVED.
+   *
+   * Runs daily and does nothing on almost every day — which is the point. A term
+   * boundary is a date nobody is watching for, and "take the archive at the end
+   * of term" is exactly the instruction a school forgets in the week it matters
+   * most, because the end of term is the busiest week they have.
+   *
+   * WHY A TERM AND NOT A YEAR. A year-end archive means a question about the
+   * first term is answered from a snapshot taken eight months later, by which
+   * time the retention sweeps have already deleted that term's telemetry. Per
+   * term, the data is archived while it still exists.
+   *
+   * IDEMPOTENT IN THE DATABASE, not in this method: a UNIQUE (schoolId, termId)
+   * means a second attempt fails at the constraint rather than relying on this
+   * sweep's memory, which a restart erases. A duplicate archive is not harmless
+   * — two files with one name and different checksums is the ambiguity the whole
+   * feature exists to prevent.
+   *
+   * Runs as SYSTEM, per school, through the ordinary tenant path so RLS still
+   * bounds every read.
+   */
+  async archiveEndedTerms(trigger: "SCHEDULED" | "MANUAL"): Promise<{ scanned: number; archived: number; skipped: number }> {
+    const client = this.privileged.client;
+    const result = { scanned: 0, archived: 0, skipped: 0 };
+    if (!client) {
+      if (trigger === "SCHEDULED") this.logger.log("term archive skipped (no privileged client)");
+      return result;
+    }
+
+    // A grace window: archive a few days AFTER the term ends, so late marks and
+    // corrections entered in the final week are inside the snapshot rather than
+    // stranded outside it.
+    const cutoff = new Date(Date.now() - TERM_ARCHIVE_GRACE_DAYS * 86_400_000);
+    const terms = (await client.term.findMany({
+      where: { endDate: { not: null, lt: cutoff } },
+      select: { id: true, schoolId: true, name: true, sessionId: true, endDate: true },
+      orderBy: { endDate: "asc" },
+      take: 500,
+    })) as Array<{ id: string; schoolId: string; name: string; sessionId: string; endDate: Date }>;
+
+    const already = new Set(
+      (
+        (await client.schoolArchive.findMany({
+          where: { termId: { in: terms.map((t) => t.id) } },
+          select: { termId: true },
+        })) as Array<{ termId: string | null }>
+      ).map((a) => a.termId),
+    );
+
+    for (const t of terms) {
+      result.scanned++;
+      if (already.has(t.id)) {
+        result.skipped++;
+        continue;
+      }
+      try {
+        // SYSTEM actor: nobody clicked this, and attributing it to a person
+        // would put a name against an act they did not perform.
+        await this.create(
+          { schoolId: t.schoolId, userId: SYSTEM_ACTOR_ID, roles: [], permissions: [] },
+          { label: t.name, sessionId: t.sessionId, termId: t.id },
+        );
+        result.archived++;
+        this.logger.log(`archived term ${t.name} for school=${t.schoolId}`);
+      } catch (err) {
+        // One school's failure must not stop the rest. A term left unarchived is
+        // retried tomorrow; a sweep that dies halfway is not.
+        result.skipped++;
+        this.logger.error(`term archive failed school=${t.schoolId} term=${t.id}: ${(err as Error).message}`);
+      }
+    }
+    return result;
   }
 }

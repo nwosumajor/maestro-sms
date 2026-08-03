@@ -19,6 +19,7 @@
 
 import { createHash } from "node:crypto";
 import { SchoolArchiveService } from "../../src/privacy/archive.service";
+import { SYSTEM_ACTOR_ID } from "../../src/billing/billing.constants";
 import type { Principal, TenantContext, TenantTx } from "../../src/integrity/integrity.foundation";
 
 const SCHOOL = "s-1";
@@ -29,7 +30,7 @@ const head: Principal = {
   permissions: ["privacy.archive.manage"],
 };
 
-function makeService(over: { rows?: Record<string, unknown[]>; employees?: unknown[] } = {}) {
+function makeService(over: { rows?: Record<string, unknown[]>; employees?: unknown[]; terms?: unknown[]; existing?: unknown[] } = {}) {
   const rows = over.rows ?? {};
   const table = (name: string) => ({
     findMany: jest.fn(async ({ skip = 0, take = 1000 }: { skip?: number; take?: number }) =>
@@ -70,8 +71,14 @@ function makeService(over: { rows?: Record<string, unknown[]>; employees?: unkno
     upload: jest.fn(async (a: { key: string; body: Buffer }) => void uploads.push(a)),
     presignDownload: jest.fn().mockResolvedValue({ url: "https://signed.example/x" }),
   };
-  const svc = new SchoolArchiveService(db as never, audit as never, storage as never);
-  return { svc, tx, audit, storage, uploads, created };
+  const privileged = {
+    client: {
+      term: { findMany: jest.fn().mockResolvedValue((over as { terms?: unknown[] }).terms ?? []) },
+      schoolArchive: { findMany: jest.fn().mockResolvedValue((over as { existing?: unknown[] }).existing ?? []) },
+    },
+  };
+  const svc = new SchoolArchiveService(db as never, audit as never, storage as never, privileged as never);
+  return { svc, tx, audit, storage, uploads, created, privileged };
 }
 
 const bundleOf = (uploads: Array<{ body: Buffer }>) => JSON.parse(uploads[0].body.toString("utf8"));
@@ -182,5 +189,58 @@ describe("retrieving one", () => {
     const { svc, tx } = makeService();
     (tx.schoolArchive.findFirst as jest.Mock).mockResolvedValue(null);
     await expect(svc.download(head, "someone-elses")).rejects.toThrow(/not found/i);
+  });
+});
+
+describe("the term sweep — the part a school will actually rely on", () => {
+  const ended = (id: string, school = SCHOOL) => ({
+    id, schoolId: school, name: "First Term", sessionId: "sess-1", endDate: new Date("2026-01-01"),
+  });
+
+  it("archives a term that has ended", async () => {
+    const { svc, created } = makeService({ terms: [ended("t-1")] });
+    await expect(svc.archiveEndedTerms("SCHEDULED")).resolves.toMatchObject({ scanned: 1, archived: 1 });
+    expect(created[0]).toMatchObject({ termId: "t-1", sessionId: "sess-1", label: "First Term" });
+  });
+
+  it("SKIPS a term already archived — the sweep runs daily", async () => {
+    // Without this every school gains a duplicate archive every single night.
+    const { svc, created } = makeService({ terms: [ended("t-1")], existing: [{ termId: "t-1" }] });
+    await expect(svc.archiveEndedTerms("SCHEDULED")).resolves.toMatchObject({ archived: 0, skipped: 1 });
+    expect(created).toHaveLength(0);
+  });
+
+  it("waits out a grace window before archiving", async () => {
+    // Late marks and corrections land in the days after a term closes; archiving
+    // on the final evening would strand them outside the snapshot.
+    const { svc, privileged } = makeService({ terms: [] });
+    await svc.archiveEndedTerms("SCHEDULED");
+    const where = (privileged.client.term.findMany as jest.Mock).mock.calls[0][0].where;
+    const daysAgo = Math.round((Date.now() - where.endDate.lt.getTime()) / 86_400_000);
+    expect(daysAgo).toBeGreaterThanOrEqual(5);
+  });
+
+  it("attributes the archive to SYSTEM, not to a person", async () => {
+    // Nobody clicked it. Putting a name against it would record an act they did
+    // not perform, in the one artifact meant to be evidence.
+    const { svc, created } = makeService({ terms: [ended("t-1")] });
+    await svc.archiveEndedTerms("SCHEDULED");
+    expect(created[0].createdById).toBe(SYSTEM_ACTOR_ID);
+  });
+
+  it("keeps going when ONE school fails", async () => {
+    // A term left unarchived is retried tomorrow; a sweep that dies halfway
+    // leaves every school after the failure permanently unarchived.
+    const { svc, tx } = makeService({ terms: [ended("t-1", "s-1"), ended("t-2", "s-2")] });
+    (tx.schoolArchive.create as jest.Mock)
+      .mockRejectedValueOnce(new Error("storage down"))
+      .mockResolvedValueOnce({ id: "a-2", createdAt: new Date() });
+    await expect(svc.archiveEndedTerms("SCHEDULED")).resolves.toMatchObject({ scanned: 2, archived: 1, skipped: 1 });
+  });
+
+  it("is inert without the privileged client", async () => {
+    const { svc } = makeService();
+    (svc as unknown as { privileged: { client: unknown } }).privileged = { client: null };
+    await expect(svc.archiveEndedTerms("SCHEDULED")).resolves.toMatchObject({ scanned: 0, archived: 0 });
   });
 });
