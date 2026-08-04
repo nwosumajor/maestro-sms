@@ -18,6 +18,7 @@ import {
   resolveRegion,
   schoolDateString,
   schoolToday,
+  complianceProfile,
 } from "@sms/types";
 
 describe("schoolDateString — the school's calendar day", () => {
@@ -94,8 +95,11 @@ describe("resolveRegion — defaults preserve today's behaviour", () => {
   it("lets a school choose a STRICTER regime than its country requires", () => {
     // A Dubai school taking British pupils may choose to run under GDPR.
     expect(resolveRegion({ country: "AE", complianceRegime: "GDPR" }).compliance).toBe("GDPR");
-    // But not an invented one.
-    expect(resolveRegion({ country: "AE", complianceRegime: "MADE_UP" }).compliance).toBe("NONE");
+    // But not an invented one — it falls back to the country's own regime,
+    // which for a country whose law we do not model is UNSPECIFIED ("we do not
+    // know your obligations"), never a claim that none apply.
+    expect(resolveRegion({ country: "AE", complianceRegime: "MADE_UP" }).compliance).toBe("UNSPECIFIED");
+    expect(complianceProfile(resolveRegion({ country: "AE", complianceRegime: "MADE_UP" }).compliance).modelled).toBe(false);
   });
 });
 
