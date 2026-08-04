@@ -59,6 +59,9 @@ export interface CompliancePostureDto {
   officerTitle?: string;
   breachAuthority?: string | null;
   breachDeadlineIsStatutory?: boolean;
+  /** "statutory" | "no-fixed-period" | "unknown". The last means a law applies
+   *  and we have NOT established its window — never that there is none. */
+  breachDeadlineBasis?: "statutory" | "no-fixed-period" | "unknown";
   /** NDPR | GDPR | NONE — from the school's region. */
   regime: string;
   country: string;

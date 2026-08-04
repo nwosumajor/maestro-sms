@@ -1,3 +1,4 @@
+import { COMPLIANCE_PROFILES } from "./compliance-regime";
 // =============================================================================
 // Region — where a school actually is
 // =============================================================================
@@ -60,7 +61,7 @@ export interface CountryProfile {
 
 // "NONE" is retained as a legacy alias existing rows hold; complianceProfile()
 // resolves it to UNSPECIFIED, which says "not modelled" rather than "none applies".
-export const COMPLIANCE_REGIMES = ["NDPR", "GDPR", "KE_DPA", "POPIA", "GH_DPA", "UNSPECIFIED", "NONE"] as const;
+export const COMPLIANCE_REGIMES = Object.keys(COMPLIANCE_PROFILES).concat("NONE") as unknown as readonly string[];
 export type ComplianceRegime = (typeof COMPLIANCE_REGIMES)[number];
 
 /**
@@ -79,36 +80,36 @@ export const COUNTRIES: Record<string, CountryProfile> = {
   // country and none is implemented, so payroll refuses rather than borrowing
   // Nigeria's. Several of these use ZERO-DECIMAL currencies (XOF, XAF, RWF, UGX) —
   // see currency.ts, which is why money is scaled by the currency and not by 100.
-  UG: { code: "UG", name: "Uganda", timezone: "Africa/Kampala", locale: "en-UG", currency: "UGX", compliance: "UNSPECIFIED", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
-  TZ: { code: "TZ", name: "Tanzania", timezone: "Africa/Dar_es_Salaam", locale: "en-TZ", currency: "TZS", compliance: "UNSPECIFIED", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
-  RW: { code: "RW", name: "Rwanda", timezone: "Africa/Kigali", locale: "en-RW", currency: "RWF", compliance: "UNSPECIFIED", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
-  ET: { code: "ET", name: "Ethiopia", timezone: "Africa/Addis_Ababa", locale: "en-ET", currency: "ETB", compliance: "UNSPECIFIED", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
-  ZM: { code: "ZM", name: "Zambia", timezone: "Africa/Lusaka", locale: "en-ZM", currency: "ZMW", compliance: "UNSPECIFIED", payrollPack: null , academicYearStartMonth: 1 , calendarTemplate: "THREE_TERM" },
-  ZW: { code: "ZW", name: "Zimbabwe", timezone: "Africa/Harare", locale: "en-ZW", currency: "USD", compliance: "UNSPECIFIED", payrollPack: null , academicYearStartMonth: 1 , calendarTemplate: "THREE_TERM" },
-  BW: { code: "BW", name: "Botswana", timezone: "Africa/Gaborone", locale: "en-BW", currency: "BWP", compliance: "UNSPECIFIED", payrollPack: null , academicYearStartMonth: 1 , calendarTemplate: "THREE_TERM" },
+  UG: { code: "UG", name: "Uganda", timezone: "Africa/Kampala", locale: "en-UG", currency: "UGX", compliance: "UG_DPPA", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
+  TZ: { code: "TZ", name: "Tanzania", timezone: "Africa/Dar_es_Salaam", locale: "en-TZ", currency: "TZS", compliance: "TZ_PDPA", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
+  RW: { code: "RW", name: "Rwanda", timezone: "Africa/Kigali", locale: "en-RW", currency: "RWF", compliance: "RW_DPL", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
+  ET: { code: "ET", name: "Ethiopia", timezone: "Africa/Addis_Ababa", locale: "en-ET", currency: "ETB", compliance: "ET_PDPP", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
+  ZM: { code: "ZM", name: "Zambia", timezone: "Africa/Lusaka", locale: "en-ZM", currency: "ZMW", compliance: "ZM_DPA", payrollPack: null , academicYearStartMonth: 1 , calendarTemplate: "THREE_TERM" },
+  ZW: { code: "ZW", name: "Zimbabwe", timezone: "Africa/Harare", locale: "en-ZW", currency: "USD", compliance: "ZW_CDPA", payrollPack: null , academicYearStartMonth: 1 , calendarTemplate: "THREE_TERM" },
+  BW: { code: "BW", name: "Botswana", timezone: "Africa/Gaborone", locale: "en-BW", currency: "BWP", compliance: "BW_DPA", payrollPack: null , academicYearStartMonth: 1 , calendarTemplate: "THREE_TERM" },
   NA: { code: "NA", name: "Namibia", timezone: "Africa/Windhoek", locale: "en-NA", currency: "NAD", compliance: "UNSPECIFIED", payrollPack: null , academicYearStartMonth: 1 , calendarTemplate: "THREE_TERM" },
-  MW: { code: "MW", name: "Malawi", timezone: "Africa/Blantyre", locale: "en-MW", currency: "MWK", compliance: "UNSPECIFIED", payrollPack: null , academicYearStartMonth: 1 , calendarTemplate: "THREE_TERM" },
+  MW: { code: "MW", name: "Malawi", timezone: "Africa/Blantyre", locale: "en-MW", currency: "MWK", compliance: "MW_DPA", payrollPack: null , academicYearStartMonth: 1 , calendarTemplate: "THREE_TERM" },
   SL: { code: "SL", name: "Sierra Leone", timezone: "Africa/Freetown", locale: "en-SL", currency: "SLE", compliance: "UNSPECIFIED", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
   LR: { code: "LR", name: "Liberia", timezone: "Africa/Monrovia", locale: "en-LR", currency: "LRD", compliance: "UNSPECIFIED", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
   GM: { code: "GM", name: "The Gambia", timezone: "Africa/Banjul", locale: "en-GM", currency: "GMD", compliance: "UNSPECIFIED", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
   // Francophone West Africa (XOF) — the UI is English-only today, so a school here
   // gets correct money and dates but an English interface. See the i18n note in
   // CLAUDE.md; the locale is set so it is ready when translations exist.
-  SN: { code: "SN", name: "Senegal", timezone: "Africa/Dakar", locale: "fr-SN", currency: "XOF", compliance: "UNSPECIFIED", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
-  CI: { code: "CI", name: "Côte d'Ivoire", timezone: "Africa/Abidjan", locale: "fr-CI", currency: "XOF", compliance: "UNSPECIFIED", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
-  ML: { code: "ML", name: "Mali", timezone: "Africa/Bamako", locale: "fr-ML", currency: "XOF", compliance: "UNSPECIFIED", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
-  BJ: { code: "BJ", name: "Benin", timezone: "Africa/Porto-Novo", locale: "fr-BJ", currency: "XOF", compliance: "UNSPECIFIED", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
-  BF: { code: "BF", name: "Burkina Faso", timezone: "Africa/Ouagadougou", locale: "fr-BF", currency: "XOF", compliance: "UNSPECIFIED", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
-  TG: { code: "TG", name: "Togo", timezone: "Africa/Lome", locale: "fr-TG", currency: "XOF", compliance: "UNSPECIFIED", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
-  NE: { code: "NE", name: "Niger", timezone: "Africa/Niamey", locale: "fr-NE", currency: "XOF", compliance: "UNSPECIFIED", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
+  SN: { code: "SN", name: "Senegal", timezone: "Africa/Dakar", locale: "fr-SN", currency: "XOF", compliance: "SN_2008", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
+  CI: { code: "CI", name: "Côte d'Ivoire", timezone: "Africa/Abidjan", locale: "fr-CI", currency: "XOF", compliance: "CI_2013", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
+  ML: { code: "ML", name: "Mali", timezone: "Africa/Bamako", locale: "fr-ML", currency: "XOF", compliance: "ML_2013", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
+  BJ: { code: "BJ", name: "Benin", timezone: "Africa/Porto-Novo", locale: "fr-BJ", currency: "XOF", compliance: "BJ_CODE", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
+  BF: { code: "BF", name: "Burkina Faso", timezone: "Africa/Ouagadougou", locale: "fr-BF", currency: "XOF", compliance: "BF_2004", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
+  TG: { code: "TG", name: "Togo", timezone: "Africa/Lome", locale: "fr-TG", currency: "XOF", compliance: "TG_2019", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
+  NE: { code: "NE", name: "Niger", timezone: "Africa/Niamey", locale: "fr-NE", currency: "XOF", compliance: "NE_2017", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
   // Central Africa (XAF)
   CM: { code: "CM", name: "Cameroon", timezone: "Africa/Douala", locale: "fr-CM", currency: "XAF", compliance: "UNSPECIFIED", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
-  GA: { code: "GA", name: "Gabon", timezone: "Africa/Libreville", locale: "fr-GA", currency: "XAF", compliance: "UNSPECIFIED", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
-  CD: { code: "CD", name: "DR Congo", timezone: "Africa/Kinshasa", locale: "fr-CD", currency: "CDF", compliance: "UNSPECIFIED", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
+  GA: { code: "GA", name: "Gabon", timezone: "Africa/Libreville", locale: "fr-GA", currency: "XAF", compliance: "GA_2011", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
+  CD: { code: "CD", name: "DR Congo", timezone: "Africa/Kinshasa", locale: "fr-CD", currency: "CDF", compliance: "CD_CODE", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
   // North Africa
-  EG: { code: "EG", name: "Egypt", timezone: "Africa/Cairo", locale: "ar-EG", currency: "EGP", compliance: "UNSPECIFIED", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
-  MA: { code: "MA", name: "Morocco", timezone: "Africa/Casablanca", locale: "fr-MA", currency: "MAD", compliance: "UNSPECIFIED", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
-  TN: { code: "TN", name: "Tunisia", timezone: "Africa/Tunis", locale: "fr-TN", currency: "TND", compliance: "UNSPECIFIED", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
+  EG: { code: "EG", name: "Egypt", timezone: "Africa/Cairo", locale: "ar-EG", currency: "EGP", compliance: "EG_PDPL", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
+  MA: { code: "MA", name: "Morocco", timezone: "Africa/Casablanca", locale: "fr-MA", currency: "MAD", compliance: "MA_0908", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
+  TN: { code: "TN", name: "Tunisia", timezone: "Africa/Tunis", locale: "fr-TN", currency: "TND", compliance: "TN_2004", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
   GB: { code: "GB", name: "United Kingdom", timezone: "Europe/London", locale: "en-GB", currency: "GBP", compliance: "GDPR", payrollPack: "GB" , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
   IE: { code: "IE", name: "Ireland", timezone: "Europe/Dublin", locale: "en-IE", currency: "EUR", compliance: "GDPR", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },
   AE: { code: "AE", name: "United Arab Emirates", timezone: "Asia/Dubai", locale: "en-AE", currency: "AED", compliance: "UNSPECIFIED", payrollPack: null , academicYearStartMonth: 9 , calendarTemplate: "THREE_TERM" },

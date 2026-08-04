@@ -11,6 +11,7 @@ import { hasPermission } from "@/lib/permissions";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
+import { BREACH_NOTIFY_HOURS } from "@sms/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
@@ -82,10 +83,30 @@ export default async function CompliancePage() {
               </div>
             )}
 
-            {posture.regimeModelled === false && posture.regimeNote && (
+            {/* Shown for EVERY regime, not only unmodelled ones. Most of the
+                modelled regimes carry the instruction that matters most — that
+                their notification window has not been established here and must
+                be confirmed — and hiding that behind `modelled` would bury it on
+                exactly the schools it is written for. */}
+            {posture.regimeNote && (
               <Alert variant="info">
-                <AlertTitle>Your country&rsquo;s data-protection law is not modelled here</AlertTitle>
-                <AlertDescription>{posture.regimeNote}</AlertDescription>
+                <AlertTitle>
+                  {posture.regimeModelled === false
+                    ? "Your country's data-protection law is not modelled here"
+                    : posture.breachDeadlineBasis === "unknown"
+                      ? `${posture.regimeLabel ?? "This regime"} applies — confirm your notification deadline`
+                      : `${posture.regimeLabel ?? "This regime"} applies`}
+                </AlertTitle>
+                <AlertDescription>
+                  {posture.regimeNote}
+                  {posture.breachDeadlineBasis === "unknown" && (
+                    <>
+                      {" "}
+                      The {BREACH_NOTIFY_HOURS}-hour countdown on each incident below is a good-practice target, not
+                      your statutory deadline.
+                    </>
+                  )}
+                </AlertDescription>
               </Alert>
             )}
 
