@@ -352,10 +352,26 @@ export class LmsContentService {
     });
 
     // Drive the engine (enforces separation of duties: approver != author).
-    await this.workflow.review(p, row.approvalRequestId!, action, comments);
+    const decided = (await this.workflow.review(p, row.approvalRequestId!, action, comments)) as {
+      state?: string;
+    };
 
+    // The content follows the WORKFLOW'S state, not the action.
+    //
+    // This used to publish on any APPROVE, which was correct only while the
+    // chain was single-stage — the moment publishing became head teacher AND
+    // principal, the first approver's click still published, and the second
+    // stage was decorative on this path. An approval that merely ADVANCES the
+    // chain leaves the content pending, exactly as the workflow says it is.
+    const approved = decided?.state === "APPROVED";
     const status: LmsContentStatus =
-      action === "APPROVE" ? "PUBLISHED" : action === "REJECT" ? "REJECTED" : "REVISION_REQUESTED";
+      action === "APPROVE"
+        ? approved
+          ? "PUBLISHED"
+          : "PENDING_APPROVAL"
+        : action === "REJECT"
+          ? "REJECTED"
+          : "REVISION_REQUESTED";
     const { dto, recipients } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const updated = (await tx.lmsContent.update({
         where: { id: contentId },

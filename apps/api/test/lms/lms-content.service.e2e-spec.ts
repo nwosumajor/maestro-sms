@@ -43,12 +43,33 @@ d("LmsContentService integration (authoring, approval, quiz, forum, RLS)", () =>
   const CLS = randomUUID();
 
   const teacher = (): Principal => ({ userId: T, schoolId: SA, roles: ["teacher"], permissions: [] });
-  const principal = (): Principal => ({ userId: PR, schoolId: SA, roles: ["principal"], permissions: [] });
+  // Carries the granular stage permission the guard would populate from the role
+  // in production. The staged engine checks `permissions` directly, so a fixture
+  // with an empty list can clear a legacy single-stage request and NOT a staged
+  // one — which is exactly how this suite passed before publishing became
+  // two-stage.
+  const principal = (): Principal => ({
+    userId: PR, schoolId: SA, roles: ["principal"],
+    permissions: ["workflow.review", "workflow.review.principal"],
+  });
   // A REAL principal: the guard populates permissions from roles, so a live approver
   // holds lms.content.approve. The fixture above deliberately does not, which is why
   // the read gap went unnoticed.
   const approver = (): Principal => ({ userId: PR, schoolId: SA, roles: ["principal"], permissions: ["lms.content.approve"] });
   const student = (u: string, s = SA): Principal => ({ userId: u, schoolId: s, roles: ["student"], permissions: [] });
+  // Publishing is TWO-STAGE now — head teacher, then principal — so the suite
+  // needs a second, DIFFERENT approver. One person clearing both stages is the
+  // thing the chain exists to prevent, and the engine refuses it.
+  const HT = randomUUID();
+  const headTeacher = (): Principal => ({
+    userId: HT, schoolId: SA, roles: ["head_teacher"],
+    permissions: ["workflow.review", "workflow.review.head"],
+  });
+  /** Clear both stages. Returns the content after the final approval. */
+  const publish = async (contentId: string) => {
+    await svc.review(headTeacher(), contentId, "APPROVE", "ok");
+    return svc.review(principal(), contentId, "APPROVE", "ok");
+  };
 
   const QUIZ_BODY = {
     kind: "QUIZ" as const,
@@ -69,6 +90,9 @@ d("LmsContentService integration (authoring, approval, quiz, forum, RLS)", () =>
     for (const [u, s, name] of [
       [T, SA, "Teach"],
       [PR, SA, "Principal"],
+      // The second approver. Publishing is two-stage, and audit_log FKs to user,
+      // so a stage cleared by someone who does not exist fails on the audit write.
+      [HT, SA, "HeadTeacher"],
       [S1, SA, "S1"],
       [S2, SA, "S2"],
       [PRB, SB, "PrincipalB"],
@@ -137,6 +161,9 @@ d("LmsContentService integration (authoring, approval, quiz, forum, RLS)", () =>
     // Author cannot approve their own content (separation of duties).
     await expect(svc.review(teacher(), c.id, "APPROVE")).rejects.toThrow();
 
+    // Head teacher approves -> STILL pending: one approval is not enough.
+    const afterFirst = await svc.review(headTeacher(), c.id, "APPROVE", "ok");
+    expect(afterFirst.status).toBe("PENDING_APPROVAL");
     // Principal approves -> published; enrolled student now sees it.
     const approved = await svc.review(principal(), c.id, "APPROVE", "ok");
     expect(approved.status).toBe("PUBLISHED");
@@ -147,7 +174,7 @@ d("LmsContentService integration (authoring, approval, quiz, forum, RLS)", () =>
   it("quiz: auto-graded, single attempt, answer key hidden from the student", async () => {
     const q = await svc.createContent(teacher(), { classId: CLS, type: "QUIZ", title: "Q1", body: QUIZ_BODY });
     await svc.submitForApproval(teacher(), q.id);
-    await svc.review(principal(), q.id, "APPROVE");
+    await publish(q.id);
 
     // The student's view never carries the answer key.
     const studentView = await svc.getContent(student(S1), q.id);
@@ -169,7 +196,7 @@ d("LmsContentService integration (authoring, approval, quiz, forum, RLS)", () =>
       body: { kind: "FORUM_THREAD", intro: "Welcome" },
     });
     await svc.submitForApproval(teacher(), f.id);
-    await svc.review(principal(), f.id, "APPROVE");
+    await publish(f.id);
 
     const post = await svc.postForum(student(S1), f.id, "Great lesson!");
     expect(post.body).toBe("Great lesson!");
