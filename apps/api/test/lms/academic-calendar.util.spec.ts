@@ -2,7 +2,7 @@
 // Academic-calendar pure helpers — validation, standard-session, teaching days
 // =============================================================================
 
-import { defaultSessionFor, pickOpeningTerm, countryProfile } from "@sms/types";
+import { defaultSessionFor, pickOpeningTerm, countryProfile, generateCalendar, termPresetsFor, CALENDAR_TEMPLATES } from "@sms/types";
 import {
   countTeachingDays,
   isHoliday,
@@ -294,5 +294,96 @@ describe("defaultSessionFor across hemispheres", () => {
       expect(m).toBeGreaterThanOrEqual(1);
       expect(m).toBeLessThanOrEqual(12);
     }
+  });
+});
+
+// =============================================================================
+// Two semesters — the US year shape
+// =============================================================================
+// TWO_SEMESTER was defined and completely unreachable: every path that created a
+// calendar called the hard-coded three-term generator, so an American school was
+// provisioned with "First/Second/Third Term" and had to rebuild the year by
+// hand. These pin the shape itself, and that the country selects it.
+
+describe("the two-semester year", () => {
+  it("lays out a US year as Fall then Spring", () => {
+    const t = generateCalendar("TWO_SEMESTER", "2026-08-01");
+    expect(t.map((x) => x.name)).toEqual(["Fall Semester", "Spring Semester"]);
+    expect(t[0].startDate).toBe("2026-08-01");
+  });
+
+  it("produces TWO periods, not three", () => {
+    // The defect in one assertion: the old path always produced three.
+    expect(generateCalendar("TWO_SEMESTER", "2026-08-01")).toHaveLength(2);
+    expect(generateCalendar("THREE_TERM", "2026-09-01")).toHaveLength(3);
+  });
+
+  it("runs August to late May, which is a real US academic year", () => {
+    const t = generateCalendar("TWO_SEMESTER", "2026-08-01");
+    expect(t[1].endDate.startsWith("2027-05")).toBe(true);
+  });
+
+  it("leaves a gap between the semesters rather than butting them together", () => {
+    // Report-card windows are inclusive date ranges; two periods sharing a
+    // boundary day would count that day twice.
+    const [fall, spring] = generateCalendar("TWO_SEMESTER", "2026-08-01");
+    expect(new Date(spring.startDate).getTime()).toBeGreaterThan(new Date(fall.endDate).getTime());
+  });
+
+  it("numbers the semesters 1 and 2", () => {
+    expect(generateCalendar("TWO_SEMESTER", "2026-08-01").map((x) => x.sequence)).toEqual([1, 2]);
+  });
+
+  it("is what the US and Canada resolve to, and nobody else", () => {
+    expect(countryProfile("US").calendarTemplate).toBe("TWO_SEMESTER");
+    expect(countryProfile("CA").calendarTemplate).toBe("TWO_SEMESTER");
+    for (const code of ["NG", "GB", "ZA", "KE", "GH", "IN", "SG"]) {
+      expect(countryProfile(code).calendarTemplate).toBe("THREE_TERM");
+    }
+  });
+
+  it("gives every catalogued country a template that actually exists", () => {
+    // An unknown key silently falls back to three terms, so a typo in the
+    // catalogue would be invisible rather than loud.
+    const known = Object.keys(CALENDAR_TEMPLATES);
+    for (const code of ["NG", "US", "CA", "ZA", "GB", "SG", "IN", "CI", "EG"]) {
+      expect(known).toContain(countryProfile(code).calendarTemplate);
+    }
+  });
+
+  it("combines with the country's start month to give a coherent US year", () => {
+    // The two country fields have to agree: an August start with a three-term
+    // shape, or a September start with semesters, would both be wrong.
+    const us = countryProfile("US");
+    const { name, yearStart } = defaultSessionFor(new Date("2026-08-04T12:00:00Z"), us.academicYearStartMonth);
+    const terms = generateCalendar(us.calendarTemplate, yearStart);
+    expect(name).toBe("2026/2027");
+    expect(yearStart).toBe("2026-08-01");
+    expect(terms.map((t) => t.name)).toEqual(["Fall Semester", "Spring Semester"]);
+  });
+});
+
+describe("termPresetsFor", () => {
+  it("offers a semester school ITS names, not 'Third Term'", () => {
+    const names = termPresetsFor("TWO_SEMESTER").map((p) => p.name);
+    expect(names.slice(0, 2)).toEqual(["Fall Semester", "Spring Semester"]);
+  });
+
+  it("still allows extra periods beyond the template", () => {
+    // A school that genuinely adds a summer session must not be blocked by its
+    // template, so the generic ordinals continue past the named ones.
+    const presets = termPresetsFor("TWO_SEMESTER");
+    expect(presets.length).toBeGreaterThan(2);
+    expect(presets[2].name).toBe("Third Term");
+    expect(presets.map((p) => p.sequence)).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+
+  it("is unchanged for a three-term school", () => {
+    expect(termPresetsFor("THREE_TERM").slice(0, 3).map((p) => p.name)).toEqual(["First Term", "Second Term", "Third Term"]);
+  });
+
+  it("falls back to the default shape for an unknown or absent key", () => {
+    expect(termPresetsFor(null).slice(0, 1)[0].name).toBe("First Term");
+    expect(termPresetsFor("NONSENSE").slice(0, 1)[0].name).toBe("First Term");
   });
 });

@@ -13,6 +13,7 @@ import jwt from "jsonwebtoken";
 import { Prisma } from "@sms/db";
 import {
   COMPLIANCE_REGIMES,
+  CALENDAR_TEMPLATES,
   COUNTRIES,
   SUBSCRIPTION_GRACE_DAYS,
   SUBSCRIPTION_STATUS,
@@ -246,7 +247,7 @@ export class OperatorService {
   async setSchoolRegion(
     p: Principal,
     schoolId: string,
-    input: { country?: string; timezone?: string; locale?: string; currency?: string; complianceRegime?: string },
+    input: { country?: string; timezone?: string; locale?: string; currency?: string; complianceRegime?: string; calendarTemplate?: string },
   ) {
     const client = this.privileged.client;
     if (!client) throw new ServiceUnavailableException("Region administration requires the privileged database configuration");
@@ -269,6 +270,12 @@ export class OperatorService {
     if (input.complianceRegime && !(COMPLIANCE_REGIMES as readonly string[]).includes(input.complianceRegime)) {
       throw new BadRequestException(`Compliance regime must be one of ${COMPLIANCE_REGIMES.join(", ")}`);
     }
+    // The year's SHAPE. Validated against the catalogue rather than stored as
+    // typed, because an unknown key silently falls back to three terms — a school
+    // would set "SEMESTER", see nothing change, and have no way to tell why.
+    if (input.calendarTemplate && !Object.keys(CALENDAR_TEMPLATES).includes(input.calendarTemplate)) {
+      throw new BadRequestException(`Calendar template must be one of ${Object.keys(CALENDAR_TEMPLATES).join(", ")}`);
+    }
 
     await client.school.update({
       where: { id: schoolId },
@@ -279,6 +286,9 @@ export class OperatorService {
         ...(input.locale !== undefined ? { locale: input.locale || null } : {}),
         ...(input.currency !== undefined ? { currency: input.currency ? input.currency.toUpperCase() : null } : {}),
         ...(input.complianceRegime !== undefined ? { complianceRegime: input.complianceRegime || null } : {}),
+        // Changing the shape does NOT rewrite an existing calendar — terms already
+        // hold marks. It decides what the NEXT quick-created year looks like.
+        ...(input.calendarTemplate !== undefined ? { calendarTemplate: input.calendarTemplate || null } : {}),
       },
     });
     // The region is cached on the hot path of every register write; a stale entry

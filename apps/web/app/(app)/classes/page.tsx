@@ -10,7 +10,7 @@ import { ClassAdmin } from "@/components/lms/ClassAdmin";
 import { ClassGrid } from "@/components/lms/ClassGrid";
 import { ClassSubjectsAdmin } from "@/components/lms/ClassSubjectsAdmin";
 import { PromotionManager } from "@/components/lms/PromotionManager";
-import { AcademicCalendar } from "@/components/lms/AcademicCalendar";
+import { AcademicCalendar, type CalendarShape } from "@/components/lms/AcademicCalendar";
 import { CalendarHealth } from "@/components/lms/CalendarHealth";
 import { PageHeader } from "@/components/shell/PageHeader";
 
@@ -29,7 +29,7 @@ export default async function ClassesPage() {
   // Server-side kind filtering: staff for teacher/supervisor pickers, parents for
   // guardian linking — students never pollute a staff picker (and the payload
   // stays small in a large school).
-  const [overview, students, staff, subjects, promotions, sessions, rooms, holidays, calendarFindings] = await Promise.all([
+  const [overview, students, staff, subjects, promotions, sessions, rooms, holidays, calendarFindings, shape] = await Promise.all([
     // ONE request carries the class list AND the figures it is managed by; the
     // counts are grouped server-side, so this costs the same at sixty classes.
     apiGet<Serialized<ClassOverviewDto>[]>("/classes/overview"),
@@ -48,7 +48,10 @@ export default async function ClassesPage() {
     // What an incomplete calendar has switched off. Same source as the sessions
     // above, so the panel cannot disagree with the editor beside it.
     canManageAcademic ? apiGet<CalendarFinding[]>("/academic/health") : Promise.resolve(null),
-  ]);
+      // The school's year shape, so the term-name choices and the quick-create
+    // describe the year this school actually runs.
+    canManageAcademic ? apiGet<CalendarShape>("/academic/shape") : Promise.resolve(null),
+]);
 
   // The admin panels only need id/name/level/nextClassId/supervisorId — all of which
   // the overview already carries, so the page no longer fetches the class list twice.
@@ -84,7 +87,7 @@ export default async function ClassesPage() {
         )}
 
         {canManageAcademic && <CalendarHealth findings={calendarFindings ?? []} />}
-        {canManageAcademic && sessions && <AcademicCalendar sessions={sessions} holidays={holidays ?? []} />}
+        {canManageAcademic && sessions && <AcademicCalendar sessions={sessions} holidays={holidays ?? []} shape={shape} />}
 
         {canPromote && classes && promotions && (
           <PromotionManager
