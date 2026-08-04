@@ -28,6 +28,10 @@ export interface BreachIncidentDto {
   notifiedSubjectsAt: Date | null;
   noNotificationReason: string | null;
   reportedByName: string;
+  /** Whether notifyDueAt is a STATUTORY deadline or merely a good-practice
+   *  target. POPIA sets no fixed hours, and a country we do not model has no
+   *  deadline we can state — the same countdown must be worded differently. */
+  deadlineIsStatutory?: boolean;
   closedAt: Date | null;
   createdAt: Date;
 
@@ -45,6 +49,16 @@ export interface BreachIncidentDto {
 
 /** The one screen a school shows its DPO. */
 export interface CompliancePostureDto {
+  /** Resolved regime key. "UNSPECIFIED" means we do not model this country's
+   *  law — NEVER that the school has no obligations. */
+  regimeLabel?: string;
+  regimeModelled?: boolean;
+  regimeNote?: string;
+  /** POPIA's officer is an "Information Officer"; asking a South African school
+   *  for a "DPO" asks for the wrong thing by the wrong name. */
+  officerTitle?: string;
+  breachAuthority?: string | null;
+  breachDeadlineIsStatutory?: boolean;
   /** NDPR | GDPR | NONE — from the school's region. */
   regime: string;
   country: string;

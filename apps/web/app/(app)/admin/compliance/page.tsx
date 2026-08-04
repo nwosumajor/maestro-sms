@@ -82,17 +82,33 @@ export default async function CompliancePage() {
               </div>
             )}
 
+            {posture.regimeModelled === false && posture.regimeNote && (
+              <Alert variant="info">
+                <AlertTitle>Your country&rsquo;s data-protection law is not modelled here</AlertTitle>
+                <AlertDescription>{posture.regimeNote}</AlertDescription>
+              </Alert>
+            )}
+
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              {/* The regime card used to print a bare key — and for 34 of 37
+                  countries that key was "NONE", which reads as "no privacy law
+                  applies here". It now names the regime and, when the country is
+                  not modelled, says so in as many words. */}
               <Card>
                 <CardHeader className="pb-2">
                   <CardDescription>Regime</CardDescription>
-                  <CardTitle className="text-2xl">{posture.regime}</CardTitle>
-                  <CardDescription>{posture.country}</CardDescription>
+                  <CardTitle className="text-lg">{posture.regimeLabel ?? posture.regime}</CardTitle>
+                  <CardDescription>
+                    {posture.country}
+                    {posture.regimeModelled === false ? " — not modelled here" : ""}
+                  </CardDescription>
                 </CardHeader>
               </Card>
               <Card>
                 <CardHeader className="pb-2">
-                  <CardDescription>Data-protection officer</CardDescription>
+                  {/* POPIA's is an "Information Officer". Asking a South African
+                      school for a "DPO" asks for the wrong thing by name. */}
+                  <CardDescription>{posture.officerTitle ?? "Data-protection officer"}</CardDescription>
                   <CardTitle className="text-base">{posture.dpoName ?? "—"}</CardTitle>
                   <CardDescription>{posture.dpoEmail ?? "not recorded"}</CardDescription>
                 </CardHeader>

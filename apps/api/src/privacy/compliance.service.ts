@@ -21,7 +21,8 @@
 
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import {
-  BREACH_NOTIFY_HOURS,
+  breachTarget,
+  complianceProfile,
   BREACH_RISK_LEVELS,
   type BreachIncidentDto,
   type BreachRiskLevel,
@@ -77,8 +78,15 @@ export class ComplianceService {
    * would let the record and the screen disagree about whether a school is late —
    * which is the single fact this whole register exists to establish.
    */
-  private clockFor(r: Row, now: Date) {
-    const notifyDueAt = new Date(r.discoveredAt.getTime() + BREACH_NOTIFY_HOURS * HOUR_MS);
+  private clockFor(r: Row, now: Date, regime?: string | null) {
+    // The deadline comes from the REGIME, not from a constant. 72 hours is the
+    // law under GDPR Art. 33, Nigeria's NDPA and Kenya's DPA — but POPIA sets no
+    // fixed period, and for a country whose law is not modelled here a
+    // statutory-looking countdown invents a deadline. `statutory` carries that
+    // distinction to the screen so the same number can be shown honestly as
+    // either "your deadline" or "good practice".
+    const target = breachTarget(regime);
+    const notifyDueAt = new Date(r.discoveredAt.getTime() + target.hours * HOUR_MS);
     const hoursRemaining = Math.round((notifyDueAt.getTime() - now.getTime()) / HOUR_MS);
     // Not notifying can be lawful — Art. 33(1) excuses it where the breach is
     // "unlikely to result in a risk". But it must be a RECORDED decision, so an
@@ -88,10 +96,10 @@ export class ComplianceService {
     // Art. 34: high risk means the people themselves must be told, not just the
     // regulator. Telling the regulator and stopping there is a common failing.
     const subjectsUnnotified = r.riskLevel === "HIGH" && !!r.notifiedAuthorityAt && !r.notifiedSubjectsAt;
-    return { notifyDueAt, hoursRemaining, overdue, subjectsUnnotified };
+    return { notifyDueAt, hoursRemaining, overdue, subjectsUnnotified, deadlineIsStatutory: target.statutory };
   }
 
-  private toDto(r: Row, reporterName: string, now: Date): BreachIncidentDto {
+  private toDto(r: Row, reporterName: string, now: Date, regime?: string | null): BreachIncidentDto {
     return {
       id: r.id,
       title: r.title,
@@ -107,7 +115,7 @@ export class ComplianceService {
       reportedByName: reporterName,
       closedAt: r.closedAt,
       createdAt: r.createdAt,
-      ...this.clockFor(r, now),
+      ...this.clockFor(r, now, regime),
     };
   }
 
@@ -162,7 +170,7 @@ export class ComplianceService {
         tx,
       );
       const me = await tx.user.findFirst({ where: { id: p.userId }, select: { name: true } });
-      return this.toDto(row, me?.name ?? "(unknown)", new Date());
+      return this.toDto(row, me?.name ?? "(unknown)", new Date(), (await this.region.forSchool(p.schoolId)).compliance);
     });
   }
 
@@ -234,12 +242,15 @@ export class ComplianceService {
         tx,
       );
       const reporter = await tx.user.findFirst({ where: { id: row.reportedById }, select: { name: true } });
-      return this.toDto(row, reporter?.name ?? "(unknown)", new Date());
+      return this.toDto(row, reporter?.name ?? "(unknown)", new Date(), (await this.region.forSchool(p.schoolId)).compliance);
     });
   }
 
   /** The register, worst first: overdue, then open, then the rest. */
   async listBreaches(p: Principal): Promise<BreachIncidentDto[]> {
+    // One region read for the whole list — the deadline is a property of the
+    // school, not of each incident.
+    const regime = (await this.region.forSchool(p.schoolId)).compliance;
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       const rows = (await tx.dataBreachIncident.findMany({ orderBy: { discoveredAt: "desc" }, take: 200 })) as Row[];
       if (rows.length === 0) return [];
@@ -251,7 +262,7 @@ export class ComplianceService {
       const by = new Map(users.map((u) => [u.id, u.name]));
       const now = new Date();
       return rows
-        .map((r) => this.toDto(r, by.get(r.reportedById) ?? "(unknown)", now))
+        .map((r) => this.toDto(r, by.get(r.reportedById) ?? "(unknown)", now, regime))
         .sort((a, b) => Number(b.overdue) - Number(a.overdue) || b.discoveredAt.getTime() - a.discoveredAt.getTime());
     });
   }
@@ -274,7 +285,7 @@ export class ComplianceService {
 
       const rows = (await tx.dataBreachIncident.findMany({ take: 500 })) as Row[];
       const now = new Date();
-      const clocked = rows.map((r) => ({ r, c: this.clockFor(r, now) }));
+      const clocked = rows.map((r) => ({ r, c: this.clockFor(r, now, region.compliance) }));
 
       const [erasurePending, consentRecorded, studentRoles] = await Promise.all([
         tx.erasureRequest.count({ where: { status: "PENDING" } }),
@@ -284,13 +295,24 @@ export class ComplianceService {
         this.countStudents(tx),
       ]);
 
-      // GDPR Art. 37 — a school processing children's data at scale must designate
-      // a DPO. NDPR expects a data-protection contact too, so the requirement is
-      // flagged for both rather than for GDPR alone.
-      const dpoRequired = region.compliance === "GDPR" || region.compliance === "NDPR";
+      // The officer requirement is regime DATA now. It used to be true only for
+      // GDPR and NDPR, so a school in Nairobi or Johannesburg was told
+      // affirmatively that no officer was required — Kenya's DPA requires a Data
+      // Protection Officer and POPIA makes an Information Officer mandatory.
+      // Saying nothing would have been safer than saying that.
+      const profile = complianceProfile(region.compliance);
+      const dpoRequired = profile.officerRequired;
 
       return {
-        regime: region.compliance,
+        regime: profile.key,
+        regimeLabel: profile.label,
+        // FALSE means "we do not model your country's law", never "you have no
+        // obligations". Every consumer must present it that way.
+        regimeModelled: profile.modelled,
+        regimeNote: profile.note,
+        officerTitle: profile.officerTitle,
+        breachAuthority: profile.authority,
+        breachDeadlineIsStatutory: profile.breachNotifyHours !== null,
         country: region.country,
         dpoName: school?.dpoName ?? null,
         dpoEmail: school?.dpoEmail ?? null,
