@@ -696,15 +696,6 @@ const schoolArchiveA = randomUUID();
       `INSERT INTO class_subject_teacher (id,"schoolId","classId","subjectId","teacherId") VALUES ($1,$2,$3,$4,$5)`,
       [classSubjectA, A, classA, subjectA, userA],
     );
-    // Subject syllabus (the term scheme of work) + one week under it.
-    await a.query(
-      `INSERT INTO subject_syllabus (id,"schoolId","classId","subjectId","termId","ownerId","updatedAt") VALUES ($1,$2,$3,$4,$5,$6,now())`,
-      [syllabusA, A, classA, subjectA, termA, userA],
-    );
-    await a.query(
-      `INSERT INTO subject_syllabus_item (id,"schoolId","syllabusId",week,topic,"updatedAt") VALUES ($1,$2,$3,1,'Week 1','now'::timestamp)`,
-      [syllabusItemA, A, syllabusA],
-    );
     // Bulk SIS import batch (maker-checker; uploaded by userA).
     await a.query(
       `INSERT INTO student_import_batch (id,"schoolId","uploadedById",rows,"updatedAt") VALUES ($1,$2,$3,'[]'::jsonb,now())`,
@@ -728,6 +719,16 @@ const schoolArchiveA = randomUUID();
     await a.query(
       `INSERT INTO term (id,"schoolId","sessionId",name,sequence,"updatedAt") VALUES ($1,$2,$3,'First Term',1,now())`,
       [termA, A, sessionA],
+    );
+    // Subject syllabus (the term scheme of work) + one week under it. Placed
+    // AFTER term: it FKs to term as well as to class, subject and user.
+    await a.query(
+      `INSERT INTO subject_syllabus (id,"schoolId","classId","subjectId","termId","ownerId","updatedAt") VALUES ($1,$2,$3,$4,$5,$6,now())`,
+      [syllabusA, A, classA, subjectA, termA, userA],
+    );
+    await a.query(
+      `INSERT INTO subject_syllabus_item (id,"schoolId","syllabusId",week,topic,"updatedAt") VALUES ($1,$2,$3,1,'Week 1','now'::timestamp)`,
+      [syllabusItemA, A, syllabusA],
     );
     // Per-term attendance rollup (derived totals for an ENDED term).
     await a.query(
@@ -1192,6 +1193,10 @@ const schoolArchiveA = randomUUID();
       // both; term references academic_session -> term before session.
       "promotion_batch",
       "report_card_remark",
+      // Syllabus before term: subject_syllabus FKs to term, so deleting term
+      // first leaves the plan behind and the next run collides on it.
+      "subject_syllabus_item",
+      "subject_syllabus",
       "term",
       "academic_session",
       // class_subject_teacher references class + subject + user -> purge first;
@@ -1216,8 +1221,6 @@ const schoolArchiveA = randomUUID();
       "lms_progress",
       "lms_submission",
       "lms_module",
-      "subject_syllabus_item",
-      "subject_syllabus",
       "lms_content_revision",
       "lms_live_attendance",
       "lms_live_session",
