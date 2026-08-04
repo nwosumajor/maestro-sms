@@ -4,7 +4,7 @@
 // `prisma db seed`. Idempotent.
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
-import { ROLE_PERMISSIONS } from "@sms/types";
+import { ROLE_PERMISSIONS, defaultSessionFor, standardTermDates, pickOpeningTerm } from "@sms/types";
 
 const prisma = new PrismaClient();
 
@@ -328,6 +328,47 @@ async function main() {
     update: {},
     create: { schoolId: school.id, plan: "ENTERPRISE", status: "ACTIVE" },
   });
+
+  // A CALENDAR. The demo school had none, so a fresh local stack started with no
+  // current term — which silently switches off the past-term register lock,
+  // automatic roll-over and the term archive sweep. Every feature that scopes to
+  // a term then behaves differently on a fresh database than on a real school's,
+  // which is the worst possible property for the environment people develop in.
+  //
+  // Created ONLY when the school has no session at all. The seed re-runs on every
+  // deploy, so an upsert keyed on a name would overwrite dates a school had since
+  // corrected — the calendar is exactly the kind of data a re-seed must not touch
+  // once it exists.
+  if ((await prisma.academicSession.count({ where: { schoolId: school.id } })) === 0) {
+    const { name: sessionName, yearStart } = defaultSessionFor(new Date());
+    const termDates = standardTermDates(yearStart);
+    const academicSession = await prisma.academicSession.create({
+      data: {
+        schoolId: school.id,
+        name: sessionName,
+        startDate: new Date(termDates[0].startDate),
+        endDate: new Date(termDates[termDates.length - 1].endDate),
+        isCurrent: true,
+      },
+    });
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    // The term containing today, so the demo behaves like a school that is IN a
+    // term rather than one perpetually about to start its first.
+    const currentIdx = pickOpeningTerm(termDates, today);
+    await prisma.term.createMany({
+      data: termDates.map((t, i) => ({
+        schoolId: school.id,
+        sessionId: academicSession.id,
+        name: t.name,
+        sequence: t.sequence,
+        startDate: new Date(t.startDate),
+        endDate: new Date(t.endDate),
+        isCurrent: i === currentIdx,
+      })),
+    });
+    console.log(`Seeded academic calendar ${sessionName} (${termDates.length} terms, current: ${termDates[currentIdx].name}).`);
+  }
 
   const passwordHash = await bcrypt.hash("password123", 10);
   const teacher = await prisma.user.upsert({

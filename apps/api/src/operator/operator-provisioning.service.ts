@@ -27,7 +27,7 @@ import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import { Prisma, type PrismaClient } from "@sms/db";
 import type { MisplacedPlatformRoleDto, PlatformStaffDutyDto, PlatformStaffInviteDto } from "@sms/types";
-import { MAX_SCHOOL_SLUG_LENGTH } from "@sms/types";
+import { MAX_SCHOOL_SLUG_LENGTH, defaultSessionFor, standardTermDates, pickOpeningTerm } from "@sms/types";
 import { allocateSchoolSlug } from "../foundation/login-email";
 import {
   PLATFORM_TIER_ROLES,
@@ -244,6 +244,43 @@ export class OperatorProvisioningService {
           agentId: agent?.id ?? null,
         },
       });
+      // A CALENDAR. Without one the school has no current term, and three
+      // protections read that pointer and simply do not engage: the past-term
+      // register lock, automatic roll-over, and the term archive sweep. A school
+      // provisioned without a calendar therefore runs unprotected from day one,
+      // silently, until somebody sets one up by hand.
+      //
+      // The term marked current is the one CONTAINING TODAY, so a school
+      // onboarding in February starts in Second Term rather than being filed
+      // against a First Term that closed months ago. Falls back to the opening
+      // term when today sits outside the year — a school set up over the summer
+      // is preparing for a session that has not begun.
+      const { name: sessionName, yearStart } = defaultSessionFor(new Date());
+      const termDates = standardTermDates(yearStart);
+      const academicSession = await tx.academicSession.create({
+        data: {
+          schoolId: school.id,
+          name: sessionName,
+          startDate: new Date(termDates[0].startDate),
+          endDate: new Date(termDates[termDates.length - 1].endDate),
+          isCurrent: true,
+        },
+      });
+      const today = new Date();
+      today.setUTCHours(0, 0, 0, 0);
+      const currentIdx = pickOpeningTerm(termDates, today);
+      await tx.term.createMany({
+        data: termDates.map((t, i) => ({
+          schoolId: school.id,
+          sessionId: academicSession.id,
+          name: t.name,
+          sequence: t.sequence,
+          startDate: new Date(t.startDate),
+          endDate: new Date(t.endDate),
+          isCurrent: i === currentIdx,
+        })),
+      });
+
       const created: Array<{ id: string; email: string; role: string; tempPassword: string }> = [];
       for (const a of prepared) {
         const u = await tx.user.create({

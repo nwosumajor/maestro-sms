@@ -307,3 +307,57 @@ export function generateCalendar(templateKey: string | null | undefined, yearSta
   }
   return out;
 }
+
+// -----------------------------------------------------------------------------
+// The session a school being set up TODAY should start with
+// -----------------------------------------------------------------------------
+// A newly provisioned school had no session and no terms at all. Nothing failed
+// loudly: the past-term register lock reads the current term's start date and
+// simply does not engage when there is no current term, marks and registers have
+// no term to file against, and the archive sweep selects on a term end date it
+// never finds. The school runs, unprotected, until somebody notices.
+//
+// So provisioning creates one. That means guessing a year, and the guess has to
+// be right for a school joining at ANY point in the calendar — which is the same
+// problem mid-year onboarding poses, one step earlier.
+//
+// The cutover is JULY rather than the September the year actually starts in.
+// Third Term ends in early July under the standard shape, so from July onward a
+// school being set up is preparing for the year AHEAD, not joining the one that
+// is finishing. Setting the cutover at September instead would hand a school
+// provisioned in August the session that had already ended.
+//
+// This is a starting point, not a ruling: both the session and its terms are
+// editable, and the calendar panel says so when the dates do not match reality.
+export function defaultSessionFor(today: Date, cutoverMonth = 7): { name: string; yearStart: string } {
+  const y = today.getUTCFullYear();
+  // getUTCMonth is 0-indexed; cutoverMonth is given 1-indexed for readability.
+  const startYear = today.getUTCMonth() + 1 >= cutoverMonth ? y : y - 1;
+  return { name: `${startYear}/${startYear + 1}`, yearStart: `${startYear}-09-01` };
+}
+
+/**
+ * Which term a school being set up TODAY should open on.
+ *
+ * "The term containing today" is right only while a term is running. A school
+ * provisioned during a break falls between two terms, and taking the first term
+ * unconditionally hands it one that has ALREADY ENDED — so its first registers
+ * file into a closed term and the past-term lock guards a window that is shut.
+ * The term about to BEGIN is the one they will actually teach in.
+ *
+ * Returns an index into `terms`, which are assumed ordered by sequence.
+ */
+export function pickOpeningTerm(
+  terms: Array<{ startDate: string | Date; endDate: string | Date }>,
+  today: Date,
+): number {
+  if (terms.length === 0) return -1;
+  const t = dayUtc(today);
+  const containing = terms.findIndex((x) => dayUtc(x.startDate) <= t && t <= dayUtc(x.endDate));
+  if (containing !== -1) return containing;
+  // In a break, or before the year starts: the next term to open.
+  const upcoming = terms.findIndex((x) => dayUtc(x.startDate) > t);
+  if (upcoming !== -1) return upcoming;
+  // The whole session is behind us — nothing ahead to point at.
+  return terms.length - 1;
+}

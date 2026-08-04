@@ -2,6 +2,7 @@
 // Academic-calendar pure helpers — validation, standard-session, teaching days
 // =============================================================================
 
+import { defaultSessionFor, pickOpeningTerm } from "@sms/types";
 import {
   countTeachingDays,
   isHoliday,
@@ -126,5 +127,114 @@ describe("teaching days", () => {
     expect(countTeachingDays("2025-09-08", "2025-09-14", holidays)).toBe(5);
     // A window over the Oct 1–3 holiday drops those weekdays.
     expect(countTeachingDays("2025-09-29", "2025-10-03", holidays)).toBe(2); // Mon 29, Tue 30 only
+  });
+});
+
+// =============================================================================
+// defaultSessionFor — the year a school being set up TODAY should start with
+// =============================================================================
+// Provisioning and the seed both create a calendar now, because a school without
+// one has no current term, and three protections read that pointer and silently
+// do not engage: the past-term register lock, roll-over, and the archive sweep.
+//
+// Creating one means guessing a year. The guess is wrong in a way nobody sees
+// until a register is filed against a session that ended last summer.
+
+describe("defaultSessionFor", () => {
+  const at = (iso: string) => defaultSessionFor(new Date(`${iso}T12:00:00Z`));
+
+  it("gives a school set up in September the year that is starting", () => {
+    expect(at("2026-09-15")).toEqual({ name: "2026/2027", yearStart: "2026-09-01" });
+  });
+
+  it("gives a school set up in February the year it is ALREADY IN", () => {
+    // The mid-year case. Rolling to 2027/2028 here would date every record a
+    // full year forward.
+    expect(at("2027-02-10")).toEqual({ name: "2026/2027", yearStart: "2026-09-01" });
+  });
+
+  it("gives a school set up in AUGUST the year ahead, not the one that ended", () => {
+    // The reason the cutover is July and not September. Third Term ends in early
+    // July, so an August school is preparing for the coming year — a September
+    // cutover would hand it a session that had already finished.
+    expect(at("2026-08-03")).toEqual({ name: "2026/2027", yearStart: "2026-09-01" });
+  });
+
+  it("treats 1 July as the first day of the year ahead", () => {
+    expect(at("2026-07-01").name).toBe("2026/2027");
+  });
+
+  it("treats 30 June as still belonging to the year in progress", () => {
+    // The exact boundary, checked from both sides — an off-by-one month here
+    // dates a whole school's first year wrong.
+    expect(at("2026-06-30").name).toBe("2025/2026");
+  });
+
+  it("names the session across the year boundary, never as a single year", () => {
+    expect(at("2027-01-01").name).toBe("2026/2027");
+    expect(at("2026-12-31").name).toBe("2026/2027");
+  });
+
+  it("always starts the session in September", () => {
+    for (const d of ["2026-01-05", "2026-07-20", "2026-09-01", "2026-11-30"]) {
+      expect(at(d).yearStart.slice(5)).toBe("09-01");
+    }
+  });
+
+  it("produces a yearStart standardTermDates can consume, spanning ~11 months", () => {
+    // The two are always used together; a yearStart the generator misreads would
+    // produce terms in the wrong year with no error.
+    const terms = standardTermDates(at("2026-08-03").yearStart);
+    expect(terms).toHaveLength(3);
+    expect(terms[0].startDate).toBe("2026-09-01");
+    expect(terms[2].endDate.startsWith("2027-")).toBe(true);
+  });
+});
+
+// =============================================================================
+// pickOpeningTerm — which term a school being set up TODAY should open on
+// =============================================================================
+// "The term containing today" is right only while a term is running. Both
+// provisioning and the seed originally fell back to the FIRST term whenever
+// today sat outside every term — which for a school set up during the Christmas
+// break handed it a First Term that had already ended, so its first registers
+// would file into a closed term and the past-term lock would guard a shut
+// window. The term about to BEGIN is the one they will actually teach in.
+
+describe("pickOpeningTerm", () => {
+  const T = standardTermDates("2026-09-01"); // Sep1–Nov29 / Dec21–Mar20 / Apr11–Jul9
+  const on = (iso: string) => pickOpeningTerm(T, new Date(`${iso}T12:00:00Z`));
+
+  it("picks the term that contains today", () => {
+    expect(on("2026-10-20")).toBe(0);
+    expect(on("2027-02-10")).toBe(1);
+    expect(on("2027-05-20")).toBe(2);
+  });
+
+  it("picks the term ABOUT TO BEGIN when today falls in a break", () => {
+    // 5 December: First Term ended 29 November, Second starts 21 December.
+    // Taking First Term here is the bug this function exists to prevent.
+    expect(on("2026-12-05")).toBe(1);
+    expect(on("2027-03-28")).toBe(2); // between Second and Third
+  });
+
+  it("picks the first term when the whole session is still ahead", () => {
+    expect(on("2026-08-03")).toBe(0);
+  });
+
+  it("picks the LAST term when the session is entirely behind us", () => {
+    // Nothing ahead to point at. The calendar panel reports this as a year that
+    // has ended rather than the code inventing a term.
+    expect(on("2027-08-15")).toBe(2);
+  });
+
+  it("includes both boundary days of a term", () => {
+    expect(on("2026-09-01")).toBe(0);
+    expect(on("2026-11-29")).toBe(0);
+    expect(on("2026-11-30")).toBe(1); // the day after it ends
+  });
+
+  it("returns -1 for a session with no terms rather than pretending index 0", () => {
+    expect(pickOpeningTerm([], new Date())).toBe(-1);
   });
 });
