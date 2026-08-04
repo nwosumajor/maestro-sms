@@ -54,6 +54,9 @@ function makeService(counts: Record<string, number>) {
     $transaction: jest.fn(async (fn: (t: unknown) => Promise<unknown>) => fn(tx)),
     // The two PLATFORM-WIDE streams, swept once per run rather than per school.
     gatewayEvent: { deleteMany: jest.fn().mockResolvedValue({ count: counts.gatewayEvent ?? 0 }) },
+    // The platform-wide purge also clears READ notifications (see the
+    // unbounded-growers suite); unread are never touched at any age.
+    notification: { deleteMany: jest.fn().mockResolvedValue({ count: counts.notification ?? 0 }) },
     $executeRaw: jest.fn().mockResolvedValue(counts.lmsContentRevision ?? 0),
   };
   const db = { client };
@@ -177,8 +180,18 @@ describe("the platform-wide streams — not about pupils, still unbounded", () =
       { id: "s-3", integrityRetentionDays: 30 },
     ]);
     await svc.purgeAllSchools("SCHEDULED");
+    // THREE schools, but each platform-wide statement runs ONCE. Asserting a
+    // fixed count of raw statements would break every time one is added and say
+    // nothing about the property; what matters is that the count does not scale
+    // with the number of schools.
+    const rawCallsFor3 = (client.$executeRaw as jest.Mock).mock.calls.length;
     expect(client.gatewayEvent.deleteMany).toHaveBeenCalledTimes(1);
-    expect(client.$executeRaw).toHaveBeenCalledTimes(1);
+    expect(client.notification.deleteMany).toHaveBeenCalledTimes(1);
+
+    const second = makeService({});
+    (second.client.school.findMany as jest.Mock).mockResolvedValue([{ id: "only-1", integrityRetentionDays: 30 }]);
+    await second.svc.purgeAllSchools("SCHEDULED");
+    expect((second.client.$executeRaw as jest.Mock).mock.calls.length).toBe(rawCallsFor3);
   });
 
   it("keeps them OUT of the per-school run record", async () => {
