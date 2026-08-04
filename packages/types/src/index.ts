@@ -10,6 +10,7 @@ export * from "./currency";
 export * from "./mobile-money";
 export * from "./region";
 export * from "./compliance-regime";
+export * from "./notification-messages";
 export * from "./roles";
 export * from "./school-email";
 export * from "./academic-progression";

@@ -172,6 +172,12 @@ export class AttendanceService {
       try {
         await this.notifications.enqueueMany(this.ctx(p), g.guardianIds, {
           type: "ATTENDANCE_ABSENCE",
+          // Written in each GUARDIAN's own language — enqueueMany renders per
+          // recipient, so a class whose families do not share one still gets it
+          // right. The title/body below stay as the English fallback for a
+          // recipient whose language has no catalogue entry.
+          key: g.status === "LATE" ? "attendance.late" : "attendance.absent",
+          params: { date: input.date },
           title: "Attendance alert",
           body: `Your child was marked ${g.status} on ${input.date}.`,
           data: { classId, date: input.date, studentId: g.studentId, status: g.status },

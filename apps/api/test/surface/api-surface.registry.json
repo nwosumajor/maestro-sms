@@ -921,6 +921,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "GET /notifications/me/language": {
+      "kind": "ui",
+      "note": "reviewed: components/account/LanguageCard.tsx loads the caller's writing language on /account"
+    },
     "GET /notifications/me/phone": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
@@ -2900,6 +2904,10 @@
     "PUT /modules/:p": {
       "kind": "ui",
       "note": "reviewed: reached from components/workflow/OtherApprovals.tsx"
+    },
+    "PUT /notifications/me/language": {
+      "kind": "ui",
+      "note": "reviewed: the Save button in components/account/LanguageCard.tsx calls this"
     },
     "PUT /notifications/me/phone": {
       "kind": "ui",
