@@ -51,24 +51,34 @@ export default async function AttendancePage({
   const user = session!.user;
   const canWrite = hasPermission(user.permissions, "attendance.write");
 
-  const [students, count, classes, termLock] = await Promise.all([
+  const page = Math.max(Number(searchParams.page ?? 1) || 1, 1);
+
+  // ONE round of fetches, not two. The history and summary used to wait for the
+  // student list purely to learn which student to ask about — but on every
+  // navigation after the first, the URL already says. Waiting anyway cost a full
+  // extra round trip on the heaviest page in the app, which on a real connection
+  // is felt rather than measured. Only a first visit with no studentId still
+  // needs the list first, and that case falls through to the second fetch below.
+  const known = searchParams.studentId;
+  const historyFor = (id: string) =>
+    Promise.all([
+      apiGet<History>(`/students/${id}/attendance?page=${page}&pageSize=${PAGE_SIZE}`),
+      apiGet<Summary>(`/students/${id}/attendance/summary`),
+    ]);
+
+  const [students, count, classes, termLock, preloaded] = await Promise.all([
     // A PAGE of the register (bounded), plus the true total so the picker can say
     // what it is not showing and search the server for the rest.
     apiGet<Student[]>("/students"),
     apiGet<{ students: number }>("/students/count"),
     canWrite ? apiGet<ClassRow[]>("/classes/mine") : Promise.resolve(null),
     canWrite ? apiGet<{ lockBeforeDate: string | null }>("/attendance/term-lock") : Promise.resolve(null),
+    known ? historyFor(known) : Promise.resolve(null),
   ]);
 
   const list = students ?? [];
-  const selectedId = searchParams.studentId ?? list[0]?.id;
-  const page = Math.max(Number(searchParams.page ?? 1) || 1, 1);
-  const [history, summary] = selectedId
-    ? await Promise.all([
-        apiGet<History>(`/students/${selectedId}/attendance?page=${page}&pageSize=${PAGE_SIZE}`),
-        apiGet<Summary>(`/students/${selectedId}/attendance/summary`),
-      ])
-    : [null, null];
+  const selectedId = known ?? list[0]?.id;
+  const [history, summary] = preloaded ?? (selectedId ? await historyFor(selectedId) : [null, null]);
   const records = history?.records ?? (history === null && selectedId ? null : []);
   const total = history?.total ?? 0;
   const pages = Math.max(Math.ceil(total / PAGE_SIZE), 1);
