@@ -128,6 +128,23 @@ export const TERM_PRESETS: ReadonlyArray<{ sequence: number; name: string }> = [
   { sequence: 6, name: "Sixth Term" },
 ];
 
+/**
+ * The term-name choices for a given year shape.
+ *
+ * TERM_PRESETS above is the generic ordinal list. It is the wrong dropdown for a
+ * school running semesters: offering "Third Term" to an American school invites
+ * exactly the mismatch the template exists to prevent, and the names it does want
+ * — "Fall Semester", "Spring Semester" — were not offered at all.
+ *
+ * Falls back to the ordinal list beyond the template's own periods, so a school
+ * that genuinely adds a summer period is not blocked by its template.
+ */
+export function termPresetsFor(templateKey: string | null | undefined): ReadonlyArray<{ sequence: number; name: string }> {
+  const t = calendarTemplate(templateKey);
+  const named = t.periodNames.map((name, i) => ({ sequence: i + 1, name }));
+  return [...named, ...TERM_PRESETS.slice(named.length)];
+}
+
 // -----------------------------------------------------------------------------
 // Standard 3-term session generation (Tier 2 quick-create)
 // -----------------------------------------------------------------------------

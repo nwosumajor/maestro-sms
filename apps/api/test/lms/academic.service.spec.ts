@@ -39,7 +39,9 @@ describe("AcademicService.createStandardSession", () => {
   it("creates the session plus exactly three sequenced terms in one action", async () => {
     const createMany = jest.fn().mockResolvedValue({ count: 3 });
     const tx = {
+      school: { findFirst: jest.fn().mockResolvedValue({ calendarTemplate: "THREE_TERM" }) },
       academicSession: {
+        findMany: jest.fn().mockResolvedValue([]),
         create: jest.fn().mockResolvedValue({ id: "s1" }),
         findFirstOrThrow: jest.fn().mockResolvedValue({ id: "s1", name: "2025/2026", isCurrent: false, startDate: new Date(), endDate: new Date() }),
         updateMany: jest.fn(),
@@ -146,7 +148,9 @@ describe("AcademicService.createStandardSession — which term becomes current",
       Promise.resolve(q?.where?.startDate ? containing : firstTerm),
     );
     const tx = {
+      school: { findFirst: jest.fn().mockResolvedValue({ calendarTemplate: "THREE_TERM" }) },
       academicSession: {
+        findMany: jest.fn().mockResolvedValue([]),
         create: jest.fn().mockResolvedValue({ id: "s1" }),
         findFirstOrThrow: jest.fn().mockResolvedValue({
           id: "s1", name: "2025/2026", isCurrent: true, startDate: new Date(), endDate: new Date(),
@@ -453,5 +457,65 @@ describe("AcademicService.deleteSession", () => {
 
   it("404s an unknown session", async () => {
     await expect(svc(txWith(null).tx).service.deleteSession(p, "nope")).rejects.toThrow(/not found/i);
+  });
+});
+
+// =============================================================================
+// Quick-create follows the SCHOOL's year shape
+// =============================================================================
+// The shape existed in the catalogue and was never consulted: createStandardSession
+// called the hard-coded three-term generator, so an American school clicking
+// "quick-create" got First/Second/Third Term regardless. Testing the DATA (that
+// US resolves to TWO_SEMESTER) proves nothing on its own — this tests the wiring.
+
+describe("AcademicService.createStandardSession — year shape", () => {
+  function txFor(schoolTemplate: string | null) {
+    const createMany = jest.fn().mockResolvedValue({ count: 0 });
+    const tx = {
+      school: { findFirst: jest.fn().mockResolvedValue({ calendarTemplate: schoolTemplate }) },
+      academicSession: {
+        findMany: jest.fn().mockResolvedValue([]),
+        create: jest.fn().mockResolvedValue({ id: "s1" }),
+        findFirstOrThrow: jest.fn().mockResolvedValue({ id: "s1", name: "n", isCurrent: false, startDate: new Date(), endDate: new Date() }),
+        updateMany: jest.fn().mockResolvedValue({}),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      term: { createMany, findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn().mockResolvedValue(null), updateMany: jest.fn().mockResolvedValue({}), update: jest.fn().mockResolvedValue({}) },
+    } as unknown as TenantTx;
+    const names = () => (createMany.mock.calls[0]?.[0]?.data ?? []).map((t: { name: string }) => t.name);
+    return { tx, createMany, names };
+  }
+
+  it("builds TWO semesters for a school whose shape is TWO_SEMESTER", async () => {
+    const { tx, names } = txFor("TWO_SEMESTER");
+    await svc(tx).service.createStandardSession(p, { name: "2026/2027", yearStart: "2026-08-01" });
+    expect(names()).toEqual(["Fall Semester", "Spring Semester"]);
+  });
+
+  it("still builds THREE terms for a three-term school", async () => {
+    // The regression that matters: every school already live is three-term.
+    const { tx, names } = txFor("THREE_TERM");
+    await svc(tx).service.createStandardSession(p, { name: "2026/2027", yearStart: "2026-09-01" });
+    expect(names()).toEqual(["First Term", "Second Term", "Third Term"]);
+  });
+
+  it("defaults to three terms when the school has never chosen", async () => {
+    const { tx, names } = txFor(null);
+    await svc(tx).service.createStandardSession(p, { name: "2026/2027", yearStart: "2026-09-01" });
+    expect(names()).toHaveLength(3);
+  });
+
+  it("lets an explicit template override the school's own", async () => {
+    // A school whose shape differs from its country's norm.
+    const { tx, names } = txFor("THREE_TERM");
+    await svc(tx).service.createStandardSession(p, { name: "2026/2027", yearStart: "2026-08-01", template: "TWO_SEMESTER" });
+    expect(names()).toEqual(["Fall Semester", "Spring Semester"]);
+  });
+
+  it("refuses a duplicate session name here too, not only on manual create", async () => {
+    const { tx, createMany } = txFor("THREE_TERM");
+    (tx as unknown as { academicSession: { findMany: jest.Mock } }).academicSession.findMany.mockResolvedValue([{ id: "old", name: "2026/2027" }]);
+    await expect(svc(tx).service.createStandardSession(p, { name: "2026/2027", yearStart: "2026-09-01" })).rejects.toThrow(/already exists/i);
+    expect(createMany).not.toHaveBeenCalled();
   });
 });

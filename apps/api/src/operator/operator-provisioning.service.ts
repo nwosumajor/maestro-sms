@@ -27,7 +27,7 @@ import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import { Prisma, type PrismaClient } from "@sms/db";
 import type { MisplacedPlatformRoleDto, PlatformStaffDutyDto, PlatformStaffInviteDto } from "@sms/types";
-import { MAX_SCHOOL_SLUG_LENGTH, defaultSessionFor, standardTermDates, pickOpeningTerm, countryProfile } from "@sms/types";
+import { MAX_SCHOOL_SLUG_LENGTH, defaultSessionFor, generateCalendar, pickOpeningTerm, countryProfile } from "@sms/types";
 import { allocateSchoolSlug } from "../foundation/login-email";
 import {
   PLATFORM_TIER_ROLES,
@@ -223,9 +223,14 @@ export class OperatorProvisioningService {
       prepared.push({ ...a, role: a.role, roleId: roleRow.id, tempPassword, passwordHash: await bcrypt.hash(tempPassword, 10) });
     }
 
+    // Pure catalogue lookup — the country decides the year's START MONTH, its
+    // SHAPE, and the template stamped on the school row. Resolved before the
+    // transaction because the school row is written first and needs it.
+    const profile = countryProfile(input.country);
+
     const result = await db.$transaction(async (tx) => {
       const school = await tx.school.create({
-        data: { name: input.name, slug, ownerName, ownerPhone, address, ...(input.country ? { country: input.country.toUpperCase() } : {}) },
+        data: { name: input.name, slug, ownerName, ownerPhone, address, ...(input.country ? { country: input.country.toUpperCase(), calendarTemplate: profile.calendarTemplate } : {}) },
       });
       // Provision on a TRIAL: ACTIVE now, but with a period end so the dunning
       // sweep will flip an unpaid school to PAST_DUE when the trial elapses
@@ -265,9 +270,12 @@ export class OperatorProvisioningService {
       // default would have filed its first registers against a session that does
       // not exist yet. Unknown country falls back to the platform's home default,
       // which is what every school already live has.
-      const startMonth = countryProfile(input.country).academicYearStartMonth;
-      const { name: sessionName, yearStart } = defaultSessionFor(new Date(), startMonth);
-      const termDates = standardTermDates(yearStart);
+      const { name: sessionName, yearStart } = defaultSessionFor(new Date(), profile.academicYearStartMonth);
+      // The SHAPE of the year is the country's too: three terms in Nigeria and
+      // the Commonwealth, two semesters in the US and Canada. This used to call
+      // the three-term generator unconditionally, so an American school was
+      // provisioned with "First/Second/Third Term".
+      const termDates = generateCalendar(profile.calendarTemplate, yearStart);
       const academicSession = await tx.academicSession.create({
         data: {
           schoolId: school.id,

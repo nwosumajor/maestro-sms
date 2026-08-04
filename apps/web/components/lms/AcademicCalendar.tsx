@@ -12,9 +12,23 @@ import { CalendarTimeline } from "./CalendarTimeline";
 import { readApiError } from "@/lib/api-error";
 
 type Session = Serialized<AcademicSessionDto>;
+
+/** The school's year SHAPE, from GET /academic/shape. Three terms in Nigeria and
+ *  the Commonwealth, two semesters in the US and Canada — it decides both the
+ *  term-name choices and what a quick-create produces. */
+export type CalendarShape = {
+  key: string;
+  label: string;
+  periodNames: string[];
+  presets: Array<{ sequence: number; name: string }>;
+};
 type Holiday = Serialized<SchoolHolidayDto>;
 
-export function AcademicCalendar({ sessions, holidays }: { sessions: Session[]; holidays: Holiday[] }) {
+export function AcademicCalendar({ sessions, holidays, shape }: { sessions: Session[]; holidays: Holiday[]; shape?: CalendarShape | null }) {
+  // Falls back to the three-term shape when the fetch was skipped or failed, so
+  // the form still works rather than rendering an empty dropdown.
+  const periods = shape?.periodNames?.length ? shape.periodNames : ["First Term", "Second Term", "Third Term"];
+  const shapeLabel = shape?.label ?? "Three terms";
   const router = useRouter();
   const [msg, setMsg] = React.useState<string | null>(null);
   const [name, setName] = React.useState("");
@@ -111,12 +125,15 @@ export function AcademicCalendar({ sessions, holidays }: { sessions: Session[]; 
             scrolls into a column of date fields. */}
         <CalendarTimeline sessions={sessions} />
 
-        {/* Quick-create: a whole standard 3-term session from one date. */}
+        {/* Quick-create: a whole standard year from one date, in the shape this
+            school actually runs. It used to say "3-term" and always build three,
+            whatever the school was — an American school got First/Second/Third
+            Term and had to rebuild the year by hand. */}
         <form
           onSubmit={async (e) => {
             e.preventDefault();
             if (stdName && stdStart) {
-              await send("POST", "/academic/sessions/standard", { name: stdName, yearStart: stdStart, makeCurrent: sessions.length === 0 }, "Standard 3-term session created.");
+              await send("POST", "/academic/sessions/standard", { name: stdName, yearStart: stdStart, makeCurrent: sessions.length === 0 }, `Standard ${periods.length}-period session created.`);
               setStdName(""); setStdStart("");
             }
           }}
@@ -130,7 +147,7 @@ export function AcademicCalendar({ sessions, holidays }: { sessions: Session[]; 
                 starts
                 <Input aria-label="Year start" type="date" value={stdStart} onChange={(e) => setStdStart(e.target.value)} className="h-9 w-36" />
               </label>
-              <Button type="submit" size="sm" disabled={!stdName || !stdStart}>Generate 3 terms</Button>
+              <Button type="submit" size="sm" disabled={!stdName || !stdStart}>Generate {periods.length} {periods.length === 2 ? "semesters" : "terms"}</Button>
             </div>
           </div>
         </form>
@@ -327,7 +344,12 @@ export function AcademicCalendar({ sessions, holidays }: { sessions: Session[]; 
                   // used in this session are hidden, so a sequence can't be
                   // negative, duplicated, or out of range.
                   const used = new Set(s.terms.map((tm) => tm.sequence));
-                  const available = TERM_PRESETS.filter((p) => !used.has(p.sequence));
+                  // The school's OWN period names. Offering "Third Term" to a
+                  // school running two semesters invites exactly the mismatch the
+                  // template exists to prevent — and "Fall Semester" was not
+                  // offered at all. Falls back to the generic ordinals.
+                  const allPresets = shape?.presets?.length ? shape.presets : TERM_PRESETS;
+                  const available = allPresets.filter((p) => !used.has(p.sequence));
                   if (available.length === 0) return <p className="mt-2 text-xs text-muted-foreground">All terms added for this session.</p>;
                   return (
                     <form
@@ -352,7 +374,7 @@ export function AcademicCalendar({ sessions, holidays }: { sessions: Session[]; 
                           value={t.sequence}
                           onChange={(e) => {
                             const seq = e.target.value;
-                            const preset = TERM_PRESETS.find((p) => String(p.sequence) === seq);
+                            const preset = allPresets.find((p) => String(p.sequence) === seq);
                             setTerm({ ...term, [s.id]: { ...t, sequence: seq, name: preset?.name ?? "" } });
                           }}
                           className="h-9 w-40 rounded-md border border-input bg-background px-3 text-sm text-foreground"

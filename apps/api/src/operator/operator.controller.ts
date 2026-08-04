@@ -63,6 +63,10 @@ const regionSchema = z.object({
   locale: z.string().max(16).optional(),
   currency: z.string().max(3).optional(),
   complianceRegime: z.string().max(16).optional(),
+  // The year's shape (THREE_TERM / TWO_SEMESTER / …). Validated against the
+  // catalogue in the service, so an unknown key is refused rather than silently
+  // falling back to three terms.
+  calendarTemplate: z.string().max(24).optional(),
 });
 
 const delegationSchema = z.object({

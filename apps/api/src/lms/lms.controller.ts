@@ -58,6 +58,8 @@ const standardSessionSchema = z.object({
   name: z.string().min(1).max(60),
   yearStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   makeCurrent: z.boolean().optional(),
+  // Omitted => the school's own shape, which defaults to its country's.
+  template: z.string().max(24).optional(),
 });
 const holidaySchema = z.object({
   name: z.string().min(1).max(100),
@@ -360,6 +362,13 @@ export class LmsController {
   // --- academic calendar (sessions + terms) ----------------------------------
   /** What is wrong with the calendar, and what each thing has disabled. Read by
    *  anyone who can see the calendar — the consequences are not secret. */
+  /** The school's year shape — drives the term-name choices and the quick-create. */
+  @Get("academic/shape")
+  @RequirePermission(LMS_PERMISSIONS.CLASS_READ)
+  calendarShape(@CurrentPrincipal() p: Principal) {
+    return this.academic.calendarShape(p);
+  }
+
   @Get("academic/health")
   @RequirePermission(LMS_PERMISSIONS.CLASS_READ)
   calendarHealth(@CurrentPrincipal() p: Principal) {

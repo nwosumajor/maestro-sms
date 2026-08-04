@@ -4,7 +4,7 @@
 // `prisma db seed`. Idempotent.
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
-import { ROLE_PERMISSIONS, defaultSessionFor, standardTermDates, pickOpeningTerm } from "@sms/types";
+import { ROLE_PERMISSIONS, DEFAULT_CALENDAR_TEMPLATE, defaultSessionFor, generateCalendar, pickOpeningTerm } from "@sms/types";
 
 const prisma = new PrismaClient();
 
@@ -341,7 +341,8 @@ async function main() {
   // once it exists.
   if ((await prisma.academicSession.count({ where: { schoolId: school.id } })) === 0) {
     const { name: sessionName, yearStart } = defaultSessionFor(new Date());
-    const termDates = standardTermDates(yearStart);
+    // Template-aware, though the demo school is THREE_TERM so this is unchanged.
+    const termDates = generateCalendar(DEFAULT_CALENDAR_TEMPLATE, yearStart);
     const academicSession = await prisma.academicSession.create({
       data: {
         schoolId: school.id,

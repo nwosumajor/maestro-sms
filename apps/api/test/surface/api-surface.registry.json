@@ -133,6 +133,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "GET /academic/shape": {
+      "kind": "ui",
+      "note": "reviewed: app/(app)/classes/page.tsx fetches this and passes it to AcademicCalendar for the term-name choices and quick-create"
+    },
     "GET /academic/sessions": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"

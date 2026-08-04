@@ -9,7 +9,7 @@
 
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { AcademicSessionDto, CalendarSession, CalendarTerm, SchoolHolidayDto, TermDto } from "@sms/types";
-import { assessCalendar, currentTermBlocker, dayUtc, pickNextTerm, standardTermDates, termHasElapsed, validateSessionDates, validateTermDates, type CalendarFinding } from "@sms/types";
+import { DEFAULT_CALENDAR_TEMPLATE, assessCalendar, calendarTemplate, termPresetsFor, currentTermBlocker, dayUtc, generateCalendar, pickNextTerm, termHasElapsed, validateSessionDates, validateTermDates, type CalendarFinding } from "@sms/types";
 
 interface HolidayRow {
   id: string;
@@ -157,6 +157,30 @@ export class AcademicService {
    * with the screen it sits on. Pure assessment: it refuses nothing, because a
    * school mid-setup is legitimately incomplete — it only removes the silence.
    */
+  /**
+   * The school's year SHAPE: how many periods, and what they are called.
+   *
+   * The calendar page needs this to offer the right term names and to say what a
+   * quick-create will produce. Without it the term dropdown offered "Third Term"
+   * to a school running two semesters — inviting exactly the mismatch the
+   * template exists to prevent.
+   */
+  async calendarShape(p: Principal): Promise<{ key: string; label: string; periodNames: string[]; presets: Array<{ sequence: number; name: string }> }> {
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      const school = (await tx.school.findFirst({
+        where: { id: p.schoolId },
+        select: { calendarTemplate: true },
+      })) as { calendarTemplate: string | null } | null;
+      const t = calendarTemplate(school?.calendarTemplate);
+      return {
+        key: t.key,
+        label: t.label,
+        periodNames: [...t.periodNames],
+        presets: [...termPresetsFor(t.key)],
+      };
+    });
+  }
+
   async calendarHealth(p: Principal): Promise<CalendarFinding[]> {
     const sessions = await this.listSessions(p);
     return assessCalendar(
@@ -551,12 +575,25 @@ export class AcademicService {
    */
   async createStandardSession(
     p: Principal,
-    input: { name: string; yearStart: string; makeCurrent?: boolean },
+    input: { name: string; yearStart: string; makeCurrent?: boolean; template?: string },
   ): Promise<AcademicSessionDto> {
-    const terms = standardTermDates(input.yearStart);
-    const sessionStart = terms[0].startDate;
-    const sessionEnd = terms[terms.length - 1].endDate;
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      // The YEAR SHAPE comes from the school, not from this function. It used to
+      // call the hard-coded three-term generator, so an American school running
+      // two semesters got "First/Second/Third Term" and had to rebuild the year
+      // by hand — while the TWO_SEMESTER template sat defined and unreachable.
+      // An explicit `template` still wins, for a school whose shape differs from
+      // its country's norm.
+      const school = (await tx.school.findFirst({
+        where: { id: p.schoolId },
+        select: { calendarTemplate: true },
+      })) as { calendarTemplate: string | null } | null;
+      const templateKey = input.template ?? school?.calendarTemplate ?? DEFAULT_CALENDAR_TEMPLATE;
+      const terms = generateCalendar(templateKey, input.yearStart);
+      const sessionStart = terms[0].startDate;
+      const sessionEnd = terms[terms.length - 1].endDate;
+      const existingSessions = (await tx.academicSession.findMany({ select: { id: true, name: true } })) as Array<{ id: string; name: string }>;
+      this.assertNameFree(existingSessions, input.name, "session");
       const s = await tx.academicSession.create({
         data: { schoolId: p.schoolId, name: input.name, startDate: new Date(sessionStart), endDate: new Date(sessionEnd) },
       });
@@ -599,7 +636,7 @@ export class AcademicService {
         await tx.academicSession.update({ where: { id: s.id }, data: { isCurrent: true } });
         if (first) await tx.term.update({ where: { id: first.id }, data: { isCurrent: true } });
       }
-      await this.log(tx, p, "academic.session.create_standard", "academic_session", s.id, { name: input.name, terms: terms.length, makeCurrent: !!input.makeCurrent });
+      await this.log(tx, p, "academic.session.create_standard", "academic_session", s.id, { name: input.name, terms: terms.length, template: templateKey, makeCurrent: !!input.makeCurrent });
       const created = (await tx.academicSession.findFirstOrThrow({ where: { id: s.id } })) as SessionRow;
       const rows = (await tx.term.findMany({ where: { sessionId: s.id }, orderBy: { sequence: "asc" } })) as TermRow[];
       return { id: created.id, name: created.name, isCurrent: created.isCurrent, startDate: created.startDate, endDate: created.endDate, terms: rows.map(this.termDto) };
