@@ -241,7 +241,10 @@ export class ReportCardService {
       doc.moveDown(0.8);
 
       // Term-weighted subject table.
-      const colX = [startX, 210, 265, 330, 395, 450, 510];
+      // Eight columns now (Pos added). Re-spaced rather than squeezed on the
+      // end: the last column runs to 545, so appending without re-spacing would
+      // have pushed Grade off the page edge.
+      const colX = [startX, 195, 250, 305, 358, 411, 464, 508];
       const drawRow = (cells: string[], bold = false) => {
         const y = doc.y;
         doc.fontSize(10).font(bold ? "Helvetica-Bold" : "Helvetica");
@@ -250,14 +253,21 @@ export class ReportCardService {
       };
       doc.fontSize(14).font("Helvetica-Bold").text("Grades", startX);
       doc.moveDown(0.2).font("Helvetica");
-      drawRow(["Subject", "Exam/60", "Mid/20", "Assn/10", "Note/10", "Total", "Grade"], true);
+      // POS is this pupil's rank in THAT subject among classmates — a number
+      // about them, never another child's marks or name. Same posture as the
+      // overall class position below.
+      drawRow(["Subject", "Exam/60", "Mid/20", "Assn/10", "Note/10", "Total", "Grade", "Pos"], true);
       doc.moveTo(startX, doc.y).lineTo(545, doc.y).strokeColor("#ccc").stroke();
       doc.moveDown(0.3);
       if (d.subjects.length === 0) {
         doc.fontSize(10).fillColor("#888").text("No published grades for this term yet.", startX).fillColor("#000");
       } else {
         for (const sub of d.subjects) {
-          drawRow([sub.subjectName, fmt(sub.exam), fmt(sub.midterm), fmt(sub.assignment), fmt(sub.classNote), fmt(sub.total), sub.grade ?? "—"]);
+          // "3/28" reads better than a bare 3: a position is meaningless without
+          // knowing how many were ranked, and ungraded pupils are excluded from
+          // that count rather than counted as beaten.
+          const pos = sub.subjectPosition && sub.subjectRanked ? `${sub.subjectPosition}/${sub.subjectRanked}` : "—";
+          drawRow([sub.subjectName, fmt(sub.exam), fmt(sub.midterm), fmt(sub.assignment), fmt(sub.classNote), fmt(sub.total), sub.grade ?? "—", pos]);
         }
       }
       doc.moveDown(0.4);

@@ -730,6 +730,59 @@ export class TermResultService {
         className = klass?.name ?? null;
       }
 
+      // ---------------------------------------------------------------------
+      // Per-subject class rank.
+      //
+      // Ranked over PUBLISHED results ONLY, whatever the viewer may see. A
+      // position has to be the same number for the parent, the pupil and the
+      // teacher — deriving it from the rows each of them is allowed to read
+      // would make a teacher's copy disagree with the family's, and would move
+      // a pupil's rank every time an unrelated mark was published.
+      //
+      // One extra query for classmates and one for their published totals. Both
+      // are bounded by the class: 30 pupils x 10 subjects x 3 terms is ~900 rows,
+      // and only the fields the total is computed from are selected.
+      const rankOf = new Map<string, { position: number; ranked: number }>();
+      if (enrollment) {
+        const classmates = (await tx.enrollment.findMany({
+          where: { classId: enrollment.classId, status: "ACTIVE" },
+          select: { studentId: true },
+        })) as Array<{ studentId: string }>;
+        const ids = classmates.map((c) => c.studentId);
+        if (ids.length > 0) {
+          const peerRows = (await tx.subjectResult.findMany({
+            where: { studentId: { in: ids }, sessionId, status: "PUBLISHED" },
+          })) as typeof results;
+          // Group by (term, subject), then rank each group.
+          const groups = new Map<string, Array<{ studentId: string; total: number }>>();
+          for (const r of peerRows) {
+            const { total } = this.recomputeTotal(r);
+            if (total === null) continue; // ungraded is UNRANKED, never last
+            const key = `${r.termId}:${r.subjectId}`;
+            const arr = groups.get(key) ?? [];
+            arr.push({ studentId: r.studentId, total });
+            groups.set(key, arr);
+          }
+          for (const [key, arr] of groups) {
+            arr.sort((a, b) => b.total - a.total);
+            // Standard competition ranking: ties SHARE a position and the next
+            // rank skips (68, 68, 65 -> 1st, 1st, 3rd). Telling two pupils on
+            // the same mark they are 1st and 2nd is what makes a parent write in.
+            let position = 0;
+            let seen = 0;
+            let prev: number | null = null;
+            for (const row of arr) {
+              seen += 1;
+              if (prev === null || row.total < prev) position = seen;
+              prev = row.total;
+              if (row.studentId === studentId) {
+                rankOf.set(key, { position, ranked: arr.length });
+              }
+            }
+          }
+        }
+      }
+
       const termReports: StudentTermReportDto[] = terms.map((t) => {
         const rows: TermSubjectRowDto[] = results
           .filter((r) => r.termId === t.id)
@@ -738,6 +791,8 @@ export class TermResultService {
             return {
               subjectId: r.subjectId,
               subjectName: subjectName.get(r.subjectId) ?? "Unknown",
+              subjectPosition: rankOf.get(`${r.termId}:${r.subjectId}`)?.position ?? null,
+              subjectRanked: rankOf.get(`${r.termId}:${r.subjectId}`)?.ranked ?? null,
               exam: r.exam,
               midterm: r.midterm,
               assignment: r.assignment,
