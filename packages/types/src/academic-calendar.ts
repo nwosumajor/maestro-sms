@@ -329,11 +329,22 @@ export function generateCalendar(templateKey: string | null | undefined, yearSta
 //
 // This is a starting point, not a ruling: both the session and its terms are
 // editable, and the calendar panel says so when the dates do not match reality.
-export function defaultSessionFor(today: Date, cutoverMonth = 7): { name: string; yearStart: string } {
+export function defaultSessionFor(today: Date, startMonth = 9): { name: string; yearStart: string } {
   const y = today.getUTCFullYear();
-  // getUTCMonth is 0-indexed; cutoverMonth is given 1-indexed for readability.
-  const startYear = today.getUTCMonth() + 1 >= cutoverMonth ? y : y - 1;
-  return { name: `${startYear}/${startYear + 1}`, yearStart: `${startYear}-09-01` };
+  const month = today.getUTCMonth() + 1; // getUTCMonth is 0-indexed
+  // Two months before the year opens, a school being set up is preparing for the
+  // year AHEAD rather than joining the one finishing. Wraps for a January start,
+  // where "two months before" is November of the PREVIOUS calendar year.
+  const cutover = ((startMonth - 2 - 1 + 12) % 12) + 1;
+  const wraps = cutover > startMonth; // e.g. start Jan (1), cutover Nov (11)
+  const startYear = wraps ? (month >= cutover ? y + 1 : y) : month >= cutover ? y : y - 1;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return {
+    // A year that opens in January closes in the SAME calendar year, so naming it
+    // "2027/2028" would misdescribe it on every report card.
+    name: startMonth === 1 ? `${startYear}` : `${startYear}/${startYear + 1}`,
+    yearStart: `${startYear}-${pad(startMonth)}-01`,
+  };
 }
 
 /**

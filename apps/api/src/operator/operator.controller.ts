@@ -119,6 +119,10 @@ const provisionSchema = z
     name: z.string().min(1).max(160),
     // Optional: omitted => derived (short) from the school name, uniqueness checked.
     slug: z.string().min(2).max(40).optional(),
+    // Set the region UP FRONT so the calendar we create opens in the right month.
+    // Southern-hemisphere schools run January to December; provisioning one as
+    // September puts its first term half a year out.
+    country: z.string().length(2).optional(),
     plan: z.enum([PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE]).optional(),
     // Extra modules beyond the chosen plan: `enabled` force-on add-ons (the "special
     // modules" a school pays extra for); `disabled` force-off. Same shape as the

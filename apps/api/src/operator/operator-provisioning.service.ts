@@ -27,7 +27,7 @@ import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import { Prisma, type PrismaClient } from "@sms/db";
 import type { MisplacedPlatformRoleDto, PlatformStaffDutyDto, PlatformStaffInviteDto } from "@sms/types";
-import { MAX_SCHOOL_SLUG_LENGTH, defaultSessionFor, standardTermDates, pickOpeningTerm } from "@sms/types";
+import { MAX_SCHOOL_SLUG_LENGTH, defaultSessionFor, standardTermDates, pickOpeningTerm, countryProfile } from "@sms/types";
 import { allocateSchoolSlug } from "../foundation/login-email";
 import {
   PLATFORM_TIER_ROLES,
@@ -95,6 +95,10 @@ export class OperatorProvisioningService {
       name: string;
       /** Optional — derived (short, unique) from `name` when omitted. */
       slug?: string;
+      /** ISO 3166-1 alpha-2. Decides the privacy regime, the fee currency and —
+       *  the reason it is accepted HERE rather than only on the later region PUT —
+       *  when the academic year opens, which the provisioned calendar needs. */
+      country?: string;
       plan?: string;
       overrides?: { enabled?: string[]; disabled?: string[] };
       admin?: AdminInput;
@@ -221,7 +225,7 @@ export class OperatorProvisioningService {
 
     const result = await db.$transaction(async (tx) => {
       const school = await tx.school.create({
-        data: { name: input.name, slug, ownerName, ownerPhone, address },
+        data: { name: input.name, slug, ownerName, ownerPhone, address, ...(input.country ? { country: input.country.toUpperCase() } : {}) },
       });
       // Provision on a TRIAL: ACTIVE now, but with a period end so the dunning
       // sweep will flip an unpaid school to PAST_DUE when the trial elapses
@@ -255,7 +259,14 @@ export class OperatorProvisioningService {
       // against a First Term that closed months ago. Falls back to the opening
       // term when today sits outside the year — a school set up over the summer
       // is preparing for a session that has not begun.
-      const { name: sessionName, yearStart } = defaultSessionFor(new Date());
+      // The country decides when the academic year OPENS. Assuming September is
+      // six months wrong for the whole of southern Africa — a school in
+      // Johannesburg, Harare or Lusaka runs January to December — so a September
+      // default would have filed its first registers against a session that does
+      // not exist yet. Unknown country falls back to the platform's home default,
+      // which is what every school already live has.
+      const startMonth = countryProfile(input.country).academicYearStartMonth;
+      const { name: sessionName, yearStart } = defaultSessionFor(new Date(), startMonth);
       const termDates = standardTermDates(yearStart);
       const academicSession = await tx.academicSession.create({
         data: {
