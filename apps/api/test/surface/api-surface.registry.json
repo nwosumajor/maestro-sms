@@ -3068,6 +3068,14 @@
     "DELETE /syllabus/:p": {
       "kind": "ui",
       "note": "reviewed: plan removal from the same panel"
+    },
+    "GET /academic/grading-policy": {
+      "kind": "ui",
+      "note": "reviewed: components/lms/GradingPolicyCard.tsx loads the scale and its choices on /classes"
+    },
+    "PUT /academic/grading-policy": {
+      "kind": "ui",
+      "note": "reviewed: the Use-this-scale and weight-preset buttons in components/lms/GradingPolicyCard.tsx"
     }
   }
 }

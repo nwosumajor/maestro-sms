@@ -40,6 +40,7 @@ import {
   type SubjectSessionSummaryDto,
   type TermSubjectRowDto,
   type ClassBroadsheetDto,
+  resolveGradeBands,
 } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -178,7 +179,7 @@ export class TermResultService {
       classNote: c.classNote ?? null,
     };
     const anyEntered = Object.values(components).some((v) => v !== null);
-    const { total, grade } = computeTermSubjectGrade(components, policy?.components);
+    const { total, grade } = computeTermSubjectGrade(components, policy?.components, resolveGradeBands(policy));
     return {
       ...components,
       // total/grade only meaningful once at least one component is entered.
@@ -212,6 +213,9 @@ export class TermResultService {
         classNote: row.classNote,
       },
       policy?.components,
+      // The school's own letter scale. Everything a family reads — the subject
+      // grade, the overall grade — comes through here, so one thread carries it.
+      resolveGradeBands(policy),
     );
     return { total, grade };
   }

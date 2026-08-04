@@ -12,6 +12,7 @@ import { ClassSubjectsAdmin } from "@/components/lms/ClassSubjectsAdmin";
 import { PromotionManager } from "@/components/lms/PromotionManager";
 import { AcademicCalendar, type CalendarShape } from "@/components/lms/AcademicCalendar";
 import { SubjectCatalogue } from "@/components/lms/SubjectCatalogue";
+import { GradingPolicyCard } from "@/components/lms/GradingPolicyCard";
 import { CalendarHealth } from "@/components/lms/CalendarHealth";
 import { PageHeader } from "@/components/shell/PageHeader";
 
@@ -87,6 +88,9 @@ export default async function ClassesPage() {
             school's subjects first, then attach them to classes. Ordering the
             page the other way round is why people typed them by hand. */}
         {canManageSubjects && <SubjectCatalogue />}
+        {/* Grading policy sits with the academic setup, beside the calendar and
+            the subject list — the three things a school configures once a year. */}
+        {canManageSubjects && <GradingPolicyCard canManage={canManageAcademic} />}
         {canManageSubjects && classes && staff && subjects && (
           <ClassSubjectsAdmin classes={classes} subjects={subjects} users={staff} rooms={rooms ?? []} />
         )}
