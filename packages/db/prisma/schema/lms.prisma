@@ -111,6 +111,11 @@ model Subject {
   /// Short stable code (e.g. MTH, ENG). Auto-generated from the name when left
   /// blank; unique per school so imports and pickers key on it, not free text.
   code      String   @default(dbgenerated("left(replace(gen_random_uuid()::text, '-', ''), 8)"))
+  /// The CONCEPT this subject is, when it came from the catalogue (MTH, PHY…).
+  /// Null for a custom subject a school typed itself — a first-class state, not
+  /// a gap. It is what makes a Senegalese "Mathématiques" and a Nigerian
+  /// "Mathematics" comparable while each school stays free to rename its own row.
+  catalogueCode String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
