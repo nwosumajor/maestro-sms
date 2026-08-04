@@ -517,3 +517,29 @@ export function subjectCatalogueFor(
     .map((s) => ({ ...s, displayName: catalogueSubjectName(s), curriculum: cat.key }))
     .sort((a, b) => SUBJECT_GROUPS.indexOf(a.group) - SUBJECT_GROUPS.indexOf(b.group) || a.displayName.localeCompare(b.displayName));
 }
+
+/**
+ * The catalogue concept a scholarship category corresponds to, if any.
+ *
+ * The scholarship exam pipeline has to name a real Subject in each school —
+ * teacher access to a question bank is decided by subject. It used to match on
+ * the exact name and create one on a miss, which splits a school's subject in
+ * two the moment its wording differs: a francophone school holding
+ * "Mathématiques" got a second "Mathematics", after which grades for one subject
+ * land under two ids and the report card shows half of them.
+ *
+ * Returning null is a real answer: COMMUNITY_DEVELOPMENT and SPECIAL are not
+ * school subjects, so those fall back to name matching and stay custom.
+ */
+export function scholarshipSubjectConcept(category: string): string | null {
+  switch (category) {
+    case "MATHEMATICS":
+      return "MTH";
+    case "GENERAL_SCIENCE":
+      return "SCI";
+    case "ART":
+      return "ART";
+    default:
+      return null;
+  }
+}

@@ -219,3 +219,58 @@ model ParentChild {
   @@index([schoolId, parentId])
   @@map("parent_child")
 }
+
+/// The scheme of work a subject teacher plans and works to for one term.
+///
+/// LmsContent holds individual items — a material, a quiz, a forum thread — but
+/// nothing said what the TERM is meant to cover, so nobody could answer "are we
+/// on schedule" without reading every item and remembering the plan. This is
+/// that plan: one per (class, subject, term), owned by whoever teaches it.
+model SubjectSyllabus {
+  id        String @id @default(uuid()) @db.Uuid
+  schoolId  String @db.Uuid
+  classId   String @db.Uuid
+  subjectId String @db.Uuid
+  termId    String @db.Uuid
+  /// Free-text aims for the term, above the week-by-week breakdown.
+  overview  String?
+  /// The teacher who owns this plan. Scalar uuid + DB FK, no Prisma relation.
+  ownerId   String @db.Uuid
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School            @relation(fields: [schoolId], references: [id])
+  items  SubjectSyllabusItem[]
+
+  /// One plan per subject per class per term — two would make "the plan"
+  /// ambiguous, and every progress figure below it arbitrary.
+  @@unique([classId, subjectId, termId])
+  @@index([schoolId])
+  @@index([schoolId, subjectId])
+  @@map("subject_syllabus")
+}
+
+/// One week (or unit) of the plan.
+model SubjectSyllabusItem {
+  id         String @id @default(uuid()) @db.Uuid
+  schoolId   String @db.Uuid
+  syllabusId String @db.Uuid
+  /// Ordering. Week 1..n; duplicates are allowed because a topic can span weeks.
+  week       Int
+  topic      String
+  objectives String?
+  resources  String?
+  /// PLANNED | TAUGHT — the flag that makes this a living document rather than
+  /// a file, and the only thing that makes "on schedule" answerable.
+  status     String   @default("PLANNED")
+  taughtAt   DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  school   School          @relation(fields: [schoolId], references: [id])
+  syllabus SubjectSyllabus @relation(fields: [syllabusId], references: [id], onDelete: Cascade)
+
+  @@index([schoolId])
+  @@index([syllabusId])
+  @@map("subject_syllabus_item")
+}

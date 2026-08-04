@@ -9,6 +9,7 @@ import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { LmsService } from "./lms.service";
+import { SyllabusService } from "./syllabus.service";
 import { PromotionService } from "./promotion.service";
 import { AcademicService } from "./academic.service";
 
@@ -56,6 +57,25 @@ const termUpdateSchema = z.object({
 });
 // Bounded so one request cannot try to add an unbounded list; the largest real
 // curriculum here is 56 entries.
+const syllabusSchema = z.object({
+  classId: z.string().uuid(),
+  subjectId: z.string().uuid(),
+  termId: z.string().uuid(),
+  overview: z.string().max(4000).nullish(),
+  // Bounded here AND in the service: the boundary rejects nonsense, the service
+  // owns the rule.
+  items: z
+    .array(
+      z.object({
+        week: z.number().int().min(1).max(60),
+        topic: z.string().min(1).max(200),
+        objectives: z.string().max(2000).nullish(),
+        resources: z.string().max(2000).nullish(),
+      }),
+    )
+    .max(60),
+});
+const syllabusStatusSchema = z.object({ status: z.enum(["PLANNED", "TAUGHT"]) });
 const catalogueAddSchema = z.object({ codes: z.array(z.string().min(1).max(16)).min(1).max(100) });
 const standardSessionSchema = z.object({
   name: z.string().min(1).max(60),
@@ -123,6 +143,7 @@ const promoteRejectSchema = z.object({ note: z.string().max(1000).optional() });
 export class LmsController {
   constructor(
     private readonly lms: LmsService,
+    private readonly syllabus: SyllabusService,
     private readonly promotion: PromotionService,
     private readonly academic: AcademicService,
   ) {}
@@ -155,6 +176,58 @@ export class LmsController {
   }
 
   // --- subject catalog + per-class offerings --------------------------------
+  // --- subject syllabus (scheme of work) -------------------------------------
+  /** The plan for one offering in one term. Null when none exists yet. */
+  @Get("syllabus")
+  @RequirePermission(LMS_PERMISSIONS.CLASS_READ)
+  getSyllabus(
+    @CurrentPrincipal() p: Principal,
+    @Query("classId") classId: string,
+    @Query("subjectId") subjectId: string,
+    @Query("termId") termId: string,
+  ) {
+    return this.syllabus.get(p, { classId, subjectId, termId });
+  }
+
+  /** Every plan the caller may see for a term — the review view. */
+  @Get("syllabus/term/:termId")
+  @RequirePermission(LMS_PERMISSIONS.CLASS_READ)
+  listSyllabi(@CurrentPrincipal() p: Principal, @Param("termId") termId: string) {
+    return this.syllabus.listForTerm(p, termId);
+  }
+
+  /** Create or replace a term plan. Written by the teacher of that offering. */
+  @Put("syllabus")
+  @RequirePermission(LMS_PERMISSIONS.CLASS_READ)
+  upsertSyllabus(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(syllabusSchema)) body: z.infer<typeof syllabusSchema>,
+  ) {
+    return this.syllabus.upsert(
+      p,
+      { classId: body.classId, subjectId: body.subjectId, termId: body.termId },
+      { overview: body.overview ?? null, items: body.items },
+    );
+  }
+
+  /** Mark a week taught, or put it back to planned. */
+  @Put("syllabus/items/:id/status")
+  @RequirePermission(LMS_PERMISSIONS.CLASS_READ)
+  setSyllabusItemStatus(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(syllabusStatusSchema)) body: z.infer<typeof syllabusStatusSchema>,
+  ) {
+    return this.syllabus.setItemStatus(p, id, body.status);
+  }
+
+  /** Remove a plan and its weeks. */
+  @Delete("syllabus/:id")
+  @RequirePermission(LMS_PERMISSIONS.CLASS_READ)
+  deleteSyllabus(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.syllabus.remove(p, id);
+  }
+
   /** The catalogue this school should be offered, with what it already has marked. */
   @Get("subjects/catalogue")
   @RequirePermission(LMS_PERMISSIONS.CLASS_READ)

@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { BullModule } from "@nestjs/bullmq";
 import { LmsController } from "./lms.controller";
 import { LmsService } from "./lms.service";
+import { SyllabusService } from "./syllabus.service";
 import { PromotionService } from "./promotion.service";
 import { AcademicService } from "./academic.service";
 import { LmsContentController } from "./lms-content.controller";
@@ -31,7 +32,7 @@ import { AcademicProgressionController } from "./progression/academic-progressio
     BullModule.registerQueue({ name: ACADEMIC_PROGRESSION_QUEUE }),
   ],
   controllers: [LmsController, LmsContentController, AcademicProgressionController],
-  providers: [
+  providers: [SyllabusService, 
     LmsService,
     PromotionService,
     AcademicService,
