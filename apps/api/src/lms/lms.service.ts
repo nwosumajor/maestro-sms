@@ -11,16 +11,20 @@
 // audit-logged. Not-visible -> 404 (never 403), no cross-tenant/owner leak.
 // =============================================================================
 
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
+import { SchoolRegionService } from "../foundation/school-region.service";
 // VALUE import: Prisma.sql/join only resolve as values, not types (CLAUDE.md).
 import { Prisma } from "@sms/db";
 import {
   NON_STAFF_ROLE_NAMES,
   ROSTER_CAP,
   SEARCH_CAP,
+  DEFAULT_CURRICULUM,
   normaliseEntityCode,
+  subjectCatalogueFor,
   uniqueEntityCode,
   type ClassOverviewDto,
+  type SubjectStage,
   type UserKind,
 } from "@sms/types";
 import {
@@ -51,6 +55,9 @@ export class LmsService {
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
+    // Optional so existing unit wirings keep working; absent, the catalogue
+    // falls back to the general international list rather than failing.
+    @Optional() private readonly regions?: SchoolRegionService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -194,6 +201,97 @@ export class LmsService {
   }
 
   // --- subject catalog + per-class offerings (subject.manage) ----------------
+  /**
+   * The catalogue this school should be offered, with what it already has marked.
+   *
+   * The list follows the school's COUNTRY, the same posture as calendar
+   * templates and payroll packs — offering "English Language" to a school in
+   * Dakar is worse than offering nothing, because people accept defaults.
+   *
+   * `added` is resolved by CONCEPT, not by name: a school that picked MTH and
+   * then renamed its copy to "Core Mathematics" must not be offered MTH again.
+   */
+  async subjectCatalogue(p: Principal, stage?: string) {
+    const region = await this.regions?.forSchool(p.schoolId);
+    const entries = subjectCatalogueFor(region?.country, stage as SubjectStage | undefined);
+    const mine = (await this.db.runAsTenantReadOnly(this.ctx(p), (tx) =>
+      tx.subject.findMany({ select: { catalogueCode: true } }),
+    )) as Array<{ catalogueCode: string | null }>;
+    const have = new Set(mine.map((m) => m.catalogueCode).filter(Boolean) as string[]);
+    return {
+      curriculum: entries[0]?.curriculum ?? DEFAULT_CURRICULUM,
+      country: region?.country ?? null,
+      subjects: entries.map((e) => ({
+        code: e.code,
+        name: e.displayName,
+        group: e.group,
+        stages: e.stages,
+        added: have.has(e.code),
+      })),
+    };
+  }
+
+  /**
+   * Add picked catalogue entries as this school's OWN subjects.
+   *
+   * Each becomes a tenant-scoped row with its own uuid — a copy, never a
+   * reference. `catalogueCode` is the only link back, which is what keeps the
+   * rename safe and RLS intact.
+   *
+   * Idempotent and partial-tolerant: an entry the school already has (by concept
+   * OR by name) is SKIPPED rather than failing the batch. Someone ticking twelve
+   * boxes, one of which duplicates a subject they typed by hand last term, should
+   * get the other eleven and a plain account of what was skipped — not an error
+   * and nothing added.
+   */
+  async addSubjectsFromCatalogue(p: Principal, codes: string[]) {
+    const region = await this.regions?.forSchool(p.schoolId);
+    const available = subjectCatalogueFor(region?.country);
+    const wanted = [...new Set(codes)];
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const existing = (await tx.subject.findMany({
+        select: { name: true, catalogueCode: true },
+      })) as Array<{ name: string; catalogueCode: string | null }>;
+      const haveCode = new Set(existing.map((e) => e.catalogueCode).filter(Boolean) as string[]);
+      const haveName = new Set(existing.map((e) => e.name.trim().toLowerCase()));
+
+      const added: Array<{ id: string; name: string; code: string; catalogueCode: string }> = [];
+      const skipped: Array<{ code: string; reason: string }> = [];
+      for (const code of wanted) {
+        const entry = available.find((a) => a.code === code);
+        if (!entry) {
+          // Not in THIS school's curriculum — refusing beats silently adding a
+          // subject from someone else's list.
+          skipped.push({ code, reason: "not in this school's catalogue" });
+          continue;
+        }
+        if (haveCode.has(code)) {
+          skipped.push({ code, reason: "already added" });
+          continue;
+        }
+        if (haveName.has(entry.displayName.trim().toLowerCase())) {
+          skipped.push({ code, reason: `a subject named "${entry.displayName}" already exists` });
+          continue;
+        }
+        const subjectCode = await this.nextCode(tx, "subject", entry.displayName, null);
+        const row = await tx.subject.create({
+          data: { schoolId: p.schoolId, name: entry.displayName, code: subjectCode, catalogueCode: code },
+        });
+        added.push({ id: row.id, name: row.name, code: row.code, catalogueCode: code });
+        haveCode.add(code);
+        haveName.add(entry.displayName.trim().toLowerCase());
+      }
+      if (added.length > 0) {
+        await this.log(tx, p, "lms.subject.catalogue_add", "subject", added[0].id, {
+          added: added.length,
+          skipped: skipped.length,
+          codes: added.map((a) => a.catalogueCode),
+        });
+      }
+      return { added, skipped };
+    });
+  }
+
   async createSubject(p: Principal, input: { name: string; code?: string | null }) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       // Duplicate guard: subject names are a catalog — one "Mathematics" per

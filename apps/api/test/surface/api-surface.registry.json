@@ -1241,6 +1241,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "GET /subjects/catalogue": {
+      "kind": "ui",
+      "note": "reviewed: components/lms/SubjectCatalogue.tsx loads the school's curriculum list on /classes"
+    },
     "GET /subjects": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
@@ -2612,6 +2616,10 @@
     "POST /subject-selections/:p/review": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
+    },
+    "POST /subjects/from-catalogue": {
+      "kind": "ui",
+      "note": "reviewed: the Add-selected button in components/lms/SubjectCatalogue.tsx calls this"
     },
     "POST /subjects": {
       "kind": "ui",

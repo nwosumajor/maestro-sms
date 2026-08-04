@@ -11,6 +11,7 @@ export * from "./mobile-money";
 export * from "./region";
 export * from "./compliance-regime";
 export * from "./notification-messages";
+export * from "./subject-catalogue";
 export * from "./roles";
 export * from "./school-email";
 export * from "./academic-progression";

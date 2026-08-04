@@ -54,6 +54,9 @@ const termUpdateSchema = z.object({
   startDate: isoDate,
   endDate: isoDate,
 });
+// Bounded so one request cannot try to add an unbounded list; the largest real
+// curriculum here is 56 entries.
+const catalogueAddSchema = z.object({ codes: z.array(z.string().min(1).max(16)).min(1).max(100) });
 const standardSessionSchema = z.object({
   name: z.string().min(1).max(60),
   yearStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -152,6 +155,23 @@ export class LmsController {
   }
 
   // --- subject catalog + per-class offerings --------------------------------
+  /** The catalogue this school should be offered, with what it already has marked. */
+  @Get("subjects/catalogue")
+  @RequirePermission(LMS_PERMISSIONS.CLASS_READ)
+  subjectCatalogue(@CurrentPrincipal() p: Principal, @Query("stage") stage?: string) {
+    return this.lms.subjectCatalogue(p, stage);
+  }
+
+  /** Copy picked catalogue entries into this school's own subjects. */
+  @Post("subjects/from-catalogue")
+  @RequirePermission(LMS_PERMISSIONS.CLASS_WRITE)
+  addSubjectsFromCatalogue(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(catalogueAddSchema)) body: z.infer<typeof catalogueAddSchema>,
+  ) {
+    return this.lms.addSubjectsFromCatalogue(p, body.codes);
+  }
+
   @Post("subjects")
   @RequirePermission(LMS_PERMISSIONS.SUBJECT_MANAGE)
   createSubject(

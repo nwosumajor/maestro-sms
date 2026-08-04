@@ -11,6 +11,7 @@ import { ClassGrid } from "@/components/lms/ClassGrid";
 import { ClassSubjectsAdmin } from "@/components/lms/ClassSubjectsAdmin";
 import { PromotionManager } from "@/components/lms/PromotionManager";
 import { AcademicCalendar, type CalendarShape } from "@/components/lms/AcademicCalendar";
+import { SubjectCatalogue } from "@/components/lms/SubjectCatalogue";
 import { CalendarHealth } from "@/components/lms/CalendarHealth";
 import { PageHeader } from "@/components/shell/PageHeader";
 
@@ -82,6 +83,10 @@ export default async function ClassesPage() {
           <ClassAdmin classes={classes} students={students} users={staff} />
         )}
 
+        {/* The catalogue sits ABOVE the per-class assignment: you pick the
+            school's subjects first, then attach them to classes. Ordering the
+            page the other way round is why people typed them by hand. */}
+        {canManageSubjects && <SubjectCatalogue />}
         {canManageSubjects && classes && staff && subjects && (
           <ClassSubjectsAdmin classes={classes} subjects={subjects} users={staff} rooms={rooms ?? []} />
         )}
