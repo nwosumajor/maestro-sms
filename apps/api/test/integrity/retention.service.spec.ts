@@ -1,3 +1,4 @@
+import { Logger } from "@nestjs/common";
 import { IntegrityRetentionService } from "../../src/integrity/retention/integrity-retention.service";
 
 // =============================================================================
@@ -47,35 +48,71 @@ describe("platform-wide purge of the unbounded growers", () => {
     const svc = new IntegrityRetentionService({ client: c } as never);
     await (svc as unknown as { purgePlatformWide: () => Promise<unknown> })["purgePlatformWide"]();
     const guessSql = raw.find((r) => r.includes("DELETE FROM guess"))!;
-    expect(guessSql).toMatch(/USING game/);
+    expect(guessSql).toMatch(/JOIN game gm/);
     expect(guessSql).toMatch(/g\."gameId" = gm\.id/);
   });
 
   it("never removes an UNREAD notification, at any age", async () => {
-    const { client: c } = client();
-    const svc = new IntegrityRetentionService({ client: c } as never);
-    await (svc as unknown as { purgePlatformWide: () => Promise<unknown> })["purgePlatformWide"]();
-    const where = c.notification.deleteMany.mock.calls[0][0].where;
-    expect(where.readAt.not).toBeNull();
-    expect(where.readAt.lt).toBeInstanceOf(Date);
-  });
-
-  it("clears delivery rows before the notification they hang off", async () => {
-    // notification_delivery FKs to notification; the other order fails on the FK
-    // and leaves the purge half-done every night.
+    // The single most important rule here: an unread notice is an outstanding
+    // thing to tell someone. Asserted on the SQL, since batching moved this off
+    // the Prisma client — the mechanism changed, the property did not.
     const { raw, client: c } = client();
     const svc = new IntegrityRetentionService({ client: c } as never);
     await (svc as unknown as { purgePlatformWide: () => Promise<unknown> })["purgePlatformWide"]();
-    expect(raw.some((r) => r.includes("DELETE FROM notification_delivery"))).toBe(true);
-    expect(c.notification.deleteMany).toHaveBeenCalled();
+    void c;
+    const noteSql = raw.find((r) => r.includes("DELETE FROM notification"))!;
+    expect(noteSql).toMatch(/"readAt" IS NOT NULL/);
+  });
+
+  it("does NOT delete delivery rows separately — the FK already cascades", async () => {
+    // An earlier version cleared them first and claimed the other order would
+    // fail on the FK. It would not: notification_delivery's FK is ON DELETE
+    // CASCADE, so the extra statement was pure cost. Pinned so it does not
+    // come back.
+    const { raw, client: c } = client();
+    const svc = new IntegrityRetentionService({ client: c } as never);
+    await (svc as unknown as { purgePlatformWide: () => Promise<unknown> })["purgePlatformWide"]();
+    void c;
+    expect(raw.some((r) => r.includes("notification_delivery"))).toBe(false);
+  });
+
+  it("deletes in BOUNDED batches, never one statement over the whole table", async () => {
+    // The first sweep on a mature database faces everything that has aged past
+    // a brand-new window at once. Unbounded, that is one enormous transaction
+    // that locks, floods the WAL, and on failure rolls back and retries the
+    // same delete forever.
+    const { raw, client: c } = client();
+    const svc = new IntegrityRetentionService({ client: c } as never);
+    await (svc as unknown as { purgePlatformWide: () => Promise<unknown> })["purgePlatformWide"]();
+    void c;
+    const bounded = raw.filter((r) => r.includes("DELETE FROM guess") || r.includes("DELETE FROM notification"));
+    expect(bounded.length).toBeGreaterThan(0);
+    for (const sql of bounded) expect(sql).toMatch(/LIMIT/);
+  });
+
+  it("stops at the batch ceiling and WARNS rather than reporting success", async () => {
+    // A sweep that silently hits its ceiling every night looks identical to one
+    // with nothing left to do, while the table keeps growing.
+    const warn = jest.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
+    const c = {
+      gatewayEvent: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+      notification: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+      // Always returns a FULL batch => there is always more to do.
+      $executeRaw: jest.fn().mockResolvedValue(20_000),
+    };
+    const svc = new IntegrityRetentionService({ client: c } as never);
+    await (svc as unknown as { purgePlatformWide: () => Promise<unknown> })["purgePlatformWide"]();
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/ceiling/i));
+    warn.mockRestore();
   });
 
   it("reports what it removed, so a silent no-op is visible", async () => {
     const { client: c } = client();
     const svc = new IntegrityRetentionService({ client: c } as never);
     const out = (await (svc as unknown as { purgePlatformWide: () => Promise<Record<string, number>> })["purgePlatformWide"]()) as Record<string, number>;
+    // One partial batch each (3 < the batch size), so the loop stops after one.
     expect(out.gameGuesses).toBe(3);
-    expect(out.readNotifications).toBe(7);
+    expect(out.readNotifications).toBe(3);
   });
 
   it("does nothing at all without the privileged client", async () => {

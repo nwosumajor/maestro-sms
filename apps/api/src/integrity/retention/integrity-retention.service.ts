@@ -39,6 +39,22 @@ const GAME_GUESS_RETENTION_DAYS = Number(process.env.GAME_GUESS_RETENTION_DAYS ?
  * their own tables.
  */
 const READ_NOTIFICATION_RETENTION_DAYS = Number(process.env.READ_NOTIFICATION_RETENTION_DAYS ?? 550);
+/**
+ * Rows removed per statement, and the ceiling on statements per sweep.
+ *
+ * These windows are new, so the FIRST sweep on a mature database deletes
+ * everything that has aged past them at once — potentially tens of millions of
+ * rows in a single statement. That is a long transaction holding locks, a WAL
+ * burst, and replication lag; and if it fails part-way it rolls back entirely
+ * and retries the same enormous delete the next night, forever.
+ *
+ * Batching turns that into a bounded amount of work per night. The ceiling means
+ * a first sweep may take several nights to catch up, which is the correct
+ * trade: nothing here is urgent, and a purge that cannot finish is worse than
+ * one that takes a week.
+ */
+const PURGE_BATCH_ROWS = Number(process.env.PURGE_BATCH_ROWS ?? 20_000);
+const PURGE_MAX_BATCHES = Number(process.env.PURGE_MAX_BATCHES ?? 25);
 
 /**
  * How many versions of a piece of LMS content are kept.
@@ -223,6 +239,28 @@ export class IntegrityRetentionService {
    * is per-school, and attributing a platform-wide delete to one school would
    * misrepresent what happened.
    */
+  /**
+   * Run a bounded DELETE repeatedly until it stops finding rows.
+   *
+   * Stops at PURGE_MAX_BATCHES even when there is more to remove, and SAYS SO —
+   * a sweep that quietly hits its ceiling every night for a year looks identical
+   * to one with nothing left to do, and the table keeps growing while the log
+   * reports success.
+   */
+  private async deleteInBatches(label: string, run: (limit: number) => Promise<number>): Promise<number> {
+    let total = 0;
+    for (let i = 0; i < PURGE_MAX_BATCHES; i += 1) {
+      const removed = Number(await run(PURGE_BATCH_ROWS));
+      total += removed;
+      if (removed < PURGE_BATCH_ROWS) return total;
+    }
+    this.logger.warn(
+      `Retention: ${label} hit the ${PURGE_MAX_BATCHES}-batch ceiling (${total} removed) — more remain, ` +
+        `the next sweep will continue. Raise PURGE_MAX_BATCHES to catch up faster.`,
+    );
+    return total;
+  }
+
   private async purgePlatformWide(): Promise<{
     gatewayEvents: number;
     contentRevisions: number;
@@ -252,32 +290,38 @@ export class IntegrityRetentionService {
     // rather than the guess's age alone, because a long-running league match is
     // still live months after its first guess.
     const guessCutoff = new Date(Date.now() - GAME_GUESS_RETENTION_DAYS * 86_400_000);
-    const guesses = await client.$executeRaw`
-      DELETE FROM guess g
-      USING game gm
-      WHERE g."gameId" = gm.id
-        AND gm.status = 'FINISHED'
-        AND g."createdAt" < ${guessCutoff}
-    `;
+    const guesses = await this.deleteInBatches("guesses", (limit) => client.$executeRaw`
+      DELETE FROM guess
+      WHERE id IN (
+        SELECT g.id FROM guess g
+        JOIN game gm ON g."gameId" = gm.id
+        WHERE gm.status = 'FINISHED' AND g."createdAt" < ${guessCutoff}
+        LIMIT ${limit}
+      )
+    `);
 
     // READ notifications only. An unread one is an outstanding thing to tell
     // someone and is kept at any age.
+    //
+    // Deliveries are NOT deleted separately: notification_delivery's FK is
+    // ON DELETE CASCADE, so removing the parent takes them with it. (An earlier
+    // version of this cleared them first and said the other order would fail on
+    // the FK — it would not, and the extra statement was doing nothing.)
     const noteCutoff = new Date(Date.now() - READ_NOTIFICATION_RETENTION_DAYS * 86_400_000);
-    const notes = await client.$executeRaw`
-      DELETE FROM notification_delivery d
-      USING notification n
-      WHERE d."notificationId" = n.id AND n."readAt" IS NOT NULL AND n."readAt" < ${noteCutoff}
-    `;
-    void notes; // deliveries go first (FK); the count that matters is the parent's
-    const readNotes = await client.notification.deleteMany({
-      where: { readAt: { not: null, lt: noteCutoff } },
-    });
+    const readNotes = await this.deleteInBatches("read notifications", (limit) => client.$executeRaw`
+      DELETE FROM notification
+      WHERE id IN (
+        SELECT id FROM notification
+        WHERE "readAt" IS NOT NULL AND "readAt" < ${noteCutoff}
+        LIMIT ${limit}
+      )
+    `);
 
     return {
       gatewayEvents: events.count,
       contentRevisions: Number(revisions),
-      gameGuesses: Number(guesses),
-      readNotifications: readNotes.count,
+      gameGuesses: guesses,
+      readNotifications: readNotes,
     };
   }
 }

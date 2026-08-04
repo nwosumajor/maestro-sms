@@ -186,7 +186,6 @@ describe("the platform-wide streams — not about pupils, still unbounded", () =
     // with the number of schools.
     const rawCallsFor3 = (client.$executeRaw as jest.Mock).mock.calls.length;
     expect(client.gatewayEvent.deleteMany).toHaveBeenCalledTimes(1);
-    expect(client.notification.deleteMany).toHaveBeenCalledTimes(1);
 
     const second = makeService({});
     (second.client.school.findMany as jest.Mock).mockResolvedValue([{ id: "only-1", integrityRetentionDays: 30 }]);
