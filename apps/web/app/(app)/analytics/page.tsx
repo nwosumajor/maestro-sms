@@ -111,18 +111,29 @@ export default async function AnalyticsPage({
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Grade distribution</CardTitle>
-                <CardDescription>Published grades by band (A ≥ 70 · B 60–69 · C 50–59 · D 45–49 · F &lt; 45).</CardDescription>
+                {/* The bands come from the SERVER, on the school's own scale.
+                    This line used to spell out "A >= 70 ... F < 45" — a third
+                    hard-coded copy of the thresholds, with no E band, which
+                    disagreed with both the report card and the aggregate it
+                    described. */}
+                <CardDescription>
+                  Published assignment grades, banded on your school&rsquo;s grading scale
+                  {gr.averagePct !== null ? ` — average ${gr.averagePct}%` : ""}.
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 {gr.graded > 0 ? (
                   <RCColumns
-                    data={[
-                      { label: "A", value: gr.A, color: RC.primary },
-                      { label: "B", value: gr.B, color: RC.primarySoft },
-                      { label: "C", value: gr.C, color: RC.primaryFaint },
-                      { label: "D", value: gr.D, color: RC.amber },
-                      { label: "F", value: gr.F, color: RC.red },
-                    ]}
+                    data={gr.bands.map((b, i) => ({
+                      label: b.grade,
+                      value: b.count,
+                      // Best band first through to the lowest: the palette walks
+                      // from primary to red across however many bands exist, so a
+                      // nine-band WAEC scale reads the same way as a five-band one.
+                      color: [RC.primary, RC.primarySoft, RC.primaryFaint, RC.amber, RC.red][
+                        Math.min(4, Math.floor((i / Math.max(1, gr.bands.length - 1)) * 4))
+                      ],
+                    }))}
                   />
                 ) : (
                   <EmptyNote>No grades have been published yet.</EmptyNote>

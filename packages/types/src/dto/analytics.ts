@@ -25,7 +25,21 @@ export interface AnalyticsOverviewDto {
   };
   fees?: { invoicedMinor: number; collectedMinor: number; outstandingMinor: number; invoices: number };
   /** Published-grade distribution by band (A≥70 · B 60–69 · C 50–59 · D 45–49 · F<45). */
-  grades?: { A: number; B: number; C: number; D: number; F: number; graded: number; averagePct: number | null };
+  /**
+   * The distribution over the SCHOOL'S OWN grade scale — one entry per band it
+   * defines, in its order. Was a fixed A/B/C/D/F, which had no E band (so marks
+   * of 40-44 were shown as failing while the report card graded them E) and
+   * ignored a school that had chosen WAEC, plus-grades, Cambridge or US.
+   *
+   * NOTE: these are ASSIGNMENT grades (Grade.score/maxScore), not term subject
+   * results — a different measure from the letter on a report card, banded on
+   * the same scale so the two are at least directly comparable.
+   */
+  grades?: {
+    bands: Array<{ grade: string; count: number }>;
+    graded: number;
+    averagePct: number | null;
+  };
   /** Student-body demographics from profiles (staff, school-wide). Each categorical
    *  profile parameter is a {value → count} map ready to chart. */
   demographics?: {
