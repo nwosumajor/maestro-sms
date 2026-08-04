@@ -157,16 +157,28 @@ d("AnalyticsService.overview grade-band aggregate (real Postgres)", () => {
     await prisma.$disconnect();
   });
 
+  /** Bands come back as a list on the SCHOOL'S scale now, not fixed A-F keys —
+   *  a WAEC school gets nine. Folded to a record so these stay readable. */
+  const byGrade = (g?: { bands: Array<{ grade: string; count: number }> }) =>
+    Object.fromEntries((g?.bands ?? []).map((b) => [b.grade, b.count]));
+
   it("school-wide (staff): buckets every PUBLISHED grade into the right band, excludes DRAFT, folds maxScore=0 into 0%/F", async () => {
     const out = await svc.overview(staff());
     // PUBLISHED only: 90(A) 55(C) 65(B) 47(D) 30(F) 0/0->0%(F) = 6 rows; the DRAFT 100/100 is excluded.
-    expect(out.grades).toEqual({ A: 1, B: 1, C: 1, D: 1, F: 2, graded: 6, averagePct: 48 }); // (90+55+65+47+30+0)/6 = 47.83 -> 48
+    // E is present with a count of 0 — it was MISSING from the old aggregate
+    // entirely, which is what made a 40-44 mark show as F here while the report
+    // card graded it E.
+    expect(byGrade(out.grades)).toEqual({ A: 1, B: 1, C: 1, D: 1, E: 0, F: 2 });
+    expect(out.grades?.graded).toBe(6);
+    expect(out.grades?.averagePct).toBe(48); // (90+55+65+47+30+0)/6 = 47.83 -> 48
   });
 
   it("family-scoped (parent): sees only their own child's grades, joined through submission.studentId", async () => {
     const out = await svc.overview(parent());
     // Only S1's two PUBLISHED grades: 90% (A) and 55% (C).
-    expect(out.grades).toEqual({ A: 1, B: 0, C: 1, D: 0, F: 0, graded: 2, averagePct: 73 }); // (90+55)/2 = 72.5 -> 73 (banker's/half-up via SQL ROUND)
+    expect(byGrade(out.grades)).toEqual({ A: 1, B: 0, C: 1, D: 0, E: 0, F: 0 });
+    expect(out.grades?.graded).toBe(2);
+    expect(out.grades?.averagePct).toBe(73); // (90+55)/2 = 72.5 -> 73 (half-up via SQL ROUND)
   });
 
   it("fees school-wide (staff): sums billable invoices + POSTED payments only; DRAFT/CANCELLED/PENDING_APPROVAL excluded, REFUND subtracts", async () => {

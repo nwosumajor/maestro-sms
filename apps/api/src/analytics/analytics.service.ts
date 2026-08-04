@@ -7,11 +7,14 @@
 // ever crosses a tenant or a family boundary.
 // =============================================================================
 
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable , Optional } from "@nestjs/common";
 import type { AnalyticsOverviewDto } from "@sms/types";
-import { normalizeGender } from "@sms/types";
+import { normalizeGender,
+  resolveGradeBands,
+} from "@sms/types";
 // VALUE import: Prisma.sql only resolves as a value, not a type (CLAUDE.md).
 import { Prisma } from "@sms/db";
+import { SchoolRegionService } from "../foundation/school-region.service";
 import {
   TENANT_DATABASE,
   type Principal,
@@ -59,7 +62,13 @@ const STAFF_WIDE = new Set(["school_admin", "principal", "accountant", "board", 
 
 @Injectable()
 export class AnalyticsService {
-  constructor(@Inject(TENANT_DATABASE) private readonly db: TenantDatabase) {}
+  constructor(
+    @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
+    // The school's grading scale. Optional so existing unit wirings keep
+    // working; absent, the platform default applies — which is what every
+    // school that has never chosen one uses anyway.
+    @Optional() private readonly regions?: SchoolRegionService,
+  ) {}
 
   private ctx(p: Principal): TenantContext {
     return { schoolId: p.schoolId, userId: p.userId };
@@ -151,7 +160,9 @@ export class AnalyticsService {
       rows.push(["Fees", "Invoices", o.fees.invoices]);
     }
     if (o.grades) {
-      for (const k of ["A", "B", "C", "D", "F"] as const) rows.push(["Grades", `Band ${k}`, o.grades[k]]);
+      // Whatever bands the school's scale defines — a WAEC school exports nine
+      // rows here, a US school five.
+      for (const b of o.grades.bands) rows.push(["Grades", `Band ${b.grade}`, b.count]);
       rows.push(["Grades", "Graded", o.grades.graded], ["Grades", "Average %", o.grades.averagePct]);
     }
     if (o.operations) {
@@ -256,13 +267,30 @@ export class AnalyticsService {
       // COALESCE(...,0) on a zero maxScore matches the prior JS fallback
       // exactly (counted as 0%, not silently dropped from the average).
       if (p.permissions.includes("grade.read")) {
+        const bands = resolveGradeBands((await this.regions?.academicForSchool(p.schoolId))?.grading);
+        // The bands come from the SCHOOL'S OWN SCALE, built into the aggregate
+        // rather than hard-coded.
+        //
+        // They used to be five literal thresholds here, and that was wrong twice
+        // over. It had no E band at all, so every mark of 40-44 was counted F on
+        // this dashboard while the pupil's report card said E — a pass shown as
+        // a fail. And once a school could choose its scale, a school on WAEC or
+        // the plus-grades scale saw a distribution that matched none of its
+        // report cards. One source of truth now: resolveGradeBands, the same
+        // function the report card grades on.
+        const bandCols = bands.map((b, i) => {
+          const upper = i === 0 ? null : bands[i - 1].min;
+          const cond =
+            upper === null
+              ? Prisma.sql`pct >= ${b.min}`
+              : Prisma.sql`pct >= ${b.min} AND pct < ${upper}`;
+          // The band's own name is the column alias, quoted — a scale like WAEC
+          // uses "A1"/"C6", and an unquoted alias would not survive that.
+          return Prisma.sql`count(*) FILTER (WHERE ${cond})::int AS ${Prisma.raw(`"${b.grade.replace(/"/g, "")}"`)}`;
+        });
         const bandSql = Prisma.sql`
           SELECT
-            count(*) FILTER (WHERE pct >= 70)::int AS a,
-            count(*) FILTER (WHERE pct >= 60 AND pct < 70)::int AS b,
-            count(*) FILTER (WHERE pct >= 50 AND pct < 60)::int AS c,
-            count(*) FILTER (WHERE pct >= 45 AND pct < 50)::int AS d,
-            count(*) FILTER (WHERE pct < 45)::int AS f,
+            ${Prisma.join(bandCols, ", ")},
             count(*)::int AS graded,
             ROUND(AVG(pct))::int AS "avgPct"
           FROM (
@@ -280,15 +308,15 @@ export class AnalyticsService {
         // A family with no scoped students yet: skip the query, same as the
         // old __none__ short-circuit — the defaults below are already correct.
         const skip = !staff && (!studentIds || studentIds.length === 0);
-        const [row]: GradeBandRow[] = skip ? [{ a: 0, b: 0, c: 0, d: 0, f: 0, graded: 0, avgPct: null }] : await tx.$queryRaw<GradeBandRow[]>(bandSql);
+        const [row] = skip
+          ? [{ graded: 0, avgPct: null } as Record<string, number | null>]
+          : await tx.$queryRaw<Array<Record<string, number | null>>>(bandSql);
         out.grades = {
-          A: row.a,
-          B: row.b,
-          C: row.c,
-          D: row.d,
-          F: row.f,
-          graded: row.graded,
-          averagePct: row.avgPct,
+          // Every band the school's scale defines, in its own order — so a WAEC
+          // school sees nine and a US school five, rather than a fixed A-F.
+          bands: bands.map((b) => ({ grade: b.grade, count: Number(row?.[b.grade] ?? 0) })),
+          graded: Number(row?.graded ?? 0),
+          averagePct: (row?.avgPct as number | null) ?? null,
         };
       }
 
