@@ -2,7 +2,7 @@
 // Academic-calendar pure helpers — validation, standard-session, teaching days
 // =============================================================================
 
-import { defaultSessionFor, pickOpeningTerm } from "@sms/types";
+import { defaultSessionFor, pickOpeningTerm, countryProfile } from "@sms/types";
 import {
   countTeachingDays,
   isHoliday,
@@ -236,5 +236,63 @@ describe("pickOpeningTerm", () => {
 
   it("returns -1 for a session with no terms rather than pretending index 0", () => {
     expect(pickOpeningTerm([], new Date())).toBe(-1);
+  });
+});
+
+// =============================================================================
+// The academic year does not open in September everywhere
+// =============================================================================
+// The platform assumed it did, which is six months wrong for the whole of
+// southern Africa: a school in Johannesburg, Harare or Lusaka runs January to
+// December. Provisioning one as September would file its first registers against
+// a session that does not exist yet.
+
+describe("defaultSessionFor across hemispheres", () => {
+  const at = (iso: string, m: number) => defaultSessionFor(new Date(`${iso}T12:00:00Z`), m);
+
+  it("leaves a September-start country exactly as it was", () => {
+    // The regression that matters most: every school already live is Nigeria.
+    expect(at("2026-08-04", 9)).toEqual({ name: "2026/2027", yearStart: "2026-09-01" });
+    expect(at("2027-02-10", 9)).toEqual({ name: "2026/2027", yearStart: "2026-09-01" });
+  });
+
+  it("opens a southern-hemisphere year in JANUARY", () => {
+    expect(at("2027-03-01", 1)).toEqual({ name: "2027", yearStart: "2027-01-01" });
+  });
+
+  it("names a January year with ONE year, not two", () => {
+    // A year that opens and closes inside the same calendar year would be
+    // misdescribed as "2027/2028" on every report card it heads.
+    expect(at("2027-03-01", 1).name).toBe("2027");
+    expect(at("2027-03-01", 9).name).toBe("2026/2027");
+  });
+
+  it("rolls a January-start school forward in NOVEMBER, wrapping the year", () => {
+    // Two months before opening, which for a January start is November of the
+    // PREVIOUS calendar year — the wraparound the arithmetic has to survive.
+    expect(at("2026-10-31", 1).name).toBe("2026");
+    expect(at("2026-11-01", 1).name).toBe("2027");
+    expect(at("2026-12-20", 1).name).toBe("2027");
+  });
+
+  it("handles an April-start country", () => {
+    expect(at("2026-08-04", 4)).toEqual({ name: "2026/2027", yearStart: "2026-04-01" });
+  });
+
+  it("takes the month from the COUNTRY, so adding one is a data change", () => {
+    expect(countryProfile("ZA").academicYearStartMonth).toBe(1);
+    expect(countryProfile("NG").academicYearStartMonth).toBe(9);
+    expect(countryProfile("IN").academicYearStartMonth).toBe(4);
+    // An unknown country falls back to the platform's home default.
+    expect(countryProfile("XX").academicYearStartMonth).toBe(9);
+  });
+
+  it("gives every catalogued country a start month", () => {
+    // A missing one would silently become undefined and produce an invalid date.
+    for (const code of ["NG", "ZA", "GH", "KE", "ZW", "SG", "US", "GB", "IN", "CI"]) {
+      const m = countryProfile(code).academicYearStartMonth;
+      expect(m).toBeGreaterThanOrEqual(1);
+      expect(m).toBeLessThanOrEqual(12);
+    }
   });
 });
