@@ -201,6 +201,21 @@ export interface TermSubjectRowDto {
   classNote: number | null;
   total: number | null;
   grade: string | null;
+  /**
+   * This student's rank in THIS subject among classmates, and how many were
+   * ranked. Null when they have no total for it — an ungraded pupil is unranked
+   * rather than last.
+   *
+   * Standard competition ranking: ties share a position and the next rank skips
+   * (68, 68, 65 -> 1st, 1st, 3rd). Two pupils on the same mark being told they
+   * are 1st and 2nd is the thing that makes a parent write in.
+   *
+   * Discloses only THIS pupil's standing — a number about them, never another
+   * child's marks or name. Same posture as the overall class position already
+   * printed on the card.
+   */
+  subjectPosition: number | null;
+  subjectRanked: number | null;
 }
 
 /** One term's worth of subject rows + the term average. */
