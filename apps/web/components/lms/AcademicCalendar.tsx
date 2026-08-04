@@ -237,6 +237,23 @@ export function AcademicCalendar({ sessions, holidays }: { sessions: Session[]; 
                           {!tm.isCurrent && (!tm.startDate || !tm.endDate) ? " · needs dates" : ""}
                         </Badge>
                       </button>
+                      {/* Removing a term added by mistake. Offered only for a term
+                          that is not current — the server refuses that anyway, and
+                          also refuses one carrying marks, so this is a shortcut to
+                          the common case rather than the authority on it. */}
+                      {!tm.isCurrent && (
+                        <button
+                          type="button"
+                          title={`Remove "${tm.name}"`}
+                          onClick={() => {
+                            if (confirm(`Remove "${tm.name}"? This is refused if the term has any assessments, results or remarks.`))
+                              void send("DELETE", `/academic/terms/${tm.id}`, undefined, "Term removed.");
+                          }}
+                          className="ml-auto rounded px-1.5 text-xs text-muted-foreground hover:text-destructive focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          Remove
+                        </button>
+                      )}
                       {/* Start date drives the term-lock boundary AND term-scoped
                           report-card attendance (which needs BOTH dates); end date
                           drives AUTOMATIC advance once it passes. Saved on blur, not

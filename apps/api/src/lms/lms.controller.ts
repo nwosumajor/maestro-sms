@@ -381,6 +381,13 @@ export class LmsController {
     return this.academic.createSession(p, body);
   }
 
+  /** Remove a term added by mistake. Refused when anything references it. */
+  @Delete("academic/terms/:id")
+  @RequirePermission(LMS_PERMISSIONS.CLASS_WRITE)
+  deleteTerm(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.academic.deleteTerm(p, id);
+  }
+
   /** Correct a session's name or window. There was no way to do this before —
    *  a session could be created and never fixed. */
   @Put("academic/sessions/:id")

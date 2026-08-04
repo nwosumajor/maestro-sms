@@ -67,9 +67,15 @@ export function ClassAttendanceBoard() {
     };
   }, []);
 
+  // Switching term used to blank the board to a loading state and rebuild it.
+  // That reads as the page breaking and re-forming for what is a filter change —
+  // and it is the single most "laggy" thing here, because the eye has to
+  // re-acquire the table every time. The previous figures stay on screen, dimmed
+  // and marked busy, and are replaced in place when the new ones land.
+  const [busy, setBusy] = React.useState(false);
   React.useEffect(() => {
     let live = true;
-    setData(null);
+    setBusy(true);
     (async () => {
       const res = await fetch(`/api/sms/attendance/by-class${termId ? `?termId=${encodeURIComponent(termId)}` : ""}`);
       if (!live) return;
@@ -78,6 +84,7 @@ export function ClassAttendanceBoard() {
           ? await res.json()
           : { from: "", to: "", termId: null, termName: null, source: "live", classes: [] },
       );
+      setBusy(false);
     })();
     return () => {
       live = false;
@@ -103,7 +110,7 @@ export function ClassAttendanceBoard() {
   if (data && rows.length === 0 && !termId) return null;
 
   return (
-    <Card>
+    <Card aria-busy={busy}>
       <CardHeader className="pb-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
@@ -117,6 +124,7 @@ export function ClassAttendanceBoard() {
                       be served from the precomputed rollup. Saying so is the honest
                       version of "why was that instant". */}
                   {data.source === "rollup" ? " Figures for this ended term are precomputed." : ""}
+                  {busy ? " Updating…" : ""}
                 </>
               ) : (
                 "Loading…"
@@ -152,7 +160,7 @@ export function ClassAttendanceBoard() {
           </div>
         </div>
       </CardHeader>
-      <CardContent className="overflow-x-auto p-0">
+      <CardContent className={(busy ? "opacity-60 " : "") + "transition-opacity overflow-x-auto p-0"}>
         <table className="w-full text-sm">
           <thead className="border-b border-border text-left text-muted-foreground">
             <tr>

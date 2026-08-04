@@ -7,7 +7,7 @@
 // (RLS), audited. Reads are broad (class.read); writes are academic.manage.
 // =============================================================================
 
-import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { AcademicSessionDto, CalendarSession, CalendarTerm, SchoolHolidayDto, TermDto } from "@sms/types";
 import { assessCalendar, currentTermBlocker, dayUtc, pickNextTerm, standardTermDates, termHasElapsed, validateSessionDates, validateTermDates, type CalendarFinding } from "@sms/types";
 
@@ -239,6 +239,53 @@ export class AcademicService {
       });
       await this.log(tx, p, "academic.term.create", "term", t.id, { sessionId, sequence: input.sequence });
       return this.termDto(t as TermRow);
+    });
+  }
+
+  /**
+   * Remove a term created by mistake.
+   *
+   * There was no way to do this: terms could be added and never removed, so a
+   * mis-click left a permanent phantom in every term picker and in the calendar
+   * check. Deleting one that carries marks would be far worse than the phantom,
+   * though — the grades would survive with no term to belong to — so this
+   * refuses when anything references it, and says WHAT references it, in the
+   * same shape as the class/subject/hostel delete guards.
+   *
+   * The CURRENT term is never deletable. Removing the pointer everything reads
+   * would switch off the register lock as a side effect of tidying up.
+   */
+  async deleteTerm(p: Principal, termId: string) {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const term = (await tx.term.findFirst({
+        where: { id: termId },
+        select: { id: true, name: true, isCurrent: true },
+      })) as { id: string; name: string; isCurrent: boolean } | null;
+      if (!term) throw new NotFoundException("Term not found");
+      if (term.isCurrent) {
+        throw new BadRequestException(
+          `"${term.name}" is the current term. Make another term current first — deleting the one everything reads would switch off the past-term register lock.`,
+        );
+      }
+
+      const [assessments, results, remarks] = await Promise.all([
+        tx.assessment.count({ where: { termId } }),
+        tx.subjectResult.count({ where: { termId } }),
+        tx.reportCardRemark.count({ where: { termId } }),
+      ]);
+      const blockers: string[] = [];
+      if (assessments > 0) blockers.push(`${assessments} assessment${assessments === 1 ? "" : "s"}`);
+      if (results > 0) blockers.push(`${results} recorded result${results === 1 ? "" : "s"}`);
+      if (remarks > 0) blockers.push(`${remarks} report-card remark${remarks === 1 ? "" : "s"}`);
+      if (blockers.length > 0) {
+        throw new ConflictException(
+          `"${term.name}" still has ${blockers.join(", ")}. A term is the scope those records belong to, so it cannot be removed while any exist.`,
+        );
+      }
+
+      await tx.term.delete({ where: { id: termId } });
+      await this.log(tx, p, "academic.term.delete", "term", termId, { name: term.name });
+      return { id: termId };
     });
   }
 

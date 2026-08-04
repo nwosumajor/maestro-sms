@@ -264,3 +264,59 @@ describe("AcademicService.updateSession", () => {
     await expect(svc(tx).service.updateSession(p, "nope", { name: "x" })).rejects.toThrow(/not found/i);
   });
 });
+
+// =============================================================================
+// Removing a term added by mistake
+// =============================================================================
+// Terms could be created and never removed, so a mis-click left a permanent
+// phantom in every term picker and in the calendar check. Deleting one that
+// carries marks would be far worse, though — the grades would survive with no
+// term to belong to.
+
+describe("AcademicService.deleteTerm", () => {
+  function txWith(term: { name: string; isCurrent: boolean } | null, counts = [0, 0, 0]) {
+    const del = jest.fn().mockResolvedValue({});
+    const tx = {
+      term: { findFirst: jest.fn().mockResolvedValue(term && { id: "t1", ...term }), delete: del },
+      assessment: { count: jest.fn().mockResolvedValue(counts[0]) },
+      subjectResult: { count: jest.fn().mockResolvedValue(counts[1]) },
+      reportCardRemark: { count: jest.fn().mockResolvedValue(counts[2]) },
+    } as unknown as TenantTx;
+    return { tx, del };
+  }
+
+  it("removes an empty, non-current term", async () => {
+    const { tx, del } = txWith({ name: "First Term", isCurrent: false });
+    await svc(tx).service.deleteTerm(p, "t1");
+    expect(del).toHaveBeenCalledWith({ where: { id: "t1" } });
+  });
+
+  it("refuses the CURRENT term — that pointer drives the register lock", async () => {
+    const { tx, del } = txWith({ name: "First Term", isCurrent: true });
+    await expect(svc(tx).service.deleteTerm(p, "t1")).rejects.toThrow(/current term/i);
+    expect(del).not.toHaveBeenCalled();
+  });
+
+  it("refuses a term that still has assessments, and says how many", async () => {
+    const { tx, del } = txWith({ name: "Second Term", isCurrent: false }, [3, 0, 0]);
+    await expect(svc(tx).service.deleteTerm(p, "t1")).rejects.toThrow(/3 assessments/);
+    expect(del).not.toHaveBeenCalled();
+  });
+
+  it("refuses on recorded results and on remarks too, not only assessments", async () => {
+    // Each blocker checked separately: an implementation that only counted
+    // assessments would still orphan a term's marks.
+    await expect(svc(txWith({ name: "T", isCurrent: false }, [0, 5, 0]).tx).service.deleteTerm(p, "t1")).rejects.toThrow(/5 recorded results/);
+    await expect(svc(txWith({ name: "T", isCurrent: false }, [0, 0, 2]).tx).service.deleteTerm(p, "t1")).rejects.toThrow(/2 report-card remarks/);
+  });
+
+  it("lists EVERY blocker at once rather than one per attempt", async () => {
+    const { tx } = txWith({ name: "T", isCurrent: false }, [1, 1, 1]);
+    await expect(svc(tx).service.deleteTerm(p, "t1")).rejects.toThrow(/assessment.*result.*remark/);
+  });
+
+  it("404s an unknown term", async () => {
+    const { tx } = txWith(null);
+    await expect(svc(tx).service.deleteTerm(p, "nope")).rejects.toThrow(/not found/i);
+  });
+});
