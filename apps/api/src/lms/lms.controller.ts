@@ -381,6 +381,13 @@ export class LmsController {
     return this.academic.createSession(p, body);
   }
 
+  /** Remove a session added by mistake. Refused when current or carrying marks. */
+  @Delete("academic/sessions/:id")
+  @RequirePermission(LMS_PERMISSIONS.CLASS_WRITE)
+  deleteSession(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.academic.deleteSession(p, id);
+  }
+
   /** Remove a term added by mistake. Refused when anything references it. */
   @Delete("academic/terms/:id")
   @RequirePermission(LMS_PERMISSIONS.CLASS_WRITE)

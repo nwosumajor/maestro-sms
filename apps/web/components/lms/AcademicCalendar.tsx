@@ -206,9 +206,33 @@ export function AcademicCalendar({ sessions, holidays }: { sessions: Session[]; 
                     </label>
                   </div>
                   {!s.isCurrent && (
-                    <Button size="sm" variant="ghost" className="h-7" onClick={() => send("PUT", `/academic/sessions/${s.id}/current`, undefined, "Current session set.")}>
-                      Set current
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button size="sm" variant="ghost" className="h-7" onClick={() => send("PUT", `/academic/sessions/${s.id}/current`, undefined, "Current session set.")}>
+                        Set current
+                      </Button>
+                      {/* Duplicate years are the easiest mistake to make here —
+                          quick-create and manual create both exist — and until
+                          now there was no way to undo one. The server refuses a
+                          session carrying marks, so this cannot lose a year of
+                          grades; the confirm says how many terms go with it. */}
+                      <button
+                        type="button"
+                        title={`Remove the ${s.name} session`}
+                        onClick={() => {
+                          const n = s.terms.length;
+                          if (
+                            confirm(
+                              `Remove the "${s.name}" session${n ? ` and its ${n} term${n === 1 ? "" : "s"}` : ""}? ` +
+                                `This is refused if any term has assessments, results or remarks.`,
+                            )
+                          )
+                            void send("DELETE", `/academic/sessions/${s.id}`, undefined, "Session removed.");
+                        }}
+                        className="rounded px-1.5 text-xs text-muted-foreground hover:text-destructive focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        Remove
+                      </button>
+                    </div>
                   )}
                 </div>
                 <div className="mt-2 space-y-1.5">

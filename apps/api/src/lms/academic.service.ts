@@ -193,10 +193,40 @@ export class AcademicService {
     });
   }
 
+  /**
+   * Refuse a name already in use among its siblings.
+   *
+   * Nothing stopped this, which is how a school ended up with TWO terms called
+   * "First Term" in one session. Duplicates here are not cosmetic: every term
+   * picker, report-card header and calendar finding names a term by its name, so
+   * two identical ones make it impossible to tell which register or which set of
+   * marks you are looking at — and only one of them is ever the right answer.
+   *
+   * Case-insensitive, because "first term" and "First Term" are the same term to
+   * everyone except a byte comparison.
+   */
+  private assertNameFree(
+    existing: Array<{ id: string; name: string }>,
+    name: string,
+    kind: "term" | "session",
+    ignoreId?: string,
+  ) {
+    const wanted = name.trim().toLowerCase();
+    const clash = existing.find((x) => x.id !== ignoreId && x.name.trim().toLowerCase() === wanted);
+    if (clash) {
+      throw new ConflictException(
+        `A ${kind} called "${clash.name}" already exists${kind === "term" ? " in this session" : ""}. ` +
+          `Two with the same name cannot be told apart on a report card or in a term picker — rename one, or edit the existing ${kind}.`,
+      );
+    }
+  }
+
   async createSession(p: Principal, input: { name: string; startDate?: string | null; endDate?: string | null }) {
     const bad = validateSessionDates(input);
     if (bad) throw new BadRequestException(bad);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const existing = (await tx.academicSession.findMany({ select: { id: true, name: true } })) as Array<{ id: string; name: string }>;
+      this.assertNameFree(existing, input.name, "session");
       const s = await tx.academicSession.create({
         data: {
           schoolId: p.schoolId,
@@ -227,6 +257,9 @@ export class AcademicService {
       })) as CalendarTermRow[];
       const bad = validateTermDates(input, session, siblings);
       if (bad) throw new BadRequestException(bad);
+      // NOTE: duplicate SEQUENCE is already refused by validateTermDates above —
+      // checking it again here would be unreachable. Only the NAME was unguarded.
+      this.assertNameFree(siblings, input.name, "term");
       const t = await tx.term.create({
         data: {
           schoolId: p.schoolId,
@@ -239,6 +272,62 @@ export class AcademicService {
       });
       await this.log(tx, p, "academic.term.create", "term", t.id, { sessionId, sequence: input.sequence });
       return this.termDto(t as TermRow);
+    });
+  }
+
+  /**
+   * Remove a session created by mistake.
+   *
+   * Sessions could be created two ways and removed by neither, so a duplicate
+   * year — the easiest mistake to make, since quick-create and manual create both
+   * exist — was permanent. It then sat in every session picker and every
+   * cumulative report next to the real one.
+   *
+   * Refused when it is the CURRENT session, and when any of its terms carries
+   * marks. A session's terms are deleted with it, which is safe ONLY because
+   * that second check has already proved they are empty — a cascade past marks
+   * would destroy a year of grades to tidy up a typo.
+   */
+  async deleteSession(p: Principal, sessionId: string) {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const session = (await tx.academicSession.findFirst({
+        where: { id: sessionId },
+        select: { id: true, name: true, isCurrent: true },
+      })) as { id: string; name: string; isCurrent: boolean } | null;
+      if (!session) throw new NotFoundException("Session not found");
+      if (session.isCurrent) {
+        throw new BadRequestException(
+          `"${session.name}" is the current session. Make another session current first — everything that asks "which year is this?" reads that pointer.`,
+        );
+      }
+
+      const terms = (await tx.term.findMany({ where: { sessionId }, select: { id: true } })) as Array<{ id: string }>;
+      const termIds = terms.map((t) => t.id);
+      if (termIds.length > 0) {
+        const [assessments, results, remarks] = await Promise.all([
+          tx.assessment.count({ where: { termId: { in: termIds } } }),
+          tx.subjectResult.count({ where: { termId: { in: termIds } } }),
+          tx.reportCardRemark.count({ where: { termId: { in: termIds } } }),
+        ]);
+        const blockers: string[] = [];
+        if (assessments > 0) blockers.push(`${assessments} assessment${assessments === 1 ? "" : "s"}`);
+        if (results > 0) blockers.push(`${results} recorded result${results === 1 ? "" : "s"}`);
+        if (remarks > 0) blockers.push(`${remarks} report-card remark${remarks === 1 ? "" : "s"}`);
+        if (blockers.length > 0) {
+          throw new ConflictException(
+            `"${session.name}" still has ${blockers.join(", ")} across its terms. A whole year of records cannot be removed to correct a name — rename it instead.`,
+          );
+        }
+      }
+
+      // Terms first: they reference the session, and nothing here has marks.
+      if (termIds.length > 0) await tx.term.deleteMany({ where: { sessionId } });
+      await tx.academicSession.delete({ where: { id: sessionId } });
+      await this.log(tx, p, "academic.session.delete", "academic_session", sessionId, {
+        name: session.name,
+        termsRemoved: termIds.length,
+      });
+      return { id: sessionId, termsRemoved: termIds.length };
     });
   }
 
@@ -311,6 +400,11 @@ export class AcademicService {
         select: { id: true, name: true, startDate: true, endDate: true },
       })) as { id: string; name: string; startDate: Date | null; endDate: Date | null } | null;
       if (!session) throw new NotFoundException("Session not found");
+
+      if (input.name !== undefined) {
+        const siblings = (await tx.academicSession.findMany({ select: { id: true, name: true } })) as Array<{ id: string; name: string }>;
+        this.assertNameFree(siblings, input.name, "session", sessionId);
+      }
 
       const merged = {
         startDate: input.startDate === undefined ? session.startDate : input.startDate,
