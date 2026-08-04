@@ -76,6 +76,13 @@ const syllabusSchema = z.object({
     .max(60),
 });
 const syllabusStatusSchema = z.object({ status: z.enum(["PLANNED", "TAUGHT"]) });
+const gradingPolicySchema = z.object({
+  scale: z.string().max(24).optional(),
+  // Floors only — there is nowhere to type a ceiling, which is what makes a gap
+  // or an overlap unrepresentable rather than merely validated.
+  bands: z.array(z.object({ min: z.number().int().min(0).max(100), grade: z.string().min(1).max(4) })).min(2).max(15).optional(),
+  weights: z.record(z.string(), z.number().int().min(0).max(100)).optional(),
+});
 const catalogueAddSchema = z.object({ codes: z.array(z.string().min(1).max(16)).min(1).max(100) });
 const standardSessionSchema = z.object({
   name: z.string().min(1).max(60),
@@ -455,6 +462,23 @@ export class LmsController {
   // --- academic calendar (sessions + terms) ----------------------------------
   /** What is wrong with the calendar, and what each thing has disabled. Read by
    *  anyone who can see the calendar — the consequences are not secret. */
+  /** The school's grading policy plus every choice available. */
+  @Get("academic/grading-policy")
+  @RequirePermission(LMS_PERMISSIONS.CLASS_READ)
+  gradingPolicy(@CurrentPrincipal() p: Principal) {
+    return this.academic.gradingPolicy(p);
+  }
+
+  /** Set the letter scale and/or the component weights. */
+  @Put("academic/grading-policy")
+  @RequirePermission(LMS_PERMISSIONS.ACADEMIC_MANAGE)
+  setGradingPolicy(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(gradingPolicySchema)) body: z.infer<typeof gradingPolicySchema>,
+  ) {
+    return this.academic.setGradingPolicy(p, body);
+  }
+
   /** The school's year shape — drives the term-name choices and the quick-create. */
   @Get("academic/shape")
   @RequirePermission(LMS_PERMISSIONS.CLASS_READ)

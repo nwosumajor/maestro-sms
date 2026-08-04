@@ -7,9 +7,12 @@
 // (RLS), audited. Reads are broad (class.read); writes are academic.manage.
 // =============================================================================
 
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, Optional, ServiceUnavailableException } from "@nestjs/common";
+import { PrivilegedDatabaseService } from "../common/privileged-database.service";
+import { SchoolRegionService } from "../foundation/school-region.service";
+import { Prisma } from "@sms/db";
 import type { AcademicSessionDto, CalendarSession, CalendarTerm, SchoolHolidayDto, TermDto } from "@sms/types";
-import { DEFAULT_CALENDAR_TEMPLATE, assessCalendar, calendarTemplate, termPresetsFor, currentTermBlocker, dayUtc, generateCalendar, pickNextTerm, termHasElapsed, validateSessionDates, validateTermDates, type CalendarFinding } from "@sms/types";
+import { DEFAULT_GRADE_SCALE, GRADE_SCALES, GRADING_PRESETS, gradeScaleProblem, resolveGradeBands, resolveGradingPolicy, DEFAULT_CALENDAR_TEMPLATE, assessCalendar, calendarTemplate, termPresetsFor, currentTermBlocker, dayUtc, generateCalendar, pickNextTerm, termHasElapsed, validateSessionDates, validateTermDates, type CalendarFinding } from "@sms/types";
 
 interface HolidayRow {
   id: string;
@@ -144,6 +147,11 @@ export class AcademicService {
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
+    // Optional so existing unit wirings keep working. Absent, the grading-policy
+    // WRITE refuses with a clear 503 rather than failing on a permission error
+    // deep in Prisma — `school` is SELECT-only for the app role.
+    @Optional() private readonly privileged?: PrivilegedDatabaseService,
+    @Optional() private readonly regions?: SchoolRegionService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -157,6 +165,83 @@ export class AcademicService {
    * with the screen it sits on. Pure assessment: it refuses nothing, because a
    * school mid-setup is legitimately incomplete — it only removes the silence.
    */
+  /** The school's grading policy: the letter scale and the component weights,
+   *  plus every choice available. The UI renders CHOICES from this, so an admin
+   *  never types a boundary. */
+  async gradingPolicy(p: Principal) {
+    const school = (await this.db.runAsTenantReadOnly(this.ctx(p), (tx) =>
+      tx.school.findFirst({ where: { id: p.schoolId }, select: { gradingPolicy: true } }),
+    )) as { gradingPolicy: unknown } | null;
+    const policy = resolveGradingPolicy(school?.gradingPolicy);
+    const stored = (school?.gradingPolicy ?? {}) as { scale?: string };
+    return {
+      scale: stored.scale ?? DEFAULT_GRADE_SCALE,
+      bands: [...resolveGradeBands(policy)],
+      components: policy.components.map((c) => ({ ...c })),
+      // Everything selectable, so the screen never has to hard-code a list that
+      // could drift from what the server accepts.
+      scaleChoices: Object.entries(GRADE_SCALES).map(([key, v]) => ({
+        key, label: v.label, note: v.note, bands: [...v.bands],
+      })),
+      weightChoices: Object.entries(GRADING_PRESETS).map(([key, v]) => ({ key, label: v.label, weights: v.weights })),
+    };
+  }
+
+  /**
+   * Set the scale and/or the weights.
+   *
+   * A CUSTOM band list is refused with the reason rather than stored — an
+   * invalid scale that fell back silently would leave a school believing they
+   * had changed their grading while every report card ignored it.
+   */
+  async setGradingPolicy(
+    p: Principal,
+    input: { scale?: string; bands?: Array<{ min: number; grade: string }>; weights?: Record<string, number> },
+  ) {
+    if (input.scale && !GRADE_SCALES[input.scale]) {
+      throw new BadRequestException(`Grading scale must be one of ${Object.keys(GRADE_SCALES).join(", ")}`);
+    }
+    if (input.bands) {
+      const problem = gradeScaleProblem(input.bands);
+      if (problem) throw new BadRequestException(problem);
+    }
+    if (input.weights) {
+      const total = Object.values(input.weights).reduce((s, v) => s + v, 0);
+      if (total !== 100) {
+        throw new BadRequestException(`The component weights must add up to 100 — these add up to ${total}.`);
+      }
+    }
+    // `school` is a GLOBAL registry table and the app role is SELECT-only on it
+    // (least privilege), so the write goes through the PRIVILEGED client — the
+    // same route the MFA policy and the late-fee config take. The READ below and
+    // the audit entry stay on the tenant client.
+    const client = this.privileged?.client;
+    if (!client) {
+      throw new ServiceUnavailableException("Changing the grading policy requires the privileged database configuration");
+    }
+    const school = (await this.db.runAsTenantReadOnly(this.ctx(p), (tx) =>
+      tx.school.findFirst({ where: { id: p.schoolId }, select: { gradingPolicy: true } }),
+    )) as { gradingPolicy: unknown } | null;
+    const current = (school?.gradingPolicy ?? {}) as Record<string, unknown>;
+    // Merge, never replace: setting the scale must not wipe the weights.
+    const next = {
+      ...current,
+      ...(input.scale !== undefined ? { scale: input.scale } : {}),
+      ...(input.bands !== undefined ? { bands: input.bands } : {}),
+      ...(input.weights !== undefined ? { weights: input.weights } : {}),
+    };
+    await client.school.update({ where: { id: p.schoolId }, data: { gradingPolicy: next as Prisma.InputJsonValue } });
+    await this.db.runAsTenant(this.ctx(p), (tx) =>
+      this.log(tx, p, "academic.grading_policy.set", "school", p.schoolId, {
+        scale: input.scale, custom: !!input.bands, weights: !!input.weights,
+      }),
+    );
+    // The region cache holds the grading policy; a stale entry would keep
+    // grading on the old scale for up to a minute.
+    this.regions?.invalidate(p.schoolId);
+    return this.gradingPolicy(p);
+  }
+
   /**
    * The school's year SHAPE: how many periods, and what they are called.
    *

@@ -66,6 +66,138 @@ export const GRADE_BANDS = [
   { min: 0, grade: "F" },
 ] as const;
 
+export type GradeBand = { min: number; grade: string };
+
+// =============================================================================
+// Grade SCALES — what a school picks instead of typing boundaries
+// =============================================================================
+// The shape above is the whole safety argument, and it is worth stating because
+// it is what makes this configurable at all: a band carries ONLY its floor. Each
+// ceiling is implied by the next band down, the top band runs to 100 and the
+// last runs to 0.
+//
+// That makes the two failure modes of a hand-typed scale UNREPRESENTABLE rather
+// than merely validated:
+//
+//   gaps      A: 70-84, B: 60-68  ->  a mark of 69 maps to no grade at all
+//   overlaps  A: 70-84, B: 65-75  ->  a mark of 72 is two different grades
+//
+// Neither can be expressed when there is nowhere to type a ceiling. A school
+// that wants "A+ is 85 to 100" sets A+ = 85 and the 100 takes care of itself.
+//
+// Most schools should never reach even that: they pick a named scale. Adding one
+// is a row here, the same posture as calendar templates, payroll packs and the
+// subject catalogue.
+
+export const GRADE_SCALES: Record<string, { label: string; note: string; bands: readonly GradeBand[] }> = {
+  WAEC: {
+    label: "WAEC / NECO (A–F, pass at 40)",
+    note: "The West African standard: A1–F9 collapsed to letters, credit at 50, pass at 40.",
+    bands: [
+      { min: 75, grade: "A1" },
+      { min: 70, grade: "B2" },
+      { min: 65, grade: "B3" },
+      { min: 60, grade: "C4" },
+      { min: 55, grade: "C5" },
+      { min: 50, grade: "C6" },
+      { min: 45, grade: "D7" },
+      { min: 40, grade: "E8" },
+      { min: 0, grade: "F9" },
+    ],
+  },
+  SIMPLE_LETTER: {
+    label: "Simple letters (A–F, pass at 40)",
+    note: "The platform default. A at 70, credit at 50, pass at 40.",
+    bands: [
+      { min: 70, grade: "A" },
+      { min: 60, grade: "B" },
+      { min: 50, grade: "C" },
+      { min: 45, grade: "D" },
+      { min: 40, grade: "E" },
+      { min: 0, grade: "F" },
+    ],
+  },
+  PLUS_MINUS: {
+    label: "With plus grades (A+ from 85)",
+    note: "A+ 85, A 70, B 60, C 50, D 45, E 40 — the scale in the example most schools describe.",
+    bands: [
+      { min: 85, grade: "A+" },
+      { min: 70, grade: "A" },
+      { min: 60, grade: "B" },
+      { min: 50, grade: "C" },
+      { min: 45, grade: "D" },
+      { min: 40, grade: "E" },
+      { min: 0, grade: "F" },
+    ],
+  },
+  CAMBRIDGE: {
+    label: "Cambridge / IGCSE style (A*–G)",
+    note: "A* at 90, A at 80, then ten-point steps.",
+    bands: [
+      { min: 90, grade: "A*" },
+      { min: 80, grade: "A" },
+      { min: 70, grade: "B" },
+      { min: 60, grade: "C" },
+      { min: 50, grade: "D" },
+      { min: 40, grade: "E" },
+      { min: 30, grade: "F" },
+      { min: 0, grade: "G" },
+    ],
+  },
+  US_LETTER: {
+    label: "United States (A–F, pass at 60)",
+    note: "Ten-point scale; anything under 60 fails.",
+    bands: [
+      { min: 90, grade: "A" },
+      { min: 80, grade: "B" },
+      { min: 70, grade: "C" },
+      { min: 60, grade: "D" },
+      { min: 0, grade: "F" },
+    ],
+  },
+};
+
+export const DEFAULT_GRADE_SCALE = "SIMPLE_LETTER";
+
+/**
+ * Why a set of bands cannot be used. Null when it can.
+ *
+ * A CUSTOM scale still has to be checked, because a school may reorder or
+ * duplicate the floors even though it cannot type a ceiling. Every rule here is
+ * about a mark that would otherwise get the wrong grade or none.
+ */
+export function gradeScaleProblem(bands: readonly GradeBand[]): string | null {
+  if (bands.length < 2) return "A scale needs at least two grades.";
+  for (const b of bands) {
+    if (!b.grade?.trim()) return "Every band needs a grade name.";
+    if (!Number.isInteger(b.min) || b.min < 0 || b.min > 100) {
+      return `"${b.grade}" starts at ${b.min}, which is not a whole number between 0 and 100.`;
+    }
+  }
+  // Strictly descending: two bands sharing a floor makes the grade for that mark
+  // depend on which row was read first.
+  for (let i = 1; i < bands.length; i += 1) {
+    if (bands[i].min >= bands[i - 1].min) {
+      return `"${bands[i].grade}" starts at ${bands[i].min}, which is not below "${bands[i - 1].grade}" at ${bands[i - 1].min}. List them highest first.`;
+    }
+  }
+  // The lowest band must reach 0, or the marks below it have no grade.
+  if (bands[bands.length - 1].min !== 0) {
+    return `The lowest grade must start at 0, or a mark below ${bands[bands.length - 1].min} would have no grade at all.`;
+  }
+  const names = bands.map((b) => b.grade.trim().toLowerCase());
+  if (new Set(names).size !== names.length) return "Two bands share a grade name.";
+  return null;
+}
+
+/** The bands a school actually grades on: its own, else its named scale, else
+ *  the platform default. Never returns an unusable set. */
+export function resolveGradeBands(policy?: GradingPolicy | null): readonly GradeBand[] {
+  if (policy?.bands && !gradeScaleProblem(policy.bands)) return policy.bands;
+  const preset = GRADE_SCALES[policy?.scale ?? DEFAULT_GRADE_SCALE] ?? GRADE_SCALES[DEFAULT_GRADE_SCALE];
+  return preset.bands;
+}
+
 /** A component mark clamped into [0, max]; null/blank counts as 0. */
 function clampMark(v: number | null | undefined, max: number): number {
   if (v === null || v === undefined || Number.isNaN(v)) return 0;
@@ -76,11 +208,13 @@ function round2(v: number): number {
   return Math.round(v * 100) / 100;
 }
 
-export function gradeLetter(total: number): string {
-  for (const band of GRADE_BANDS) {
+export function gradeLetter(total: number, bands?: readonly GradeBand[]): string {
+  for (const band of bands ?? GRADE_BANDS) {
     if (total >= band.min) return band.grade;
   }
-  return "F";
+  // Only reachable if a caller passes bands whose lowest floor is above 0 —
+  // gradeScaleProblem refuses those, so this is a belt-and-braces last resort.
+  return (bands ?? GRADE_BANDS)[(bands ?? GRADE_BANDS).length - 1]?.grade ?? "F";
 }
 
 /**
@@ -95,13 +229,16 @@ export function computeTermSubjectGrade(
   /** The school's weighting. Defaults to the platform's, so every existing caller
    *  and every school already live is unchanged. */
   components: ReadonlyArray<{ key: GradeComponentKey; max: number }> = GRADE_COMPONENTS,
+  /** The school's letter scale. Defaults to the platform's, so every existing
+   *  caller and every school already live is unchanged. */
+  bands?: readonly GradeBand[],
 ): TermGradeResult {
   const complete = components.every((comp) => {
     const v = c[comp.key];
     return v !== null && v !== undefined;
   });
   const total = round2(components.reduce((sum, comp) => sum + clampMark(c[comp.key], comp.max), 0));
-  return { total, complete, grade: gradeLetter(total) };
+  return { total, complete, grade: gradeLetter(total, bands) };
 }
 
 // =============================================================================
@@ -119,6 +256,10 @@ export function computeTermSubjectGrade(
 /** A school's weighting: the same four components, different maxima. */
 export interface GradingPolicy {
   components: ReadonlyArray<{ key: GradeComponentKey; label: string; max: number }>;
+  /** A key of GRADE_SCALES. What almost every school should set. */
+  scale?: string;
+  /** A hand-built scale, floors only. Overrides `scale` when valid. */
+  bands?: readonly GradeBand[];
 }
 
 export const DEFAULT_GRADING_POLICY: GradingPolicy = { components: GRADE_COMPONENTS };
@@ -138,15 +279,27 @@ export const GRADING_PRESETS: Record<string, { label: string; weights: Record<Gr
  * of quiet divergence that ends up in a transcript.
  */
 export function resolveGradingPolicy(stored: unknown): GradingPolicy {
-  const w = (stored as { weights?: Partial<Record<GradeComponentKey, number>> } | null)?.weights;
-  if (!w) return DEFAULT_GRADING_POLICY;
+  const raw = stored as {
+    weights?: Partial<Record<GradeComponentKey, number>>;
+    scale?: string;
+    bands?: GradeBand[];
+  } | null;
+  // The letter SCALE is independent of the weights: a school may keep the
+  // default 60/20/10/10 and still want A+ from 85. Reading them separately means
+  // choosing one never silently resets the other.
+  const scalePart = {
+    ...(raw?.scale ? { scale: raw.scale } : {}),
+    ...(raw?.bands && !gradeScaleProblem(raw.bands) ? { bands: raw.bands } : {}),
+  };
+  const w = raw?.weights;
+  if (!w) return { ...DEFAULT_GRADING_POLICY, ...scalePart };
   const components = GRADE_COMPONENTS.map((c) => ({
     key: c.key,
     label: c.label,
     max: typeof w[c.key] === "number" && w[c.key]! >= 0 ? Math.round(w[c.key]!) : c.max,
   }));
   const total = components.reduce((s, c) => s + c.max, 0);
-  return total === 100 ? { components } : DEFAULT_GRADING_POLICY;
+  return total === 100 ? { components, ...scalePart } : { ...DEFAULT_GRADING_POLICY, ...scalePart };
 }
 
 /** Do these weights form a usable policy? Used at the API boundary so a bad
