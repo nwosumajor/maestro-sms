@@ -128,6 +128,8 @@ const schoolArchiveA = randomUUID();
   const ultimateConsentA = randomUUID();
   const ultimateLinkA = randomUUID();
   const lmsContentA = randomUUID();
+  const syllabusA = randomUUID();
+  const syllabusItemA = randomUUID();
   const quizAttemptA = randomUUID();
   const forumPostA = randomUUID();
   const lmsProgressA = randomUUID();
@@ -694,6 +696,15 @@ const schoolArchiveA = randomUUID();
       `INSERT INTO class_subject_teacher (id,"schoolId","classId","subjectId","teacherId") VALUES ($1,$2,$3,$4,$5)`,
       [classSubjectA, A, classA, subjectA, userA],
     );
+    // Subject syllabus (the term scheme of work) + one week under it.
+    await a.query(
+      `INSERT INTO subject_syllabus (id,"schoolId","classId","subjectId","termId","ownerId","updatedAt") VALUES ($1,$2,$3,$4,$5,$6,now())`,
+      [syllabusA, A, classA, subjectA, termA, userA],
+    );
+    await a.query(
+      `INSERT INTO subject_syllabus_item (id,"schoolId","syllabusId",week,topic,"updatedAt") VALUES ($1,$2,$3,1,'Week 1','now'::timestamp)`,
+      [syllabusItemA, A, syllabusA],
+    );
     // Bulk SIS import batch (maker-checker; uploaded by userA).
     await a.query(
       `INSERT INTO student_import_batch (id,"schoolId","uploadedById",rows,"updatedAt") VALUES ($1,$2,$3,'[]'::jsonb,now())`,
@@ -1205,6 +1216,8 @@ const schoolArchiveA = randomUUID();
       "lms_progress",
       "lms_submission",
       "lms_module",
+      "subject_syllabus_item",
+      "subject_syllabus",
       "lms_content_revision",
       "lms_live_attendance",
       "lms_live_session",
@@ -1419,6 +1432,8 @@ const schoolArchiveA = randomUUID();
     ["cbt_exam", cbtExamA],
     ["cbt_sitting", cbtSittingA],
     ["cbt_theory_answer", cbtTheoryAnswerA],
+    ["subject_syllabus", syllabusA],
+    ["subject_syllabus_item", syllabusItemA],
     ["lms_content", lmsContentA],
     ["quiz_attempt", quizAttemptA],
     ["forum_post", forumPostA],

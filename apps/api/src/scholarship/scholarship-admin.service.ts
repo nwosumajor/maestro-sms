@@ -14,7 +14,9 @@
 
 import { BadRequestException, Injectable, Logger, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { Prisma, type PrismaClient } from "@sms/db";
-import { SCHOLARSHIP_MAX_AWARDS, type ScholarshipApplicationDto, type ScholarshipProgramDto } from "@sms/types";
+import { SCHOLARSHIP_MAX_AWARDS, type ScholarshipApplicationDto, type ScholarshipProgramDto,
+  scholarshipSubjectConcept,
+} from "@sms/types";
 import { uniqueEntityCode } from "@sms/types";
 import { NotificationService } from "../notifications/notification.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
@@ -369,11 +371,33 @@ export class ScholarshipAdminService {
         // The program's category is the subject; find-or-create it in each school
         // (privileged client, so this crosses into the tenant deliberately).
         const subjectName = String(program.category).replaceAll("_", " ");
-        const existingCodes = (await db.subject.findMany({ where: { schoolId }, select: { code: true } })).map((r) => r.code);
+        // Resolve by CONCEPT first, then by name case-insensitively, and only
+        // then create.
+        //
+        // This used to match on the exact name and create one on a miss, which
+        // splits a school's subject in two the moment its wording differs: a
+        // francophone school holding "Mathématiques" (MTH) got a second
+        // "Mathematics" row, and a school holding "MATHEMATICS" got another
+        // still — after which grades for one subject land under two ids and the
+        // report card silently shows half of them.
+        const concept = scholarshipSubjectConcept(String(program.category));
+        const rows = (await db.subject.findMany({
+          where: { schoolId },
+          select: { id: true, name: true, code: true, catalogueCode: true },
+        })) as Array<{ id: string; name: string; code: string; catalogueCode: string | null }>;
+        const wanted = subjectName.trim().toLowerCase();
         const subject =
-          (await db.subject.findFirst({ where: { schoolId, name: subjectName }, select: { id: true, name: true } })) ??
+          (concept ? rows.find((r) => r.catalogueCode === concept) : undefined) ??
+          rows.find((r) => r.name.trim().toLowerCase() === wanted) ??
           (await db.subject.create({
-            data: { schoolId, name: subjectName, code: uniqueEntityCode(subjectName, existingCodes) },
+            data: {
+              schoolId,
+              name: subjectName,
+              code: uniqueEntityCode(subjectName, rows.map((r) => r.code)),
+              // Stamp the concept so the NEXT school-side pick recognises it
+              // rather than adding a twin from the other direction.
+              catalogueCode: concept,
+            },
             select: { id: true, name: true },
           }));
         const bank = await db.cbtQuestionBank.create({

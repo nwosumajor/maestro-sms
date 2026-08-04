@@ -339,6 +339,8 @@ model School {
   archives             SchoolArchive[]
 
   @@map("school")
+  subjectSyllabi     SubjectSyllabus[]
+  subjectSyllabusItems SubjectSyllabusItem[]
 }
 
 /// TENANT-SCOPED: a school's subscription plan + per-school module overrides.

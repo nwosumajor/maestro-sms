@@ -13,6 +13,7 @@ import { LiveSessions } from "@/components/lms/LiveSessions";
 import { Awards } from "@/components/lms/Awards";
 import { PageHeader } from "@/components/shell/PageHeader";
 import { ContentFilterBar } from "@/components/lms/ContentFilterBar";
+import { SyllabusPanel } from "@/components/lms/SyllabusPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +39,15 @@ export default async function ClassContentPage({
   if (searchParams?.type) qs.set("type", searchParams.type);
   if (searchParams?.status) qs.set("status", searchParams.status);
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
-  const content = await apiGet<Serialized<LmsContentDto>[]>(`/classes/${classId}/content${suffix}`);
+  // Fetched alongside the content, not after it: the scheme of work is the
+  // first thing on the page, and a second round trip to fill it in would show
+  // the plan arriving after the items it is supposed to frame.
+  const [content, offerings, sessions] = await Promise.all([
+    apiGet<Serialized<LmsContentDto>[]>(`/classes/${classId}/content${suffix}`),
+    apiGet<Array<{ subjectId: string; subjectName: string; teacherId: string }>>(`/classes/${classId}/subjects`),
+    apiGet<Array<{ isCurrent: boolean; terms: Array<{ id: string; name: string; isCurrent: boolean }> }>>("/academic/sessions"),
+  ]);
+  const currentTerm = (sessions ?? []).flatMap((x) => x.terms).find((t) => t.isCurrent) ?? null;
 
   const canAuthor = hasPermission(user.permissions, "lms.content.write");
   const canReview = hasPermission(user.permissions, "lms.content.approve");
@@ -62,6 +71,25 @@ export default async function ClassContentPage({
             </Link>
           )}
         </div>
+
+        {/* The plan for the term, above the items. "What is this term meant to
+            cover, and where are we" is the question this page could not answer. */}
+        {currentTerm && (offerings ?? []).length > 0 && (
+          <div className="space-y-3">
+            {(offerings ?? []).map((o) => (
+              <SyllabusPanel
+                key={o.subjectId}
+                classId={classId}
+                subjectId={o.subjectId}
+                subjectName={o.subjectName}
+                termId={currentTerm.id}
+                // The server re-checks this against class_subject_teacher; the
+                // flag only decides whether to render the controls.
+                canWrite={canAuthor || o.teacherId === user.id}
+              />
+            ))}
+          </div>
+        )}
 
         {content === null ? (
           <Alert variant="info">
