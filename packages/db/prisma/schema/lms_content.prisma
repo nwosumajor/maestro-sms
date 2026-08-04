@@ -31,6 +31,11 @@ model LmsContent {
   /// Gradebook tag (plain uuid; both null = not counted toward the report card).
   /// A QUIZ/ASSIGNMENT tagged with a (subjectId, termId) can be pulled into the
   /// SubjectResult "assignment" CA component by the subject teacher.
+  /// The syllabus TOPIC this item teaches (plain uuid, DB FK, no Prisma
+  /// relation). Null = general class content not tied to a week of the plan.
+  /// It is what lets a teacher write the notes for week 3 and a pupil open
+  /// "week 3" and find them, rather than hunting a flat content list.
+  syllabusItemId    String?  @db.Uuid
   subjectId         String?  @db.Uuid
   termId            String?  @db.Uuid
   /// MATERIAL PDF: object-storage key + original filename + upload-confirmed flag.

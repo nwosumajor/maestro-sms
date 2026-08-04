@@ -72,6 +72,21 @@ export const GRADE_PUBLISH_CHAIN: WorkflowStage[] = [
   { key: "PRINCIPAL", label: "Principal (final)", permission: WORKFLOW_PERMISSIONS.REVIEW_PRINCIPAL },
 ];
 
+/**
+ * Lesson-note / content publish: head teacher, then principal.
+ *
+ * This type already went through the engine but with NO chain, which made it
+ * legacy single-stage — any one `workflow.review` holder could put a lesson in
+ * front of a class. Content a child reads deserves the same two pairs of eyes as
+ * the grades they are given for it, so it now mirrors GRADE_PUBLISH exactly.
+ * Each stage must be a DIFFERENT person from the author and from each other —
+ * separation of duties, engine-enforced.
+ */
+export const LMS_CONTENT_PUBLISH_CHAIN: WorkflowStage[] = [
+  { key: "HEAD", label: "Head teacher", permission: WORKFLOW_PERMISSIONS.REVIEW_HEAD },
+  { key: "PRINCIPAL", label: "Principal (final)", permission: WORKFLOW_PERMISSIONS.REVIEW_PRINCIPAL },
+];
+
 /** Exam-schedule approval: the whole term's exam schedule goes live only after
  *  the head teacher AND then the principal approve (each a different person from
  *  the submitter — separation of duties, engine-enforced). Mirrors GRADE_PUBLISH. */

@@ -47,7 +47,9 @@ import type {
   XapiStatementDto,
   XapiVerb,
 } from "@sms/types";
-import { badgeMeta, gradeComponentMax, isBadgeKey, LMS_PERMISSIONS } from "@sms/types";
+import { badgeMeta, gradeComponentMax, isBadgeKey, LMS_PERMISSIONS,
+  LMS_CONTENT_PUBLISH_CHAIN,
+} from "@sms/types";
 import { isXapiVerb, normalizeXapiResult } from "./xapi.util";
 import {
   AUDIT_LOG_SERVICE,
@@ -157,6 +159,8 @@ export class LmsContentService {
       body: LmsContentBody;
       subjectId?: string | null;
       termId?: string | null;
+      /** The syllabus TOPIC these notes teach. Null = general class content. */
+      syllabusItemId?: string | null;
     },
   ): Promise<LmsContentDto> {
     if (!CONTENT_TYPES.has(input.type)) throw new BadRequestException("invalid content type");
@@ -166,6 +170,7 @@ export class LmsContentService {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.assertTeacherOfClass(tx, p, input.classId);
       const tag = await this.validateGradeTag(tx, input.type, input.classId, input.subjectId, input.termId);
+      const syllabusItemId = await this.validateSyllabusTopic(tx, input.classId, input.syllabusItemId);
       const row = (await tx.lmsContent.create({
         data: {
           schoolId: p.schoolId,
@@ -177,12 +182,37 @@ export class LmsContentService {
           authorId: p.userId,
           subjectId: tag.subjectId,
           termId: tag.termId,
+          syllabusItemId,
         },
       })) as ContentRow;
       await this.snapshot(tx, p, row, "Created");
       await this.log(tx, p, "lms.content.create", row.id, { classId: input.classId, type: input.type });
       return this.toDto(row, true, await this.nameOf(tx, row.authorId));
     });
+  }
+
+  /**
+   * Check that a syllabus topic belongs to THIS class before attaching to it.
+   *
+   * Without this, a teacher could point their notes at another class's week —
+   * the id is a plain uuid, so nothing else would stop them, and the notes would
+   * then surface under a plan they have no part in.
+   */
+  private async validateSyllabusTopic(tx: TenantTx, classId: string, itemId?: string | null): Promise<string | null> {
+    if (!itemId) return null;
+    const item = (await tx.subjectSyllabusItem.findFirst({
+      where: { id: itemId },
+      select: { syllabusId: true },
+    })) as { syllabusId: string } | null;
+    if (!item) throw new BadRequestException("That syllabus topic does not exist.");
+    const syl = (await tx.subjectSyllabus.findFirst({
+      where: { id: item.syllabusId },
+      select: { classId: true },
+    })) as { classId: string } | null;
+    if (!syl || syl.classId !== classId) {
+      throw new BadRequestException("That syllabus topic belongs to a different class.");
+    }
+    return itemId;
   }
 
   async updateContent(
@@ -287,6 +317,10 @@ export class LmsContentService {
         type: "LMS_CONTENT_PUBLISH",
         title: `Publish: ${row.title}`,
         payload: { contentId, classId: row.classId, contentType: row.type },
+        // Head teacher, then principal — the same two pairs of eyes a grade
+        // gets. Without a chain this was legacy single-stage, so one reviewer
+        // could put a lesson in front of a class on their own.
+        stages: LMS_CONTENT_PUBLISH_CHAIN,
       });
       requestId = (req as { id: string }).id;
     }
@@ -318,10 +352,26 @@ export class LmsContentService {
     });
 
     // Drive the engine (enforces separation of duties: approver != author).
-    await this.workflow.review(p, row.approvalRequestId!, action, comments);
+    const decided = (await this.workflow.review(p, row.approvalRequestId!, action, comments)) as {
+      state?: string;
+    };
 
+    // The content follows the WORKFLOW'S state, not the action.
+    //
+    // This used to publish on any APPROVE, which was correct only while the
+    // chain was single-stage — the moment publishing became head teacher AND
+    // principal, the first approver's click still published, and the second
+    // stage was decorative on this path. An approval that merely ADVANCES the
+    // chain leaves the content pending, exactly as the workflow says it is.
+    const approved = decided?.state === "APPROVED";
     const status: LmsContentStatus =
-      action === "APPROVE" ? "PUBLISHED" : action === "REJECT" ? "REJECTED" : "REVISION_REQUESTED";
+      action === "APPROVE"
+        ? approved
+          ? "PUBLISHED"
+          : "PENDING_APPROVAL"
+        : action === "REJECT"
+          ? "REJECTED"
+          : "REVISION_REQUESTED";
     const { dto, recipients } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const updated = (await tx.lmsContent.update({
         where: { id: contentId },
