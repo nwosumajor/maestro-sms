@@ -21,6 +21,7 @@
 
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import {
+  breachDeadlineBasis,
   breachTarget,
   complianceProfile,
   BREACH_RISK_LEVELS,
@@ -312,7 +313,10 @@ export class ComplianceService {
         regimeNote: profile.note,
         officerTitle: profile.officerTitle,
         breachAuthority: profile.authority,
-        breachDeadlineIsStatutory: profile.breachNotifyHours !== null,
+        breachDeadlineIsStatutory: profile.breachNotify.kind === "hours",
+        // WHY it is not statutory, so the screen can distinguish "the law names
+        // no period" from "we have not established the period".
+        breachDeadlineBasis: breachDeadlineBasis(region.compliance),
         country: region.country,
         dpoName: school?.dpoName ?? null,
         dpoEmail: school?.dpoEmail ?? null,
