@@ -9,6 +9,7 @@ import type { Principal } from "../integrity/integrity.foundation";
 import { NotificationService } from "./notification.service";
 
 // Loose E.164: 8–15 digits with an optional +. Empty string clears the number.
+const languageSchema = z.object({ locale: z.string().max(8).nullable().optional() });
 const phoneSchema = z.object({
   phone: z
     .string()
@@ -73,6 +74,23 @@ export class NotificationController {
     @Body(new ZodValidationPipe(phoneSchema)) body: z.infer<typeof phoneSchema>,
   ) {
     return this.notifications.setMyPhone(p, body.phone || null);
+  }
+
+  /** The language the caller is written to in. Null = follow the school. */
+  @Get("me/language")
+  @RequirePermission(NOTIFICATION_PERMISSIONS.NOTIFICATION_READ)
+  myLanguage(@CurrentPrincipal() p: Principal) {
+    return this.notifications.getMyLanguage(p);
+  }
+
+  /** Set or clear it. Self-scoped; audited. */
+  @Put("me/language")
+  @RequirePermission(NOTIFICATION_PERMISSIONS.NOTIFICATION_READ)
+  setMyLanguage(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(languageSchema)) body: z.infer<typeof languageSchema>,
+  ) {
+    return this.notifications.setMyLanguage(p, body.locale || null);
   }
 
   /** The caller's own external-channel delivery preferences (self-scoped). */

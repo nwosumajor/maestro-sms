@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { MfaSetup } from "@/components/security/MfaSetup";
 import { ChangePasswordForm } from "@/components/auth/ChangePasswordForm";
 import { PhoneCard } from "@/components/account/PhoneCard";
+import { LanguageCard } from "@/components/account/LanguageCard";
 import { NotificationPreferences } from "@/components/account/NotificationPreferences";
 import type { NotificationPreferenceDto, Serialized } from "@sms/types";
 import { PageHeader } from "@/components/shell/PageHeader";
@@ -63,6 +64,9 @@ export default async function AccountPage({ searchParams }: { searchParams: { en
         </Card>
 
         <PhoneCard initialPhone={myPhone?.phone ?? null} />
+        {/* Sits beside the phone number deliberately: both answer "how do you
+            reach me", and a francophone parent setting one wants the other. */}
+        <LanguageCard />
 
         <Card>
           <CardHeader>

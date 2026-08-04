@@ -15,11 +15,13 @@
 // =============================================================================
 
 import { InjectQueue } from "@nestjs/bullmq";
-import { ForbiddenException, Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { MessageCreditsService } from "./message-credits.service";
 import { Prisma } from "@sms/db";
 import type { Queue } from "bullmq";
-import type { NotificationChannelValue, NotificationTypeValue, NotificationPreferenceDto } from "@sms/types";
+import type { NotificationChannelValue, NotificationTypeValue, NotificationPreferenceDto, MessageLanguage } from "@sms/types";
+import { MESSAGE_LANGUAGES, messageLanguage, renderNotification } from "@sms/types";
+import { SchoolRegionService } from "../foundation/school-region.service";
 import { allowedChannels, deliverableEmail } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -43,11 +45,27 @@ const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal"]);
 export interface NotificationInput {
   recipientId: string;
   type: NotificationTypeValue | string;
+  /** English fallback, and what is stored when no `key` is given. */
   title: string;
   body: string;
   data?: Record<string, unknown>;
   /** External channels to ALSO deliver. In-app is always created. */
   channels?: NotificationChannelValue[];
+  /**
+   * A `NOTIFICATION_MESSAGES` key, for producers that want the text written in
+   * the RECIPIENT's language.
+   *
+   * A composed `title`/`body` has already picked a language, and the producer
+   * does not know who is about to read it — `enqueueMany` sends one notification
+   * to a class of guardians who need not share a language. Passing a key defers
+   * that choice to `persist`, which runs once per recipient.
+   *
+   * Optional on purpose: the ~95 existing producers keep working in English and
+   * migrate one at a time. An untranslated notice is a far smaller problem than
+   * a rewrite of every call site at once.
+   */
+  key?: string;
+  params?: Record<string, string | number>;
 }
 
 @Injectable()
@@ -62,6 +80,10 @@ export class NotificationService {
     // Optional so existing unit tests / minimal wirings keep working; when
     // absent, SMS/WhatsApp deliveries are unmetered (dev stub behaviour).
     @Optional() private readonly credits?: MessageCreditsService,
+    // Optional for the same reason as `credits`: unit tests wire the service
+    // directly. Absent, a recipient with no locale of their own falls back to
+    // the platform default rather than to their school's.
+    @Optional() private readonly regions?: SchoolRegionService,
   ) {}
 
   private ctx(p: TenantContext): TenantContext {
@@ -210,6 +232,44 @@ export class NotificationService {
     });
   }
 
+  // --- self-service language ---------------------------------------------------
+  /**
+   * The caller's own writing language.
+   *
+   * `null` means "follow the school", which is the state every existing user is
+   * in — so the effective value is returned alongside, or the /account screen
+   * could only show a blank where a parent expects to see what they will be
+   * written in.
+   */
+  async getMyLanguage(p: Principal): Promise<{ locale: string | null; effective: string }> {
+    const row = (await this.db.runAsTenantReadOnly(this.ctx(p), (tx) =>
+      tx.user.findFirst({ where: { id: p.userId }, select: { locale: true } }),
+    )) as { locale: string | null } | null;
+    if (row?.locale) return { locale: row.locale, effective: messageLanguage(row.locale) };
+    const region = await this.regions?.forSchool(p.schoolId);
+    return { locale: null, effective: messageLanguage(region?.locale) };
+  }
+
+  /** Set or clear it. Clearing (null) hands the choice back to the school. */
+  async setMyLanguage(p: Principal, locale: string | null): Promise<{ locale: string | null; effective: string }> {
+    // Refused rather than silently stored: an unsupported value would resolve to
+    // English at send time and the user would never learn why their choice did
+    // nothing. Egypt's Arabic is the live example — see MESSAGE_LANGUAGES.
+    if (locale && !(MESSAGE_LANGUAGES as readonly string[]).includes(locale)) {
+      throw new BadRequestException(
+        `Language must be one of ${MESSAGE_LANGUAGES.join(", ")}. Clear it to follow the school's own language.`,
+      );
+    }
+    await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      await tx.user.update({ where: { id: p.userId }, data: { locale } });
+      await this.audit.record(
+        { actorId: p.userId, action: "notification.language.set", entity: "user", entityId: p.userId, schoolId: p.schoolId, metadata: { locale } },
+        tx,
+      );
+    });
+    return this.getMyLanguage(p);
+  }
+
   // --- self-service delivery target (mobile number) ---------------------------
   async getMyPhone(p: Principal): Promise<{ phone: string | null }> {
     const row = await this.db.runAsTenant(this.ctx(p), (tx) =>
@@ -317,15 +377,52 @@ export class NotificationService {
     return null;
   }
 
+  /**
+   * The RECIPIENT's language: their own choice, else their school's, else the
+   * platform default.
+   *
+   * Resolved here rather than by the producer because this is the only point
+   * that knows who is being written to. `enqueueMany` already loops per
+   * recipient, so a class of guardians who do not share a language each get
+   * their own — which is the whole reason the key is deferred this far.
+   */
+  private async languageFor(tx: TenantTx, recipientId: string, schoolId: string): Promise<MessageLanguage> {
+    const user = (await tx.user.findFirst({
+      where: { id: recipientId },
+      select: { locale: true },
+    })) as { locale: string | null } | null;
+    if (user?.locale) return messageLanguage(user.locale);
+    // Falls back to the school. A null here is the platform default, so a school
+    // that has never set a region is unchanged.
+    const region = await this.regions?.forSchool(schoolId);
+    return messageLanguage(region?.locale);
+  }
+
   private async persist(tx: TenantTx, actor: TenantContext, input: NotificationInput) {
+    // Localise BEFORE writing, so the stored inbox row and every external
+    // delivery say the same thing. Rendering at delivery time instead would let
+    // a parent's SMS and their in-app inbox disagree.
+    let title = input.title;
+    let body = input.body;
+    if (input.key) {
+      const lang = await this.languageFor(tx, input.recipientId, actor.schoolId);
+      const rendered = renderNotification(input.key, lang, input.params ?? {});
+      // A mistyped key falls back to the producer's English text. Sending a
+      // parent the literal string "attendance.absnet" would be worse than
+      // sending them correct English.
+      if (rendered) {
+        title = rendered.title;
+        body = rendered.body;
+      }
+    }
     const notification = await tx.notification.create({
       data: {
         schoolId: actor.schoolId,
         recipientId: input.recipientId,
         actorId: actor.userId ?? null,
         type: input.type,
-        title: input.title,
-        body: input.body,
+        title,
+        body,
         data: (input.data ?? undefined) as Prisma.InputJsonValue | undefined,
       },
     });

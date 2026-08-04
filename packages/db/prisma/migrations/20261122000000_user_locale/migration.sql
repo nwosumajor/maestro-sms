@@ -1,0 +1,11 @@
+-- The language a person is written to in.
+--
+-- NULL keeps today's behaviour exactly: every existing user falls back to their
+-- school's locale, which falls back to the platform default. Nobody's
+-- notifications change language until they choose one.
+--
+-- Per-user rather than per-school deliberately. A Senegalese school has
+-- francophone parents and may well have an anglophone principal or a
+-- British-curriculum teacher; a school-level setting could never serve both, and
+-- retrofitting per-user afterwards means revisiting every notification producer.
+ALTER TABLE "user" ADD COLUMN "locale" TEXT;
