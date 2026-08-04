@@ -44,6 +44,9 @@ const gradeTag = {
   termId: z.string().uuid().nullable().optional(),
 };
 const createSchema = z.object({
+  // The syllabus TOPIC these notes teach. Validated server-side against the
+  // class, since a bare uuid could otherwise point at another class's week.
+  syllabusItemId: z.string().uuid().nullish(),
   type: z.enum(["MATERIAL", "LESSON", "QUIZ", "FORUM_THREAD", "VIDEO", "ASSIGNMENT"]),
   title: z.string().min(1).max(200),
   body: bodySchema,
@@ -118,6 +121,7 @@ export class LmsContentController {
       body: b.body as unknown as LmsContentBody,
       subjectId: b.subjectId,
       termId: b.termId,
+      syllabusItemId: b.syllabusItemId ?? null,
     });
   }
 
