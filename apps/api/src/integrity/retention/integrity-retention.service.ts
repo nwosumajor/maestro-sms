@@ -16,6 +16,29 @@ export type RetentionTrigger = "SCHEDULED" | "MANUAL";
  * about our own delivery log, not a school's decision about its pupils.
  */
 const GATEWAY_EVENT_RETENTION_DAYS = Number(process.env.GATEWAY_EVENT_RETENTION_DAYS ?? 730);
+/**
+ * Guesses from FINISHED games.
+ *
+ * The two largest tables in a ten-year deployment are attendance and game
+ * guesses, and only one of them is a record anyone will ever ask for. At 50
+ * schools this is on the order of 5M rows a year of pure play data; the result,
+ * the placings and the leaderboard are stored separately and are what anyone
+ * looks at afterwards. A year is long enough for a pupil to revisit a match and
+ * far short of carrying fifty million rows through every backup.
+ *
+ * Only FINISHED games are touched — an in-flight game's guesses ARE the game.
+ */
+const GAME_GUESS_RETENTION_DAYS = Number(process.env.GAME_GUESS_RETENTION_DAYS ?? 365);
+/**
+ * READ notifications past the window.
+ *
+ * Unread is never touched at any age: an unread notice is an outstanding thing
+ * to tell someone, and deleting it silently is the one outcome worse than
+ * keeping it. Read ones are receipts of a conversation that already happened —
+ * the invoice, the register and the report card they refer to all survive on
+ * their own tables.
+ */
+const READ_NOTIFICATION_RETENTION_DAYS = Number(process.env.READ_NOTIFICATION_RETENTION_DAYS ?? 550);
 
 /**
  * How many versions of a piece of LMS content are kept.
@@ -91,7 +114,8 @@ export class IntegrityRetentionService {
     );
     this.logger.log(
       `Retention sweep (${trigger}) complete: ${schools.length} schools, ${purged} rows purged. ` +
-        `Platform-wide: gatewayEvents=${globalCounts.gatewayEvents} contentRevisions=${globalCounts.contentRevisions}.`,
+        `Platform-wide: gatewayEvents=${globalCounts.gatewayEvents} contentRevisions=${globalCounts.contentRevisions} ` +
+          `gameGuesses=${globalCounts.gameGuesses} readNotifications=${globalCounts.readNotifications}.`,
     );
     return results;
   }
@@ -199,9 +223,14 @@ export class IntegrityRetentionService {
    * is per-school, and attributing a platform-wide delete to one school would
    * misrepresent what happened.
    */
-  private async purgePlatformWide(): Promise<{ gatewayEvents: number; contentRevisions: number }> {
+  private async purgePlatformWide(): Promise<{
+    gatewayEvents: number;
+    contentRevisions: number;
+    gameGuesses: number;
+    readNotifications: number;
+  }> {
     const client = this.db.client;
-    if (!client) return { gatewayEvents: 0, contentRevisions: 0 };
+    if (!client) return { gatewayEvents: 0, contentRevisions: 0, gameGuesses: 0, readNotifications: 0 };
 
     const cutoff = new Date(Date.now() - GATEWAY_EVENT_RETENTION_DAYS * 86_400_000);
     // Every event past the window, INCLUDING the school-less ones.
@@ -219,6 +248,36 @@ export class IntegrityRetentionService {
       WHERE r.id = ranked.id AND ranked.rn > ${LMS_REVISIONS_KEPT}
     `;
 
-    return { gatewayEvents: events.count, contentRevisions: Number(revisions) };
+    // Guesses from games that have FINISHED. The join is on the game's state
+    // rather than the guess's age alone, because a long-running league match is
+    // still live months after its first guess.
+    const guessCutoff = new Date(Date.now() - GAME_GUESS_RETENTION_DAYS * 86_400_000);
+    const guesses = await client.$executeRaw`
+      DELETE FROM guess g
+      USING game gm
+      WHERE g."gameId" = gm.id
+        AND gm.status = 'FINISHED'
+        AND g."createdAt" < ${guessCutoff}
+    `;
+
+    // READ notifications only. An unread one is an outstanding thing to tell
+    // someone and is kept at any age.
+    const noteCutoff = new Date(Date.now() - READ_NOTIFICATION_RETENTION_DAYS * 86_400_000);
+    const notes = await client.$executeRaw`
+      DELETE FROM notification_delivery d
+      USING notification n
+      WHERE d."notificationId" = n.id AND n."readAt" IS NOT NULL AND n."readAt" < ${noteCutoff}
+    `;
+    void notes; // deliveries go first (FK); the count that matters is the parent's
+    const readNotes = await client.notification.deleteMany({
+      where: { readAt: { not: null, lt: noteCutoff } },
+    });
+
+    return {
+      gatewayEvents: events.count,
+      contentRevisions: Number(revisions),
+      gameGuesses: Number(guesses),
+      readNotifications: readNotes.count,
+    };
   }
 }
