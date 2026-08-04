@@ -210,6 +210,7 @@ describe("AcademicService.updateSession", () => {
         findFirst: jest.fn().mockResolvedValue({
           id: "s1", name: "2025/2026", startDate: new Date("2025-09-01"), endDate: new Date("2026-07-31"),
         }),
+        findMany: jest.fn().mockResolvedValue([{ id: "s1", name: "2025/2026" }]),
         update,
       },
       term: { findMany: jest.fn().mockResolvedValue(terms) },
@@ -318,5 +319,139 @@ describe("AcademicService.deleteTerm", () => {
   it("404s an unknown term", async () => {
     const { tx } = txWith(null);
     await expect(svc(tx).service.deleteTerm(p, "nope")).rejects.toThrow(/not found/i);
+  });
+});
+
+// =============================================================================
+// Duplicates — the mistake that produced a real school's broken calendar
+// =============================================================================
+// Nothing stopped two terms sharing a name, which is how a live school ended up
+// with two called "First Term" in one session. That is not cosmetic: every term
+// picker, report-card header and calendar finding names a term by its name, so
+// two identical ones make it impossible to tell which register or which marks
+// you are looking at.
+
+describe("duplicate names are refused", () => {
+  const sessionTx = (existing: Array<{ id: string; name: string }>) => {
+    const create = jest.fn().mockResolvedValue({ id: "new", name: "x", isCurrent: false, startDate: null, endDate: null });
+    return {
+      tx: { academicSession: { findMany: jest.fn().mockResolvedValue(existing), create } } as unknown as TenantTx,
+      create,
+    };
+  };
+
+  it("refuses a second session with the same name", async () => {
+    const { tx, create } = sessionTx([{ id: "s1", name: "2026/2027" }]);
+    await expect(svc(tx).service.createSession(p, { name: "2026/2027" })).rejects.toThrow(/already exists/i);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("compares names case- and space-insensitively", async () => {
+    // "first term" and "First Term" are the same term to everyone except a byte
+    // comparison, and a school that types one then the other has made the same
+    // mistake either way.
+    const { tx } = sessionTx([{ id: "s1", name: "2026/2027" }]);
+    await expect(svc(tx).service.createSession(p, { name: "  2026/2027  " })).rejects.toThrow(/already exists/i);
+  });
+
+  it("allows a genuinely different session name", async () => {
+    const { tx, create } = sessionTx([{ id: "s1", name: "2026/2027" }]);
+    await svc(tx).service.createSession(p, { name: "2027/2028" });
+    expect(create).toHaveBeenCalled();
+  });
+
+  const termTx = (siblings: Array<{ id: string; sessionId: string; name: string; sequence: number; startDate: Date | null; endDate: Date | null }>) => {
+    const create = jest.fn().mockResolvedValue({ id: "t9", sessionId: "s1", name: "x", sequence: 9, startDate: null, endDate: null, isCurrent: false });
+    return {
+      tx: {
+        academicSession: { findFirst: jest.fn().mockResolvedValue({ id: "s1", startDate: null, endDate: null }) },
+        term: { findMany: jest.fn().mockResolvedValue(siblings), create },
+      } as unknown as TenantTx,
+      create,
+    };
+  };
+  const sib = (name: string, sequence: number) => ({ id: `t${sequence}`, sessionId: "s1", name, sequence, startDate: null, endDate: null });
+
+  it("refuses a second term with the same name in one session", async () => {
+    // The exact live defect.
+    const { tx, create } = termTx([sib("First Term", 1)]);
+    await expect(svc(tx).service.addTerm(p, "s1", { name: "First Term", sequence: 2 })).rejects.toThrow(/already exists in this session/i);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("already refused a term reusing an existing SEQUENCE — pinning that it still does", async () => {
+    // Sequence orders report-card columns and defines "the next term" for
+    // roll-over. This was ALREADY guarded by validateTermDates; the test is here
+    // so the two guards are visibly separate concerns and neither silently goes.
+    const { tx, create } = termTx([sib("First Term", 1)]);
+    await expect(svc(tx).service.addTerm(p, "s1", { name: "Second Term", sequence: 1 })).rejects.toThrow(/already uses sequence 1/i);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("allows a distinct name and sequence", async () => {
+    const { tx, create } = termTx([sib("First Term", 1)]);
+    await svc(tx).service.addTerm(p, "s1", { name: "Second Term", sequence: 2 });
+    expect(create).toHaveBeenCalled();
+  });
+});
+
+// =============================================================================
+// Removing a session added by mistake
+// =============================================================================
+// Sessions could be created two ways and removed by neither, so a duplicate year
+// was permanent. Its terms go with it — safe ONLY because the marks check has
+// already proved they are empty.
+
+describe("AcademicService.deleteSession", () => {
+  function txWith(session: { name: string; isCurrent: boolean } | null, terms: string[] = [], counts = [0, 0, 0]) {
+    const delSession = jest.fn().mockResolvedValue({});
+    const delTerms = jest.fn().mockResolvedValue({ count: terms.length });
+    const tx = {
+      academicSession: { findFirst: jest.fn().mockResolvedValue(session && { id: "s1", ...session }), delete: delSession },
+      term: { findMany: jest.fn().mockResolvedValue(terms.map((id) => ({ id }))), deleteMany: delTerms },
+      assessment: { count: jest.fn().mockResolvedValue(counts[0]) },
+      subjectResult: { count: jest.fn().mockResolvedValue(counts[1]) },
+      reportCardRemark: { count: jest.fn().mockResolvedValue(counts[2]) },
+    } as unknown as TenantTx;
+    return { tx, delSession, delTerms };
+  }
+
+  it("removes an empty session together with its terms", async () => {
+    const { tx, delSession, delTerms } = txWith({ name: "2027/2028", isCurrent: false }, ["t1", "t2", "t3"]);
+    const out = await svc(tx).service.deleteSession(p, "s1");
+    expect(delTerms).toHaveBeenCalledWith({ where: { sessionId: "s1" } });
+    expect(delSession).toHaveBeenCalledWith({ where: { id: "s1" } });
+    expect(out.termsRemoved).toBe(3);
+  });
+
+  it("refuses the CURRENT session", async () => {
+    const { tx, delSession } = txWith({ name: "2026/2027", isCurrent: true }, ["t1"]);
+    await expect(svc(tx).service.deleteSession(p, "s1")).rejects.toThrow(/current session/i);
+    expect(delSession).not.toHaveBeenCalled();
+  });
+
+  it("refuses when ANY of its terms carries marks — and deletes no terms either", async () => {
+    // The consequence that makes this dangerous: a cascade past marks would
+    // destroy a year of grades to correct a typo.
+    const { tx, delSession, delTerms } = txWith({ name: "2025/2026", isCurrent: false }, ["t1", "t2"], [4, 0, 0]);
+    await expect(svc(tx).service.deleteSession(p, "s1")).rejects.toThrow(/4 assessments/);
+    expect(delTerms).not.toHaveBeenCalled();
+    expect(delSession).not.toHaveBeenCalled();
+  });
+
+  it("checks results and remarks too, not only assessments", async () => {
+    await expect(svc(txWith({ name: "S", isCurrent: false }, ["t1"], [0, 7, 0]).tx).service.deleteSession(p, "s1")).rejects.toThrow(/7 recorded results/);
+    await expect(svc(txWith({ name: "S", isCurrent: false }, ["t1"], [0, 0, 3]).tx).service.deleteSession(p, "s1")).rejects.toThrow(/3 report-card remarks/);
+  });
+
+  it("handles a session with no terms at all", async () => {
+    const { tx, delSession, delTerms } = txWith({ name: "Empty", isCurrent: false }, []);
+    await svc(tx).service.deleteSession(p, "s1");
+    expect(delTerms).not.toHaveBeenCalled();
+    expect(delSession).toHaveBeenCalled();
+  });
+
+  it("404s an unknown session", async () => {
+    await expect(svc(txWith(null).tx).service.deleteSession(p, "nope")).rejects.toThrow(/not found/i);
   });
 });

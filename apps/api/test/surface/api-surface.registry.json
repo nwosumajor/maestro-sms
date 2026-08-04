@@ -2773,6 +2773,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "DELETE /academic/sessions/:p": {
+      "kind": "ui",
+      "note": "reviewed: the per-session Remove button in components/lms/AcademicCalendar.tsx calls this"
+    },
     "DELETE /academic/terms/:p": {
       "kind": "ui",
       "note": "reviewed: the per-term Remove button in components/lms/AcademicCalendar.tsx calls this"
