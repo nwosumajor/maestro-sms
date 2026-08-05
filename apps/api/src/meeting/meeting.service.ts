@@ -19,6 +19,7 @@ import { MEETING_PROVIDERS, isMeetingJoinOpen, meetingJoinOpensAt, normalizeMeet
   type MeetingAudienceKind,
   isAppointment,
   NON_STAFF_ROLE_NAMES,
+  MEETING_PERMISSIONS,
 } from "@sms/types";
 import type { MeetingProvider } from "@sms/types";
 import {
@@ -366,6 +367,26 @@ export class MeetingService {
         const notStaff = wantedCohosts.filter((id) => !ok.has(id));
         if (notStaff.length > 0) {
           throw new BadRequestException(`${notStaff.length} of those are not staff at this school.`);
+        }
+        // AND they must be able to SEE a meeting. Being staff is not enough:
+        // the meetings list is gated on `meeting.host`, so a colleague without
+        // it would be told they are attending and then get a 403 — an
+        // invitation that never arrives, and invisible to whoever sent it.
+        // Refusing here makes that impossible rather than merely unlikely.
+        const canSee = (await tx.userRole.findMany({
+          where: {
+            userId: { in: wantedCohosts },
+            role: { permissions: { some: { permission: { key: MEETING_PERMISSIONS.MEETING_HOST } } } },
+          },
+          select: { userId: true },
+          distinct: ["userId"],
+        })) as Array<{ userId: string }>;
+        const seeing = new Set(canSee.map((x) => x.userId));
+        const blind = wantedCohosts.filter((id) => !seeing.has(id));
+        if (blind.length > 0) {
+          throw new BadRequestException(
+            `${blind.length} of those cannot open the meetings page, so they would never see this. Their role needs meeting access first.`,
+          );
         }
         await tx.meetingCohost.createMany({
           data: wantedCohosts.map((tid) => ({ schoolId: p.schoolId, slotId: row.id, teacherId: tid })),

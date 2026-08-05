@@ -26,6 +26,7 @@ import {
   type ClassOverviewDto,
   type SubjectStage,
   type UserKind,
+  MEETING_PERMISSIONS,
 } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -857,7 +858,16 @@ export class LmsService {
           ? { some: { role: { name: "parent" } } }
           : kind === "staff"
             ? { some: { role: { name: { notIn: [...NON_STAFF_ROLE_NAMES] } } } }
-            : undefined;
+            : kind === "meeting-host"
+              ? {
+                  some: {
+                    role: {
+                      name: { notIn: [...NON_STAFF_ROLE_NAMES] },
+                      permissions: { some: { permission: { key: MEETING_PERMISSIONS.MEETING_HOST } } },
+                    },
+                  },
+                }
+              : undefined;
     const needle = q?.trim();
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const [users, roles] = await Promise.all([

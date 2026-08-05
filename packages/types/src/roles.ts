@@ -25,7 +25,10 @@ export const NON_SCHOOL_STAFF_ROLE_NAMES = [...NON_STAFF_ROLE_NAMES, ...PLATFORM
 
 /** Categories accepted by `GET /users?kind=` — server-side picker filtering so
  *  a staff picker never mixes in students/parents (and vice versa). */
-export const USER_KINDS = ["staff", "teacher", "parent"] as const;
+// "meeting-host" is staff NARROWED to those who can actually open the meetings
+// page. A picker that offers a colleague the endpoint will then refuse is the
+// same defect as an audience picker offering a scope you may not address.
+export const USER_KINDS = ["staff", "teacher", "parent", "meeting-host"] as const;
 export type UserKind = (typeof USER_KINDS)[number];
 
 /** Categorise a user's role list for grouped pickers (announcements etc.).

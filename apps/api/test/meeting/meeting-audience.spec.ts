@@ -551,14 +551,24 @@ describe("book() — the capacity claim itself", () => {
 // Two things must follow, or being added is an invitation that never arrives:
 // they have to SEE the meeting, and they have to get the join link.
 
-function cohostHarness(staffIds: string[]) {
+function cohostHarness(staffIds: string[], seeingIds?: string[]) {
+  // The harness HONOURS the where. createSlot asks userRole two different
+  // questions — "are these staff" and "can these open the meetings page" — and a
+  // mock answering both with the same list is how a deleted check keeps passing.
+  const canSee = seeingIds ?? staffIds;
   const cohosts: Array<Record<string, unknown>> = [];
   const notified: string[][] = [];
   const tx = {
     class: { findFirst: jest.fn().mockResolvedValue({ id: "c1", name: "JSS2" }), findMany: jest.fn().mockResolvedValue([]) },
     classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue({ id: "o" }) },
     user: { findFirst: jest.fn().mockResolvedValue({ id: "s1", name: "P" }), findMany: jest.fn().mockResolvedValue([]) },
-    userRole: { findMany: jest.fn().mockResolvedValue(staffIds.map((userId) => ({ userId }))) },
+    userRole: {
+      findMany: jest.fn((args: { where?: { role?: Record<string, unknown> } }) => {
+        const asksPermission = !!args?.where?.role?.permissions;
+        const pool = asksPermission ? canSee : staffIds;
+        return Promise.resolve(pool.map((userId) => ({ userId })));
+      }),
+    },
     enrollment: { findMany: jest.fn().mockResolvedValue([]) },
     parentChild: { findMany: jest.fn().mockResolvedValue([]) },
     meetingInvitee: { findMany: jest.fn().mockResolvedValue([]), createMany: jest.fn().mockResolvedValue({ count: 0 }) },
@@ -602,6 +612,16 @@ describe("adding colleagues to a meeting", () => {
     const { svc, cohosts } = cohostHarness(["t2"]);
     await expect(svc.createSlot(principal, { ...CO, cohostIds: ["t2", "a-parent"] }))
       .rejects.toThrow(/not staff at this school/);
+    expect(cohosts).toHaveLength(0);
+  });
+
+  it("refuses a colleague who could never open the meetings page", async () => {
+    // head_teacher hit exactly this live: staff, addable, and then 403 on their
+    // own meetings list. Refusing at ADD time is the only point where anyone is
+    // watching — the 403 lands days later on someone who cannot explain it.
+    const { svc, cohosts } = cohostHarness(["t2", "no-perm"], ["t2"]);
+    await expect(svc.createSlot(principal, { ...CO, cohostIds: ["t2", "no-perm"] }))
+      .rejects.toThrow(/cannot open the meetings page/);
     expect(cohosts).toHaveLength(0);
   });
 
