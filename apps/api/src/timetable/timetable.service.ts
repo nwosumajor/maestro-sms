@@ -22,6 +22,9 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
+// VALUE import — Prisma.PrismaClientKnownRequestError is a class, so `import
+// type` would compile and then fail every instanceof at runtime.
+import { Prisma } from "@sms/db";
 import type {
   DayOfWeekValue,
   DayStructureInput,
@@ -109,28 +112,73 @@ export class TimetableService {
   async createPeriod(p: Principal, input: PeriodInput) {
     this.assertTimes(input.startTime, input.endTime);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const period = await tx.period.create({
-        data: {
-          schoolId: p.schoolId,
-          name: input.name,
-          sequence: input.sequence,
-          startTime: input.startTime,
-          endTime: input.endTime,
-        },
-      });
+      await this.assertNoPeriodOverlap(tx, input.startTime, input.endTime);
+      const period = await tx.period
+        .create({
+          data: {
+            schoolId: p.schoolId,
+            name: input.name,
+            sequence: input.sequence,
+            startTime: input.startTime,
+            endTime: input.endTime,
+          },
+        })
+        .catch((e) => this.rethrowUniqueViolation(e, "Another period already uses that position in the day"));
       await this.log(tx, p, "timetable.period.create", "period", period.id);
       return period;
     });
   }
 
   async updatePeriod(p: Principal, id: string, input: Partial<PeriodInput>) {
-    if (input.startTime && input.endTime) this.assertTimes(input.startTime, input.endTime);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const existing = await tx.period.findFirst({ where: { id }, select: { id: true } });
+      const existing = (await tx.period.findFirst({
+        where: { id },
+        select: { id: true, startTime: true, endTime: true },
+      })) as { id: string; startTime: string; endTime: string } | null;
       if (!existing) throw new NotFoundException("Period not found");
-      const period = await tx.period.update({ where: { id }, data: input });
+      // Validate the row AS IT WILL BE, not the payload. The old check ran only
+      // when BOTH times were present, so `PATCH {startTime:"23:00"}` on an
+      // 08:00-09:00 period stored 23:00-09:00 — a period ending before it
+      // begins, which every downstream ordering then reads as valid.
+      const startTime = input.startTime ?? existing.startTime;
+      const endTime = input.endTime ?? existing.endTime;
+      this.assertTimes(startTime, endTime);
+      await this.assertNoPeriodOverlap(tx, startTime, endTime, id);
+      const period = await tx.period
+        .update({ where: { id }, data: input })
+        .catch((e) => this.rethrowUniqueViolation(e, "Another period already uses that position in the day"));
       await this.log(tx, p, "timetable.period.update", "period", id);
       return period;
+    });
+  }
+
+  /**
+   * Delete a period, refusing while lessons are scheduled in it.
+   *
+   * There was no way to remove a period at all — a mistyped one was permanent
+   * unless you regenerated the whole day, which itself refuses once any lesson
+   * is placed. So a single typo could only be fixed by clearing the timetable.
+   *
+   * The guard names what blocks it, because "cannot delete" without a count
+   * sends someone hunting through the grid. Teacher-availability rows ARE
+   * removed with it: they mark "unavailable in THIS period" and mean nothing
+   * once it is gone — the same thing generateDay already does when it replaces
+   * the day.
+   */
+  async deletePeriod(p: Principal, id: string) {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const existing = await tx.period.findFirst({ where: { id }, select: { id: true, name: true } });
+      if (!existing) throw new NotFoundException("Period not found");
+      const placed = await tx.timetableEntry.count({ where: { periodId: id } });
+      if (placed > 0) {
+        throw new ConflictException(
+          `${placed} lesson${placed === 1 ? " is" : "s are"} scheduled in ${existing.name}. Remove them first.`,
+        );
+      }
+      await tx.teacherUnavailability.deleteMany({ where: { periodId: id } });
+      await tx.period.delete({ where: { id } });
+      await this.log(tx, p, "timetable.period.delete", "period", id, { name: existing.name });
+      return { id, deleted: true };
     });
   }
 
@@ -180,9 +228,9 @@ export class TimetableService {
 
   async createRoom(p: Principal, input: RoomInput) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const room = await tx.room.create({
-        data: { schoolId: p.schoolId, name: input.name, capacity: input.capacity ?? null },
-      });
+      const room = await tx.room
+        .create({ data: { schoolId: p.schoolId, name: input.name, capacity: input.capacity ?? null } })
+        .catch((e) => this.rethrowUniqueViolation(e, "A room with that name already exists"));
       await this.log(tx, p, "timetable.room.create", "room", room.id);
       return room;
     });
@@ -192,12 +240,44 @@ export class TimetableService {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const existing = await tx.room.findFirst({ where: { id }, select: { id: true } });
       if (!existing) throw new NotFoundException("Room not found");
-      const room = await tx.room.update({
-        where: { id },
-        data: { name: input.name, capacity: input.capacity ?? undefined },
-      });
+      const room = await tx.room
+        .update({ where: { id }, data: { name: input.name, capacity: input.capacity ?? undefined } })
+        .catch((e) => this.rethrowUniqueViolation(e, "A room with that name already exists"));
       await this.log(tx, p, "timetable.room.update", "room", id);
       return room;
+    });
+  }
+
+  /**
+   * Delete a room, refusing while lessons are scheduled in it or an offering
+   * still prefers it. Same reasoning as deletePeriod: a mistyped room name was
+   * otherwise permanent, and it appears in every room picker forever.
+   *
+   * `preferredRoomId` on a class-subject offering is a SOFT constraint the
+   * solver reads. Deleting the room out from under it would leave the offering
+   * pointing at nothing, so that blocks too and says which.
+   */
+  async deleteRoom(p: Principal, id: string) {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const existing = await tx.room.findFirst({ where: { id }, select: { id: true, name: true } });
+      if (!existing) throw new NotFoundException("Room not found");
+      const [placed, preferred] = await Promise.all([
+        tx.timetableEntry.count({ where: { roomId: id } }),
+        tx.classSubjectTeacher.count({ where: { preferredRoomId: id } }),
+      ]);
+      if (placed > 0) {
+        throw new ConflictException(
+          `${placed} lesson${placed === 1 ? " is" : "s are"} scheduled in ${existing.name}. Move them first.`,
+        );
+      }
+      if (preferred > 0) {
+        throw new ConflictException(
+          `${preferred} subject offering${preferred === 1 ? "" : "s"} prefer${preferred === 1 ? "s" : ""} ${existing.name}. Clear that preference first.`,
+        );
+      }
+      await tx.room.delete({ where: { id } });
+      await this.log(tx, p, "timetable.room.delete", "room", id, { name: existing.name });
+      return { id, deleted: true };
     });
   }
 
@@ -207,18 +287,26 @@ export class TimetableService {
       await this.assertReferencesExist(tx, input);
       await this.assertNoConflict(tx, input);
       const subjectName = await this.subjectLabel(tx, input.subjectId);
-      const entry = await tx.timetableEntry.create({
-        data: {
-          schoolId: p.schoolId,
-          classId: input.classId,
-          dayOfWeek: input.dayOfWeek,
-          periodId: input.periodId,
-          subjectId: input.subjectId,
-          subject: subjectName,
-          teacherId: input.teacherId,
-          roomId: input.roomId ?? null,
-        },
-      });
+      const entry = await tx.timetableEntry
+        .create({
+          data: {
+            schoolId: p.schoolId,
+            classId: input.classId,
+            dayOfWeek: input.dayOfWeek,
+            periodId: input.periodId,
+            subjectId: input.subjectId,
+            subject: subjectName,
+            teacherId: input.teacherId,
+            roomId: input.roomId ?? null,
+          },
+        })
+        // assertNoConflict already passed, so a violation here means somebody
+        // else took the slot between that check and this insert. We cannot say
+        // WHICH of class/teacher/room without a query, and the transaction is
+        // already aborted — so say the true thing rather than guess.
+        .catch((e) =>
+          this.rethrowUniqueViolation(e, "That slot was taken while you were saving. Check the grid and try again."),
+        );
       await this.log(tx, p, "timetable.entry.create", "timetable_entry", entry.id, {
         classId: input.classId,
         dayOfWeek: input.dayOfWeek,
@@ -294,18 +382,31 @@ export class TimetableService {
 
       const result = generateTimetable(offerings, slots, { classBusy, teacherBusy, roomBusy }, unavailable);
       // One bulk insert for all generated lessons (not one INSERT per lesson).
-      await tx.timetableEntry.createMany({
-        data: result.placed.map((lesson) => ({
-          schoolId: p.schoolId,
-          classId: lesson.classId,
-          dayOfWeek: lesson.day as DayOfWeekValue,
-          periodId: lesson.periodId,
-          subjectId: lesson.subjectId,
-          subject: lesson.subject,
-          teacherId: lesson.teacherId,
-          roomId: lesson.roomId,
-        })),
-      });
+      // The solver planned against the grid as it was READ at the top of this
+      // transaction. If someone placed a lesson meanwhile, the constraints
+      // reject the whole insert — correctly, since a partly-applied generation
+      // is worse than none. Say so rather than surfacing a raw P2002.
+      await tx.timetableEntry
+        .createMany({
+          data: result.placed.map((lesson) => ({
+            schoolId: p.schoolId,
+            classId: lesson.classId,
+            dayOfWeek: lesson.day as DayOfWeekValue,
+            periodId: lesson.periodId,
+            subjectId: lesson.subjectId,
+            subject: lesson.subject,
+            teacherId: lesson.teacherId,
+            roomId: lesson.roomId,
+          })),
+        })
+        .catch((e) => {
+          if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+            throw new ConflictException(
+              "The timetable changed while this was generating — nothing was saved. Review the grid and run it again.",
+            );
+          }
+          throw e;
+        });
 
       // Resolve ids -> display names so unplaced/diagnostics read as evidence.
       const classRows = await tx.class.findMany({ where: { id: { in: targetClassIds } }, select: { id: true, name: true } });
@@ -778,6 +879,26 @@ export class TimetableService {
     });
   }
 
+  /**
+   * Turn a unique-constraint violation into a 409 the caller can act on.
+   *
+   * The CALLER says what a collision means, because Prisma does not: this
+   * deployment reports `Unique constraint failed on the (not available)` with
+   * `meta.target` absent, so keying off the column list silently never matched
+   * and every duplicate stayed a 500. My first version did exactly that, and
+   * the unit tests passed only because the fixture supplied a target the real
+   * database never sends.
+   *
+   * Do not re-query here to identify the constraint — the failed statement has
+   * already aborted the surrounding transaction, so any follow-up read fails too.
+   */
+  private rethrowUniqueViolation(e: unknown, message: string): never {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+      throw new ConflictException(message);
+    }
+    throw e;
+  }
+
   // --- conflict detection ----------------------------------------------------
   private async assertNoConflict(tx: TenantTx, e: EntryInput, excludeId?: string) {
     const slot = { dayOfWeek: e.dayOfWeek, periodId: e.periodId };
@@ -801,6 +922,34 @@ export class TimetableService {
         select: { id: true },
       });
       if (roomClash) throw new ConflictException("That room is already booked in that slot");
+    }
+  }
+
+  /**
+   * A bell schedule cannot have two periods running at once.
+   *
+   * `generateDay` produces a clean non-overlapping day, but a hand-created
+   * period was checked only for start<end — so 08:30-09:30 could be added
+   * alongside 08:00-09:00 and both would show in the grid, with a lesson
+   * placeable in each. Times are "HH:MM" and zero-padded, so string comparison
+   * IS chronological comparison; no parsing needed.
+   *
+   * Half-open intervals: a period ending 09:00 and one starting 09:00 do not
+   * overlap, which is the normal back-to-back case.
+   */
+  private async assertNoPeriodOverlap(tx: TenantTx, start: string, end: string, excludeId?: string) {
+    const clash = (await tx.period.findFirst({
+      where: {
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+        startTime: { lt: end },
+        endTime: { gt: start },
+      },
+      select: { name: true, startTime: true, endTime: true },
+    })) as { name: string; startTime: string; endTime: string } | null;
+    if (clash) {
+      throw new ConflictException(
+        `That overlaps ${clash.name} (${clash.startTime}-${clash.endTime}). Periods cannot run at the same time.`,
+      );
     }
   }
 

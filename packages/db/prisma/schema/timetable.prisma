@@ -124,13 +124,20 @@ model TimetableEntry {
   room       Room?         @relation(fields: [roomId], references: [id])
   covers     LessonCover[]
 
-  /// A class has at most one lesson per (day, period).
+  /// The three double-booking rules, enforced HERE and not only in the service.
+  /// assertNoConflict checks then inserts, which is not atomic: 12 concurrent
+  /// bookings of one teacher slot let 2 through, and the API answered 201 twice.
+  /// The class rule was already a constraint and held; the other two were only
+  /// indexes, so they corrupted silently.
+  ///
+  /// roomId is nullable and Postgres treats NULLs as distinct, so free-period
+  /// rows with no room never collide with each other.
   @@unique([schoolId, classId, dayOfWeek, periodId])
+  @@unique([schoolId, teacherId, dayOfWeek, periodId])
+  @@unique([schoolId, roomId, dayOfWeek, periodId])
   @@index([schoolId])
   @@index([schoolId, classId])
   @@index([schoolId, subjectId])
-  @@index([schoolId, teacherId, dayOfWeek, periodId])
-  @@index([schoolId, roomId, dayOfWeek, periodId])
   @@map("timetable_entry")
 }
 
