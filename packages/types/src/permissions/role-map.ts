@@ -215,6 +215,10 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
   ],
   // Head of teaching: stage-1 approver for teaching staff requests.
   head_teacher: ["attendance.amend.review", "member.scan", "hr.self", "cbt.review", "task.assign", "task.participate", "poll.vote", "discussion.participate", "discipline.file", "form.respond", "exam.release",
+    // A head teacher sits in parent meetings as a matter of course — usually
+    // alongside the form teacher. Without this they could be ADDED to one and
+    // then get a 403 on their own meetings list: told to attend, unable to see it.
+    "meeting.host",
     "class.read", "enrollment.read", "attendance.read", "grade.read", "subject.selection.approve",
     "workflow.create", "workflow.read", "workflow.review", "workflow.review.head",
     "notification.read", "notification.send", "security.elevation.request",

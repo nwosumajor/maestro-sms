@@ -135,7 +135,7 @@ export function MeetingsClient({
                 never listed here — adding yourself is the one thing this cannot
                 usefully do. */}
             <PeoplePicker
-              kind="staff"
+              kind="meeting-host"
               label="Colleagues attending (optional)"
               hint="They will see the meeting in their own list and get the join link, and are told they have been added."
               value={cohosts}

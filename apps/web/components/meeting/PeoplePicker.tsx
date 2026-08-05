@@ -34,7 +34,7 @@ export function PeoplePicker({
   max,
 }: {
   /** Narrows the SERVER query by role category. */
-  kind: "parent" | "staff";
+  kind: "parent" | "meeting-host";
   label: string;
   hint: string;
   value: Person[];
