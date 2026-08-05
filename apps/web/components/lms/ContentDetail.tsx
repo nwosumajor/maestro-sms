@@ -339,10 +339,17 @@ function MaterialView({
   const [msg, setMsg] = React.useState<string | null>(null);
   const inputRef = React.useRef<HTMLInputElement>(null);
 
+  // GET, matching the route. This called POST and therefore 404'd on every
+  // click — so the pupil-facing Download button had never worked, on a feature
+  // whose whole purpose is that pupils can read the file.
   const download = async () => {
-    const r = await post<{ url: string }>(`/content/${contentId}/download`);
-    if (r.ok && r.data?.url) window.open(r.data.url, "_blank", "noopener");
-    else setMsg(r.error ?? "No file available.");
+    const res = await fetch(`/api/sms/content/${contentId}/download`);
+    if (!res.ok) {
+      setMsg(res.status === 404 ? "No file available." : "Could not open the file.");
+      return;
+    }
+    const { url } = (await res.json()) as { url: string };
+    window.open(url, "_blank", "noopener");
   };
 
   // presign -> PUT the bytes straight to storage -> confirm. Same three steps

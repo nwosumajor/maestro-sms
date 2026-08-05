@@ -173,7 +173,16 @@ export class LmsContentService {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.assertTeacherOfClass(tx, p, input.classId);
       const tag = await this.validateGradeTag(tx, input.type, input.classId, input.subjectId, input.termId);
-      const syllabusItemId = await this.validateSyllabusTopic(tx, input.classId, input.syllabusItemId);
+      const topic = await this.validateSyllabusTopic(tx, input.classId, input.syllabusItemId);
+      // INHERIT the subject from the syllabus topic. Without this the whole
+      // subject-scoping rule was unreachable for the case it exists for: a
+      // teacher attaching notes to a week of the SS3 Physics plan set
+      // syllabusItemId and nothing else, the row stayed UNTAGGED, and untagged
+      // means "general class material — always visible". Every pupil in SS3 got
+      // the Physics handout, including those who never took Physics.
+      // An explicit subjectId still wins; this only fills a blank.
+      const subjectId = tag.subjectId ?? topic.subjectId;
+      await this.assertMayTagSubject(tx, p, input.classId, subjectId);
       const row = (await tx.lmsContent.create({
         data: {
           schoolId: p.schoolId,
@@ -183,9 +192,9 @@ export class LmsContentService {
           body: body as unknown as Prisma.InputJsonValue,
           status: "DRAFT",
           authorId: p.userId,
-          subjectId: tag.subjectId,
+          subjectId,
           termId: tag.termId,
-          syllabusItemId,
+          syllabusItemId: topic.itemId,
         },
       })) as ContentRow;
       await this.snapshot(tx, p, row, "Created");
@@ -201,8 +210,12 @@ export class LmsContentService {
    * the id is a plain uuid, so nothing else would stop them, and the notes would
    * then surface under a plan they have no part in.
    */
-  private async validateSyllabusTopic(tx: TenantTx, classId: string, itemId?: string | null): Promise<string | null> {
-    if (!itemId) return null;
+  private async validateSyllabusTopic(
+    tx: TenantTx,
+    classId: string,
+    itemId?: string | null,
+  ): Promise<{ itemId: string | null; subjectId: string | null }> {
+    if (!itemId) return { itemId: null, subjectId: null };
     const item = (await tx.subjectSyllabusItem.findFirst({
       where: { id: itemId },
       select: { syllabusId: true },
@@ -210,12 +223,15 @@ export class LmsContentService {
     if (!item) throw new BadRequestException("That syllabus topic does not exist.");
     const syl = (await tx.subjectSyllabus.findFirst({
       where: { id: item.syllabusId },
-      select: { classId: true },
-    })) as { classId: string } | null;
+      select: { classId: true, subjectId: true },
+    })) as { classId: string; subjectId: string } | null;
     if (!syl || syl.classId !== classId) {
       throw new BadRequestException("That syllabus topic belongs to a different class.");
     }
-    return itemId;
+    // A syllabus belongs to exactly ONE subject, and it is non-null — so a topic
+    // under the SS3 Physics plan can only be Physics. Returning it lets the
+    // caller tag the content without asking the teacher to say "Physics" twice.
+    return { itemId, subjectId: syl.subjectId };
   }
 
   async updateContent(
@@ -234,6 +250,11 @@ export class LmsContentService {
       const tag = tagProvided
         ? await this.validateGradeTag(tx, row.type as LmsContentType, row.classId, input.subjectId, input.termId)
         : undefined;
+      // The SAME rule as create. Without it a Physics-only teacher could create
+      // content tagged Physics and then PATCH the subject to Literature — or to
+      // null, which reaches every pupil in the class. A guard on one write path
+      // and not the other is not a guard.
+      if (tag) await this.assertMayTagSubject(tx, p, row.classId, tag.subjectId);
       const updated = (await tx.lmsContent.update({
         where: { id: contentId },
         data: {
@@ -1640,9 +1661,21 @@ export class LmsContentService {
   // ---------------------------------------------------------------------------
   // Gradebook tagging + "pull LMS scores into the report card"
   // ---------------------------------------------------------------------------
-  /** Validate/normalise a gradebook (subject, term) tag. Both-null = untagged.
-   *  Only QUIZ/ASSIGNMENT may be tagged; the subject must be offered by the
-   *  class and the term must exist. Returns the pair to persist. */
+  /**
+   * Validate/normalise the (subject, term) tag. Both-null = untagged.
+   *
+   * `subjectId` now answers TWO questions, and they have different rules:
+   *
+   *   subject ALONE  -> WHO MAY SEE IT. Any content type. A pupil sees content
+   *                     for the subjects they offer, so an SS3 Physics handout
+   *                     reaches the physicists and nobody else.
+   *   subject + term -> COUNTS TOWARD THE REPORT CARD. Quizzes and assignments
+   *                     only, exactly as before.
+   *
+   * Requiring a term for the first case was what blocked it: a MATERIAL could
+   * not carry a subject at all, so the scoping rule had nothing to act on. A
+   * term alone is still an error — it says "grade this" without saying as what.
+   */
   private async validateGradeTag(
     tx: TenantTx,
     type: LmsContentType,
@@ -1653,17 +1686,25 @@ export class LmsContentService {
     const sid = subjectId ?? null;
     const tid = termId ?? null;
     if (!sid && !tid) return { subjectId: null, termId: null };
-    if (!sid || !tid) {
+    if (!sid) {
       throw new BadRequestException("Both a subject and a term are required to count this toward the report card");
     }
-    if (!GRADABLE_TYPES.has(type)) {
-      throw new BadRequestException("Only quizzes and assignments can be tagged for the report card");
-    }
+    // The subject must be one the class actually offers, whichever job it is
+    // doing — otherwise the tag names a subject no pupil here can be offering,
+    // and the content would be invisible to everyone.
     const offering = await tx.classSubjectTeacher.findFirst({
       where: { classId, subjectId: sid },
       select: { id: true },
     });
     if (!offering) throw new NotFoundException("That subject is not offered by this class");
+
+    // Subject alone: an access tag. Nothing more to check.
+    if (!tid) return { subjectId: sid, termId: null };
+
+    // Subject + term: report-card tagging, unchanged.
+    if (!GRADABLE_TYPES.has(type)) {
+      throw new BadRequestException("Only quizzes and assignments can be tagged for the report card");
+    }
     const term = await tx.term.findFirst({ where: { id: tid }, select: { id: true } });
     if (!term) throw new NotFoundException("Term not found");
     return { subjectId: sid, termId: tid };
@@ -1986,7 +2027,66 @@ export class LmsContentService {
       where: { classId, teacherId: p.userId },
       select: { id: true },
     });
-    return !!teaches;
+    if (teaches) return true;
+    // ...or they hold a SUBJECT OFFERING in the class. Assigning someone to
+    // teach SS3 Physics writes a classSubjectTeacher row and no ClassTeacher
+    // row, so a subject teacher could write the SS3 Physics SYLLABUS (that
+    // service reads the offering) and then could not create the lesson notes
+    // that hang off it — the same person, the same class, two different answers
+    // to "do you teach here". `subjectsTaughtBy` below keeps them to their own
+    // subject, which a bare ClassTeacher row never expressed.
+    const offering = await tx.classSubjectTeacher.findFirst({
+      where: { classId, teacherId: p.userId },
+      select: { id: true },
+    });
+    return !!offering;
+  }
+
+  /**
+   * The subjects this teacher personally teaches in the class, or null if they
+   * are class-wide (a form teacher, or staff) and may tag anything.
+   *
+   * Authoring is not the same as authoring FOR ANY SUBJECT. Now that holding an
+   * offering grants authorship, the Physics teacher must not be able to publish
+   * something tagged Literature to the Literature set.
+   */
+  /**
+   * A teacher who holds only subject offerings may publish for THOSE subjects
+   * and nothing else — including nothing untagged, which would reach every pupil
+   * in the class regardless of what they take.
+   *
+   * Class-wide staff (a form teacher, leadership) are unaffected: addressing the
+   * whole class is exactly their job, and general class material is what an
+   * untagged row is for.
+   */
+  private async assertMayTagSubject(
+    tx: TenantTx,
+    p: Principal,
+    classId: string,
+    subjectId: string | null,
+  ): Promise<void> {
+    const mine = await this.subjectsTaughtBy(tx, p, classId);
+    if (!mine) return;
+    if (!subjectId) {
+      throw new BadRequestException("Choose the subject this is for — you teach specific subjects in this class.");
+    }
+    if (!mine.has(subjectId)) {
+      throw new BadRequestException("You can only publish content for a subject you teach in this class.");
+    }
+  }
+
+  private async subjectsTaughtBy(tx: TenantTx, p: Principal, classId: string): Promise<Set<string> | null> {
+    if (this.isSchoolWide(p)) return null;
+    const classWide = await tx.classTeacher.findFirst({
+      where: { classId, teacherId: p.userId },
+      select: { id: true },
+    });
+    if (classWide) return null;
+    const rows = (await tx.classSubjectTeacher.findMany({
+      where: { classId, teacherId: p.userId },
+      select: { subjectId: true },
+    })) as Array<{ subjectId: string }>;
+    return new Set(rows.map((r) => r.subjectId));
   }
 
   /**

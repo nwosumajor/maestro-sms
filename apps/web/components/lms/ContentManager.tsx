@@ -93,6 +93,24 @@ export function ContentManager({
   }, [classId]);
   React.useEffect(() => { void loadModules(); }, [loadModules]);
 
+  // The class's offered subjects, so a teacher tags what they publish. This is
+  // the field that decides WHO can open it: a pupil sees content for subjects
+  // they offer, plus anything left untagged.
+  const [subjects, setSubjects] = React.useState<Array<{ subjectId: string; subjectName: string }>>([]);
+  React.useEffect(() => {
+    let live = true;
+    void (async () => {
+      const res = await fetch(`/api/sms/classes/${classId}/subjects`);
+      if (!res.ok || !live) return;
+      const rows = (await res.json()) as Array<{ subjectId: string; subjectName: string }>;
+      // De-duplicated: a subject taught by two teachers is still one subject.
+      const seen = new Map<string, string>();
+      for (const r of rows) if (!seen.has(r.subjectId)) seen.set(r.subjectId, r.subjectName);
+      setSubjects([...seen].map(([subjectId, subjectName]) => ({ subjectId, subjectName })));
+    })();
+    return () => { live = false; };
+  }, [classId]);
+
   const act = async (label: string, fn: () => Promise<{ ok: boolean; error: string | null }>) => {
     const r = await fn();
     setMsg(r.ok ? label : r.error);
@@ -116,6 +134,7 @@ export function ContentManager({
       {canAuthor && (
         <CreateForm
           classId={classId}
+          subjects={subjects}
           onDone={() => {
             setMsg("Draft created.");
             router.refresh();
@@ -287,10 +306,12 @@ function ModuleBar({
 // --- create form ------------------------------------------------------------
 function CreateForm({
   classId,
+  subjects,
   onDone,
   onError,
 }: {
   classId: string;
+  subjects: Array<{ subjectId: string; subjectName: string }>;
   onDone: () => void;
   onError: (m: string) => void;
 }) {
@@ -312,6 +333,8 @@ function CreateForm({
   const [quizTimeLimit, setQuizTimeLimit] = React.useState("");
   const [quizScoring, setQuizScoring] = React.useState<"BEST" | "LATEST">("BEST");
   const [quizDrawCount, setQuizDrawCount] = React.useState("");
+  // "" = deliberately untagged: general class material every pupil should get.
+  const [subjectId, setSubjectId] = React.useState("");
   const sel = "h-9 rounded-md border border-input bg-background px-3 text-sm";
 
   const reset = () => {
@@ -325,6 +348,7 @@ function CreateForm({
     setDueAt("");
     setPoints("");
     setAllowLate(false);
+    setSubjectId("");
     setQuizOpensAt("");
     setQuizClosesAt("");
     setQuizMaxAttempts("1");
@@ -384,7 +408,14 @@ function CreateForm({
             ? "Add assignment instructions."
             : "Add at least one quiz question.",
       );
-    const res = await post(`/classes/${classId}/content`, { type, title: title.trim(), body: b });
+    const res = await post(`/classes/${classId}/content`, {
+      type,
+      title: title.trim(),
+      body: b,
+      // Sent as null, not omitted, so "everyone in the class" is an explicit
+      // choice rather than a field the form forgot.
+      subjectId: subjectId || null,
+    });
     if (res.ok) {
       reset();
       onDone();
@@ -432,6 +463,34 @@ function CreateForm({
               />
             </div>
           </div>
+
+          {/* WHO gets this. Named "Subject" because that is what a teacher
+              thinks in, with the access consequence spelled out underneath —
+              the choice is invisible in its effect otherwise, and a teacher
+              would find out only when the wrong pupils opened it. */}
+          {subjects.length > 0 && (
+            <div className="space-y-1.5">
+              <Label htmlFor="ct-subject">Subject</Label>
+              <select
+                id="ct-subject"
+                value={subjectId}
+                onChange={(e) => setSubjectId(e.target.value)}
+                className={`${sel} w-full sm:w-72`}
+              >
+                <option value="">Everyone in the class</option>
+                {subjects.map((s) => (
+                  <option key={s.subjectId} value={s.subjectId}>
+                    Only pupils offering {s.subjectName}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-muted-foreground">
+                {subjectId
+                  ? "Pupils who do not offer this subject will not see it, even with a direct link."
+                  : "Every pupil in the class will see this once it is approved and published."}
+              </p>
+            </div>
+          )}
 
           {type === "LESSON" && (
             <div className="space-y-1.5">

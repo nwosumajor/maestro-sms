@@ -251,3 +251,222 @@ describe("attaching a PDF to a material", () => {
     await expect(svc.presignUpload(teacher, "m1", pdf)).rejects.toThrow(/locked/i);
   });
 });
+
+// =============================================================================
+// A syllabus topic carries its subject onto the content
+// =============================================================================
+// This is what made the whole scoping rule reachable for the case it exists
+// for. A teacher attaching notes to a week of the SS3 Physics plan set
+// syllabusItemId and NOTHING else, so the row stayed untagged — and untagged
+// means "general class material, always visible". Every pupil in SS3 got the
+// Physics handout, including those who never took Physics.
+
+describe("content created against a syllabus topic", () => {
+  function createHarness(syllabusSubjectId: string) {
+    const created: Array<Record<string, unknown>> = [];
+    const tx = {
+      subjectSyllabusItem: { findFirst: jest.fn().mockResolvedValue({ syllabusId: "syl1" }) },
+      subjectSyllabus: {
+        findFirst: jest.fn().mockResolvedValue({ classId: "cls1", subjectId: syllabusSubjectId }),
+      },
+      classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue({ id: "o1" }) },
+      classTeacher: { findFirst: jest.fn().mockResolvedValue({ id: "ct1" }) },
+      class: { findFirst: jest.fn().mockResolvedValue({ id: "cls1" }) },
+      subject: { findFirst: jest.fn().mockResolvedValue({ id: "phys", name: "Physics" }) },
+      term: { findFirst: jest.fn().mockResolvedValue({ id: "term1" }) },
+      lmsContent: {
+        create: jest.fn((args: { data: Record<string, unknown> }) => {
+          created.push(args.data);
+          return Promise.resolve({ id: "new", ...args.data, status: "DRAFT", authorId: "t1", body: {} });
+        }),
+      },
+      lmsContentRevision: { create: jest.fn().mockResolvedValue({}), count: jest.fn().mockResolvedValue(0) },
+      user: {
+        findFirst: jest.fn().mockResolvedValue({ id: "t1", name: "Teacher" }),
+        findMany: jest.fn().mockResolvedValue([{ id: "t1", name: "Teacher" }]),
+      },
+    } as unknown as TenantTx;
+    const db = { runAsTenant: <T>(_c: unknown, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
+    const svc = new LmsContentService(
+      db as never,
+      { record: jest.fn().mockResolvedValue(undefined) } as never,
+      { create: jest.fn(), review: jest.fn() } as never,
+      { enqueue: jest.fn(), enqueueMany: jest.fn() } as never,
+      { presignUpload: jest.fn(), presignDownload: jest.fn() } as never,
+      { getStudentSessionReport: jest.fn() } as never,
+    );
+    return { svc, created };
+  }
+
+  const base = {
+    classId: "cls1",
+    type: "MATERIAL" as const,
+    title: "Week 3 handout",
+    body: { kind: "MATERIAL" as const, description: "Reading" },
+  };
+
+  it("INHERITS the subject from the topic", async () => {
+    const { svc, created } = createHarness("phys");
+    await svc.createContent(teacher, { ...base, syllabusItemId: "item1" });
+    expect(created[0]).toMatchObject({ subjectId: "phys", syllabusItemId: "item1" });
+  });
+
+  it("an explicit subject still wins over the topic's", async () => {
+    // Inheritance fills a blank; it must never override what was actually asked
+    // for. Subject WITHOUT a term — that is the access tag. Adding a term would
+    // be report-card tagging, which a MATERIAL is still rightly refused.
+    const { svc, created } = createHarness("phys");
+    await svc.createContent(teacher, { ...base, syllabusItemId: "item1", subjectId: "chem" });
+    expect(created[0]).toMatchObject({ subjectId: "chem" });
+  });
+
+  it("a MATERIAL still cannot be tagged for the report card", async () => {
+    const { svc } = createHarness("phys");
+    await expect(
+      svc.createContent(teacher, { ...base, subjectId: "phys", termId: "term1" }),
+    ).rejects.toThrow(/Only quizzes and assignments/);
+  });
+
+  it("no topic and no subject stays untagged — general class material", async () => {
+    const { svc, created } = createHarness("phys");
+    await svc.createContent(teacher, base);
+    expect(created[0]).toMatchObject({ subjectId: null, syllabusItemId: null });
+  });
+});
+
+// =============================================================================
+// A SUBJECT teacher may author — for their own subject only
+// =============================================================================
+// Assigning someone to teach SS3 Physics writes a classSubjectTeacher row and
+// NO ClassTeacher row. The syllabus service reads the offering, so they could
+// write the SS3 Physics SYLLABUS — while `canAuthor` read only ClassTeacher, so
+// they got "Class not found" creating the lesson notes that hang off it. Same
+// person, same class, two different answers to "do you teach here".
+//
+// Granting authorship is what makes the second rule necessary: the Physics
+// teacher must not publish something tagged Literature, nor anything UNTAGGED,
+// which reaches pupils who do not take their subject.
+
+describe("a subject teacher with no ClassTeacher row", () => {
+  /** What the CLASS offers — a superset of what any one teacher teaches. */
+  const CLASS_OFFERS = ["phys", "chem", "lit"];
+
+  function subjectTeacherHarness(taught: string[], existing?: Record<string, unknown>) {
+    const created: Array<Record<string, unknown>> = [];
+    const tx = {
+      // Not class-wide. Only the offerings below.
+      classTeacher: { findFirst: jest.fn().mockResolvedValue(null) },
+      classSubjectTeacher: {
+        // THREE different questions reach this table and they must not share one
+        // answer:
+        //   { classId, teacherId }            -> do I teach anything here?
+        //   { classId, subjectId }            -> does the CLASS offer this?
+        //   { classId, teacherId } findMany   -> which subjects are mine?
+        // The class offers Literature — taught by somebody else. Answering
+        // "not offered" for it hid the rule under test behind a different error.
+        findFirst: jest.fn((args: { where: { teacherId?: string; subjectId?: string } }) => {
+          const { teacherId, subjectId } = args.where;
+          if (teacherId && !subjectId) return Promise.resolve(taught.length > 0 ? { id: "o1" } : null);
+          if (subjectId && !teacherId) return Promise.resolve(CLASS_OFFERS.includes(subjectId) ? { id: "o1" } : null);
+          return Promise.resolve(subjectId && taught.includes(subjectId) ? { id: "o1" } : null);
+        }),
+        findMany: jest.fn().mockResolvedValue(taught.map((subjectId) => ({ subjectId }))),
+      },
+      subjectSyllabusItem: { findFirst: jest.fn().mockResolvedValue({ syllabusId: "syl1" }) },
+      subjectSyllabus: { findFirst: jest.fn().mockResolvedValue({ classId: "cls1", subjectId: "phys" }) },
+      class: { findFirst: jest.fn().mockResolvedValue({ id: "cls1" }) },
+      subject: { findFirst: jest.fn().mockResolvedValue({ id: "phys", name: "ZZ Physics" }) },
+      term: { findFirst: jest.fn().mockResolvedValue({ id: "term1" }) },
+      lmsContent: {
+        findFirst: jest.fn().mockResolvedValue(existing ?? null),
+        create: jest.fn((args: { data: Record<string, unknown> }) => {
+          created.push(args.data);
+          return Promise.resolve({ id: "new", ...args.data, status: "DRAFT", authorId: "t1", body: {} });
+        }),
+        update: jest.fn((args: { data: Record<string, unknown> }) =>
+          Promise.resolve({ ...(existing ?? {}), ...args.data })),
+      },
+      lmsContentRevision: { create: jest.fn().mockResolvedValue({}), count: jest.fn().mockResolvedValue(0) },
+      user: {
+        findFirst: jest.fn().mockResolvedValue({ id: "t1", name: "Teacher" }),
+        findMany: jest.fn().mockResolvedValue([{ id: "t1", name: "Teacher" }]),
+      },
+    } as unknown as TenantTx;
+    const db = { runAsTenant: <T>(_c: unknown, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
+    const svc = new LmsContentService(
+      db as never,
+      { record: jest.fn().mockResolvedValue(undefined) } as never,
+      { create: jest.fn(), review: jest.fn() } as never,
+      { enqueue: jest.fn(), enqueueMany: jest.fn() } as never,
+      { presignUpload: jest.fn(), presignDownload: jest.fn() } as never,
+      { getStudentSessionReport: jest.fn() } as never,
+    );
+    return { svc, created };
+  }
+
+  const base = {
+    classId: "cls1",
+    type: "MATERIAL" as const,
+    title: "Week 3 handout",
+    body: { kind: "MATERIAL" as const, description: "Motion under gravity" },
+  };
+
+  it("CAN author for the class, via their offering", async () => {
+    const { svc, created } = subjectTeacherHarness(["phys"]);
+    await svc.createContent(teacher, { ...base, syllabusItemId: "item1" });
+    expect(created[0]).toMatchObject({ subjectId: "phys" });
+  });
+
+  it("cannot publish for a subject they do not teach", async () => {
+    const { svc, created } = subjectTeacherHarness(["phys"]);
+    await expect(svc.createContent(teacher, { ...base, subjectId: "lit" })).rejects.toThrow(
+      /only publish content for a subject you teach/i,
+    );
+    expect(created).toHaveLength(0);
+  });
+
+  it("cannot publish UNTAGGED content to the whole class", async () => {
+    // Untagged reaches every pupil in the class. Someone who holds only Physics
+    // has no business addressing the pupils who do not take it.
+    const { svc } = subjectTeacherHarness(["phys"]);
+    await expect(svc.createContent(teacher, base)).rejects.toThrow(/Choose the subject this is for/i);
+  });
+
+  it("a teacher of two subjects may use either", async () => {
+    const { svc, created } = subjectTeacherHarness(["phys", "chem"]);
+    await svc.createContent(teacher, { ...base, subjectId: "chem" });
+    expect(created[0]).toMatchObject({ subjectId: "chem" });
+  });
+
+  it("cannot RE-TAG an existing draft to a subject they do not teach", async () => {
+    // The create guard alone was a hole: make it Physics, then PATCH it to
+    // Literature. A guard on one write path and not the other is not a guard.
+    const { svc } = subjectTeacherHarness(["phys"], {
+      id: "c1",
+      classId: "cls1",
+      type: "MATERIAL",
+      status: "DRAFT",
+      authorId: "t1",
+      body: {},
+      subjectId: "phys",
+    });
+    await expect(svc.updateContent(teacher, "c1", { subjectId: "lit" })).rejects.toThrow(
+      /only publish content for a subject you teach/i,
+    );
+  });
+
+  it("cannot RE-TAG a draft to untagged, reaching the whole class", async () => {
+    const { svc } = subjectTeacherHarness(["phys"], {
+      id: "c1",
+      classId: "cls1",
+      type: "MATERIAL",
+      status: "DRAFT",
+      authorId: "t1",
+      body: {},
+      subjectId: "phys",
+    });
+    await expect(svc.updateContent(teacher, "c1", { subjectId: null })).rejects.toThrow(
+      /Choose the subject this is for/i,
+    );
+  });
+});
