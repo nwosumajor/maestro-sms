@@ -1,10 +1,11 @@
 import "reflect-metadata";
 import type { Server as HttpServer } from "node:http";
 import * as Sentry from "@sentry/node";
-import { NestFactory } from "@nestjs/core";
+import { HttpAdapterHost, NestFactory } from "@nestjs/core";
 import { Logger as PinoLogger } from "nestjs-pino";
 import { AppModule } from "./app.module";
 import { GameSocketGateway } from "./game-socket/game-socket.gateway";
+import { MalformedIdFilter } from "./common/malformed-id.filter";
 
 async function bootstrap() {
   // Error tracking: only active when a DSN is configured (no-op otherwise). The
@@ -33,6 +34,12 @@ async function bootstrap() {
   });
   // NOTE: validation is done per-route with Zod (ZodValidationPipe), so we do
   // NOT install a global class-validator ValidationPipe.
+
+  // An unparseable id in the path reaches Prisma and 500s. This turns exactly
+  // that case into the 404 the caller would get for a well-formed id that does
+  // not exist; every other Prisma error keeps its behaviour. Needs the http
+  // adapter, so it is registered after create().
+  app.useGlobalFilters(new MalformedIdFilter(app.get(HttpAdapterHost).httpAdapter));
 
   const port = Number(process.env.API_PORT ?? 3001);
   await app.listen(port);

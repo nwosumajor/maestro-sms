@@ -89,7 +89,13 @@ const liveUpdateSchema = z.object({
   startsAt: z.string().min(1).optional(),
   durationMinutes: z.number().int().positive().max(1440).optional(),
 });
-const uploadSchema = z.object({ fileName: z.string().min(1).max(255), contentType: z.string().min(1).max(120) });
+// sizeBytes is REQUIRED: the presigned URL it returns writes straight to our
+// bucket, so a cap enforced only in the browser is not a cap at all.
+const uploadSchema = z.object({
+  fileName: z.string().min(1).max(255),
+  contentType: z.string().min(1).max(120),
+  sizeBytes: z.number().int().positive(),
+});
 const reviewSchema = z.object({
   action: z.enum(["APPROVE", "REJECT", "REQUEST_REVISION"]),
   comments: z.string().max(2000).optional(),
