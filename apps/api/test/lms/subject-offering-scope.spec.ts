@@ -425,11 +425,14 @@ describe("a subject teacher with no ClassTeacher row", () => {
     expect(created).toHaveLength(0);
   });
 
-  it("cannot publish UNTAGGED content to the whole class", async () => {
-    // Untagged reaches every pupil in the class. Someone who holds only Physics
-    // has no business addressing the pupils who do not take it.
-    const { svc } = subjectTeacherHarness(["phys"]);
-    await expect(svc.createContent(teacher, base)).rejects.toThrow(/Choose the subject this is for/i);
+  it("CAN publish untagged, addressing the whole class", async () => {
+    // Corrected model. A senior class is organised as a stream — SS3 Science is
+    // a cohort where everyone offers the science set — so the Physics teacher
+    // addressing the class IS addressing their own pupils. Refusing this
+    // modelled the class as a mixed group who happen to share some subjects.
+    const { svc, created } = subjectTeacherHarness(["phys"]);
+    await svc.createContent(teacher, base);
+    expect(created[0]).toMatchObject({ subjectId: null });
   });
 
   it("a teacher of two subjects may use either", async () => {
@@ -455,7 +458,7 @@ describe("a subject teacher with no ClassTeacher row", () => {
     );
   });
 
-  it("cannot RE-TAG a draft to untagged, reaching the whole class", async () => {
+  it("CAN widen a draft from one subject to the whole class", async () => {
     const { svc } = subjectTeacherHarness(["phys"], {
       id: "c1",
       classId: "cls1",
@@ -465,8 +468,6 @@ describe("a subject teacher with no ClassTeacher row", () => {
       body: {},
       subjectId: "phys",
     });
-    await expect(svc.updateContent(teacher, "c1", { subjectId: null })).rejects.toThrow(
-      /Choose the subject this is for/i,
-    );
+    await expect(svc.updateContent(teacher, "c1", { subjectId: null })).resolves.toBeDefined();
   });
 });

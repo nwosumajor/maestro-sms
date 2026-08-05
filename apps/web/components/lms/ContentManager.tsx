@@ -486,8 +486,8 @@ function CreateForm({
               </select>
               <p className="text-xs text-muted-foreground">
                 {subjectId
-                  ? "Pupils who do not offer this subject will not see it, even with a direct link."
-                  : "Every pupil in the class will see this once it is approved and published."}
+                  ? "Only pupils offering this subject will see it — useful for an elective. Pupils who do not take it cannot open it, even with a direct link."
+                  : "Every pupil in the class will see this once approved. This is the right choice for a streamed class where everyone takes the subject."}
               </p>
             </div>
           )}
