@@ -77,6 +77,9 @@ import {
 import { isJoinable, normalizeJoinUrl } from "./lms-live.util";
 import { TermResultService } from "../gradebook/term-result.service";
 
+/** Teaching PDFs are lesson handouts, not archives. Mirrors the integrity
+ *  module's cap so the platform has one answer to "how big may a file be". */
+const MAX_MATERIAL_BYTES = 25 * 1024 * 1024; // 25 MB
 const SCHOOL_WIDE_ROLES = new Set(["school_admin"]);
 const CONTENT_TYPES = new Set<LmsContentType>(["MATERIAL", "LESSON", "QUIZ", "FORUM_THREAD", "VIDEO", "ASSIGNMENT"]);
 // Only these two content types can be tagged with a (subject, term) and pulled
@@ -246,10 +249,11 @@ export class LmsContentService {
   }
 
   // --- PDF material upload (presigned, like the Document Vault) --------------
+
   async presignUpload(
     p: Principal,
     contentId: string,
-    input: { fileName: string; contentType: string },
+    input: { fileName: string; contentType: string; sizeBytes: number },
   ): Promise<LmsPresignDto> {
     const presign = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const row = await this.requireContent(tx, contentId);
@@ -257,6 +261,19 @@ export class LmsContentService {
       if (row.type !== "MATERIAL") throw new BadRequestException("Only MATERIAL content takes a file");
       if (row.status !== "DRAFT" && row.status !== "REVISION_REQUESTED") {
         throw new ConflictException("Content is locked for upload");
+      }
+      // PDF only, checked HERE and not just in the browser. This presign hands
+      // out a URL that writes to our bucket; a client-side check is a
+      // convenience, not a control, and anything the page will not render is
+      // just a file pupils cannot read. A wrong extension with a PDF mime type
+      // still uploads — the mime type is what the browser will honour.
+      if (input.contentType !== "application/pdf") {
+        throw new BadRequestException("Only PDF files can be attached, so every pupil can open it in the browser.");
+      }
+      if (input.sizeBytes > MAX_MATERIAL_BYTES) {
+        throw new BadRequestException(
+          `That file is ${(input.sizeBytes / 1024 / 1024).toFixed(1)} MB. The limit is ${MAX_MATERIAL_BYTES / 1024 / 1024} MB.`,
+        );
       }
       const safe = (input.fileName ?? "file.pdf").replace(/[^A-Za-z0-9._-]/g, "_");
       const key = `lms/${p.schoolId}/${contentId}/${Date.now()}_${safe}`;
@@ -453,6 +470,53 @@ export class LmsContentService {
     });
   }
 
+  /**
+   * The subjects this PUPIL offers this term, or null meaning "do not narrow".
+   *
+   * Class enrolment is not the same thing as offering a subject. Once pupils
+   * choose subjects, a Physics handout tagged to the class was shown to every
+   * pupil in it — including those who never took Physics. That is clutter on
+   * the one screen a pupil is supposed to be able to scan, and it makes "what
+   * do I have to read?" a question they answer wrongly.
+   *
+   * FAILS OPEN, deliberately, in three cases: no current term, no approved
+   * selection, or an approved selection naming nothing. A school that does not
+   * use subject selection at all must be completely unaffected — narrowing on
+   * absent data would hide every tagged material from every pupil, which is a
+   * far worse failure than showing one handout too many.
+   *
+   * Two indexed reads: Term.isCurrent, then the UNIQUE (termId, studentId).
+   */
+  private async offeredSubjectIds(tx: TenantTx, studentId: string): Promise<Set<string> | null> {
+    const term = (await tx.term.findFirst({
+      where: { isCurrent: true },
+      select: { id: true },
+    })) as { id: string } | null;
+    if (!term) return null;
+
+    const sel = (await tx.subjectSelection.findFirst({
+      where: { termId: term.id, studentId, status: "APPROVED" },
+      select: { subjectIds: true },
+    })) as { subjectIds: unknown } | null;
+    if (!sel) return null;
+
+    const ids = Array.isArray(sel.subjectIds)
+      ? (sel.subjectIds as unknown[]).filter((x): x is string => typeof x === "string")
+      : [];
+    return ids.length > 0 ? new Set(ids) : null;
+  }
+
+  /**
+   * Content is visible if it is UNTAGGED (general class material — notices,
+   * timetables, anything not owned by one subject) or tagged with a subject the
+   * pupil offers. Untagged must always pass, or turning this on would hide
+   * every existing row: subjectId was optional long before this filter existed.
+   */
+  private offeredSubjectWhere(offered: Set<string> | null): Record<string, unknown> {
+    if (!offered) return {};
+    return { OR: [{ subjectId: null }, { subjectId: { in: [...offered] } }] };
+  }
+
   // --- reads (relationship + approval scoped) -------------------------------
   /**
    * A class's content, optionally narrowed by type or status.
@@ -483,6 +547,13 @@ export class LmsContentService {
       if (!staff) where.status = "PUBLISHED";
       else if (filter.status) where.status = filter.status;
       if (filter.type) where.type = filter.type;
+
+      // Narrow to subjects this pupil actually offers. Applied to the PUPIL
+      // only: a guardian has no selection of their own, and inferring one from
+      // a child would pick the wrong child for a parent with two in the class.
+      if (!staff && p.roles.includes("student")) {
+        Object.assign(where, this.offeredSubjectWhere(await this.offeredSubjectIds(tx, p.userId)));
+      }
 
       const rows = (await tx.lmsContent.findMany({
         where,
@@ -523,8 +594,17 @@ export class LmsContentService {
       const classIds = [...new Set(enrolled.map((e) => e.classId))];
       if (classIds.length === 0) return { outstanding: 0, items: [] };
 
+      // The SAME subject narrowing as the per-class list. This feed is the one a
+      // pupil actually opens, so leaving it out would route every hidden item
+      // straight back to them and make the filter cosmetic.
+      const offered = await this.offeredSubjectIds(tx, p.userId);
+
       const rows = (await tx.lmsContent.findMany({
-        where: { classId: { in: classIds }, status: "PUBLISHED" },
+        where: {
+          classId: { in: classIds },
+          status: "PUBLISHED",
+          ...this.offeredSubjectWhere(offered),
+        },
         orderBy: { createdAt: "desc" },
         take: MY_LEARNING_MAX,
         select: { id: true, classId: true, type: true, title: true, createdAt: true },
@@ -1971,6 +2051,18 @@ export class LmsContentService {
     // Non-staff: must be enrolled/guardian AND the content must be published.
     await this.assertEnrolledOrGuardian(tx, p, row.classId);
     if (row.status !== "PUBLISHED") throw new NotFoundException("Content not found");
+
+    // ...and a PUPIL must offer the subject it is tagged with. This is the
+    // choke point the item read, the PDF download and the quiz endpoints all
+    // pass through, so the rule lives here once rather than in three places —
+    // otherwise hiding a row from the list while still serving it by id would
+    // make the filter cosmetic for anyone holding a link.
+    // 404, not 403: the existing convention, and it says nothing about whether
+    // the material exists.
+    if (row.subjectId && p.roles.includes("student")) {
+      const offered = await this.offeredSubjectIds(tx, p.userId);
+      if (offered && !offered.has(row.subjectId)) throw new NotFoundException("Content not found");
+    }
     return false;
   }
 

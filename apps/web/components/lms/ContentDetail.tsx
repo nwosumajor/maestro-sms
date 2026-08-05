@@ -21,6 +21,9 @@ import type {
   Serialized,
 } from "@sms/types";
 import * as React from "react";
+
+/** Mirrors the server cap; the server re-checks both type and size. */
+const MAX_MATERIAL_BYTES = 25 * 1024 * 1024;
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -84,7 +87,13 @@ export function ContentDetail({
         {body.kind === "LESSON" && <LessonBlocks blocks={body.blocks} />}
 
         {body.kind === "MATERIAL" && (
-          <MaterialView contentId={content.id} description={body.description ?? null} fileName={content.fileName} />
+          <MaterialView
+            contentId={content.id}
+            description={body.description ?? null}
+            fileName={content.fileName}
+            isStaff={isStaff}
+            locked={content.status !== "DRAFT" && content.status !== "REVISION_REQUESTED"}
+          />
         )}
 
         {body.kind === "QUIZ" && (
@@ -316,12 +325,19 @@ function MaterialView({
   contentId,
   description,
   fileName,
+  isStaff,
+  locked,
 }: {
   contentId: string;
   description: string | null;
   fileName: string | null;
+  isStaff: boolean;
+  locked: boolean;
 }) {
+  const [name, setName] = React.useState(fileName);
+  const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
+  const inputRef = React.useRef<HTMLInputElement>(null);
 
   const download = async () => {
     const r = await post<{ url: string }>(`/content/${contentId}/download`);
@@ -329,15 +345,78 @@ function MaterialView({
     else setMsg(r.error ?? "No file available.");
   };
 
+  // presign -> PUT the bytes straight to storage -> confirm. Same three steps
+  // as the Document Vault and the submission uploader; the bytes never pass
+  // through the API. The endpoints existed already and nothing called them, so
+  // a teacher could not attach a PDF at all.
+  const onPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const clear = () => { if (inputRef.current) inputRef.current.value = ""; };
+    if (file.type !== "application/pdf") {
+      setMsg("Please choose a PDF — that is what pupils can open in the browser.");
+      clear();
+      return;
+    }
+    if (file.size > MAX_MATERIAL_BYTES) {
+      setMsg(`That file is ${(file.size / 1024 / 1024).toFixed(1)} MB. The limit is ${MAX_MATERIAL_BYTES / 1024 / 1024} MB.`);
+      clear();
+      return;
+    }
+    setBusy(true);
+    setMsg(null);
+    try {
+      const pres = await post<{ url: string }>(`/content/${contentId}/upload`, {
+        fileName: file.name,
+        contentType: file.type,
+        sizeBytes: file.size,
+      });
+      if (!pres.ok || !pres.data?.url) throw new Error(pres.error ?? "Could not start the upload.");
+      const put = await fetch(pres.data.url, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
+      if (!put.ok) throw new Error(`The file did not reach storage (${put.status}).`);
+      const conf = await post(`/content/${contentId}/upload/confirm`);
+      if (!conf.ok) throw new Error(conf.error ?? "Uploaded, but confirming it failed.");
+      setName(file.name);
+      setMsg("Attached. Pupils see it once this material is published.");
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : "Upload failed.");
+    } finally {
+      setBusy(false);
+      clear();
+    }
+  };
+
   return (
     <div className="space-y-3">
       {description && <p className="text-sm">{description}</p>}
-      {fileName ? (
+      {name ? (
         <Button size="sm" onClick={download}>
-          Download {fileName}
+          Download {name}
         </Button>
       ) : (
-        <p className="text-sm text-muted-foreground">No file attached yet.</p>
+        <p className="text-sm text-muted-foreground">
+          {isStaff ? "No PDF attached yet." : "No file attached yet."}
+        </p>
+      )}
+
+      {/* Staff only, and only while the material can still be edited — after
+          submission it is awaiting approval, and swapping the file underneath a
+          reviewer would mean they approved something else. */}
+      {isStaff && (
+        <div className="rounded-md border border-border p-3">
+          <p className="text-sm font-medium">{name ? "Replace the PDF" : "Attach a PDF for pupils to read"}</p>
+          <p className="text-xs text-muted-foreground">
+            {locked
+              ? "Locked while this is awaiting approval. Request a revision to change it."
+              : `PDF only, up to ${MAX_MATERIAL_BYTES / 1024 / 1024} MB. Pupils taking this subject can open it once published.`}
+          </p>
+          <div className="mt-2 flex items-center gap-2">
+            <input ref={inputRef} type="file" accept="application/pdf" className="hidden" onChange={onPick} disabled={busy || locked} />
+            <Button type="button" size="sm" variant="outline" disabled={busy || locked} onClick={() => inputRef.current?.click()}>
+              {busy ? "Uploading…" : name ? "Choose a different PDF" : "Choose PDF"}
+            </Button>
+          </div>
+        </div>
       )}
       {msg && <p className="text-sm text-muted-foreground">{msg}</p>}
     </div>
