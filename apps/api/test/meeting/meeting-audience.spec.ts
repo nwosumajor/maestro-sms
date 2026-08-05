@@ -1,0 +1,226 @@
+// =============================================================================
+// Meeting audience — who a meeting is FOR
+// =============================================================================
+// The page modelled one thing: a bookable 1:1 slot, and every parent in the
+// school saw every open slot with nothing saying which were meant for them. A
+// principal calling a year-group meeting could not express it at all.
+//
+// The fix is one field, not a second model. What these defend:
+//
+//   • a parent sees only what their family is invited to
+//   • a teacher cannot summon a year group or the school
+//   • the audience RULE is stored, so it stays current as pupils come and go
+//   • nothing fans out to compute a list on a page render
+
+import { describeAudience, meetingAudienceProblem } from "@sms/types";
+
+describe("meetingAudienceProblem", () => {
+  it("accepts each of the four shapes", () => {
+    expect(meetingAudienceProblem({ kind: "SCHOOL", ref: null })).toBeNull();
+    expect(meetingAudienceProblem({ kind: "STAGE", ref: "SENIOR_SECONDARY" })).toBeNull();
+    expect(meetingAudienceProblem({ kind: "CLASS", ref: "c-1" })).toBeNull();
+    expect(meetingAudienceProblem({ kind: "STUDENT", ref: "s-1" })).toBeNull();
+  });
+
+  it("refuses a targeted audience with NO target", () => {
+    // The dangerous direction: a null ref would silently widen the invitation to
+    // everybody, which is the one mistake that must not be expressible.
+    expect(meetingAudienceProblem({ kind: "CLASS", ref: null })).toMatch(/needs a class/);
+    expect(meetingAudienceProblem({ kind: "STAGE", ref: null })).toMatch(/needs a year group/);
+    expect(meetingAudienceProblem({ kind: "STUDENT", ref: null })).toMatch(/needs a student/);
+  });
+
+  it("refuses a whole-school meeting that also names a class", () => {
+    // Two audiences in one row: which one is it? Refusing beats picking.
+    expect(meetingAudienceProblem({ kind: "SCHOOL", ref: "c-1" })).toMatch(/takes no class or pupil/);
+  });
+
+  it("refuses an unknown kind", () => {
+    expect(meetingAudienceProblem({ kind: "EVERYONE" as never, ref: null })).toMatch(/must be one of/);
+  });
+});
+
+describe("describeAudience", () => {
+  it("names the audience the way a parent would read it", () => {
+    expect(describeAudience({ kind: "SCHOOL", ref: null })).toBe("All parents in the school");
+    expect(describeAudience({ kind: "CLASS", ref: "c" }, { class: "JSS2" })).toBe("All JSS2 parents");
+    expect(describeAudience({ kind: "STAGE", ref: "s" }, { stage: "Senior Secondary" })).toBe("All Senior Secondary parents");
+    expect(describeAudience({ kind: "STUDENT", ref: "s" }, { student: "Amara" })).toBe("Amara's parents");
+  });
+
+  it("degrades to a generic label rather than showing a raw id", () => {
+    // A screen that has not loaded the class name must not print a uuid at a
+    // parent, and must not claim the wrong scope either.
+    expect(describeAudience({ kind: "CLASS", ref: "c-1" })).toBe("One class's parents");
+    expect(describeAudience({ kind: "STAGE", ref: "SENIOR_SECONDARY" })).toBe("One year group's parents");
+    expect(describeAudience({ kind: "STUDENT", ref: "s-1" })).toBe("One pupil's parents");
+  });
+
+  it("never leaks the ref into the label", () => {
+    for (const kind of ["STUDENT", "CLASS", "STAGE", "SCHOOL"] as const) {
+      expect(describeAudience({ kind, ref: "SECRET-ID" })).not.toContain("SECRET-ID");
+    }
+  });
+});
+
+// -----------------------------------------------------------------------------
+
+import { MeetingService } from "../../src/meeting/meeting.service";
+import type { Principal, TenantContext, TenantTx } from "../../src/integrity/integrity.foundation";
+
+const teacher: Principal = { schoolId: "A", userId: "t1", roles: ["teacher"], permissions: ["meeting.host"] };
+const principal: Principal = { schoolId: "A", userId: "p1", roles: ["principal"], permissions: ["meeting.host"] };
+const parent: Principal = { schoolId: "A", userId: "par1", roles: ["parent"], permissions: ["meeting.book"] };
+
+function harness(opts: {
+  ownsClass?: boolean;
+  children?: string[];
+  classes?: string[];
+  stages?: Array<string | null>;
+} = {}) {
+  const created: Array<Record<string, unknown>> = [];
+  let slotWhere: Record<string, unknown> | null = null;
+  const tx = {
+    class: {
+      findFirst: jest.fn(({ where }: { where: Record<string, unknown> }) =>
+        Promise.resolve(where.supervisorId ? (opts.ownsClass ? { id: "c1" } : null) : { id: "c1" }),
+      ),
+      findMany: jest.fn().mockResolvedValue((opts.stages ?? []).map((stage) => ({ stage }))),
+    },
+    classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue(opts.ownsClass ? { id: "o" } : null) },
+    user: { findFirst: jest.fn().mockResolvedValue({ id: "s1", name: "Pupil" }), findMany: jest.fn().mockResolvedValue([]) },
+    parentChild: { findMany: jest.fn().mockResolvedValue((opts.children ?? []).map((studentId) => ({ studentId }))) },
+    enrollment: { findMany: jest.fn().mockResolvedValue((opts.classes ?? []).map((classId) => ({ classId }))) },
+    meetingSlot: {
+      create: jest.fn(({ data }: { data: Record<string, unknown> }) => {
+        created.push(data);
+        return Promise.resolve({ id: "sl1", ...data, provider: null, joinUrl: null, active: true, booked: 0 });
+      }),
+      findMany: jest.fn(({ where }: { where: Record<string, unknown> }) => {
+        slotWhere = where;
+        return Promise.resolve([]);
+      }),
+    },
+    meetingBooking: { groupBy: jest.fn().mockResolvedValue([]), count: jest.fn().mockResolvedValue(0) },
+  } as unknown as TenantTx;
+  const db = {
+    runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
+    runAsTenantReadOnly: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
+  };
+  const audit = { record: jest.fn().mockResolvedValue(undefined) };
+  return { svc: new MeetingService(db as never, audit as never, undefined as never), created, where: () => slotWhere };
+}
+
+const WHEN = { startsAt: "2027-03-01T09:00:00Z", endsAt: "2027-03-01T09:30:00Z" };
+
+describe("who may summon whom", () => {
+  it("lets a principal call a whole-school meeting", async () => {
+    const { svc, created } = harness();
+    await svc.createSlot(principal, { ...WHEN, audience: { kind: "SCHOOL", ref: null } });
+    expect(created[0]).toMatchObject({ audienceKind: "SCHOOL", audienceRef: null });
+  });
+
+  it("REFUSES a teacher calling the whole school", async () => {
+    // The dropdown must not be the control. A teacher changing a select box
+    // cannot summon every parent in the school.
+    const { svc, created } = harness();
+    await expect(svc.createSlot(teacher, { ...WHEN, audience: { kind: "SCHOOL", ref: null } }))
+      .rejects.toThrow(/principal or school administrator/i);
+    expect(created).toHaveLength(0);
+  });
+
+  it("REFUSES a teacher calling a year group", async () => {
+    const { svc } = harness();
+    await expect(svc.createSlot(teacher, { ...WHEN, audience: { kind: "STAGE", ref: "SENIOR_SECONDARY" } }))
+      .rejects.toThrow(/principal or school administrator/i);
+  });
+
+  it("lets a teacher call the parents of a class they teach", async () => {
+    const { svc, created } = harness({ ownsClass: true });
+    await svc.createSlot(teacher, { ...WHEN, audience: { kind: "CLASS", ref: "c1" } });
+    expect(created[0]).toMatchObject({ audienceKind: "CLASS", audienceRef: "c1" });
+  });
+
+  it("404s a teacher calling a class they have nothing to do with", async () => {
+    const { svc, created } = harness({ ownsClass: false });
+    await expect(svc.createSlot(teacher, { ...WHEN, audience: { kind: "CLASS", ref: "c9" } }))
+      .rejects.toThrow(/not found/i);
+    expect(created).toHaveLength(0);
+  });
+
+  it("refuses a year group that is not one of the four", async () => {
+    // A typo'd stage would produce a meeting nobody is invited to, which looks
+    // exactly like one nobody has booked.
+    const { svc } = harness();
+    await expect(svc.createSlot(principal, { ...WHEN, audience: { kind: "STAGE", ref: "SS3" } }))
+      .rejects.toThrow(/Year group must be one of/);
+  });
+
+  it("defaults to SCHOOL when no audience is given, as every old slot was", async () => {
+    const { svc, created } = harness();
+    await svc.createSlot(principal, WHEN);
+    expect(created[0]).toMatchObject({ audienceKind: "SCHOOL", audienceRef: null });
+  });
+
+  it("lets a TEACHER open a plain slot with no audience — offering availability is not summoning anyone", async () => {
+    // The distinction the first version of this rule blurred: an open bookable
+    // slot invites nobody, parents find it. Refusing it would have broken every
+    // teacher's existing workflow.
+    const { svc, created } = harness();
+    await svc.createSlot(teacher, WHEN);
+    expect(created[0]).toMatchObject({ audienceKind: "SCHOOL" });
+  });
+});
+
+describe("capacity follows the audience", () => {
+  it("caps a 1:1 appointment at 5, however large a number is sent", async () => {
+    const { svc, created } = harness();
+    await svc.createSlot(principal, { ...WHEN, capacity: 900, audience: { kind: "STUDENT", ref: "s1" } });
+    expect(created[0].capacity).toBe(5);
+  });
+
+  it("lets a school briefing hold a room", async () => {
+    // The old flat cap of 30 made a whole-school meeting unrepresentable.
+    const { svc, created } = harness();
+    await svc.createSlot(principal, { ...WHEN, capacity: 800, audience: { kind: "SCHOOL", ref: null } });
+    expect(created[0].capacity).toBe(800);
+  });
+});
+
+describe("a parent sees only what their family is invited to", () => {
+  it("asks for THEIR children, classes and year groups — plus school-wide", async () => {
+    const { svc, where } = harness({ children: ["kid1"], classes: ["c1"], stages: ["SENIOR_SECONDARY"] });
+    await svc.openSlots(parent);
+    const or = (where()?.OR ?? []) as Array<Record<string, unknown>>;
+    expect(or).toEqual(
+      expect.arrayContaining([
+        { audienceKind: "SCHOOL" },
+        { audienceKind: "STUDENT", audienceRef: { in: ["kid1"] } },
+        { audienceKind: "CLASS", audienceRef: { in: ["c1"] } },
+        { audienceKind: "STAGE", audienceRef: { in: ["SENIOR_SECONDARY"] } },
+      ]),
+    );
+  });
+
+  it("never widens to every slot in the school", async () => {
+    // The old behaviour: no OR at all, so a parent saw every teacher's slots.
+    const { svc, where } = harness({ children: ["kid1"], classes: ["c1"] });
+    await svc.openSlots(parent);
+    expect(where()?.OR).toBeDefined();
+  });
+
+  it("still shows school-wide meetings to a parent with no enrolled child", async () => {
+    // A newly-registered parent must not be cut off from a PTA notice.
+    const { svc, where } = harness({ children: [], classes: [] });
+    await svc.openSlots(parent);
+    expect(where()?.OR).toEqual([{ audienceKind: "SCHOOL" }]);
+  });
+
+  it("drops classes with NO year group rather than matching every stage", async () => {
+    // An ungrouped class must not be swept into a year-group meeting.
+    const { svc, where } = harness({ children: ["kid1"], classes: ["c1"], stages: [null] });
+    await svc.openSlots(parent);
+    const or = (where()?.OR ?? []) as Array<Record<string, unknown>>;
+    expect(or.some((c) => c.audienceKind === "STAGE")).toBe(false);
+  });
+});

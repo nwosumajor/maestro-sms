@@ -1,5 +1,11 @@
 /** A parent-teacher appointment slot (with current booking count). */
 export interface MeetingSlotDto {
+  /** WHO the meeting is for, and a ready-made label for it. The label is built
+   *  server-side because only the server has the class and pupil names, and
+   *  three screens would otherwise each build their own wording. */
+  audienceKind: string;
+  audienceRef: string | null;
+  audienceLabel: string;
   id: string;
   teacherId: string;
   teacherName: string | null;

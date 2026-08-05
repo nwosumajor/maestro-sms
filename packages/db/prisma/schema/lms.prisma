@@ -21,6 +21,12 @@ model Class {
   /// Ordering within the school's progression (e.g. JSS1=1, JSS2=2). Drives the
   /// "promote to the next class" flow together with nextClassId.
   level        Int?
+  /// The year group this class belongs to: PRE_PRIMARY | PRIMARY |
+  /// JUNIOR_SECONDARY | SENIOR_SECONDARY (the SUBJECT_STAGES vocabulary the
+  /// subject catalogue already uses — one word for a year group across the
+  /// product). Null = ungrouped; such a class is never swept up by a year-group
+  /// meeting, which is the safe direction.
+  stage        String?
   /// The class students promote INTO at end of session. Null = final/terminal
   /// class (promotion graduates instead of moving). Self-relation within a school.
   nextClassId  String?  @db.Uuid

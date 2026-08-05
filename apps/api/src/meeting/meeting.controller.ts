@@ -13,7 +13,17 @@ const slotSchema = z.object({
   teacherId: z.string().uuid().optional(),
   startsAt: z.string().datetime(),
   endsAt: z.string().datetime(),
-  capacity: z.number().int().min(1).max(30).optional(),
+  // Ceiling raised for briefings; the SERVICE narrows it by audience (5 for a
+  // 1:1 appointment, 2000 for a year group or the school), so the boundary
+  // rejects nonsense and the service owns the rule.
+  capacity: z.number().int().min(1).max(2000).optional(),
+  /** WHO it is for. Omitted = SCHOOL, which is what every slot was before. */
+  audience: z
+    .object({
+      kind: z.enum(["STUDENT", "CLASS", "STAGE", "SCHOOL"]),
+      ref: z.string().max(40).nullish(),
+    })
+    .optional(),
   location: z.string().max(200).optional(),
   note: z.string().max(500).optional(),
   // Optional VIDEO meeting. The URL is re-validated server-side (https +
@@ -38,13 +48,26 @@ export class MeetingController {
     return this.meetings.mySlots(p);
   }
 
+
+  /** The audiences this host may address. Drives the picker; the create
+   *  endpoint re-checks, so this is convenience, never the control. */
+  @Get("audiences")
+  @RequirePermission(MEETING_PERMISSIONS.MEETING_HOST)
+  audiences(@CurrentPrincipal() p: Principal) {
+    return this.meetings.audienceChoices(p);
+  }
   @Post("slots")
   @RequirePermission(MEETING_PERMISSIONS.MEETING_HOST)
   createSlot(
     @CurrentPrincipal() p: Principal,
     @Body(new ZodValidationPipe(slotSchema)) body: z.infer<typeof slotSchema>,
   ): Promise<MeetingSlotDto> {
-    return this.meetings.createSlot(p, body);
+    return this.meetings.createSlot(p, {
+      ...body,
+      // Zod gives `ref?: string | null | undefined`; the service's contract is
+      // `string | null`, and SCHOOL legitimately has none.
+      audience: body.audience ? { kind: body.audience.kind, ref: body.audience.ref ?? null } : undefined,
+    });
   }
 
   @Delete("slots/:id")

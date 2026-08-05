@@ -3076,6 +3076,10 @@
     "PUT /academic/grading-policy": {
       "kind": "ui",
       "note": "reviewed: the Use-this-scale and weight-preset buttons in components/lms/GradingPolicyCard.tsx"
+    },
+    "GET /meetings/audiences": {
+      "kind": "ui",
+      "note": "reviewed: app/(app)/meetings/page.tsx loads the host's addressable scopes for the MeetingsClient picker"
     }
   }
 }

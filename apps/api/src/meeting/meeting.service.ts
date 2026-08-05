@@ -11,7 +11,13 @@
 
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { MeetingSlotDto, MeetingBookingDto } from "@sms/types";
-import { MEETING_PROVIDERS, isMeetingJoinOpen, meetingJoinOpensAt, normalizeMeetingUrl } from "@sms/types";
+import { MEETING_PROVIDERS, isMeetingJoinOpen, meetingJoinOpensAt, normalizeMeetingUrl,
+  SUBJECT_STAGES,
+  meetingAudienceProblem,
+  type MeetingAudience,
+  describeAudience,
+  type MeetingAudienceKind,
+} from "@sms/types";
 import type { MeetingProvider } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -23,6 +29,13 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 import { NotificationService } from "../notifications/notification.service";
+
+const STAGE_LABELS: Record<string, string> = {
+  PRE_PRIMARY: "Pre-primary",
+  PRIMARY: "Primary",
+  JUNIOR_SECONDARY: "Junior Secondary",
+  SENIOR_SECONDARY: "Senior Secondary",
+};
 
 const STAFF_WIDE = new Set(["school_admin", "principal"]);
 
@@ -41,9 +54,104 @@ export class MeetingService {
   // --- teacher: manage slots --------------------------------------------------
 
   /** Open a slot. A teacher opens their OWN; staff-wide may open for any teacher. */
+  /**
+   * The pupil, class or year group named by an audience must EXIST and be
+   * something this host may address.
+   *
+   * Without this a typo'd uuid produces a meeting nobody is invited to — which
+   * looks identical to one nobody has booked, and would be discovered by an
+   * empty room.
+   */
+  private async assertAudienceExists(
+    tx: TenantTx,
+    p: Principal,
+    a: MeetingAudience,
+    staffWide: boolean,
+  ): Promise<void> {
+    if (a.kind === "SCHOOL") return;
+    if (a.kind === "STAGE") {
+      if (!(SUBJECT_STAGES as readonly string[]).includes(a.ref!)) {
+        throw new BadRequestException(`Year group must be one of ${SUBJECT_STAGES.join(", ")}`);
+      }
+      return;
+    }
+    if (a.kind === "CLASS") {
+      const klass = await tx.class.findFirst({ where: { id: a.ref! }, select: { id: true } });
+      if (!klass) throw new NotFoundException("Class not found");
+      if (staffWide) return;
+      // A teacher may call their OWN class's parents together — the class they
+      // supervise or teach a subject to — and no other.
+      const [supervises, teaches] = await Promise.all([
+        tx.class.findFirst({ where: { id: a.ref!, supervisorId: p.userId }, select: { id: true } }),
+        tx.classSubjectTeacher.findFirst({ where: { classId: a.ref!, teacherId: p.userId }, select: { id: true } }),
+      ]);
+      if (!supervises && !teaches) throw new NotFoundException("Class not found");
+      return;
+    }
+    // STUDENT: the pupil must exist. Any teacher may offer an appointment about
+    // any pupil they are asked about, so this checks existence, not membership.
+    const student = await tx.user.findFirst({ where: { id: a.ref! }, select: { id: true } });
+    if (!student) throw new NotFoundException("Student not found");
+  }
+
+  /**
+   * The audiences THIS host may address.
+   *
+   * Served rather than hard-coded in the UI so the picker can never offer a
+   * scope the server would refuse — the authorization rule lives in one place
+   * and the screen renders whatever it is given. A teacher gets their own
+   * classes; leadership additionally gets the year groups and the school.
+   */
+  async audienceChoices(p: Principal): Promise<Array<{ kind: string; ref: string | null; label: string }>> {
+    const staffWide = p.roles.some((r) => STAFF_WIDE.has(r));
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      const classes = staffWide
+        ? ((await tx.class.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true }, take: 200 })) as Array<{ id: string; name: string }>)
+        : await (async () => {
+            const [supervised, taught] = await Promise.all([
+              tx.class.findMany({ where: { supervisorId: p.userId }, select: { id: true, name: true } }),
+              tx.classSubjectTeacher.findMany({ where: { teacherId: p.userId }, select: { classId: true } }),
+            ]);
+            const ids = [...new Set((taught as Array<{ classId: string }>).map((t) => t.classId))];
+            const extra = ids.length
+              ? ((await tx.class.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } })) as Array<{ id: string; name: string }>)
+              : [];
+            const seen = new Map<string, string>();
+            for (const c of [...(supervised as Array<{ id: string; name: string }>), ...extra]) seen.set(c.id, c.name);
+            return [...seen].map(([id, name]) => ({ id, name }));
+          })();
+
+      // Which year groups this school actually USES. Offering all four to a
+      // primary school invites a meeting with no one in it.
+      const stagesInUse = staffWide
+        ? [
+            ...new Set(
+              ((await tx.class.findMany({ select: { stage: true } })) as Array<{ stage: string | null }>)
+                .map((c) => c.stage)
+                .filter((x): x is string => !!x),
+            ),
+          ]
+        : [];
+
+      return [
+        // A 1:1 appointment first: it is the common case and the safest default,
+        // which is why it is index 0 in the picker.
+        { kind: "STUDENT", ref: null, label: "One pupil (appointment)" },
+        ...classes.map((c) => ({ kind: "CLASS", ref: c.id, label: `All ${c.name} parents` })),
+        ...stagesInUse.map((st) => ({ kind: "STAGE", ref: st, label: `All ${STAGE_LABELS[st] ?? st} parents` })),
+        ...(staffWide ? [{ kind: "SCHOOL", ref: null, label: "All parents in the school" }] : []),
+      ];
+    });
+  }
+
   async createSlot(
     p: Principal,
-    input: { teacherId?: string; startsAt: string; endsAt: string; capacity?: number; location?: string; note?: string; provider?: string | null; joinUrl?: string | null },
+    input: {
+      teacherId?: string; startsAt: string; endsAt: string; capacity?: number; location?: string;
+      note?: string; provider?: string | null; joinUrl?: string | null;
+      /** Who it is for. Omitted = SCHOOL, which is what every slot was before. */
+      audience?: MeetingAudience;
+    },
   ): Promise<MeetingSlotDto> {
     const staffWide = p.roles.some((r) => STAFF_WIDE.has(r));
     const teacherId = input.teacherId && staffWide ? input.teacherId : p.userId;
@@ -55,14 +163,38 @@ export class MeetingService {
     // Validate the optional video link BEFORE opening a transaction: an invalid
     // URL is a client error, not a half-written slot.
     const link = this.validateLink(input.provider, input.joinUrl);
+
+    // An OMITTED audience keeps the old behaviour exactly: an open slot any
+    // parent may find and book. That is not the same act as calling a meeting,
+    // and conflating the two is what broke the existing tests — a teacher
+    // offering availability is not summoning the school.
+    const declared = input.audience;
+    const audience: MeetingAudience = declared ?? { kind: "SCHOOL", ref: null };
+    const audienceProblem = meetingAudienceProblem(audience);
+    if (audienceProblem) throw new BadRequestException(audienceProblem);
+    // WHO MAY SUMMON WHOM. Choosing to address a year group or the whole school
+    // is a leadership act, and one a teacher must not be able to perform by
+    // changing a dropdown. It bites on a DECLARED audience only: passing nothing
+    // means "I did not choose a scope", never "I chose everyone".
+    if (declared && (declared.kind === "STAGE" || declared.kind === "SCHOOL") && !staffWide) {
+      throw new ForbiddenException(
+        "Only a principal or school administrator can call a year-group or whole-school meeting.",
+      );
+    }
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      await this.assertAudienceExists(tx, p, audience, staffWide);
       const row = await tx.meetingSlot.create({
         data: {
           schoolId: p.schoolId,
           teacherId,
           startsAt,
           endsAt,
-          capacity: Math.max(1, Math.min(input.capacity ?? 1, 30)),
+          // A 1:1 appointment is capacity 1; a year-group or school briefing is
+          // a room, so the ceiling follows the audience rather than a single
+          // number that is wrong for one of them.
+          capacity: Math.max(1, Math.min(input.capacity ?? 1, audience.kind === "STUDENT" ? 5 : 2000)),
+          audienceKind: audience.kind,
+          audienceRef: audience.ref,
           location: input.location ?? null,
           note: input.note ?? null,
           provider: link.provider,
@@ -107,25 +239,77 @@ export class MeetingService {
       });
       const counts = await this.bookingCounts(tx, slots.map((s: { id: string }) => s.id));
       const teacherNames = await this.userNames(tx, slots.map((s: { teacherId: string }) => s.teacherId));
-      return slots.map((s: SlotRow) => this.toSlotDto(s, counts.get(s.id) ?? 0, null, teacherNames.get(s.teacherId)));
+      const namesFor = await this.audienceNamesFor(tx, slots as SlotRow[]);
+      return slots.map((s: SlotRow) => this.toSlotDto(s, counts.get(s.id) ?? 0, p, teacherNames.get(s.teacherId), namesFor(s)));
     });
   }
 
   // --- parent: browse + book --------------------------------------------------
 
   /** Open slots a parent can book (future, active, not full). Teacher optional. */
+  /**
+   * The meetings THIS family is invited to.
+   *
+   * It used to return every open slot in the school, which is why the page read
+   * as ambiguous: a parent saw a maths teacher's slots for a class their child
+   * is not in, with nothing saying which were meant for them.
+   *
+   * The filter runs FROM the family OUTWARDS — the caller's children, their
+   * classes, those classes' year groups — and asks for slots matching any of
+   * those, plus the whole-school ones. That is three small lookups bounded by
+   * how many children this parent has, then ONE indexed query.
+   *
+   * It deliberately never resolves the other direction. "Who is invited to the
+   * whole-school meeting" is thousands of guardians, and a page that computed
+   * it on every render is the lag this design exists to avoid — nothing fans
+   * out until a notification is actually sent.
+   */
   async openSlots(p: Principal, teacherId?: string): Promise<MeetingSlotDto[]> {
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      const children = (await tx.parentChild.findMany({
+        where: { parentId: p.userId },
+        select: { studentId: true },
+      })) as Array<{ studentId: string }>;
+      const studentIds = children.map((c) => c.studentId);
+      const enrolments = studentIds.length
+        ? ((await tx.enrollment.findMany({
+            where: { studentId: { in: studentIds }, status: "ACTIVE" },
+            select: { classId: true },
+          })) as Array<{ classId: string }>)
+        : [];
+      const classIds = [...new Set(enrolments.map((e) => e.classId))];
+      const stages = classIds.length
+        ? ((await tx.class.findMany({
+            where: { id: { in: classIds } },
+            select: { stage: true },
+          })) as Array<{ stage: string | null }>)
+            .map((c) => c.stage)
+            .filter((x): x is string => !!x)
+        : [];
+
+      const audienceFilter = [
+        { audienceKind: "SCHOOL" },
+        ...(studentIds.length ? [{ audienceKind: "STUDENT", audienceRef: { in: studentIds } }] : []),
+        ...(classIds.length ? [{ audienceKind: "CLASS", audienceRef: { in: classIds } }] : []),
+        ...(stages.length ? [{ audienceKind: "STAGE", audienceRef: { in: [...new Set(stages)] } }] : []),
+      ];
+
       const slots = await tx.meetingSlot.findMany({
-        where: { active: true, startsAt: { gte: new Date() }, ...(teacherId ? { teacherId } : {}) },
+        where: {
+          active: true,
+          startsAt: { gte: new Date() },
+          ...(teacherId ? { teacherId } : {}),
+          OR: audienceFilter,
+        },
         orderBy: { startsAt: "asc" },
         take: 200,
       });
       const counts = await this.bookingCounts(tx, slots.map((s: { id: string }) => s.id));
       const teacherNames = await this.userNames(tx, slots.map((s: { teacherId: string }) => s.teacherId));
+      const namesFor = await this.audienceNamesFor(tx, slots as SlotRow[]);
       return slots
         .filter((s: SlotRow) => (counts.get(s.id) ?? 0) < s.capacity)
-        .map((s: SlotRow) => this.toSlotDto(s, counts.get(s.id) ?? 0, null, teacherNames.get(s.teacherId)));
+        .map((s: SlotRow) => this.toSlotDto(s, counts.get(s.id) ?? 0, null, teacherNames.get(s.teacherId), namesFor(s)));
     });
   }
 
@@ -257,7 +441,41 @@ export class MeetingService {
     return { provider: provider as string, joinUrl: url };
   }
 
-  private toSlotDto(s: SlotRow, booked: number, p: Principal | null, teacherName?: string): MeetingSlotDto {
+  /**
+   * Names for the audience labels of a page of slots.
+   *
+   * Two bounded lookups keyed on the DISTINCT refs actually present — not one
+   * per slot, and never a resolution of who is in the audience. A stage needs no
+   * lookup at all; it is a static label.
+   */
+  private async audienceNamesFor(tx: TenantTx, slots: SlotRow[]) {
+    const classIds = [...new Set(slots.filter((s) => s.audienceKind === "CLASS" && s.audienceRef).map((s) => s.audienceRef!))];
+    const studentIds = [...new Set(slots.filter((s) => s.audienceKind === "STUDENT" && s.audienceRef).map((s) => s.audienceRef!))];
+    const [classes, students] = await Promise.all([
+      classIds.length
+        ? (tx.class.findMany({ where: { id: { in: classIds } }, select: { id: true, name: true } }) as Promise<Array<{ id: string; name: string }>>)
+        : Promise.resolve([] as Array<{ id: string; name: string }>),
+      studentIds.length
+        ? (tx.user.findMany({ where: { id: { in: studentIds } }, select: { id: true, name: true } }) as Promise<Array<{ id: string; name: string }>>)
+        : Promise.resolve([] as Array<{ id: string; name: string }>),
+    ]);
+    const classBy = new Map(classes.map((c) => [c.id, c.name]));
+    const studentBy = new Map(students.map((u) => [u.id, u.name]));
+    return (s: SlotRow) => ({
+      class: s.audienceRef ? classBy.get(s.audienceRef) ?? null : null,
+      student: s.audienceRef ? studentBy.get(s.audienceRef) ?? null : null,
+      stage: s.audienceRef ? STAGE_LABELS[s.audienceRef] ?? null : null,
+    });
+  }
+
+  private toSlotDto(
+    s: SlotRow,
+    booked: number,
+    p: Principal | null,
+    teacherName?: string,
+    /** Names for the audience label. Absent = a generic label, never a wrong one. */
+    audienceNames?: { student?: string | null; class?: string | null; stage?: string | null },
+  ): MeetingSlotDto {
     // SECURITY: the join link is released only inside the server-computed window
     // (15 min before -> 30 min after), so a link that leaks early is unusable.
     // The HOST always sees their own link — they created it and need it to hand
@@ -275,6 +493,14 @@ export class MeetingService {
       location: s.location,
       note: s.note,
       active: s.active,
+      audienceKind: s.audienceKind ?? "SCHOOL",
+      audienceRef: s.audienceRef ?? null,
+      // Built here, once, rather than in each of the three screens that show a
+      // slot — otherwise "All JSS2 parents" is worded three different ways.
+      audienceLabel: describeAudience(
+        { kind: (s.audienceKind ?? "SCHOOL") as MeetingAudienceKind, ref: s.audienceRef ?? null },
+        audienceNames ?? {},
+      ),
       provider: s.provider ?? null,
       /** Null until the window opens (or unless you are the host). */
       joinUrl: s.joinUrl ? (open || isHost ? s.joinUrl : null) : null,
@@ -298,5 +524,5 @@ export class MeetingService {
   }
 }
 
-type SlotRow = { id: string; teacherId: string; startsAt: Date; endsAt: Date; capacity: number; location: string | null; note: string | null; active: boolean; provider: string | null; joinUrl: string | null };
+type SlotRow = { id: string; teacherId: string; startsAt: Date; endsAt: Date; capacity: number; location: string | null; note: string | null; active: boolean; provider: string | null; joinUrl: string | null; audienceKind?: string | null; audienceRef?: string | null };
 type BookingRow = { id: string; slotId: string; studentId: string; status: string; note: string | null; slot?: { startsAt: Date; teacherId: string; location: string | null } };
