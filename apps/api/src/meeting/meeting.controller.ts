@@ -20,10 +20,13 @@ const slotSchema = z.object({
   /** WHO it is for. Omitted = SCHOOL, which is what every slot was before. */
   audience: z
     .object({
-      kind: z.enum(["STUDENT", "CLASS", "STAGE", "SCHOOL"]),
+      kind: z.enum(["STUDENT", "SELECTED", "CLASS", "STAGE", "SCHOOL"]),
       ref: z.string().max(40).nullish(),
     })
     .optional(),
+  /** For a SELECTED audience: the parents to invite. Bounded here AND in the
+   *  service — the boundary rejects nonsense, the service owns the rule. */
+  inviteeIds: z.array(z.string().uuid()).max(500).optional(),
   location: z.string().max(200).optional(),
   note: z.string().max(500).optional(),
   // Optional VIDEO meeting. The URL is re-validated server-side (https +

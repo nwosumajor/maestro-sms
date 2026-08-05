@@ -17,6 +17,7 @@ import { MEETING_PROVIDERS, isMeetingJoinOpen, meetingJoinOpensAt, normalizeMeet
   type MeetingAudience,
   describeAudience,
   type MeetingAudienceKind,
+  isAppointment,
 } from "@sms/types";
 import type { MeetingProvider } from "@sms/types";
 import {
@@ -77,7 +78,10 @@ export class MeetingService {
     // prove it exists, so making the label cost a second query would be waste.
   ): Promise<{ className: string | null; studentName: string | null }> {
     const none = { className: null, studentName: null };
-    if (a.kind === "SCHOOL") return none;
+    // SCHOOL names nothing. SELECTED names nothing HERE either — its people are
+    // validated against parentChild where they are written, not through `ref`.
+    // Falling through to the STUDENT branch made this query `where: { id: null }`.
+    if (a.kind === "SCHOOL" || a.kind === "SELECTED") return none;
     if (a.kind === "STAGE") {
       if (!(SUBJECT_STAGES as readonly string[]).includes(a.ref!)) {
         throw new BadRequestException(`Year group must be one of ${SUBJECT_STAGES.join(", ")}`);
@@ -115,7 +119,16 @@ export class MeetingService {
    * Returns distinct parent ids. A guardian with three children in a year group
    * is told once, not three times.
    */
-  private async resolveAudience(tx: TenantTx, a: MeetingAudience): Promise<string[]> {
+  private async resolveAudience(tx: TenantTx, a: MeetingAudience, slotId?: string): Promise<string[]> {
+    // SELECTED is the one kind whose people are STORED rather than derived —
+    // there is no rule to derive a hand-picked set from.
+    if (a.kind === "SELECTED") {
+      const rows = (await tx.meetingInvitee.findMany({
+        where: { slotId: slotId! },
+        select: { parentId: true },
+      })) as Array<{ parentId: string }>;
+      return [...new Set(rows.map((r) => r.parentId))];
+    }
     let studentIds: string[] | null = null; // null = every pupil in the school
     if (a.kind === "STUDENT") {
       studentIds = [a.ref!];
@@ -164,7 +177,7 @@ export class MeetingService {
     label: string,
   ): Promise<void> {
     try {
-      const recipients = await this.db.runAsTenantReadOnly(this.ctx(p), (tx) => this.resolveAudience(tx, audience));
+      const recipients = await this.db.runAsTenantReadOnly(this.ctx(p), (tx) => this.resolveAudience(tx, audience, slot.id));
       if (recipients.length === 0) return;
       const when = slot.startsAt.toISOString().slice(0, 16).replace("T", " ");
       for (let i = 0; i < recipients.length; i += ANNOUNCE_CHUNK) {
@@ -248,6 +261,8 @@ export class MeetingService {
       note?: string; provider?: string | null; joinUrl?: string | null;
       /** Who it is for. Omitted = SCHOOL, which is what every slot was before. */
       audience?: MeetingAudience;
+      /** For a SELECTED audience: the parents to invite. Ignored otherwise. */
+      inviteeIds?: string[];
     },
   ): Promise<MeetingSlotDto> {
     const staffWide = p.roles.some((r) => STAFF_WIDE.has(r));
@@ -273,9 +288,12 @@ export class MeetingService {
     // is a leadership act, and one a teacher must not be able to perform by
     // changing a dropdown. It bites on a DECLARED audience only: passing nothing
     // means "I did not choose a scope", never "I chose everyone".
-    if (declared && (declared.kind === "STAGE" || declared.kind === "SCHOOL") && !staffWide) {
+    // A hand-picked set can span the whole school, so it is a leadership act for
+    // the same reason a year group is: a teacher must not be able to summon an
+    // arbitrary list of families by ticking boxes.
+    if (declared && (declared.kind === "STAGE" || declared.kind === "SCHOOL" || declared.kind === "SELECTED") && !staffWide) {
       throw new ForbiddenException(
-        "Only a principal or school administrator can call a year-group or whole-school meeting.",
+        "Only a principal or school administrator can call a meeting for selected parents, a year group or the whole school.",
       );
     }
     const dto = await this.db.runAsTenant(this.ctx(p), async (tx) => {
@@ -292,6 +310,10 @@ export class MeetingService {
           capacity: Math.max(1, Math.min(input.capacity ?? 1, audience.kind === "STUDENT" ? 5 : 2000)),
           audienceKind: audience.kind,
           audienceRef: audience.ref,
+          // Only a DECLARED wide audience is a briefing. An omitted audience is
+          // a plain bookable slot — an appointment — and must keep its capacity
+          // claim, which is what deriving this from `audience` silently lost.
+          kind: declared && !isAppointment(declared.kind) ? "BRIEFING" : "APPOINTMENT",
           location: input.location ?? null,
           note: input.note ?? null,
           provider: link.provider,
@@ -302,6 +324,29 @@ export class MeetingService {
         { actorId: p.userId, action: "meeting.slot.create", entity: "meeting_slot", entityId: row.id, schoolId: p.schoolId, metadata: { teacherId } },
         tx,
       );
+      if (audience.kind === "SELECTED") {
+        const ids = [...new Set(input.inviteeIds ?? [])].filter(Boolean);
+        if (ids.length === 0) throw new BadRequestException("Choose at least one parent to invite.");
+        if (ids.length > 500) throw new BadRequestException("Invite at most 500 parents at a time.");
+        // Every id must be a real parent IN THIS SCHOOL. RLS already confines the
+        // lookup to the tenant, so a foreign id simply is not found — and an
+        // invitation to somebody who does not exist is a meeting one fewer
+        // person attends, discovered by an empty chair.
+        const found = (await tx.parentChild.findMany({
+          where: { parentId: { in: ids } },
+          select: { parentId: true },
+          distinct: ["parentId"],
+        })) as Array<{ parentId: string }>;
+        const real = new Set(found.map((f) => f.parentId));
+        const unknown = ids.filter((i) => !real.has(i));
+        if (unknown.length > 0) {
+          throw new BadRequestException(`${unknown.length} of those are not parents at this school.`);
+        }
+        await tx.meetingInvitee.createMany({
+          data: ids.map((parentId) => ({ schoolId: p.schoolId, slotId: row.id, parentId })),
+          skipDuplicates: true,
+        });
+      }
       return this.toSlotDto(row, 0, teacherId === p.userId ? p : null, undefined, {
         class: audience.kind === "CLASS" ? className : null,
         student: audience.kind === "STUDENT" ? studentName : null,
@@ -396,8 +441,17 @@ export class MeetingService {
             .filter((x): x is string => !!x)
         : [];
 
+      // SELECTED is matched through the invitee table rather than by rule — the
+      // one audience whose membership is stored. Bounded: the ids this parent
+      // is on, which is however many meetings they have been invited to.
+      const invited = (await tx.meetingInvitee.findMany({
+        where: { parentId: p.userId },
+        select: { slotId: true },
+      })) as Array<{ slotId: string }>;
+
       const audienceFilter = [
         { audienceKind: "SCHOOL" },
+        ...(invited.length ? [{ id: { in: invited.map((i) => i.slotId) } }] : []),
         ...(studentIds.length ? [{ audienceKind: "STUDENT", audienceRef: { in: studentIds } }] : []),
         ...(classIds.length ? [{ audienceKind: "CLASS", audienceRef: { in: classIds } }] : []),
         ...(stages.length ? [{ audienceKind: "STAGE", audienceRef: { in: [...new Set(stages)] } }] : []),
@@ -428,15 +482,28 @@ export class MeetingService {
       // The child must be the caller's own.
       const link = await tx.parentChild.findFirst({ where: { parentId: p.userId, studentId }, select: { id: true } });
       if (!link) throw new ForbiddenException("You can only book for your own child");
-      const slot = await tx.meetingSlot.findFirst({ where: { id: slotId, active: true }, select: { id: true, teacherId: true, capacity: true, startsAt: true } });
+      const slot = await tx.meetingSlot.findFirst({ where: { id: slotId, active: true }, select: { id: true, teacherId: true, capacity: true, startsAt: true, kind: true } });
       if (!slot) throw new NotFoundException("Slot not found");
       if (slot.startsAt < new Date()) throw new BadRequestException("That slot is in the past");
       // No double-booking the same slot by the same parent.
       const dup = await tx.meetingBooking.findFirst({ where: { slotId, parentId: p.userId, status: "BOOKED" }, select: { id: true } });
       if (dup) throw new ConflictException("You already have a booking for this slot");
-      // Capacity claim: count BOOKED and reject if full (serialized within the tx).
-      const booked = await tx.meetingBooking.count({ where: { slotId, status: "BOOKED" } });
-      if (booked >= slot.capacity) throw new ConflictException("That slot is fully booked");
+      // THE CAPACITY CLAIM RUNS FOR APPOINTMENTS ONLY.
+      //
+      // An appointment allocates a scarce thing — one teacher, one half-hour —
+      // so it must serialise, and counting inside the transaction is the correct
+      // way to do that at appointment scale.
+      //
+      // A BRIEFING allocates nothing. Running this over one would be O(n^2): each
+      // of 2,000 parents COUNTs every booking already on the slot, all contending
+      // on the same rows. That is exactly how responding to a whole-school notice
+      // would take the system down. A hall either fits people or it does not, and
+      // that is not a per-parent transaction — so attendance is recorded by the
+      // INSERT alone, with the unique index doing the duplicate check.
+      if ((slot.kind ?? "APPOINTMENT") === "APPOINTMENT") {
+        const booked = await tx.meetingBooking.count({ where: { slotId, status: "BOOKED" } });
+        if (booked >= slot.capacity) throw new ConflictException("That slot is fully booked");
+      }
       const row = await tx.meetingBooking.create({
         data: { schoolId: p.schoolId, slotId, parentId: p.userId, studentId, note: note ?? null },
       });
