@@ -30,7 +30,20 @@ function makeService() {
     },
     classTeacher: { groupBy: jest.fn().mockResolvedValue([{ classId: "c1", _count: { _all: 2 } }]) },
     user: { findMany: jest.fn().mockResolvedValue([{ id: "t1", name: "Mrs Bello" }]) },
-    $queryRaw: jest.fn().mockResolvedValue([{ classId: "c1", subjects: 9 }]),
+    // The subject COUNT now comes from reading the offerings themselves — the
+    // same query that supplies who teaches what — so the raw COUNT is gone.
+    classSubjectTeacher: {
+      findMany: jest.fn().mockResolvedValue([
+        { classId: "c1", subjectId: "s1", teacherId: "t1" },
+        { classId: "c1", subjectId: "s2", teacherId: "t1" },
+      ]),
+    },
+    subject: {
+      findMany: jest.fn().mockResolvedValue([
+        { id: "s1", name: "English" },
+        { id: "s2", name: "Mathematics" },
+      ]),
+    },
   };
   const db = {
     runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx as unknown as TenantTx),
@@ -51,7 +64,7 @@ describe("LmsService.listClassOverview", () => {
       students: 28,
       capacity: 30,
       teachers: 2,
-      subjects: 9,
+      subjects: 2,
       supervisorName: "Mrs Bello",
     });
     // A class with nothing recorded reads as zero, not as absent — and a class with
@@ -77,7 +90,8 @@ describe("LmsService.listClassOverview", () => {
     await service.listClassOverview(admin);
     expect(tx.enrollment.groupBy).toHaveBeenCalledTimes(1);
     expect(tx.classTeacher.groupBy).toHaveBeenCalledTimes(1);
-    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.classSubjectTeacher.findMany).toHaveBeenCalledTimes(1);
+    expect(tx.subject.findMany).toHaveBeenCalledTimes(1);
     // One lookup for every supervisor, not one per class.
     expect(tx.user.findMany).toHaveBeenCalledTimes(1);
   });
