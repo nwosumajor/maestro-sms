@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { personLabel } from "@/lib/people";
+import { readApiError } from "@/lib/api-error";
 
 type Cls = Serialized<ClassDto>;
 type Subj = Serialized<SubjectDto>;
@@ -62,6 +63,9 @@ export function ClassSubjectsAdmin({
     teacherId: teachers[0]?.id ?? "",
     lessonsPerWeek: "",
     preferredRoomId: "",
+    // Off by default: a roster edit should not rewrite a published timetable
+    // unless somebody asks it to.
+    moveLessons: false,
   });
   const [sup, setSup] = React.useState({ classId: classes[0]?.id ?? "", supervisorId: staff[0]?.id ?? "" });
   const [prog, setProg] = React.useState({ classId: classes[0]?.id ?? "", level: "", nextClassId: "", capacity: "" });
@@ -96,14 +100,38 @@ export function ClassSubjectsAdmin({
         <form
           onSubmit={async (e) => {
             e.preventDefault();
-            await send("POST", `/classes/${cs.classId}/subjects`, {
-              subjectId: cs.subjectId,
-              teacherId: cs.teacherId,
-              // CSP timetable inputs — omitted when blank so re-assigning a
-              // teacher never silently resets a stored quota/room.
-              ...(cs.lessonsPerWeek !== "" ? { lessonsPerWeek: Number(cs.lessonsPerWeek) } : {}),
-              ...(cs.preferredRoomId !== "" ? { preferredRoomId: cs.preferredRoomId } : {}),
-            }, "Subject teacher assigned.");
+            // The response says whether this REPLACED somebody and how many
+            // placed lessons still name them. Reporting "Assigned." either way
+            // is how a Physics teacher gets swapped out without anyone noticing.
+            const res = await fetch(`/api/sms/classes/${cs.classId}/subjects`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                subjectId: cs.subjectId,
+                teacherId: cs.teacherId,
+                // CSP timetable inputs — omitted when blank so re-assigning a
+                // teacher never silently resets a stored quota/room.
+                ...(cs.lessonsPerWeek !== "" ? { lessonsPerWeek: Number(cs.lessonsPerWeek) } : {}),
+                ...(cs.preferredRoomId !== "" ? { preferredRoomId: cs.preferredRoomId } : {}),
+                moveScheduledLessons: cs.moveLessons,
+              }),
+            });
+            if (!res.ok) { setMsg(await readApiError(res)); return; }
+            const out = (await res.json()) as {
+              replacedTeacherName?: string | null;
+              scheduledLessons?: number;
+              movedLessons?: number;
+            };
+            setMsg(
+              !out.replacedTeacherName
+                ? "Subject teacher assigned."
+                : out.movedLessons
+                  ? `Replaced ${out.replacedTeacherName}. ${out.movedLessons} scheduled lesson${out.movedLessons === 1 ? "" : "s"} moved across.`
+                  : out.scheduledLessons
+                    ? `Replaced ${out.replacedTeacherName} — but ${out.scheduledLessons} scheduled lesson${out.scheduledLessons === 1 ? " still names" : "s still name"} them. Tick "move scheduled lessons" to bring them across.`
+                    : `Replaced ${out.replacedTeacherName}.`,
+            );
+            router.refresh();
           }}
           className="flex flex-wrap items-end gap-2 border-t border-border pt-4"
         >
@@ -137,6 +165,14 @@ export function ClassSubjectsAdmin({
               {rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
             </select>
           )}
+          <label className="mb-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={cs.moveLessons}
+              onChange={(e) => setCs({ ...cs, moveLessons: e.target.checked })}
+            />
+            Move scheduled lessons to the new teacher
+          </label>
           <Button type="submit" size="sm" variant="outline" disabled={!cs.subjectId || !cs.teacherId}>Assign</Button>
           <Button
             type="button"
