@@ -27,7 +27,7 @@ import {
 } from "@nestjs/common";
 import { Prisma } from "@sms/db";
 import type { SubjectSelectionDto, SubjectSelectionOptionsDto } from "@sms/types";
-import { LMS_PERMISSIONS } from "@sms/types";
+import { LMS_PERMISSIONS , supervisorStage} from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -94,6 +94,7 @@ export class SubjectSelectionService {
       status: row.status,
       supervisorId: row.supervisorId,
       supervisorName: row.supervisorId ? (nameById.get(row.supervisorId) ?? null) : null,
+      supervisorStage: supervisorStage(row),
       reviewNote: row.reviewNote,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,

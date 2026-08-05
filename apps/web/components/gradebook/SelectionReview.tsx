@@ -62,6 +62,18 @@ export function SelectionReview({ userId, canApproveFinal }: { userId: string; c
               <p className="truncate text-xs text-muted-foreground">
                 {s.subjects.map((x) => x.name).join(", ")}
               </p>
+              {/* Say it where the decision is made. PENDING_ADMIN looks the same
+                  whether a form teacher passed it or whether the class has none,
+                  and the difference is whether this reviewer is the second check
+                  or the only one. */}
+              {s.status === "PENDING_ADMIN" && s.supervisorStage === "SKIPPED_NO_SUPERVISOR" && (
+                <p className="text-xs text-amber-700 dark:text-amber-500">
+                  No form-teacher check — {s.className} has no supervisor, so yours is the only review.
+                </p>
+              )}
+              {s.status === "PENDING_ADMIN" && s.supervisorStage === "PASSED" && s.supervisorName && (
+                <p className="text-xs text-muted-foreground">Passed by {s.supervisorName}.</p>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <Badge variant={s.status === "APPROVED" ? "default" : s.status === "REJECTED" ? "destructive" : "secondary"}>

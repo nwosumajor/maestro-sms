@@ -395,6 +395,32 @@ export const SUBJECT_SELECTION_STATUSES = [
 ] as const;
 export type SubjectSelectionStatus = (typeof SUBJECT_SELECTION_STATUSES)[number];
 
+/**
+ * What happened at stage 1 of a subject selection.
+ *
+ * SKIPPED_NO_SUPERVISOR is the one worth naming. A class with no supervisor
+ * sends the selection straight to PENDING_ADMIN — a deliberate fail-open, so a
+ * pupil is never stranded by an unconfigured class. But the reviewer at stage 2
+ * then IS the only check, and nothing said so: `PENDING_ADMIN` looks identical
+ * whether a form teacher passed it or whether there was never a form teacher.
+ * A control that quietly becomes one stage reads as two.
+ */
+export type SupervisorStage = "PENDING" | "PASSED" | "SKIPPED_NO_SUPERVISOR";
+
+/** Derived from the row, never stored — one source of truth for the answer. */
+export function supervisorStage(row: {
+  status: string;
+  supervisorId: string | null;
+  supervisorActedById: string | null;
+}): SupervisorStage {
+  if (row.status === "PENDING_SUPERVISOR") return "PENDING";
+  // No supervisor was ever named on the class, so stage 1 did not run.
+  if (!row.supervisorId) return "SKIPPED_NO_SUPERVISOR";
+  // Named but never acted: the class supervisor changed after submission, so
+  // the stage the row moved past is not one anybody actually performed.
+  return row.supervisorActedById ? "PASSED" : "SKIPPED_NO_SUPERVISOR";
+}
+
 export interface SubjectSelectionDto {
   id: string;
   sessionId: string;
@@ -410,6 +436,9 @@ export interface SubjectSelectionDto {
   /** Snapshot of the class supervisor who must pass stage 1 (null = skipped). */
   supervisorId: string | null;
   supervisorName: string | null;
+  /** What actually happened at stage 1 — see `supervisorStage`. DERIVED, never
+   *  stored, so it cannot drift from the row it describes. */
+  supervisorStage: SupervisorStage;
   reviewNote: string | null;
   createdAt: Date;
   updatedAt: Date;
