@@ -9,7 +9,7 @@
 // sees open slots and their own bookings.
 // =============================================================================
 
-import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import type { MeetingSlotDto, MeetingBookingDto } from "@sms/types";
 import { MEETING_PROVIDERS, isMeetingJoinOpen, meetingJoinOpensAt, normalizeMeetingUrl,
   SUBJECT_STAGES,
@@ -30,6 +30,10 @@ import {
 } from "../integrity/integrity.foundation";
 import { NotificationService } from "../notifications/notification.service";
 
+/** Guardians told per transaction. Small enough that each is a short
+ *  transaction, large enough that a year group is a handful of them. */
+const ANNOUNCE_CHUNK = 200;
+
 const STAGE_LABELS: Record<string, string> = {
   PRE_PRIMARY: "Pre-primary",
   PRIMARY: "Primary",
@@ -41,6 +45,8 @@ const STAFF_WIDE = new Set(["school_admin", "principal"]);
 
 @Injectable()
 export class MeetingService {
+  private readonly logger = new Logger("Meeting");
+
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
@@ -67,18 +73,21 @@ export class MeetingService {
     p: Principal,
     a: MeetingAudience,
     staffWide: boolean,
-  ): Promise<void> {
-    if (a.kind === "SCHOOL") return;
+    // Returns the NAME it just verified: this method already loads the row to
+    // prove it exists, so making the label cost a second query would be waste.
+  ): Promise<{ className: string | null; studentName: string | null }> {
+    const none = { className: null, studentName: null };
+    if (a.kind === "SCHOOL") return none;
     if (a.kind === "STAGE") {
       if (!(SUBJECT_STAGES as readonly string[]).includes(a.ref!)) {
         throw new BadRequestException(`Year group must be one of ${SUBJECT_STAGES.join(", ")}`);
       }
-      return;
+      return none;
     }
     if (a.kind === "CLASS") {
-      const klass = await tx.class.findFirst({ where: { id: a.ref! }, select: { id: true } });
+      const klass = (await tx.class.findFirst({ where: { id: a.ref! }, select: { id: true, name: true } })) as { id: string; name: string } | null;
       if (!klass) throw new NotFoundException("Class not found");
-      if (staffWide) return;
+      if (staffWide) return { className: klass.name, studentName: null };
       // A teacher may call their OWN class's parents together — the class they
       // supervise or teach a subject to — and no other.
       const [supervises, teaches] = await Promise.all([
@@ -86,12 +95,100 @@ export class MeetingService {
         tx.classSubjectTeacher.findFirst({ where: { classId: a.ref!, teacherId: p.userId }, select: { id: true } }),
       ]);
       if (!supervises && !teaches) throw new NotFoundException("Class not found");
-      return;
+      return { className: klass.name, studentName: null };
     }
     // STUDENT: the pupil must exist. Any teacher may offer an appointment about
     // any pupil they are asked about, so this checks existence, not membership.
-    const student = await tx.user.findFirst({ where: { id: a.ref! }, select: { id: true } });
+    const student = (await tx.user.findFirst({ where: { id: a.ref! }, select: { id: true, name: true } })) as { id: string; name: string } | null;
     if (!student) throw new NotFoundException("Student not found");
+    return { className: null, studentName: student.name };
+  }
+
+  /**
+   * The guardians an audience resolves to.
+   *
+   * THE ONE PLACE resolution happens, and it happens only when a meeting is
+   * ANNOUNCED — never to render a page. Everything else in this file works from
+   * the rule outwards, which is what keeps the parent's list to a single indexed
+   * query no matter how large the school is.
+   *
+   * Returns distinct parent ids. A guardian with three children in a year group
+   * is told once, not three times.
+   */
+  private async resolveAudience(tx: TenantTx, a: MeetingAudience): Promise<string[]> {
+    let studentIds: string[] | null = null; // null = every pupil in the school
+    if (a.kind === "STUDENT") {
+      studentIds = [a.ref!];
+    } else if (a.kind === "CLASS") {
+      const rows = (await tx.enrollment.findMany({
+        where: { classId: a.ref!, status: "ACTIVE" },
+        select: { studentId: true },
+      })) as Array<{ studentId: string }>;
+      studentIds = rows.map((r) => r.studentId);
+    } else if (a.kind === "STAGE") {
+      const classes = (await tx.class.findMany({ where: { stage: a.ref! }, select: { id: true } })) as Array<{ id: string }>;
+      if (classes.length === 0) return [];
+      const rows = (await tx.enrollment.findMany({
+        where: { classId: { in: classes.map((c) => c.id) }, status: "ACTIVE" },
+        select: { studentId: true },
+      })) as Array<{ studentId: string }>;
+      studentIds = rows.map((r) => r.studentId);
+    }
+    if (studentIds !== null && studentIds.length === 0) return [];
+
+    const links = (await tx.parentChild.findMany({
+      where: studentIds === null ? {} : { studentId: { in: [...new Set(studentIds)] } },
+      select: { parentId: true },
+    })) as Array<{ parentId: string }>;
+    return [...new Set(links.map((l) => l.parentId))];
+  }
+
+  /**
+   * Tell the audience a meeting has been called.
+   *
+   * Runs AFTER the slot is committed and never throws: a notification failure
+   * must not lose a meeting that already exists. The slot is the durable record;
+   * telling people is best-effort, exactly as the booking notice already is.
+   *
+   * CHUNKED, and that is the whole point. `enqueueMany` opens ONE transaction and
+   * writes a notification, its deliveries and an audit row per recipient — about
+   * four statements each. A whole-school meeting at 2,000 guardians would be
+   * ~8,000 statements in a single transaction, holding locks and flooding the
+   * WAL for as long as it took. In chunks it is a series of short transactions
+   * instead, and a chunk that fails costs that chunk rather than the lot.
+   */
+  private async announce(
+    p: Principal,
+    slot: { id: string; startsAt: Date; endsAt: Date; location: string | null },
+    audience: MeetingAudience,
+    label: string,
+  ): Promise<void> {
+    try {
+      const recipients = await this.db.runAsTenantReadOnly(this.ctx(p), (tx) => this.resolveAudience(tx, audience));
+      if (recipients.length === 0) return;
+      const when = slot.startsAt.toISOString().slice(0, 16).replace("T", " ");
+      for (let i = 0; i < recipients.length; i += ANNOUNCE_CHUNK) {
+        const chunk = recipients.slice(i, i + ANNOUNCE_CHUNK);
+        await this.notifications.enqueueMany(this.ctx(p), chunk, {
+          type: "GENERIC",
+          // A key, not a sentence: enqueueMany renders per RECIPIENT, so a
+          // francophone parent is written to in French and an anglophone one in
+          // English from the same call.
+          key: "meeting.called",
+          params: { audience: label, date: when, location: slot.location ?? "the school" },
+          title: "A meeting has been called",
+          body: `${label} — ${when}${slot.location ? ` at ${slot.location}` : ""}.`,
+          data: { slotId: slot.id },
+          channels: ["EMAIL"],
+        });
+      }
+      this.logger.log(`Meeting ${slot.id} announced to ${recipients.length} guardian(s): ${label}`);
+    } catch (err) {
+      // Deliberately swallowed and LOGGED. An announcement that fails silently
+      // and invisibly is the worse outcome; the meeting still exists and is on
+      // every invited parent's page regardless.
+      this.logger.error(`Meeting ${slot.id} announcement failed: ${String(err)}`);
+    }
   }
 
   /**
@@ -181,8 +278,8 @@ export class MeetingService {
         "Only a principal or school administrator can call a year-group or whole-school meeting.",
       );
     }
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      await this.assertAudienceExists(tx, p, audience, staffWide);
+    const dto = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const { className, studentName } = await this.assertAudienceExists(tx, p, audience, staffWide);
       const row = await tx.meetingSlot.create({
         data: {
           schoolId: p.schoolId,
@@ -205,8 +302,20 @@ export class MeetingService {
         { actorId: p.userId, action: "meeting.slot.create", entity: "meeting_slot", entityId: row.id, schoolId: p.schoolId, metadata: { teacherId } },
         tx,
       );
-      return this.toSlotDto(row, 0, teacherId === p.userId ? p : null);
+      return this.toSlotDto(row, 0, teacherId === p.userId ? p : null, undefined, {
+        class: audience.kind === "CLASS" ? className : null,
+        student: audience.kind === "STUDENT" ? studentName : null,
+        stage: audience.kind === "STAGE" ? STAGE_LABELS[audience.ref!] ?? null : null,
+      });
     });
+
+    // AFTER the transaction, and only for a DECLARED audience. An open bookable
+    // slot invites nobody — parents find it — so announcing one would be sending
+    // the whole school a notice about a teacher's free half-hour.
+    if (declared && declared.kind !== "STUDENT") {
+      await this.announce(p, { id: dto.id, startsAt, endsAt, location: input.location ?? null }, audience, dto.audienceLabel);
+    }
+    return dto;
   }
 
   /** Withdraw an unbooked slot. Host / staff-wide. */

@@ -120,6 +120,13 @@ export const NOTIFICATION_MESSAGES: Record<string, MessageTemplate> = {
       fr: "{title} est disponible pour {student}.",
     },
   },
+  "meeting.called": {
+    title: { en: "A meeting has been called", fr: "Une réunion est convoquée" },
+    body: {
+      en: "{audience} — {date} at {location}.",
+      fr: "{audience} — le {date} à {location}.",
+    },
+  },
   "meeting.booked": {
     title: { en: "Meeting confirmed", fr: "Rendez-vous confirmé" },
     body: {
