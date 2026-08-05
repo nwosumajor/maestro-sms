@@ -2051,13 +2051,19 @@ export class LmsContentService {
    * something tagged Literature to the Literature set.
    */
   /**
-   * A teacher who holds only subject offerings may publish for THOSE subjects
-   * and nothing else — including nothing untagged, which would reach every pupil
-   * in the class regardless of what they take.
+   * A teacher may TAG only a subject they teach in this class.
    *
-   * Class-wide staff (a form teacher, leadership) are unaffected: addressing the
-   * whole class is exactly their job, and general class material is what an
-   * untagged row is for.
+   * They may also leave it UNTAGGED, which addresses the whole class. That is
+   * correct for how senior classes are actually organised: SS3 Science is a
+   * cohort where everyone offers the science set, so the Physics teacher
+   * addressing "SS3 Science" is addressing exactly their pupils. An earlier
+   * version refused this and forced a subject to be named — which was modelling
+   * the class as a mixed group whose members happen to share some subjects. It
+   * is the other way round: the class IS the subject set, and per-pupil
+   * selection refines the elective margin within it.
+   *
+   * What stays refused is publishing AS another teacher's subject — that would
+   * put one teacher's material into another's stream.
    */
   private async assertMayTagSubject(
     tx: TenantTx,
@@ -2065,11 +2071,9 @@ export class LmsContentService {
     classId: string,
     subjectId: string | null,
   ): Promise<void> {
+    if (!subjectId) return;
     const mine = await this.subjectsTaughtBy(tx, p, classId);
     if (!mine) return;
-    if (!subjectId) {
-      throw new BadRequestException("Choose the subject this is for — you teach specific subjects in this class.");
-    }
     if (!mine.has(subjectId)) {
       throw new BadRequestException("You can only publish content for a subject you teach in this class.");
     }
