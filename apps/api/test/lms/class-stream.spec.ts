@@ -167,3 +167,83 @@ describe("copying a subject set across the arms", () => {
     await expect(h.svc.copySubjectsToArms(admin, "nope")).rejects.toThrow(NotFoundException);
   });
 });
+
+// =============================================================================
+// The class overview must not become one query per class
+// =============================================================================
+// The list now carries WHO TEACHES WHAT, not just counts. That is exactly the
+// kind of addition that quietly turns a page into N+1 — a school with sixty
+// classes would fire sixty offering reads on every load.
+
+describe("class overview cost", () => {
+  function overviewHarness(classCount: number, subjectsPerClass: number) {
+    const classes = Array.from({ length: classCount }, (_, i) => ({
+      id: `c${i}`,
+      name: `SS1 Science ${String.fromCharCode(65 + i)}`,
+      code: null,
+      level: 1,
+      capacity: null,
+      nextClassId: null,
+      supervisorId: "sup1",
+      stage: "SENIOR_SECONDARY",
+      stream: "SCIENCE",
+      arm: String.fromCharCode(65 + i),
+    }));
+    const offerings = classes.flatMap((c) =>
+      Array.from({ length: subjectsPerClass }, (_, j) => ({ classId: c.id, subjectId: `s${j}`, teacherId: `t${j}` })),
+    );
+    const calls: string[] = [];
+    const track = <T,>(name: string, value: T) => {
+      calls.push(name);
+      return Promise.resolve(value);
+    };
+    const tx = {
+      class: { findMany: jest.fn(() => track("class.findMany", classes)) },
+      enrollment: { groupBy: jest.fn(() => track("enrollment.groupBy", [])) },
+      classTeacher: { groupBy: jest.fn(() => track("classTeacher.groupBy", [])), findMany: jest.fn(() => track("classTeacher.findMany", [])) },
+      classSubjectTeacher: { findMany: jest.fn(() => track("offerings.findMany", offerings)) },
+      subject: { findMany: jest.fn(() => track("subject.findMany", [{ id: "s0", name: "Biology" }, { id: "s1", name: "Physics" }])) },
+      user: { findMany: jest.fn(() => track("user.findMany", [{ id: "sup1", name: "Form Teacher" }, { id: "t0", name: "Mr Bio" }, { id: "t1", name: "Ms Phys" }])) },
+    } as unknown as TenantTx;
+    const db = { runAsTenantReadOnly: <T>(_c: unknown, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
+    const svc = new LmsService(db as never, { record: jest.fn() } as never);
+    return { svc, calls };
+  }
+
+  const staff = { userId: "a1", schoolId: "s1", roles: ["school_admin"], permissions: [] } as unknown as Principal;
+
+  it("costs the SAME number of queries for 2 classes as for 60", async () => {
+    const small = overviewHarness(2, 2);
+    await small.svc.listClassOverview(staff);
+    const big = overviewHarness(60, 2);
+    await big.svc.listClassOverview(staff);
+    expect(big.calls.length).toBe(small.calls.length);
+    // Named so a regression says WHICH read started repeating.
+    expect(big.calls.filter((c) => c === "offerings.findMany")).toHaveLength(1);
+  });
+
+  it("pairs each subject with its teacher, sorted", async () => {
+    const h = overviewHarness(1, 2);
+    const [row] = (await h.svc.listClassOverview(staff)) as Array<{
+      subjects: number;
+      subjectTeachers: Array<{ subjectName: string; teacherName: string }>;
+    }>;
+    expect(row.subjects).toBe(2);
+    // Insertion order here is ALREADY alphabetical, so this assertion fails if
+    // the sort is removed OR reversed — with two items whose natural order
+    // happens to reverse into sorted order, it would catch neither.
+    expect(row.subjectTeachers.map((p) => `${p.subjectName}=${p.teacherName}`)).toEqual([
+      "Biology=Mr Bio",
+      "Physics=Ms Phys",
+    ]);
+  });
+
+  it("names an unresolved teacher rather than dropping the subject", async () => {
+    // A subject whose teacher row is missing must still appear — silently
+    // omitting it would understate what the class offers.
+    const h = overviewHarness(1, 3);
+    const [row] = (await h.svc.listClassOverview(staff)) as Array<{ subjectTeachers: Array<{ teacherName: string }> }>;
+    expect(row.subjectTeachers).toHaveLength(3);
+    expect(row.subjectTeachers.some((p) => p.teacherName === "Unassigned")).toBe(true);
+  });
+});

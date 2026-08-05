@@ -911,11 +911,14 @@ export class LmsService {
         capacity: number | null;
         nextClassId: string | null;
         supervisorId: string | null;
+        stage: string | null;
+        stream: string | null;
+        arm: string | null;
       }>;
       if (classes.length === 0) return [];
       const ids = classes.map((c) => c.id);
 
-      const [rolls, teachers, offerings, supervisors] = await Promise.all([
+      const [rolls, teachers, offerings] = await Promise.all([
         // ACTIVE only: a promoted or withdrawn pupil is not in the room, and a roll
         // that counts them makes capacity meaningless.
         tx.enrollment.groupBy({
@@ -928,29 +931,61 @@ export class LmsService {
           where: { classId: { in: ids } },
           _count: { _all: true },
         } as never) as unknown as Promise<Array<{ classId: string; _count: { _all: number } }>>,
-        // DISTINCT subjects: one subject taught by two teachers is one offering on
-        // the timetable, not two.
-        tx.$queryRaw`
-          SELECT "classId", count(DISTINCT "subjectId")::int AS subjects
-          FROM class_subject_teacher
-          WHERE "schoolId" = ${p.schoolId}::uuid
-            AND "classId" = ANY(ARRAY[${Prisma.join(ids)}]::uuid[])
-          GROUP BY "classId"
-        ` as Promise<Array<{ classId: string; subjects: number }>>,
-        (async () => {
-          const supIds = [...new Set(classes.map((c) => c.supervisorId).filter((x): x is string => !!x))];
-          if (supIds.length === 0) return [] as Array<{ id: string; name: string }>;
-          return (await tx.user.findMany({
-            where: { id: { in: supIds } },
-            select: { id: true, name: true },
-          })) as Array<{ id: string; name: string }>;
-        })(),
+        // The offerings THEMSELVES rather than a count of them. This replaces a
+        // raw COUNT query — the subject total is derived from these rows, so
+        // showing who teaches what on the list costs no extra round trip.
+        // Still ONE query for every class on the page, never one per class.
+        tx.classSubjectTeacher.findMany({
+          where: { classId: { in: ids } },
+          select: { classId: true, subjectId: true, teacherId: true },
+        }) as Promise<Array<{ classId: string; subjectId: string; teacherId: string }>>,
       ]);
+
+      // Two more batched lookups to name what we just read — constant, never per
+      // class. Supervisors and subject teachers resolve in ONE user query: they
+      // are both people, and splitting them would double the round trips to
+      // answer the same question.
+      const personIds = [
+        ...new Set([
+          ...classes.map((c) => c.supervisorId).filter((x): x is string => !!x),
+          ...offerings.map((o) => o.teacherId),
+        ]),
+      ];
+      const [subjectRows, personRows] = await Promise.all([
+        offerings.length
+          ? (tx.subject.findMany({
+              where: { id: { in: [...new Set(offerings.map((o) => o.subjectId))] } },
+              select: { id: true, name: true },
+            }) as Promise<Array<{ id: string; name: string }>>)
+          : Promise.resolve([] as Array<{ id: string; name: string }>),
+        personIds.length
+          ? (tx.user.findMany({
+              where: { id: { in: personIds } },
+              select: { id: true, name: true },
+            }) as Promise<Array<{ id: string; name: string }>>)
+          : Promise.resolve([] as Array<{ id: string; name: string }>),
+      ]);
+      const subjName = new Map(subjectRows.map((r) => [r.id, r.name]));
+      const teachName = new Map(personRows.map((r) => [r.id, r.name]));
+
+      const pairsBy = new Map<string, Array<{ subjectId: string; subjectName: string; teacherId: string; teacherName: string }>>();
+      for (const o of offerings) {
+        const list = pairsBy.get(o.classId) ?? [];
+        list.push({
+          subjectId: o.subjectId,
+          subjectName: subjName.get(o.subjectId) ?? "Unknown subject",
+          teacherId: o.teacherId,
+          teacherName: teachName.get(o.teacherId) ?? "Unassigned",
+        });
+        pairsBy.set(o.classId, list);
+      }
+      // Alphabetical so the same class reads the same way every load — an order
+      // that shifts between renders makes a list impossible to scan.
+      for (const list of pairsBy.values()) list.sort((a, b) => a.subjectName.localeCompare(b.subjectName));
 
       const rollBy = new Map(rolls.map((r) => [r.classId, r._count._all]));
       const teachBy = new Map(teachers.map((r) => [r.classId, r._count._all]));
-      const subjBy = new Map(offerings.map((r) => [r.classId, r.subjects]));
-      const supBy = new Map(supervisors.map((u) => [u.id, u.name]));
+      const supBy = teachName;
 
       return classes.map((c) => ({
         id: c.id,
@@ -963,7 +998,11 @@ export class LmsService {
         students: rollBy.get(c.id) ?? 0,
         capacity: c.capacity,
         teachers: teachBy.get(c.id) ?? 0,
-        subjects: subjBy.get(c.id) ?? 0,
+        subjects: (pairsBy.get(c.id) ?? []).length,
+        subjectTeachers: pairsBy.get(c.id) ?? [],
+        stage: c.stage,
+        stream: c.stream,
+        arm: c.arm,
       }));
     });
   }

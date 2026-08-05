@@ -35,6 +35,20 @@ export interface ClassOverviewDto {
   teachers: number;
   /** Distinct subject offerings defined for the class. */
   subjects: number;
+  /**
+   * WHO TEACHES WHAT, on the list itself.
+   *
+   * The overview previously carried only counts ("3 teachers · 5 subjects"),
+   * so answering "who takes SS3 Science A for Physics?" meant opening each
+   * class in turn. These come from the same query that produces the count —
+   * one read for the whole page, never one per class.
+   */
+  subjectTeachers: Array<{ subjectId: string; subjectName: string; teacherId: string; teacherName: string }>;
+  /** Structured identity, so the list can be GROUPED rather than sorted by a
+   *  name string that only looks ordered. */
+  stage: string | null;
+  stream: string | null;
+  arm: string | null;
 }
 
 /** A subject in the school's catalog. */

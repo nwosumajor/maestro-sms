@@ -3,6 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import type { ClassOverviewDto, Serialized } from "@sms/types";
+import { CLASS_STREAM_LABELS, SUBJECT_STAGE_LABELS } from "@sms/types";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -24,6 +25,9 @@ type Row = Serialized<ClassOverviewDto>;
  * never sent. That reasoning stops holding the moment this list is capped — at
  * which point it needs the server-search treatment the people pickers use.
  */
+const STREAM_LABEL: Record<string, string> = CLASS_STREAM_LABELS;
+const STAGE_LABEL: Record<string, string> = SUBJECT_STAGE_LABELS;
+
 export function ClassGrid({ classes, canEnrol }: { classes: Row[]; canEnrol: boolean }) {
   const [q, setQ] = React.useState("");
   const [only, setOnly] = React.useState<"all" | "attention">("all");
@@ -41,10 +45,41 @@ export function ClassGrid({ classes, canEnrol }: { classes: Row[]; canEnrol: boo
           !needle ||
           c.name.toLowerCase().includes(needle) ||
           (c.code ?? "").toLowerCase().includes(needle) ||
-          (c.supervisorName ?? "").toLowerCase().includes(needle),
+          (c.supervisorName ?? "").toLowerCase().includes(needle) ||
+          // Searching a teacher's name answers "what does Mr X take, and
+          // where?" — the question the counts made impossible to ask.
+          c.subjectTeachers.some(
+            (st) => st.teacherName.toLowerCase().includes(needle) || st.subjectName.toLowerCase().includes(needle),
+          ),
       )
       .sort((a, b) => (a.level ?? 999) - (b.level ?? 999) || a.name.localeCompare(b.name));
   }, [classes, q, only]);
+
+  /**
+   * Grouped by year and stream, because a school with six arms of three streams
+   * is thirty cards that all look alike. The heading is derived from the
+   * STRUCTURED fields — grouping on the name string would put "SS3 Science A"
+   * and "SS3 Sci A" in different piles, which is the drift the fields exist to
+   * end. Classes with no stage/stream fall into one honest "Other" group rather
+   * than being hidden.
+   */
+  const groups = React.useMemo(() => {
+    const by = new Map<string, { label: string; order: number; items: Row[] }>();
+    for (const c of rows) {
+      const prefix = c.stage === "SENIOR_SECONDARY" ? "SS" : c.stage === "JUNIOR_SECONDARY" ? "JSS" : null;
+      const label =
+        prefix && c.level != null
+          ? `${prefix}${c.level}${c.stream && c.stream !== "GENERAL" ? ` ${STREAM_LABEL[c.stream] ?? c.stream}` : ""}`
+          : c.stage && c.level != null
+            ? `${STAGE_LABEL[c.stage] ?? c.stage} ${c.level}`
+            : "Other";
+      const key = label;
+      const g = by.get(key) ?? { label, order: c.level ?? 999, items: [] };
+      g.items.push(c);
+      by.set(key, g);
+    }
+    return [...by.values()].sort((a, b) => a.order - b.order || a.label.localeCompare(b.label));
+  }, [rows]);
 
   const attention = classes.filter(needsAttention).length;
   const roll = classes.reduce((sum, c) => sum + c.students, 0);
@@ -84,8 +119,18 @@ export function ClassGrid({ classes, canEnrol }: { classes: Row[]; canEnrol: boo
           {only === "attention" ? "Every class has a form teacher and is within capacity." : `No class matches “${q.trim()}”.`}
         </p>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {rows.map((c) => {
+        <div className="space-y-6">
+          {groups.map((g) => (
+            <section key={g.label} className="space-y-3">
+              <div className="flex items-baseline gap-2">
+                <h3 className="text-sm font-semibold">{g.label}</h3>
+                <span className="text-xs text-muted-foreground tabular-nums">
+                  {g.items.length} class{g.items.length === 1 ? "" : "es"} ·{" "}
+                  {g.items.reduce((n, c) => n + c.students, 0)} pupils
+                </span>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {g.items.map((c) => {
             const over = c.capacity != null && c.students > c.capacity;
             const full = c.capacity != null && !over && c.students >= c.capacity;
             return (
@@ -93,7 +138,20 @@ export function ClassGrid({ classes, canEnrol }: { classes: Row[]; canEnrol: boo
                 <CardContent className="flex flex-1 flex-col gap-3 p-4">
                   <div className="flex items-start justify-between gap-2">
                     <div>
-                      <p className="font-semibold">{c.name}</p>
+                      {/* The name IS the way in. Reaching a roster through a
+                          small "Roster" button is a step people do not find;
+                          clicking the class is what everyone tries first. */}
+                      <p className="font-semibold">
+                        {canEnrol ? (
+                          <Link href={`/classes/${c.id}/roster`} className="hover:underline">
+                            {c.name}
+                          </Link>
+                        ) : (
+                          <Link href={`/classes/${c.id}/info`} className="hover:underline">
+                            {c.name}
+                          </Link>
+                        )}
+                      </p>
                       <p className="text-xs text-muted-foreground">
                         {c.code ? <span className="font-mono">{c.code}</span> : null}
                         {c.code && c.level != null ? " · " : null}
@@ -122,8 +180,24 @@ export function ClassGrid({ classes, canEnrol }: { classes: Row[]; canEnrol: boo
                     {full && <Badge variant="outline">Full</Badge>}
                   </div>
 
+                  {/* WHO TEACHES WHAT. The card used to carry only counts, so
+                      "who takes this class for Physics?" meant opening each
+                      class in turn. These arrive with the list — one query for
+                      the page, not one per class. */}
+                  {c.subjectTeachers.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No subjects assigned yet.</p>
+                  ) : (
+                    <dl className="space-y-0.5 text-xs">
+                      {c.subjectTeachers.map((st) => (
+                        <div key={st.subjectId} className="flex justify-between gap-3">
+                          <dt className="truncate">{st.subjectName}</dt>
+                          <dd className="shrink-0 text-muted-foreground">{st.teacherName}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  )}
                   <p className="text-xs text-muted-foreground tabular-nums">
-                    {c.teachers} teacher{c.teachers === 1 ? "" : "s"} · {c.subjects} subject{c.subjects === 1 ? "" : "s"}
+                    {c.teachers} class teacher{c.teachers === 1 ? "" : "s"} · {c.subjects} subject{c.subjects === 1 ? "" : "s"}
                   </p>
 
                   <div className="mt-auto flex flex-wrap gap-2 pt-1">
@@ -143,6 +217,9 @@ export function ClassGrid({ classes, canEnrol }: { classes: Row[]; canEnrol: boo
               </Card>
             );
           })}
+              </div>
+            </section>
+          ))}
         </div>
       )}
     </div>
