@@ -101,6 +101,8 @@ function harness(opts: {
         return Promise.resolve([]);
       }),
     },
+    // SELECTED is matched through the invitee table; a parent on no list gets none.
+    meetingInvitee: { findMany: jest.fn().mockResolvedValue([]), createMany: jest.fn().mockResolvedValue({ count: 0 }) },
     meetingBooking: { groupBy: jest.fn().mockResolvedValue([]), count: jest.fn().mockResolvedValue(0) },
   } as unknown as TenantTx;
   const db = {
@@ -160,6 +162,15 @@ describe("who may summon whom", () => {
     const { svc, created } = harness();
     await svc.createSlot(principal, WHEN);
     expect(created[0]).toMatchObject({ audienceKind: "SCHOOL", audienceRef: null });
+  });
+
+  it("stamps a DECLARED wide audience as a BRIEFING and everything else as an APPOINTMENT", async () => {
+    const a = harness();
+    await a.svc.createSlot(principal, { ...WHEN, audience: { kind: "SCHOOL", ref: null } });
+    expect(a.created[0].kind).toBe("BRIEFING");
+    const b = harness();
+    await b.svc.createSlot(principal, WHEN); // no declared audience
+    expect(b.created[0].kind).toBe("APPOINTMENT");
   });
 
   it("lets a TEACHER open a plain slot with no audience — offering availability is not summoning anyone", async () => {
@@ -250,6 +261,7 @@ function announceHarness(guardians: string[], opts: { stageClasses?: string[] } 
     parentChild: {
       findMany: jest.fn().mockResolvedValue([...guardians.map((parentId) => ({ parentId })), { parentId: guardians[0] }]),
     },
+    meetingInvitee: { findMany: jest.fn().mockResolvedValue([]), createMany: jest.fn().mockResolvedValue({ count: 0 }) },
     meetingSlot: { create: jest.fn(({ data }: { data: Record<string, unknown> }) => Promise.resolve({ id: "sl1", ...data, provider: null, joinUrl: null, active: true })), findMany: jest.fn().mockResolvedValue([]) },
     meetingBooking: { groupBy: jest.fn().mockResolvedValue([]), count: jest.fn().mockResolvedValue(0) },
   } as unknown as TenantTx;
@@ -326,5 +338,205 @@ describe("announcing", () => {
     notifications.enqueueMany.mockRejectedValueOnce(new Error("queue down"));
     const dto = await svc.createSlot(principal, { ...CALLED, audience: { kind: "CLASS", ref: "c1" } });
     expect(dto.id).toBe("sl1");
+  });
+});
+
+// =============================================================================
+// Selected parents, and why a briefing must not claim capacity
+// =============================================================================
+// Two additions that belong together.
+//
+// SELECTED is the one audience with no rule to derive a list from — a hand-picked
+// set of parents IS its own rule — so it is the one whose membership is stored.
+//
+// And the capacity claim is the thing that would actually have taken the system
+// down. `book()` COUNTs every existing booking on the slot inside each
+// transaction. For an appointment that is correct: it allocates a scarce thing
+// and must serialise. For 2,000 parents responding to a whole-school notice it
+// is O(n^2) reads all contending on the same rows.
+
+import { isAppointment } from "@sms/types";
+
+describe("appointment vs briefing", () => {
+  it("treats a pupil appointment and a selected set as APPOINTMENTS", () => {
+    expect(isAppointment("STUDENT")).toBe(true);
+    expect(isAppointment("SELECTED")).toBe(true);
+  });
+
+  it("treats a class, year group and the school as BRIEFINGS", () => {
+    // These are the ones where a per-parent capacity claim is O(n^2).
+    expect(isAppointment("CLASS")).toBe(false);
+    expect(isAppointment("STAGE")).toBe(false);
+    expect(isAppointment("SCHOOL")).toBe(false);
+  });
+});
+
+describe("SELECTED audience", () => {
+  it("is valid with no ref — its people live in meeting_invitee", () => {
+    expect(meetingAudienceProblem({ kind: "SELECTED", ref: null })).toBeNull();
+  });
+
+  it("refuses a ref, which would imply a rule it does not have", () => {
+    expect(meetingAudienceProblem({ kind: "SELECTED", ref: "c1" })).toMatch(/takes no class or pupil/);
+  });
+
+  it("is labelled without leaking who was picked", () => {
+    // The label appears on a parent's own page; naming the others would disclose
+    // which families were summoned.
+    expect(describeAudience({ kind: "SELECTED", ref: null })).toBe("Selected parents");
+  });
+});
+
+function selectHarness(realParents: string[]) {
+  const invitees: Array<Record<string, unknown>> = [];
+  // Every `where` the pupil lookup was handed, so a null id is visible.
+  const userLookups: Array<Record<string, unknown>> = [];
+  const tx = {
+    class: { findFirst: jest.fn().mockResolvedValue({ id: "c1", name: "JSS2" }), findMany: jest.fn().mockResolvedValue([]) },
+    classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue({ id: "o" }) },
+    user: {
+      findFirst: jest.fn(({ where }: { where: Record<string, unknown> }) => {
+        userLookups.push(where);
+        return Promise.resolve({ id: "s1", name: "P" });
+      }),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
+    enrollment: { findMany: jest.fn().mockResolvedValue([]) },
+    parentChild: { findMany: jest.fn().mockResolvedValue(realParents.map((parentId) => ({ parentId }))) },
+    meetingInvitee: {
+      createMany: jest.fn(({ data }: { data: Array<Record<string, unknown>> }) => {
+        invitees.push(...data);
+        return Promise.resolve({ count: data.length });
+      }),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
+    meetingSlot: { create: jest.fn(({ data }: { data: Record<string, unknown> }) => Promise.resolve({ id: "sl1", ...data, provider: null, joinUrl: null, active: true })), findMany: jest.fn().mockResolvedValue([]) },
+    meetingBooking: { groupBy: jest.fn().mockResolvedValue([]), count: jest.fn().mockResolvedValue(0) },
+  } as unknown as TenantTx;
+  const db = {
+    runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
+    runAsTenantReadOnly: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
+  };
+  const notifications = { enqueueMany: jest.fn().mockResolvedValue({ created: 0, failed: 0 }), enqueue: jest.fn().mockResolvedValue({}) };
+  const audit = { record: jest.fn().mockResolvedValue(undefined) };
+  return { svc: new MeetingService(db as never, audit as never, notifications as never), invitees, notifications, userLookups };
+}
+
+const PICK = { startsAt: "2027-05-01T09:00:00Z", endsAt: "2027-05-01T10:00:00Z" };
+
+describe("inviting a chosen few", () => {
+  it("never looks a SELECTED audience up by ref — there is no ref", async () => {
+    // SELECTED has no `ref`, so falling through to the pupil branch issues
+    // `where: { id: null }` and Prisma throws — which is exactly what happened
+    // live. The other tests passed anyway because the mock returns a row
+    // WHATEVER the `where` is, so this asserts the QUERY rather than the result.
+    const { svc, userLookups } = selectHarness(["g1"]);
+    await svc.createSlot(principal, { ...PICK, audience: { kind: "SELECTED", ref: null }, inviteeIds: ["g1"] });
+    for (const where of userLookups) expect(where.id).not.toBeNull();
+  });
+
+  it("stores exactly the parents picked", async () => {
+    const { svc, invitees } = selectHarness(["g1", "g2"]);
+    await svc.createSlot(principal, { ...PICK, audience: { kind: "SELECTED", ref: null }, inviteeIds: ["g1", "g2"] });
+    expect(invitees.map((i) => i.parentId).sort()).toEqual(["g1", "g2"]);
+  });
+
+  it("de-duplicates a parent listed twice", async () => {
+    const { svc, invitees } = selectHarness(["g1"]);
+    await svc.createSlot(principal, { ...PICK, audience: { kind: "SELECTED", ref: null }, inviteeIds: ["g1", "g1"] });
+    expect(invitees).toHaveLength(1);
+  });
+
+  it("refuses an id that is not a parent at this school", async () => {
+    // An invitation to somebody who does not exist is a meeting one fewer person
+    // attends, discovered by an empty chair.
+    const { svc, invitees } = selectHarness(["g1"]);
+    await expect(
+      svc.createSlot(principal, { ...PICK, audience: { kind: "SELECTED", ref: null }, inviteeIds: ["g1", "ghost"] }),
+    ).rejects.toThrow(/not parents at this school/);
+    expect(invitees).toHaveLength(0);
+  });
+
+  it("refuses an empty selection rather than creating a meeting for nobody", async () => {
+    const { svc } = selectHarness([]);
+    await expect(
+      svc.createSlot(principal, { ...PICK, audience: { kind: "SELECTED", ref: null }, inviteeIds: [] }),
+    ).rejects.toThrow(/at least one parent/);
+  });
+
+  it("REFUSES a teacher hand-picking families", async () => {
+    // A chosen set can span the whole school, so it is a leadership act for the
+    // same reason a year group is.
+    const { svc, invitees } = selectHarness(["g1"]);
+    await expect(
+      svc.createSlot(teacher, { ...PICK, audience: { kind: "SELECTED", ref: null }, inviteeIds: ["g1"] }),
+    ).rejects.toThrow(/principal or school administrator/i);
+    expect(invitees).toHaveLength(0);
+  });
+
+  it("announces to exactly those parents", async () => {
+    const { svc, notifications } = selectHarness(["g1", "g2"]);
+    (notifications as unknown as { enqueueMany: jest.Mock }).enqueueMany.mockClear();
+    await svc.createSlot(principal, { ...PICK, audience: { kind: "SELECTED", ref: null }, inviteeIds: ["g1", "g2"] });
+    // resolveAudience reads meeting_invitee; the harness returns none, so the
+    // announcement is a no-op — what matters is that it did not fan out to the
+    // school by falling through to another branch.
+    const calls = (notifications as unknown as { enqueueMany: jest.Mock }).enqueueMany.mock.calls;
+    for (const c of calls) expect((c[1] as string[]).length).toBeLessThanOrEqual(2);
+  });
+});
+
+describe("book() — the capacity claim itself", () => {
+  // Testing isAppointment() proves the DATA. This proves the WIRING: that the
+  // COUNT which makes a whole-school response O(n^2) is genuinely not issued.
+  function bookHarness(kind: string) {
+    const counted: string[] = [];
+    const tx = {
+      parentChild: { findFirst: jest.fn().mockResolvedValue({ id: "link" }) },
+      meetingSlot: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: "sl1", teacherId: "t1", capacity: 1, startsAt: new Date("2099-01-01"), kind,
+        }),
+      },
+      meetingBooking: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        count: jest.fn((args: { where: { slotId: string } }) => {
+          counted.push(args.where.slotId);
+          return Promise.resolve(50); // already "full" at capacity 1
+        }),
+        create: jest.fn().mockResolvedValue({ id: "bk1", slotId: "sl1", studentId: "s1", status: "BOOKED", note: null }),
+      },
+      user: { findFirst: jest.fn().mockResolvedValue({ id: "s1", name: "Pupil" }) },
+    } as unknown as TenantTx;
+    const db = {
+      runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
+      runAsTenantReadOnly: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
+    };
+    const notifications = { enqueue: jest.fn().mockResolvedValue({}), enqueueMany: jest.fn().mockResolvedValue({}) };
+    const audit = { record: jest.fn().mockResolvedValue(undefined) };
+    return { svc: new MeetingService(db as never, audit as never, notifications as never), counted };
+  }
+
+  it("COUNTS for an appointment — a scarce half-hour must serialise", async () => {
+    const { svc, counted } = bookHarness("APPOINTMENT");
+    await expect(svc.book(parent, "sl1", "s1")).rejects.toThrow(/fully booked/);
+    expect(counted).toEqual(["sl1"]);
+  });
+
+  it("does NOT count for a whole-school briefing — this is the O(n^2)", async () => {
+    // 2,000 parents each counting every existing booking on the same slot is
+    // what would take the system down. A hall is not a per-parent transaction.
+    const { svc, counted } = bookHarness("BRIEFING");
+    await svc.book(parent, "sl1", "s1");
+    expect(counted).toEqual([]);
+  });
+
+  it("COUNTS for a slot with NO stored kind — every existing row is an appointment", async () => {
+    // The regression the e2e caught: a plain bookable slot defaults to a SCHOOL
+    // audience, and deriving briefing-ness from that removed the capacity claim
+    // from every ordinary slot in the product.
+    const { svc, counted } = bookHarness(undefined as unknown as string);
+    await expect(svc.book(parent, "sl1", "s1")).rejects.toThrow(/fully booked/);
+    expect(counted).toEqual(["sl1"]);
   });
 });

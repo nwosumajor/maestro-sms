@@ -128,6 +128,7 @@ const schoolArchiveA = randomUUID();
   const ultimateConsentA = randomUUID();
   const ultimateLinkA = randomUUID();
   const lmsContentA = randomUUID();
+  const meetingInviteeA = randomUUID();
   const syllabusA = randomUUID();
   const syllabusItemA = randomUUID();
   const quizAttemptA = randomUUID();
@@ -395,6 +396,11 @@ const schoolArchiveA = randomUUID();
       `INSERT INTO meeting_slot (id,"schoolId","teacherId","startsAt","endsAt","updatedAt")
        VALUES ($1,$2,$3,now() + interval '1 day',now() + interval '1 day' + interval '30 min',now())`,
       [meetingSlotA, A, userA],
+    );
+    // Hand-picked invitees of a SELECTED meeting.
+    await a.query(
+      `INSERT INTO meeting_invitee (id,"schoolId","slotId","parentId") VALUES ($1,$2,$3,$4)`,
+      [meetingInviteeA, A, meetingSlotA, userA],
     );
     await a.query(
       `INSERT INTO meeting_booking (id,"schoolId","slotId","parentId","studentId","updatedAt")
@@ -1285,6 +1291,7 @@ const schoolArchiveA = randomUUID();
       "exam_schedule",
       "platform_feedback_message",
       "platform_feedback",
+      "meeting_invitee",
       "meeting_booking",
       "meeting_slot",
       "lesson_cover",
@@ -1389,6 +1396,7 @@ const schoolArchiveA = randomUUID();
     ["timetable_entry", ttEntryA],
     ["lesson_cover", lessonCoverA],
     ["meeting_slot", meetingSlotA],
+    ["meeting_invitee", meetingInviteeA],
     ["meeting_booking", meetingBookingA],
     ["exam_schedule", examScheduleA],
     ["platform_feedback", platformFeedbackA],

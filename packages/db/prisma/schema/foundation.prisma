@@ -339,6 +339,7 @@ model School {
   archives             SchoolArchive[]
 
   @@map("school")
+  meetingInvitees    MeetingInvitee[]
   subjectSyllabi     SubjectSyllabus[]
   subjectSyllabusItems SubjectSyllabusItem[]
 }

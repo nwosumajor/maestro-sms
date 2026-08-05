@@ -33,6 +33,18 @@ model MeetingSlot {
   audienceKind String  @default("SCHOOL")
   audienceRef  String?
 
+  /// APPOINTMENT | BRIEFING — whether this allocates a scarce thing.
+  ///
+  /// STORED rather than derived from the audience, because the two are not the
+  /// same question. A plain bookable slot has no declared audience and so
+  /// defaults to SCHOOL, but it is an APPOINTMENT: one teacher, one half-hour,
+  /// capacity genuinely enforced. Deriving from the audience quietly removed the
+  /// capacity claim from every ordinary slot, which the e2e caught.
+  ///
+  /// Only a DECLARED wide audience makes a briefing. Existing rows default to
+  /// APPOINTMENT, which is exactly what they are.
+  kind         String  @default("APPOINTMENT")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -44,6 +56,7 @@ model MeetingSlot {
   joinUrl  String?
   school   School           @relation(fields: [schoolId], references: [id])
   bookings MeetingBooking[]
+  invitees MeetingInvitee[]
 
   @@index([schoolId])
   @@index([schoolId, teacherId])
@@ -74,4 +87,28 @@ model MeetingBooking {
   @@index([schoolId, slotId])
   @@index([schoolId, parentId])
   @@map("meeting_booking")
+}
+
+/// The hand-picked parents of a SELECTED meeting.
+///
+/// The one audience with no rule to derive a list from — a chosen set of parents
+/// IS its own rule — so it is stored. Every other kind stays derivable and
+/// therefore stays current as pupils come and go, which is why this table exists
+/// only for this case rather than as a general invitation list.
+model MeetingInvitee {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+  slotId   String @db.Uuid
+  /// The invited parent (DB FK to user; scalar, no Prisma relation).
+  parentId String @db.Uuid
+
+  createdAt DateTime @default(now())
+
+  school School      @relation(fields: [schoolId], references: [id])
+  slot   MeetingSlot @relation(fields: [slotId], references: [id], onDelete: Cascade)
+
+  /// Inviting the same parent twice is a no-op, not two invitations.
+  @@unique([slotId, parentId])
+  @@index([schoolId])
+  @@map("meeting_invitee")
 }
