@@ -460,11 +460,48 @@ export class LmsService {
   async assignTeacher(p: Principal, classId: string, teacherId: string) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.requireClass(tx, classId);
-      const row = await tx.classTeacher.create({
-        data: { schoolId: p.schoolId, classId, teacherId },
+      const teacher = await tx.user.findFirst({ where: { id: teacherId }, select: { id: true } });
+      if (!teacher) throw new NotFoundException("Teacher not found");
+      // Idempotent: assigning twice is a duplicate click, not an error, and the
+      // unique index would otherwise surface it as a raw 500.
+      const row = await tx.classTeacher.upsert({
+        where: { classId_teacherId: { classId, teacherId } },
+        update: {},
+        create: { schoolId: p.schoolId, classId, teacherId },
       });
       await this.log(tx, p, "lms.teacher.assign", "class", classId, { teacherId });
       return row;
+    });
+  }
+
+  /**
+   * Take a class teacher off a class.
+   *
+   * There was NO way to do this. A class-teacher assignment is the widest
+   * relationship in the product — it grants the roster, the grades, the
+   * documents, and the right to publish untagged content to every pupil in the
+   * class — and it could be granted and never taken back. A mis-click, a change
+   * of form teacher, or a member of staff moving on all left standing access
+   * with no route to revoke it. Assigning without revoking is not an
+   * assignment, it is a one-way grant.
+   *
+   * Deliberately NOT guarded on "the last teacher": a class with no teacher yet
+   * is a normal state (it is how every class starts), so refusing would make
+   * fixing a mistake impossible in exactly the case you most need to.
+   */
+  async removeTeacher(p: Principal, classId: string, teacherId: string) {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      await this.requireClass(tx, classId);
+      // 404-not-403, and the same answer whether the class or the assignment is
+      // missing — never disclose which.
+      const existing = await tx.classTeacher.findFirst({
+        where: { classId, teacherId },
+        select: { id: true },
+      });
+      if (!existing) throw new NotFoundException("That teacher is not assigned to this class");
+      await tx.classTeacher.delete({ where: { id: existing.id } });
+      await this.log(tx, p, "lms.teacher.remove", "class", classId, { teacherId });
+      return { classId, teacherId, removed: true };
     });
   }
 

@@ -42,6 +42,19 @@ export function ClassAdmin({
   const [cls, setCls] = React.useState({ name: "" });
   // assign teacher
   const [at, setAt] = React.useState({ classId: classes[0]?.id ?? "", teacherId: teachers[0]?.id ?? "" });
+
+  // The class roster already carries its teachers, so this needs no new
+  // endpoint — null means "still loading", [] means genuinely nobody.
+  const [assigned, setAssigned] = React.useState<Array<{ id: string; name: string }> | null>(null);
+  const loadAssigned = React.useCallback(async (classId: string) => {
+    if (!classId) { setAssigned([]); return; }
+    setAssigned(null);
+    const res = await fetch(`/api/sms/classes/${classId}`);
+    if (!res.ok) { setAssigned([]); return; }
+    const roster = (await res.json()) as { teachers?: Array<{ teacher?: { id: string; name: string } }> };
+    setAssigned((roster.teachers ?? []).map((t) => t.teacher).filter((t): t is { id: string; name: string } => !!t));
+  }, []);
+  React.useEffect(() => { void loadAssigned(at.classId); }, [at.classId, loadAssigned]);
   // enroll
   const [en, setEn] = React.useState({ classId: classes[0]?.id ?? "", studentId: students[0]?.id ?? "" });
   // link guardian
@@ -66,7 +79,12 @@ export function ClassAdmin({
         </form>
 
         <form
-          onSubmit={async (e) => { e.preventDefault(); await post(`/classes/${at.classId}/teachers`, { teacherId: at.teacherId }, "Teacher assigned."); }}
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (await post(`/classes/${at.classId}/teachers`, { teacherId: at.teacherId }, "Teacher assigned.")) {
+              void loadAssigned(at.classId);
+            }
+          }}
           className="flex flex-wrap items-end gap-2 border-t border-border pt-4"
         >
           <Label className="w-full">Assign teacher</Label>
@@ -78,6 +96,44 @@ export function ClassAdmin({
           </select>
           <Button type="submit" size="sm" variant="outline" disabled={!at.teacherId}>Assign</Button>
         </form>
+
+        {/* WHO IS ALREADY ASSIGNED. The form was write-only: you picked a class
+            and a teacher and clicked Assign, never seeing the current state —
+            and there was no way to take an assignment back at all. A class
+            teacher holds the widest access in the product (roster, grades,
+            documents, and publishing to every pupil), so it has to be
+            revocable, and revoking starts with being able to see it. */}
+        <div className="space-y-1.5">
+          <p className="text-xs font-medium text-muted-foreground">
+            Class teachers of {classes.find((c) => c.id === at.classId)?.name ?? "this class"}
+          </p>
+          {assigned === null ? (
+            <p className="text-xs text-muted-foreground">Loading…</p>
+          ) : assigned.length === 0 ? (
+            <p className="text-xs text-muted-foreground">Nobody yet — a class with no class teacher is normal until you assign one.</p>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {assigned.map((t) => (
+                <span key={t.id} className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs">
+                  {t.name}
+                  <button
+                    type="button"
+                    title={`Remove ${t.name} from this class`}
+                    className="text-muted-foreground hover:text-destructive"
+                    onClick={async () => {
+                      if (!confirm(`Remove ${t.name} as a class teacher? They keep any subjects they teach here.`)) return;
+                      const res = await fetch(`/api/sms/classes/${at.classId}/teachers/${t.id}`, { method: "DELETE" });
+                      if (res.ok) { setMsg("Removed."); void loadAssigned(at.classId); router.refresh(); }
+                      else setMsg(await readApiError(res));
+                    }}
+                  >
+                    ×<span className="sr-only">Remove {t.name}</span>
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
 
         <form
           onSubmit={async (e) => { e.preventDefault(); await post(`/classes/${en.classId}/enrollments`, { studentId: en.studentId }, "Student enrolled."); }}

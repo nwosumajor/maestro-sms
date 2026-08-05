@@ -339,6 +339,18 @@ export class LmsController {
     return this.lms.assignTeacher(p, classId, body.teacherId);
   }
 
+  /** Take a class teacher off a class — the counterpart the assign route never
+   *  had, so class-wide access could be granted and never revoked. */
+  @Delete("classes/:classId/teachers/:teacherId")
+  @RequirePermission(LMS_PERMISSIONS.ENROLLMENT_WRITE)
+  removeTeacher(
+    @CurrentPrincipal() p: Principal,
+    @Param("classId") classId: string,
+    @Param("teacherId") teacherId: string,
+  ) {
+    return this.lms.removeTeacher(p, classId, teacherId);
+  }
+
   /** Enrol MANY students at once — one capacity check, already-enrolled skipped. */
   @Post("classes/:classId/enrollments/bulk")
   @RequirePermission(LMS_PERMISSIONS.ENROLLMENT_WRITE)
