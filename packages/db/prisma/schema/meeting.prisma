@@ -57,6 +57,7 @@ model MeetingSlot {
   school   School           @relation(fields: [schoolId], references: [id])
   bookings MeetingBooking[]
   invitees MeetingInvitee[]
+  cohosts  MeetingCohost[]
 
   @@index([schoolId])
   @@index([schoolId, teacherId])
@@ -111,4 +112,31 @@ model MeetingInvitee {
   @@unique([slotId, parentId])
   @@index([schoolId])
   @@map("meeting_invitee")
+}
+
+/// Additional staff attending a meeting alongside its organiser.
+///
+/// `MeetingSlot.teacherId` stays the ORGANISER — it decides who may withdraw the
+/// slot and whose list it appears in as their own. Co-hosts are people who will
+/// be in the room: a form teacher joined by the head of year and the counsellor.
+/// Modelling them as a second column on the slot would cap it at two; modelling
+/// them by replacing teacherId would lose the "who owns this" answer that three
+/// other behaviours already depend on.
+model MeetingCohost {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+  slotId   String @db.Uuid
+  /// The attending staff member (DB FK to user; scalar, no Prisma relation).
+  teacherId String @db.Uuid
+
+  createdAt DateTime @default(now())
+
+  school School      @relation(fields: [schoolId], references: [id])
+  slot   MeetingSlot @relation(fields: [slotId], references: [id], onDelete: Cascade)
+
+  /// Adding the same colleague twice is a no-op, not two seats.
+  @@unique([slotId, teacherId])
+  @@index([schoolId])
+  @@index([schoolId, teacherId])
+  @@map("meeting_cohost")
 }

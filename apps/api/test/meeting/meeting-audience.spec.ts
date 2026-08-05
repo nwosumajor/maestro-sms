@@ -12,7 +12,7 @@
 //   • the audience RULE is stored, so it stays current as pupils come and go
 //   • nothing fans out to compute a list on a page render
 
-import { describeAudience, meetingAudienceProblem } from "@sms/types";
+import { NOTIFICATION_MESSAGES, describeAudience, meetingAudienceProblem } from "@sms/types";
 
 describe("meetingAudienceProblem", () => {
   it("accepts each of the four shapes", () => {
@@ -538,5 +538,183 @@ describe("book() — the capacity claim itself", () => {
     const { svc, counted } = bookHarness(undefined as unknown as string);
     await expect(svc.book(parent, "sl1", "s1")).rejects.toThrow(/fully booked/);
     expect(counted).toEqual(["sl1"]);
+  });
+});
+
+// =============================================================================
+// Colleagues attending
+// =============================================================================
+// `teacherId` stays the ORGANISER — it decides who may withdraw the slot and
+// whose list it is theirs in. A co-host is someone who will be IN THE ROOM: a
+// form teacher joined by the head of year and the counsellor.
+//
+// Two things must follow, or being added is an invitation that never arrives:
+// they have to SEE the meeting, and they have to get the join link.
+
+function cohostHarness(staffIds: string[]) {
+  const cohosts: Array<Record<string, unknown>> = [];
+  const notified: string[][] = [];
+  const tx = {
+    class: { findFirst: jest.fn().mockResolvedValue({ id: "c1", name: "JSS2" }), findMany: jest.fn().mockResolvedValue([]) },
+    classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue({ id: "o" }) },
+    user: { findFirst: jest.fn().mockResolvedValue({ id: "s1", name: "P" }), findMany: jest.fn().mockResolvedValue([]) },
+    userRole: { findMany: jest.fn().mockResolvedValue(staffIds.map((userId) => ({ userId }))) },
+    enrollment: { findMany: jest.fn().mockResolvedValue([]) },
+    parentChild: { findMany: jest.fn().mockResolvedValue([]) },
+    meetingInvitee: { findMany: jest.fn().mockResolvedValue([]), createMany: jest.fn().mockResolvedValue({ count: 0 }) },
+    meetingCohost: {
+      createMany: jest.fn(({ data }: { data: Array<Record<string, unknown>> }) => {
+        cohosts.push(...data);
+        return Promise.resolve({ count: data.length });
+      }),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
+    meetingSlot: { create: jest.fn(({ data }: { data: Record<string, unknown> }) => Promise.resolve({ id: "sl1", ...data, provider: null, joinUrl: null, active: true })), findMany: jest.fn().mockResolvedValue([]) },
+    meetingBooking: { groupBy: jest.fn().mockResolvedValue([]), count: jest.fn().mockResolvedValue(0) },
+  } as unknown as TenantTx;
+  const db = {
+    runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
+    runAsTenantReadOnly: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
+  };
+  const notifications = {
+    enqueueMany: jest.fn((_c: unknown, ids: string[]) => {
+      notified.push(ids);
+      return Promise.resolve({ created: ids.length, failed: 0 });
+    }),
+    enqueue: jest.fn().mockResolvedValue({}),
+  };
+  const audit = { record: jest.fn().mockResolvedValue(undefined) };
+  return { svc: new MeetingService(db as never, audit as never, notifications as never), cohosts, notified };
+}
+
+const CO = { startsAt: "2027-07-01T09:00:00Z", endsAt: "2027-07-01T10:00:00Z" };
+
+describe("adding colleagues to a meeting", () => {
+  it("stores each colleague", async () => {
+    const { svc, cohosts } = cohostHarness(["t2", "t3"]);
+    await svc.createSlot(principal, { ...CO, cohostIds: ["t2", "t3"] });
+    expect(cohosts.map((c) => c.teacherId).sort()).toEqual(["t2", "t3"]);
+  });
+
+  it("refuses somebody who is not staff", async () => {
+    // A parent added as a host would get the join link before the window and the
+    // organiser's view of the slot.
+    const { svc, cohosts } = cohostHarness(["t2"]);
+    await expect(svc.createSlot(principal, { ...CO, cohostIds: ["t2", "a-parent"] }))
+      .rejects.toThrow(/not staff at this school/);
+    expect(cohosts).toHaveLength(0);
+  });
+
+  it("drops the organiser from their own co-host list", async () => {
+    // Adding yourself is the one thing this cannot usefully do, and a duplicate
+    // row would make the unique index the thing that reports it.
+    const { svc, cohosts } = cohostHarness(["t2"]);
+    await svc.createSlot(principal, { ...CO, cohostIds: [principal.userId, "t2"] });
+    expect(cohosts.map((c) => c.teacherId)).toEqual(["t2"]);
+  });
+
+  it("de-duplicates a colleague listed twice", async () => {
+    const { svc, cohosts } = cohostHarness(["t2"]);
+    await svc.createSlot(principal, { ...CO, cohostIds: ["t2", "t2"] });
+    expect(cohosts).toHaveLength(1);
+  });
+
+  it("TELLS them they have been added", async () => {
+    // Otherwise being added is an invitation that never arrives.
+    const { svc, notified } = cohostHarness(["t2"]);
+    await svc.createSlot(principal, { ...CO, cohostIds: ["t2"] });
+    expect(notified.flat()).toContain("t2");
+  });
+
+  it("tells them with a KEY, so a francophone colleague reads French", async () => {
+    const { svc } = cohostHarness(["t2"]);
+    const h = cohostHarness(["t2"]);
+    await h.svc.createSlot(principal, { ...CO, cohostIds: ["t2"] });
+    void svc;
+    expect(NOTIFICATION_MESSAGES["meeting.cohost_added"]).toBeDefined();
+    expect(NOTIFICATION_MESSAGES["meeting.cohost_added"].title.fr).toMatch(/réunion/);
+  });
+
+  it("still creates the meeting when telling them fails", async () => {
+    const { svc, cohosts } = cohostHarness(["t2"]);
+    const dto = await svc.createSlot(principal, { ...CO, cohostIds: ["t2"] });
+    expect(dto.id).toBe("sl1");
+    expect(cohosts).toHaveLength(1);
+  });
+
+  it("refuses more than 20 colleagues", async () => {
+    const many = Array.from({ length: 21 }, (_, i) => `t${i}`);
+    const { svc } = cohostHarness(many);
+    await expect(svc.createSlot(principal, { ...CO, cohostIds: many })).rejects.toThrow(/at most 20/);
+  });
+});
+
+describe("a co-host is a host for the things that matter", () => {
+  // Storing the row is not enough. If they cannot SEE the meeting or GET the
+  // link, being added is an invitation that never arrives — so these test the
+  // wiring rather than the write.
+  const colleague: Principal = { schoolId: "A", userId: "t2", roles: ["teacher"], permissions: ["meeting.host"] };
+
+  function listHarness(cohostOf: string[]) {
+    const tx = {
+      meetingCohost: {
+        findMany: jest.fn(({ where }: { where: Record<string, unknown> }) =>
+          Promise.resolve(
+            where.teacherId
+              ? cohostOf.map((slotId) => ({ slotId }))
+              : cohostOf.map((slotId) => ({ slotId, teacherId: "t2" })),
+          ),
+        ),
+      },
+      meetingSlot: {
+        // HONOURS the where. A mock that returns the row whatever is asked makes
+        // "the co-host can see it" pass even when the filter that lets them see
+        // it has been deleted — which is exactly what happened the first time.
+        findMany: jest.fn(({ where }: { where: Record<string, unknown> }) => {
+          const or = (where?.OR ?? []) as Array<Record<string, unknown>>;
+          const byOwner = where?.teacherId === "OWNER";
+          const byOr = or.some(
+            (c) => c.teacherId === "OWNER" || ((c.id as { in?: string[] })?.in ?? []).includes("sl1"),
+          );
+          if (!byOwner && !byOr) return Promise.resolve([]);
+          return Promise.resolve([
+          {
+            id: "sl1", teacherId: "OWNER", startsAt: new Date("2099-01-01T09:00:00Z"),
+            endsAt: new Date("2099-01-01T10:00:00Z"), capacity: 1, location: null, note: null,
+            active: true, provider: "ZOOM", joinUrl: "https://zoom.us/j/123", audienceKind: "STUDENT",
+            audienceRef: null, kind: "APPOINTMENT",
+          },
+        ]);
+        }),
+      },
+      meetingBooking: { groupBy: jest.fn().mockResolvedValue([]) },
+      user: { findMany: jest.fn().mockResolvedValue([{ id: "t2", name: "Colleague" }]) },
+      class: { findMany: jest.fn().mockResolvedValue([]) },
+    } as unknown as TenantTx;
+    const db = {
+      runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
+      runAsTenantReadOnly: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
+    };
+    const audit = { record: jest.fn().mockResolvedValue(undefined) };
+    const notifications = { enqueue: jest.fn(), enqueueMany: jest.fn() };
+    return new MeetingService(db as never, audit as never, notifications as never);
+  }
+
+  it("SEES a meeting they were added to, though they do not own it", async () => {
+    const out = await listHarness(["sl1"]).mySlots(colleague);
+    expect(out.map((s) => s.id)).toContain("sl1");
+  });
+
+  it("GETS the join link before the window, as the organiser does", async () => {
+    // The meeting is in 2099, so the window is shut. A co-host must still have
+    // the link — they are in the room, and being told to attend a call you
+    // cannot open is the failure this prevents.
+    const out = await listHarness(["sl1"]).mySlots(colleague);
+    expect(out[0].joinUrl).toBe("https://zoom.us/j/123");
+  });
+
+  it("lists the colleagues on the slot, so a parent knows who will be there", async () => {
+    const out = await listHarness(["sl1"]).mySlots(colleague);
+    expect((out[0].cohosts ?? []).map((c) => c.name)).toContain("Colleague");
   });
 });

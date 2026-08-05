@@ -8,6 +8,7 @@ import { JoinMeetingLink } from "@/components/meeting/JoinMeetingLink";
 import { sendSms, postSms } from "@/components/game/play-ui";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { PeoplePicker, type Person } from "./PeoplePicker";
 import { dateTime } from "@/lib/format";
 
 type Slot = Serialized<MeetingSlotDto>;
@@ -59,6 +60,9 @@ export function MeetingsClient({
   // Index 0 is always the safest scope the server offered this host.
   const [audienceIdx, setAudienceIdx] = React.useState(0);
   const picked = audiences[audienceIdx];
+  // The two pickers. Invitees only apply to a SELECTED audience; co-hosts to any.
+  const [invitees, setInvitees] = React.useState<Person[]>([]);
+  const [cohosts, setCohosts] = React.useState<Person[]>([]);
 
   const createSlot = () => {
     if (!form.date) return;
@@ -73,6 +77,8 @@ export function MeetingsClient({
         provider: form.provider || undefined,
         joinUrl: form.provider ? form.joinUrl : undefined,
         ...(picked ? { audience: { kind: picked.kind, ref: picked.ref } } : {}),
+        ...(picked?.kind === "SELECTED" ? { inviteeIds: invitees.map((i) => i.id) } : {}),
+        ...(cohosts.length ? { cohostIds: cohosts.map((c) => c.id) } : {}),
       }),
       "Slot opened.",
     );
@@ -112,6 +118,31 @@ export function MeetingsClient({
                 ))}
               </div>
             )}
+            {/* Shown only for SELECTED: a search box for a scope that does not
+                use one would be a control that does nothing. */}
+            {picked?.kind === "SELECTED" && (
+              <PeoplePicker
+                kind="parent"
+                label="Which parents"
+                hint="Search and tick the families to invite. Only they will see this meeting."
+                value={invitees}
+                onChange={setInvitees}
+                max={500}
+              />
+            )}
+
+            {/* Colleagues attending, for any scope. The organiser is you and is
+                never listed here — adding yourself is the one thing this cannot
+                usefully do. */}
+            <PeoplePicker
+              kind="staff"
+              label="Colleagues attending (optional)"
+              hint="They will see the meeting in their own list and get the join link, and are told they have been added."
+              value={cohosts}
+              onChange={setCohosts}
+              max={20}
+            />
+
             <div className="flex flex-wrap items-end gap-2">
               <input type="date" className="rounded-md border bg-background p-1.5 text-sm" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
               <input type="time" className="rounded-md border bg-background p-1.5 text-sm" value={form.start} onChange={(e) => setForm({ ...form, start: e.target.value })} />
@@ -198,7 +229,14 @@ export function MeetingsClient({
                         </span>
                       </td>
                       <td className="px-4 py-2 text-muted-foreground">
-                        {s.teacherName ?? "Teacher"}{" · "}
+                        {s.teacherName ?? "Teacher"}
+                        {/* Who else will be there. A parent walking into a room
+                            with three staff they were not told about is the
+                            thing this line prevents. */}
+                        {(s.cohosts ?? []).length > 0 && (
+                          <span className="text-xs"> with {(s.cohosts ?? []).map((c) => c.name).join(", ")}</span>
+                        )}
+                        {" · "}
                         <JoinMeetingLink provider={s.provider} joinUrl={s.joinUrl} joinOpen={s.joinOpen} joinOpensAt={s.joinOpensAt} location={s.location} />
                       </td>
                       <td className="px-4 py-2 text-right">
