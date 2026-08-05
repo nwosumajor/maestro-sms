@@ -153,7 +153,18 @@ export function ClassSubjectsAdmin({
 
         {/* Class supervisor */}
         <form
-          onSubmit={async (e) => { e.preventDefault(); await send("PUT", `/classes/${sup.classId}`, { supervisorId: sup.supervisorId }, "Supervisor set."); }}
+          onSubmit={async (e) => {
+            e.preventDefault();
+            // "" clears it. The form could only ever SET a supervisor — once
+            // named, there was no way to remove one from the UI, and the
+            // supervisor is the named approver for subject selections.
+            await send(
+              "PUT",
+              `/classes/${sup.classId}`,
+              { supervisorId: sup.supervisorId || null },
+              sup.supervisorId ? "Supervisor set." : "Supervisor cleared.",
+            );
+          }}
           className="flex flex-wrap items-end gap-2 border-t border-border pt-4"
         >
           <Label className="w-full">Class supervisor (form teacher)</Label>
@@ -161,10 +172,15 @@ export function ClassSubjectsAdmin({
             {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
           <select aria-label="Supervisor" value={sup.supervisorId} onChange={(e) => setSup({ ...sup, supervisorId: e.target.value })} className={sel}>
+            <option value="">— no supervisor —</option>
             {staff.map((s) => <option key={s.id} value={s.id}>{personLabel(s)}</option>)}
           </select>
-          <Button type="submit" size="sm" variant="outline" disabled={!sup.supervisorId}>Set supervisor</Button>
+          <Button type="submit" size="sm" variant="outline">{sup.supervisorId ? "Set supervisor" : "Clear supervisor"}</Button>
         </form>
+        <p className="-mt-2 text-xs text-muted-foreground">
+          The supervisor is the form teacher: they check subject selections and pupil profiles before the school
+          admin does. With none set, that first check is skipped and the admin is the only reviewer.
+        </p>
 
         {/* Class progression: level + next class */}
         <form
