@@ -12,6 +12,7 @@ export * from "./region";
 export * from "./compliance-regime";
 export * from "./notification-messages";
 export * from "./subject-catalogue";
+export * from "./class-stream";
 export * from "./meeting-audience";
 export * from "./roles";
 export * from "./school-email";

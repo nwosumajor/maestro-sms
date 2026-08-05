@@ -1757,6 +1757,10 @@
       "kind": "ui",
       "note": "reached via a runtime-built path (web builds \"/classes/:p\")"
     },
+    "POST /classes/:p/subjects/copy-to-arms": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
     "POST /classes/:p/teachers": {
       "kind": "ui",
       "note": "reached via a runtime-built path (web builds \"/classes/:p\")"

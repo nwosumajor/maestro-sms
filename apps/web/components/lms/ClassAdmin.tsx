@@ -1,6 +1,14 @@
 "use client";
 
 import type { IdNameDto, UserSummaryDto, Serialized } from "@sms/types";
+import {
+  CLASS_ARMS,
+  CLASS_STREAMS,
+  CLASS_STREAM_LABELS,
+  SUBJECT_STAGES,
+  SUBJECT_STAGE_LABELS,
+  composeClassName,
+} from "@sms/types";
 import { StudentPicker } from "@/components/people/StudentPicker";
 import { UserPicker } from "@/components/people/UserPicker";
 import * as React from "react";
@@ -41,6 +49,22 @@ export function ClassAdmin({
   // create class
   const [cls, setCls] = React.useState({ name: "" });
   // assign teacher
+  // The class name is COMPOSED from what was chosen, never typed. A typed name
+  // is how "SS3 Science A", "SS3 Sci A" and "SS3-SCIENCE-A" end up as three
+  // year groups that no report can compare.
+  const [shape, setShape] = React.useState<{ stage: string; level: string; stream: string; arm: string }>({
+    stage: "SENIOR_SECONDARY",
+    level: "3",
+    stream: "SCIENCE",
+    arm: "",
+  });
+  const composed = composeClassName({
+    stage: shape.stage || null,
+    level: shape.level ? Number(shape.level) : null,
+    stream: shape.stream || null,
+    arm: shape.arm || null,
+  });
+
   const [at, setAt] = React.useState({ classId: classes[0]?.id ?? "", teacherId: teachers[0]?.id ?? "" });
 
   // The class roster already carries its teachers, so this needs no new
@@ -68,14 +92,59 @@ export function ClassAdmin({
       </CardHeader>
       <CardContent className="space-y-4">
         <form
-          onSubmit={async (e) => { e.preventDefault(); if (await post("/classes", { name: cls.name }, "Class created.")) setCls({ name: "" }); }}
+          onSubmit={async (e) => {
+            e.preventDefault();
+            await post(
+              "/classes",
+              {
+                name: composed,
+                stage: shape.stage || null,
+                level: shape.level ? Number(shape.level) : null,
+                stream: shape.stream || null,
+                arm: shape.arm || null,
+              },
+              "Class created.",
+            );
+          }}
           className="flex flex-wrap items-end gap-2"
         >
           {/* A class is a COHORT — its subjects are defined per class in
-              "Subjects, teachers & progression" (the Subject catalog +
-              class-subject-teacher offerings), not typed here. */}
-          <div className="space-y-1.5"><Label htmlFor="cl-name">New class</Label><Input id="cl-name" value={cls.name} onChange={(e) => setCls({ name: e.target.value })} placeholder="JSS1A" required /></div>
-          <Button type="submit" size="sm">Create class</Button>
+              "Subjects, teachers & progression", not typed here. Everything
+              below is CHOSEN, so the structured fields and the name can never
+              disagree and no two arms can be spelled differently. */}
+          <div className="space-y-1.5">
+            <Label htmlFor="cl-stage">Section</Label>
+            <select id="cl-stage" value={shape.stage} onChange={(e) => setShape({ ...shape, stage: e.target.value })} className={sel}>
+              {SUBJECT_STAGES.map((st) => <option key={st} value={st}>{SUBJECT_STAGE_LABELS[st]}</option>)}
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="cl-level">Year</Label>
+            <select id="cl-level" value={shape.level} onChange={(e) => setShape({ ...shape, level: e.target.value })} className={sel}>
+              {[1, 2, 3, 4, 5, 6].map((n) => <option key={n} value={String(n)}>{n}</option>)}
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="cl-stream">Stream</Label>
+            <select id="cl-stream" value={shape.stream} onChange={(e) => setShape({ ...shape, stream: e.target.value })} className={sel}>
+              <option value="">— none —</option>
+              {CLASS_STREAMS.map((st) => <option key={st} value={st}>{CLASS_STREAM_LABELS[st]}</option>)}
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="cl-arm">Arm</Label>
+            <select id="cl-arm" value={shape.arm} onChange={(e) => setShape({ ...shape, arm: e.target.value })} className={sel}>
+              <option value="">— single class —</option>
+              {CLASS_ARMS.map((a) => <option key={a} value={a}>{a}</option>)}
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Will be called</Label>
+            <p className="flex h-9 items-center rounded-md border border-dashed border-border px-3 text-sm font-medium">
+              {composed || "—"}
+            </p>
+          </div>
+          <Button type="submit" size="sm" disabled={!composed}>Create class</Button>
         </form>
 
         <form

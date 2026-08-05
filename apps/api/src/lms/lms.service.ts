@@ -102,7 +102,15 @@ export class LmsService {
 
   async createClass(
     p: Principal,
-    input: { name: string; level?: number | null; nextClassId?: string | null; code?: string | null },
+    input: {
+      name: string;
+      level?: number | null;
+      nextClassId?: string | null;
+      code?: string | null;
+      stage?: string | null;
+      stream?: string | null;
+      arm?: string | null;
+    },
   ) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       // Same catalog rule as subjects: one "JSS2A" per school, or every roster
@@ -120,9 +128,16 @@ export class LmsService {
           code,
           level: input.level ?? null,
           nextClassId: input.nextClassId ?? null,
+          stage: input.stage ?? null,
+          stream: input.stream ?? null,
+          arm: input.arm ?? null,
         },
       });
-      await this.log(tx, p, "lms.class.create", "class", cls.id);
+      await this.log(tx, p, "lms.class.create", "class", cls.id, {
+        stage: input.stage ?? null,
+        stream: input.stream ?? null,
+        arm: input.arm ?? null,
+      });
       return cls;
     });
   }
@@ -131,7 +146,16 @@ export class LmsService {
   async updateClass(
     p: Principal,
     classId: string,
-    input: { name?: string; level?: number | null; nextClassId?: string | null; supervisorId?: string | null; capacity?: number | null },
+    input: {
+      name?: string;
+      level?: number | null;
+      nextClassId?: string | null;
+      supervisorId?: string | null;
+      capacity?: number | null;
+      stage?: string | null;
+      stream?: string | null;
+      arm?: string | null;
+    },
   ) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.requireClass(tx, classId);
@@ -153,6 +177,9 @@ export class LmsService {
           nextClassId: input.nextClassId === undefined ? undefined : input.nextClassId,
           supervisorId: input.supervisorId === undefined ? undefined : input.supervisorId,
           capacity: input.capacity === undefined ? undefined : input.capacity,
+          stage: input.stage === undefined ? undefined : input.stage,
+          stream: input.stream === undefined ? undefined : input.stream,
+          arm: input.arm === undefined ? undefined : input.arm,
         },
       });
       await this.log(tx, p, "lms.class.update", "class", classId, {
@@ -160,6 +187,9 @@ export class LmsService {
         level: input.level,
         nextClassId: input.nextClassId,
         capacity: input.capacity,
+        stage: input.stage,
+        stream: input.stream,
+        arm: input.arm,
       });
       return cls;
     });
@@ -502,6 +532,78 @@ export class LmsService {
       await tx.classTeacher.delete({ where: { id: existing.id } });
       await this.log(tx, p, "lms.teacher.remove", "class", classId, { teacherId });
       return { classId, teacherId, removed: true };
+    });
+  }
+
+  /**
+   * Copy this class's subject set onto every OTHER arm of the same stream.
+   *
+   * This is the whole reason streams and arms are structured. Six arms of SS3
+   * Science times twelve subjects is seventy-two assignments done by hand, and
+   * the errors are not evenly spread: the last arm gets the tired admin. Set
+   * one arm up correctly, then apply it.
+   *
+   * SUBJECTS copy; TEACHERS do not have to. Each arm normally has its own
+   * teacher for the same subject, so a copied row carries this class's teacher
+   * only as a starting point and `skipDuplicates` means an arm that already has
+   * that subject KEEPS its own teacher. Copying over a correct assignment would
+   * be worse than not copying at all.
+   *
+   * Cost is two statements regardless of how many arms: one indexed read for
+   * the siblings (schoolId, stage, level, stream) and one createMany.
+   */
+  async copySubjectsToArms(p: Principal, classId: string): Promise<{ arms: number; created: number }> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const source = (await tx.class.findFirst({
+        where: { id: classId },
+        select: { id: true, stage: true, level: true, stream: true, name: true },
+      })) as { id: string; stage: string | null; level: number | null; stream: string | null; name: string } | null;
+      if (!source) throw new NotFoundException("Class not found");
+      if (!source.stage || source.level == null) {
+        throw new BadRequestException("Set this class's stage and year before copying its subjects to other arms.");
+      }
+
+      const siblings = (await tx.class.findMany({
+        where: {
+          id: { not: classId },
+          stage: source.stage,
+          level: source.level,
+          stream: source.stream,
+        },
+        select: { id: true },
+      })) as Array<{ id: string }>;
+      if (siblings.length === 0) {
+        throw new BadRequestException(`${source.name} has no other arms to copy to.`);
+      }
+
+      const offerings = (await tx.classSubjectTeacher.findMany({
+        where: { classId },
+        select: { subjectId: true, teacherId: true, lessonsPerWeek: true },
+      })) as Array<{ subjectId: string; teacherId: string; lessonsPerWeek: number | null }>;
+      if (offerings.length === 0) {
+        throw new BadRequestException(`${source.name} has no subjects to copy.`);
+      }
+
+      // ONE insert for every (arm x subject). skipDuplicates is what makes this
+      // safe to run twice and what protects an arm's existing teacher.
+      const res = await tx.classSubjectTeacher.createMany({
+        data: siblings.flatMap((sib) =>
+          offerings.map((o) => ({
+            schoolId: p.schoolId,
+            classId: sib.id,
+            subjectId: o.subjectId,
+            teacherId: o.teacherId,
+            lessonsPerWeek: o.lessonsPerWeek ?? undefined,
+          })),
+        ),
+        skipDuplicates: true,
+      });
+      await this.log(tx, p, "lms.class.subjects.copy-to-arms", "class", classId, {
+        arms: siblings.length,
+        subjects: offerings.length,
+        created: res.count,
+      });
+      return { arms: siblings.length, created: res.count };
     });
   }
 

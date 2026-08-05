@@ -18,7 +18,11 @@
 // nothing here fans out until a notification is actually sent.
 // =============================================================================
 
-export const MEETING_AUDIENCES = ["STUDENT", "SELECTED", "CLASS", "STAGE", "SCHOOL"] as const;
+// STREAM sits between CLASS and STAGE: "all SS3 Science parents" is the meeting
+// a senior school actually calls, and before streams were structured it could
+// only be approximated by inviting the whole year or each arm separately.
+// Its `ref` is "STAGE:LEVEL:STREAM" — see streamAudienceRef.
+export const MEETING_AUDIENCES = ["STUDENT", "SELECTED", "CLASS", "STREAM", "STAGE", "SCHOOL"] as const;
 export type MeetingAudienceKind = (typeof MEETING_AUDIENCES)[number];
 
 export interface MeetingAudience {
@@ -55,7 +59,7 @@ export function isAppointment(kind: MeetingAudienceKind): boolean {
  *  label for an id the caller has already loaded — this never queries. */
 export function describeAudience(
   a: MeetingAudience,
-  names: { student?: string | null; class?: string | null; stage?: string | null } = {},
+  names: { student?: string | null; class?: string | null; stage?: string | null; stream?: string | null } = {},
 ): string {
   switch (a.kind) {
     case "STUDENT":
@@ -64,6 +68,8 @@ export function describeAudience(
       return "Selected parents";
     case "CLASS":
       return names.class ? `All ${names.class} parents` : "One class's parents";
+    case "STREAM":
+      return names.stream ? `All ${names.stream} parents` : "One stream's parents";
     case "STAGE":
       return names.stage ? `All ${names.stage} parents` : "One year group's parents";
     case "SCHOOL":
@@ -83,5 +89,27 @@ export function meetingAudienceProblem(a: MeetingAudience): string | null {
   // SELECTED carries its people in meeting_invitee, not in `ref`.
   if (a.kind === "SELECTED") return a.ref ? "A selected-parents meeting takes no class or pupil." : null;
   if (!a.ref) return `A ${a.kind.toLowerCase()} meeting needs a ${a.kind === "STAGE" ? "year group" : a.kind.toLowerCase()}.`;
+  if (a.kind === "STREAM" && !parseStreamRef(a.ref)) {
+    return "That stream is not a valid year-and-stream.";
+  }
   return null;
+}
+
+/**
+ * A stream audience needs THREE things to identify it — stage, year and stream
+ * — because "Science" alone spans SS1, SS2 and SS3. They travel as one opaque
+ * `ref` string so the audience column stays a single value.
+ */
+export function streamAudienceRef(stage: string, level: number, stream: string): string {
+  return `${stage}:${level}:${stream}`;
+}
+
+/** Null when the ref is not a well-formed stream reference. */
+export function parseStreamRef(ref: string): { stage: string; level: number; stream: string } | null {
+  const parts = ref.split(":");
+  if (parts.length !== 3) return null;
+  const [stage, lvl, stream] = parts;
+  const level = Number(lvl);
+  if (!stage || !stream || !Number.isInteger(level)) return null;
+  return { stage, level, stream };
 }
