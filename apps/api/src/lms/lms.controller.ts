@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, Header, Param, Post, Put, Query } from "@nestjs/common";
-import { MODULES, USER_KINDS, type UserKind } from "@sms/types";
+import { MODULES, USER_KINDS, type UserKind , SUBJECT_STAGES, CLASS_STREAMS, CLASS_ARMS} from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
 import type { AcademicSessionDto, ClassDto, ClassEligibilityDto, ClassInfoDto, ClassOverviewDto, ClassSubjectDto, IdNameDto, PromotionBatchDto, SchoolHolidayDto, SubjectDto, UserWithEmailDto } from "@sms/types";
 import { z } from "zod";
@@ -13,17 +13,22 @@ import { SyllabusService } from "./syllabus.service";
 import { PromotionService } from "./promotion.service";
 import { AcademicService } from "./academic.service";
 
-const createClassSchema = z.object({
-  name: z.string().min(1),
+// stage / stream / arm are ENUMS, not free text: the web offers them as selects
+// so nobody can create a fifth spelling of "Science" and split a year group in
+// two. Zod rejects anything off the list rather than storing it.
+const classShape = {
   level: z.number().int().min(0).max(50).nullish(),
   nextClassId: z.string().uuid().nullish(),
-});
+  stage: z.enum(SUBJECT_STAGES).nullish(),
+  stream: z.enum(CLASS_STREAMS).nullish(),
+  arm: z.enum(CLASS_ARMS).nullish(),
+};
+const createClassSchema = z.object({ name: z.string().min(1), ...classShape });
 const updateClassSchema = z.object({
   name: z.string().min(1).optional(),
-  level: z.number().int().min(0).max(50).nullish(),
-  nextClassId: z.string().uuid().nullish(),
   supervisorId: z.string().uuid().nullish(),
   capacity: z.number().int().min(0).max(10000).nullish(),
+  ...classShape,
 });
 const enrollStatusSchema = z.object({
   status: z.enum(["ACTIVE", "TRANSFERRED", "WITHDRAWN"]),
@@ -159,7 +164,7 @@ export class LmsController {
   @RequirePermission(LMS_PERMISSIONS.CLASS_WRITE)
   createClass(
     @CurrentPrincipal() p: Principal,
-    @Body(new ZodValidationPipe(createClassSchema)) body: { name: string },
+    @Body(new ZodValidationPipe(createClassSchema)) body: z.infer<typeof createClassSchema>,
   ) {
     return this.lms.createClass(p, body);
   }
@@ -318,6 +323,14 @@ export class LmsController {
     @Param("subjectId") subjectId: string,
   ) {
     return this.lms.removeClassSubject(p, classId, subjectId);
+  }
+
+  /** Copy this class's subject set onto every other arm of the same stream —
+   *  one action instead of one configuration per arm. */
+  @Post("classes/:classId/subjects/copy-to-arms")
+  @RequirePermission(LMS_PERMISSIONS.CLASS_WRITE)
+  copySubjectsToArms(@CurrentPrincipal() p: Principal, @Param("classId") classId: string) {
+    return this.lms.copySubjectsToArms(p, classId);
   }
 
   @Get("classes/:classId/subjects")

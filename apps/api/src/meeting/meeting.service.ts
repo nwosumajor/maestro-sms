@@ -20,6 +20,9 @@ import { MEETING_PROVIDERS, isMeetingJoinOpen, meetingJoinOpensAt, normalizeMeet
   isAppointment,
   NON_STAFF_ROLE_NAMES,
   MEETING_PERMISSIONS,
+  parseStreamRef,
+  streamAudienceRef,
+  CLASS_STREAM_LABELS,
 } from "@sms/types";
 import type { MeetingProvider } from "@sms/types";
 import {
@@ -45,6 +48,21 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 const STAFF_WIDE = new Set(["school_admin", "principal"]);
+
+/** "SS3 Science" — the one place a stream is turned into words, so the picker,
+ *  the notification and the slot row cannot describe it differently. */
+function streamRefLabel(ref: string | null | undefined): string | null {
+  if (!ref) return null;
+  const parsed = parseStreamRef(ref);
+  return parsed ? streamLabel(parsed.stage, parsed.level, parsed.stream) : null;
+}
+
+function streamLabel(stage: string | null, level: number | null, stream: string | null): string {
+  const prefix = stage === "SENIOR_SECONDARY" ? "SS" : stage === "JUNIOR_SECONDARY" ? "JSS" : (STAGE_LABELS[stage ?? ""] ?? "");
+  const year = level == null ? "" : `${prefix === "SS" || prefix === "JSS" ? "" : " "}${level}`;
+  const name = stream ? ` ${CLASS_STREAM_LABELS[stream as keyof typeof CLASS_STREAM_LABELS] ?? stream}` : "";
+  return `${prefix}${year}${name}`.trim();
+}
 
 @Injectable()
 export class MeetingService {
@@ -88,6 +106,18 @@ export class MeetingService {
       if (!(SUBJECT_STAGES as readonly string[]).includes(a.ref!)) {
         throw new BadRequestException(`Year group must be one of ${SUBJECT_STAGES.join(", ")}`);
       }
+      return none;
+    }
+    if (a.kind === "STREAM") {
+      const parsed = parseStreamRef(a.ref!);
+      if (!parsed) throw new BadRequestException("That stream is not a valid year-and-stream.");
+      // It must be a stream the school actually runs — otherwise the meeting is
+      // announced to nobody and looks sent.
+      const any = await tx.class.findFirst({
+        where: { stage: parsed.stage, level: parsed.level, stream: parsed.stream },
+        select: { id: true },
+      });
+      if (!any) throw new NotFoundException("No classes in that stream");
       return none;
     }
     if (a.kind === "CLASS") {
@@ -137,6 +167,21 @@ export class MeetingService {
     } else if (a.kind === "CLASS") {
       const rows = (await tx.enrollment.findMany({
         where: { classId: a.ref!, status: "ACTIVE" },
+        select: { studentId: true },
+      })) as Array<{ studentId: string }>;
+      studentIds = rows.map((r) => r.studentId);
+    } else if (a.kind === "STREAM") {
+      // Every arm of the stream, in one indexed read on
+      // (schoolId, stage, level, stream).
+      const parsed = parseStreamRef(a.ref!);
+      if (!parsed) return [];
+      const classes = (await tx.class.findMany({
+        where: { stage: parsed.stage, level: parsed.level, stream: parsed.stream },
+        select: { id: true },
+      })) as Array<{ id: string }>;
+      if (classes.length === 0) return [];
+      const rows = (await tx.enrollment.findMany({
+        where: { classId: { in: classes.map((c) => c.id) }, status: "ACTIVE" },
         select: { studentId: true },
       })) as Array<{ studentId: string }>;
       studentIds = rows.map((r) => r.studentId);
@@ -245,11 +290,28 @@ export class MeetingService {
           ]
         : [];
 
+      // The streams this school actually runs, as (stage, level, stream) triples.
+      // Distinct on the DB rather than in JS so it stays one indexed read even
+      // when a school has sixty classes.
+      const streamsInUse = staffWide
+        ? ((await tx.class.findMany({
+            where: { stream: { not: null }, stage: { not: null }, level: { not: null } },
+            select: { stage: true, level: true, stream: true },
+            distinct: ["stage", "level", "stream"],
+            orderBy: [{ stage: "asc" }, { level: "asc" }, { stream: "asc" }],
+          })) as Array<{ stage: string | null; level: number | null; stream: string | null }>)
+        : [];
+
       return [
         // A 1:1 appointment first: it is the common case and the safest default,
         // which is why it is index 0 in the picker.
         { kind: "STUDENT", ref: null, label: "One pupil (appointment)" },
         ...classes.map((c) => ({ kind: "CLASS", ref: c.id, label: `All ${c.name} parents` })),
+        ...streamsInUse.map((s) => ({
+          kind: "STREAM",
+          ref: streamAudienceRef(s.stage!, s.level!, s.stream!),
+          label: `All ${streamLabel(s.stage, s.level, s.stream)} parents`,
+        })),
         ...stagesInUse.map((st) => ({ kind: "STAGE", ref: st, label: `All ${STAGE_LABELS[st] ?? st} parents` })),
         ...(staffWide ? [{ kind: "SCHOOL", ref: null, label: "All parents in the school" }] : []),
       ];
@@ -295,7 +357,7 @@ export class MeetingService {
     // A hand-picked set can span the whole school, so it is a leadership act for
     // the same reason a year group is: a teacher must not be able to summon an
     // arbitrary list of families by ticking boxes.
-    if (declared && (declared.kind === "STAGE" || declared.kind === "SCHOOL" || declared.kind === "SELECTED") && !staffWide) {
+    if (declared && (declared.kind === "STAGE" || declared.kind === "STREAM" || declared.kind === "SCHOOL" || declared.kind === "SELECTED") && !staffWide) {
       throw new ForbiddenException(
         "Only a principal or school administrator can call a meeting for selected parents, a year group or the whole school.",
       );
@@ -397,6 +459,7 @@ export class MeetingService {
         class: audience.kind === "CLASS" ? className : null,
         student: audience.kind === "STUDENT" ? studentName : null,
         stage: audience.kind === "STAGE" ? STAGE_LABELS[audience.ref!] ?? null : null,
+        stream: audience.kind === "STREAM" ? streamRefLabel(audience.ref) : null,
       });
     });
 
@@ -518,14 +581,23 @@ export class MeetingService {
           })) as Array<{ classId: string }>)
         : [];
       const classIds = [...new Set(enrolments.map((e) => e.classId))];
-      const stages = classIds.length
+      // One read gives BOTH the year groups and the streams these children are
+      // in — still from the family outwards, still bounded by the number of
+      // children, never by the size of the school.
+      const childClasses = classIds.length
         ? ((await tx.class.findMany({
             where: { id: { in: classIds } },
-            select: { stage: true },
-          })) as Array<{ stage: string | null }>)
-            .map((c) => c.stage)
-            .filter((x): x is string => !!x)
+            select: { stage: true, level: true, stream: true },
+          })) as Array<{ stage: string | null; level: number | null; stream: string | null }>)
         : [];
+      const stages = childClasses.map((c) => c.stage).filter((x): x is string => !!x);
+      const streamRefs = [
+        ...new Set(
+          childClasses
+            .filter((c) => c.stage && c.level != null && c.stream)
+            .map((c) => streamAudienceRef(c.stage!, c.level!, c.stream!)),
+        ),
+      ];
 
       // SELECTED is matched through the invitee table rather than by rule — the
       // one audience whose membership is stored. Bounded: the ids this parent
@@ -541,6 +613,9 @@ export class MeetingService {
         ...(studentIds.length ? [{ audienceKind: "STUDENT", audienceRef: { in: studentIds } }] : []),
         ...(classIds.length ? [{ audienceKind: "CLASS", audienceRef: { in: classIds } }] : []),
         ...(stages.length ? [{ audienceKind: "STAGE", audienceRef: { in: [...new Set(stages)] } }] : []),
+        // Without this a parent is announced to a stream meeting and then
+        // cannot find it — the notification arrives, the page stays empty.
+        ...(streamRefs.length ? [{ audienceKind: "STREAM", audienceRef: { in: streamRefs } }] : []),
       ];
 
       const slots = await tx.meetingSlot.findMany({
@@ -748,6 +823,7 @@ export class MeetingService {
       class: s.audienceRef ? classBy.get(s.audienceRef) ?? null : null,
       student: s.audienceRef ? studentBy.get(s.audienceRef) ?? null : null,
       stage: s.audienceRef ? STAGE_LABELS[s.audienceRef] ?? null : null,
+      stream: s.audienceKind === "STREAM" ? streamRefLabel(s.audienceRef) : null,
     });
   }
 
@@ -757,7 +833,7 @@ export class MeetingService {
     p: Principal | null,
     teacherName?: string,
     /** Names for the audience label. Absent = a generic label, never a wrong one. */
-    audienceNames?: { student?: string | null; class?: string | null; stage?: string | null },
+    audienceNames?: { student?: string | null; class?: string | null; stage?: string | null; stream?: string | null },
     cohosts?: Array<{ id: string; name: string }>,
   ): MeetingSlotDto {
     // SECURITY: the join link is released only inside the server-computed window

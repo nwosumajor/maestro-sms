@@ -36,6 +36,14 @@ model Class {
   /// Max ACTIVE enrollments; enrollment/import/promotion refuse to exceed it. Null
   /// = unlimited.
   capacity     Int?
+  /// SCIENCE | ART | COMMERCIAL | GENERAL — the senior-school stream this class
+  /// belongs to. Null for junior/primary classes, and for any class created
+  /// before streams existed. Chosen from a fixed list, never typed.
+  stream       String?
+  /// "A".."J" when a stream is split across several rooms. Null when the stream
+  /// is one class. Also chosen, never typed — a free-text arm produces "A",
+  /// "a", "A " and "1" as four arms of one stream.
+  arm          String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -61,6 +69,10 @@ model Class {
   @@unique([schoolId, code])
   @@index([schoolId])
   @@index([schoolId, supervisorId])
+  /// Grouping a year's streams and arms — "every SS3 Science class" — is the
+  /// query behind stream ranking, the subject-set copy and a stream-wide
+  /// announcement. Without this it is a seq scan of every class in the school.
+  @@index([schoolId, stage, level, stream])
   @@map("class")
 }
 

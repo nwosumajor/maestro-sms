@@ -151,6 +151,32 @@ export function ClassSubjectsAdmin({
           </Button>
         </form>
 
+        {/* Copy a stream's subject set across its arms */}
+        <div className="space-y-1.5 border-t border-border pt-4">
+          <Label className="w-full">Copy subjects to the other arms</Label>
+          <p className="text-xs text-muted-foreground">
+            Set one arm up correctly, then apply it to every other arm of the same year and stream. Subjects copy;
+            an arm that already offers a subject keeps its own teacher, so this is safe to run twice.
+          </p>
+          <div className="flex flex-wrap items-end gap-2">
+            <select aria-label="Copy from" value={cs.classId} onChange={(e) => setCs({ ...cs, classId: e.target.value })} className={sel}>
+              {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={async () => {
+                const from = classes.find((c) => c.id === cs.classId)?.name ?? "this class";
+                if (!confirm(`Copy every subject on ${from} to the other arms of its stream?`)) return;
+                await send("POST", `/classes/${cs.classId}/subjects/copy-to-arms`, undefined, "Subjects copied.");
+              }}
+            >
+              Copy to other arms
+            </Button>
+          </div>
+        </div>
+
         {/* Class supervisor */}
         <form
           onSubmit={async (e) => {
