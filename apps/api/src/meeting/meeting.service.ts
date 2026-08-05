@@ -18,6 +18,7 @@ import { MEETING_PROVIDERS, isMeetingJoinOpen, meetingJoinOpensAt, normalizeMeet
   describeAudience,
   type MeetingAudienceKind,
   isAppointment,
+  NON_STAFF_ROLE_NAMES,
 } from "@sms/types";
 import type { MeetingProvider } from "@sms/types";
 import {
@@ -263,6 +264,8 @@ export class MeetingService {
       audience?: MeetingAudience;
       /** For a SELECTED audience: the parents to invite. Ignored otherwise. */
       inviteeIds?: string[];
+      /** Colleagues who will also be in the room. The organiser stays teacherId. */
+      cohostIds?: string[];
     },
   ): Promise<MeetingSlotDto> {
     const staffWide = p.roles.some((r) => STAFF_WIDE.has(r));
@@ -347,6 +350,28 @@ export class MeetingService {
           skipDuplicates: true,
         });
       }
+      // Colleagues attending alongside the organiser. Checked to be STAFF of
+      // this school: RLS confines the lookup to the tenant, and the role check
+      // stops a parent being added as a host — which would hand them the join
+      // link before the window and the organiser's view of the slot.
+      const wantedCohosts = [...new Set(input.cohostIds ?? [])].filter((id) => id && id !== teacherId);
+      if (wantedCohosts.length > 0) {
+        if (wantedCohosts.length > 20) throw new BadRequestException("A meeting can have at most 20 additional staff.");
+        const staff = (await tx.userRole.findMany({
+          where: { userId: { in: wantedCohosts }, role: { name: { notIn: [...NON_STAFF_ROLE_NAMES] } } },
+          select: { userId: true },
+          distinct: ["userId"],
+        })) as Array<{ userId: string }>;
+        const ok = new Set(staff.map((x) => x.userId));
+        const notStaff = wantedCohosts.filter((id) => !ok.has(id));
+        if (notStaff.length > 0) {
+          throw new BadRequestException(`${notStaff.length} of those are not staff at this school.`);
+        }
+        await tx.meetingCohost.createMany({
+          data: wantedCohosts.map((tid) => ({ schoolId: p.schoolId, slotId: row.id, teacherId: tid })),
+          skipDuplicates: true,
+        });
+      }
       return this.toSlotDto(row, 0, teacherId === p.userId ? p : null, undefined, {
         class: audience.kind === "CLASS" ? className : null,
         student: audience.kind === "STUDENT" ? studentName : null,
@@ -357,6 +382,25 @@ export class MeetingService {
     // AFTER the transaction, and only for a DECLARED audience. An open bookable
     // slot invites nobody — parents find it — so announcing one would be sending
     // the whole school a notice about a teacher's free half-hour.
+    // Tell the colleagues. Separate from the parent announcement: a co-host is
+    // being asked to attend, not invited to book, and the two read differently.
+    const cohostIds = [...new Set(input.cohostIds ?? [])].filter((id) => id && id !== teacherId);
+    if (cohostIds.length > 0) {
+      try {
+        await this.notifications.enqueueMany(this.ctx(p), cohostIds, {
+          type: "GENERIC",
+          key: "meeting.cohost_added",
+          params: { date: startsAt.toISOString().slice(0, 16).replace("T", " "), audience: dto.audienceLabel },
+          title: "You have been added to a meeting",
+          body: `${dto.audienceLabel} — ${startsAt.toISOString().slice(0, 16).replace("T", " ")}.`,
+          data: { slotId: dto.id },
+          channels: ["EMAIL"],
+        });
+      } catch (err) {
+        this.logger.error(`Meeting ${dto.id} co-host notice failed: ${String(err)}`);
+      }
+    }
+
     if (declared && declared.kind !== "STUDENT") {
       await this.announce(p, { id: dto.id, startsAt, endsAt, location: input.location ?? null }, audience, dto.audienceLabel);
     }
@@ -386,15 +430,36 @@ export class MeetingService {
   async mySlots(p: Principal): Promise<MeetingSlotDto[]> {
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       const staffWide = p.roles.some((r) => STAFF_WIDE.has(r));
+      // A colleague added to a meeting has to be able to SEE it, or being added
+      // is an invitation they never receive. One bounded lookup — the meetings
+      // this person is attending — then the same single query.
+      const attending = staffWide
+        ? []
+        : ((await tx.meetingCohost.findMany({
+            where: { teacherId: p.userId },
+            select: { slotId: true },
+          })) as Array<{ slotId: string }>);
       const slots = await tx.meetingSlot.findMany({
-        where: staffWide ? {} : { teacherId: p.userId },
+        where: staffWide
+          ? {}
+          : attending.length > 0
+            ? { OR: [{ teacherId: p.userId }, { id: { in: attending.map((a) => a.slotId) } }] }
+            : { teacherId: p.userId },
         orderBy: { startsAt: "asc" },
         take: 200,
       });
       const counts = await this.bookingCounts(tx, slots.map((s: { id: string }) => s.id));
       const teacherNames = await this.userNames(tx, slots.map((s: { teacherId: string }) => s.teacherId));
       const namesFor = await this.audienceNamesFor(tx, slots as SlotRow[]);
-      return slots.map((s: SlotRow) => this.toSlotDto(s, counts.get(s.id) ?? 0, p, teacherNames.get(s.teacherId), namesFor(s)));
+      const cohosts = await this.cohostsFor(tx, slots as SlotRow[]);
+      // A co-host must count as a host for the join link, so their ids ride on
+      // the row rather than being looked up again inside toSlotDto.
+      return slots.map((s: SlotRow) =>
+        this.toSlotDto(
+          { ...s, cohostIds: (cohosts.get(s.id) ?? []).map((c) => c.id) },
+          counts.get(s.id) ?? 0, p, teacherNames.get(s.teacherId), namesFor(s), cohosts.get(s.id) ?? [],
+        ),
+      );
     });
   }
 
@@ -470,9 +535,10 @@ export class MeetingService {
       const counts = await this.bookingCounts(tx, slots.map((s: { id: string }) => s.id));
       const teacherNames = await this.userNames(tx, slots.map((s: { teacherId: string }) => s.teacherId));
       const namesFor = await this.audienceNamesFor(tx, slots as SlotRow[]);
+      const cohosts = await this.cohostsFor(tx, slots as SlotRow[]);
       return slots
         .filter((s: SlotRow) => (counts.get(s.id) ?? 0) < s.capacity)
-        .map((s: SlotRow) => this.toSlotDto(s, counts.get(s.id) ?? 0, null, teacherNames.get(s.teacherId), namesFor(s)));
+        .map((s: SlotRow) => this.toSlotDto(s, counts.get(s.id) ?? 0, null, teacherNames.get(s.teacherId), namesFor(s), cohosts.get(s.id) ?? []));
     });
   }
 
@@ -624,6 +690,26 @@ export class MeetingService {
    * per slot, and never a resolution of who is in the audience. A stage needs no
    * lookup at all; it is a static label.
    */
+  /** Co-hosts for a page of slots: ONE query over the slot ids, then grouped —
+   *  not a lookup per row. */
+  private async cohostsFor(tx: TenantTx, slots: SlotRow[]): Promise<Map<string, Array<{ id: string; name: string }>>> {
+    const ids = slots.map((s) => s.id);
+    const out = new Map<string, Array<{ id: string; name: string }>>();
+    if (ids.length === 0) return out;
+    const rows = (await tx.meetingCohost.findMany({
+      where: { slotId: { in: ids } },
+      select: { slotId: true, teacherId: true },
+    })) as Array<{ slotId: string; teacherId: string }>;
+    if (rows.length === 0) return out;
+    const names = await this.userNames(tx, rows.map((r) => r.teacherId));
+    for (const r of rows) {
+      const arr = out.get(r.slotId) ?? [];
+      arr.push({ id: r.teacherId, name: names.get(r.teacherId) ?? "Staff" });
+      out.set(r.slotId, arr);
+    }
+    return out;
+  }
+
   private async audienceNamesFor(tx: TenantTx, slots: SlotRow[]) {
     const classIds = [...new Set(slots.filter((s) => s.audienceKind === "CLASS" && s.audienceRef).map((s) => s.audienceRef!))];
     const studentIds = [...new Set(slots.filter((s) => s.audienceKind === "STUDENT" && s.audienceRef).map((s) => s.audienceRef!))];
@@ -651,12 +737,15 @@ export class MeetingService {
     teacherName?: string,
     /** Names for the audience label. Absent = a generic label, never a wrong one. */
     audienceNames?: { student?: string | null; class?: string | null; stage?: string | null },
+    cohosts?: Array<{ id: string; name: string }>,
   ): MeetingSlotDto {
     // SECURITY: the join link is released only inside the server-computed window
     // (15 min before -> 30 min after), so a link that leaks early is unusable.
     // The HOST always sees their own link — they created it and need it to hand
     // out or re-open.
-    const isHost = !!p && p.userId === s.teacherId;
+    // A co-host is in the room, so they get the link on the same terms as the
+    // organiser. Without this they would be told to attend and then be unable to.
+    const isHost = !!p && (p.userId === s.teacherId || (s.cohostIds ?? []).includes(p.userId));
     const open = isMeetingJoinOpen(s.startsAt, s.endsAt);
     return {
       id: s.id,
@@ -669,6 +758,8 @@ export class MeetingService {
       location: s.location,
       note: s.note,
       active: s.active,
+      kind: s.kind ?? "APPOINTMENT",
+      cohosts: cohosts ?? [],
       audienceKind: s.audienceKind ?? "SCHOOL",
       audienceRef: s.audienceRef ?? null,
       // Built here, once, rather than in each of the three screens that show a
@@ -700,5 +791,5 @@ export class MeetingService {
   }
 }
 
-type SlotRow = { id: string; teacherId: string; startsAt: Date; endsAt: Date; capacity: number; location: string | null; note: string | null; active: boolean; provider: string | null; joinUrl: string | null; audienceKind?: string | null; audienceRef?: string | null };
+type SlotRow = { id: string; teacherId: string; startsAt: Date; endsAt: Date; capacity: number; location: string | null; note: string | null; active: boolean; provider: string | null; joinUrl: string | null; audienceKind?: string | null; audienceRef?: string | null; kind?: string | null; cohostIds?: string[] };
 type BookingRow = { id: string; slotId: string; studentId: string; status: string; note: string | null; slot?: { startsAt: Date; teacherId: string; location: string | null } };

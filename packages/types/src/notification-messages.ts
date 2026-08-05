@@ -127,6 +127,13 @@ export const NOTIFICATION_MESSAGES: Record<string, MessageTemplate> = {
       fr: "{audience} — le {date} à {location}.",
     },
   },
+  "meeting.cohost_added": {
+    title: { en: "You have been added to a meeting", fr: "Vous avez été ajouté(e) à une réunion" },
+    body: {
+      en: "{audience} — {date}. You are listed as attending.",
+      fr: "{audience} — le {date}. Vous êtes inscrit(e) comme participant(e).",
+    },
+  },
   "meeting.booked": {
     title: { en: "Meeting confirmed", fr: "Rendez-vous confirmé" },
     body: {

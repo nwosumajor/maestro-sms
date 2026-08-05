@@ -6,6 +6,11 @@ export interface MeetingSlotDto {
   audienceKind: string;
   audienceRef: string | null;
   audienceLabel: string;
+  /** APPOINTMENT | BRIEFING — whether a capacity claim applies. */
+  kind?: string;
+  /** Colleagues attending alongside the organiser, so a parent knows who will
+   *  be in the room before they walk in. */
+  cohosts?: Array<{ id: string; name: string }>;
   id: string;
   teacherId: string;
   teacherName: string | null;

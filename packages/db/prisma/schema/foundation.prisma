@@ -340,6 +340,7 @@ model School {
 
   @@map("school")
   meetingInvitees    MeetingInvitee[]
+  meetingCohosts     MeetingCohost[]
   subjectSyllabi     SubjectSyllabus[]
   subjectSyllabusItems SubjectSyllabusItem[]
 }
