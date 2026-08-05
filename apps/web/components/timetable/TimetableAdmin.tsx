@@ -176,6 +176,16 @@ export function TimetableAdmin({
           <Button type="submit" variant="outline" size="sm">Add room</Button>
         </form>
 
+        {/* Rooms were addable but never shown, so a typo was invisible AND
+            permanent — it stayed in every room picker with no way to reach it. */}
+        {rooms.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {rooms.map((r) => (
+              <RoomChip key={r.id} room={r} onRemoved={() => router.refresh()} />
+            ))}
+          </div>
+        )}
+
         <form onSubmit={addEntry} className="space-y-3 border-t border-border pt-4">
           <Label>Add a lesson</Label>
           <div className="flex flex-wrap items-end gap-2">
@@ -420,6 +430,35 @@ function AutoGeneratePanel() {
 }
 
 /** One editable period row (name / sequence / start / end) → PATCH periods/:id. */
+/** A room, with removal. The server owns the rule (lessons scheduled, or an
+ *  offering preferring it) and names what blocks it. */
+function RoomChip({ room, onRemoved }: { room: Named; onRemoved: () => void }) {
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState<string | null>(null);
+
+  const remove = async () => {
+    if (!confirm(`Remove ${room.name}?`)) return;
+    setBusy(true); setErr(null);
+    const res = await fetch(`/api/sms/timetable/rooms/${room.id}`, { method: "DELETE" });
+    setBusy(false);
+    if (res.ok) onRemoved();
+    else setErr(await readApiError(res));
+  };
+
+  return (
+    <span className="inline-flex flex-col gap-0.5">
+      <span className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs">
+        {room.name}
+        <button type="button" onClick={remove} disabled={busy}
+          title={`Remove ${room.name}`} className="text-muted-foreground hover:text-destructive">
+          ×<span className="sr-only">Remove {room.name}</span>
+        </button>
+      </span>
+      {err && <span className="max-w-56 text-[11px] text-destructive">{err}</span>}
+    </span>
+  );
+}
+
 function PeriodEditRow({ period, onSaved }: { period: Period; onSaved: () => void }) {
   const [name, setName] = React.useState(period.name);
   const [startTime, setStartTime] = React.useState(period.startTime);
@@ -442,6 +481,18 @@ function PeriodEditRow({ period, onSaved }: { period: Period; onSaved: () => voi
     else setNote(await readApiError(res));
   };
 
+  // The server refuses while lessons sit in this period and says how many, so
+  // the button stays enabled and the REASON is what the user sees. Disabling it
+  // on a guess here would mean maintaining the same rule in two places.
+  const remove = async () => {
+    if (!confirm(`Remove ${period.name}? Lessons scheduled in it will block this.`)) return;
+    setBusy(true); setNote(null);
+    const res = await fetch(`/api/sms/timetable/periods/${period.id}`, { method: "DELETE" });
+    setBusy(false);
+    if (res.ok) onSaved();
+    else setNote(await readApiError(res));
+  };
+
   return (
     <div className="flex flex-wrap items-end gap-2">
       <span className="w-6 text-xs text-muted-foreground tabular-nums">{period.sequence}.</span>
@@ -451,6 +502,10 @@ function PeriodEditRow({ period, onSaved }: { period: Period; onSaved: () => voi
       {period.isBreak && <span className="mb-2 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">break</span>}
       <Button type="button" variant="outline" size="sm" disabled={busy || !dirty || !name.trim()} onClick={save}>
         {busy ? "Saving…" : "Save"}
+      </Button>
+      <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={remove}
+        className="text-destructive hover:text-destructive">
+        Remove
       </Button>
       {note && <span className="text-xs text-muted-foreground">{note}</span>}
     </div>

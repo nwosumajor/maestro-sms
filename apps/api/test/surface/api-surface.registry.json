@@ -5,6 +5,14 @@
       "kind": "ui",
       "note": "reviewed: a call in app/(app)/calendar/page.tsx builds this path"
     },
+    "DELETE /academic/sessions/:p": {
+      "kind": "ui",
+      "note": "reviewed: the per-session Remove button in components/lms/AcademicCalendar.tsx calls this"
+    },
+    "DELETE /academic/terms/:p": {
+      "kind": "ui",
+      "note": "reviewed: the per-term Remove button in components/lms/AcademicCalendar.tsx calls this"
+    },
     "DELETE /admin/users/:p/roles/:p": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
@@ -113,6 +121,10 @@
       "kind": "ui",
       "note": "reviewed: a call in app/(app)/classes/page.tsx builds this path"
     },
+    "DELETE /syllabus/:p": {
+      "kind": "ui",
+      "note": "reviewed: plan removal from the same panel"
+    },
     "DELETE /timetable/cover/:p": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
@@ -121,9 +133,21 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "DELETE /timetable/periods/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "DELETE /timetable/rooms/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
     "DELETE /transport/vehicles/:p": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
+    },
+    "GET /academic/grading-policy": {
+      "kind": "ui",
+      "note": "reviewed: components/lms/GradingPolicyCard.tsx loads the scale and its choices on /classes"
     },
     "GET /academic/health": {
       "kind": "ui",
@@ -133,13 +157,13 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
-    "GET /academic/shape": {
-      "kind": "ui",
-      "note": "reviewed: app/(app)/classes/page.tsx fetches this and passes it to AcademicCalendar for the term-name choices and quick-create"
-    },
     "GET /academic/sessions": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
+    },
+    "GET /academic/shape": {
+      "kind": "ui",
+      "note": "reviewed: app/(app)/classes/page.tsx fetches this and passes it to AcademicCalendar for the term-name choices and quick-create"
     },
     "GET /admin/export/staff.csv": {
       "kind": "ui",
@@ -877,6 +901,10 @@
       "kind": "ui",
       "note": "reviewed: components/lms/LiveSessions.tsx builds this via its local req() helper"
     },
+    "GET /meetings/audiences": {
+      "kind": "ui",
+      "note": "reviewed: app/(app)/meetings/page.tsx loads the host's addressable scopes for the MeetingsClient picker"
+    },
     "GET /meetings/bookings/mine": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
@@ -1241,17 +1269,25 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
-    "GET /subjects/catalogue": {
-      "kind": "ui",
-      "note": "reviewed: components/lms/SubjectCatalogue.tsx loads the school's curriculum list on /classes"
-    },
     "GET /subjects": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "GET /subjects/catalogue": {
+      "kind": "ui",
+      "note": "reviewed: components/lms/SubjectCatalogue.tsx loads the school's curriculum list on /classes"
+    },
     "GET /submissions/:p/grade": {
       "kind": "ui",
       "note": "reviewed: reached from components/gradebook/GradingConsole.tsx"
+    },
+    "GET /syllabus": {
+      "kind": "ui",
+      "note": "reviewed: components/lms/SyllabusPanel.tsx loads the term plan on /classes/[id]/content"
+    },
+    "GET /syllabus/term/:p": {
+      "kind": "ui",
+      "note": "reviewed: the review view; reachable from the same panel's term listing"
     },
     "GET /tasks": {
       "kind": "ui",
@@ -2617,13 +2653,13 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
-    "POST /subjects/from-catalogue": {
-      "kind": "ui",
-      "note": "reviewed: the Add-selected button in components/lms/SubjectCatalogue.tsx calls this"
-    },
     "POST /subjects": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
+    },
+    "POST /subjects/from-catalogue": {
+      "kind": "ui",
+      "note": "reviewed: the Add-selected button in components/lms/SubjectCatalogue.tsx calls this"
     },
     "POST /submissions/:p/grade": {
       "kind": "ui",
@@ -2789,13 +2825,9 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
-    "DELETE /academic/sessions/:p": {
+    "PUT /academic/grading-policy": {
       "kind": "ui",
-      "note": "reviewed: the per-session Remove button in components/lms/AcademicCalendar.tsx calls this"
-    },
-    "DELETE /academic/terms/:p": {
-      "kind": "ui",
-      "note": "reviewed: the per-term Remove button in components/lms/AcademicCalendar.tsx calls this"
+      "note": "reviewed: the Use-this-scale and weight-preset buttons in components/lms/GradingPolicyCard.tsx"
     },
     "PUT /academic/sessions/:p": {
       "kind": "ui",
@@ -3021,6 +3053,14 @@
       "kind": "ui",
       "note": "reviewed: a call in app/(app)/classes/page.tsx builds this path"
     },
+    "PUT /syllabus": {
+      "kind": "ui",
+      "note": "reviewed: the Save-plan button in components/lms/SyllabusPanel.tsx"
+    },
+    "PUT /syllabus/items/:p/status": {
+      "kind": "ui",
+      "note": "reviewed: the Mark-taught button in components/lms/SyllabusPanel.tsx"
+    },
     "PUT /tasks/:p/me": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
@@ -3048,38 +3088,6 @@
     "PUT /ultimate/consent": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
-    },
-    "GET /syllabus": {
-      "kind": "ui",
-      "note": "reviewed: components/lms/SyllabusPanel.tsx loads the term plan on /classes/[id]/content"
-    },
-    "GET /syllabus/term/:p": {
-      "kind": "ui",
-      "note": "reviewed: the review view; reachable from the same panel's term listing"
-    },
-    "PUT /syllabus": {
-      "kind": "ui",
-      "note": "reviewed: the Save-plan button in components/lms/SyllabusPanel.tsx"
-    },
-    "PUT /syllabus/items/:p/status": {
-      "kind": "ui",
-      "note": "reviewed: the Mark-taught button in components/lms/SyllabusPanel.tsx"
-    },
-    "DELETE /syllabus/:p": {
-      "kind": "ui",
-      "note": "reviewed: plan removal from the same panel"
-    },
-    "GET /academic/grading-policy": {
-      "kind": "ui",
-      "note": "reviewed: components/lms/GradingPolicyCard.tsx loads the scale and its choices on /classes"
-    },
-    "PUT /academic/grading-policy": {
-      "kind": "ui",
-      "note": "reviewed: the Use-this-scale and weight-preset buttons in components/lms/GradingPolicyCard.tsx"
-    },
-    "GET /meetings/audiences": {
-      "kind": "ui",
-      "note": "reviewed: app/(app)/meetings/page.tsx loads the host's addressable scopes for the MeetingsClient picker"
     }
   }
 }

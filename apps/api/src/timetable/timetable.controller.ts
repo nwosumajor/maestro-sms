@@ -157,6 +157,13 @@ export class TimetableController {
     return this.timetable.updatePeriod(p, id, body);
   }
 
+  /** Remove a period. 409 (naming the count) while lessons are scheduled in it. */
+  @Delete("periods/:id")
+  @RequirePermission(TIMETABLE_PERMISSIONS.TIMETABLE_WRITE)
+  deletePeriod(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.timetable.deletePeriod(p, id);
+  }
+
   // --- rooms ---
   @Get("rooms")
   @RequirePermission(TIMETABLE_PERMISSIONS.TIMETABLE_READ)
@@ -181,6 +188,14 @@ export class TimetableController {
     @Body(new ZodValidationPipe(roomUpdateSchema)) body: z.infer<typeof roomUpdateSchema>,
   ) {
     return this.timetable.updateRoom(p, id, body);
+  }
+
+  /** Remove a room. 409 while lessons are scheduled in it or an offering
+   *  still names it as preferred. */
+  @Delete("rooms/:id")
+  @RequirePermission(TIMETABLE_PERMISSIONS.TIMETABLE_WRITE)
+  deleteRoom(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.timetable.deleteRoom(p, id);
   }
 
   /** Auto-generate a conflict-free weekly grid from class-subject-teacher
