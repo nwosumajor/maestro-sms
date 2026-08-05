@@ -32,6 +32,12 @@ function makeService(over: {
       findMany: jest.fn().mockResolvedValue([]),
       upsert,
     },
+    // assignClassSubject now always asks which placed lessons name somebody
+    // other than the incoming teacher — no scheduled lessons here.
+    timetableEntry: {
+      findMany: jest.fn().mockResolvedValue([]),
+      updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
     subject: { findFirst: jest.fn().mockResolvedValue(over.subject ?? { id: "s1" }) },
     user: { findFirst: jest.fn().mockResolvedValue(over.user ?? { id: "t1" }) },
     enrollment: { findMany: jest.fn().mockResolvedValue([]) },

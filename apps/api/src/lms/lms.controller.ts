@@ -129,6 +129,9 @@ const classSubjectSchema = z.object({
   /** CSP timetable inputs (optional — omitting leaves the stored values alone). */
   lessonsPerWeek: z.number().int().min(1).max(15).optional(),
   preferredRoomId: z.string().uuid().nullish(),
+  /** Also move lessons already placed for the PREVIOUS teacher. Opt-in: a
+   *  published timetable should not be rewritten by a roster edit. */
+  moveScheduledLessons: z.boolean().optional(),
 });
 const promotionSchema = z.object({
   sourceClassId: z.string().uuid(),
@@ -311,6 +314,7 @@ export class LmsController {
     return this.lms.assignClassSubject(p, classId, body.subjectId, body.teacherId, {
       lessonsPerWeek: body.lessonsPerWeek,
       preferredRoomId: body.preferredRoomId,
+      moveScheduledLessons: body.moveScheduledLessons,
     });
   }
 

@@ -407,14 +407,33 @@ export class LmsService {
     });
   }
 
-  /** Assign (or re-assign) a teacher to a class's subject offering, optionally
-   *  with its CSP timetable inputs (weekly lesson quota + fixed room). */
+  /**
+   * Assign (or RE-assign) a teacher to a class's subject offering.
+   *
+   * One teacher per (class, subject) — a school with several Physics teachers
+   * gives them different classes or arms, which is how timetabling works
+   * anyway: two people cannot hold the same lesson.
+   *
+   * Two things this used to do silently, and no longer does:
+   *
+   * 1. REPLACING somebody looked identical to a first assignment — same 201,
+   *    same "Assigned." The previous teacher simply vanished from the offering
+   *    and nobody was told. It now reports whom it replaced.
+   *
+   * 2. The PLACED TIMETABLE did not follow. `timetable_entry.teacherId` is its
+   *    own column, so after a reassignment the roster said one teacher and the
+   *    week said another — the old teacher kept the lessons in their list and
+   *    the new one never saw them. Rewriting a published timetable
+   *    automatically would be worse (a cover arrangement is a legitimate
+   *    reason for them to differ), so the count is REPORTED and the move is
+   *    opt-in.
+   */
   async assignClassSubject(
     p: Principal,
     classId: string,
     subjectId: string,
     teacherId: string,
-    opts?: { lessonsPerWeek?: number; preferredRoomId?: string | null },
+    opts?: { lessonsPerWeek?: number; preferredRoomId?: string | null; moveScheduledLessons?: boolean },
   ) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.requireClass(tx, classId);
@@ -422,6 +441,16 @@ export class LmsService {
       if (!subj) throw new NotFoundException("Subject not found");
       const teacher = await tx.user.findFirst({ where: { id: teacherId }, select: { id: true } });
       if (!teacher) throw new NotFoundException("Teacher not found");
+
+      // Who is being replaced, if anyone — read BEFORE the upsert overwrites it.
+      const prev = (await tx.classSubjectTeacher.findFirst({
+        where: { classId, subjectId },
+        select: { teacherId: true },
+      })) as { teacherId: string } | null;
+      const replacedId = prev && prev.teacherId !== teacherId ? prev.teacherId : null;
+      const replacedName = replacedId
+        ? ((await tx.user.findFirst({ where: { id: replacedId }, select: { name: true } })) as { name: string } | null)?.name ?? null
+        : null;
       if (opts?.preferredRoomId) {
         const room = await tx.room.findFirst({ where: { id: opts.preferredRoomId }, select: { id: true } });
         if (!room) throw new NotFoundException("Room not found");
@@ -442,13 +471,63 @@ export class LmsService {
           preferredRoomId: opts?.preferredRoomId ?? null,
         },
       });
+      // Placed lessons for this offering that name ANYONE other than the
+      // teacher who now holds it.
+      //
+      // Defined against the NEW teacher, not against whoever was replaced. My
+      // first version only looked for the previous holder's lessons, so
+      // replacing without moving left them naming a third party that no later
+      // call could find — the divergence became permanent the moment you
+      // declined to fix it. This way, re-running the assignment with the box
+      // ticked repairs it at any time.
+      const stale = (await tx.timetableEntry.findMany({
+        where: { classId, subjectId, teacherId: { not: teacherId } },
+        select: { id: true, dayOfWeek: true, periodId: true },
+      })) as Array<{ id: string; dayOfWeek: string; periodId: string }>;
+
+      let moved = 0;
+      if (stale.length > 0 && opts?.moveScheduledLessons) {
+        // The new teacher may already be teaching in one of those slots. Moving
+        // into it would violate the double-booking constraint, so check FIRST
+        // and refuse the whole change with something the admin can act on —
+        // half-moving a timetable is worse than not moving it.
+        const clashes = (await tx.timetableEntry.findMany({
+          where: {
+            teacherId,
+            OR: stale.map((e) => ({ dayOfWeek: e.dayOfWeek as never, periodId: e.periodId })),
+          },
+          select: { id: true },
+        })) as Array<{ id: string }>;
+        if (clashes.length > 0) {
+          throw new ConflictException(
+            `That teacher is already booked in ${clashes.length} of those ${stale.length} slots. Move or clear those lessons first.`,
+          );
+        }
+        const res = await tx.timetableEntry.updateMany({
+          where: { id: { in: stale.map((e) => e.id) } },
+          data: { teacherId },
+        });
+        moved = res.count;
+      }
+
       await this.log(tx, p, "lms.class.subject.assign", "class", classId, {
+        replacedTeacherId: replacedId,
+        scheduledLessons: stale.length,
+        movedLessons: moved,
         subjectId,
         teacherId,
         lessonsPerWeek: row.lessonsPerWeek,
         preferredRoomId: row.preferredRoomId,
       });
-      return row;
+      // The caller needs to KNOW it replaced somebody and that lessons may now
+      // name the wrong teacher — a bare row looks identical either way.
+      return {
+        ...row,
+        replacedTeacherId: replacedId,
+        replacedTeacherName: replacedName,
+        scheduledLessons: stale.length,
+        movedLessons: moved,
+      };
     });
   }
 
