@@ -214,7 +214,15 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     "message.read", "message.send", "event.read", "announcement.read",
   ],
   // Head of teaching: stage-1 approver for teaching staff requests.
-  head_teacher: ["attendance.amend.review", "member.scan", "hr.self", "cbt.review", "task.assign", "task.participate", "poll.vote", "discussion.participate", "discipline.file", "form.respond", "exam.release",
+  head_teacher: [
+    // Stage 1 of LMS_CONTENT_PUBLISH_CHAIN is the HEAD TEACHER, but the review
+    // route gates on lms.content.approve, which only the principal held — so
+    // stage 1 was refused at the door and the chain could never complete.
+    // Lesson notes and materials could be submitted and never published.
+    // The route gate says "you may act on content approvals"; the ENGINE
+    // decides which stage you may act on, and enforces a different person each.
+    "lms.content.approve", "lms.content.read",
+    "attendance.amend.review", "member.scan", "hr.self", "cbt.review", "task.assign", "task.participate", "poll.vote", "discussion.participate", "discipline.file", "form.respond", "exam.release",
     // A head teacher sits in parent meetings as a matter of course — usually
     // alongside the form teacher. Without this they could be ADDED to one and
     // then get a 403 on their own meetings list: told to attend, unable to see it.
