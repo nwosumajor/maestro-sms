@@ -224,3 +224,107 @@ describe("a parent sees only what their family is invited to", () => {
     expect(or.some((c) => c.audienceKind === "STAGE")).toBe(false);
   });
 });
+
+// =============================================================================
+// Announcing a called meeting
+// =============================================================================
+// The half that was missing: a class or year-group meeting now TELLS those
+// parents. The risk it carries is the reason this is chunked.
+//
+// `enqueueMany` opens ONE transaction and writes a notification, its deliveries
+// and an audit row per recipient — about four statements each. A whole-school
+// meeting at 2,000 guardians in a single call would be ~8,000 statements in one
+// transaction, holding locks and flooding the WAL for as long as it took.
+
+function announceHarness(guardians: string[], opts: { stageClasses?: string[] } = {}) {
+  const calls: string[][] = [];
+  const tx = {
+    class: {
+      findFirst: jest.fn().mockResolvedValue({ id: "c1", name: "JSS2" }),
+      findMany: jest.fn().mockResolvedValue((opts.stageClasses ?? ["c1"]).map((id) => ({ id, stage: "SENIOR_SECONDARY" }))),
+    },
+    classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue({ id: "o" }) },
+    user: { findFirst: jest.fn().mockResolvedValue({ id: "s1", name: "Pupil" }), findMany: jest.fn().mockResolvedValue([]) },
+    enrollment: { findMany: jest.fn().mockResolvedValue(guardians.map((_, i) => ({ classId: "c1", studentId: `stu${i}` }))) },
+    // One guardian per pupil, plus a DUPLICATE to prove de-duplication.
+    parentChild: {
+      findMany: jest.fn().mockResolvedValue([...guardians.map((parentId) => ({ parentId })), { parentId: guardians[0] }]),
+    },
+    meetingSlot: { create: jest.fn(({ data }: { data: Record<string, unknown> }) => Promise.resolve({ id: "sl1", ...data, provider: null, joinUrl: null, active: true })), findMany: jest.fn().mockResolvedValue([]) },
+    meetingBooking: { groupBy: jest.fn().mockResolvedValue([]), count: jest.fn().mockResolvedValue(0) },
+  } as unknown as TenantTx;
+  const db = {
+    runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
+    runAsTenantReadOnly: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
+  };
+  const notifications = {
+    enqueueMany: jest.fn((_c: unknown, ids: string[]) => {
+      calls.push(ids);
+      return Promise.resolve({ created: ids.length, failed: 0 });
+    }),
+    enqueue: jest.fn().mockResolvedValue({}),
+  };
+  const audit = { record: jest.fn().mockResolvedValue(undefined) };
+  return { svc: new MeetingService(db as never, audit as never, notifications as never), calls, notifications };
+}
+
+const CALLED = { startsAt: "2027-03-01T09:00:00Z", endsAt: "2027-03-01T10:00:00Z" };
+
+describe("announcing", () => {
+  it("tells every guardian of a class meeting", async () => {
+    const { svc, calls } = announceHarness(["g1", "g2", "g3"]);
+    await svc.createSlot(principal, { ...CALLED, audience: { kind: "CLASS", ref: "c1" } });
+    expect(calls.flat().sort()).toEqual(["g1", "g2", "g3"]);
+  });
+
+  it("tells a guardian ONCE even with several children in the audience", async () => {
+    // The harness returns a duplicate parent deliberately: a parent with three
+    // children in a year group must not get three notices.
+    const { svc, calls } = announceHarness(["g1", "g2"]);
+    await svc.createSlot(principal, { ...CALLED, audience: { kind: "STAGE", ref: "SENIOR_SECONDARY" } });
+    const all = calls.flat();
+    expect(all.length).toBe(new Set(all).size);
+  });
+
+  it("CHUNKS a large audience instead of one enormous transaction", async () => {
+    // 450 guardians at a chunk of 200 = 3 calls, each its own short transaction.
+    const many = Array.from({ length: 450 }, (_, i) => `g${i}`);
+    const { svc, calls } = announceHarness(many);
+    await svc.createSlot(principal, { ...CALLED, audience: { kind: "SCHOOL", ref: null } });
+    expect(calls).toHaveLength(3);
+    for (const c of calls) expect(c.length).toBeLessThanOrEqual(200);
+    expect(calls.flat().length).toBe(450);
+  });
+
+  it("does NOT announce a plain bookable slot", async () => {
+    // An open slot invites nobody — parents find it. Announcing one would send
+    // the whole school a notice about a teacher's free half-hour.
+    const { svc, notifications } = announceHarness(["g1", "g2"]);
+    await svc.createSlot(principal, CALLED);
+    expect(notifications.enqueueMany).not.toHaveBeenCalled();
+  });
+
+  it("does NOT announce a 1:1 appointment either", async () => {
+    // A STUDENT slot is an offer of time, taken up by booking — the parent is
+    // told when they book, not summoned.
+    const { svc, notifications } = announceHarness(["g1"]);
+    await svc.createSlot(principal, { ...CALLED, audience: { kind: "STUDENT", ref: "s1" } });
+    expect(notifications.enqueueMany).not.toHaveBeenCalled();
+  });
+
+  it("sends a KEY, so each parent is written in their own language", async () => {
+    const { svc, notifications } = announceHarness(["g1"]);
+    await svc.createSlot(principal, { ...CALLED, audience: { kind: "CLASS", ref: "c1" } });
+    const input = (notifications.enqueueMany.mock.calls[0] as unknown as unknown[])[2] as { key?: string };
+    expect(input.key).toBe("meeting.called");
+  });
+
+  it("still creates the meeting when the announcement throws", async () => {
+    // The slot is the durable record; telling people is best-effort. Losing a
+    // meeting because a notification failed would be the worse outcome.
+    const { svc, notifications } = announceHarness(["g1"]);
+    notifications.enqueueMany.mockRejectedValueOnce(new Error("queue down"));
+    const dto = await svc.createSlot(principal, { ...CALLED, audience: { kind: "CLASS", ref: "c1" } });
+    expect(dto.id).toBe("sl1");
+  });
+});
