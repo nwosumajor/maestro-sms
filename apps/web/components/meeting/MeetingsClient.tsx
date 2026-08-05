@@ -16,6 +16,10 @@ type Booking = Serialized<MeetingBookingDto>;
 // Parent-teacher meetings. Hosts (teachers/staff) open slots and see bookings;
 // parents browse open slots and book one for a child. The two panels render by
 // what the caller can do.
+/** What this host may address. Built server-side from their own classes, so the
+ *  dropdown can never offer a scope the server would refuse. */
+export type AudienceChoice = { kind: string; ref: string | null; label: string };
+
 export function MeetingsClient({
   canHost,
   canBook,
@@ -23,6 +27,7 @@ export function MeetingsClient({
   openSlots,
   myBookings,
   children,
+  audiences = [],
 }: {
   canHost: boolean;
   canBook: boolean;
@@ -30,6 +35,9 @@ export function MeetingsClient({
   openSlots: Slot[];
   myBookings: Booking[];
   children: { studentId: string; studentName: string }[];
+  /** Audience options for the host form, from the server. Empty = whole-school
+   *  only, which is what every slot was before this existed. */
+  audiences?: AudienceChoice[];
 }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
@@ -48,6 +56,10 @@ export function MeetingsClient({
     } else setMsg(res.error ?? "Failed.");
   };
 
+  // Index 0 is always the safest scope the server offered this host.
+  const [audienceIdx, setAudienceIdx] = React.useState(0);
+  const picked = audiences[audienceIdx];
+
   const createSlot = () => {
     if (!form.date) return;
     const startsAt = new Date(`${form.date}T${form.start}:00`).toISOString();
@@ -60,6 +72,7 @@ export function MeetingsClient({
         // A video meeting needs BOTH; the server re-validates the URL.
         provider: form.provider || undefined,
         joinUrl: form.provider ? form.joinUrl : undefined,
+        ...(picked ? { audience: { kind: picked.kind, ref: picked.ref } } : {}),
       }),
       "Slot opened.",
     );
@@ -71,9 +84,34 @@ export function MeetingsClient({
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base">Open a meeting slot</CardTitle>
-            <CardDescription>Parents can book an available slot for a chat about their child.</CardDescription>
+            <CardDescription>
+              Choose WHO it is for, then a time. One parent books a 1:1 appointment; a class, year group or
+              whole-school meeting invites every parent in it — they see it on their own meetings page.
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
+            {/* WHO comes first, deliberately: it changes what the meeting IS
+                (a 1:1 appointment or a briefing) and therefore how the rest of
+                the form reads. The options come from the SERVER, so this can
+                never offer a scope the server would refuse. */}
+            {audiences.length > 1 && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-xs font-medium text-muted-foreground">For</span>
+                {audiences.map((a, i) => (
+                  <button
+                    key={`${a.kind}:${a.ref ?? ""}`}
+                    type="button"
+                    onClick={() => setAudienceIdx(i)}
+                    aria-pressed={audienceIdx === i}
+                    className={`rounded-md border px-2 py-1 text-xs ${
+                      audienceIdx === i ? "border-primary bg-primary/10 text-primary" : "border-border"
+                    }`}
+                  >
+                    {a.label}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="flex flex-wrap items-end gap-2">
               <input type="date" className="rounded-md border bg-background p-1.5 text-sm" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
               <input type="time" className="rounded-md border bg-background p-1.5 text-sm" value={form.start} onChange={(e) => setForm({ ...form, start: e.target.value })} />
@@ -104,7 +142,15 @@ export function MeetingsClient({
               <tbody>
                 {mySlots.map((s) => (
                   <tr key={s.id} className="border-b border-border last:border-0">
-                    <td className="px-4 py-2">{dateTime(s.startsAt)}</td>
+                    <td className="px-4 py-2">
+                      {dateTime(s.startsAt)}
+                      {/* WHO it is for, on every row. Its absence is what made
+                          the page ambiguous: a parent could see a slot and have
+                          no way to tell whether it was meant for them. */}
+                      <span className="ml-2 rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">
+                        {s.audienceLabel}
+                      </span>
+                    </td>
                     <td className="px-4 py-2 text-muted-foreground">
                       <JoinMeetingLink provider={s.provider} joinUrl={s.joinUrl} joinOpen={s.joinOpen} joinOpensAt={s.joinOpensAt} location={s.location} />
                     </td>
@@ -129,7 +175,10 @@ export function MeetingsClient({
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base">Book a meeting</CardTitle>
-            <CardDescription>Available slots with your child&apos;s teachers.</CardDescription>
+            <CardDescription>
+              Only meetings your family is invited to — your child&apos;s own appointments, their class, their year
+              group, and anything called for the whole school.
+            </CardDescription>
           </CardHeader>
           <CardContent className="p-0">
             {openSlots.length === 0 ? (
@@ -139,7 +188,15 @@ export function MeetingsClient({
                 <tbody>
                   {openSlots.map((s) => (
                     <tr key={s.id} className="border-b border-border last:border-0">
-                      <td className="px-4 py-2">{dateTime(s.startsAt)}</td>
+                      <td className="px-4 py-2">
+                        {dateTime(s.startsAt)}
+                        {/* WHY this meeting is in a parent's list. Without it the
+                            page shows a time and a teacher and leaves the parent
+                            to guess whether it concerns them. */}
+                        <span className="ml-2 rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">
+                          {s.audienceLabel}
+                        </span>
+                      </td>
                       <td className="px-4 py-2 text-muted-foreground">
                         {s.teacherName ?? "Teacher"}{" · "}
                         <JoinMeetingLink provider={s.provider} joinUrl={s.joinUrl} joinOpen={s.joinOpen} joinOpensAt={s.joinOpensAt} location={s.location} />

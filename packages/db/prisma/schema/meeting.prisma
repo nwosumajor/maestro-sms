@@ -20,6 +20,19 @@ model MeetingSlot {
   /// Set false to withdraw an unbooked slot (kept for history if booked).
   active    Boolean  @default(true)
 
+  /// WHO this meeting is for: STUDENT | CLASS | STAGE | SCHOOL, with `audienceRef`
+  /// naming the pupil, class or year group (null for SCHOOL).
+  ///
+  /// The RULE is stored, never the resolved list of guardians. Snapshotting
+  /// "the 812 guardians of Senior Secondary" would leave out a pupil who enrols
+  /// next week and keep inviting one who has left. It is also why nothing fans
+  /// out until a notification is actually sent.
+  ///
+  /// Existing rows default to SCHOOL, which is exactly what they already were:
+  /// visible to every parent who could book.
+  audienceKind String  @default("SCHOOL")
+  audienceRef  String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
