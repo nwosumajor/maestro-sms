@@ -175,6 +175,7 @@ apply_rls packages/db/prisma/rls/102_school_archive_rls.sql school_archive_inser
 apply_rls 103_subject_syllabus_rls.sql subject_syllabus_item_delete
 apply_rls 104_meeting_invitee_rls.sql meeting_invitee_delete
 apply_rls 105_meeting_cohost_rls.sql meeting_cohost_delete
+apply_rls 106_meeting_request_rls.sql meeting_request_update
 
 # Seed on first provision (compose: SEED_ON_START=true; cloud migrate task: always).
 if [ "${SEED_ON_START}" = "true" ] || [ "$MODE" = "migrate" ]; then

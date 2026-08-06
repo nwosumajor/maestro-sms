@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Post, Query } from "@nestjs/common";
 import { z } from "zod";
-import { MEETING_PERMISSIONS } from "@sms/types";
+import { MEETING_PERMISSIONS , MEETING_REQUEST_TOPICS} from "@sms/types";
 import { MEETING_PROVIDERS } from "@sms/types";
 import type { MeetingSlotDto, MeetingBookingDto } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -8,6 +8,7 @@ import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { MeetingService } from "./meeting.service";
+import { MeetingRequestService } from "./meeting-request.service";
 
 const slotSchema = z.object({
   teacherId: z.string().uuid().optional(),
@@ -42,9 +43,29 @@ const bookSchema = z.object({
   note: z.string().max(500).optional(),
 });
 
+const meetingRequestSchema = z.object({
+  studentId: z.string().uuid(),
+  teacherId: z.string().uuid(),
+  topic: z.enum(MEETING_REQUEST_TOPICS),
+  note: z.string().max(2000).nullish(),
+});
+const meetingReviewSchema = z.object({
+  action: z.enum(["PASS", "DECLINE"]),
+  note: z.string().max(2000).optional(),
+});
+const meetingDecideSchema = z.object({
+  action: z.enum(["ACCEPT", "DECLINE"]),
+  startsAt: z.string().optional(),
+  endsAt: z.string().optional(),
+  note: z.string().max(2000).optional(),
+});
+
 @Controller("meetings")
 export class MeetingController {
-  constructor(private readonly meetings: MeetingService) {}
+  constructor(
+    private readonly meetings: MeetingService,
+    private readonly requests: MeetingRequestService,
+  ) {}
 
   // --- host (teacher / staff) ---
   @Get("slots/mine")
@@ -61,6 +82,55 @@ export class MeetingController {
   audiences(@CurrentPrincipal() p: Principal) {
     return this.meetings.audienceChoices(p);
   }
+  // --- parent-initiated requests --------------------------------------------
+
+  /** A parent asks a teacher for a meeting about their own child. */
+  @Post("requests")
+  @RequirePermission(MEETING_PERMISSIONS.MEETING_REQUEST)
+  createRequest(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(meetingRequestSchema)) b: z.infer<typeof meetingRequestSchema>,
+  ) {
+    return this.requests.create(p, { ...b, note: b.note ?? null });
+  }
+
+  /** The requests this caller may see: a parent's own, a teacher's inbox, or
+   *  every one for leadership. `?open=1` narrows to those still awaiting. */
+  @Get("requests")
+  @RequirePermission(MEETING_PERMISSIONS.MEETING_REQUEST_READ)
+  listRequests(@CurrentPrincipal() p: Principal, @Query("open") open?: string) {
+    return this.requests.list(p, { open: open === "1" });
+  }
+
+  /** Leadership passes a request to the teacher, or refuses it. */
+  @Post("requests/:id/review")
+  @RequirePermission(MEETING_PERMISSIONS.MEETING_HOST)
+  reviewRequest(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(meetingReviewSchema)) b: z.infer<typeof meetingReviewSchema>,
+  ) {
+    return this.requests.review(p, id, b.action, b.note);
+  }
+
+  /** The teacher answers — accepting opens the meeting itself. */
+  @Post("requests/:id/decide")
+  @RequirePermission(MEETING_PERMISSIONS.MEETING_HOST)
+  decideRequest(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(meetingDecideSchema)) b: z.infer<typeof meetingDecideSchema>,
+  ) {
+    return this.requests.decide(p, id, b);
+  }
+
+  /** The parent withdraws their own request. */
+  @Delete("requests/:id")
+  @RequirePermission(MEETING_PERMISSIONS.MEETING_REQUEST)
+  cancelRequest(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.requests.cancel(p, id);
+  }
+
   @Post("slots")
   @RequirePermission(MEETING_PERMISSIONS.MEETING_HOST)
   createSlot(

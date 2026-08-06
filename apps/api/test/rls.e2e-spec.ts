@@ -129,7 +129,8 @@ const schoolArchiveA = randomUUID();
   const ultimateLinkA = randomUUID();
   const lmsContentA = randomUUID();
   const meetingInviteeA = randomUUID();
-  const meetingCohostA = randomUUID();
+  const meetingRequestA = randomUUID();
+const meetingCohostA = randomUUID();
   const syllabusA = randomUUID();
   const syllabusItemA = randomUUID();
   const quizAttemptA = randomUUID();
@@ -406,6 +407,13 @@ const schoolArchiveA = randomUUID();
     await a.query(
       `INSERT INTO meeting_cohost (id,"schoolId","slotId","teacherId") VALUES ($1,$2,$3,$4)`,
       [meetingCohostA, A, meetingSlotA, userA],
+    );
+    // A parent's request for a meeting — names a child, a parent and a teacher,
+    // so the whole row is family contact about a minor.
+    await a.query(
+      `INSERT INTO meeting_request (id,"schoolId","parentId","studentId","teacherId",topic,status,"updatedAt")
+       VALUES ($1,$2,$3,$3,$3,'PROGRESS','PENDING_TEACHER',now())`,
+      [meetingRequestA, A, userA],
     );
     await a.query(
       `INSERT INTO meeting_booking (id,"schoolId","slotId","parentId","studentId","updatedAt")
@@ -1296,6 +1304,7 @@ const schoolArchiveA = randomUUID();
       "exam_schedule",
       "platform_feedback_message",
       "platform_feedback",
+      "meeting_request",
       "meeting_invitee",
       "meeting_cohost",
       "meeting_booking",
@@ -1404,6 +1413,7 @@ const schoolArchiveA = randomUUID();
     ["meeting_slot", meetingSlotA],
     ["meeting_invitee", meetingInviteeA],
     ["meeting_cohost", meetingCohostA],
+    ["meeting_request", meetingRequestA],
     ["meeting_booking", meetingBookingA],
     ["exam_schedule", examScheduleA],
     ["platform_feedback", platformFeedbackA],
