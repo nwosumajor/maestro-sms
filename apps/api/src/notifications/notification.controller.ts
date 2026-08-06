@@ -52,6 +52,14 @@ export class NotificationController {
     });
   }
 
+  /** Mark ALL of the caller's own notifications read — one statement, not one
+   *  request per row. */
+  @Post("read-all")
+  @RequirePermission(NOTIFICATION_PERMISSIONS.NOTIFICATION_READ)
+  markAllRead(@CurrentPrincipal() p: Principal) {
+    return this.notifications.markAllRead(p);
+  }
+
   /** Mark one of the caller's own notifications read. */
   @Post(":id/read")
   @RequirePermission(NOTIFICATION_PERMISSIONS.NOTIFICATION_READ)
