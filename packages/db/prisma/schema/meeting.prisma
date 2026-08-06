@@ -140,3 +140,44 @@ model MeetingCohost {
   @@index([schoolId, teacherId])
   @@map("meeting_cohost")
 }
+
+/// A parent asking a teacher for a meeting about their own child.
+///
+/// The TEACHER is the approver — they own the time. A school may opt into
+/// leadership approval (School.requireMeetingApproval), and a CONCERN always
+/// involves leadership whatever that setting says, because a concern addressed
+/// to the person it may be about is the one routing this must not get wrong.
+model MeetingRequest {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  /// Scalar FKs (DB-level), matching the pattern that keeps User lean.
+  parentId  String @db.Uuid
+  studentId String @db.Uuid
+  teacherId String @db.Uuid
+
+  /// PROGRESS | WELLBEING | ATTENDANCE | CONCERN | OTHER
+  topic  String
+  note   String?
+  /// PENDING_APPROVAL | PENDING_TEACHER | ACCEPTED | DECLINED | CANCELLED
+  status String @default("PENDING_TEACHER")
+
+  /// Who accepted/declined, and why. A decline without a reason tells the
+  /// parent nothing and is the commonest cause of a re-request.
+  decidedById  String? @db.Uuid
+  decisionNote String?
+  /// The slot opened when it was accepted — the meeting itself.
+  slotId       String? @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId])
+  /// The teacher's inbox, and the staleness sweep.
+  @@index([schoolId, teacherId, status])
+  /// The parent's own list.
+  @@index([schoolId, parentId, status])
+  @@map("meeting_request")
+}

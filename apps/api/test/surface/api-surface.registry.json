@@ -97,6 +97,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "DELETE /meetings/requests/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
     "DELETE /meetings/slots/:p": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
@@ -910,6 +914,10 @@
       "note": "reviewed: app/(app)/meetings/page.tsx loads the host's addressable scopes for the MeetingsClient picker"
     },
     "GET /meetings/bookings/mine": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /meetings/requests": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
@@ -2258,6 +2266,18 @@
       "note": "reviewed: components/lms/LiveSessions.tsx builds this via its local req() helper"
     },
     "POST /meetings/bookings": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /meetings/requests": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /meetings/requests/:p/decide": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "POST /meetings/requests/:p/review": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
