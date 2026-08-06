@@ -179,6 +179,28 @@ export class NotificationService {
     });
   }
 
+  /**
+   * Mark every one of the caller's unread notifications read, in ONE statement.
+   *
+   * The web used to loop `POST :id/read` — one sequential round trip per
+   * notification, so a full inbox was dozens of requests taking as many
+   * latencies, and a failure halfway left some read and some not with nothing
+   * said. One UPDATE is both faster and atomic: it either all happened or none
+   * of it did.
+   *
+   * Scoped to `recipientId = p.userId`: "all" means all of MINE. There is no
+   * form of this that can touch another person's inbox.
+   */
+  async markAllRead(p: Principal): Promise<{ read: number }> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const res = await tx.notification.updateMany({
+        where: { recipientId: p.userId, readAt: null },
+        data: { readAt: new Date() },
+      });
+      return { read: res.count };
+    });
+  }
+
   async markRead(p: Principal, id: string) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       // SECURITY: scope to the caller's own row — you can only read-receipt your

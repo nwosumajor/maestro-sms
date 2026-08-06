@@ -2309,6 +2309,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "POST /notifications/read-all": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
     "POST /operator/agents": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"

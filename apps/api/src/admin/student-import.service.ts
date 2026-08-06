@@ -38,6 +38,22 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 
+/**
+ * The template a school actually fills in.
+ *
+ * The class column used to be `classId` — a raw 36-character UUID, one per
+ * pupil. Nobody has that. To fill in a spreadsheet you would have to dig an id
+ * out of a URL for every class, paste it hundreds of times, and then be unable
+ * to check your own work, because a column of uuids cannot be read back.
+ *
+ * It is now `class`, and it takes what the school already calls the class: its
+ * NAME ("SS3 Science A") or its CODE. Both are unique per school and both are
+ * visible on the classes page. A uuid still resolves, so any file somebody
+ * already built keeps working.
+ */
+/** A value shaped like an id, so an already-built file still resolves. */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const TEMPLATE_HEADERS = [
   "name",
   "email",
@@ -46,7 +62,7 @@ const TEMPLATE_HEADERS = [
   "gender",
   "phone",
   "address",
-  "classId",
+  "class",
 ];
 
 interface BatchRow {
@@ -78,13 +94,42 @@ export class StudentImportService {
    * generated from the name.
    */
   csvTemplate(): string {
-    const withEmail = ["Ada Lovelace", "ada@example.com", "ADM-001", "2012-05-01", "F", "08000000000", "12 Main St", ""];
-    const noEmail = ["Bolu Eze", "", "ADM-002", "2012-09-14", "M", "", "", ""];
+    // The sample rows SHOW the class written the way a school writes it, so the
+    // format is obvious from the file itself rather than from documentation
+    // somebody has to be told exists.
+    const withEmail = ["Ada Lovelace", "ada@example.com", "ADM-001", "2012-05-01", "F", "08000000000", "12 Main St", "SS3 Science A"];
+    const noEmail = ["Bolu Eze", "", "ADM-002", "2012-09-14", "M", "", "", "JSS1"];
     return `${TEMPLATE_HEADERS.join(",")}\n${withEmail.join(",")}\n${noEmail.join(",")}\n`;
   }
 
+  /**
+   * Turn what a school typed in the `class` column into a class id.
+   *
+   * Accepts, in order: an exact id, the class CODE, or the class NAME
+   * case-insensitively — because "ss3 science a" is what somebody will type and
+   * refusing it teaches nothing. Returns null when it matches nothing, and the
+   * CALLER reports which value failed: "no class called X" is actionable,
+   * "invalid row" is not.
+   */
+  private async resolveClassRef(tx: TenantTx, ref: string): Promise<string | null> {
+    const value = ref.trim();
+    if (!value) return null;
+    const found = (await tx.class.findFirst({
+      where: {
+        OR: [
+          ...(UUID_RE.test(value) ? [{ id: value }] : []),
+          { code: { equals: value, mode: "insensitive" as const } },
+          { name: { equals: value, mode: "insensitive" as const } },
+        ],
+      },
+      select: { id: true },
+    })) as { id: string } | null;
+    return found?.id ?? null;
+  }
+
   /** Stage a PENDING batch and compute a dry-run summary (new vs duplicate email). */
-  async stage(p: Principal, rows: StudentImportRow[]) {
+  async stage(p: Principal, inputRows: StudentImportRow[]) {
+    let rows = inputRows;
     if (!rows.length) throw new BadRequestException("No rows to import");
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       // Only a SUPPLIED address can be a true duplicate now: a generated
@@ -105,9 +150,25 @@ export class StudentImportService {
         if (dup.has(e) || seen.has(e)) duplicateCount++;
         seen.add(e);
       }
+      // Resolve every class the file names, ONCE per distinct value rather than
+      // once per pupil — a 300-row file usually names a handful of classes.
+      const refs = [...new Set(rows.map((r) => (r.class ?? r.classId ?? "").trim()).filter(Boolean))];
+      const resolved = new Map<string, string | null>();
+      for (const ref of refs) resolved.set(ref, await this.resolveClassRef(tx, ref));
+      const unknownClasses = refs.filter((r) => !resolved.get(r));
+
+      // Write the resolved id onto the stored row, so approval does not have to
+      // resolve again — and cannot resolve DIFFERENTLY if a class is renamed
+      // between the dry run and the approval.
+      rows = rows.map((r) => {
+        const ref = (r.class ?? r.classId ?? "").trim();
+        return ref ? { ...r, classId: resolved.get(ref) ?? null } : r;
+      });
+
       const summary: StudentImportSummary = {
         total: rows.length,
         newCount: rows.length - duplicateCount,
+        ...(unknownClasses.length ? { unknownClasses } : {}),
         duplicateCount,
       };
       const batch = await tx.studentImportBatch.create({

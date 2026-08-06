@@ -39,6 +39,7 @@ const sisRowSchema = z.object({
   gender: z.string().max(20).nullish(),
   phone: z.string().max(40).nullish(),
   address: z.string().max(400).nullish(),
+  class: z.string().max(120).nullish(),
   classId: z.string().uuid().nullish(),
 });
 const sisImportSchema = z.object({ rows: z.array(sisRowSchema).min(1).max(1000) });

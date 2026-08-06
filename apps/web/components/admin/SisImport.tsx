@@ -12,7 +12,11 @@ import { readApiError } from "@/lib/api-error";
 
 type Batch = Serialized<StudentImportBatchDto>;
 
-const COLS = ["name", "email", "admissionNumber", "dateOfBirth", "gender", "phone", "address", "classId"] as const;
+// `class` takes the class NAME or CODE — what the school already calls it and
+// what is printed on the classes page. It used to be `classId`, a raw uuid:
+// nobody has one to hand, so filling this in meant digging an id out of a URL
+// per class and pasting it once per pupil, with no way to check the result.
+const COLS = ["name", "email", "admissionNumber", "dateOfBirth", "gender", "phone", "address", "class"] as const;
 
 /** Parse a CSV string (header row + data rows) into typed SIS rows. */
 function parseCsv(text: string): Record<string, string>[] {
@@ -29,7 +33,7 @@ function parseCsv(text: string): Record<string, string>[] {
 
 export function SisImport({ batches, currentUserId }: { batches: Batch[]; currentUserId: string }) {
   const router = useRouter();
-  const [csv, setCsv] = React.useState(`${COLS.join(",")}\nAda Lovelace,ada@example.com,ADM-001,2012-05-01,F,08000000000,12 Main St,\nBolu Eze,,ADM-002,2012-09-14,M,,,`);
+  const [csv, setCsv] = React.useState(`${COLS.join(",")}\nAda Lovelace,ada@example.com,ADM-001,2012-05-01,F,08000000000,12 Main St,SS3 Science A\nBolu Eze,,ADM-002,2012-09-14,M,,,JSS1`);
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
   // One-time credentials from the LAST approval — shown once, never persisted.
@@ -74,6 +78,9 @@ export function SisImport({ batches, currentUserId }: { batches: Batch[]; curren
         gender: r.gender || null,
         phone: r.phone || null,
         address: r.address || null,
+        // Either spelling reaches the server; it resolves a name or code and
+        // the DRY RUN reports any that match nothing, before anything is created.
+        class: r.class || null,
         classId: r.classId || null,
       }));
     if (rows.length === 0) { setMsg("No valid rows — every row needs at least a name."); return; }
@@ -147,6 +154,11 @@ export function SisImport({ batches, currentUserId }: { batches: Batch[]; curren
           <form onSubmit={stage} className="space-y-3">
             <div className="space-y-1.5">
               <Label htmlFor="sis-csv">CSV (header row required)</Label>
+              <p className="text-xs text-muted-foreground">
+                Only <span className="font-mono">name</span> is required. Write{" "}
+                <span className="font-mono">class</span> the way you say it — &ldquo;SS3 Science A&rdquo; or the
+                class code. Anything that matches no class is listed back to you before anything is created.
+              </p>
               <Textarea id="sis-csv" value={csv} onChange={(e) => setCsv(e.target.value)} rows={6} className="font-mono text-xs" />
             </div>
             <Button type="submit" disabled={busy}>{busy ? "Staging…" : "Stage import"}</Button>
