@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { readApiError } from "@/lib/api-error";
 import { shortDate } from "@/lib/format";
+import { useFormat } from "@/components/shell/RegionProvider";
 
 const STATUSES = ["PRESENT", "ABSENT", "LATE", "EXCUSED"] as const;
 type Status = (typeof STATUSES)[number];
@@ -30,7 +31,23 @@ type SessionSummary = {
   _count?: { records: number };
 };
 
-const today = () => new Date().toISOString().slice(0, 10);
+/**
+ * TODAY IS THE SCHOOL'S CALENDAR DAY, not the browser's UTC one.
+ *
+ * This used to be `new Date().toISOString().slice(0, 10)`, which is the UTC
+ * date. For a school east of UTC that opens the register on YESTERDAY in the
+ * early morning; for one west of UTC it opens TOMORROW in the evening — and the
+ * teacher has no reason to look, because the field is prefilled and looks
+ * right. The API already decides the term lock and the 7-day stale rule in the
+ * school's zone, so the page was disagreeing with the server about what day it
+ * is.
+ *
+ * en-CA formats as YYYY-MM-DD, which is what the date input wants. The zone
+ * comes from the SESSION, so the server render and the client render agree —
+ * deriving it from the runtime is a hydration mismatch.
+ */
+const todayIn = (timezone: string) =>
+  new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(new Date());
 
 export function TakeRegister({
   classes,
@@ -47,7 +64,11 @@ export function TakeRegister({
   const [classId, setClassId] = React.useState(
     (initialClassId && classes.some((c) => c.id === initialClassId) ? initialClassId : classes[0]?.id) ?? "",
   );
-  const [date, setDate] = React.useState(today());
+  const { region } = useFormat();
+  // ONE value for "today", so the default, the max and the Today button cannot
+  // disagree with each other or with the server.
+  const schoolToday = React.useMemo(() => todayIn(region.timezone), [region.timezone]);
+  const [date, setDate] = React.useState(schoolToday);
   const [roster, setRoster] = React.useState<Student[] | null>(null);
   const [marks, setMarks] = React.useState<Record<string, Status>>({});
   const [savedSession, setSavedSession] = React.useState<Session>(null);
@@ -170,13 +191,13 @@ export function TakeRegister({
             id="att-date"
             type="date"
             value={date}
-            max={today()}
+            max={schoolToday}
             onChange={(e) => setDate(e.target.value)}
             className="w-44"
           />
         </div>
-        {date !== today() && (
-          <Button type="button" variant="ghost" size="sm" onClick={() => setDate(today())}>
+        {date !== schoolToday && (
+          <Button type="button" variant="ghost" size="sm" onClick={() => setDate(schoolToday)}>
             Today
           </Button>
         )}
@@ -248,9 +269,21 @@ export function TakeRegister({
             ))}
           </div>
           {!locked && (
-            <Button onClick={submit} disabled={busy}>
-              {busy ? "Saving…" : savedSession ? "Update register" : "Save register"}
-            </Button>
+            <div className="space-y-1.5">
+              {/* SAY IT BEFORE. Saving messages the guardians of everyone marked
+                  absent or late, and a message cannot be unsent — correcting a
+                  mis-tick afterwards does not recall it. The count is what makes
+                  it checkable at a glance. */}
+              {tally.ABSENT + tally.LATE > 0 && (
+                <p className="text-xs text-amber-700 dark:text-amber-500">
+                  Saving notifies the guardians of {tally.ABSENT + tally.LATE} pupil
+                  {tally.ABSENT + tally.LATE === 1 ? "" : "s"} marked absent or late. It cannot be unsent.
+                </p>
+              )}
+              <Button onClick={submit} disabled={busy}>
+                {busy ? "Saving…" : savedSession ? "Update register" : "Save register"}
+              </Button>
+            </div>
           )}
         </div>
       )}
