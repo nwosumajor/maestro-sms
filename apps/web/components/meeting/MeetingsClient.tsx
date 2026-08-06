@@ -9,6 +9,8 @@ import { sendSms, postSms } from "@/components/game/play-ui";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { PeoplePicker, type Person } from "./PeoplePicker";
+import { StudentPicker } from "@/components/people/StudentPicker";
+import { Label } from "@/components/ui/label";
 import { dateTime } from "@/lib/format";
 
 type Slot = Serialized<MeetingSlotDto>;
@@ -58,14 +60,45 @@ export function MeetingsClient({
   };
 
   // Index 0 is always the safest scope the server offered this host.
+  /**
+   * "Open — any parent can book" is not one of the server's AUDIENCES; it is the
+   * absence of one, so it is prepended here rather than returned by the API.
+   *
+   * It has to exist, and has to be first. The server's list starts with
+   * "One pupil (appointment)" carrying a NULL ref, and the page always sent
+   * whatever was selected — so the default selection produced
+   * "A student meeting needs a student" for every host, and the ordinary
+   * bookable slot the module was built around could not be created from this
+   * page at all. Open is also the only choice that notifies nobody, which is
+   * what a default should be.
+   */
+  const OPEN: AudienceChoice = { kind: "OPEN", ref: null, label: "Open — any parent can book" };
+  const options = React.useMemo(() => [OPEN, ...audiences], [audiences]);
   const [audienceIdx, setAudienceIdx] = React.useState(0);
-  const picked = audiences[audienceIdx];
+  const chosen = options[audienceIdx] ?? OPEN;
+  // OPEN means "send no audience at all"; every other choice declares one.
+  const picked = chosen.kind === "OPEN" ? null : chosen;
+  // A STUDENT audience needs the pupil it is about — the server's option
+  // carries a null ref and there was no way to fill it in.
+  const [studentId, setStudentId] = React.useState("");
+  const needsStudent = chosen.kind === "STUDENT";
+  const audienceRef = needsStudent ? studentId : (picked?.ref ?? null);
   // The two pickers. Invitees only apply to a SELECTED audience; co-hosts to any.
   const [invitees, setInvitees] = React.useState<Person[]>([]);
   const [cohosts, setCohosts] = React.useState<Person[]>([]);
 
   const createSlot = () => {
     if (!form.date) return;
+    if (needsStudent && !studentId) {
+      setMsg("Choose which pupil this appointment is about.");
+      return;
+    }
+    // Announcing is irreversible: the notification is on its way before the
+    // page repaints. Anything wider than one family gets one confirmation
+    // naming the group, so a mis-clicked chip is not a message to the school.
+    if (picked && !needsStudent && !confirm(`Notify ${chosen.label.toLowerCase()} that this meeting has been called?`)) {
+      return;
+    }
     const startsAt = new Date(`${form.date}T${form.start}:00`).toISOString();
     const endsAt = new Date(`${form.date}T${form.end}:00`).toISOString();
     return run(
@@ -76,8 +109,8 @@ export function MeetingsClient({
         // A video meeting needs BOTH; the server re-validates the URL.
         provider: form.provider || undefined,
         joinUrl: form.provider ? form.joinUrl : undefined,
-        ...(picked ? { audience: { kind: picked.kind, ref: picked.ref } } : {}),
-        ...(picked?.kind === "SELECTED" ? { inviteeIds: invitees.map((i) => i.id) } : {}),
+        ...(picked ? { audience: { kind: picked.kind, ref: audienceRef } } : {}),
+        ...(chosen.kind === "SELECTED" ? { inviteeIds: invitees.map((i) => i.id) } : {}),
         ...(cohosts.length ? { cohostIds: cohosts.map((c) => c.id) } : {}),
       }),
       "Slot opened.",
@@ -100,10 +133,10 @@ export function MeetingsClient({
                 (a 1:1 appointment or a briefing) and therefore how the rest of
                 the form reads. The options come from the SERVER, so this can
                 never offer a scope the server would refuse. */}
-            {audiences.length > 1 && (
+            {options.length > 1 && (
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="text-xs font-medium text-muted-foreground">For</span>
-                {audiences.map((a, i) => (
+                {options.map((a, i) => (
                   <button
                     key={`${a.kind}:${a.ref ?? ""}`}
                     type="button"
@@ -118,9 +151,31 @@ export function MeetingsClient({
                 ))}
               </div>
             )}
+            {/* WHAT THIS WILL DO, next to the button that does it. An audience
+                is not a filter — declaring one sends a notification to every
+                family in it, at once, with no way to unsend. */}
+            <p className={`text-xs ${picked && !needsStudent ? "text-amber-700 dark:text-amber-500" : "text-muted-foreground"}`}>
+              {chosen.kind === "OPEN"
+                ? "Nobody is notified. Parents find this slot on their meetings page and book it."
+                : needsStudent
+                  ? "That pupil's parents are notified when you open this."
+                  : `${chosen.label} are notified as soon as you open this. It cannot be unsent.`}
+            </p>
+
+            {needsStudent && (
+              <div className="space-y-1.5">
+                <Label>Which pupil</Label>
+                <StudentPicker
+                  value={studentId}
+                  onChange={(id: string) => setStudentId(id)}
+                  placeholder="Search the pupil this appointment is about…"
+                />
+              </div>
+            )}
+
             {/* Shown only for SELECTED: a search box for a scope that does not
                 use one would be a control that does nothing. */}
-            {picked?.kind === "SELECTED" && (
+            {chosen.kind === "SELECTED" && (
               <PeoplePicker
                 kind="parent"
                 label="Which parents"
