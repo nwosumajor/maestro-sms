@@ -40,6 +40,36 @@ export const FEES_PERMISSIONS = {
 /** Payments at/above this (minor units) need a second approver. ~₦50,000. */
 export const PAYMENT_APPROVAL_THRESHOLD_MINOR = 5_000_000;
 
+/**
+ * The threshold is judged against everything posted on an invoice in this
+ * window, not against one payment on its own.
+ *
+ * Per-payment alone is trivially evaded: two payments of NGN 30,000 post
+ * immediately where one of NGN 60,000 waits for a second pair of eyes.
+ * Confirmed live before this was added — same amount, same person, same
+ * invoice, one route through the control and one straight past it.
+ *
+ * 24 hours rather than "ever": a family genuinely paying in instalments across
+ * a term should not have every later payment held, and the control is about a
+ * large sum moving at once.
+ */
+export const PAYMENT_APPROVAL_WINDOW_HOURS = 24;
+
+/**
+ * Does this payment need a second signature?
+ *
+ * `recentPostedMinor` is what has already POSTED on the same invoice inside the
+ * window. Refunds always need one, whatever the amount.
+ */
+export function paymentNeedsApproval(input: {
+  kind: string;
+  amountMinor: number;
+  recentPostedMinor: number;
+}): boolean {
+  if (input.kind === "REFUND") return true;
+  return input.amountMinor + input.recentPostedMinor >= PAYMENT_APPROVAL_THRESHOLD_MINOR;
+}
+
 /** Chargeback-rate escalation: this many disputes opened against one school
  *  within the window escalates an OPERATOR_ALERT to the platform owner (a
  *  climbing dispute rate risks the gateway suspending the merchant account). */

@@ -11,6 +11,9 @@ interface Fakes {
   invoiceRow?: Record<string, unknown> | null;
   /** POSTED payments already on the invoice (drive net paid). */
   posted?: { amountMinor: number; kind: string }[];
+  /** What has POSTED on this invoice inside the approval window — the sum the
+   *  cumulative threshold is judged against. */
+  recentPostedMinor?: number;
   /** The payment returned by payment.findFirst (for approve/reject). */
   pendingPayment?: Record<string, unknown> | null;
   parentLink?: { id: string } | null;
@@ -41,6 +44,10 @@ function makeService(f: Fakes) {
       create: jest.fn(({ data }: { data: Record<string, unknown> }) => Promise.resolve({ id: "pay-1", ...data })),
       findFirst: jest.fn().mockResolvedValue(f.pendingPayment ?? null),
       findMany: jest.fn().mockResolvedValue(f.posted ?? []),
+      // The approval threshold is judged against what has already POSTED on the
+      // invoice inside the window, so recordPayment always asks for that sum.
+      // `recentPostedMinor` lets a case set up a SPLIT deliberately.
+      aggregate: jest.fn().mockResolvedValue({ _sum: { amountMinor: f.recentPostedMinor ?? 0 } }),
       update: jest.fn(({ data }: { data: Record<string, unknown> }) => Promise.resolve({ id: "pay-1", ...data })),
       updateMany: jest.fn().mockResolvedValue({ count: f.claimCount ?? 1 }),
     },
@@ -200,5 +207,35 @@ describe("FeesService", () => {
       parentLink: null,
     });
     await expect(service.getInvoice(principal(["parent"]), "inv-1")).rejects.toThrow(/not found/i);
+  });
+});
+
+// The service half of the cumulative threshold: the pure rule is covered in
+// payment-approval-threshold.spec.ts; this proves recordPayment ASKS for the
+// window sum and acts on it, which is where a split actually happens.
+describe("FeesService — splitting a payment does not evade approval", () => {
+  it("a second small payment that crosses the line posts as PENDING_APPROVAL", async () => {
+    const { service } = makeService({
+      invoiceRow: { id: "inv-1", studentId: "stu-1", totalMinor: 20_000_000, status: "ISSUED", currency: "NGN" },
+      // NGN 30,000 already posted on this invoice today.
+      recentPostedMinor: 3_000_000,
+    });
+    const pay = await service.recordPayment(principal(["accountant"]), "inv-1", {
+      amountMinor: 3_000_000,
+      method: "CASH",
+    });
+    expect(pay.status).toBe("PENDING_APPROVAL");
+  });
+
+  it("the same payment on a quiet invoice still posts immediately", async () => {
+    const { service } = makeService({
+      invoiceRow: { id: "inv-1", studentId: "stu-1", totalMinor: 20_000_000, status: "ISSUED", currency: "NGN" },
+      recentPostedMinor: 0,
+    });
+    const pay = await service.recordPayment(principal(["accountant"]), "inv-1", {
+      amountMinor: 3_000_000,
+      method: "CASH",
+    });
+    expect(pay.status).toBe("POSTED");
   });
 });

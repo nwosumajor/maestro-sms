@@ -15,6 +15,8 @@ import { randomUUID } from "node:crypto";
 import { Prisma } from "@sms/db";
 import {
   PAYMENT_APPROVAL_THRESHOLD_MINOR,
+  PAYMENT_APPROVAL_WINDOW_HOURS,
+  paymentNeedsApproval,
   type InvoiceStatusValue,
   type PaymentMethodValue,
 } from "@sms/types";
@@ -432,7 +434,6 @@ export class FeesService {
   async recordPayment(p: Principal, invoiceId: string, input: PaymentInput) {
     if (input.amountMinor <= 0) throw new BadRequestException("amountMinor must be > 0");
     const kind = input.kind ?? "PAYMENT";
-    const needsApproval = kind === "REFUND" || input.amountMinor >= PAYMENT_APPROVAL_THRESHOLD_MINOR;
 
     const result = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       // Serialize concurrent recorders on THIS invoice by locking its row for
@@ -443,6 +444,25 @@ export class FeesService {
       await tx.$executeRaw`SELECT id FROM "invoice" WHERE id = ${invoiceId}::uuid FOR UPDATE`;
       const inv = await tx.invoice.findFirst({ where: { id: invoiceId } });
       if (!inv) throw new NotFoundException("Invoice not found");
+
+      // THE THRESHOLD IS CUMULATIVE. Judged per payment it is trivially evaded:
+      // two of NGN 30,000 post immediately where one of NGN 60,000 waits for a
+      // second pair of eyes. Confirmed live — same amount, same person, same
+      // invoice, one route through the control and one straight past it, and
+      // the invoice moved to PARTIALLY_PAID off the split.
+      //
+      // Read inside the FOR UPDATE above, so two concurrent recorders cannot
+      // each see the other's total as absent and both slip under.
+      const since = new Date(Date.now() - PAYMENT_APPROVAL_WINDOW_HOURS * 60 * 60 * 1000);
+      const recent = (await tx.payment.aggregate({
+        where: { invoiceId, status: "POSTED", createdAt: { gte: since } },
+        _sum: { amountMinor: true },
+      })) as { _sum: { amountMinor: number | null } };
+      const needsApproval = paymentNeedsApproval({
+        kind,
+        amountMinor: input.amountMinor,
+        recentPostedMinor: recent._sum.amountMinor ?? 0,
+      });
       if (inv.status === "DRAFT") throw new BadRequestException("Issue the invoice before recording payment");
       if (inv.status === "CANCELLED") throw new BadRequestException("Invoice is cancelled");
       if (inv.status === "PAID" && kind === "PAYMENT") {
