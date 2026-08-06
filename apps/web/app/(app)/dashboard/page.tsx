@@ -170,9 +170,23 @@ export default async function DashboardPage() {
     apiGet<Ev[]>(`/events?from=${since}`),
   ]);
 
+  // apiGet returns null for ANY failure — a network error, an expired token, a
+  // 5xx. /dashboard/summary has no permission gate and always returns an
+  // object, so null here can only mean the fetch failed; it is never a
+  // legitimate empty. That distinction matters because these figures used to
+  // fall back to 0, and "Approvals 0 — nothing pending" is a work queue
+  // reporting itself as clear. An approver who reads that stops looking.
+  const summaryFailed = summary === null;
+  const overviewFailed = overview === null;
+  const someFiguresMissing = summaryFailed || overviewFailed;
+
   const pending = summary?.pendingApprovals ?? 0;
   const classCount = summary?.classes ?? 0;
   const unread = summary?.unreadNotifications ?? inbox?.unread ?? 0;
+  /** An unread figure is only unknown if BOTH sources failed. */
+  const unreadUnknown = summaryFailed && inbox === null;
+  /** "—" reads as "not known"; 0 reads as "none", and they are not the same. */
+  const num = (value: number, unknown: boolean) => (unknown ? "—" : String(value));
   const recent = (inbox?.items ?? []).slice(0, 6);
   const upcoming = (events ?? [])
     .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime())
@@ -185,7 +199,12 @@ export default async function DashboardPage() {
   if (overview?.operations?.students != null)
     stats.push({ label: "Students", value: overview.operations.students.toLocaleString(), sub: "on the register", href: "/students" });
   if (classCount > 0 || can("class.read"))
-    stats.push({ label: isFamily ? "Classes" : "My classes", value: String(classCount), sub: "this session", href: "/classes" });
+    stats.push({
+      label: isFamily ? "Classes" : "My classes",
+      value: num(classCount, summaryFailed),
+      sub: summaryFailed ? "could not be loaded" : "this session",
+      href: "/classes",
+    });
   if (att != null)
     stats.push({ label: "Attendance", value: `${att}%`, sub: isFamily ? "your record" : "school-wide", href: "/attendance" });
   if (overview?.fees && can("fee.read"))
@@ -198,15 +217,25 @@ export default async function DashboardPage() {
   if (overview?.grades?.averagePct != null && isFamily)
     stats.push({ label: "Grade average", value: `${overview.grades.averagePct}%`, sub: "published results", href: "/gradebook" });
   if (can("workflow.read"))
-    stats.push({ label: "Approvals", value: String(pending), sub: pending === 1 ? "awaiting review" : "awaiting review", href: "/workflows" });
-  stats.push({ label: "Unread", value: String(unread), sub: "in your inbox", href: "/notifications" });
+    stats.push({
+      label: "Approvals",
+      value: num(pending, summaryFailed),
+      sub: summaryFailed ? "could not be loaded" : "awaiting review",
+      href: "/workflows",
+    });
+  stats.push({
+    label: "Unread",
+    value: num(unread, unreadUnknown),
+    sub: unreadUnknown ? "could not be loaded" : "in your inbox",
+    href: "/notifications",
+  });
   const kpis = stats.slice(0, 4);
 
   // --- Quick actions: the role's real daily tasks (permission + module gated) --
   const actions: { icon: LucideIcon; label: string; href: string; hint: string; show: boolean }[] = [
     { icon: CalendarCheckIcon, label: "Take the register", href: "/attendance", hint: "Mark today's attendance", show: can("attendance.write") },
     { icon: GraduationCapIcon, label: "Record grades", href: "/gradebook", hint: "Scores & term results", show: can("grade.write") },
-    { icon: ClipboardCheckIcon, label: "Review approvals", href: "/workflows", hint: pending ? `${pending} waiting on you` : "Nothing pending", show: can("workflow.review") || can("workflow.review.head") || can("workflow.review.hr") || can("workflow.review.principal") },
+    { icon: ClipboardCheckIcon, label: "Review approvals", href: "/workflows", hint: summaryFailed ? "Open to check" : pending ? `${pending} waiting on you` : "Nothing pending", show: can("workflow.review") || can("workflow.review.head") || can("workflow.review.hr") || can("workflow.review.principal") },
     { icon: CreditCardIcon, label: can("fee.manage") ? "Manage fees" : "Pay fees", href: "/fees", hint: can("fee.manage") ? "Invoices & payments" : "Invoices & receipts", show: can("fee.read") && mod("fees") },
     { icon: BookOpenIcon, label: "My classes", href: "/classes", hint: "Lessons, quizzes & forums", show: can("class.read") && mod("lms") },
     { icon: MonitorCheckIcon, label: "CBT exams", href: "/cbt", hint: can("cbt.manage") ? "Author & schedule" : "Sit your exams", show: (can("cbt.manage") || can("cbt.take")) && mod("cbt") },
@@ -242,6 +271,17 @@ export default async function DashboardPage() {
             </span>
           }
         >
+          {/* A tile driven by `overview` simply VANISHES when that fetch fails,
+              which is quieter than a wrong number but still leaves somebody
+              reading a dashboard that is missing the figure they came for. Say
+              it once, here, rather than letting absence speak. */}
+          {someFiguresMissing && (
+            <p className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-200">
+              Some figures could not be loaded, so they are shown as “—” or left out. Reload to try again — this is not
+              a report that everything is at zero.
+            </p>
+          )}
+
           {/* ---- Ledger KPI strip -------------------------------------------- */}
           {kpis.length > 0 && (
             <div className="flex flex-wrap">
