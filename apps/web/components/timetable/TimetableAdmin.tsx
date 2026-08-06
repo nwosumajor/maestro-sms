@@ -252,6 +252,11 @@ export function TimetableAdmin({
 function TeacherAvailabilityEditor({ teachers, periods }: { teachers: Named[]; periods: Period[] }) {
   const [teacherId, setTeacherId] = React.useState(teachers[0]?.id ?? "");
   const [blocked, setBlocked] = React.useState<Set<string>>(new Set());
+  // THREE states, not two. Saving REPLACES the teacher's whole set, so an empty
+  // grid is an instruction to delete everything — and a failed load produced
+  // exactly that grid, indistinguishable from "this teacher has no
+  // restrictions". One click later their real availability was gone.
+  const [load, setLoad] = React.useState<"loading" | "ready" | "failed">("loading");
   const [busy, setBusy] = React.useState(false);
   const [note, setNote] = React.useState<string | null>(null);
   const key = (day: string, periodId: string) => `${day}|${periodId}`;
@@ -259,13 +264,20 @@ function TeacherAvailabilityEditor({ teachers, periods }: { teachers: Named[]; p
   React.useEffect(() => {
     if (!teacherId) return;
     let cancelled = false;
+    setLoad("loading");
     (async () => {
-      const res = await fetch(`/api/sms/timetable/availability?teacherId=${teacherId}`);
+      const res = await fetch(`/api/sms/timetable/availability?teacherId=${teacherId}`).catch(() => null);
       if (cancelled) return;
-      if (res.ok) {
+      if (res?.ok) {
         const rows = (await res.json()) as Serialized<TeacherUnavailabilityDto>[];
         setBlocked(new Set(rows.map((r) => key(r.dayOfWeek, r.periodId))));
-      } else setBlocked(new Set());
+        setLoad("ready");
+      } else {
+        // Do NOT fall back to an empty set: that is a delete instruction
+        // wearing the clothes of a clean slate.
+        setBlocked(new Set());
+        setLoad("failed");
+      }
       setNote(null);
     })();
     return () => { cancelled = true; };
@@ -340,9 +352,25 @@ function TeacherAvailabilityEditor({ teachers, periods }: { teachers: Named[]; p
         </table>
       </div>
       <div className="flex items-center gap-2">
-        <Button type="button" size="sm" variant="outline" disabled={busy || !teacherId} onClick={save}>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={busy || !teacherId || load !== "ready"}
+          onClick={save}
+        >
           {busy ? "Saving…" : "Save availability"}
         </Button>
+        {load === "failed" && (
+          <span className="text-xs text-destructive">
+            Could not read this teacher&apos;s current availability, so saving is off — it would replace their whole
+            set with what you can see. Reload and try again.
+          </span>
+        )}
+        {load === "loading" && <span className="text-xs text-muted-foreground">Loading…</span>}
+        {load === "ready" && !note && (
+          <span className="text-xs text-muted-foreground">Saving replaces this teacher&apos;s whole set.</span>
+        )}
         {note && <span className="text-xs text-muted-foreground">{note}</span>}
       </div>
     </div>
