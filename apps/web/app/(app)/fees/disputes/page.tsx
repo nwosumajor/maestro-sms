@@ -56,7 +56,7 @@ export default async function DisputesPage() {
         {disputes.length === 0 ? (
           <Card>
             <CardContent className="py-8 text-sm text-muted-foreground">
-              No disputes — no payer has ever contested a card payment.
+              No disputes recorded. If a payer contests a card payment, it appears here.
             </CardContent>
           </Card>
         ) : (
