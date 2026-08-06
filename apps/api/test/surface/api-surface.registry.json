@@ -1349,6 +1349,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "GET /timetable/export.csv": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
     "GET /timetable/load": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"

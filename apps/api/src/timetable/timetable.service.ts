@@ -669,6 +669,72 @@ export class TimetableService {
   }
 
   /**
+   * The whole grid as CSV — one row per lesson.
+   *
+   * The PDF prints ONE class or ONE teacher, which is right for a wall or a
+   * pupil's folder and useless for the thing an administrator actually does
+   * with a timetable: check it in a spreadsheet, or hand the master to whoever
+   * builds the exam schedule. There was no CSV at all, and no whole-school
+   * print of any kind.
+   *
+   * Scoping and cost are INHERITED, not re-implemented: it runs through the
+   * same `getTimetableView` the screen uses, so a teacher exports exactly the
+   * rows they can already see and the read stays the batched one — no per-row
+   * lookup, no second scoping rule to keep in step with the first.
+   *
+   * Omitting every filter gives the whole school, which is why that is
+   * staff-wide only — the view already enforces it.
+   */
+  async exportCsv(
+    p: Principal,
+    opts: { classId?: string; teacherId?: string; roomId?: string },
+  ): Promise<{ csv: string; filename: string }> {
+    const rows = await this.getTimetableView(p, opts);
+    const periods = await this.db.runAsTenantReadOnly(this.ctx(p), (tx) =>
+      tx.period.findMany({ orderBy: { sequence: "asc" }, select: { id: true, name: true, startTime: true, endTime: true } }),
+    );
+    const periodById = new Map(
+      (periods as Array<{ id: string; name: string; startTime: string; endTime: string }>).map((x) => [x.id, x]),
+    );
+    const order = new Map(WEEKDAYS.map((d, i) => [d, i]));
+
+    const header = ["Day", "Period", "Start", "End", "Class", "Subject", "Teacher", "Room"];
+    const lines = [header.map((h) => this.csvCell(h)).join(",")];
+    for (const r of [...rows].sort(
+      (a, b) =>
+        (order.get(a.dayOfWeek as DayOfWeekValue) ?? 99) - (order.get(b.dayOfWeek as DayOfWeekValue) ?? 99) ||
+        (periodById.get(a.periodId)?.startTime ?? "").localeCompare(periodById.get(b.periodId)?.startTime ?? "") ||
+        a.className.localeCompare(b.className),
+    )) {
+      const per = periodById.get(r.periodId);
+      lines.push(
+        [
+          r.dayOfWeek,
+          per?.name ?? "",
+          per?.startTime ?? "",
+          per?.endTime ?? "",
+          r.className,
+          r.subject,
+          r.teacherName,
+          r.room?.name ?? "",
+        ]
+          .map((v) => this.csvCell(String(v)))
+          .join(","),
+      );
+    }
+    const scope = opts.classId ? "class" : opts.teacherId ? "teacher" : opts.roomId ? "room" : "school";
+    return { csv: lines.join("\n"), filename: `timetable-${scope}.csv` };
+  }
+
+  /** Quoted AND formula-neutralised (OWASP CSV injection): a subject or room
+   *  typed as "=cmd" must not execute when the file is opened in a spreadsheet. */
+  private csvCell(value: string): string {
+    let v = String(value ?? "");
+    if (/^[=+\-@\t\r]/.test(v)) v = `'${v}`;
+    return `"${v.replace(/"/g, '""')}"`;
+  }
+
+  /**
    * Standing teaching load per teacher: periods assigned vs periods they are
    * actually available for.
    *
