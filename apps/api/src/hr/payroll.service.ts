@@ -309,11 +309,29 @@ export class PayrollService {
     });
   }
 
-  /** Bank-transfer export (CSV) for a run: name, bank, account, net pay. */
+  /**
+   * Bank-transfer export (CSV) for a run: name, bank, account, net pay.
+   *
+   * FINALIZED ONLY. This file is a payment instruction — it is what somebody
+   * uploads to the bank — and finalizing is deliberately maker-checker
+   * (creator !== finalizer) so that one person cannot pay the staff alone.
+   * Handing out the payment file for a DRAFT run bypassed that second signature
+   * entirely: one person could create a run and download the instructions for
+   * figures nobody else had ever seen. Verified live before the fix — 14 rows
+   * of names, banks, account numbers and net pay from an unfinalized run.
+   *
+   * The remittance CSVs in this same service were already gated this way, which
+   * is what makes this an oversight rather than a decision.
+   */
   async bankExport(p: Principal, runId: string): Promise<{ csv: string; filename: string }> {
     const rows = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const run = await tx.payrollRun.findFirst({ where: { id: runId } });
       if (!run) throw new NotFoundException("Payroll run not found");
+      if (run.status !== "FINALIZED") {
+        throw new BadRequestException(
+          "Finalize the run before exporting the bank file — it has to be approved by a second person first.",
+        );
+      }
       const slips = await tx.payslip.findMany({ where: { payrollRunId: runId } });
       const userIds = slips.map((s) => s.userId);
       const users = await tx.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } });

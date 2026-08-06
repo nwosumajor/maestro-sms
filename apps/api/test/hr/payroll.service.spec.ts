@@ -275,3 +275,48 @@ describe("payroll refuses a country whose tax law we do not implement", () => {
     ).resolves.toBeDefined();
   });
 });
+
+// =============================================================================
+// The bank file is a payment instruction
+// =============================================================================
+// Finalizing is maker-checker (creator !== finalizer) so one person cannot pay
+// the staff alone. Handing out the bank file for a DRAFT run bypassed that
+// second signature completely — verified live: 14 rows of names, banks,
+// account numbers and net pay from an unfinalized run.
+//
+// The remittance CSVs in the same service were already gated this way, which is
+// what makes this an oversight rather than a decision.
+
+describe("bank export is finalized-only", () => {
+  function exportHarness(status: string) {
+    const tx = {
+      payrollRun: { findFirst: jest.fn().mockResolvedValue({ id: "r1", status, periodMonth: 5, periodYear: 2027 }) },
+      payslip: { findMany: jest.fn().mockResolvedValue([{ userId: "u1", netMinor: 100000 }]) },
+      user: { findMany: jest.fn().mockResolvedValue([{ id: "u1", name: "Staff" }]) },
+      employee: { findMany: jest.fn().mockResolvedValue([{ userId: "u1", bankNameEnc: null, bankAccountEnc: null }]) },
+    } as unknown as TenantTx;
+    const db = { runAsTenant: <T>(_c: unknown, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
+    return {
+      svc: new PayrollService(
+        db as never,
+        { record: jest.fn().mockResolvedValue(undefined) } as never,
+        { forSchool: jest.fn().mockResolvedValue({ currency: "NGN" }) } as never,
+      ),
+      tx,
+    };
+  }
+
+  const actor = { userId: "hr1", schoolId: "s1", roles: ["hr_manager"], permissions: [] } as unknown as Principal;
+
+  it("refuses a DRAFT run, and says why", async () => {
+    const h = exportHarness("DRAFT");
+    await expect(h.svc.bankExport(actor, "r1")).rejects.toThrow(/approved by a second person/);
+    // Nothing was read: the refusal comes before any payslip or bank detail.
+    expect(h.tx.payslip.findMany).not.toHaveBeenCalled();
+  });
+
+  it("allows a FINALIZED run", async () => {
+    const h = exportHarness("FINALIZED");
+    await expect(h.svc.bankExport(actor, "r1")).resolves.toHaveProperty("csv");
+  });
+});

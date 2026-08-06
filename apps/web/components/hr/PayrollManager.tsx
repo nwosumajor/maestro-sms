@@ -111,9 +111,31 @@ export function PayrollManager({ runs, canRun }: { runs: Run[]; canRun: boolean 
                     <td className="px-4 py-2.5">
                       <span className="flex items-center gap-3">
                         {canRun && r.status === "DRAFT" && (
-                          <Button size="sm" disabled={busy === r.id} onClick={() => call(`hr/payroll/runs/${r.id}/finalize`, {}, r.id)}>Finalize</Button>
+                          <Button
+                            size="sm"
+                            disabled={busy === r.id}
+                            onClick={() => {
+                              // Irreversible, and it is what releases the bank
+                              // file. Say what is being signed off, in the
+                              // numbers the person is accountable for.
+                              const ok = confirm(
+                                `Finalize ${MONTHS[r.periodMonth - 1]} ${r.periodYear}?\n\n` +
+                                  `${r.payslipCount} staff · net ${money(r.totalNetMinor)}\n\n` +
+                                  `This cannot be undone, and it releases the bank payment file.`,
+                              );
+                              if (ok) void call(`hr/payroll/runs/${r.id}/finalize`, {}, r.id);
+                            }}
+                          >
+                            Finalize
+                          </Button>
                         )}
-                        {canRun && (
+                        {/* FINALIZED only, exactly like the remittances below.
+                            The bank file is a payment instruction, and finalize
+                            is the second signature — offering it on a draft
+                            invited somebody to pay from figures nobody had
+                            approved. The server refuses either way; the page
+                            should not offer what will be refused. */}
+                        {canRun && r.status === "FINALIZED" && (
                           <a className="text-sm text-primary underline" href={`/api/sms/hr/payroll/runs/${r.id}/bank-export`}>Bank export</a>
                         )}
                         {canRun && r.status === "FINALIZED" && (
