@@ -126,6 +126,26 @@ export function TimetableViews({
               print
             </a>
           )}
+          {/* CSV for whatever is on screen, INCLUDING the room axis and the
+              whole school — the PDF prints one class or one teacher, which is
+              right for a wall and useless for checking a grid in a spreadsheet
+              or handing the master to whoever builds the exam schedule.
+              Scoping is the view's own, so this exports exactly what is
+              visible and nothing more. */}
+          <a
+            className="text-sm text-muted-foreground underline hover:text-foreground"
+            href={`/api/sms/timetable/export.csv${
+              axis === "class" && classId
+                ? `?classId=${classId}`
+                : axis === "teacher" && teacherId
+                  ? `?teacherId=${teacherId}`
+                  : axis === "room" && roomId
+                    ? `?roomId=${roomId}`
+                    : ""
+            }`}
+          >
+            CSV
+          </a>
         </div>
       </div>
 

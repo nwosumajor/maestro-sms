@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Res } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Res, StreamableFile } from "@nestjs/common";
 import type { Response } from "express";
 import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
@@ -297,6 +297,22 @@ export class TimetableController {
 
   /** Printable landscape grid for a class or a teacher. Audited; reuses the view's
    *  scoping, so nobody can print a week they cannot already see. */
+  /** The grid as CSV — one row per lesson. No filter = the whole school (the
+   *  view's own scoping decides whether this caller may have that). */
+  @Get("export.csv")
+  @RequirePermission(TIMETABLE_PERMISSIONS.TIMETABLE_READ)
+  async exportCsv(
+    @CurrentPrincipal() p: Principal,
+    @Res({ passthrough: true }) res: Response,
+    @Query("classId") classId?: string,
+    @Query("teacherId") teacherId?: string,
+    @Query("roomId") roomId?: string,
+  ): Promise<StreamableFile> {
+    const { csv, filename } = await this.timetable.exportCsv(p, { classId, teacherId, roomId });
+    res.set({ "Content-Type": "text/csv", "Content-Disposition": `attachment; filename="${filename}"` });
+    return new StreamableFile(Buffer.from(csv, "utf8"));
+  }
+
   @Get("print.pdf")
   @RequirePermission(TIMETABLE_PERMISSIONS.TIMETABLE_READ)
   async print(
