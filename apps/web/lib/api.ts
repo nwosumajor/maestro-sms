@@ -11,6 +11,17 @@ const API_BASE = process.env.API_BASE_URL ?? "http://localhost:3001";
  * An endpoint may legitimately answer 200 with an EMPTY body (e.g. a student
  * with no medical record) — `res.json()` throws on that, so read the text first
  * and treat an empty body as null rather than crashing the whole SSR render.
+ *
+ * // GOTCHA: NULL MEANS THREE DIFFERENT THINGS HERE — not signed in, the
+ * // request FAILED (403/500/network), and the record genuinely does not
+ * // exist. Only the last is what this function was written for; the other two
+ * // got folded in silently.
+ * //
+ * // Callers overwhelmingly write `?? []` or `?? 0`, which turns a failed
+ * // request into a confident statement of fact: "No disputes", "Nothing
+ * // waiting on you", "Approvals 0". A reader acts on those. Before adding
+ * // another such default, ask whether the empty state ASSERTS something —
+ * // and if it does, distinguish the failure instead.
  */
 export async function apiGet<T>(path: string): Promise<T | null> {
   const token = await bearerForSession();

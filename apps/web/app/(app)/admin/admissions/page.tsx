@@ -33,7 +33,7 @@ export default async function AdminAdmissionsPage() {
           <FormFeeCard initialMinor={formFee.formFeeMinor} canManage={hasPermission(user.permissions, "fee.manage")} />
         )}
         {apps.length === 0 ? (
-          <Alert variant="info"><AlertTitle>No applications</AlertTitle><AlertDescription>None received yet.</AlertDescription></Alert>
+          <Alert variant="info"><AlertTitle>No applications</AlertTitle><AlertDescription>None recorded for this school.</AlertDescription></Alert>
         ) : (
           <AdmissionsReview apps={apps} />
         )}
