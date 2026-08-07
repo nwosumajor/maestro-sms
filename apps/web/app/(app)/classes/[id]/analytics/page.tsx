@@ -1,7 +1,9 @@
 import Link from "next/link";
 import type { LmsAnalyticsDto, Serialized, XapiStatementDto } from "@sms/types";
+import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
+import { hasPermission } from "@/lib/permissions";
 import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { LmsAnalytics } from "@/components/lms/LmsAnalytics";
@@ -17,6 +19,9 @@ export const dynamic = "force-dynamic";
 export default async function ClassAnalyticsPage({ params }: { params: { id: string } }) {
   const session = await auth();
   const user = session!.user;
+  // Same gate as the section index — a detail page is reachable by URL
+  // whether or not the list that links to it was.
+  if (!hasPermission(user.permissions, "class.read")) redirect("/dashboard");
   const classId = params.id;
 
   const [data, statements] = await Promise.all([

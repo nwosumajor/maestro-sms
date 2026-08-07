@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { hasPermission } from "@/lib/permissions";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
@@ -22,6 +22,9 @@ type Roster = {
 export default async function ClassRosterPage({ params }: { params: { id: string } }) {
   const session = await auth();
   const user = session!.user;
+  // Same gate as the section index — a detail page is reachable by URL
+  // whether or not the list that links to it was.
+  if (!hasPermission(user.permissions, "class.read")) redirect("/dashboard");
   // 404-not-403: the API returns 404 (null here) for a class the caller can't see.
   const roster = await apiGet<Roster>(`/classes/${params.id}`);
   if (!roster) notFound();

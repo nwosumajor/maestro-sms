@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { LmsContentDto, Serialized } from "@sms/types";
 import { hasPermission } from "@/lib/permissions";
+import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
@@ -31,6 +32,9 @@ export default async function ClassContentPage({
 }) {
   const session = await auth();
   const user = session!.user;
+  // Same gate as the section index — a detail page is reachable by URL
+  // whether or not the list that links to it was.
+  if (!hasPermission(user.permissions, "class.read")) redirect("/dashboard");
   const classId = params.id;
 
   // Filtering narrows the QUERY, not the browser. A class accumulates a year of

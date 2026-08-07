@@ -1,4 +1,5 @@
 import type { CbtAuthoringOptionsDto, CbtBankDto, CbtExamDto, Serialized } from "@sms/types";
+import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { hasPermission } from "@/lib/permissions";
@@ -19,6 +20,8 @@ export const dynamic = "force-dynamic";
 export default async function CbtPage() {
   const session = await auth();
   const user = session!.user;
+  // Mirrors the nav's anyPerm — any ONE of these may open the section.
+  if (!hasPermission(user.permissions, "cbt.manage") && !hasPermission(user.permissions, "cbt.take") && !hasPermission(user.permissions, "cbt.review")) redirect("/dashboard");
   const isStaff = hasPermission(user.permissions, "cbt.manage");
   const isReviewer = !isStaff && hasPermission(user.permissions, "cbt.review");
 

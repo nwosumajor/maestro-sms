@@ -1,7 +1,9 @@
 import Link from "next/link";
 import type { MyLearningDto, Serialized } from "@sms/types";
+import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
+import { hasPermission } from "@/lib/permissions";
 import { AppShell } from "@/components/shell/AppShell";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -33,6 +35,9 @@ const TYPE_LABEL: Record<string, string> = {
 export default async function LearningPage() {
   const session = await auth();
   const user = session!.user;
+  // Gate matches this section's AppShell nav entry ("lms.quiz.attempt"), so the page
+  // cannot be reached by URL by someone the nav hides it from.
+  if (!hasPermission(user.permissions, "lms.quiz.attempt")) redirect("/dashboard");
   const data = await apiGet<Learning>("/my/learning");
 
   const items = data?.items ?? [];

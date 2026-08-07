@@ -1,5 +1,6 @@
 import type { GameDto, Serialized } from "@sms/types";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { hasPermission } from "@/lib/permissions";
@@ -13,6 +14,11 @@ export const dynamic = "force-dynamic";
 export default async function DuelPage({ params }: { params: { id: string } }) {
   const session = await auth();
   const user = session!.user;
+  // The Games section is gated on game.leaderboard.read — the same permission
+  // the AppShell nav uses. Without this the nav merely HID the link: all 18
+  // pages stayed reachable by URL and fetched anyway, so the 14 roles that
+  // hold no game permission generated ~200 refused API calls per pass.
+  if (!hasPermission(user.permissions, "game.leaderboard.read")) redirect("/dashboard");
   const game = await apiGet<Serialized<GameDto>>(`/games/${params.id}`);
   const canPlay = hasPermission(user.permissions, "game.play");
   const canModerate = hasPermission(user.permissions, "game.match.moderate");

@@ -17,6 +17,11 @@ export const dynamic = "force-dynamic";
 export default async function TournamentPage({ params }: { params: { id: string } }) {
   const session = await auth();
   const user = session!.user;
+  // The Games section is gated on game.leaderboard.read — the same permission
+  // the AppShell nav uses. Without this the nav merely HID the link: all 18
+  // pages stayed reachable by URL and fetched anyway, so the 14 roles that
+  // hold no game permission generated ~200 refused API calls per pass.
+  if (!hasPermission(user.permissions, "game.leaderboard.read")) redirect("/dashboard");
   if (!hasPermission(user.permissions, "game.leaderboard.read")) redirect("/games");
 
   const t = await apiGet<Serialized<RaceTournamentDto>>(`/race-tournaments/${params.id}`);

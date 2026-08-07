@@ -1,6 +1,7 @@
 import type { ContactDto, MedicalRecordDto, StudentProfileDto, Serialized } from "@sms/types";
 import { hasPermission } from "@/lib/permissions";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
@@ -37,6 +38,9 @@ function Field({ label, value }: { label: string; value: string | null | undefin
 export default async function StudentProfilePage({ params }: { params: { id: string } }) {
   const session = await auth();
   const user = session!.user;
+  // Same gate as the section index — a detail page is reachable by URL
+  // whether or not the list that links to it was.
+  if (!hasPermission(user.permissions, "student.profile.read")) redirect("/dashboard");
   // Each call returns null if the caller lacks the permission (RBAC) — we hide
   // the section rather than fail the page.
   const canReadGrades = hasPermission(user.permissions, "grade.read");

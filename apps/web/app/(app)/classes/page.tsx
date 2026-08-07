@@ -1,6 +1,7 @@
 import type { AcademicSessionDto, ClassDto, ClassOverviewDto, PromotionBatchDto, SchoolHolidayDto, SubjectDto, Serialized, CalendarFinding } from "@sms/types";
 import Link from "next/link";
 import { hasPermission } from "@/lib/permissions";
+import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
@@ -22,6 +23,9 @@ export const dynamic = "force-dynamic";
 export default async function ClassesPage() {
   const session = await auth();
   const user = session!.user;
+  // Gate matches this section's AppShell nav entry ("class.read"), so the page
+  // cannot be reached by URL by someone the nav hides it from.
+  if (!hasPermission(user.permissions, "class.read")) redirect("/dashboard");
   const canWrite = hasPermission(user.permissions, "class.write");
   const canManageSubjects = hasPermission(user.permissions, "subject.manage");
   const canPromote = hasPermission(user.permissions, "class.promote");

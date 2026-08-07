@@ -1,5 +1,6 @@
 import type { IdNameDto, PeriodDto, TimetableEntryDto, Serialized } from "@sms/types";
 import { hasPermission } from "@/lib/permissions";
+import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
@@ -23,6 +24,9 @@ export default async function TimetablePage({
 }) {
   const session = await auth();
   const user = session!.user;
+  // Gate matches this section's AppShell nav entry ("timetable.read"), so the page
+  // cannot be reached by URL by someone the nav hides it from.
+  if (!hasPermission(user.permissions, "timetable.read")) redirect("/dashboard");
   const canWrite = hasPermission(user.permissions, "timetable.write");
   const [periods, classes, rooms, allTeachers] = await Promise.all([
     apiGet<Period[]>("/timetable/periods"),

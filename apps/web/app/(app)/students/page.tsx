@@ -1,7 +1,9 @@
 import type { IdNameDto, Serialized } from "@sms/types";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
+import { hasPermission } from "@/lib/permissions";
 import { AppShell } from "@/components/shell/AppShell";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -19,6 +21,9 @@ export default async function StudentsPage({
 }) {
   const session = await auth();
   const user = session!.user;
+  // Gate matches this section's AppShell nav entry ("student.profile.read"), so the page
+  // cannot be reached by URL by someone the nav hides it from.
+  if (!hasPermission(user.permissions, "student.profile.read")) redirect("/dashboard");
 
   // The search runs in the QUERY. The roster list is bounded now (it used to be
   // uncapped so the admin dashboard could count it), so on a large school this page

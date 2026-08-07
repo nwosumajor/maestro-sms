@@ -1,7 +1,9 @@
 import type { CheckersSummaryDto, Serialized } from "@sms/types";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
+import { hasPermission } from "@/lib/permissions";
 import { AppShell } from "@/components/shell/AppShell";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
@@ -15,6 +17,11 @@ export const dynamic = "force-dynamic";
 export default async function CheckersPage() {
   const session = await auth();
   const user = session!.user;
+  // The Games section is gated on game.leaderboard.read — the same permission
+  // the AppShell nav uses. Without this the nav merely HID the link: all 18
+  // pages stayed reachable by URL and fetched anyway, so the 14 roles that
+  // hold no game permission generated ~200 refused API calls per pass.
+  if (!hasPermission(user.permissions, "game.leaderboard.read")) redirect("/dashboard");
   const games = await apiGet<Serialized<CheckersSummaryDto>[]>("/checkers");
 
   const open = (games ?? []).filter((g) => g.status === "LOBBY" && !g.yourColor);
