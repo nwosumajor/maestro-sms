@@ -14,7 +14,14 @@ const API_BASE = process.env.API_BASE_URL ?? "http://localhost:3001";
  *                            case the function was written for (a pupil with no
  *                            medical record answers 200 with an empty body, and
  *                            res.json() would throw on that)
- *   401 / 403         null   you may not see this; the UI correctly hides it
+ *   401               null   the session is gone; middleware owns the redirect
+ *   403               THROW  the page ALREADY decided you were allowed — every
+ *                            one of these gates with `hasPermission` and
+ *                            redirects otherwise — so a 403 means the web and
+ *                            the API disagree about what you may do. Rendering
+ *                            an empty list hides that: it is what made
+ *                            head_teacher's missing `meeting.host` look like
+ *                            "you have no meetings" instead of a broken role.
  *   5xx / network     THROW  the server is broken, so nothing we could render
  *                            is trustworthy
  *
@@ -43,8 +50,15 @@ export async function apiGet<T>(path: string): Promise<T | null> {
     // the school has no data, which is a different and much worse claim.
     throw new Error(`API unreachable: GET ${path}`, { cause });
   }
-  // 5xx is the server telling us it failed. 4xx is an answer.
+  // 5xx is the server telling us it failed. 4xx is an answer — except 403,
+  // which is an answer that contradicts a decision this page already made.
   if (res.status >= 500) throw new Error(`API ${res.status}: GET ${path}`);
+  if (res.status === 403) {
+    throw new Error(
+      `API 403: GET ${path} — the page allowed this user but the API refused. ` +
+        `A role is probably missing a permission the endpoint requires.`,
+    );
+  }
   if (!res.ok) return null;
   const text = await res.text();
   if (!text) return null;

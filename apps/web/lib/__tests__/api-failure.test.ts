@@ -23,11 +23,6 @@ describe("apiGet returns null for an ANSWER", () => {
     await expect(apiGet("/x")).resolves.toBeNull();
   });
 
-  it("403 — you may not see it, and the UI correctly hides it", async () => {
-    global.fetch = respond(403) as never;
-    await expect(apiGet("/x")).resolves.toBeNull();
-  });
-
   it("401 — the session is gone; middleware owns the redirect", async () => {
     global.fetch = respond(401) as never;
     await expect(apiGet("/x")).resolves.toBeNull();
@@ -58,6 +53,16 @@ describe("apiGet THROWS when the server is broken", () => {
     await expect(apiGet("/x")).rejects.toThrow(/API 502/);
     global.fetch = respond(503) as never;
     await expect(apiGet("/x")).rejects.toThrow(/API 503/);
+  });
+
+  it("403 — the page allowed this user and the API refused", async () => {
+    // Every page gates with hasPermission and redirects otherwise, so reaching
+    // an apiGet means the page already decided. A 403 is the web and the API
+    // disagreeing — which rendered as an empty list, and is exactly what made
+    // head_teacher's missing `meeting.host` look like "you have no meetings"
+    // rather than a broken role.
+    global.fetch = respond(403) as never;
+    await expect(apiGet("/meetings/slots/mine")).rejects.toThrow(/API 403.*missing a permission/s);
   });
 
   it("a network failure, naming the path so it can be traced", async () => {
