@@ -19,7 +19,10 @@ SELECT id FROM "user" WHERE email LIKE 'vol.s%@demo.school' OR email LIKE 'vol.t
 CREATE TEMP TABLE doomed_class AS SELECT id FROM class WHERE name LIKE 'VOL %';
 
 DELETE FROM payment WHERE reference LIKE 'VOLPAY-%';
+-- Line items before their invoice, and the catalog rows they point at last.
+DELETE FROM invoice_line_item WHERE "invoiceId" IN (SELECT id FROM invoice WHERE reference LIKE 'VOL-%');
 DELETE FROM invoice WHERE reference LIKE 'VOL-%';
+DELETE FROM fee_item WHERE name LIKE 'VOL %';
 DELETE FROM notification WHERE "recipientId" IN (SELECT id FROM doomed_user);
 DELETE FROM attendance_record WHERE "sessionId" IN
   (SELECT id FROM attendance_session WHERE "classId" IN (SELECT id FROM doomed_class));
