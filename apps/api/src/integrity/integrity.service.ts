@@ -211,7 +211,12 @@ export class IntegrityService {
         const assessment = await tx.assessment.findFirst({ where: { id: submission.assessmentId }, select: { createdById: true, classId: true } });
         // principal is the school-head oversight tier (holds integrity.report.read
         // + integrity.exemption.write), so it reviews school-wide like school_admin.
-        const schoolWide = p.roles.some((r) => r === "school_admin" || r === "super_admin" || r === "principal");
+        // SECURITY: no super_admin. These are integrity signals on MINORS —
+        // Golden Rule #5's most sensitive category — and a standing platform
+        // read of them is exactly what the no-standing-superadmin gate exists
+        // to prevent. Written as a predicate rather than a named role set, it
+        // was invisible to that gate.
+        const schoolWide = p.roles.some((r) => r === "school_admin" || r === "principal");
         const teaches = assessment?.classId
           ? await tx.classTeacher.findFirst({ where: { classId: assessment.classId, teacherId: p.userId }, select: { id: true } })
           : null;

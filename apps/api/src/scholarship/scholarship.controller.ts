@@ -11,6 +11,7 @@
 import { Body, Controller, Get, Param, Post, Put, Query } from "@nestjs/common";
 import { z } from "zod";
 import { SCHOLARSHIP_PERMISSIONS } from "@sms/types";
+import type { ScholarshipApplicationDto } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { RequireStepUp } from "../auth/require-stepup.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -148,6 +149,19 @@ export class ScholarshipController {
     @Body(new ZodValidationPipe(programUpdateSchema)) body: z.infer<typeof programUpdateSchema>,
   ) {
     return this.admin.updateProgram(p, id, body);
+  }
+
+  /** School leadership's oversight of their OWN school's applications.
+   *
+   *  This is what `scholarship.read` is for. Until now it gated nothing: it put
+   *  the section in the nav and a "Requests & decisions" tile on the dashboard,
+   *  and board / school_admin — who hold READ but not APPLY — arrived at a page
+   *  that promised them oversight and fetched nothing. Tenant-scoped by RLS, so
+   *  it can only ever return the caller's own school. */
+  @Get("school-applications")
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.READ)
+  listSchoolApplications(@CurrentPrincipal() p: Principal): Promise<ScholarshipApplicationDto[]> {
+    return this.scholarships.listForSchool(p);
   }
 
   /** Cross-tenant review queue (non-DRAFT applications across all schools). */

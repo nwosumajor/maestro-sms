@@ -90,8 +90,11 @@ export class HostelService {
   // --- warden relationship scoping -------------------------------------------
   // school_admin / principal (and an impersonating super_admin) manage EVERY
   // hostel; a warden is confined to the hostel(s) they are assigned to.
+  // SECURITY: no super_admin. A platform account holds no standing scope over a
+  // school's data — the supported route in is impersonation, which mints the
+  // TARGET user's roles and is step-up gated, time limited and audited by name.
   private wide(p: Principal): boolean {
-    return p.roles.some((r) => r === "school_admin" || r === "principal" || r === "super_admin");
+    return p.roles.some((r) => r === "school_admin" || r === "principal");
   }
   /** Module-wide scoping: admins AND the head warden see/manage EVERY hostel.
    *  junior_admin (the operational records tier) holds hostel.read and is

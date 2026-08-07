@@ -68,6 +68,34 @@ describe("super_admin has no standing role scope over tenant data", () => {
     expect(offenders).toEqual([]);
   });
 
+  it("appears in no inline role PREDICATE either", () => {
+    // The second hole in the SHAPE. The case above reads named role sets, so a
+    // scope written as a predicate is invisible to it:
+    //
+    //   private wide(p: Principal) {
+    //     return p.roles.some((r) => r === "school_admin" || r === "super_admin");
+    //   }
+    //
+    // Three survived the sweep that removed 31 named ones — hostel and transport
+    // fleet scope, and integrity's school-wide read of behavioural signals on
+    // MINORS. Transport's even carried a comment justifying it as "an
+    // impersonating super_admin", which is not how impersonation works.
+    //
+    // Deliberately narrow: it matches super_admin compared against a ROLE, not
+    // every mention. Checks like `roles.includes("super_admin")` in auth (the
+    // password-expiry and MFA exemptions) and in the permission guard are about
+    // super_admin as a PLATFORM actor, not standing scope over a tenant's data.
+    const PREDICATE = /\br\s*===\s*["']super_admin["']|\brole\s*===\s*["']super_admin["']/;
+    const offenders: string[] = [];
+    for (const file of tsFiles(SRC)) {
+      const source = readFileSync(file, "utf8");
+      for (const line of source.split("\n")) {
+        if (PREDICATE.test(line)) offenders.push(`${file.slice(SRC.length + 1)} — ${line.trim()}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
   it("still finds the role sets it is meant to be policing", () => {
     // Guards the gate itself. A regex that silently stopped matching would make
     // this suite pass forever while checking nothing — the failure mode that makes
