@@ -132,6 +132,10 @@ model InvoiceLineItem {
 
   @@index([schoolId])
   @@index([schoolId, invoiceId])
+  // invoiceId alone, for FK ENFORCEMENT — see the note on Payment. The
+  // (schoolId, invoiceId) composite serves the app and cannot serve the FK
+  // checker, which supplies no schoolId.
+  @@index([invoiceId])
   @@map("invoice_line_item")
 }
 
@@ -172,6 +176,16 @@ model Payment {
   // Approvals inbox: finds the few rows awaiting a decision without scanning
   // the whole (ever-growing) table. Mirrors invoice_adjustment/admission_application.
   @@index([schoolId, status])
+  // invoiceId ALONE, as well as the composite above. The composite serves the
+  // APP, which always reads inside a tenant. It cannot serve FK ENFORCEMENT,
+  // which runs `WHERE "invoiceId" = $1` with no schoolId — wrong leading column
+  // — so every delete or key-update of an invoice seq-scanned this whole table.
+  // Measured at 182,702 payments: ~16-19ms PER CHECK, and the check fires once
+  // per invoice row touched. Removing 216,000 invoices did not finish in 72
+  // minutes; the same delete took 4m17s once payment held only 4,502 rows.
+  // Write cost of carrying it, measured over 21,600 inserts (median of 3):
+  // 1,697ms -> 1,766ms, about +4%.
+  @@index([invoiceId])
   @@map("payment")
 }
 
@@ -341,6 +355,10 @@ model InvoiceAdjustment {
   @@index([schoolId])
   @@index([schoolId, invoiceId])
   @@index([schoolId, status])
+  // invoiceId alone, for FK ENFORCEMENT — see the note on Payment. The
+  // (schoolId, invoiceId) composite serves the app and cannot serve the FK
+  // checker, which supplies no schoolId.
+  @@index([invoiceId])
   @@map("invoice_adjustment")
 }
 
@@ -399,5 +417,9 @@ model MobileMoneyIntent {
   /// to chase, across every school. Without this it seq-scans a table that only
   /// grows, on a schedule.
   @@index([status, createdAt])
+  // invoiceId alone, for FK ENFORCEMENT — see the note on Payment. The
+  // (schoolId, invoiceId) composite serves the app and cannot serve the FK
+  // checker, which supplies no schoolId.
+  @@index([invoiceId])
   @@map("mobile_money_intent")
 }
