@@ -20,7 +20,7 @@ export default async function CertificatesPage() {
   const [staffList, studentList] = await Promise.all([
     // /users requires class.write — narrower than this page's own gate.
 
-    hasPermission(user.permissions, "class.write") ? apiGet<Person[]>("/users?kind=staff") : Promise.resolve(null),
+    hasPermission(user.permissions, "directory.people.read") ? apiGet<Person[]>("/directory/people?kind=staff") : Promise.resolve(null),
     // Classes for the bulk issuer. The roster itself is NOT prefetched — the
     // single-issue picker searches for a pupil.
     apiGet<Person[]>("/classes/mine"),

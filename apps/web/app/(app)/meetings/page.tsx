@@ -31,7 +31,9 @@ export default async function MeetingsPage() {
     // address. The teacher list is the ordinary staff directory; the server
     // re-checks that whoever is picked actually teaches THIS child.
     canSeeRequests ? apiGet<Serialized<MeetingRequestDto>[]>("/meetings/requests") : Promise.resolve([]),
-    canAsk ? apiGet<Array<{ id: string; name: string }>>("/users?kind=teacher") : Promise.resolve([]),
+    hasPermission(user.permissions, "directory.people.read")
+      ? apiGet<Array<{ id: string; name: string }>>("/directory/people?kind=teacher")
+      : Promise.resolve([]),
   ]);
   const children = (family?.children ?? []).map((c) => ({ studentId: c.studentId, studentName: c.studentName }));
 

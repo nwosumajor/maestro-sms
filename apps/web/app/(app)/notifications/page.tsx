@@ -17,7 +17,7 @@ export default async function NotificationsPage() {
   const canSend = hasPermission(user.permissions, "notification.send");
   const [data, users] = await Promise.all([
     apiGet<InboxData>("/notifications"),
-    canSend ? apiGet<{ id: string; name: string; roles: string[] }[]>("/users") : Promise.resolve(null),
+    hasPermission(user.permissions, "directory.people.read") ? apiGet<{ id: string; name: string; roles: string[] }[]>("/directory/people") : Promise.resolve(null),
   ]);
 
   return (

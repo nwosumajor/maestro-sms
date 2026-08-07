@@ -33,7 +33,7 @@ export default async function ExamsPage({
     apiGet<Serialized<MyExamDto>[]>("/exams/mine"),
     apiGet<Serialized<MyExamDto>[]>("/exams/invigilations/mine"),
     canManage ? apiGet<Serialized<IdNameDto>[]>("/classes/mine") : Promise.resolve([]),
-    canManage ? apiGet<{ id: string; name: string; roles?: string[] }[]>("/users?kind=staff") : Promise.resolve([]),
+    hasPermission(user.permissions, "directory.people.read") ? apiGet<{ id: string; name: string; roles?: string[] }[]>("/directory/people?kind=staff") : Promise.resolve([]),
     // Halls come from the timetable's room registry, so a sitting can't invent
     // "Hall A" alongside an existing "hall A" — and capacity rides along.
     canManage ? apiGet<Serialized<IdNameDto>[]>("/timetable/rooms") : Promise.resolve([]),
