@@ -154,9 +154,34 @@ function fill(route, ids) {
 
 const ERROR_RE = /Application error|server-side exception|is not a function|Cannot read propert|TypeError|__NEXT_ERROR/i;
 
+// A page that THROWS during SSR is served as a 200 carrying the error boundary,
+// and that boundary is a CLIENT component — so none of the strings above appear
+// in the HTML and the shell looks like an ordinary small page. This smoke
+// reported "all 102 routes ok" for every role while four roles were getting an
+// error screen on /workflows, because it could not see this at all.
+//
+// What a throw does leave is a serialized digest in the flight stream. Next uses
+// the same channel for ordinary CONTROL FLOW, so the digest VALUE is the signal,
+// not its presence:
+//   NEXT_NOT_FOUND               notFound()  — a missing record, correct
+//   NEXT_REDIRECT;...            redirect()  — a permission gate firing, correct
+//   NEXT_HTTP_ERROR_FALLBACK;404 the same, newer form
+//   <numeric>                    an UNCAUGHT error — the error boundary
+// Matching the presence of a digest (or React's $RX retry shim, which also fires
+// on recovered suspense) reported 917 failures, nearly all of them healthy pages
+// 404ing or redirecting exactly as designed.
+const DIGEST_RE = /E\{\\?"digest\\?":\\?"([^"\\]+)/g;
+const CONTROL_FLOW = /^(NEXT_NOT_FOUND|NEXT_REDIRECT|NEXT_HTTP_ERROR_FALLBACK)/;
+
+/** Digests that mean a real throw, ignoring Next's control-flow sentinels. */
+function errorDigests(html) {
+  return [...html.matchAll(DIGEST_RE)].map((m) => m[1]).filter((d) => !CONTROL_FLOW.test(d));
+}
+
 function classify(status, html) {
   if (status === 500) return "FAIL";
   if (status === 200 && ERROR_RE.test(html)) return "FAIL";
+  if (status === 200 && errorDigests(html).length) return "FAIL";
   return "ok"; // 200-clean, 3xx redirect (perm/nav), 401/403/404 are all fine
 }
 
@@ -198,7 +223,7 @@ async function main() {
       const html = res.status === 200 ? await res.text() : "";
       if (classify(res.status, html) === "FAIL") {
         // Pull the Next digest if present for quick server-log correlation.
-        const dig = html.match(/Digest:\s*(\d+)/)?.[1];
+        const dig = errorDigests(html)[0] ?? html.match(/Digest:\s*(\d+)/)?.[1];
         bad.push(`${url} -> ${res.status}${dig ? ` (digest ${dig})` : ""}`);
       }
     }

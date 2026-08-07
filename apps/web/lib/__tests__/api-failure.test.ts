@@ -23,6 +23,17 @@ describe("apiGet returns null for an ANSWER", () => {
     await expect(apiGet("/x")).resolves.toBeNull();
   });
 
+  it("403 — half the app reads what the caller may not see, and expects null", async () => {
+    // Briefly a throw. Measured against a real stack that broke 491 (page,role)
+    // pairs across 52 of 102 routes, because pages rely on this returning null
+    // rather than gating every call. It is logged instead.
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+    global.fetch = respond(403) as never;
+    await expect(apiGet("/workflows")).resolves.toBeNull();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("403 GET /workflows"));
+    warn.mockRestore();
+  });
+
   it("401 — the session is gone; middleware owns the redirect", async () => {
     global.fetch = respond(401) as never;
     await expect(apiGet("/x")).resolves.toBeNull();
@@ -55,14 +66,13 @@ describe("apiGet THROWS when the server is broken", () => {
     await expect(apiGet("/x")).rejects.toThrow(/API 503/);
   });
 
-  it("403 — the page allowed this user and the API refused", async () => {
-    // Every page gates with hasPermission and redirects otherwise, so reaching
-    // an apiGet means the page already decided. A 403 is the web and the API
-    // disagreeing — which rendered as an empty list, and is exactly what made
-    // head_teacher's missing `meeting.host` look like "you have no meetings"
-    // rather than a broken role.
-    global.fetch = respond(403) as never;
-    await expect(apiGet("/meetings/slots/mine")).rejects.toThrow(/API 403.*missing a permission/s);
+  it("429 — rate limited is not an answer about the data", async () => {
+    // The per-tenant limiter allows 1,200 req/min per SCHOOL. A rejected read
+    // used to render as "No invoices" — telling a busy school its ledger is
+    // empty. It also silently hollowed out the route smoke, which was making
+    // 19,286 rate-limited requests and counting the empty pages as passes.
+    global.fetch = respond(429) as never;
+    await expect(apiGet("/invoices")).rejects.toThrow(/API 429.*rate limited/s);
   });
 
   it("a network failure, naming the path so it can be traced", async () => {
