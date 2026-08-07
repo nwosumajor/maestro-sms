@@ -477,6 +477,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "GET /directory/people": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
     "GET /directory/search": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"

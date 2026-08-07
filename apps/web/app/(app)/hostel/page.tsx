@@ -24,7 +24,7 @@ export default async function HostelPage() {
     apiGet<Serialized<HostelDto>[]>("/hostels"),
     apiGet<Serialized<HostelAllocationDto>[]>("/hostels/allocations"),
     canManage ? apiGet<{ id: string; name: string }[]>("/students") : Promise.resolve([]),
-    canCreate ? apiGet<{ id: string; name: string; roles?: string[] }[]>("/users?kind=staff") : Promise.resolve([]),
+    hasPermission(user.permissions, "directory.people.read") ? apiGet<{ id: string; name: string; roles?: string[] }[]>("/directory/people?kind=staff") : Promise.resolve([]),
     apiGet<Serialized<HostelSummaryDto>>("/hostels/summary"),
   ]);
 

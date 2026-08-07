@@ -23,7 +23,7 @@ export default async function DisciplinePage() {
   type Person = { id: string; name: string };
   const [complaintsPage, staffList, teacherList, studentList] = await Promise.all([
     apiGet<PageDto<Serialized<DisciplineComplaintDto>>>("/discipline/complaints"),
-    canManage ? apiGet<Person[]>("/users?kind=staff") : Promise.resolve([]),
+    hasPermission(user.permissions, "directory.people.read") ? apiGet<Person[]>("/directory/people?kind=staff") : Promise.resolve([]),
     apiGet<Person[]>("/discipline/file-targets?type=TEACHER"),
     apiGet<Person[]>("/discipline/file-targets?type=STUDENT"),
   ]);

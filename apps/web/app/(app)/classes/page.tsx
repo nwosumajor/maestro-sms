@@ -41,7 +41,7 @@ export default async function ClassesPage() {
     apiGet<Serialized<ClassOverviewDto>[]>("/classes/overview"),
     // Roster no longer prefetched: the enrol/link controls search on demand.
     Promise.resolve(null),
-    canWrite ? apiGet<{ id: string; name: string; roles: string[] }[]>("/users?kind=staff") : Promise.resolve(null),
+    hasPermission(user.permissions, "directory.people.read") ? apiGet<{ id: string; name: string; roles: string[] }[]>("/directory/people?kind=staff") : Promise.resolve(null),
     // The guardian directory is no longer fetched at all. It existed to fill one
     // dropdown, and in a large school that is thousands of rows shipped on every
     // visit; the picker searches the server instead.

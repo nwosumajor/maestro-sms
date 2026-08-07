@@ -21,7 +21,7 @@ export default async function TasksPage() {
   // separate so the picker is categorised instead of one mixed directory.
   const [taskPage, staffList, studentList] = await Promise.all([
     apiGet<PageDto<Serialized<TaskDto>>>("/tasks"),
-    canAssign ? apiGet<Person[]>("/users?kind=staff") : Promise.resolve([]),
+    hasPermission(user.permissions, "directory.people.read") ? apiGet<Person[]>("/directory/people?kind=staff") : Promise.resolve([]),
     canAssign ? apiGet<Person[]>("/students") : Promise.resolve([]),
   ]);
   const byName = (a: Person, b: Person) => a.name.localeCompare(b.name);

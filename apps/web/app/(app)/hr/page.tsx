@@ -30,7 +30,7 @@ export default async function HrPage() {
   const canLeaveManage = hasPermission(user.permissions, "hr.leave.manage");
   const [employees, users, changes, leaveTypes, leaveRequests, coverage, org] = await Promise.all([
     apiGet<Employee[]>("/hr/employees"),
-    canWrite ? apiGet<{ id: string; name: string; roles: string[] }[]>("/users?kind=staff") : Promise.resolve(null),
+    hasPermission(user.permissions, "directory.people.read") ? apiGet<{ id: string; name: string; roles: string[] }[]>("/directory/people?kind=staff") : Promise.resolve(null),
     apiGet<Serialized<SalaryChangeDto>[]>("/hr/salary/changes"),
     canLeaveManage ? apiGet<Serialized<LeaveTypeDto>[]>("/hr/leave/types") : Promise.resolve(null),
     canLeaveManage ? apiGet<Serialized<LeaveRequestDto>[]>("/hr/leave/requests") : Promise.resolve(null),

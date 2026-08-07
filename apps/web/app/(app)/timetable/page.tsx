@@ -36,7 +36,7 @@ export default async function TimetablePage({
     apiGet<Room[]>("/timetable/rooms"),
     // Teacher directory for the availability editor AND the teacher view (class.write
     // accompanies timetable.write on every writing role).
-    canWrite ? apiGet<{ id: string; name: string; roles?: string[] }[]>("/users?kind=teacher") : Promise.resolve(null),
+    hasPermission(user.permissions, "directory.people.read") ? apiGet<{ id: string; name: string; roles?: string[] }[]>("/directory/people?kind=teacher") : Promise.resolve(null),
   ]);
 
   const list = classes ?? [];
