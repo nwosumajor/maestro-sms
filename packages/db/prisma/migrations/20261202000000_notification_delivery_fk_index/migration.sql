@@ -1,0 +1,21 @@
+-- notification_delivery.notificationId had no standalone index.
+--
+-- Postgres indexes the PARENT side of a foreign key automatically (it is the
+-- primary key); it never indexes the CHILD side. The FK check on deleting a
+-- notification runs `WHERE "notificationId" = $1` with NO schoolId, so the
+-- existing (schoolId, notificationId) composite cannot serve it — wrong leading
+-- column — and the check seq-scans this table once per deleted row.
+--
+-- The nightly READ_NOTIFICATION_RETENTION sweep deletes in bulk, so the cost is
+-- deletes x child rows. Measured deleting 5,000 notifications:
+--     63 delivery rows        69 ms
+--     45,063 delivery rows    15,555 ms      (225x for 715x the rows)
+-- In production this table grows one row per notification PER CHANNEL, so it
+-- outgrows `notification` itself and the sweep eventually cannot finish.
+--
+-- CONCURRENTLY is deliberately NOT used: Prisma runs each migration inside a
+-- transaction, and CREATE INDEX CONCURRENTLY cannot run in one. This table is
+-- small enough at migration time that a brief lock is the right trade; if that
+-- ever stops being true, build it by hand outside the migration.
+CREATE INDEX IF NOT EXISTS "notification_delivery_notificationId_idx"
+  ON "notification_delivery" ("notificationId");
