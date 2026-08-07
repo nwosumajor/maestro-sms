@@ -1,5 +1,6 @@
 import type { BillingOverviewDto, ReferralInfoDto, Serialized } from "@sms/types";
 import { hasPermission } from "@/lib/permissions";
+import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
@@ -32,6 +33,12 @@ const PAYMENT_VARIANT: Record<string, "default" | "secondary" | "destructive" | 
 export default async function BillingPage() {
   const session = await auth();
   const user = session!.user;
+  // Gate BEFORE fetching. This page had no gate at all: all three reads
+  // require billing.read, which 14 of 18 roles lack, so every one of them
+  // loaded a billing page that fired three authenticated round-trips and
+  // rendered nothing. Redirecting is what the rest of the app does.
+  if (!hasPermission(user.permissions, "billing.read")) redirect("/dashboard");
+
   const [data, referral, credits] = await Promise.all([
     apiGet<Overview>("/billing"),
     apiGet<Serialized<ReferralInfoDto>>("/billing/referral"),
