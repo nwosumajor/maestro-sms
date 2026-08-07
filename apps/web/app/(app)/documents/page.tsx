@@ -1,5 +1,6 @@
 import type { DocumentRowDto, Serialized } from "@sms/types";
 import { hasPermission } from "@/lib/permissions";
+import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
@@ -15,6 +16,9 @@ type DocRow = Serialized<DocumentRowDto>;
 export default async function DocumentsPage() {
   const session = await auth();
   const user = session!.user;
+  // Gate matches this section's AppShell nav entry ("document.read"), so the page
+  // cannot be reached by URL by someone the nav hides it from.
+  if (!hasPermission(user.permissions, "document.read")) redirect("/dashboard");
   const canWrite = hasPermission(user.permissions, "document.write");
   // The roster is no longer prefetched — the upload form searches for a student.
   const page = await apiGet<{ items: DocRow[]; nextCursor: string | null }>("/documents");

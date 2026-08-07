@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import type { ClassInfoDto } from "@sms/types";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
+import { hasPermission } from "@/lib/permissions";
 import { AppShell } from "@/components/shell/AppShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/shell/PageHeader";
@@ -13,6 +14,9 @@ export const dynamic = "force-dynamic";
 export default async function ClassInfoPage({ params }: { params: { id: string } }) {
   const session = await auth();
   const user = session!.user;
+  // Same gate as the section index — a detail page is reachable by URL
+  // whether or not the list that links to it was.
+  if (!hasPermission(user.permissions, "class.read")) redirect("/dashboard");
   const info = await apiGet<ClassInfoDto>(`/classes/${params.id}/info`);
   if (!info) notFound();
 

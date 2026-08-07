@@ -1,5 +1,6 @@
 import type { AcademicSessionDto, CalendarEventDto, SchoolHolidayDto, Serialized } from "@sms/types";
 import { hasPermission } from "@/lib/permissions";
+import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
@@ -18,6 +19,9 @@ type Entry = { key: string; at: number; title: string; when: string; kind: "even
 export default async function CalendarPage() {
   const session = await auth();
   const user = session!.user;
+  // Gate matches this section's AppShell nav entry ("event.read"), so the page
+  // cannot be reached by URL by someone the nav hides it from.
+  if (!hasPermission(user.permissions, "event.read")) redirect("/dashboard");
   const canWrite = hasPermission(user.permissions, "event.write");
   // The academic overlay (term boundaries + holidays) is class.read-gated; every
   // role that reaches the calendar holds it, but guard anyway so a missing grant

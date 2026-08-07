@@ -1,6 +1,7 @@
 import type { ForumPostDto, LmsContentDto, QuizAttemptResultDto, Serialized } from "@sms/types";
 import Link from "next/link";
 import { hasPermission } from "@/lib/permissions";
+import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
@@ -17,6 +18,7 @@ export const dynamic = "force-dynamic";
 export default async function ContentDetailPage({ params }: { params: { id: string } }) {
   const session = await auth();
   const user = session!.user;
+  if (!hasPermission(user.permissions, "lms.content.read")) redirect("/dashboard");
 
   const content = await apiGet<Serialized<LmsContentDto>>(`/content/${params.id}`);
 

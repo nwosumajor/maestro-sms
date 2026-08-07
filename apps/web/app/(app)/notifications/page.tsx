@@ -1,4 +1,5 @@
 import { hasPermission } from "@/lib/permissions";
+import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
@@ -12,6 +13,7 @@ export const dynamic = "force-dynamic";
 export default async function NotificationsPage() {
   const session = await auth();
   const user = session!.user;
+  if (!hasPermission(user.permissions, "notification.read")) redirect("/dashboard");
   const canSend = hasPermission(user.permissions, "notification.send");
   const [data, users] = await Promise.all([
     apiGet<InboxData>("/notifications"),

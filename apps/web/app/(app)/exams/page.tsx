@@ -1,4 +1,5 @@
 import type { ExamScheduleDto, ExamSittingDto, MyExamDto, IdNameDto, CbtExamDto, Serialized } from "@sms/types";
+import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { hasPermission } from "@/lib/permissions";
@@ -17,6 +18,9 @@ export default async function ExamsPage({
 }) {
   const session = await auth();
   const user = session!.user;
+  // Gate matches this section's AppShell nav entry ("timetable.read"), so the page
+  // cannot be reached by URL by someone the nav hides it from.
+  if (!hasPermission(user.permissions, "timetable.read")) redirect("/dashboard");
   const canManage = hasPermission(user.permissions, "exam.manage");
   const canRelease = hasPermission(user.permissions, "exam.release");
 

@@ -18,7 +18,9 @@ export default async function CertificatesPage() {
   // that list — two server-filtered fetches, never one mixed directory.
   type Person = { id: string; name: string };
   const [staffList, studentList] = await Promise.all([
-    apiGet<Person[]>("/users?kind=staff"),
+    // /users requires class.write — narrower than this page's own gate.
+
+    hasPermission(user.permissions, "class.write") ? apiGet<Person[]>("/users?kind=staff") : Promise.resolve(null),
     // Classes for the bulk issuer. The roster itself is NOT prefetched — the
     // single-issue picker searches for a pupil.
     apiGet<Person[]>("/classes/mine"),

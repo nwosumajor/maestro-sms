@@ -1,6 +1,7 @@
 import type { MessageDto, PageDto, ThreadSummaryDto, ThreadViewDto, UserSummaryDto, Serialized } from "@sms/types";
 import { hasPermission } from "@/lib/permissions";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
@@ -23,6 +24,9 @@ type Contact = Serialized<UserSummaryDto>;
 export default async function MessagesPage({ searchParams }: { searchParams: { thread?: string } }) {
   const session = await auth();
   const user = session!.user;
+  // Gate matches this section's AppShell nav entry ("message.read"), so the page
+  // cannot be reached by URL by someone the nav hides it from.
+  if (!hasPermission(user.permissions, "message.read")) redirect("/dashboard");
   const canSend = hasPermission(user.permissions, "message.send");
   const [threads, contacts] = await Promise.all([
     // Keyset-paginated: the first page is enough for the inbox list.

@@ -1,7 +1,9 @@
 import type { FamilyOverviewDto, Serialized } from "@sms/types";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
+import { hasPermission } from "@/lib/permissions";
 import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -19,6 +21,9 @@ const date = (iso: string | null) => (iso ? iso.slice(0, 10) : "—");
 export default async function FamilyPage() {
   const session = await auth();
   const user = session!.user;
+  // Gate matches this section's AppShell nav entry ("family.read"), so the page
+  // cannot be reached by URL by someone the nav hides it from.
+  if (!hasPermission(user.permissions, "family.read")) redirect("/dashboard");
   const overview = (await apiGet<Overview>("/family/overview")) ?? { children: [] };
 
   return (

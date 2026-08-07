@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res } from "@nestjs/common";
 import type { Response } from "express";
 import { z } from "zod";
-import { EXAM_PERMISSIONS } from "@sms/types";
+import { EXAM_PERMISSIONS, TIMETABLE_PERMISSIONS } from "@sms/types";
 import type { ExamAttendanceDto, ExamDayDto, ExamScheduleDto, ExamSittingDto, ExamSeatDto, InvigilationDto, MyExamDto } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -71,13 +71,13 @@ export class ExamController {
   // --- student / parent / invigilator self views (gated on timetable.read,
   //     which students, parents and staff all hold) ---
   @Get("mine")
-  @RequirePermission("timetable.read")
+  @RequirePermission(TIMETABLE_PERMISSIONS.TIMETABLE_READ)
   myExams(@CurrentPrincipal() p: Principal): Promise<MyExamDto[]> {
     return this.exams.myExams(p);
   }
 
   @Get("invigilations/mine")
-  @RequirePermission("timetable.read")
+  @RequirePermission(TIMETABLE_PERMISSIONS.TIMETABLE_READ)
   myInvigilations(@CurrentPrincipal() p: Principal): Promise<MyExamDto[]> {
     return this.exams.myInvigilations(p);
   }

@@ -1,6 +1,6 @@
 import { BadRequestException, Body, Controller, Get, Param, Post } from "@nestjs/common";
 import type { MemberScanDto, ScanRecordResultDto } from "@sms/types";
-import { isScanPurpose } from "@sms/types";
+import { isScanPurpose, SIS_PERMISSIONS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import type { Principal } from "../integrity/integrity.foundation";
@@ -16,7 +16,7 @@ export class MemberScanController {
    * The code is a path param (opaque uniqueId, no PII), never a body.
    */
   @Get("scan/:code")
-  @RequirePermission("member.scan")
+  @RequirePermission(SIS_PERMISSIONS.MEMBER_SCAN)
   resolve(@CurrentPrincipal() p: Principal, @Param("code") code: string): Promise<MemberScanDto> {
     return this.scan.resolve(p, code);
   }
@@ -27,7 +27,7 @@ export class MemberScanController {
    * Same tenant-scoping, permission and audit as the lookup.
    */
   @Post("scan/:code")
-  @RequirePermission("member.scan")
+  @RequirePermission(SIS_PERMISSIONS.MEMBER_SCAN)
   record(
     @CurrentPrincipal() p: Principal,
     @Param("code") code: string,

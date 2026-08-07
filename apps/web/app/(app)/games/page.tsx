@@ -20,6 +20,7 @@ import {
   Trophy,
   Zap,
 } from "lucide-react";
+import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { hasPermission } from "@/lib/permissions";
@@ -80,6 +81,11 @@ function SectionIcon({ children, className }: { children: React.ReactNode; class
 export default async function GamesPage() {
   const session = await auth();
   const user = session!.user;
+  // The Games section is gated on game.leaderboard.read — the same permission
+  // the AppShell nav uses. Without this the nav merely HID the link: all 18
+  // pages stayed reachable by URL and fetched anyway, so the 14 roles that
+  // hold no game permission generated ~200 refused API calls per pass.
+  if (!hasPermission(user.permissions, "game.leaderboard.read")) redirect("/dashboard");
   const canPlay = hasPermission(user.permissions, "game.play");
   const canRaceOpen = hasPermission(user.permissions, "game.race.open");
   const canRaceTournament = hasPermission(user.permissions, "game.race.tournament");

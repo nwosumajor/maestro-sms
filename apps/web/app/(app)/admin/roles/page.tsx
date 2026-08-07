@@ -16,7 +16,9 @@ export default async function RolesPage() {
   const user = session!.user;
   if (!hasPermission(user.permissions, "rbac.manage")) redirect("/dashboard");
   const [users, roles] = await Promise.all([
-    apiGet<{ id: string; name: string; email: string; roles: string[] }[]>("/users"),
+    // /users requires class.write — narrower than this page's own gate.
+
+    hasPermission(user.permissions, "class.write") ? apiGet<{ id: string; name: string; email: string; roles: string[] }[]>("/users") : Promise.resolve(null),
     apiGet<{ name: string }[]>("/admin/roles"),
   ]);
   const mfaPolicy = await apiGet<{ requireStaffMfa: boolean }>("/admin/security/mfa-policy");

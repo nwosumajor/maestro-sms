@@ -1,5 +1,6 @@
 import type { AcademicSessionDto, IdNameDto, StudentSessionReportDto, Serialized } from "@sms/types";
 import { hasPermission } from "@/lib/permissions";
+import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { MyMarks } from "@/components/gradebook/MyMarks";
@@ -21,6 +22,9 @@ type Report = Serialized<StudentSessionReportDto>;
 export default async function GradebookPage() {
   const session = await auth();
   const user = session!.user;
+  // Gate matches this section's AppShell nav entry ("grade.read"), so the page
+  // cannot be reached by URL by someone the nav hides it from.
+  if (!hasPermission(user.permissions, "grade.read")) redirect("/dashboard");
   const canGrade = hasPermission(user.permissions, "grade.write");
   const canPickSubjects = hasPermission(user.permissions, "subject.select");
   const canApproveSelections = hasPermission(user.permissions, "subject.selection.approve");
