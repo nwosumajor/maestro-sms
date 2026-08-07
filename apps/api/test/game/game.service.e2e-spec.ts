@@ -46,7 +46,18 @@ d("GameService integration (RLS + persistence + server authority)", () => {
   });
 
   const assertNoSecret = (v: unknown) => {
-    const json = JSON.stringify(v);
+    // Strip UUIDs before scanning. The needles are 4-DIGIT secrets and a uuid is
+    // 32 HEX characters, so "1234" or "5678" turns up inside a random id 0.034%
+    // of the time — across the ids a single run serialises that is roughly one
+    // CI failure in every 150-400 runs, reported as "the secret leaked" when
+    // nothing leaked. It failed exactly that way on #124, a seeder-only change.
+    //
+    // Stripping ids costs nothing: a secret is four digits and is never a uuid,
+    // so no real leak can hide in the part being removed.
+    const json = JSON.stringify(v).replace(
+      /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi,
+      "<uuid>",
+    );
     expect(json).not.toContain("1234");
     expect(json).not.toContain("5678");
   };
