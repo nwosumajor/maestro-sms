@@ -1,7 +1,7 @@
 import type { InvoiceDetailDto, Serialized } from "@sms/types";
 import { hasPermission } from "@/lib/permissions";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
@@ -32,6 +32,11 @@ type InvoiceDetail = Serialized<InvoiceDetailDto>;
 export default async function InvoiceDetailPage({ params }: { params: { id: string } }) {
   const session = await auth();
   const user = session!.user;
+  // Same gate as the fees list. Without it, the 12 roles that hold no fee.read
+  // reached this page, asked the API for an invoice, were refused, and got a
+  // "not found" — which says the invoice does not exist rather than that this
+  // is not theirs to open.
+  if (!hasPermission(user.permissions, "fee.read")) redirect("/dashboard");
   const inv = await apiGet<InvoiceDetail>(`/invoices/${params.id}`);
   if (!inv) notFound();
   const canManage = hasPermission(user.permissions, "fee.manage");

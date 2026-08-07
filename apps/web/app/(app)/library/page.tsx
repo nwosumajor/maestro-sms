@@ -23,7 +23,11 @@ export default async function LibraryPage() {
     apiGet<Serialized<BookLoanDto>[]>("/library/loans"),
     // /library/report was built and never rendered: the librarian could see
     // individual loans but not whether the library as a whole was healthy.
-    apiGet<Serialized<LibraryReportDto>>("/library/report"),
+    // Manage-gated, so a student or junior_admin holding only library.read was
+    // asking for a report they can never have — the strip then vanished with no
+    // explanation, which read as "the library has no stats" rather than "this
+    // is not yours to see".
+    canManage ? apiGet<Serialized<LibraryReportDto>>("/library/report") : Promise.resolve(null),
   ]);
 
   return (

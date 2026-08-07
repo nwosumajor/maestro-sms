@@ -1,6 +1,8 @@
 import type { LmsContentDto, Serialized } from "@sms/types";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
+import { redirect } from "next/navigation";
+import { hasPermission } from "@/lib/permissions";
 import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ApprovalQueue } from "@/components/lms/ApprovalQueue";
@@ -15,6 +17,9 @@ export default async function ContentApprovalsPage() {
   const session = await auth();
   const user = session!.user;
 
+  // Needs lms.content.approve. Ungated, this page loaded for every role and
+  // asked anyway — 16 refusals in a single 18-role pass.
+  if (!hasPermission(user.permissions, "lms.content.approve")) redirect("/dashboard");
   const pending = await apiGet<Serialized<LmsContentDto>[]>("/content/approvals/pending");
 
   return (

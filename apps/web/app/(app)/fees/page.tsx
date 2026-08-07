@@ -1,5 +1,6 @@
 import type { InvoiceListItemDto, InvoiceSummaryDto, Serialized } from "@sms/types";
 import { hasPermission } from "@/lib/permissions";
+import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
@@ -16,6 +17,10 @@ type InvoiceRow = Serialized<InvoiceListItemDto>;
 export default async function FeesPage() {
   const session = await auth();
   const user = session!.user;
+  // /invoices and /invoices/summary both require fee.read; without this the
+  // page loaded for roles that hold none of it and asked twice anyway.
+  if (!hasPermission(user.permissions, "fee.read")) redirect("/dashboard");
+
   const [page, summary] = await Promise.all([
     apiGet<{ items: InvoiceRow[]; nextCursor: string | null }>("/invoices"),
     apiGet<Serialized<InvoiceSummaryDto>>("/invoices/summary"),
