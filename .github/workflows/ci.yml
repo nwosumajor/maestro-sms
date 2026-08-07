@@ -44,13 +44,16 @@ jobs:
       REDIS_HOST: 127.0.0.1
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      # Version comes from package.json's "packageManager" field — action-setup@v4
-      # errors if both that AND an explicit `version:` input are set.
-      - uses: pnpm/action-setup@v4
+      # Version comes from package.json's "packageManager" field — the action
+      # errors if both that AND an explicit `version:` input are set, so there
+      # is deliberately no `with:` here.
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      # node-version tracks the Dockerfiles (node:20-alpine) on purpose: CI must
+      # test on the Node production actually runs, not a newer one.
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: pnpm
