@@ -115,16 +115,54 @@ JOIN vol_class vc ON vc.id = s."classId"
 JOIN enrollment e ON e."classId" = s."classId";
 
 -- --- fees: 6 terms of invoices, most of them paid ---------------------------
+-- totalMinor is left at 0 and DERIVED from the line items below, the way the
+-- application builds an invoice. Writing a total and no lines produced an
+-- invoice page showing a figure above an empty "Line items" table.
 INSERT INTO invoice (id, "schoolId", "studentId", reference, status, currency,
                      "totalMinor", "dueDate", "issuedAt", "createdById", "createdAt", "updatedAt")
 SELECT gen_random_uuid(), c.school_id, vs.id,
        'VOL-' || vs.n || '-' || t,
        (CASE WHEN t < 6 THEN 'PAID' ELSE 'ISSUED' END)::"InvoiceStatus",
-       'NGN', 15000000 + (vs.n % 5) * 500000,
+       'NGN', 0,
        (CURRENT_DATE - ((6 - t) * 90))::date,
        now() - ((6 - t) * INTERVAL '90 days'),
        c.admin_id, now(), now()
 FROM cfg c, vol_student vs, generate_series(1, 6) t;
+
+-- --- the fee catalog the line items are drawn from --------------------------
+INSERT INTO fee_item (id, "schoolId", name, description, "amountMinor", currency, active, "createdAt", "updatedAt")
+SELECT gen_random_uuid(), c.school_id, f.name, f.name || ' (volume fixture)', f.amount, 'NGN', true, now(), now()
+FROM cfg c, (VALUES
+  ('VOL Tuition',           10500000),
+  ('VOL Development Levy',   2500000),
+  ('VOL Books & Materials',  1200000),
+  ('VOL Examination Fee',     800000)
+) AS f(name, amount);
+
+-- --- line items: 4 per invoice ----------------------------------------------
+-- This is the table that grows FASTEST in a real school — one-to-many with
+-- invoices, so it ends up LARGER than payment. The first version of this seeder
+-- created none, which made invoice_line_item look trivially small and hid that
+-- its FK to invoice had no index (#123).
+INSERT INTO invoice_line_item (id, "schoolId", "invoiceId", "feeItemId",
+                               description, "amountMinor", quantity, "createdAt")
+SELECT gen_random_uuid(), c.school_id, i.id, fi.id,
+       fi.name,
+       -- A little per-pupil variation so the totals are not all identical.
+       fi."amountMinor" + ((abs(hashtext(i.id::text)) % 5) * 100000),
+       1,
+       i."createdAt"
+FROM cfg c
+JOIN invoice i ON i."schoolId" = c.school_id AND i.reference LIKE 'VOL-%'
+JOIN fee_item fi ON fi."schoolId" = c.school_id AND fi.name LIKE 'VOL %';
+
+-- The invoice total IS the sum of its lines. Deriving it rather than asserting
+-- it means the fixture can never disagree with itself.
+UPDATE invoice i
+SET "totalMinor" = l.total
+FROM (SELECT "invoiceId", sum("amountMinor" * quantity)::int AS total
+      FROM invoice_line_item GROUP BY "invoiceId") l
+WHERE l."invoiceId" = i.id AND i.reference LIKE 'VOL-%';
 
 INSERT INTO payment (id, "schoolId", "invoiceId", "amountMinor", method, reference,
                      "paidAt", "recordedById", "createdAt", kind, status)
