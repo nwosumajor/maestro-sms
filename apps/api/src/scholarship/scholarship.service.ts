@@ -103,6 +103,35 @@ export class ScholarshipService {
     });
   }
 
+  /** School leadership's oversight list: every application raised in THEIR OWN
+   *  school, newest first.
+   *
+   *  `scholarship.read` was an orphaned permission — held by board, principal,
+   *  school_admin and super_admin, and gating nothing. It put "Scholarships" in
+   *  the nav and a "Requests & decisions" tile on the dashboard, and the page
+   *  told leadership they could "see your students' applications and outcomes
+   *  here" while fetching nothing for them. board and school_admin (who hold
+   *  READ but not APPLY) reached a permanent dead end.
+   *
+   *  DRAFTs are excluded deliberately: a draft is a half-written form belonging
+   *  to the parent or teacher composing it, and oversight begins when it is
+   *  submitted. This mirrors the platform owner's own review queue, which lists
+   *  non-DRAFT only — leadership should not see MORE than the sponsor does.
+   *
+   *  Scoping is the tenant boundary itself: runAsTenant sets the GUC and RLS
+   *  confines the rows to the caller's school, so there is no second scoping
+   *  rule here to drift out of step with the first. */
+  async listForSchool(p: Principal): Promise<ScholarshipApplicationDto[]> {
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      const rows = await tx.scholarshipApplication.findMany({
+        where: { status: { not: "DRAFT" } },
+        orderBy: { createdAt: "desc" },
+        take: 500,
+      });
+      return this.toApplicationDtos(tx, rows);
+    });
+  }
+
   /** Applications sitting at MY chain stage: class supervisor → their classes'
    *  students; guardian → their children; principal → school-wide. */
   private async pendingForMe(tx: TenantTx, p: Principal) {

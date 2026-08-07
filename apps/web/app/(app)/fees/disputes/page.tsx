@@ -32,8 +32,12 @@ export default async function DisputesPage() {
   const user = session!.user;
   // fee.manage, not fee.read: the list is school-wide finance-internal data.
   if (!hasPermission(user.permissions, "fee.manage")) redirect("/dashboard");
-  const disputes = (await apiGet<Dispute[]>("/fees/disputes")) ?? [];
-  const open = disputes.filter((d) => d.status === "OPEN").length;
+  // NOT `?? []`. "No disputes recorded" is a statement about money that a
+  // finance officer acts on — it is the sentence that says nobody is contesting
+  // a payment and there is no deadline to meet. A failed read must not be able
+  // to produce it, so null (couldn't load) stays distinct from [] (none).
+  const disputes = await apiGet<Dispute[]>("/fees/disputes");
+  const open = disputes?.filter((d) => d.status === "OPEN").length ?? 0;
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="fees" permissions={user.permissions}>
@@ -53,7 +57,17 @@ export default async function DisputesPage() {
           </Link>
         </div>
 
-        {disputes.length === 0 ? (
+        {disputes === null ? (
+          <Card>
+            <CardContent className="py-8 text-sm">
+              <p className="font-medium text-destructive">Couldn&apos;t load disputes</p>
+              <p className="mt-1 text-muted-foreground">
+                This is a failure to load — not a report that there are none. Do not treat it as &ldquo;nothing to
+                respond to&rdquo;; an unanswered dispute is lost by default. Please refresh.
+              </p>
+            </CardContent>
+          </Card>
+        ) : disputes.length === 0 ? (
           <Card>
             <CardContent className="py-8 text-sm text-muted-foreground">
               No disputes recorded. If a payer contests a card payment, it appears here.

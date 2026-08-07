@@ -1201,6 +1201,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "GET /scholarships/school-applications": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
     "GET /schools/branding": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"

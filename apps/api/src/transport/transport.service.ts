@@ -74,10 +74,14 @@ export class TransportService {
   private cf(v: unknown): Json {
     return (v ?? {}) as Json;
   }
-  // school_admin / principal (and an impersonating super_admin) see the whole fleet;
-  // a driver sees ONLY their own vehicle + its routes + passengers.
+  // school_admin / principal see the whole fleet; a driver sees ONLY their own
+  // vehicle + its routes + passengers.
+  // SECURITY: no super_admin. This once read "(and an impersonating super_admin)",
+  // which is not how impersonation works — it mints the TARGET user's roles and
+  // never super_admin, so the entry granted a standing platform scope over a
+  // school's fleet on the strength of a false belief about the mechanism.
   private wide(p: Principal): boolean {
-    return p.roles.some((r) => r === "school_admin" || r === "principal" || r === "super_admin");
+    return p.roles.some((r) => r === "school_admin" || r === "principal");
   }
   /** Module-wide scoping: admins AND the head driver see/manage the whole fleet.
    *  junior_admin (operational records tier) holds transport.read and is included
