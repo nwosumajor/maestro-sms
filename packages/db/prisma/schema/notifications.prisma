@@ -105,6 +105,14 @@ model NotificationDelivery {
   @@index([schoolId])
   @@index([schoolId, notificationId])
   @@index([schoolId, status])
+  // notificationId ALONE, in addition to the composite above. The composite
+  // serves the app, which always reads inside a tenant; it cannot serve the FK
+  // checker, which runs `WHERE "notificationId" = $1` with no schoolId — a
+  // leading-column mismatch, so Postgres seq-scans this table once PER DELETED
+  // ROW. The nightly notification retention sweep does exactly that: deleting
+  // 5,000 notifications took 69ms against 63 delivery rows and 15,555ms against
+  // 45,063 — 225x slower for 715x the child rows, and it grows with the square.
+  @@index([notificationId])
   @@map("notification_delivery")
 }
 
