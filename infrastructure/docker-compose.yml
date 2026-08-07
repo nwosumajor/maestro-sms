@@ -58,6 +58,7 @@ services:
       AUTH_SECRET: ${AUTH_SECRET}
       AUTH_SECRET_PREVIOUS: ${AUTH_SECRET_PREVIOUS:-}
       REDIS_HOST: redis
+      TENANT_RATE_LIMIT_PER_MIN: ${TENANT_RATE_LIMIT_PER_MIN:-1200}
       REDIS_PORT: "6379"
       # App connects as the least-privilege role (RLS enforced). Defaults to a
       # DIRECT writer connection; override DATABASE_URL in .env to route through

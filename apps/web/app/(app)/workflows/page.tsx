@@ -1,6 +1,7 @@
 import type { PendingApprovalDto, Serialized } from "@sms/types";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
+import { hasPermission } from "@/lib/permissions";
 import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { WorkflowInbox, type WorkflowDto } from "@/components/workflow/WorkflowInbox";
@@ -17,8 +18,15 @@ export default async function WorkflowsPage() {
   // permission of its own — it only ever returns sources the caller can already
   // act on — so an approver WITHOUT workflow.read (e.g. an accountant holding
   // only fee.approve) still gets a useful page.
+  // GET /workflows requires workflow.read; six roles legitimately lack it
+  // (student, parent, warden, driver, manager_admin, super_admin). The call is
+  // gated so that ABSENCE is expressed here, in the page, rather than left for
+  // the API to refuse — an unguarded call 403s, and apiGet now treats a 403 as
+  // the web and API disagreeing and throws, which turned this page into an
+  // error screen for those roles.
+  const canReadWorkflows = hasPermission(user.permissions, "workflow.read");
   const [requests, others] = await Promise.all([
-    apiGet<WorkflowDto[]>("/workflows"),
+    canReadWorkflows ? apiGet<WorkflowDto[]>("/workflows") : Promise.resolve(null),
     apiGet<Serialized<PendingApprovalDto>[]>("/approvals/pending"),
   ]);
   const other = others ?? [];
