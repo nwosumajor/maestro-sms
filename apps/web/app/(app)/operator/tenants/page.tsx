@@ -55,7 +55,11 @@ export default async function OperatorTenantsPage({
   query.set("page", String(pageNum));
 
   const tenantPage = await apiGet<TenantPage>(`/operator/tenants?${query.toString()}`);
+  // NULL is "could not ask", [] is "nothing matched". Collapsed, a failed read
+  // told the platform owner their search matched no schools — on the registry
+  // that lists their customers.
   const tenantList = tenantPage?.tenants ?? [];
+  const registryUnavailable = tenantPage === null;
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="operatortenants" permissions={user.permissions}>
@@ -82,10 +86,16 @@ export default async function OperatorTenantsPage({
         />
 
         <div className="space-y-3">
-          {tenantList.length === 0 && (
-            <p className="rounded-md border border-border bg-card px-4 py-6 text-center text-sm text-muted-foreground">
-              No schools match this search/filter.
+          {registryUnavailable ? (
+            <p className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-6 text-center text-sm text-destructive">
+              The tenant registry could not be loaded — this is not a report that no school matches.
             </p>
+          ) : (
+            tenantList.length === 0 && (
+              <p className="rounded-md border border-border bg-card px-4 py-6 text-center text-sm text-muted-foreground">
+                No schools match this search/filter.
+              </p>
+            )
           )}
           {tenantList.map((t) => (
             <Card key={t.id}>

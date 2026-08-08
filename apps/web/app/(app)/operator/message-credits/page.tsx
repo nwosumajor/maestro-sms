@@ -54,8 +54,9 @@ export default async function MessageCreditsPage({
           <Alert variant="destructive">
             <AlertTitle>Unavailable</AlertTitle>
             <AlertDescription>
-              This view needs the platform&apos;s privileged database configuration (DATABASE_MIGRATE_URL /
-              DATABASE_RETENTION_URL), same as the operator directory and analytics — it isn&apos;t set here.
+              The credit balances could not be read, so this is not a report that no school has any.
+              The usual cause is the platform&apos;s privileged database configuration (DATABASE_MIGRATE_URL /
+              DATABASE_RETENTION_URL) being unset, as the operator directory and analytics also need it.
             </AlertDescription>
           </Alert>
         ) : rows.length === 0 ? (
