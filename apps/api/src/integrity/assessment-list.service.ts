@@ -21,7 +21,15 @@ import {
   type TenantTx,
 } from "./integrity.foundation";
 
-const SCHOOL_WIDE_ROLES = new Set(["school_admin"]);
+// Aligned with the two sibling services in this module — IntegrityReportService
+// and ExemptionService both read {school_admin, principal}. Assessment listing
+// alone stopped at school_admin, so a PRINCIPAL could open the integrity report
+// for a submission and grant a pupil an exemption on it, yet /assessments was
+// empty for them: the module let them judge an assessment they could not find.
+// junior_admin holds assessment.read and integrity.report.read on the same
+// footing (CLAUDE.md's records tier), and is roster-wide everywhere else.
+// Listing a minor's submissions stays audit-logged for all of them (GR#5).
+const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal", "junior_admin"]);
 
 @Injectable()
 export class AssessmentListService {
@@ -60,13 +68,34 @@ export class AssessmentListService {
       const classIds = [...new Set(assessments.map((a) => a.classId).filter((c): c is string => !!c))];
       const classes = await tx.class.findMany({ where: { id: { in: classIds } }, select: { id: true, name: true } });
       const className = new Map(classes.map((c) => [c.id, c.name]));
-      const subs = await tx.submission.findMany({ where: { assessmentId: { in: ids } }, select: { assessmentId: true, studentId: true, status: true } });
-      const countByAssessment = new Map<string, number>();
-      const myStatus = new Map<string, string>();
-      for (const s of subs) {
-        countByAssessment.set(s.assessmentId, (countByAssessment.get(s.assessmentId) ?? 0) + 1);
-        if (s.studentId === p.userId) myStatus.set(s.assessmentId, s.status);
-      }
+      // scale: COUNT in Postgres, and ask separately for the caller's own row.
+      //
+      // This loaded EVERY submission for every listed assessment into Node to
+      // produce two things: a count per assessment, and the caller's own status.
+      // At LIST_CAP (500) assessments in a 30-pupil class that is 15,000 rows
+      // hydrated to yield 500 numbers and at most 500 statuses — measured at
+      // 16,201 submissions on the volume-seeded school. The cost is
+      // assessments x pupils, so it grows with the school's SIZE and its
+      // lifetime at once, on the page a teacher opens to find today's work.
+      //
+      // Two bounded queries replace it: one grouped count, and the caller's own
+      // submissions (one per assessment at most). Same treatment as
+      // RecruitmentService.listRequisitions and the fees report.
+      const [counts, mine] = await Promise.all([
+        tx.submission.groupBy({
+          by: ["assessmentId"],
+          where: { assessmentId: { in: ids } },
+          _count: { _all: true },
+        }),
+        tx.submission.findMany({
+          where: { assessmentId: { in: ids }, studentId: p.userId },
+          select: { assessmentId: true, status: true },
+        }),
+      ]);
+      const countByAssessment = new Map(
+        (counts as Array<{ assessmentId: string; _count: { _all: number } }>).map((c) => [c.assessmentId, c._count._all]),
+      );
+      const myStatus = new Map(mine.map((s: { assessmentId: string; status: string }) => [s.assessmentId, s.status]));
       return assessments.map<AssessmentSummaryDto>((a) => ({
         id: a.id,
         title: a.title,

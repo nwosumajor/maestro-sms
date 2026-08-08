@@ -47,6 +47,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
+import { REPORT_CENTER_PERMISSIONS } from "@/lib/permissions";
 import { auth } from "@/lib/auth";
 import { regionOf } from "@/lib/format";
 import { RegionProvider } from "./RegionProvider";
@@ -138,6 +139,9 @@ const NAV: {
   perm?: Permission;
   /** Visible if the caller holds ANY of these (for items spanning roles). */
   anyPerm?: Permission[];
+  /** Hidden when the caller holds `perm` and lacks `unless` — for an entry that a
+   *  better-framed one replaces, but only for that audience. */
+  hideIf?: { perm: Permission; unless: Permission };
   module?: ModuleKey;
 }[] = [
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboardIcon, href: "/dashboard" },
@@ -163,7 +167,15 @@ const NAV: {
   { key: "meetings", label: "Meetings", icon: CalendarCheckIcon, href: "/meetings", anyPerm: ["meeting.host", "meeting.book"] },
   { key: "exams", label: "Exams", icon: ClipboardListIcon, href: "/exams", perm: "timetable.read" },
   { key: "scan", label: "Scan ID", icon: ScanLineIcon, href: "/scan", perm: "member.scan" },
-  { key: "students", label: "Students", icon: IdCardIcon, href: "/students", perm: "student.profile.read", module: MODULES.SIS },
+  // A guardian was offered BOTH "Students" and "My children", and for them the
+  // two lead to the same one child — the first under a label that reads like the
+  // school's whole roster. "My children" is the honest framing, and it now links
+  // through to each child's record, so nothing is lost by hiding the other door.
+  // `unless: enrollment.read` keeps it for everyone who genuinely browses a
+  // roster — including a TEACHER who is also a parent at the school, which is
+  // common — and a STUDENT never holds family.read, so their own record stays
+  // reachable here (it is their only route to it).
+  { key: "students", label: "Students", icon: IdCardIcon, href: "/students", perm: "student.profile.read", hideIf: { perm: "family.read", unless: "enrollment.read" }, module: MODULES.SIS },
   { key: "family", label: "My children", icon: UsersIcon, href: "/family", perm: "family.read", module: MODULES.SIS },
   { key: "classes", label: "Classes", icon: UsersIcon, href: "/classes", perm: "class.read", module: MODULES.LMS },
   // Gated on lms.quiz.attempt, which ONLY students hold: this is a personal to-do
@@ -216,7 +228,20 @@ const NAV: {
   { key: "discipline", label: "Discipline", icon: ShieldAlertIcon, href: "/discipline", perm: "discipline.file", module: MODULES.DISCIPLINE },
   { key: "forms", label: "Forms", icon: ClipboardListIcon, href: "/forms", perm: "form.respond", module: MODULES.FORM },
   { key: "alumni", label: "Alumni", icon: GraduationCapIcon, href: "/alumni", perm: "alumni.manage", module: MODULES.ALUMNI },
-  { key: "reports", label: "Reports", icon: FileBarChartIcon, href: "/reports", perm: "attendance.read" },
+  // The Report Center is a STAFF hub. Gated on attendance.read it opened for
+  // every parent, student, teacher, warden and driver in the school — for the
+  // family readers it held one card duplicating their own Analytics nav entry,
+  // and for the rest it linked to a page the nav hides from them because it
+  // would show them zeros. These are exactly the reports the page can list, so
+  // the entry now appears only when there is a report behind it; /reports
+  // redirects anyone who reaches it by URL with nothing to show.
+  {
+    key: "reports",
+    label: "Reports",
+    icon: FileBarChartIcon,
+    href: "/reports",
+    anyPerm: REPORT_CENTER_PERMISSIONS,
+  },
   { key: "games", label: "Games", icon: Gamepad2Icon, href: "/games", perm: "game.leaderboard.read", module: MODULES.GAMES },
   // Cross-school "Ultimate" arena — a PLATFORM function: only the super_admin
   // (game.ultimate.admin) creates/cancels it. Direct link so the platform owner
@@ -337,6 +362,9 @@ export async function AppShell({
       (!isPlatformOwner || PLATFORM_OWNER_NAV.has(item.key)) &&
       (!item.perm || permissions.includes(item.perm)) &&
       (!item.anyPerm || item.anyPerm.some((pp) => permissions.includes(pp))) &&
+      (!item.hideIf ||
+        !permissions.includes(item.hideIf.perm) ||
+        permissions.includes(item.hideIf.unless)) &&
       (!item.module || !modules || modules.includes(item.module)),
   );
   // Apply the school's saved branding (logo + brand colour + font). The member

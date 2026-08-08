@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/shell/PageHeader";
@@ -24,6 +25,13 @@ export default async function RecertificationPage() {
     apiGet<Anomalies>("/security/anomalies"),
   ]);
 
+  // A FAILED READ IS NOT A ZERO — and on THIS page a zero is a security
+  // all-clear. `?? 0` rendered "Active elevations 0" and "Break-glass (30d) 0"
+  // whenever a read failed, which is precisely the finding a reviewer opens
+  // this page to look for. An em dash says the figure could not be established.
+  const num = (value: number | undefined, unknown: boolean) => (unknown ? "—" : String(value ?? 0));
+  const anyMissing = rec === null || anom === null;
+
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="admin" permissions={user.permissions}>
       <div className="space-y-6">
@@ -33,15 +41,30 @@ export default async function RecertificationPage() {
           <Link href="/admin" className="text-sm text-muted-foreground hover:underline">← Admin</Link>
         </div>
 
+        {anyMissing && (
+          <Alert variant="destructive">
+            <AlertTitle>This review is incomplete</AlertTitle>
+            <AlertDescription>
+              {rec === null && anom === null
+                ? "Neither the access review nor the anomaly signals could be loaded."
+                : rec === null
+                  ? "The access review (elevations and assignments) could not be loaded."
+                  : "The anomaly signals (break-glass, medical-record access) could not be loaded."}{" "}
+              Figures shown as &ldquo;—&rdquo; are unknown, <strong>not zero</strong>. Do not sign off a
+              recertification from this page until it loads cleanly.
+            </AlertDescription>
+          </Alert>
+        )}
+
         <div className="grid gap-4 sm:grid-cols-3">
           <Card>
-            <CardHeader><CardDescription>Active elevations</CardDescription><CardTitle className="text-2xl">{rec?.activeElevations.length ?? 0}</CardTitle></CardHeader>
+            <CardHeader><CardDescription>Active elevations</CardDescription><CardTitle className="text-2xl">{num(rec?.activeElevations.length, rec === null)}</CardTitle></CardHeader>
           </Card>
           <Card>
-            <CardHeader><CardDescription>Break-glass (30d)</CardDescription><CardTitle className="text-2xl">{anom?.breakGlassCount ?? 0}</CardTitle></CardHeader>
+            <CardHeader><CardDescription>Break-glass (30d)</CardDescription><CardTitle className="text-2xl">{num(anom?.breakGlassCount, anom === null)}</CardTitle></CardHeader>
           </Card>
           <Card>
-            <CardHeader><CardDescription>Users reviewed</CardDescription><CardTitle className="text-2xl">{rec?.assignments.length ?? 0}</CardTitle></CardHeader>
+            <CardHeader><CardDescription>Users reviewed</CardDescription><CardTitle className="text-2xl">{num(rec?.assignments.length, rec === null)}</CardTitle></CardHeader>
           </Card>
         </div>
 
@@ -64,7 +87,24 @@ export default async function RecertificationPage() {
         )}
 
         <Card>
-          <CardHeader><CardTitle className="text-base">User → roles</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle className="text-base">Staff access → roles</CardTitle>
+            {/* Say what is NOT here. This table used to list every account in
+                the school — on a 900-pupil school, 901 of 977 rows were a pupil
+                holding "student" — which buried the handful of staff grants a
+                reviewer is here to check. Excluding them is only defensible if
+                the page admits to it. */}
+            <CardDescription>
+              Accounts holding a role beyond the pupil/guardian baseline
+              {rec !== null && rec.baselineAccountsExcluded > 0 && (
+                <>
+                  . {rec.baselineAccountsExcluded.toLocaleString()} pupil and guardian account
+                  {rec.baselineAccountsExcluded === 1 ? " is" : "s are"} not listed — they hold no role to
+                  recertify. Anyone given a staff role appears here regardless.
+                </>
+              )}
+            </CardDescription>
+          </CardHeader>
           <CardContent className="p-0">
             <table className="w-full text-sm">
               <tbody>

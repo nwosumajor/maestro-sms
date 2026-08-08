@@ -146,13 +146,40 @@ export class ScholarshipAdminService {
   }
 
   // --- review queue (cross-tenant) -------------------------------------------
-  async listApplications(filter: { status?: string; programId?: string }): Promise<ScholarshipApplicationDto[]> {
+  /**
+   * The cross-tenant review queue.
+   *
+   * GOLDEN RULE #5 — this read is AUDITED, and was not. It returns up to 500
+   * applications from EVERY school with the pupil's name, their guardian's
+   * name, and the `signals` snapshot: published grade average, attendance, and
+   * outstanding fees. That is a minor's academic and financial record, read
+   * across the tenant boundary by the platform.
+   *
+   * Every mutation on this service already logs through auditOwn, and the file
+   * header above claims "every action is audit-logged in the operator's own
+   * tenant" — the READ was the exception, and the controller passed `_p`, so
+   * nothing even reached here to log with. Same shape as the fix to
+   * OperatorUserService.listUsers.
+   */
+  async listApplications(
+    p: Principal,
+    filter: { status?: string; programId?: string },
+  ): Promise<ScholarshipApplicationDto[]> {
     const db = this.client();
     const where: Prisma.ScholarshipApplicationWhereInput = {};
     // Never show DRAFTs to the platform (they aren't submitted yet).
     where.status = filter.status ? (filter.status as never) : { not: "DRAFT" };
     if (filter.programId) where.programId = filter.programId;
     const rows = await db.scholarshipApplication.findMany({ where, orderBy: { createdAt: "desc" }, take: 500 });
+    // Log the VIEW before the early return, so an empty queue is recorded too —
+    // "who looked, and when" is the question, and a search that found nothing
+    // is still a search. Counts and filters only, never a pupil's name.
+    await this.auditOwn(p, "scholarship.applications.view", filter.programId ?? "all", {
+      count: rows.length,
+      status: filter.status ?? null,
+      programId: filter.programId ?? null,
+      schools: [...new Set(rows.map((r) => r.schoolId))].length,
+    });
     if (rows.length === 0) return [];
     const programIds = [...new Set(rows.map((r) => r.programId))];
     const userIds = [...new Set(rows.flatMap((r) => [r.studentId, r.applicantId]))];

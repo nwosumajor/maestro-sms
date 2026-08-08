@@ -55,16 +55,43 @@ export function normalisePath(p: string): string {
   );
 }
 
-/** Every route the API serves. */
+/**
+ * Every route the API serves.
+ *
+ * ONE FILE CAN DECLARE MORE THAN ONE @Controller, and two do: the public
+ * careers board lives beside the HR recruitment controller, and the public
+ * biometric intake beside HR attendance — deliberately, so those routes sit at
+ * /public/* outside their module's prefix and gate. Taking the FIRST
+ * @Controller in the file as the prefix for every route in it therefore filed
+ * `GET /public/careers/:slug` under `GET /hr/recruitment/:p`, and the registry
+ * ended up asserting two routes that do not exist while three that do — all of
+ * them PUBLIC and unauthenticated — went unaccounted for. Exactly the routes a
+ * surface gate is most for.
+ *
+ * So the prefix is resolved by POSITION: each route decorator belongs to the
+ * last @Controller declared above it.
+ */
 export function extractRoutes(srcDir: string): ApiRoute[] {
   const routes: ApiRoute[] = [];
   for (const file of walk(srcDir)) {
     const src = readFileSync(file, "utf8");
-    const base = /@Controller\(\s*["'`]([^"'`]*)["'`]/.exec(src)?.[1] ?? "";
+    const controllers = [...src.matchAll(/@Controller\(\s*(?:["'`]([^"'`]*)["'`])?/g)].map((c) => ({
+      at: c.index ?? 0,
+      base: c[1] ?? "",
+    }));
+    /** The prefix of the nearest @Controller ABOVE this decorator. */
+    const baseFor = (at: number) => {
+      let base = "";
+      for (const c of controllers) {
+        if (c.at > at) break;
+        base = c.base;
+      }
+      return base;
+    };
     // Handles @Get(), @Get("x"), and decorators split across lines.
     for (const m of src.matchAll(/@(Get|Post|Put|Patch|Delete|All)\(\s*(?:["'`]([^"'`]*)["'`])?\s*\)/g)) {
       const method = m[1].toUpperCase();
-      const path = normalisePath([base, m[2] ?? ""].filter(Boolean).join("/"));
+      const path = normalisePath([baseFor(m.index ?? 0), m[2] ?? ""].filter(Boolean).join("/"));
       routes.push({ key: `${method} ${path}`, method, path, file: file.slice(srcDir.length + 1) });
     }
   }

@@ -37,10 +37,16 @@ export default async function AdminUsersPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Users ({users?.length ?? 0})</CardTitle>
+            <CardTitle className="text-base">Users ({users === null ? "—" : users.length})</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
-            {(users ?? []).length === 0 && <p className="text-sm text-muted-foreground">No users yet.</p>}
+            {users === null ? (
+              <p className="text-sm text-destructive">
+                The user list could not be loaded — this is not a report that the school has none.
+              </p>
+            ) : (
+              users.length === 0 && <p className="text-sm text-muted-foreground">No users yet.</p>
+            )}
             {(users ?? []).map((u) => (
               <div key={u.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3 py-2">
                 <div className="min-w-0">

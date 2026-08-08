@@ -10,7 +10,7 @@
 
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException, UnauthorizedException } from "@nestjs/common";
 import bcrypt from "bcryptjs";
-import { SECURITY_PERMISSIONS, isElevatable, type AuditLogPageDto } from "@sms/types";
+import { NON_STAFF_ROLE_NAMES, SECURITY_PERMISSIONS, isElevatable, type AuditLogPageDto } from "@sms/types";
 import { generateSecret, otpauthUri, verifyTotp } from "../auth/totp";
 import { signStepUp } from "../auth/stepup";
 import { decodeAuditCursor, encodeAuditCursor } from "../common/audit-cursor";
@@ -283,12 +283,31 @@ export class SecurityService {
         e.roles.push(ur.role.name);
         byUser.set(ur.user.id, e);
       }
+      // A RECERTIFICATION IS ABOUT ACCESS WORTH REVIEWING.
+      //
+      // This listed every account in the school. Measured on a 900-pupil school
+      // that was 977 assignments, 901 of them a pupil holding `student` — the
+      // one role that grants the least — in a 128kb payload that grows with the
+      // roll. Two things wrong with that, and the second is the serious one:
+      // it is slow, and it buries the fifteen staff accounts a reviewer is
+      // actually there to check under nine hundred identical rows. A control
+      // that has to be scrolled past is a control that gets rubber-stamped.
+      //
+      // So: an account is listed when it holds ANY role beyond the non-staff
+      // baseline. A pupil who has ALSO been given a staff role still appears —
+      // that is exactly the grant this report exists to surface — while a pupil
+      // who is only a pupil has nothing to recertify. The excluded count is
+      // RETURNED rather than dropped, so the page can say what it left out
+      // instead of quietly showing a shorter list.
+      const all = [...byUser.values()];
+      const assignments = all.filter((u) => u.roles.some((r) => !NON_STAFF_ROLE_NAMES.includes(r as never)));
       return {
         roles: (roles as Array<{ name: string; permissions: { permission: { key: string } }[] }>).map((r) => ({
           name: r.name,
           permissions: r.permissions.map((rp) => rp.permission.key).sort(),
         })),
-        assignments: [...byUser.values()].sort((a, b) => a.name.localeCompare(b.name)),
+        assignments: assignments.sort((a, b) => a.name.localeCompare(b.name)),
+        baselineAccountsExcluded: all.length - assignments.length,
         activeElevations,
       };
     });

@@ -14,7 +14,13 @@ export interface PrivilegeGrantDto {
 
 export interface RecertificationDto {
   roles: { name: string; permissions: string[] }[];
+  /** Accounts holding a role BEYOND the non-staff baseline — the access a
+   *  recertification is actually about. A pupil who also holds a staff role is
+   *  here; a pupil who is only a pupil is not. */
   assignments: { id: string; name: string; email: string; roles: string[] }[];
+  /** How many accounts were left out by that rule, so the page can SAY so
+   *  rather than quietly present a shorter list as the whole school. */
+  baselineAccountsExcluded: number;
   activeElevations: { id: string; permission: string; reason: string; breakGlass: boolean }[];
 }
 

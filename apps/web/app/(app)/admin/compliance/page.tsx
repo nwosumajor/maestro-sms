@@ -177,7 +177,21 @@ export default async function CompliancePage() {
               </CardContent>
             </Card>
 
-            <BreachRegister initial={breaches ?? []} />
+            {/* NULL IS NOT AN EMPTY REGISTER. `?? []` rendered a breach
+                register with no entries whenever the read failed — on the page
+                that tracks the Art. 33 72-hour clock, and directly under a
+                posture panel that would still be showing green. */}
+            {breaches === null ? (
+              <Alert variant="destructive">
+                <AlertTitle>The breach register could not be loaded</AlertTitle>
+                <AlertDescription>
+                  This is <strong>not</strong> a report that there are no breaches on record. Reload before
+                  relying on this page, and treat the posture summary above as unverified until it does.
+                </AlertDescription>
+              </Alert>
+            ) : (
+              <BreachRegister initial={breaches} />
+            )}
 
             <p className="text-xs text-muted-foreground">
               Breach register last read {dateTime(new Date().toISOString())}. Every entry here is

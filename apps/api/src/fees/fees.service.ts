@@ -39,11 +39,22 @@ const INVOICE_PAGE_SIZE = 50;
 /** Ceiling a caller can request per page. */
 const INVOICE_PAGE_MAX = 200;
 
+// junior_admin does "fee RECORDING" for the whole school (CLAUDE.md) and holds
+// fee.read + fee.manage. Without it here both were dead: /invoices returned zero
+// rows, assertCanAccessStudent 404'd every invoice, and /fees/reports answered
+// scope:"none" (which bounces the page back to /fees). A tier that may record a
+// payment could not open a single invoice to record one against.
+//
+// SECURITY: this set is a ROW SCOPE, never an authority. Approving a payment or
+// a refund needs fee.approve, which junior_admin deliberately does NOT hold — so
+// the maker-checker split survives untouched: junior_admin records, and a
+// different person with fee.approve releases anything over the threshold.
 const BILLING_WIDE_ROLES = new Set([
   "accountant",
   "school_admin",
   "principal",
   "board",
+  "junior_admin",
 ]);
 
 export interface FeeItemInput {
@@ -270,36 +281,85 @@ export class FeesService {
     });
   }
 
-  /** Receivables aging + collection summary (billing-wide staff/board only). */
+  /**
+   * Receivables aging + collection summary (billing-wide staff/board only).
+   *
+   * scale: computed ENTIRELY in Postgres — the same treatment AnalyticsService
+   * already gives its fee stats, and for the same reason. This used to load
+   * EVERY non-DRAFT invoice the school has ever issued, each with its POSTED
+   * payments, into Node and add them up in a JS loop. Nothing bounded it: not a
+   * date window, not a cap, and financial records are never deleted, so the cost
+   * grew with the school's whole lifetime on a page finance staff open daily.
+   * Measured at 5,401 invoices / 4,502 payments it took 308ms against 1.3ms for
+   * the SQL — the time was Prisma hydrating ten thousand objects, not the query
+   * — which puts a ten-year-old school of the same size around three seconds.
+   *
+   * The money SUMs are cast ::float8, NOT ::int/::bigint: a lifetime kobo total
+   * overflows int4, and Prisma maps int8 to a JS BigInt that the JSON layer
+   * cannot serialize. float8 is exact for integers to 2^53 — identical
+   * semantics to the JS reduce it replaces.
+   *
+   * `today` is still computed in JS and passed in, deliberately: CURRENT_DATE
+   * would read the DB session's timezone and silently move every bucket
+   * boundary by a day. Same expression as before, so the buckets do not shift.
+   */
   async financeReport(p: Principal) {
     if (!this.isBillingWide(p)) return { scope: "none" as const };
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const invoices = await tx.invoice.findMany({
-        where: { status: { in: ["ISSUED", "PARTIALLY_PAID", "PAID"] } },
-        include: { payments: { where: { status: "POSTED" }, select: { amountMinor: true, kind: true } } },
-      });
-      const mk = () => ({ count: 0, amountMinor: 0 });
-      const bucket = { current: mk(), d1_30: mk(), d31_60: mk(), d60plus: mk() };
-      let invoiced = 0;
-      let collected = 0;
       const today = new Date(new Date().toISOString().slice(0, 10));
-      for (const inv of invoices as Array<{ totalMinor: number; dueDate: Date; payments: { amountMinor: number; kind: string }[] }>) {
-        const paid = inv.payments.reduce((n, x) => n + (x.kind === "REFUND" ? -x.amountMinor : x.amountMinor), 0);
-        invoiced += inv.totalMinor;
-        collected += paid;
-        const balance = inv.totalMinor - paid;
-        if (balance <= 0) continue;
-        const days = Math.floor((today.getTime() - new Date(inv.dueDate).getTime()) / 86_400_000);
-        const b = days <= 0 ? bucket.current : days <= 30 ? bucket.d1_30 : days <= 60 ? bucket.d31_60 : bucket.d60plus;
-        b.count += 1;
-        b.amountMinor += balance;
-      }
-      const pending = await tx.payment.findMany({ where: { status: "PENDING_APPROVAL" }, select: { amountMinor: true } });
+      // Each bucket is (count, outstanding) over invoices with a POSITIVE
+      // balance, split by how far past `today` the due date is — the same
+      // days <= 0 / <= 30 / <= 60 / else ladder this replaces. Written out in
+      // full rather than generated: a helper emitting two columns can only
+      // alias one of them, and a mislabelled money column is silent.
+      const rows = (await tx.$queryRaw`
+        WITH billable AS (
+          SELECT id, "totalMinor", "dueDate" FROM "invoice"
+          WHERE status IN ('ISSUED', 'PARTIALLY_PAID', 'PAID')
+        ),
+        net AS (
+          SELECT p."invoiceId",
+                 SUM(CASE WHEN p.kind = 'REFUND' THEN -p."amountMinor" ELSE p."amountMinor" END) AS paid
+            FROM "payment" p
+           WHERE p.status = 'POSTED' AND p."invoiceId" IN (SELECT id FROM billable)
+           GROUP BY p."invoiceId"
+        ),
+        bal AS (
+          SELECT b."totalMinor",
+                 COALESCE(n.paid, 0) AS paid,
+                 b."totalMinor" - COALESCE(n.paid, 0) AS balance,
+                 (${today}::date - b."dueDate") AS days
+            FROM billable b LEFT JOIN net n ON n."invoiceId" = b.id
+        )
+        SELECT
+          COALESCE(SUM("totalMinor"), 0)::float8 AS "invoicedMinor",
+          COALESCE(SUM(paid), 0)::float8         AS "collectedMinor",
+          count(*) FILTER (WHERE balance > 0 AND days <= 0)::int AS "currentCount",
+          COALESCE(SUM(balance) FILTER (WHERE balance > 0 AND days <= 0), 0)::float8 AS "currentMinor",
+          count(*) FILTER (WHERE balance > 0 AND days > 0 AND days <= 30)::int AS "d1_30Count",
+          COALESCE(SUM(balance) FILTER (WHERE balance > 0 AND days > 0 AND days <= 30), 0)::float8 AS "d1_30Minor",
+          count(*) FILTER (WHERE balance > 0 AND days > 30 AND days <= 60)::int AS "d31_60Count",
+          COALESCE(SUM(balance) FILTER (WHERE balance > 0 AND days > 30 AND days <= 60), 0)::float8 AS "d31_60Minor",
+          count(*) FILTER (WHERE balance > 0 AND days > 60)::int AS "d60plusCount",
+          COALESCE(SUM(balance) FILTER (WHERE balance > 0 AND days > 60), 0)::float8 AS "d60plusMinor"
+        FROM bal`) as Array<Record<string, number>>;
+      const r = rows[0] ?? {};
+      const n = (k: string) => Number(r[k] ?? 0);
+      const invoiced = n("invoicedMinor");
+      const collected = n("collectedMinor");
+      const pending = (await tx.$queryRaw`
+        SELECT count(*)::int AS count, COALESCE(SUM("amountMinor"), 0)::float8 AS "amountMinor"
+          FROM "payment" WHERE status = 'PENDING_APPROVAL'`) as Array<{ count: number; amountMinor: number }>;
       return {
         scope: "school" as const,
         totals: { invoicedMinor: invoiced, collectedMinor: collected, outstandingMinor: invoiced - collected },
-        aging: bucket,
-        pendingApprovals: { count: pending.length, amountMinor: pending.reduce((n: number, x: { amountMinor: number }) => n + x.amountMinor, 0) },
+        aging: {
+          current: { count: n("currentCount"), amountMinor: n("currentMinor") },
+          d1_30: { count: n("d1_30Count"), amountMinor: n("d1_30Minor") },
+          d31_60: { count: n("d31_60Count"), amountMinor: n("d31_60Minor") },
+          d60plus: { count: n("d60plusCount"), amountMinor: n("d60plusMinor") },
+        },
+        pendingApprovals: { count: Number(pending[0]?.count ?? 0), amountMinor: Number(pending[0]?.amountMinor ?? 0) },
       };
     });
   }

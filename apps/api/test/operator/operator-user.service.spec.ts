@@ -66,8 +66,30 @@ describe("OperatorUserService", () => {
         },
       ],
     });
-    const res = await service.listUsers("A");
+    const res = await service.listUsers(op, "A");
     expect(res[0]).toMatchObject({ id: "u1", roles: ["teacher", "hr_clerk"], mfaRequired: true });
+  });
+
+  // GOLDEN RULE #5. This read lists every account in a school by NAME and email
+  // — on the demo tenant, 980 rows of which 901 are pupils — cross-tenant. It
+  // took no principal at all, so it left no trace; its sibling students read,
+  // which returns strictly less about the same children, has always been logged.
+  it("AUDITS the cross-tenant view, with a count and never the names", async () => {
+    const { service, audit } = makeService({
+      users: [
+        { id: "u1", name: "Ada", email: "ada@t", status: "ACTIVE", mfaEnabled: false, mfaRequired: false, lockedUntil: null, roles: [{ role: { name: "student" } }] },
+        { id: "u2", name: "Bola", email: "bola@t", status: "ACTIVE", mfaEnabled: false, mfaRequired: false, lockedUntil: null, roles: [{ role: { name: "student" } }] },
+      ],
+    });
+    await service.listUsers(op, "A");
+    const entry = audit.record.mock.calls.at(-1)?.[0];
+    expect(entry).toMatchObject({
+      action: "operator.users.view",
+      actorId: op.userId,
+      metadata: { targetSchoolId: "A", count: 2 },
+    });
+    // The audit log must not become a second copy of the PII it is recording.
+    expect(JSON.stringify(entry)).not.toMatch(/Ada|Bola|ada@t|bola@t/);
   });
 
   it("hides a super_admin target (404, not 403) on any mutation", async () => {

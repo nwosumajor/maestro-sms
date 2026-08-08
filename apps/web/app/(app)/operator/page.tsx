@@ -114,6 +114,15 @@ export default async function OperatorPage({
             or already downgraded. Two places showing the same fact is how they
             drift apart. Scope matches the queue exactly (active schools only), so
             this count can never exceed the list it links to. */}
+        {/* A SILENT ALARM IS WORSE THAN NO ALARM. `?? 0` hid this banner
+            entirely when the read failed, so the page an owner opens daily to
+            catch lapsed schools looked exactly like a day with none. */}
+        {billingAlerts === null && (
+          <p className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
+            ⚠ Past-due schools could not be checked — this is <strong>not</strong> a report that none are.
+          </p>
+        )}
+
         {(billingAlerts?.length ?? 0) > 0 && (
           <Link
             href="/operator/attention?kind=PAST_DUE"
@@ -143,7 +152,12 @@ export default async function OperatorPage({
             Junior-admin tier grants across every school — each is maker-checker: raised by one senior, applied only
             after a different senior approves. The decision belongs to the school; this list is oversight.
           </p>
-          {(adminAppointments?.length ?? 0) === 0 ? (
+          {adminAppointments === null ? (
+            <p className="mt-3 text-sm text-destructive">
+              This list could not be loaded. Appointments awaiting a second senior are <strong>not</strong>
+              {" "}shown as none — they are simply unknown right now.
+            </p>
+          ) : adminAppointments.length === 0 ? (
             <p className="mt-3 text-sm text-muted-foreground">No admin appointments yet.</p>
           ) : (
             <ul className="mt-3 space-y-1.5 text-sm">
@@ -174,8 +188,23 @@ export default async function OperatorPage({
 
         {/* Above the routine work: a platform role inside a customer school is a
             security finding, not a queue item. Renders nothing when clean. */}
-        <PlatformRoleAudit initial={roleAudit ?? []} />
-        {canReviewOnboarding && <OnboardingRequests requests={onboarding ?? []} />}
+        {/* This panel renders NOTHING when empty, by design — so a failed read
+            was indistinguishable from a clean bill of health on a security
+            finding report. Say so instead. */}
+        {roleAudit === null ? (
+          <p className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
+            The platform-role audit could not be run — this is not a finding of &ldquo;no misplaced platform
+            roles&rdquo;.
+          </p>
+        ) : (
+          <PlatformRoleAudit initial={roleAudit} />
+        )}
+        {canReviewOnboarding && onboarding === null && (
+          <p className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
+            Onboarding requests could not be loaded — schools waiting to be provisioned would not appear.
+          </p>
+        )}
+        {canReviewOnboarding && onboarding !== null && <OnboardingRequests requests={onboarding} />}
         {canManageStaff && <PlatformStaff />}
         {/* Beside hiring, because it is the same job: who works here, and what may
             they do this month. */}

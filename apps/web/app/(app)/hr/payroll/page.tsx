@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
+import { LoadFailure } from "@/components/ui/load-failure";
 import { PayrollManager } from "@/components/hr/PayrollManager";
 import { LoansAdmin } from "@/components/hr/LoansAdmin";
 import { PageHeader } from "@/components/shell/PageHeader";
@@ -25,8 +26,20 @@ export default async function PayrollPage() {
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="hr" permissions={user.permissions}>
       <div className="space-y-6">
         <PageHeader title={<>Payroll</>} subtitle={<>Monthly runs snapshot each active employee&apos;s salary into encrypted payslips. Draft → finalize.</>} />
-        <PayrollManager runs={runs ?? []} canRun={canRun} />
-        <LoansAdmin initial={loans ?? []} canApprove={canApprove} />
+        {runs === null ? (
+          <LoadFailure what="Payroll runs">
+            A run already in DRAFT would not be listed, and starting a new one could duplicate it.
+          </LoadFailure>
+        ) : (
+          <PayrollManager runs={runs} canRun={canRun} />
+        )}
+        {loans === null ? (
+          <LoadFailure what="Loan requests">
+            Staff loans awaiting a second approver are not shown — the queue is unknown, not empty.
+          </LoadFailure>
+        ) : (
+          <LoansAdmin initial={loans} canApprove={canApprove} />
+        )}
       </div>
     </AppShell>
   );

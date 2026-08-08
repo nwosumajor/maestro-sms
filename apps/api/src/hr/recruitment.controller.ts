@@ -149,6 +149,15 @@ export class RecruitmentController {
 export class PublicCareersController {
   constructor(private readonly recruit: RecruitmentService) {}
 
+  /** The index: only schools with an open vacancy, and how many. Declared
+   *  BEFORE :slug — Nest matches in declaration order, and a literal route
+   *  registered after a parameterised sibling is unreachable. */
+  @Public()
+  @Get()
+  index() {
+    return this.recruit.publicCareersIndex();
+  }
+
   @Public()
   @Get(":slug")
   openings(@Param("slug") slug: string) {

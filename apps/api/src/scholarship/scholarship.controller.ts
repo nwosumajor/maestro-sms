@@ -168,11 +168,11 @@ export class ScholarshipController {
   @Get("applications")
   @RequirePermission(SCHOLARSHIP_PERMISSIONS.ADMIN)
   listApplications(
-    @CurrentPrincipal() _p: Principal,
+    @CurrentPrincipal() p: Principal,
     @Query("status") status?: string,
     @Query("programId") programId?: string,
   ) {
-    return this.admin.listApplications({ status, programId });
+    return this.admin.listApplications(p, { status, programId });
   }
 
   /** Non-award decisions: REVIEW / SHORTLIST / REJECT. */

@@ -52,6 +52,11 @@ function makeService(f: Fakes) {
       updateMany: jest.fn().mockResolvedValue({ count: f.claimCount ?? 1 }),
     },
     $executeRaw: jest.fn().mockResolvedValue(1),
+    // financeReport aggregates in SQL. These fakes cannot evaluate it, and are
+    // not meant to: the arithmetic is proven against a real Postgres in
+    // finance-report.e2e-spec.ts. What the unit case below asserts is the SCOPE
+    // decision in front of it, so an empty result set is the right stub.
+    $queryRaw: jest.fn().mockResolvedValue([]),
     parentChild: {
       findFirst: jest.fn().mockResolvedValue(f.parentLink ?? null),
       findMany: jest.fn().mockResolvedValue(f.parentChildMany ?? []),
@@ -207,6 +212,42 @@ describe("FeesService", () => {
       parentLink: null,
     });
     await expect(service.getInvoice(principal(["parent"]), "inv-1")).rejects.toThrow(/not found/i);
+  });
+
+  // Regression for the dead grant: junior_admin does school-wide fee RECORDING
+  // (CLAUDE.md) and holds fee.read + fee.manage, but was not billing-wide — so
+  // every invoice 404'd and there was nothing to record a payment against.
+  it("junior_admin (records tier) may open any invoice — matches its fee.manage grant", async () => {
+    const { service } = makeService({
+      invoiceRow: { id: "inv-1", studentId: "not-mine", totalMinor: 10000, status: "ISSUED", dueDate: new Date(), payments: [] },
+      parentLink: null,
+    });
+    await expect(service.getInvoice(principal(["junior_admin"]), "inv-1")).resolves.toMatchObject({ id: "inv-1" });
+  });
+
+  it("the finance report answers junior_admin school-wide, not scope:none", async () => {
+    const { service } = makeService({});
+    const report = (await service.financeReport(principal(["junior_admin"]))) as { scope: string };
+    expect(report.scope).toBe("school");
+  });
+
+  // SECURITY: widening the ROW scope must not have widened AUTHORITY. Approving
+  // is separately gated on fee.approve, which junior_admin does not hold — but
+  // the in-service separation-of-duties rule must hold for them too.
+  it("junior_admin still cannot approve a payment they recorded themselves", async () => {
+    const { service } = makeService({
+      pendingPayment: { id: "pay-1", status: "PENDING_APPROVAL", recordedById: "u-1", invoiceId: "inv-1", kind: "PAYMENT", amountMinor: 6_000_000 },
+    });
+    await expect(service.approvePayment(principal(["junior_admin"], "u-1"), "pay-1")).rejects.toThrow(/cannot approve/i);
+  });
+
+  it("a large payment recorded by junior_admin still parks as PENDING_APPROVAL", async () => {
+    const { service } = makeService({
+      invoiceRow: { id: "inv-1", status: "ISSUED", studentId: "stu-1", totalMinor: 100_000_000, currency: "NGN" },
+      posted: [],
+    });
+    const pay = await service.recordPayment(principal(["junior_admin"]), "inv-1", { amountMinor: 6_000_000, method: "CASH" });
+    expect(pay.status).toBe("PENDING_APPROVAL");
   });
 });
 

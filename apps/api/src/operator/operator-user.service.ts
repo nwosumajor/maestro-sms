@@ -79,7 +79,19 @@ export class OperatorUserService {
   }
 
   // --- reads -----------------------------------------------------------------
-  async listUsers(schoolId: string): Promise<OperatorUserDto[]> {
+  /**
+   * Every account in a school, cross-tenant.
+   *
+   * GOLDEN RULE #5 — this read is AUDITED, and was not. It returns names and
+   * email addresses for the whole school: measured on the demo tenant, 980 rows
+   * of which 901 are pupils. Its sibling `listSchoolStudents` returns strictly
+   * LESS about the same children and has always logged `operator.students.view`;
+   * this one took no principal at all (the controller passed `_p`), so a
+   * platform operator could read every pupil's name and email in any school and
+   * leave no trace. The audit helper was already here — the read just never
+   * called it.
+   */
+  async listUsers(p: Principal, schoolId: string): Promise<OperatorUserDto[]> {
     const db = this.client();
     const school = await db.school.findFirst({ where: { id: schoolId }, select: { id: true } });
     if (!school) throw new NotFoundException("School not found");
@@ -98,6 +110,13 @@ export class OperatorUserService {
         lockedUntil: true,
         roles: { select: { role: { select: { name: true } } } },
       },
+    });
+    // Log the VIEW, with the target school and how many people were listed —
+    // never the names themselves, which would copy the PII into the audit log.
+    // Matches operator.students.view exactly.
+    await this.auditInOperatorTenant(p, "operator.users.view", schoolId, {
+      targetSchoolId: schoolId,
+      count: users.length,
     });
     return users.map((u) => ({
       id: u.id,

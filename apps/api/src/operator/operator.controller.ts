@@ -817,13 +817,14 @@ export class OperatorController {
   }
 
   // --- cross-tenant user directory + governance (super_admin) ----------------
+  /** Every account in a school (cross-tenant; AUDITED — it lists pupils by name). */
   @Get("tenants/:schoolId/users")
   @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_USER_READ)
   listUsers(
-    @CurrentPrincipal() _p: Principal,
+    @CurrentPrincipal() p: Principal,
     @Param("schoolId") schoolId: string,
   ): Promise<OperatorUserDto[]> {
-    return this.users.listUsers(schoolId);
+    return this.users.listUsers(p, schoolId);
   }
 
   /** Suspend / reactivate an account (DISABLED blocks login). Step-up: destructive. */

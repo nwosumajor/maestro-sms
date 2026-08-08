@@ -115,6 +115,49 @@ describe("LmsService relationship scoping", () => {
     expect(classes).toEqual([]);
   });
 
+  // Regression for the dead grant: junior_admin holds class.read/class.write and
+  // enrollment.read/write, has NO teaching or parental relationship to fall back
+  // on, and so saw an empty /classes — the records tier could not open the
+  // records. Only the school-wide short-circuit can satisfy this.
+  it("junior_admin (records tier) sees every class — matches its class.write grant", async () => {
+    const { service, classFindMany } = makeService({
+      classRows: [
+        { id: "c1", name: "A" },
+        { id: "c2", name: "B" },
+      ],
+    });
+    const classes = (await service.listMyClasses(principal(["junior_admin"]))) as { id: string }[];
+    expect(classes).toHaveLength(2);
+    expect(classFindMany).toHaveBeenCalledWith({ orderBy: { name: "asc" } });
+  });
+
+  // board (read-only oversight) and head_teacher (head of teaching) both held
+  // class.read and were served nothing. What separates them is the CONTROLLER's
+  // permission on each route, not this set: the roster of pupil names needs
+  // enrollment.read, which head_teacher holds and board does not.
+  it.each(["board", "head_teacher"])("%s sees every class — its class.read grant is real", async (role) => {
+    const { service, classFindMany } = makeService({
+      classRows: [
+        { id: "c1", name: "A" },
+        { id: "c2", name: "B" },
+      ],
+    });
+    const classes = (await service.listMyClasses(principal([role]))) as { id: string }[];
+    expect(classes).toHaveLength(2);
+    expect(classFindMany).toHaveBeenCalledWith({ orderBy: { name: "asc" } });
+  });
+
+  it("junior_admin may read any class roster (no teaching relationship needed)", async () => {
+    const { service, tx } = makeService({});
+    (tx.class.findFirst as jest.Mock).mockResolvedValue({ id: "c1", name: "A" });
+    (tx.classTeacher.findFirst as jest.Mock).mockResolvedValue(null);
+    (tx.classTeacher.findMany as jest.Mock).mockResolvedValue([]);
+    (tx.enrollment.findMany as jest.Mock).mockResolvedValue([]);
+    await expect(service.getClassRoster(principal(["junior_admin"]), "c1")).resolves.toEqual(
+      expect.objectContaining({ class: { id: "c1", name: "A" } }),
+    );
+  });
+
   it("roster access for a non-member of the class is 404", async () => {
     const { service, tx } = makeService({});
     (tx.class.findFirst as jest.Mock).mockResolvedValue({ id: "c1", name: "A" });
@@ -164,6 +207,24 @@ describe("LmsService roster", () => {
     const arg = findMany.mock.calls[0][0] as { take: number; where: { name?: { contains: string } } };
     expect(arg.where.name?.contains).toBe("ada");
     expect(arg.take).toBe(SEARCH_CAP);
+  });
+
+  it("junior_admin takes the whole-school roster path, not the relationship one", async () => {
+    // The pickers on /admin/parents, /fees, /attendance and /tasks are all fed by
+    // listStudents. Falling to the relationship path returned zero rows, so the
+    // tier that imports pupils and links guardians had nobody to link.
+    const tx = {
+      user: { count: jest.fn().mockResolvedValue(901), findMany: jest.fn().mockResolvedValue([{ id: "s1" }]) },
+      classTeacher: { findMany: jest.fn() },
+      enrollment: { findMany: jest.fn() },
+      parentChild: { findMany: jest.fn() },
+    };
+    const rows = (await mk(tx).listStudents(principal(["junior_admin"]))) as unknown[];
+    expect(rows).toHaveLength(1);
+    // No membership joins on the whole-school path.
+    expect(tx.classTeacher.findMany).not.toHaveBeenCalled();
+    expect(tx.parentChild.findMany).not.toHaveBeenCalled();
+    await expect(mk(tx).countStudents(principal(["junior_admin"]))).resolves.toEqual({ students: 901 });
   });
 
   it("a relationship-scoped caller's count matches what they can actually list", async () => {

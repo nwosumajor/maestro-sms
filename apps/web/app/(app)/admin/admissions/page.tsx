@@ -16,7 +16,7 @@ export default async function AdminAdmissionsPage() {
   const user = session!.user;
   if (!hasPermission(user.permissions, "admission.review")) redirect("/dashboard");
   const [apps, formFee] = await Promise.all([
-    apiGet<Application[]>("/admissions").then((a) => a ?? []),
+    apiGet<Application[]>("/admissions"),
     apiGet<{ formFeeMinor: number }>("/admissions/settings/form-fee"),
   ]);
 
@@ -32,7 +32,18 @@ export default async function AdminAdmissionsPage() {
         {formFee && (
           <FormFeeCard initialMinor={formFee.formFeeMinor} canManage={hasPermission(user.permissions, "fee.manage")} />
         )}
-        {apps.length === 0 ? (
+        {/* A failed read used to render "No applications — none recorded for
+            this school", and an admissions officer who believes that stops
+            looking. A family waiting on a decision is the cost. */}
+        {apps === null ? (
+          <Alert variant="destructive">
+            <AlertTitle>Applications could not be loaded</AlertTitle>
+            <AlertDescription>
+              This is not a report that none were submitted. Reload before treating the queue as clear —
+              applicants are waiting on a decision.
+            </AlertDescription>
+          </Alert>
+        ) : apps.length === 0 ? (
           <Alert variant="info"><AlertTitle>No applications</AlertTitle><AlertDescription>None recorded for this school.</AlertDescription></Alert>
         ) : (
           <AdmissionsReview apps={apps} />

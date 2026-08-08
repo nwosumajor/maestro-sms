@@ -20,7 +20,23 @@ import {
 } from "../integrity/integrity.foundation";
 
 const PER_CATEGORY = 6;
-const ROSTER_WIDE = new Set(["school_admin", "principal", "board", "accountant", "hr_clerk", "hr_manager", "junior_admin"]);
+// Kept in step with LmsService.ROSTER_WIDE_ROLES, which decides the same
+// question for /students and /classes: search that disagrees with the page it
+// links to is the drift this scoping is meant to prevent — head_teacher listing
+// 31 classes on /classes and none in the omnibox is a bug either way round.
+// The two sets are not identical, and that is deliberate: `accountant` is here
+// for invoice lookup but holds no class.read, so the categories below gate them
+// out by permission anyway.
+const ROSTER_WIDE = new Set([
+  "school_admin",
+  "principal",
+  "board",
+  "accountant",
+  "hr_clerk",
+  "hr_manager",
+  "junior_admin",
+  "head_teacher",
+]);
 const STAFF_WIDE = new Set(["school_admin", "principal"]);
 
 @Injectable()
@@ -68,11 +84,21 @@ export class SearchService {
         }
       }
 
-      // --- classes ---
+      // --- classes (relationship-scoped, like students above) ---
+      // This category used to be a bare `class.read` check with NO narrowing, so
+      // a PARENT searching "vol" got all six of the school's VOL classes back —
+      // every class name and id in the school, none of them their child's. The
+      // rows behind them were safe (getClassInfo 404s a non-member, the roster
+      // needs enrollment.read), which made it worse rather than better: search
+      // offered six results whose links open a page that silently shows nothing.
       if (this.has(p, "class.read")) {
-        const classes = await tx.class.findMany({ where: { name: like }, select: { id: true, name: true }, take: PER_CATEGORY });
-        for (const c of classes) {
-          hits.push({ kind: "class", id: c.id, title: c.name, subtitle: null, href: `/timetable?classId=${c.id}` });
+        const classIds = await this.visibleClassIds(tx, p);
+        if (classIds === "all" || classIds.length > 0) {
+          const where = classIds === "all" ? { name: like } : { name: like, id: { in: classIds } };
+          const classes = await tx.class.findMany({ where, select: { id: true, name: true }, take: PER_CATEGORY });
+          for (const c of classes) {
+            hits.push({ kind: "class", id: c.id, title: c.name, subtitle: null, href: `/timetable?classId=${c.id}` });
+          }
         }
       }
 
@@ -92,6 +118,38 @@ export class SearchService {
 
       return { query: q, hits };
     });
+  }
+
+  /** "all" (whole-school staff) or the concrete class ids a relationship-scoped
+   *  caller belongs to: classes they teach, are enrolled in, or their children
+   *  are enrolled in. Mirrors LmsService.visibleClasses — a class the caller
+   *  cannot open must not be offered to them as a search result. */
+  private async visibleClassIds(tx: TenantTx, p: Principal): Promise<string[] | "all"> {
+    if (p.roles.some((r) => ROSTER_WIDE.has(r))) return "all";
+    const ids = new Set<string>();
+    const taught = await tx.classTeacher.findMany({ where: { teacherId: p.userId }, select: { classId: true } });
+    taught.forEach((t: { classId: string }) => ids.add(t.classId));
+    const subjectTaught = await tx.classSubjectTeacher.findMany({ where: { teacherId: p.userId }, select: { classId: true } });
+    subjectTaught.forEach((t: { classId: string }) => ids.add(t.classId));
+    const supervised = await tx.class.findMany({ where: { supervisorId: p.userId }, select: { id: true } });
+    supervised.forEach((c: { id: string }) => ids.add(c.id));
+    // Own enrolments (a student) and their CHILDREN's (a parent) — deliberately
+    // NOT visibleStudentIds, which for a teacher also contains the pupils they
+    // teach. Following that set back to enrolments would hand a teacher every
+    // OTHER class those pupils sit in, which is wider than LmsService allows.
+    const family = new Set<string>();
+    if (p.roles.includes("student")) family.add(p.userId);
+    const kids = await tx.parentChild.findMany({ where: { parentId: p.userId }, select: { studentId: true } });
+    kids.forEach((k: { studentId: string }) => family.add(k.studentId));
+    if (family.size > 0) {
+      const enr = await tx.enrollment.findMany({
+        where: { studentId: { in: [...family] } },
+        select: { classId: true },
+        distinct: ["classId"],
+      });
+      enr.forEach((e: { classId: string }) => ids.add(e.classId));
+    }
+    return [...ids];
   }
 
   /** "all" (whole-school staff) or the concrete id set a relationship-scoped

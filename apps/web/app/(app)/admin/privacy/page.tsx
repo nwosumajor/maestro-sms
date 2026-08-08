@@ -14,23 +14,36 @@ export default async function AdminPrivacyPage() {
   const session = await auth();
   const user = session!.user;
   if (!hasPermission(user.permissions, "privacy.erasure.review")) redirect("/dashboard");
-  const requests = (await apiGet<ErasureRequest[]>("/privacy/erasure")) ?? [];
-  // What the retention sweeps actually deleted. /integrity/retention/runs was
-  // built and rendered nowhere, so "what happened to last year's telemetry?" —
-  // the first question a data-protection officer asks — had no answer in-product.
-  const runs =
-    (await apiGet<
-      { id: string; retentionDays: number; cutoff: string; signalsDeleted: number; draftsDeleted: number; telemetryDeleted: number; xapiDeleted: number; scansDeleted: number; trigger: string; createdAt: string }[]
-    >("/integrity/retention/runs")) ?? [];
+  // NULL IS NOT EMPTY, and on this page that distinction is the whole point.
+  // apiGet returns null when it could not ask (403, or a 404 because the
+  // school's plan does not include the module) and [] only when the answer is
+  // genuinely "none". Both were collapsed with `?? []`, so a page whose job is
+  // to be EVIDENCE asserted facts it had not established.
+  const requests = await apiGet<ErasureRequest[]>("/privacy/erasure");
+  // What the retention sweeps actually deleted. Gated before asking: the runs
+  // endpoint needs integrity.retention.run AND the INTEGRITY module, which the
+  // STANDARD plan does not include — so on a STANDARD school this 404s, and
+  // saying "no purge has run" there is a guess dressed as a record.
+  const canReadRuns = hasPermission(user.permissions, "integrity.retention.run");
+  const runs = canReadRuns
+    ? await apiGet<
+        { id: string; retentionDays: number; cutoff: string; signalsDeleted: number; draftsDeleted: number; telemetryDeleted: number; xapiDeleted: number; scansDeleted: number; trigger: string; createdAt: string }[]
+      >("/integrity/retention/runs")
+    : null;
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="admin" permissions={user.permissions}>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <PageHeader title={<>Erasure requests</>} subtitle={<>Right-to-erasure requests to review against retention obligations.</>} />
+          <Link href="/admin" className="text-sm text-muted-foreground hover:underline">← Admin</Link>
+        </div>
 
         {/* Evidence that the retention policy is actually enforced, not just
-            configured. Counts only — never what was purged. */}
+            configured. Counts only — never what was purged.
+            This section used to sit INSIDE the header's flex row, between the
+            title and the back link, so the card rendered squashed into the
+            header bar with "← Admin" beside it rather than at the far right. */}
         <section className="rounded-lg border border-border bg-card p-4">
           <header className="mb-1 flex items-baseline justify-between gap-2">
             <h2 className="text-sm font-semibold">Retention history</h2>
@@ -39,7 +52,17 @@ export default async function AdminPrivacyPage() {
           <p className="mb-3 text-xs text-muted-foreground">
             Telemetry about pupils is deleted on your school&rsquo;s retention window. These are the runs that did it.
           </p>
-          {runs.length === 0 ? (
+          {!canReadRuns ? (
+            <p className="text-xs text-muted-foreground">
+              Your role cannot read the retention history — ask a principal or school administrator.
+            </p>
+          ) : runs === null ? (
+            <p className="text-xs text-destructive">
+              The retention history could not be loaded, so this is <strong>not</strong> a record that nothing was
+              deleted. If your plan does not include Assessment Integrity there is no telemetry to purge; otherwise
+              retry, and report it if it persists.
+            </p>
+          ) : runs.length === 0 ? (
             <p className="text-xs text-muted-foreground">
               No purge has run yet — either the window has not elapsed, or retention is disabled for this school.
             </p>
@@ -61,9 +84,16 @@ export default async function AdminPrivacyPage() {
             </ul>
           )}
         </section>
-          <Link href="/admin" className="text-sm text-muted-foreground hover:underline">← Admin</Link>
-        </div>
-        {requests.length === 0 ? (
+
+        {requests === null ? (
+          <Alert variant="destructive">
+            <AlertTitle>Requests could not be loaded</AlertTitle>
+            <AlertDescription>
+              This is not a report that none are pending. A right-to-erasure request has a statutory clock, so
+              retry rather than treating this as an empty queue.
+            </AlertDescription>
+          </Alert>
+        ) : requests.length === 0 ? (
           <Alert variant="info"><AlertTitle>No requests</AlertTitle><AlertDescription>No erasure requests are pending.</AlertDescription></Alert>
         ) : (
           <ErasureReview requests={requests} />

@@ -7,13 +7,16 @@ export const dynamic = "force-dynamic";
 
 const API_BASE = process.env.API_BASE_URL ?? "http://localhost:3001";
 
-async function getSchools(): Promise<PublicSchoolDto[]> {
+// NULL means "we could not ask", [] means "there genuinely are none". Both were
+// returned as [], so an API blip told a prospective parent this platform has no
+// schools — on the page whose whole job is to show them there are.
+async function getSchools(): Promise<PublicSchoolDto[] | null> {
   try {
     const res = await fetch(`${API_BASE}/public/schools`, { cache: "no-store" });
-    if (!res.ok) return [];
+    if (!res.ok) return null;
     return (await res.json()) as PublicSchoolDto[];
   } catch {
-    return [];
+    return null;
   }
 }
 
@@ -40,7 +43,12 @@ export default async function SchoolsPage() {
         </p>
       </div>
 
-      {schools.length === 0 ? (
+      {schools === null ? (
+        <p className="text-sm text-destructive">
+          We couldn&rsquo;t load the school list just now — this isn&rsquo;t a sign that none are available.
+          Please refresh in a moment.
+        </p>
+      ) : schools.length === 0 ? (
         <p className="text-sm text-muted-foreground">No schools are available right now. Please check back soon.</p>
       ) : (
         <>

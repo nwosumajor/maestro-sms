@@ -18,6 +18,7 @@ import { hasPermission } from "@/lib/permissions";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
 import { GroupsManager } from "@/components/operator/GroupsManager";
 import { PageHeader } from "@/components/shell/PageHeader";
@@ -33,7 +34,7 @@ export default async function OperatorGroupsPage() {
   if (!hasPermission(user.permissions, "platform.subscription.manage")) redirect("/operator");
 
   const [groups, names] = await Promise.all([
-    apiGet<never[]>("/operator/groups").then((r) => r ?? []),
+    apiGet<never[]>("/operator/groups"),
     apiGet<TenantNameDto[]>("/operator/tenant-names"),
   ]);
 
@@ -62,7 +63,16 @@ export default async function OperatorGroupsPage() {
           </Link>
         </div>
 
-        <GroupsManager groups={groups} schools={(names ?? []).map((n) => ({ id: n.id, name: n.name }))} />
+        {groups === null && (
+          <Alert variant="destructive">
+            <AlertTitle>Groups could not be loaded</AlertTitle>
+            <AlertDescription>
+              This is not a report that no school group exists. Creating one from here could duplicate a group
+              you cannot currently see.
+            </AlertDescription>
+          </Alert>
+        )}
+        <GroupsManager groups={groups ?? []} schools={(names ?? []).map((n) => ({ id: n.id, name: n.name }))} />
       </div>
     </AppShell>
   );

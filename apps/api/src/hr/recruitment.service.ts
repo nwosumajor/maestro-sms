@@ -7,12 +7,13 @@
 // needed, unlike cross-tenant onboarding). Every mutation is audit-logged.
 // =============================================================================
 
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import { Prisma } from "@sms/db";
 import type { ApplicantDto, JobRequisitionDto } from "@sms/types";
 import { STORAGE_PROVIDER, type StorageProvider } from "../documents/storage.provider";
+import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -31,6 +32,10 @@ export class RecruitmentService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     @Inject(STORAGE_PROVIDER) private readonly storage: StorageProvider,
+    // Cross-tenant COUNTS for the public careers index only. @Optional so every
+    // existing unit wiring keeps working, and null when no privileged URL is
+    // configured — the index degrades to "unknown", never to a wrong answer.
+    @Optional() private readonly privileged?: PrivilegedDatabaseService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -184,6 +189,53 @@ export class RecruitmentService {
       }),
     );
     return { school: school.name, jobs };
+  }
+
+  /**
+   * PUBLIC: the careers INDEX — schools that actually have an open vacancy,
+   * with how many.
+   *
+   * The index used to list every active school and invite the visitor to "view
+   * vacancies" at each. Measured on the live stack, two of three schools had
+   * ZERO open requisitions, so most of those links were dead ends a job seeker
+   * could only discover by clicking. Counting here also replaces the N page
+   * loads that discovery cost with ONE query.
+   *
+   * Cross-tenant by nature, so the count comes from the privileged client in a
+   * single groupBy — NOT a per-school loop under each tenant GUC, which would
+   * be one query per school on a public, unauthenticated page.
+   *
+   * NOTHING TENANT-PRIVATE CROSSES: a school's name, slug and a COUNT of
+   * postings it publishes to the world anyway. No requisition rows, no
+   * applicants. When no privileged URL is configured the count is unavailable,
+   * and every school is returned with `openings: null` so the page can say it
+   * does not know rather than claim a school is not hiring.
+   */
+  async publicCareersIndex(): Promise<
+    { id: string; name: string; slug: string; openings: number | null }[]
+  > {
+    const schools = await this.db.runAsTenant<{ id: string; name: string; slug: string }[]>(
+      { schoolId: ZERO, userId: ZERO },
+      (tx) =>
+        tx.school.findMany({
+          where: { status: "ACTIVE", isPlatform: false },
+          select: { id: true, name: true, slug: true },
+          orderBy: { name: "asc" },
+        }),
+    );
+    const privileged = this.privileged?.client;
+    if (!privileged) {
+      return schools.map((s) => ({ ...s, openings: null }));
+    }
+    const grouped = (await privileged.jobRequisition.groupBy({
+      by: ["schoolId"],
+      where: { status: "OPEN", schoolId: { in: schools.map((s) => s.id) } },
+      _count: { _all: true },
+    })) as unknown as Array<{ schoolId: string; _count: { _all: number } }>;
+    const openBySchool = new Map(grouped.map((g) => [g.schoolId, g._count._all]));
+    return schools
+      .map((s) => ({ ...s, openings: openBySchool.get(s.id) ?? 0 }))
+      .filter((s) => (s.openings ?? 0) > 0);
   }
 
   /** PUBLIC: apply to an OPEN vacancy. Quarantined intake exactly like the

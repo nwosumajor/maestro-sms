@@ -50,6 +50,25 @@ function discoverRoutes(dir, prefix = "") {
   return out;
 }
 
+// --- the OTHER rate limit, and how it lies to you ---------------------------
+// GOTCHA: `TenantRateLimitService` caps the whole SCHOOL at
+// TENANT_RATE_LIMIT_PER_MIN (default 1200) requests/minute, and every demo role
+// belongs to the same school. 18 roles x 102 routes x several API calls each,
+// with no think-time, saturates that budget partway through — after which
+// `apiGet` correctly THROWS on a 429 (a 429 is not an answer about the data),
+// the page renders its error boundary, and this smoke reports it as a FAILING
+// ROUTE. The signature is a contiguous ALPHABETICAL TAIL of failures with
+// digests that repeat across roles, and the proof is one line:
+//
+//   docker compose logs frontend | grep -c "API 429"
+//
+// It is not a page bug and it is not caused by whatever you just changed —
+// though a change that gives a role MORE rows to render will make it start
+// earlier, which reads exactly like a regression. Re-run the suspect role
+// alone, and raise the ceiling for a full pass:
+//
+//   TENANT_RATE_LIMIT_PER_MIN=100000 docker compose up -d backend
+//
 // --- login pacing -----------------------------------------------------------
 // The API rate-limits POST /auth/login (10/min per IP). Each web login triggers
 // exactly one such call, so testing >9 roles would trip it and silently under-

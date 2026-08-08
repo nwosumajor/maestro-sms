@@ -50,6 +50,7 @@ export default async function OperatorSchoolsPage({
 
   const page = await apiGet<DirectoryPage>(`/operator/directory?${query.toString()}`);
   const rows = page?.rows ?? [];
+  const directoryUnavailable = page === null;
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="operator" permissions={user.permissions}>
@@ -73,7 +74,9 @@ export default async function OperatorSchoolsPage({
 
         {rows.length === 0 ? (
           <p className="rounded-md border border-border bg-card px-4 py-6 text-center text-sm text-muted-foreground">
-            No schools match this search/filter.
+            {directoryUnavailable
+              ? "The directory could not be loaded — this is not a report that no school matches."
+              : "No schools match this search/filter."}
           </p>
         ) : (
           <div className="overflow-x-auto rounded-xl border border-border/70 bg-card shadow-card">
