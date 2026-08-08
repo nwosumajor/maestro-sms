@@ -33,20 +33,27 @@ export default async function AdminPage() {
     apiGet<WorkflowRow[]>("/workflows"),
   ]);
 
-  const outstandingMinor = invoices?.outstandingMinor ?? 0;
-  const collectedMinor = invoices?.collectedMinor ?? 0;
-  const overdueCount = invoices?.overdueCount ?? 0;
+  // A FAILED READ IS NOT A ZERO. `?? 0` here printed "Outstanding ₦0.00",
+  // "Past due 0" and "Approvals pending 0" whenever a read failed — telling an
+  // administrator every fee is collected and nothing is waiting on them. /dashboard
+  // was fixed this way already; this page kept the false zeros.
+  const feesUnknown = invoices === null;
   const currency = invoices?.currency ?? "NGN";
   const pendingApprovals = (workflows ?? []).filter((w) => w.state === "PENDING_REVIEW").length;
 
+  /** An em dash where a number cannot be established. */
+  const num = (value: number, unknown: boolean) => (unknown ? "—" : String(value));
+  const cash = (minor: number, unknown: boolean) => (unknown ? "—" : money(minor, currency));
+
   const stats = [
-    { label: "Students", value: String(students?.students ?? 0), href: "/students" },
-    { label: "Classes", value: String((classes ?? []).length), href: "/classes" },
-    { label: "Outstanding", value: money(outstandingMinor, currency), href: "/fees" },
-    { label: "Collected", value: money(collectedMinor, currency), href: "/fees" },
-    { label: "Past due", value: String(overdueCount), href: "/fees" },
-    { label: "Approvals pending", value: String(pendingApprovals), href: "/workflows" },
+    { label: "Students", value: num(students?.students ?? 0, students === null), href: "/students" },
+    { label: "Classes", value: num((classes ?? []).length, classes === null), href: "/classes" },
+    { label: "Outstanding", value: cash(invoices?.outstandingMinor ?? 0, feesUnknown), href: "/fees" },
+    { label: "Collected", value: cash(invoices?.collectedMinor ?? 0, feesUnknown), href: "/fees" },
+    { label: "Past due", value: num(invoices?.overdueCount ?? 0, feesUnknown), href: "/fees" },
+    { label: "Approvals pending", value: num(pendingApprovals, workflows === null), href: "/workflows" },
   ];
+  const anyFigureMissing = students === null || classes === null || feesUnknown || workflows === null;
 
   const actions = ([
     { label: "New invoice", href: "/fees", perm: "fee.manage", desc: "Bill a student for fees" },
@@ -81,6 +88,13 @@ export default async function AdminPage() {
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="admin" permissions={user.permissions}>
       <div className="space-y-6">
         <PageHeader title={<>Admin</>} subtitle={<>Operational overview and quick actions for {user.schoolName}.</>} />
+
+        {anyFigureMissing && (
+          <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+            Some figures below could not be loaded and show as &ldquo;—&rdquo;. That is a failure to read them, not
+            a zero — do not treat a dash as &ldquo;nothing outstanding&rdquo;.
+          </div>
+        )}
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
           {stats.map((s) => (
