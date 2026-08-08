@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { SisImport } from "@/components/admin/SisImport";
 import { PageHeader } from "@/components/shell/PageHeader";
 
@@ -14,7 +15,9 @@ export default async function ImportPage() {
   const session = await auth();
   const user = session!.user;
   if (!hasPermission(user.permissions, "student.import")) redirect("/dashboard");
-  const batches = (await apiGet<Serialized<StudentImportBatchDto>[]>("/admin/students/import")) ?? [];
+  // A batch list is a MAKER-CHECKER queue: rendering a failed read as "none"
+  // hides imports waiting on a second administrator.
+  const batches = await apiGet<Serialized<StudentImportBatchDto>[]>("/admin/students/import");
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="admin" permissions={user.permissions}>
@@ -25,7 +28,15 @@ export default async function ImportPage() {
               password to reset on first login.</>} />
           <Link href="/admin" className="text-sm text-muted-foreground hover:underline">← Admin</Link>
         </div>
-        <SisImport batches={batches} currentUserId={user.id} />
+        {batches === null && (
+          <Alert variant="destructive">
+            <AlertTitle>Existing batches could not be loaded</AlertTitle>
+            <AlertDescription>
+              You can still upload, but any batch already waiting for a second administrator is not shown below.
+            </AlertDescription>
+          </Alert>
+        )}
+        <SisImport batches={batches ?? []} currentUserId={user.id} />
       </div>
     </AppShell>
   );

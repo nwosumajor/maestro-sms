@@ -8,13 +8,17 @@ export const dynamic = "force-dynamic";
 
 const API_BASE = process.env.API_BASE_URL ?? "http://localhost:3001";
 
-async function getSchools(): Promise<PublicSchoolDto[]> {
+// NULL means "we could not ask", [] means "there genuinely are none". Collapsed
+// into [], a failed fetch rendered "No schools are available right now" — on an
+// application form, that reads as a closed admissions season rather than a
+// broken page, and the parent leaves instead of retrying.
+async function getSchools(): Promise<PublicSchoolDto[] | null> {
   try {
     const res = await fetch(`${API_BASE}/public/schools`, { cache: "no-store" });
-    if (!res.ok) return [];
+    if (!res.ok) return null;
     return (await res.json()) as PublicSchoolDto[];
   } catch {
-    return [];
+    return null;
   }
 }
 
@@ -44,7 +48,12 @@ export default async function EnrollPage({ searchParams }: { searchParams: { sch
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {schools.length === 0 ? (
+          {schools === null ? (
+            <p className="text-sm text-destructive">
+              We couldn&rsquo;t load the list of schools just now, so this form can&rsquo;t be completed yet.
+              This is a temporary problem on our side, not a closed admissions list — please refresh in a moment.
+            </p>
+          ) : schools.length === 0 ? (
             <p className="text-sm text-muted-foreground">No schools are available right now. Please check back soon.</p>
           ) : (
             <EnrollForm schools={schools} preselect={searchParams.school} />

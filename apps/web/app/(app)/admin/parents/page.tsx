@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ParentOnboard } from "@/components/admin/ParentOnboard";
 import { PageHeader } from "@/components/shell/PageHeader";
 
@@ -28,6 +29,15 @@ export default async function ParentsPage() {
               account is created.</>} />
           <Link href="/admin" className="text-sm text-muted-foreground hover:underline">← Admin</Link>
         </div>
+        {(batches === null || students === null) && (
+          <Alert variant="destructive">
+            <AlertTitle>Some data could not be loaded</AlertTitle>
+            <AlertDescription>
+              {batches === null && "Batches already waiting for a second administrator are not listed. "}
+              {students === null && "The pupil list is unavailable, so linking a guardian to a child will not work here yet."}
+            </AlertDescription>
+          </Alert>
+        )}
         <ParentOnboard batches={batches ?? []} students={students ?? []} currentUserId={user.id} />
       </div>
     </AppShell>

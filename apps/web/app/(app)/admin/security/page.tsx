@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ElevationPanel, type Grant } from "@/components/security/ElevationPanel";
 import { HandoverPanel } from "@/components/security/HandoverPanel";
 import { PageHeader } from "@/components/shell/PageHeader";
@@ -15,7 +16,9 @@ export default async function SecurityPage() {
   const user = session!.user;
   if (!hasPermission(user.permissions, "security.elevation.request")) redirect("/dashboard");
 
-  const grants = (await apiGet<Grant[]>("/security/elevation")) ?? [];
+  // NULL is not "nobody holds an elevated grant" — that claim belongs to a
+  // read that actually succeeded.
+  const grants = await apiGet<Grant[]>("/security/elevation");
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="admin" permissions={user.permissions}>
@@ -27,8 +30,18 @@ export default async function SecurityPage() {
           <Link href="/admin" className="text-sm text-muted-foreground hover:underline">← Admin</Link>
         </div>
 
+        {grants === null && (
+          <Alert variant="destructive">
+            <AlertTitle>Active grants could not be loaded</AlertTitle>
+            <AlertDescription>
+              The list below is empty because the read failed, <strong>not</strong> because nobody holds an
+              elevated permission right now.
+            </AlertDescription>
+          </Alert>
+        )}
+
         <ElevationPanel
-          grants={grants}
+          grants={grants ?? []}
           userId={user.id}
           canApprove={hasPermission(user.permissions, "security.elevation.approve")}
         />

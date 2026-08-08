@@ -198,3 +198,48 @@ describe("SecurityService.delegateElevation", () => {
     );
   });
 });
+
+// ===========================================================================
+// Recertification: WHAT IS WORTH REVIEWING
+// ===========================================================================
+// The report listed every account in the school. On a 900-pupil school that
+// was 977 assignments, 901 of them a pupil holding "student" — the role that
+// grants the least — in a 128kb payload growing with the roll. The cost is not
+// only speed: a reviewer who must scroll past nine hundred identical rows to
+// reach fifteen staff accounts is a reviewer who signs it off unread.
+describe("SecurityService recertification scope", () => {
+  const mk = (userRoles: { user: { id: string; name: string; email: string }; role: { name: string } }[]) => {
+    const tx = {
+      role: { findMany: jest.fn().mockResolvedValue([]) },
+      userRole: { findMany: jest.fn().mockResolvedValue(userRoles) },
+      privilegeGrant: { findMany: jest.fn().mockResolvedValue([]) },
+    } as unknown as TenantTx;
+    const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
+    return new SecurityService(db as never, { record: jest.fn() } as never);
+  };
+  const u = (id: string, role: string) => ({ user: { id, name: id, email: `${id}@s` }, role: { name: role } });
+
+  it("lists staff and leaves out accounts that are only a pupil or guardian", async () => {
+    const svc = mk([u("pupil-1", "student"), u("pupil-2", "student"), u("mum", "parent"), u("teach", "teacher")]);
+    const r = await svc.recertification(principal("admin"));
+    expect(r.assignments.map((a) => a.id)).toEqual(["teach"]);
+    expect(r.baselineAccountsExcluded).toBe(3);
+  });
+
+  // The grant this report exists to surface: a pupil account that has ALSO
+  // been given a staff role must never be filtered out by the pupil half.
+  it("KEEPS a pupil who has also been given a staff role", async () => {
+    const svc = mk([u("pupil-1", "student"), u("pupil-1", "teacher")]);
+    const r = await svc.recertification(principal("admin"));
+    expect(r.assignments).toHaveLength(1);
+    expect(r.assignments[0].roles.sort()).toEqual(["student", "teacher"]);
+    expect(r.baselineAccountsExcluded).toBe(0);
+  });
+
+  it("reports zero excluded when every account is staff", async () => {
+    const svc = mk([u("head", "principal")]);
+    const r = await svc.recertification(principal("admin"));
+    expect(r.assignments).toHaveLength(1);
+    expect(r.baselineAccountsExcluded).toBe(0);
+  });
+});
