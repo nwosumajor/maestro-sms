@@ -17,9 +17,15 @@ const STAFF = new Set(["school_admin", "principal"]);
 const STAFF_OR_TEACHER = new Set(["teacher", "school_admin", "principal", "accountant", "hr_clerk", "board"]);
 /** Safety cap on messages returned for a single thread (most-recent-first). */
 const MESSAGE_PAGE = 500;
-/** Upper bound on the participant rows scanned to find a caller's threads. A
- *  member with more threads than this pages through the newest ones. */
-const THREAD_SCAN_CAP = 2000;
+// REMOVED: THREAD_SCAN_CAP (2000). It bounded a pre-fetch of the caller's
+// participant rows, and its comment claimed "a member with more threads than
+// this pages through the newest ones" — which is exactly what it did NOT do.
+// The query had no orderBy, so the threads it kept were arbitrary: on a
+// 2,600-thread inbox the 600 it dropped were scattered, including the
+// 14th-newest conversation. Membership is now a JOIN in listThreads and
+// searchMessages, so both are bounded by the page and correct at any size.
+// Do not reintroduce a cap here: the fix for a big inbox is pagination, and it
+// already has it.
 /** Cap on the contact picker; `q` narrows it in a large school. */
 const CONTACT_PAGE = 200;
 
@@ -69,21 +75,36 @@ export class MessagingService {
     const limit = pageLimit(opts.limit);
     const cursor = decodeCursor(opts.cursor);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const parts = await tx.threadParticipant.findMany({
-        where: { userId: p.userId },
-        select: { threadId: true, lastReadAt: true },
-        take: THREAD_SCAN_CAP,
-      });
-      const ids = parts.map((x: { threadId: string }) => x.threadId);
-      if (ids.length === 0) return { items: [], nextCursor: null };
-      const lastRead = new Map(parts.map((x: { threadId: string; lastReadAt: Date | null }) => [x.threadId, x.lastReadAt]));
+      // MEMBERSHIP IS A FILTER, NOT A PRE-FETCH.
+      //
+      // This used to read the caller's participant rows first — `take: 2000`,
+      // with NO orderBy — and then page threads within whatever that returned.
+      // Anyone in more than 2,000 threads therefore had the rest made
+      // permanently invisible, and "whatever Postgres returned" is not "the
+      // most recent": measured on a 2,600-thread inbox, paging to the very end
+      // yielded exactly 2,000 and the 600 missing ones were SCATTERED, the
+      // 14th-newest conversation among them. Nothing in the response said so —
+      // the last page just ended.
+      //
+      // Filtering on the relation instead lets Postgres do the join, so the
+      // read is bounded by the PAGE and correct for any inbox size. The
+      // participant rows are then fetched for the page only, which is where
+      // lastReadAt is actually needed.
       const rows = (await tx.messageThread.findMany({
-        where: { id: { in: ids }, ...seekWhere(cursor) },
+        where: { participants: { some: { userId: p.userId } }, ...seekWhere(cursor) },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         take: limit + 1,
       })) as Array<{ id: string; subject: string; updatedAt: Date; createdAt: Date }>;
       const page = toPage(rows, limit);
       if (page.items.length === 0) return { items: [], nextCursor: null };
+      const lastRead = new Map(
+        (
+          await tx.threadParticipant.findMany({
+            where: { userId: p.userId, threadId: { in: page.items.map((t) => t.id) } },
+            select: { threadId: true, lastReadAt: true },
+          })
+        ).map((x: { threadId: string; lastReadAt: Date | null }) => [x.threadId, x.lastReadAt]),
+      );
 
       // Batch the per-thread work that used to be 2 queries EACH (a findFirst for
       // the last message + a count for unread) — that is what made a busy inbox
@@ -135,19 +156,17 @@ export class MessagingService {
     if (term.length < 2) return [];
     const capped = Math.min(Math.max(1, limit), 50);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const parts = await tx.threadParticipant.findMany({
-        where: { userId: p.userId },
-        select: { threadId: true },
-        take: THREAD_SCAN_CAP,
-      });
-      const ids = parts.map((x: { threadId: string }) => x.threadId);
-      if (ids.length === 0) return [];
+      // Same fix as listThreads: JOIN the membership rather than pre-fetching a
+      // capped list of thread ids. Searching "the first 2,000 threads Postgres
+      // happened to return" is a search that quietly cannot find things, which
+      // is worse than one that is slow — the caller reads "no matches" and
+      // concludes the message does not exist.
       return tx.$queryRaw<Array<{ id: string; threadId: string; senderId: string; body: string; createdAt: Date; subject: string }>>`
         SELECT m.id, m."threadId", m."senderId", m.body, m."createdAt", t.subject
         FROM "message" m
         JOIN "message_thread" t ON t.id = m."threadId"
-        WHERE m."threadId" = ANY(${ids}::uuid[])
-          AND to_tsvector('english', m.body) @@ plainto_tsquery('english', ${term})
+        JOIN "thread_participant" tp ON tp."threadId" = t.id AND tp."userId" = ${p.userId}::uuid
+        WHERE to_tsvector('english', m.body) @@ plainto_tsquery('english', ${term})
         ORDER BY m."createdAt" DESC
         LIMIT ${capped}
       `;

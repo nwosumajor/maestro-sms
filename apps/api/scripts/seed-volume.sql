@@ -379,6 +379,49 @@ FROM cfg c
 JOIN submission sub ON sub."schoolId" = c.school_id
 JOIN assessment a ON a.id = sub."assessmentId" AND a.title LIKE 'VOL %';
 
+
+-- --- messaging: threads, participants, messages ------------------------------
+-- The last module with no volume behind it. A school's inbox is the page staff
+-- keep open all day, and its cost is per-PARTICIPANT rather than per-school:
+-- what matters is how many threads ONE person is in, not how many exist.
+--
+-- 2,600 threads, and the demo admin sits in ALL of them ON PURPOSE.
+-- MessagingService scans a caller's threads with `take: THREAD_SCAN_CAP` (2000)
+-- — an inbox below that ceiling can never show what happens at it, and every
+-- real school has someone (a principal, an office account) who crosses it.
+CREATE TEMP TABLE vol_thread AS
+SELECT gen_random_uuid() AS id, n
+FROM generate_series(1, 2600) AS n;
+
+INSERT INTO message_thread (id, "schoolId", subject, "createdById", "createdAt", "updatedAt")
+SELECT vt.id, c.school_id, 'VOL thread ' || vt.n, c.admin_id,
+       now() - (vt.n * INTERVAL '3 hours'), now() - (vt.n * INTERVAL '3 hours')
+FROM cfg c, vol_thread vt;
+
+-- Two participants per thread: the office account and one guardian-side pupil,
+-- which is the shape real threads take (staff <-> family).
+INSERT INTO thread_participant (id, "schoolId", "threadId", "userId", "lastReadAt", "createdAt")
+SELECT gen_random_uuid(), c.school_id, vt.id, c.admin_id,
+       -- A third of the inbox unread, so the unread groupBy has real work.
+       CASE WHEN vt.n % 3 = 0 THEN NULL ELSE now() END,
+       now()
+FROM cfg c, vol_thread vt;
+
+INSERT INTO thread_participant (id, "schoolId", "threadId", "userId", "lastReadAt", "createdAt")
+SELECT gen_random_uuid(), c.school_id, vt.id, vs.id, now(), now()
+FROM cfg c, vol_thread vt
+JOIN vol_student vs ON vs.n = ((vt.n - 1) % 900) + 1;
+
+-- ~7 messages per thread, alternating sender, newest last.
+INSERT INTO message (id, "schoolId", "threadId", "senderId", body, "createdAt")
+SELECT gen_random_uuid(), c.school_id, vt.id,
+       CASE WHEN m.n % 2 = 0 THEN c.admin_id ELSE vs.id END,
+       'Seeded volume message ' || m.n || ' about term arrangements and attendance.',
+       now() - (vt.n * INTERVAL '3 hours') + (m.n * INTERVAL '5 minutes')
+FROM cfg c, vol_thread vt
+JOIN vol_student vs ON vs.n = ((vt.n - 1) % 900) + 1,
+     generate_series(1, 7) m(n);
+
 COMMIT;
 
 ANALYZE;

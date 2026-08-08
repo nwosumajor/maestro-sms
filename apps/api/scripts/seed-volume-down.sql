@@ -51,6 +51,11 @@ DELETE FROM student_profile WHERE "studentId" IN (SELECT id FROM doomed_user);
 -- ACADEMICS, child-before-parent: a grade hangs off a submission, a submission
 -- off an assessment; subject results and offerings both point at the subjects.
 -- All of it must go before the classes and users they reference.
+-- Messaging: messages and participants before the thread they hang off.
+DELETE FROM message WHERE "threadId" IN (SELECT id FROM message_thread WHERE subject LIKE 'VOL thread %');
+DELETE FROM thread_participant WHERE "threadId" IN (SELECT id FROM message_thread WHERE subject LIKE 'VOL thread %');
+DELETE FROM message_thread WHERE subject LIKE 'VOL thread %';
+
 DELETE FROM grade WHERE "submissionId" IN
   (SELECT s.id FROM submission s JOIN assessment a ON a.id = s."assessmentId" WHERE a.title LIKE 'VOL %');
 DELETE FROM submission WHERE "assessmentId" IN (SELECT id FROM assessment WHERE title LIKE 'VOL %');
