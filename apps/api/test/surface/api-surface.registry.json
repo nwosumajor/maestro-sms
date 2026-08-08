@@ -89,6 +89,10 @@
       "kind": "ui",
       "note": "reviewed: reached from components/hr/DutyRoster.tsx"
     },
+    "DELETE /integrity/exemptions/:p": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
     "DELETE /library/books/:p": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
@@ -858,6 +862,10 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /hr/staff/training": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
+    "GET /integrity/exemptions": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
@@ -2208,6 +2216,10 @@
     "POST /hr/staff/documents/reminders/run": {
       "kind": "system",
       "note": "manual trigger for a SCHEDULED job \u2014 ops/runbook surface, not day-to-day UI"
+    },
+    "POST /integrity/exemptions": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
     },
     "POST /integrity/retention/run": {
       "kind": "system",

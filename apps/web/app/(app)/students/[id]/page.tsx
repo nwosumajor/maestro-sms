@@ -1,4 +1,4 @@
-import type { ContactDto, MedicalRecordDto, StudentProfileDto, Serialized } from "@sms/types";
+import type { ContactDto, IntegrityExemptionDto, MedicalRecordDto, StudentProfileDto, Serialized } from "@sms/types";
 import { hasPermission } from "@/lib/permissions";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -15,6 +15,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { shortDate } from "@/lib/format";
 import { StudentAdmin } from "@/components/sis/StudentAdmin";
+import { ExemptionPanel } from "@/components/assessment/ExemptionPanel";
 import { PrivacyPanel } from "@/components/privacy/PrivacyPanel";
 import { ReportCardButton } from "@/components/reportcards/ReportCardButton";
 import { RemarksEditor } from "@/components/reportcards/RemarksEditor";
@@ -44,11 +45,15 @@ export default async function StudentProfilePage({ params }: { params: { id: str
   // Each call returns null if the caller lacks the permission (RBAC) — we hide
   // the section rather than fail the page.
   const canReadGrades = hasPermission(user.permissions, "grade.read");
-  const [profile, contacts, medical, sessions] = await Promise.all([
+  const canReadExemptions = hasPermission(user.permissions, "integrity.exemption.read");
+  const [profile, contacts, medical, sessions, exemptions] = await Promise.all([
     apiGet<Profile>(`/students/${params.id}/profile`),
     apiGet<Contact[]>(`/students/${params.id}/contacts`),
     apiGet<Medical>(`/students/${params.id}/medical`),
     canReadGrades ? apiGet<Serialized<AcademicSessionDto>[]>("/academic/sessions") : Promise.resolve(null),
+    canReadExemptions
+      ? apiGet<Serialized<IntegrityExemptionDto>[]>(`/integrity/exemptions?studentId=${params.id}`)
+      : Promise.resolve(null),
   ]);
 
   return (
@@ -153,6 +158,17 @@ export default async function StudentProfilePage({ params }: { params: { id: str
               </CardContent>
             </Card>
           ))}
+
+        {canReadExemptions && (
+          <ExemptionPanel
+            studentId={params.id}
+            // The profile DTO carries no name (this page titles itself "Profile" and
+            // shows the admission number). The exemption rows do carry it.
+            studentName={exemptions?.[0]?.studentName ?? "this pupil"}
+            initial={exemptions}
+            canWrite={hasPermission(user.permissions, "integrity.exemption.write")}
+          />
+        )}
 
         <PrivacyPanel studentId={params.id} />
       </div>

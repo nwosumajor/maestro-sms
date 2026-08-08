@@ -37,3 +37,26 @@ export interface SubmissionFilePresignDto {
   url: string;
   expiresInSeconds: number;
 }
+
+
+/**
+ * An accessibility accommodation: integrity monitoring (paste-blocking, focus
+ * tracking) is switched off for this pupil, globally or for one assessment.
+ * `active` is derived — a revoked row is KEPT, never deleted, because an
+ * accommodation record is evidence of a decision about a child.
+ */
+export interface IntegrityExemptionDto {
+  id: string;
+  studentId: string;
+  studentName: string;
+  /** Null = every assessment. */
+  assessmentId: string | null;
+  assessmentTitle: string | null;
+  reason: string;
+  grantedById: string;
+  grantedByName: string;
+  revokedAt: Date | null;
+  revokedByName: string | null;
+  active: boolean;
+  createdAt: Date;
+}
