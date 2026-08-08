@@ -52,6 +52,11 @@ function makeService(f: Fakes) {
       updateMany: jest.fn().mockResolvedValue({ count: f.claimCount ?? 1 }),
     },
     $executeRaw: jest.fn().mockResolvedValue(1),
+    // financeReport aggregates in SQL. These fakes cannot evaluate it, and are
+    // not meant to: the arithmetic is proven against a real Postgres in
+    // finance-report.e2e-spec.ts. What the unit case below asserts is the SCOPE
+    // decision in front of it, so an empty result set is the right stub.
+    $queryRaw: jest.fn().mockResolvedValue([]),
     parentChild: {
       findFirst: jest.fn().mockResolvedValue(f.parentLink ?? null),
       findMany: jest.fn().mockResolvedValue(f.parentChildMany ?? []),
