@@ -14,15 +14,25 @@ export class FeeOpsProcessor extends WorkerHost {
   }
 
   async process(job: Job): Promise<Record<string, number>> {
+    // "done: schools=0" and "never ran" must not read the same. The service
+    // flags the difference; this reports it.
     if (job.name === LATE_FEE_JOB) {
       const r = await this.feeOps.lateFeeSweep();
-      this.logger.log(`Late-fee sweep done: schools=${r.schools} applied=${r.feesApplied}`);
-      return r;
+      this.logger.log(
+        r.skipped
+          ? "Late-fee sweep SKIPPED (no privileged DB) — this is not a sweep that found nothing overdue."
+          : `Late-fee sweep done: schools=${r.schools} applied=${r.feesApplied}`,
+      );
+      return { schools: r.schools, feesApplied: r.feesApplied };
     }
     if (job.name === REMINDER_JOB) {
       const r = await this.feeOps.reminderSweep();
-      this.logger.log(`Reminder sweep done: schools=${r.schools} reminded=${r.reminded}`);
-      return r;
+      this.logger.log(
+        r.skipped
+          ? "Overdue-reminder sweep SKIPPED (no privileged DB) — this is not a sweep that found nothing to chase."
+          : `Reminder sweep done: schools=${r.schools} reminded=${r.reminded}`,
+      );
+      return { schools: r.schools, reminded: r.reminded };
     }
     return {};
   }

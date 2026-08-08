@@ -67,6 +67,18 @@ const PURGE_MAX_BATCHES = Number(process.env.PURGE_MAX_BATCHES ?? 25);
  */
 const LMS_REVISIONS_KEPT = Number(process.env.LMS_REVISIONS_KEPT ?? 50);
 
+/** What a whole sweep did. `purged` counts EVERY stream — tenant-scoped and
+ *  platform-wide — so no caller has to add them up and get it wrong. */
+export interface RetentionSweepResult {
+  schools: SchoolRetentionResult[];
+  purged: number;
+  platformWide: { gatewayEvents: number; contentRevisions: number; gameGuesses: number; readNotifications: number };
+  /** True when no privileged DB was configured — NOT the same as "nothing to purge". */
+  skipped: boolean;
+}
+
+const EMPTY_PLATFORM_COUNTS = { gatewayEvents: 0, contentRevisions: 0, gameGuesses: 0, readNotifications: 0 };
+
 export interface SchoolRetentionResult {
   schoolId: string;
   retentionDays: number;
@@ -99,14 +111,27 @@ export class IntegrityRetentionService {
     @Inject(RETENTION_DATABASE) private readonly db: RetentionDatabaseService,
   ) {}
 
-  /** Sweep every tenant (the scheduled worker's entry point). */
-  async purgeAllSchools(
-    trigger: RetentionTrigger = "SCHEDULED",
-  ): Promise<SchoolRetentionResult[]> {
+  /**
+   * Sweep every tenant (the scheduled worker's entry point).
+   *
+   * RETURNS ITS OWN TOTAL. It used to hand back only the per-school rows and
+   * leave each caller to add them up, and the BullMQ processor — the number an
+   * operator actually reads, because it is what the job result stores — summed
+   * three of the five streams. It omitted xapiDeleted and scansDeleted, and
+   * scan_event is one of the largest tables the platform projects (47M rows at
+   * ten years), so a night that purged millions could report `rows=0`. The
+   * platform-wide streams were missing from that total too.
+   *
+   * The service already had a comment two methods down saying "EVERY stream, or
+   * the reported total quietly under-counts what was purged" — the defect was
+   * that the total was RE-DERIVED per caller rather than computed once. It now
+   * is not derivable anywhere else.
+   */
+  async purgeAllSchools(trigger: RetentionTrigger = "SCHEDULED"): Promise<RetentionSweepResult> {
     const client = this.db.client;
     if (!client) {
       this.logger.warn("Retention sweep requested but no privileged DB — skipping.");
-      return [];
+      return { schools: [], purged: 0, platformWide: EMPTY_PLATFORM_COUNTS, skipped: true };
     }
     const schools = await client.school.findMany({
       select: { id: true, integrityRetentionDays: true },
@@ -128,12 +153,15 @@ export class IntegrityRetentionService {
       (n, r) => n + r.signalsDeleted + r.draftsDeleted + r.telemetryDeleted + r.xapiDeleted + r.scansDeleted,
       0,
     );
+    const platformTotal =
+      globalCounts.gatewayEvents + globalCounts.contentRevisions + globalCounts.gameGuesses + globalCounts.readNotifications;
     this.logger.log(
-      `Retention sweep (${trigger}) complete: ${schools.length} schools, ${purged} rows purged. ` +
+      `Retention sweep (${trigger}) complete: ${schools.length} schools, ${purged + platformTotal} rows purged ` +
+        `(${purged} tenant-scoped + ${platformTotal} platform-wide). ` +
         `Platform-wide: gatewayEvents=${globalCounts.gatewayEvents} contentRevisions=${globalCounts.contentRevisions} ` +
           `gameGuesses=${globalCounts.gameGuesses} readNotifications=${globalCounts.readNotifications}.`,
     );
-    return results;
+    return { schools: results, purged: purged + platformTotal, platformWide: globalCounts, skipped: false };
   }
 
   /** Purge one school using its window. schoolId/retentionDays come from the

@@ -1,3 +1,4 @@
+import { Logger } from "@nestjs/common";
 // =============================================================================
 // Retention covers EVERY stream of telemetry about children
 // =============================================================================
@@ -19,6 +20,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { IntegrityRetentionService } from "../../src/integrity/retention/integrity-retention.service";
+import { IntegrityRetentionProcessor } from "../../src/integrity/retention/integrity-retention.processor";
+import { PURGE_EXPIRED_JOB } from "../../src/integrity/integrity.constants";
 
 /** Source with comments stripped — the file explains these table names in prose. */
 const SERVICE_SRC = readFileSync(
@@ -113,7 +116,7 @@ describe("the sweep clears every telemetry stream", () => {
 
   it("returns the new counts per school", async () => {
     const { svc } = makeService({ xapiStatement: 50, scanEvent: 40 });
-    const [r] = await svc.purgeAllSchools("SCHEDULED");
+    const [r] = (await svc.purgeAllSchools("SCHEDULED")).schools;
     expect({ xapi: r.xapiDeleted, scans: r.scansDeleted }).toEqual({ xapi: 50, scans: 40 });
   });
 
@@ -219,5 +222,56 @@ describe("the source itself", () => {
     // at runtime would tell you — it just grows.
     const deleted = [...SERVICE_SRC.matchAll(/tx\.(\w+)\.deleteMany/g)].map((m) => m[1]);
     expect(deleted.sort()).toEqual([...PURGED].sort());
+  });
+});
+
+// ===========================================================================
+// The JOB RESULT — the number that outlives the log line
+// ===========================================================================
+// The service's own total was already correct and tested. The BullMQ processor
+// re-derived it and summed THREE of the five tenant streams, omitting
+// xapiDeleted and scansDeleted (scan_event is one of the largest tables the
+// platform projects) and every platform-wide stream. A night that removed
+// millions could store `purged: 0` as the job's result — and unlike a log line
+// that is what a dashboard or an on-call check reads back later.
+//
+// The durable fix was to stop DERIVING the total in more than one place, so
+// these cases assert the processor reports what the service computed.
+describe("IntegrityRetentionProcessor job result", () => {
+  const job = { name: PURGE_EXPIRED_JOB } as never;
+
+  it("reports the total the SERVICE computed, never one of its own", async () => {
+    const counts = {
+      integritySignal: 1, submissionDraft: 2, submissionTelemetry: 3,
+      xapiStatement: 50, scanEvent: 40,          // the two that were dropped
+      gatewayEvent: 7, lmsContentRevision: 5,
+    };
+    // The service's own figure, taken from the service — NOT re-added here. A
+    // test that summed the fields itself would agree with a wrong processor
+    // just as readily as a right one.
+    const expected = (await makeService(counts).svc.purgeAllSchools("SCHEDULED")).purged;
+    const out = await new IntegrityRetentionProcessor(makeService(counts).svc).process(job);
+    expect(out).toEqual({ schools: 1, purged: expected });
+  });
+
+  // The sharp case: a night whose ENTIRE yield is the two streams the old
+  // processor dropped. It reported 0 — indistinguishable from a quiet night.
+  it("a sweep of ONLY xapi + scan events does not report zero", async () => {
+    const { svc } = makeService({ xapiStatement: 50, scanEvent: 40 });
+    const out = await new IntegrityRetentionProcessor(svc).process(job);
+    expect(out.purged).toBe(90);
+  });
+
+  it("a sweep with NO privileged DB is not a sweep that found nothing", async () => {
+    const svc = new IntegrityRetentionService({ client: null } as never);
+    const processor = new IntegrityRetentionProcessor(svc);
+    const logged: string[] = [];
+    jest.spyOn(Logger.prototype, "log").mockImplementation((m: unknown) => { logged.push(String(m)); });
+    try {
+      await expect(processor.process(job)).resolves.toEqual({ schools: 0, purged: 0 });
+      expect(logged.join(" ")).toMatch(/SKIPPED/i);
+    } finally {
+      jest.restoreAllMocks();
+    }
   });
 });
