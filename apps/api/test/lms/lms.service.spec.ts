@@ -131,6 +131,22 @@ describe("LmsService relationship scoping", () => {
     expect(classFindMany).toHaveBeenCalledWith({ orderBy: { name: "asc" } });
   });
 
+  // board (read-only oversight) and head_teacher (head of teaching) both held
+  // class.read and were served nothing. What separates them is the CONTROLLER's
+  // permission on each route, not this set: the roster of pupil names needs
+  // enrollment.read, which head_teacher holds and board does not.
+  it.each(["board", "head_teacher"])("%s sees every class — its class.read grant is real", async (role) => {
+    const { service, classFindMany } = makeService({
+      classRows: [
+        { id: "c1", name: "A" },
+        { id: "c2", name: "B" },
+      ],
+    });
+    const classes = (await service.listMyClasses(principal([role]))) as { id: string }[];
+    expect(classes).toHaveLength(2);
+    expect(classFindMany).toHaveBeenCalledWith({ orderBy: { name: "asc" } });
+  });
+
   it("junior_admin may read any class roster (no teaching relationship needed)", async () => {
     const { service, tx } = makeService({});
     (tx.class.findFirst as jest.Mock).mockResolvedValue({ id: "c1", name: "A" });

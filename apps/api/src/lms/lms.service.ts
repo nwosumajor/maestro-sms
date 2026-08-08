@@ -54,12 +54,26 @@ import {
 // already been widened for it one at a time; this set and Fees were the two
 // that were missed. READS only — every write is separately permission-gated,
 // so this grants no authority junior_admin did not already hold.
+//
+// board and head_teacher held class.read and were served zero classes for the
+// same reason — no teaching or parental relationship to fall back on. Being in
+// this set does NOT give them the same reach, because the controller draws the
+// finer line by permission and their grants differ:
+//   class.read      -> class list / overview / info   board YES, head_teacher YES
+//   enrollment.read -> the ROSTER of pupil names,
+//                      roster.csv, eligibility        board NO,  head_teacher YES
+// So oversight (board) sees the school's SHAPE — which classes exist, who
+// teaches them, how full they are — and the head of teaching, who already holds
+// enrollment.read, sees who is in them. Minors' names are gated by the grant,
+// not by this set (GR#5), and the roster read stays audit-logged either way.
 const ROSTER_WIDE_ROLES = new Set([
   "school_admin",
   "principal",
   "hr_manager",
   "hr_clerk",
   "junior_admin",
+  "board",
+  "head_teacher",
 ]);
 
 @Injectable()

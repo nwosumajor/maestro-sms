@@ -33,6 +33,7 @@ d("SearchService federated search + scoping (real Postgres)", () => {
   const studentRoleId = randomUUID();
   const teacherRoleId = randomUUID();
   const classId = randomUUID();
+  const otherClassId = randomUUID();
   const invoiceId = randomUUID();
 
   const adminP = (): Principal => ({ userId: ADMIN, schoolId: SA, roles: ["school_admin"], permissions: ["student.profile.read", "class.read", "fee.read", "rbac.manage"] });
@@ -60,6 +61,13 @@ d("SearchService federated search + scoping (real Postgres)", () => {
     await admin.query(`INSERT INTO user_role (id,"schoolId","userId","roleId") VALUES ($1,$2,$3,$4)`, [randomUUID(), SA, TEACHER, tid]);
     await admin.query(`INSERT INTO parent_child (id,"schoolId","parentId","studentId") VALUES ($1,$2,$3,$4)`, [randomUUID(), SA, PARENT, MY_CHILD]);
     await admin.query(`INSERT INTO class (id,"schoolId",name,"updatedAt") VALUES ($1,$2,'Searchable Class',now())`, [classId, SA]);
+    // A second class NOBODY in this family belongs to — the control for the
+    // class-scoping case below.
+    await admin.query(`INSERT INTO class (id,"schoolId",name,"updatedAt") VALUES ($1,$2,'Searchable Other Class',now())`, [otherClassId, SA]);
+    await admin.query(
+      `INSERT INTO enrollment (id,"schoolId","classId","studentId",status) VALUES ($1,$2,$3,$4,'ACTIVE')`,
+      [randomUUID(), SA, classId, MY_CHILD],
+    );
     await admin.query(
       `INSERT INTO invoice (id,"schoolId","studentId",reference,status,"totalMinor","dueDate","createdById","updatedAt")
        VALUES ($1,$2,$3,'SEARCH-INV-1','ISSUED',1000,now(),$4,now())`,
@@ -70,7 +78,7 @@ d("SearchService federated search + scoping (real Postgres)", () => {
   });
 
   afterAll(async () => {
-    for (const t of ["invoice", "class", "parent_child", "user_role"]) await admin.query(`DELETE FROM ${t} WHERE "schoolId" = $1`, [SA]);
+    for (const t of ["invoice", "enrollment", "class", "parent_child", "user_role"]) await admin.query(`DELETE FROM ${t} WHERE "schoolId" = $1`, [SA]);
     await admin.query(`DELETE FROM role WHERE id = ANY($1)`, [[studentRoleId, teacherRoleId]]);
     await admin.query(`DELETE FROM "user" WHERE "schoolId" = $1`, [SA]);
     await admin.query(`DELETE FROM school WHERE id = $1`, [SA]);
@@ -97,6 +105,25 @@ d("SearchService federated search + scoping (real Postgres)", () => {
     expect(res.hits.some((h) => h.kind === "staff")).toBe(false); // no staff directory for parents
     const inv = await svc.search(parentP(), "SEARCH-INV");
     expect(inv.hits.filter((h) => h.kind === "invoice")).toHaveLength(1); // their own child's invoice
+  });
+
+  // The class category used to be a bare class.read check with no narrowing, so
+  // this same search handed a parent every class in the school. The rows behind
+  // them were already safe (getClassInfo 404s a non-member), which made it a
+  // list of six results whose links open a page showing nothing — plus the name
+  // and id of every class in the school, none of it theirs.
+  it("a parent sees ONLY the class their child is enrolled in", async () => {
+    const res = await svc.search(parentP(), "Searchable");
+    const classes = res.hits.filter((h) => h.kind === "class").map((h) => h.title);
+    expect(classes).toEqual(["Searchable Class"]);
+    expect(classes).not.toContain("Searchable Other Class");
+  });
+
+  it("an admin still sees BOTH classes — the narrowing is relationship-scoped, not a cap", async () => {
+    const classes = (await svc.search(adminP(), "Searchable")).hits
+      .filter((h) => h.kind === "class")
+      .map((h) => h.title);
+    expect(classes).toEqual(expect.arrayContaining(["Searchable Class", "Searchable Other Class"]));
   });
 
   it("a query shorter than 2 chars returns nothing", async () => {

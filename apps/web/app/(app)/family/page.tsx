@@ -30,7 +30,8 @@ export default async function FamilyPage() {
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="family" permissions={user.permissions}>
       <div className="space-y-6">
         <PageHeader title={<>My children</>} subtitle={<>Everything about your linked children in one place — published grades, attendance,
-            discipline, tasks and fees. Full detail lives on the{" "}
+            discipline, tasks and fees. Open a child&apos;s name for their record: profile,
+            emergency contacts and medical. Full detail lives on the{" "}
             <Link className="text-primary hover:underline" href="/gradebook">Grades</Link>,{" "}
             <Link className="text-primary hover:underline" href="/attendance">Attendance</Link> and{" "}
             <Link className="text-primary hover:underline" href="/fees">Fees</Link> pages.</>} />
@@ -47,7 +48,14 @@ export default async function FamilyPage() {
             <Card key={c.studentId}>
               <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
                 <CardTitle className="text-base">
-                  {c.studentName}
+                  {/* Through to the child's RECORD — profile, emergency contacts and
+                      medical. This hub deliberately links out to Grades/Attendance/
+                      Fees but never named the record itself, so the only route to it
+                      was a nav entry labelled "Students", which read like the whole
+                      school's roster. */}
+                  <Link className="hover:underline" href={`/students/${c.studentId}`}>
+                    {c.studentName}
+                  </Link>
                   {c.className && <span className="text-muted-foreground"> · {c.className}</span>}
                 </CardTitle>
                 {c.grades?.sessionAverage != null && (
