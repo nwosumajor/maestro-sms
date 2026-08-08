@@ -23,6 +23,8 @@ import { IntegrityController } from "./integrity.controller";
 import { IntegrityService } from "./integrity.service";
 import { IntegrityProcessor } from "./integrity.processor";
 import { IntegrityReportController } from "./integrity-report.controller";
+import { ExemptionService } from "./exemption.service";
+import { ExemptionController } from "./exemption.controller";
 import { IntegrityReportService } from "./integrity-report.service";
 import { AssessmentTakeController } from "./assessment-take.controller";
 import { AssessmentListController } from "./assessment-list.controller";
@@ -45,11 +47,11 @@ import { IntegrityRetentionController } from "./retention/integrity-retention.co
     IntegrityReportController,
     AssessmentTakeController,
     AssessmentListController,
-    IntegrityRetentionController,
-  ],
+    IntegrityRetentionController, ExemptionController,],
   providers: [
     IntegrityService,
     IntegrityReportService,
+    ExemptionService,
     AssessmentListService,
     IntegrityProcessor,
     // Submission file answers reuse the Document Vault's pluggable storage.
