@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
+import { LoadFailure } from "@/components/ui/load-failure";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -107,6 +108,14 @@ export default async function HrPage() {
         )}
 
         <OrgChart nodes={org ?? []} />
+        {/* Both of these are MAKER-CHECKER queues: a salary change and a leave
+            request each wait on a second person. Rendering a failed read as an
+            empty queue is how a request sits unapproved for a month. */}
+        {changes === null && (
+          <LoadFailure what="Salary change requests">
+            Requests awaiting a second approver are not shown.
+          </LoadFailure>
+        )}
         <SalaryChanges
           employees={employees ?? []}
           changes={changes ?? []}
@@ -115,6 +124,11 @@ export default async function HrPage() {
           userId={user.id}
         />
 
+        {canLeaveManage && leaveRequests === null && (
+          <LoadFailure what="Leave requests">
+            Staff waiting on a leave decision would not appear below.
+          </LoadFailure>
+        )}
         {canLeaveManage && <LeaveAdmin types={leaveTypes ?? []} requests={leaveRequests ?? []} coverage={coverage ?? []} />}
       </div>
     </AppShell>

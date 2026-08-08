@@ -21,10 +21,15 @@ export default async function TournamentPage({ params }: { params: { id: string 
   // the AppShell nav uses. Without this the nav merely HID the link: all 18
   // pages stayed reachable by URL and fetched anyway, so the 14 roles that
   // hold no game permission generated ~200 refused API calls per pass.
+  // One gate. The same condition was checked twice with two different
+  // destinations; the second was unreachable, so "/games" was never where
+  // anyone landed. Every other page in this section sends them to /dashboard.
   if (!hasPermission(user.permissions, "game.leaderboard.read")) redirect("/dashboard");
-  if (!hasPermission(user.permissions, "game.leaderboard.read")) redirect("/games");
 
   const t = await apiGet<Serialized<RaceTournamentDto>>(`/race-tournaments/${params.id}`);
+  // notFound() rather than a rendered message: apiGet returns null for BOTH a
+  // missing tournament and one in another tenant, and 404 is the answer to both
+  // (never reveal that it exists). Matches the sibling play screens.
   if (!t) notFound();
 
   // Class names for the per-class boards. Best-effort: a missing name renders as

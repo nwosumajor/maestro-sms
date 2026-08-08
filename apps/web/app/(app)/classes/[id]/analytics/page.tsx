@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { hasPermission } from "@/lib/permissions";
 import { AppShell } from "@/components/shell/AppShell";
+import { LoadFailure } from "@/components/ui/load-failure";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { LmsAnalytics } from "@/components/lms/LmsAnalytics";
 import { XapiActivity } from "@/components/lms/XapiActivity";
@@ -48,7 +49,13 @@ export default async function ClassAnalyticsPage({ params }: { params: { id: str
         ) : (
           <>
             <LmsAnalytics data={data} />
-            <XapiActivity statements={statements ?? []} />
+            {statements === null ? (
+              <LoadFailure what="Recent activity">
+                An empty feed here would read as &ldquo;nobody has engaged with this content&rdquo;.
+              </LoadFailure>
+            ) : (
+              <XapiActivity statements={statements} />
+            )}
           </>
         )}
       </div>

@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
+import { LoadFailure } from "@/components/ui/load-failure";
 import { RecruitmentManager } from "@/components/hr/RecruitmentManager";
 import { PageHeader } from "@/components/shell/PageHeader";
 
@@ -23,7 +24,14 @@ export default async function RecruitmentPage() {
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="hr" permissions={user.permissions}>
       <div className="space-y-6">
         <PageHeader eyebrow={<><Link href="/hr" className="text-sm text-muted-foreground hover:underline">← Back to HR</Link></>} title={<>Recruitment</>} subtitle={<>Job requisitions and the applicant pipeline. Hiring an applicant provisions a staff account.</>} />
-        <RecruitmentManager requisitions={requisitions ?? []} applicants={applicants ?? []} />
+        {requisitions === null || applicants === null ? (
+          <LoadFailure what="Recruitment">
+            Open vacancies and the applicants in the pipeline are unknown right now — people waiting on a
+            decision would not appear here.
+          </LoadFailure>
+        ) : (
+          <RecruitmentManager requisitions={requisitions} applicants={applicants} />
+        )}
       </div>
     </AppShell>
   );

@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
+import { LoadFailure } from "@/components/ui/load-failure";
 import { StaffLifecyclePanel } from "@/components/hr/StaffLifecyclePanel";
 import { ReviewsPanel } from "@/components/hr/ReviewsPanel";
 import { CompensationPanel } from "@/components/hr/CompensationPanel";
@@ -40,10 +41,23 @@ export default async function StaffDetailPage({ params }: { params: { userId: st
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="hr" permissions={user.permissions}>
       <div className="space-y-6">
         <PageHeader eyebrow={<><Link href="/hr" className="text-sm text-muted-foreground hover:underline">← Back to HR</Link></>} title={<>{name}</>} subtitle={<>Onboarding, compliance documents and training for this staff member.</>} />
+        {/* Employment changes and exits are maker-checker, and a disciplinary
+            case file is a record someone relies on being complete. An empty
+            panel from a failed read reads as "nothing on file". */}
+        {canWrite && (changes === null || exits === null) && (
+          <LoadFailure what="This staff member's employment history">
+            Confirmations, promotions or an exit awaiting a second approver would not be shown.
+          </LoadFailure>
+        )}
         {canWrite && <EmploymentLifecycle userId={userId} employee={employee} initial={changes ?? []} canApprove={canApprove} />}
         {canWrite && <CompensationPanel userId={userId} initial={components ?? []} />}
         {canWrite && <ExitPanel userId={userId} initial={exits ?? []} canApprove={canApprove} />}
         <StaffLifecyclePanel userId={userId} checklists={checklists ?? []} documents={documents ?? []} training={training ?? []} />
+        {(appraisals === null || cases === null) && (
+          <LoadFailure what="Appraisals and disciplinary cases">
+            Treat the panel below as incomplete — an open case may exist that is not listed.
+          </LoadFailure>
+        )}
         <ReviewsPanel userId={userId} appraisals={appraisals ?? []} cases={cases ?? []} canAppraise={canAppraise} canDiscipline={canDiscipline} />
       </div>
     </AppShell>

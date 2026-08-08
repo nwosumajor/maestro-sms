@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
+import { LoadFailure } from "@/components/ui/load-failure";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
 import { ContentManager } from "@/components/lms/ContentManager";
@@ -78,6 +79,13 @@ export default async function ClassContentPage({
 
         {/* The plan for the term, above the items. "What is this term meant to
             cover, and where are we" is the question this page could not answer. */}
+        {/* Without this the whole term plan just VANISHES when the subject list
+            fails to load, which reads as "this class has no subjects". */}
+        {currentTerm && offerings === null && (
+          <LoadFailure what="This class&rsquo;s subjects">
+            The term plan below is missing because the subject list could not be read.
+          </LoadFailure>
+        )}
         {currentTerm && (offerings ?? []).length > 0 && (
           <div className="space-y-3">
             {(offerings ?? []).map((o) => (

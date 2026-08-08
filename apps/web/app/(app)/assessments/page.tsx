@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
+import { LoadFailure } from "@/components/ui/load-failure";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -32,6 +33,7 @@ export default async function AssessmentsPage({
     apiGet<{ id: string; name: string }[]>("/classes/mine"),
   ]);
   const assessments = assessmentsData ?? [];
+  const assessmentsUnavailable = assessmentsData === null;
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="assessments" permissions={user.permissions}>
@@ -63,7 +65,11 @@ export default async function AssessmentsPage({
 
         {canWrite && <CreateAssessment classes={classes ?? []} />}
 
-        {assessments.length === 0 ? (
+        {assessmentsUnavailable ? (
+          <LoadFailure what="Assessments">
+            A pupil with work due would still have it due; this page just cannot see it right now.
+          </LoadFailure>
+        ) : assessments.length === 0 ? (
           <Alert variant="info">
             <AlertTitle>No assessments</AlertTitle>
             <AlertDescription>Nothing here yet for your account.</AlertDescription>

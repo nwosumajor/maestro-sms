@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
+import { LoadFailure } from "@/components/ui/load-failure";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
 import { ContentDetail } from "@/components/lms/ContentDetail";
@@ -61,6 +62,11 @@ export default async function ContentDetailPage({ params }: { params: { id: stri
             >
               ← Back to class content
             </Link>
+            {forum === null && (
+              <LoadFailure what="Forum posts">
+                The discussion below will look empty — that is this page failing, not the class being quiet.
+              </LoadFailure>
+            )}
             <ContentDetail
               content={content}
               forum={forum ?? []}
