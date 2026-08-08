@@ -55,11 +55,20 @@ export class PrivacyService {
    * cross-tenant bulk export (which runs under the TARGET school's context). The
    * caller owns the audit log. Medical is decrypted with the passed `schoolId`'s
    * per-tenant key and only when `includeMedical` (so it's opt-in, never leaked).
+   *
+   * COMPLETENESS IS THE CALLER'S CHOICE, because the two callers are answering
+   * different questions. A data subject exercising RIGHT OF ACCESS is entitled
+   * to their data, not to the most recent page of it, so that path passes no
+   * limit. The operator's BULK dump collects up to 1,000 pupils in one response
+   * and is an administrative convenience rather than a statutory answer, so it
+   * bounds each pupil's notification history. Either way the bundle SAYS which
+   * it is in `coverage` — silent truncation on a right-of-access artifact is
+   * the actual defect, and it is invisible to whoever receives the file.
    */
   async collectStudentBundle(
     tx: TenantTx,
     studentId: string,
-    opts: { schoolId: string; includeMedical: boolean },
+    opts: { schoolId: string; includeMedical: boolean; notificationLimit?: number },
   ) {
     const student = await tx.user.findFirst({
       where: { id: studentId },
@@ -90,8 +99,30 @@ export class PrivacyService {
         where: { studentId },
         select: { id: true, type: true, title: true, status: true, createdAt: true },
       }),
-      tx.notification.findMany({ where: { recipientId: studentId }, orderBy: { createdAt: "desc" }, take: 100 }),
+      // Uncapped unless the CALLER asks for a bound. A hard `take: 100` here
+      // truncated a right-of-access bundle SILENTLY — the recipient had no way
+      // to tell a complete record from a clipped one — and it was the only
+      // capped section, while attendance beside it already ships every row (195
+      // for the busiest pupil in the demo school, ~2,300 over a career). One
+      // pupil's history is bounded by their career and further bounded by
+      // retention: READ notifications are purged on
+      // READ_NOTIFICATION_RETENTION_DAYS, so what survives is recent plus
+      // anything still unread.
+      tx.notification.findMany({
+        where: { recipientId: studentId },
+        orderBy: { createdAt: "desc" },
+        ...(opts.notificationLimit ? { take: opts.notificationLimit } : {}),
+      }),
     ]);
+
+    // A limit that was REACHED means there may be more; a limit that was not
+    // reached means this is everything, so the bundle can still call itself
+    // complete. Saying "possibly truncated" when nothing was cut would train a
+    // reader to ignore the flag.
+    const truncated = opts.notificationLimit !== undefined && notifications.length === opts.notificationLimit;
+    const completenessNote = truncated
+      ? `Notification history was limited to the ${opts.notificationLimit} most recent entries for this bulk export. Run the per-pupil data export for a complete record. Every other section is complete.`
+      : "All sections are complete and untruncated.";
 
     return {
       student,
@@ -103,6 +134,20 @@ export class PrivacyService {
       invoices,
       documents,
       notifications,
+      // What this bundle does and does NOT contain, stated IN the artifact. A
+      // recipient cannot otherwise tell whether "medical": "(not included)"
+      // means the pupil has no record or that the exporter could not read one.
+      coverage: {
+        complete: !truncated,
+        // The PERMISSION, not whether a row happened to exist — otherwise a
+        // pupil with no medical record is indistinguishable from one whose
+        // record the exporter was not allowed to read. That is the same
+        // ambiguity this block exists to remove.
+        medicalIncluded: opts.includeMedical,
+        note: opts.includeMedical
+          ? completenessNote
+          : "Medical records are EXCLUDED from this export because the person who ran it does not hold student.medical.read — this is not a statement that the pupil has no medical record. Every other section is complete and untruncated.",
+      },
     };
   }
 

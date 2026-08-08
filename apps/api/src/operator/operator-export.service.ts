@@ -27,6 +27,10 @@ import { PrivacyService } from "../privacy/privacy.service";
 
 /** Hard cap on one export so a request can't build an unbounded response. */
 const MAX_STUDENTS = 1000;
+/** Per-pupil notification history in a BULK dump. The per-pupil NDPR export is
+ *  complete; this path multiplies by up to MAX_STUDENTS, so it bounds the one
+ *  section with no natural ceiling and declares it in each bundle's `coverage`. */
+const BULK_NOTIFICATION_LIMIT = 100;
 
 @Injectable()
 export class OperatorExportService {
@@ -71,7 +75,16 @@ export class OperatorExportService {
     const students: unknown[] = [];
     for (const id of ids) {
       const bundle = await this.db.runAsTenant({ schoolId, userId: p.userId }, (tx) =>
-        this.privacy.collectStudentBundle(tx, id, { schoolId, includeMedical }),
+        // This path collects up to MAX_STUDENTS pupils into ONE response, so it
+        // bounds each pupil's notification history rather than shipping every
+        // one a thousand times over. The per-pupil NDPR export passes no limit
+        // and is complete — and each bundle's `coverage` block says which of the
+        // two it is, so a bulk dump can never be mistaken for a statutory answer.
+        this.privacy.collectStudentBundle(tx, id, {
+          schoolId,
+          includeMedical,
+          notificationLimit: BULK_NOTIFICATION_LIMIT,
+        }),
       );
       students.push(bundle);
     }

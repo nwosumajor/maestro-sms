@@ -8,10 +8,21 @@
 --
 -- This seeds ONE school with the volume a real secondary school accumulates:
 --   900 students, 60 staff, 30 classes
---   ~171,000 attendance records  (900 pupils x 190 school days)
---   ~48,600 grades               (900 x 9 subjects x 6 assessments)
---   5,400 invoices + ~7,000 payments
---   ~45,000 notifications, ~18,000 messages
+--   ~175,000 attendance records  (900 pupils x ~195 school days)
+--   5,400 invoices + line items + ~4,500 payments
+--   ~45,000 notifications
+--   900 SIS profiles + ~1,800 emergency contacts + ~150 medical records
+--
+-- NOT SEEDED, and named here because this header used to claim two of them:
+--   grades / submissions / assessments  — so the gradebook, report cards, term
+--                                         results and the grade analytics have
+--                                         still never been measured at volume
+--   messages                            — the messaging module likewise
+-- Adding those needs assessments and a term structure to hang them from; until
+-- someone does, treat any performance claim about those modules as unmeasured.
+-- An earlier version of this comment listed "~48,600 grades" and "~18,000
+-- messages" that no statement in the file ever wrote, which is worse than
+-- listing nothing: it retires the question.
 --
 -- Bulk SQL, not Prisma: 300k rows through an ORM takes hours and proves nothing
 -- extra. Runs as the SUPERUSER, so RLS is bypassed and schoolId is set
@@ -180,6 +191,72 @@ SELECT gen_random_uuid(), c.school_id, vs.id,
        CASE WHEN g % 3 = 0 THEN NULL ELSE now() END,
        now() - (g * INTERVAL '3 hours'), now()
 FROM cfg c, vol_student vs, generate_series(1, 50) g;
+
+-- --- SIS: the pupil RECORD behind every roster row --------------------------
+-- Without these the SIS pages were still being measured against an EMPTY table:
+-- 906 pupils and 5 profiles, so /students/[id], the contacts list and every
+-- profile-completion query seq-scanned nothing and returned in no time. The
+-- roster looked seeded; the records behind it were not.
+--
+-- `vol_student.n` is the deterministic per-pupil index the rest of this file
+-- already uses, so every derived value below is stable across re-runs.
+--
+-- profileStatus is spread across the real vocabulary rather than all-APPROVED,
+-- because the nudge sweep and the completion dashboard FILTER on it — a column
+-- with a single value cannot exercise its own index.
+INSERT INTO student_profile (id, "schoolId", "studentId", "admissionNumber", "dateOfBirth",
+                             gender, phone, email, "addressLine1", city, state, country,
+                             "profileStatus", "submittedAt", "createdAt", "updatedAt")
+SELECT gen_random_uuid(), c.school_id, vs.id,
+       'VOL/' || to_char(vs.n, 'FM0000'),
+       -- Secondary-school ages: a birth date 11-18 years back, spread by pupil.
+       (now() - (((11 * 365) + (vs.n * 7 % 2555)) * INTERVAL '1 day'))::date,
+       CASE WHEN vs.n % 2 = 0 THEN 'FEMALE' ELSE 'MALE' END,
+       '080' || lpad(vs.n::text, 8, '0'),
+       u.email,
+       (vs.n % 400)::text || ' Volume Street',
+       'Lagos', 'Lagos', 'NG',
+       CASE vs.n % 5
+         WHEN 0 THEN 'INCOMPLETE'
+         WHEN 1 THEN 'SUBMITTED'
+         WHEN 2 THEN 'CHANGES_REQUESTED'
+         ELSE 'APPROVED'
+       END,
+       CASE WHEN vs.n % 5 = 0 THEN NULL ELSE now() - INTERVAL '30 days' END,
+       now(), now()
+FROM cfg c, vol_student vs
+JOIN "user" u ON u.id = vs.id;
+
+-- Two contacts per pupil. The emergency-contact list is what a school opens in
+-- the situation it least wants to be slow, and priority ordering is the whole
+-- point of the table — one contact each would never exercise it.
+INSERT INTO emergency_contact (id, "schoolId", "profileId", name, relationship, phone, email,
+                               priority, "createdAt", "updatedAt")
+SELECT gen_random_uuid(), c.school_id, sp.id,
+       CASE WHEN p.n = 1 THEN 'Guardian of ' ELSE 'Second contact for ' END || u.name,
+       CASE WHEN p.n = 1 THEN 'parent' ELSE 'aunt' END,
+       '070' || lpad((vs.n * 10 + p.n)::text, 8, '0'),
+       NULL, p.n, now(), now()
+FROM cfg c, vol_student vs
+JOIN "user" u ON u.id = vs.id
+JOIN student_profile sp ON sp."studentId" = vs.id,
+     generate_series(1, 2) p(n);
+
+-- Medical records for a MINORITY (~1 in 6). Every read of these is decrypted
+-- and audit-logged, so giving every pupil one would overstate how often that
+-- path runs; giving none left it untested at volume.
+-- NOTE: seeded as PLAINTEXT. decryptField passes anything without the
+-- ciphertext prefix through untouched, so reads work — but this does NOT
+-- exercise the decrypt cost that real, app-written records carry.
+INSERT INTO medical_record (id, "schoolId", "profileId", "bloodGroup", allergies, conditions,
+                            "createdAt", "updatedAt")
+SELECT gen_random_uuid(), c.school_id, sp.id,
+       (ARRAY['O+','A+','B+','AB+','O-','A-'])[1 + (vs.n % 6)],
+       'Seeded volume allergy note', 'Seeded volume condition note',
+       now(), now()
+FROM cfg c, vol_student vs
+JOIN student_profile sp ON sp."studentId" = vs.id
+WHERE vs.n % 6 = 0;
 
 COMMIT;
 
