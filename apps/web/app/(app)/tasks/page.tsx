@@ -22,7 +22,20 @@ export default async function TasksPage() {
   const [taskPage, staffList, studentList] = await Promise.all([
     apiGet<PageDto<Serialized<TaskDto>>>("/tasks"),
     hasPermission(user.permissions, "directory.people.read") ? apiGet<Person[]>("/directory/people?kind=staff") : Promise.resolve([]),
-    canAssign ? apiGet<Person[]>("/students") : Promise.resolve([]),
+    // /students requires class.read, NOT task.assign — head_admin holds the
+    // latter and not the former, so this asked and was refused, and the student
+    // picker rendered empty with no explanation.
+    //
+    // Deliberately NOT solved by adding a `student` kind to /directory/people:
+    // that endpoint is open to every picker-holding role INCLUDING parents, and
+    // a flat list of pupil names is roster-level data on MINORS. /students is
+    // relationship-scoped (teacher -> their classes, parent -> their children)
+    // and that scoping is the point. Compare /discipline/file-targets, which is
+    // purpose-built and gated on the permission its own page uses — the shape to
+    // copy when a picker needs its own list.
+    canAssign && hasPermission(user.permissions, "class.read")
+      ? apiGet<Person[]>("/students")
+      : Promise.resolve([]),
   ]);
   const byName = (a: Person, b: Person) => a.name.localeCompare(b.name);
   const staff = [...(staffList ?? [])].sort(byName);
