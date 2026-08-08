@@ -27,14 +27,19 @@ function makeService() {
     classTeacher: { findMany: classTeacherFindMany, findFirst: jest.fn().mockResolvedValue(null) },
     enrollment: { findMany: enrollmentFindMany },
     class: { findMany: jest.fn().mockResolvedValue([{ id: "c-1", name: "JSS2A" }]) },
-    submission: { findMany: jest.fn().mockResolvedValue([]) },
+    // The count is a grouped COUNT and the caller's own status a targeted read —
+    // the list must never hydrate every submission just to add them up.
+    submission: {
+      findMany: jest.fn().mockResolvedValue([]),
+      groupBy: jest.fn().mockResolvedValue([{ assessmentId: "a-1", _count: { _all: 27 } }]),
+    },
   } as unknown as TenantTx;
   const db = {
     runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
     runAsTenantReadOnly: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
   };
   const service = new AssessmentListService(db as never, { record: jest.fn() } as never);
-  return { service, assessmentFindMany, classTeacherFindMany };
+  return { service, assessmentFindMany, classTeacherFindMany, tx };
 }
 
 const principal = (roles: string[]): Principal => ({
@@ -88,5 +93,29 @@ describe("AssessmentListService scoping", () => {
     // top of the scope rather than replacing it.
     expect(where.AND[0]).toHaveProperty("OR");
     expect(where.AND[1]).toEqual({ classId: "c-9" });
+  });
+});
+
+// ===========================================================================
+// The counts come from Postgres, not from Node
+// ===========================================================================
+// This used to load EVERY submission for every listed assessment — at LIST_CAP
+// (500) assessments in a 30-pupil class, 15,000 rows hydrated to yield 500
+// numbers, on the page a teacher opens to find today's work.
+describe("AssessmentListService submission counts", () => {
+  it("groups the count in SQL and asks only for the caller's own submissions", async () => {
+    const { service, tx } = makeService();
+    const out = await service.listAssessments(principal(["school_admin"]));
+    expect(out[0].submissionCount).toBe(27);
+
+    const groupBy = tx.submission.groupBy as jest.Mock;
+    expect(groupBy).toHaveBeenCalledTimes(1);
+    expect(groupBy.mock.calls[0][0]).toMatchObject({ by: ["assessmentId"], _count: { _all: true } });
+
+    // The only findMany against submissions is the caller's OWN — narrowed by
+    // studentId, never a whole-table read the service then filters in memory.
+    const findMany = tx.submission.findMany as jest.Mock;
+    expect(findMany).toHaveBeenCalledTimes(1);
+    expect(findMany.mock.calls[0][0].where.studentId).toBe("u-1");
   });
 });

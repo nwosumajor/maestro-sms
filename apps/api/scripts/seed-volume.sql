@@ -258,6 +258,127 @@ FROM cfg c, vol_student vs
 JOIN student_profile sp ON sp."studentId" = vs.id
 WHERE vs.n % 6 = 0;
 
+
+-- --- ACADEMICS: subjects, offerings, and a term of marks ---------------------
+-- The gradebook, the report card, term results and the grade-band analytics all
+-- read from here, and until now NONE of them had ever been measured against
+-- more than a single row. This is the part the header used to claim and never
+-- wrote.
+--
+-- Nine subjects per class is a realistic secondary-school load, and it is the
+-- multiplier that matters: every per-term read is pupils x subjects, so nine
+-- turns 900 pupils into 8,100 rows per term.
+CREATE TEMP TABLE vol_subject AS
+SELECT gen_random_uuid() AS id, name, 'VOL' || to_char(n, 'FM00') AS code, n
+FROM (VALUES
+  ('VOL Mathematics', 1), ('VOL English Language', 2), ('VOL Biology', 3),
+  ('VOL Chemistry', 4), ('VOL Physics', 5), ('VOL Geography', 6),
+  ('VOL Economics', 7), ('VOL Civic Education', 8), ('VOL Agricultural Science', 9)
+) AS t(name, n);
+
+INSERT INTO subject (id, "schoolId", name, code, "createdAt", "updatedAt")
+SELECT vsub.id, c.school_id, vsub.name, vsub.code, now(), now()
+FROM cfg c, vol_subject vsub;
+
+-- Every class offers every subject, taught by one of the 60 VOL teachers. This
+-- is what makes the timetable, the syllabus panel and subject scoping real.
+CREATE TEMP TABLE vol_teacher AS
+SELECT id, row_number() OVER (ORDER BY email) AS n FROM "user" WHERE email LIKE 'vol.t%@demo.school';
+
+INSERT INTO class_subject_teacher (id, "schoolId", "classId", "subjectId", "teacherId",
+                                   "lessonsPerWeek", "createdAt")
+SELECT gen_random_uuid(), c.school_id, vc.id, vsub.id, vt.id, 4, now()
+FROM cfg c, vol_class vc, vol_subject vsub
+JOIN vol_teacher vt ON vt.n = ((vsub.n - 1) % 60) + 1;
+
+-- --- subject results: 900 pupils x 9 subjects x 3 terms ---------------------
+-- PUBLISHED, because every read path that matters filters on it — the report
+-- card, the broadsheet and the class-position ranking all ignore DRAFT, so
+-- seeding DRAFT rows would leave those queries measuring nothing again.
+--
+-- Marks are derived from the pupil and subject index rather than random, so a
+-- re-run produces the same school and a regression in the weighting maths is
+-- visible as a changed number rather than noise. Exam is out of 60, midterm 20,
+-- assignment 10, class note 10 — the GRADE_COMPONENTS split in @sms/types.
+-- Terms that have already started, numbered oldest-first so marks can MOVE
+-- from one to the next. Without an ordinal every term got identical marks and
+-- the cumulative session report showed [70, 70, 70] — three terms that cannot
+-- disagree cannot exercise a session average, a progression, or a report card
+-- that claims a pupil improved.
+CREATE TEMP TABLE vol_term AS
+SELECT t.id, t."sessionId", row_number() OVER (ORDER BY t."startDate") AS n
+FROM term t
+JOIN academic_session sess ON sess.id = t."sessionId"
+WHERE sess."schoolId" = (SELECT school_id FROM cfg) AND t."startDate" <= current_date;
+
+INSERT INTO subject_result (id, "schoolId", "sessionId", "termId", "classId", "subjectId",
+                            "studentId", exam, midterm, assignment, "classNote", total, grade,
+                            status, "gradedById", "gradedAt", "updatedAt")
+SELECT gen_random_uuid(), c.school_id, sess.id, t.id, e."classId", vsub.id, vs.id,
+       ex.v, mid.v, asg.v, note.v,
+       ex.v + mid.v + asg.v + note.v,
+       CASE WHEN ex.v + mid.v + asg.v + note.v >= 70 THEN 'A'
+            WHEN ex.v + mid.v + asg.v + note.v >= 60 THEN 'B'
+            WHEN ex.v + mid.v + asg.v + note.v >= 50 THEN 'C'
+            WHEN ex.v + mid.v + asg.v + note.v >= 45 THEN 'D'
+            WHEN ex.v + mid.v + asg.v + note.v >= 40 THEN 'E'
+            ELSE 'F' END,
+       'PUBLISHED', c.teacher_id, now(), now()
+-- EVERY TERM THAT HAS ALREADY STARTED, not just the current one.
+--
+-- Seeding only the CURRENT term put the marks in a term with no attendance:
+-- the demo school's current term begins after today, while the 5,820 seeded
+-- registers land in the three terms before it. So a report card at volume had
+-- marks OR attendance and never both, and its attendance section went on being
+-- measured against nothing. Anchoring to "terms that have started" puts both
+-- halves in the same place, and gives the cumulative session report more than
+-- one term to add up.
+FROM cfg c
+CROSS JOIN vol_student vs
+CROSS JOIN vol_subject vsub
+CROSS JOIN vol_term t
+JOIN enrollment e ON e."studentId" = vs.id
+JOIN academic_session sess ON sess.id = t."sessionId"
+-- Marks derived from (pupil, subject, TERM) rather than random: a re-run
+-- rebuilds the same school, so a regression in the weighting maths shows up as
+-- a changed number instead of noise. The term ordinal nudges each component,
+-- so a pupil's totals move across the year the way a real one's do. Exam is out
+-- of 60, midterm 20, assignment 10, class note 10 — the GRADE_COMPONENTS split.
+CROSS JOIN LATERAL (SELECT LEAST(60, 25 + ((vs.n * 7 + vsub.n * 13 + t.n * 5) % 36))::float8 AS v) ex
+CROSS JOIN LATERAL (SELECT LEAST(20, 8 + ((vs.n * 3 + vsub.n * 5 + t.n * 3) % 13))::float8 AS v) mid
+CROSS JOIN LATERAL (SELECT LEAST(10, 4 + ((vs.n + vsub.n + t.n) % 7))::float8 AS v) asg
+CROSS JOIN LATERAL (SELECT LEAST(10, 4 + ((vs.n * 2 + vsub.n + t.n * 2) % 7))::float8 AS v) note;
+
+-- --- assessments + submissions + grades -------------------------------------
+-- The OTHER grade path: Grade hangs off a Submission, and it is what the
+-- analytics grade-band aggregate and the assessment list read. Six assessments
+-- per class per term is what a real subject teacher sets.
+INSERT INTO assessment (id, "schoolId", title, description, "classId", "termId",
+                        "createdById", "createdAt", "updatedAt")
+SELECT gen_random_uuid(), c.school_id,
+       'VOL ' || vsub.name || ' test ' || a.n, 'Seeded volume assessment',
+       vc.id, t.id, c.teacher_id, now() - (a.n * INTERVAL '10 days'), now()
+FROM cfg c, vol_class vc, vol_subject vsub, generate_series(1, 2) a(n)
+JOIN academic_session sess ON sess."schoolId" = (SELECT school_id FROM cfg) AND sess."isCurrent"
+JOIN term t ON t."sessionId" = sess.id AND t."isCurrent";
+
+INSERT INTO submission (id, "schoolId", "assessmentId", "studentId", status, "submittedAt",
+                        "createdAt", "updatedAt")
+SELECT gen_random_uuid(), c.school_id, a.id, e."studentId", 'SUBMITTED'::"SubmissionStatus",
+       a."createdAt" + INTERVAL '3 days', a."createdAt", now()
+FROM cfg c
+JOIN assessment a ON a."schoolId" = c.school_id AND a.title LIKE 'VOL %'
+JOIN enrollment e ON e."classId" = a."classId";
+
+INSERT INTO grade (id, "schoolId", "submissionId", score, "maxScore", status,
+                   "gradedById", "gradedAt", "updatedAt")
+SELECT gen_random_uuid(), c.school_id, sub.id,
+       (35 + (('x' || substr(md5(sub.id::text), 1, 6))::bit(24)::bigint % 66))::float8,
+       100, 'PUBLISHED', c.teacher_id, now(), now()
+FROM cfg c
+JOIN submission sub ON sub."schoolId" = c.school_id
+JOIN assessment a ON a.id = sub."assessmentId" AND a.title LIKE 'VOL %';
+
 COMMIT;
 
 ANALYZE;
