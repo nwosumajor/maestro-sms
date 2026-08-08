@@ -279,9 +279,19 @@ export class FeeOpsService {
 
   /** Add the configured flat late fee ONCE to each invoice overdue past grace.
    *  Idempotent: the marker line item is the "already applied" flag. */
-  async lateFeeSweep(): Promise<{ schools: number; feesApplied: number }> {
+  async lateFeeSweep(): Promise<{ schools: number; feesApplied: number; skipped?: boolean }> {
     const client = this.privileged.client;
-    if (!client) return { schools: 0, feesApplied: 0 };
+    // SAY SO. This returned zeros in silence, and the processor then logged
+    // "Late-fee sweep done: schools=0 applied=0" — which reads as a quiet night
+    // rather than a sweep that never ran. With no privileged URL configured,
+    // late fees are never applied on ANY school, for ever, and the nightly log
+    // reports success. Every sibling sweep (dunning, reconciliation,
+    // mobile-money recovery, retention, audit partitions) warns here; these two
+    // were the exception.
+    if (!client) {
+      this.logger.warn("Late-fee sweep requested but no privileged DB — skipping. No late fee was applied to any school.");
+      return { schools: 0, feesApplied: 0, skipped: true };
+    }
     const schools = await client.school.findMany({
       where: { isPlatform: false, lateFeeFlatMinor: { gt: 0 } },
       select: { id: true, lateFeeFlatMinor: true, lateFeeGraceDays: true },
@@ -361,9 +371,12 @@ export class FeeOpsService {
 
   /** Weekly overdue-reminder sweep: the staff-triggered reminder, run for every
    *  school under a SYSTEM principal (overdue-only — never nags early). */
-  async reminderSweep(): Promise<{ schools: number; reminded: number }> {
+  async reminderSweep(): Promise<{ schools: number; reminded: number; skipped?: boolean }> {
     const client = this.privileged.client;
-    if (!client) return { schools: 0, reminded: 0 };
+    if (!client) {
+      this.logger.warn("Overdue-reminder sweep requested but no privileged DB — skipping. No guardian was reminded.");
+      return { schools: 0, reminded: 0, skipped: true };
+    }
     const schools = await client.school.findMany({ where: { isPlatform: false }, select: { id: true } });
     let reminded = 0;
     for (const school of schools) {

@@ -32,8 +32,15 @@ async function main(): Promise<void> {
   });
   try {
     const service = app.get(IntegrityRetentionService);
-    const results = await service.purgeAllSchools("SCHEDULED");
-    logger.log(`Retention CLI done: ${results.length} schools swept.`);
+    const result = await service.purgeAllSchools("SCHEDULED");
+    // A scheduled one-shot task's last line is the only thing anyone sees. Say
+    // whether it swept nothing because there was nothing, or because it was
+    // never configured to sweep at all.
+    logger.log(
+      result.skipped
+        ? "Retention CLI: SKIPPED — no DATABASE_RETENTION_URL / DATABASE_MIGRATE_URL configured, nothing was purged."
+        : `Retention CLI done: ${result.schools.length} schools swept, ${result.purged} rows purged.`,
+    );
   } finally {
     await app.close();
   }
