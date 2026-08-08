@@ -44,11 +44,22 @@ import {
 // student picker previously used a narrower {school_admin, super_admin} set,
 // which left a PRINCIPAL's /students page empty (they fell to the
 // relationship path: classes-they-teach + their-children = none).
+//
+// junior_admin is the operational records tier (CLAUDE.md) and holds class.read,
+// class.write, enrollment.read/write, guardian.write, student.import and
+// parent.import. Without it here every one of those was a DEAD GRANT: the guard
+// let the call through and the row filter returned nothing, so /students,
+// /classes and every student picker rendered empty for the tier whose whole job
+// is records. SIS, Documents, Attendance, Timetable, Analytics and Search had
+// already been widened for it one at a time; this set and Fees were the two
+// that were missed. READS only — every write is separately permission-gated,
+// so this grants no authority junior_admin did not already hold.
 const ROSTER_WIDE_ROLES = new Set([
   "school_admin",
   "principal",
   "hr_manager",
   "hr_clerk",
+  "junior_admin",
 ]);
 
 @Injectable()

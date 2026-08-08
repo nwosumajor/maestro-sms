@@ -21,7 +21,15 @@ import {
   type TenantTx,
 } from "./integrity.foundation";
 
-const SCHOOL_WIDE_ROLES = new Set(["school_admin"]);
+// Aligned with the two sibling services in this module — IntegrityReportService
+// and ExemptionService both read {school_admin, principal}. Assessment listing
+// alone stopped at school_admin, so a PRINCIPAL could open the integrity report
+// for a submission and grant a pupil an exemption on it, yet /assessments was
+// empty for them: the module let them judge an assessment they could not find.
+// junior_admin holds assessment.read and integrity.report.read on the same
+// footing (CLAUDE.md's records tier), and is roster-wide everywhere else.
+// Listing a minor's submissions stays audit-logged for all of them (GR#5).
+const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal", "junior_admin"]);
 
 @Injectable()
 export class AssessmentListService {

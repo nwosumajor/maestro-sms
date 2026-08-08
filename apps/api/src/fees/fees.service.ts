@@ -39,11 +39,22 @@ const INVOICE_PAGE_SIZE = 50;
 /** Ceiling a caller can request per page. */
 const INVOICE_PAGE_MAX = 200;
 
+// junior_admin does "fee RECORDING" for the whole school (CLAUDE.md) and holds
+// fee.read + fee.manage. Without it here both were dead: /invoices returned zero
+// rows, assertCanAccessStudent 404'd every invoice, and /fees/reports answered
+// scope:"none" (which bounces the page back to /fees). A tier that may record a
+// payment could not open a single invoice to record one against.
+//
+// SECURITY: this set is a ROW SCOPE, never an authority. Approving a payment or
+// a refund needs fee.approve, which junior_admin deliberately does NOT hold — so
+// the maker-checker split survives untouched: junior_admin records, and a
+// different person with fee.approve releases anything over the threshold.
 const BILLING_WIDE_ROLES = new Set([
   "accountant",
   "school_admin",
   "principal",
   "board",
+  "junior_admin",
 ]);
 
 export interface FeeItemInput {
