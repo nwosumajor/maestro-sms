@@ -478,6 +478,11 @@ model PaymentChannelConfigRow {
   enabled   Json
   /// Free-text note the operator can leave for the next person.
   note      String?
+  /// Last health-check result per channel: { CHANNEL: { ok, at, detail } }.
+  /// Kept so the daily sweep can alert on a TRANSITION (working -> broken)
+  /// rather than repeating the same alarm every night, and so the operator
+  /// screen can show the last known truth without calling a gateway on render.
+  health    Json?
   updatedAt DateTime @updatedAt
 
   @@map("payment_channel_config")

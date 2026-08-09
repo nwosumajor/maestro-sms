@@ -2377,6 +2377,10 @@
       "kind": "ui",
       "note": "\"Test connection\" on the PaymentChannels card — calls the gateway to prove a key works"
     },
+    "POST /operator/payment-channels/health/run": {
+      "kind": "ui",
+      "note": "manual run of the daily payment-rail health check — PaymentChannels card"
+    },
     "POST /operator/platform-delegations": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"

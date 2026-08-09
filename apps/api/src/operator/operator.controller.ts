@@ -55,6 +55,7 @@ import { GrowthService } from "../billing/growth.service";
 import { GroupService } from "../group/group.service";
 import { OperatorCreditsService } from "./operator-credits.service";
 import { PaymentChannelService } from "../payments/payment-channel.service";
+import { PaymentHealthService } from "../payments/payment-health.service";
 
 /** Delegation input. `days` is bounded here AND in the service — the boundary
  *  rejects nonsense, the service owns the rule. */
@@ -239,6 +240,7 @@ export class OperatorController {
     private readonly pricing: PlanPricingService,
     private readonly platformFees: PlatformFeeService,
     private readonly channels: PaymentChannelService,
+    private readonly paymentHealth: PaymentHealthService,
     private readonly growth: GrowthService,
     private readonly groups: GroupService,
     private readonly credits: OperatorCreditsService,
@@ -633,6 +635,9 @@ export class OperatorController {
       stranded: await this.channels.strandedBy(enabled),
       // Switched ON is not the same as USABLE — see ChannelReadiness.
       readiness: this.channels.readiness(enabled),
+      // Last known result of the daily check. Read from storage, never by
+      // calling a gateway to render a page.
+      health: await this.paymentHealth.lastKnown(),
     };
   }
 
@@ -654,6 +659,13 @@ export class OperatorController {
     // The zod enum already narrowed these to real channels; normaliseChannels
     // in the service is the authoritative re-check.
     return this.channels.update(p, { ...body, enabled: body.enabled as PaymentChannel[] });
+  }
+
+  /** Run the daily health check now (it also runs on a schedule). */
+  @Post("payment-channels/health/run")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_PRICING_MANAGE)
+  runPaymentHealth() {
+    return this.paymentHealth.run("MANUAL");
   }
 
   /**

@@ -11,6 +11,7 @@ type Channel = string;
 type Labels = Record<Channel, { name: string; comingSoon: string }>;
 type Stranded = { id: string; name: string; currency: string };
 type Readiness = { channel: string; enabled: boolean; configured: boolean; missing: string | null };
+type Health = Record<string, { ok: boolean; at: string; detail: string }>;
 
 /**
  * The platform's payment switchboard.
@@ -26,12 +27,16 @@ export function PaymentChannels({
   labels,
   initialStranded,
   readiness,
+  health,
 }: {
   initialEnabled: Channel[];
   all: Channel[];
   labels: Labels;
   initialStranded: Stranded[];
   readiness: Readiness[];
+  /** Last result of the DAILY check — the only line here that reflects reality
+   *  over time rather than configuration at this instant. */
+  health: Health;
 }) {
   const [enabled, setEnabled] = React.useState<Channel[]>(initialEnabled);
   const [stranded, setStranded] = React.useState<Stranded[]>(initialStranded);
@@ -78,6 +83,13 @@ export function PaymentChannels({
     () => Object.fromEntries(readiness.map((r) => [r.channel, r])) as Record<string, Readiness>,
     [readiness],
   );
+  const [checking, setChecking] = React.useState(false);
+  const runHealth = async () => {
+    setChecking(true);
+    const res = await sendSms("POST", "operator/payment-channels/health/run");
+    setChecking(false);
+    setMsg(res.ok ? "Health check run. Reload to see the updated status." : res.error);
+  };
   const dirty = JSON.stringify([...enabled].sort()) !== JSON.stringify([...initialEnabled].sort());
 
   return (
@@ -111,6 +123,11 @@ export function PaymentChannels({
                     >
                       {(tested[c] as { ok: boolean }).ok ? "✓ " : "✗ "}
                       {(tested[c] as { detail: string }).detail}
+                    </span>
+                  )}
+                  {!tested[c] && on && health?.[c] && (
+                    <span className={`mt-0.5 block text-xs ${health[c].ok ? "text-muted-foreground" : "text-destructive"}`}>
+                      {health[c].ok ? "Last daily check: healthy" : `Last daily check FAILED — ${health[c].detail}`}
                     </span>
                   )}
                   <span className="mt-0.5 block text-xs text-muted-foreground">
@@ -167,6 +184,11 @@ export function PaymentChannels({
         <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" disabled={busy || !dirty || enabled.length === 0} onClick={() => save(false)}>
             {busy ? "Saving…" : "Save channels"}
+          </Button>
+          {/* The same check that runs daily. Here so the owner can confirm a fix
+              immediately rather than waiting for tomorrow's sweep. */}
+          <Button size="sm" variant="outline" disabled={checking} onClick={() => void runHealth()}>
+            {checking ? "Checking…" : "Run health check now"}
           </Button>
           {needsForce && (
             <Button size="sm" variant="destructive" disabled={busy} onClick={() => save(true)}>
