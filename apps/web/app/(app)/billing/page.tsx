@@ -185,6 +185,7 @@ export default async function BillingPage() {
                           <th className="py-2 pr-4 font-medium">Amount</th>
                           <th className="py-2 pr-4 font-medium">Status</th>
                           <th className="py-2 pr-4 font-medium">Period end</th>
+                          <th className="py-2 pr-4 font-medium">Receipt</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -204,6 +205,20 @@ export default async function BillingPage() {
                               </Badge>
                             </td>
                             <td className="py-2 pr-4">{pmt.periodEnd ? shortDate(pmt.periodEnd) : "—"}</td>
+                            <td className="py-2 pr-4">
+                              {/* Only a PAID row has a receipt — there is no such
+                                  thing as a receipt for money never received. */}
+                              {pmt.status === "PAID" ? (
+                                <a
+                                  className="underline underline-offset-2 hover:no-underline"
+                                  href={`/api/sms/billing/payments/${pmt.id}/receipt.pdf`}
+                                >
+                                  Receipt
+                                </a>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
