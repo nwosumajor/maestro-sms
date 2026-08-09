@@ -14,7 +14,7 @@
 // schoolId (mirrors the Fees online-payment webhook). Mutations are audit-logged.
 // =============================================================================
 
-import { BadRequestException, Inject, Injectable, Logger, ServiceUnavailableException, Optional} from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException, Optional} from "@nestjs/common";
 import {
   BILLING_CYCLES,
   CURRENCIES,
@@ -26,6 +26,7 @@ import {
   SUBSCRIPTION_PAYMENT_KINDS,
   SUBSCRIPTION_STATUS,
   computeSubscriptionPriceMinor,
+  formatMoney,
   computeTrueUpMinor,
   defaultCurrencyFor,
   isBillingCycle,
@@ -60,6 +61,7 @@ import { BillingDunningService, type DunningResult } from "./billing-dunning.ser
 import { PlanPricingService } from "./plan-pricing.service";
 import { ReferralService, type ReferralGrant } from "./referral.service";
 import { encryptField } from "../foundation/field-crypto";
+import PDFDocument from "pdfkit";
 import { GrowthService } from "./growth.service";
 import { PaymentChannelService } from "../payments/payment-channel.service";
 
@@ -121,6 +123,80 @@ export class BillingService {
     } catch (e) {
       this.logger.warn(`could not void subscription intent ${paymentId}: ${(e as Error).message}`);
     }
+  }
+
+  /**
+   * A downloadable receipt for a subscription payment the school made.
+   *
+   * Parent fee payments have produced numbered receipt PDFs for a long time.
+   * The school's own purchase — the larger transaction of the two, and the one
+   * a bursar has to file against a budget — produced only an in-app
+   * notification whose body said "this message is your payment receipt". That
+   * is not a document anybody can attach to an expense claim.
+   *
+   * PAID rows only. There is no such thing as a receipt for money that was
+   * never received, and issuing one for a PENDING or ABANDONED intent would
+   * hand a school proof of a payment the platform never took.
+   *
+   * 404 for anything else, never 403 — the same posture as the fees receipt.
+   */
+  async receiptPdf(p: Principal, paymentId: string): Promise<{ buffer: Buffer; filename: string }> {
+    const data = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const pay = await tx.platformSubscriptionPayment.findFirst({
+        where: { id: paymentId, status: "PAID" },
+      });
+      if (!pay) throw new NotFoundException("Payment not found");
+      const school = await tx.school.findFirst({ where: { id: p.schoolId }, select: { name: true } });
+      await this.audit.record(
+        {
+          actorId: p.userId,
+          action: "billing.receipt.download",
+          entity: "platform_subscription_payment",
+          entityId: paymentId,
+          schoolId: p.schoolId,
+        },
+        tx,
+      );
+      return { pay, schoolName: school?.name ?? "" };
+    });
+
+    const { pay } = data;
+    const issuedAt = pay.paidAt ?? pay.createdAt;
+    const receiptNo = `SUB-${issuedAt.toISOString().slice(0, 10).replace(/-/g, "")}-${paymentId.slice(0, 8).toUpperCase()}`;
+    // formatMoney, never minor/100 — a zero-decimal currency prints at a
+    // hundredth of its value under a naive divide, on the one page a payer reads.
+    const amount = formatMoney(pay.amountMinor, pay.currency);
+
+    const buffer = await new Promise<Buffer>((resolve, reject) => {
+      const doc = new PDFDocument({ size: "A5", margin: 40 });
+      const chunks: Buffer[] = [];
+      doc.on("data", (c: Buffer) => chunks.push(c));
+      doc.on("end", () => resolve(Buffer.concat(chunks)));
+      doc.on("error", reject);
+      doc.fontSize(16).text("MAESTRO-SMS", { align: "center" });
+      doc.moveDown(0.3).fontSize(12).text("SUBSCRIPTION RECEIPT", { align: "center" });
+      doc.moveDown();
+      doc.fontSize(10);
+      doc.text(`Receipt no: ${receiptNo}`);
+      doc.text(`Date: ${issuedAt.toISOString().slice(0, 10)}`);
+      doc.text(`School: ${data.schoolName}`);
+      doc.moveDown();
+      doc.text(`Plan: ${pay.plan}`);
+      doc.text(`Billing cycle: ${pay.billingCycle}`);
+      doc.text(`Seats billed: ${pay.seats}`);
+      if (pay.periodStart && pay.periodEnd) {
+        doc.text(
+          `Period: ${pay.periodStart.toISOString().slice(0, 10)} to ${pay.periodEnd.toISOString().slice(0, 10)}`,
+        );
+      }
+      doc.moveDown();
+      doc.fontSize(12).text(`Amount paid: ${amount}`);
+      doc.fontSize(10).text(`Gateway reference: ${pay.reference}`);
+      doc.moveDown(2).fontSize(8).fillColor("#666")
+        .text("Computer-generated receipt — valid without signature.", { align: "center" });
+      doc.end();
+    });
+    return { buffer, filename: `${receiptNo}.pdf` };
   }
 
   private ctx(p: Principal): TenantContext {
@@ -232,7 +308,7 @@ export class BillingService {
 
     const billableSeats = Math.max(1, activeStudents);
     // Quote with the operator-effective pricing so the screen matches checkout —
-    // one quote per (tier × cycle × ALLOWED currency); ENTERPRISE is USD-only.
+    // one quote per (tier × cycle × ALLOWED currency).
     const pricing = await this.planPricing.effectiveAll();
     const quotes = SELLABLE_TIERS.flatMap((plan) =>
       planCurrencies(plan).flatMap((currency) =>
@@ -681,6 +757,38 @@ export class BillingService {
    * A mismatch marks the payment FAILED + audits it; the webhook still returns
    * ok so the gateway doesn't retry a permanently-wrong charge forever.
    */
+  /**
+   * RECOVER a subscription charge the gateway took but whose webhook never
+   * arrived. Called by the daily reconciliation sweep.
+   *
+   * The sweep already did this for parent fee invoices and filtered subscription
+   * charges straight out, so the platform's OWN revenue had no recovery path at
+   * all. The consequence was the worst ordering possible: the school is charged,
+   * the payment row stays PENDING, currentPeriodEnd is never extended — and then
+   * dunning flips them PAST_DUE and downgrades them to STANDARD. A school pays
+   * for ENTERPRISE and gets demoted for it, with nothing anywhere connecting the
+   * two.
+   *
+   * Idempotent by construction: it goes through the same applyPaidByReference
+   * the webhook uses, which refuses a row already PAID. So a recovered charge
+   * and a late webhook cannot both extend the period.
+   */
+  async recoverSubscriptionCharge(
+    schoolId: string,
+    reference: string,
+    paid: { amountMinor?: number; currency?: string },
+  ): Promise<boolean> {
+    const before = await this.db.runAsTenant({ schoolId, userId: SYSTEM_ACTOR_ID }, (tx) =>
+      tx.platformSubscriptionPayment.findFirst({ where: { reference }, select: { status: true } }),
+    );
+    if (!before || before.status === "PAID") return false;
+    await this.applyPaidByReference(schoolId, reference, paid);
+    const after = await this.db.runAsTenant({ schoolId, userId: SYSTEM_ACTOR_ID }, (tx) =>
+      tx.platformSubscriptionPayment.findFirst({ where: { reference }, select: { status: true } }),
+    );
+    return after?.status === "PAID";
+  }
+
   private async applyPaidByReference(
     schoolId: string | undefined,
     reference: string | undefined,

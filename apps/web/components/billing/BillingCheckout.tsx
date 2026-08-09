@@ -40,14 +40,24 @@ export function BillingCheckout({
   const cycles = React.useMemo(() => Array.from(new Set(quotes.map((q) => q.billingCycle))), [quotes]);
   const [plan, setPlan] = React.useState(plans[0] ?? "STANDARD");
   const [cycle, setCycle] = React.useState(cycles[1] ?? cycles[0] ?? "TERM");
-  // Currency choice follows the tier: ₦ (Paystack) or $ (Stripe); ENTERPRISE is
-  // USD-only, so its quotes carry only USD and the selector collapses to it.
+  // Every tier sells in both currencies. Which one is DEFAULTED to is decided
+  // below from what can actually be charged, not from the tier.
   const planCurrencies = React.useMemo(
     () => Array.from(new Set(quotes.filter((q) => q.plan === plan).map((q) => q.currency))),
     [quotes, plan],
   );
-  const [currency, setCurrency] = React.useState(planCurrencies[0] ?? "NGN");
-  const effectiveCurrency = planCurrencies.includes(currency) ? currency : planCurrencies[0] ?? "NGN";
+  // Default to a currency that can actually be CHARGED, not the tier's headline
+  // one. ENTERPRISE presents in dollars, but the live card rail may not settle
+  // USD — defaulting there put the top tier behind a disabled button and sold
+  // nothing. Falls back to the tier's own order when nothing is known.
+  const [currency, setCurrency] = React.useState<string | null>(null);
+  const chargeable = React.useMemo(
+    () => planCurrencies.filter((c) => currencyAvailability.find((a) => a.currency === c)?.available !== false),
+    [planCurrencies, currencyAvailability],
+  );
+  const preferred = chargeable[0] ?? planCurrencies[0] ?? "NGN";
+  const effectiveCurrency =
+    currency && (planCurrencies as string[]).includes(currency) ? (currency as typeof preferred) : preferred;
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
   const [promo, setPromo] = React.useState("");
@@ -100,8 +110,8 @@ export function BillingCheckout({
         <CardTitle>Upgrade or renew</CardTitle>
         <CardDescription>
           Per-seat pricing across {activeStudents} active student{activeStudents === 1 ? "" : "s"}. Pay monthly,
-          per term (3 months — 5% off) or per year (9 months — 15% off), in naira or US dollars — Enterprise is
-          billed in dollars. Your plan activates automatically once the payment is confirmed.
+          per term (3 months — 5% off) or per year (9 months — 15% off). Every plan, including Enterprise, can
+          be paid in naira or US dollars. Your plan activates automatically once the payment is confirmed.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -138,12 +148,20 @@ export function BillingCheckout({
               id="bill-currency"
               className="h-9 rounded-md border border-input bg-background px-3 text-sm"
               value={effectiveCurrency}
-              onChange={(e) => setCurrency(e.target.value as typeof currency)}
+              onChange={(e) => setCurrency(e.target.value)}
               disabled={planCurrencies.length === 1}
             >
-              {planCurrencies.map((c) => (
-                <option key={c} value={c}>{c === "NGN" ? "₦ Naira" : "$ US Dollar"}</option>
-              ))}
+              {planCurrencies.map((c) => {
+                // Say WHY an option cannot be picked rather than hiding it —
+                // a school looking for dollars needs to know it is us, not them.
+                const off = currencyAvailability.find((a) => a.currency === c)?.available === false;
+                return (
+                  <option key={c} value={c}>
+                    {c === "NGN" ? "₦ Naira" : "$ US Dollar"}
+                    {off ? " — unavailable" : ""}
+                  </option>
+                );
+              })}
             </select>
           </div>
           <div className="space-y-1.5">

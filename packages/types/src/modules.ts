@@ -277,16 +277,36 @@ export const CURRENCY_SYMBOL: Record<Currency, string> = {
   EUR: "€",
 };
 
-/** Which currencies a tier may be quoted/sold in. ENTERPRISE is USD-ONLY — it
- *  targets international schools and is indicated in dollars EVERYWHERE
- *  (homepage, quotes, checkout, operator pricing). */
+/**
+ * Which currencies a tier may be quoted/sold in.
+ *
+ * EVERY tier is sellable in BOTH, ENTERPRISE included. It used to be USD-only
+ * on the reasoning that it targets international schools — but the platform's
+ * only live card rail is a Paystack account not enabled for USD, so USD-only
+ * meant ENTERPRISE could not be bought AT ALL. A Nigerian group on the top tier
+ * had no way to pay for it, which is a revenue gap created entirely by a
+ * display preference.
+ *
+ * The NGN price already existed (`PLAN_PRICING.ENTERPRISE`); only this gate
+ * withheld it. Whether a currency can actually be CHARGED today is a separate,
+ * live question answered by the payment switchboard + the gateway account's own
+ * settlement currencies — not by hard-coding a market here.
+ */
 export function planCurrencies(plan: Plan): Currency[] {
-  // Only what the platform can price AND settle today. The type permits more so a
-  // new market is a price list rather than a code change; offering a currency with
+  // Only what the platform ships PRICES for. The type permits more so a new
+  // market is a price list rather than a code change; offering a currency with
   // no price would produce a checkout that cannot complete.
-  return plan === PLANS.ENTERPRISE ? [CURRENCIES.USD] : [CURRENCIES.NGN, CURRENCIES.USD];
+  void plan;
+  return [CURRENCIES.NGN, CURRENCIES.USD];
 }
-/** The currency a tier is DISPLAYED in by default (₦ locally, $ for ENTERPRISE). */
+/**
+ * The currency a tier is DISPLAYED in by default.
+ *
+ * ENTERPRISE still PRESENTS in dollars — that is its market, and the marketing
+ * surfaces read this. It is a display preference only: the checkout offers both
+ * and defaults to whichever can actually be charged right now, so a dollar
+ * headline never blocks a naira sale.
+ */
 export function defaultCurrencyFor(plan: Plan): Currency {
   return plan === PLANS.ENTERPRISE ? CURRENCIES.USD : CURRENCIES.NGN;
 }
@@ -312,17 +332,15 @@ export type MultiCurrencyPlanPricing = Partial<Record<Currency, PlanPricing>>;
  * `plan_price` table); `PlanPricingService.effective()` merges those rows over
  * these constants, and everything that quotes or charges (billing overview,
  * checkout, the public landing page) reads the merged result.
- * NOTE: an ENTERPRISE NGN entry exists to keep the Record type total, but the
- * tier is never quoted/sold in NGN — `planCurrencies` gates every surface.
  */
 export const PLAN_PRICING: PlanPricing = {
   STANDARD: { perSeatMonthlyMinor: 20_000 }, // ₦200 / student / month
   PREMIUM: { perSeatMonthlyMinor: 35_000 }, // ₦350 / student / month
   ULTIMATE: { perSeatMonthlyMinor: 50_000 }, // ₦500 / student / month
-  ENTERPRISE: { perSeatMonthlyMinor: 75_000 }, // (unsellable in NGN — see note)
+  ENTERPRISE: { perSeatMonthlyMinor: 75_000 }, // ₦750 / student / month
 };
 
-/** USD defaults, in cents. ENTERPRISE is sold ONLY in USD. */
+/** USD defaults, in cents. */
 export const PLAN_PRICING_USD: PlanPricing = {
   STANDARD: { perSeatMonthlyMinor: 25 }, // $0.25 / student / month
   PREMIUM: { perSeatMonthlyMinor: 40 }, // $0.40 / student / month

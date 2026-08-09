@@ -2965,6 +2965,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "GET /billing/payments/:p/receipt.pdf": {
+      "kind": "ui",
+      "note": "Receipt link on the /billing payment history — a subscription purchase produced no filable document before this"
+    },
     "GET /fees/settlement/banks": {
       "kind": "ui",
       "note": "SettlementAccountCard bank picker — the real gateway bank list, replacing ten hard-coded codes"
