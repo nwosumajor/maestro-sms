@@ -60,6 +60,16 @@ services:
       REDIS_HOST: redis
       TENANT_RATE_LIMIT_PER_MIN: ${TENANT_RATE_LIMIT_PER_MIN:-1200}
       REDIS_PORT: "6379"
+      # --- payment rails -------------------------------------------------------
+      # PASS-THROUGH ONLY: put the real values in infrastructure/.env, never here.
+      # Absent, each rail reports itself unconfigured and the operator's payment
+      # switchboard says "switched on but NOT usable" rather than failing at a
+      # parent's checkout. Use TEST keys locally — sk_test_… / sk_test_… — and
+      # prove them with "Test connection" on /operator/pricing.
+      PAYSTACK_SECRET_KEY: ${PAYSTACK_SECRET_KEY:-}
+      PAYSTACK_DEDICATED_BANK: ${PAYSTACK_DEDICATED_BANK:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
       # App connects as the least-privilege role (RLS enforced). Defaults to a
       # DIRECT writer connection; override DATABASE_URL in .env to route through
       # the opt-in pgbouncer pooler (see the `pgbouncer` service below).

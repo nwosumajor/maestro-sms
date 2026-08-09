@@ -1,5 +1,5 @@
 import {
-  Delete, Body, Controller, Get, Param, Post, Put, Query, Res, StreamableFile } from "@nestjs/common";
+  Delete, Body, Controller, Get, Param, Post, Put, Query, Res, StreamableFile, BadRequestException} from "@nestjs/common";
 import type { Response } from "express";
 import type {
   MessageCreditBalancePageDto,
@@ -654,6 +654,19 @@ export class OperatorController {
     // The zod enum already narrowed these to real channels; normaliseChannels
     // in the service is the authoritative re-check.
     return this.channels.update(p, { ...body, enabled: body.enabled as PaymentChannel[] });
+  }
+
+  /**
+   * Prove a rail works by CALLING it. A present key is not a working key, and
+   * the difference is only ever discovered by a payer otherwise.
+   */
+  @Post("payment-channels/:channel/test")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_PRICING_MANAGE)
+  testPaymentChannel(@Param("channel") channel: string) {
+    if (!(PAYMENT_CHANNEL_VALUES as string[]).includes(channel)) {
+      throw new BadRequestException("Unknown payment channel");
+    }
+    return this.channels.testConnection(channel as PaymentChannel);
   }
 
   /** The platform's convenience fee on online fee collection (take-rate). */

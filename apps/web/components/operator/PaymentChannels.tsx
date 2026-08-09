@@ -38,6 +38,18 @@ export function PaymentChannels({
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
   const [needsForce, setNeedsForce] = React.useState(false);
+  // Per-channel connection results. A present key is not a working key, and the
+  // difference is otherwise discovered by a parent at checkout.
+  const [tested, setTested] = React.useState<Record<string, { ok: boolean; detail: string } | "testing">>({});
+
+  const test = async (c: Channel) => {
+    setTested((t) => ({ ...t, [c]: "testing" }));
+    const res = await sendSms<{ ok: boolean; detail: string }>("POST", `operator/payment-channels/${c}/test`);
+    setTested((t) => ({
+      ...t,
+      [c]: res.ok && res.data ? res.data : { ok: false, detail: res.error ?? "The test could not be run." },
+    }));
+  };
 
   const toggle = (c: Channel) => {
     setNeedsForce(false);
@@ -90,6 +102,17 @@ export function PaymentChannels({
               >
                 <span className="min-w-0">
                   <span className="text-sm font-medium">{labels[c]?.name ?? c}</span>
+                  {/* The RESULT of talking to the gateway outranks everything
+                      else on this row: it is the only line that reflects
+                      reality rather than configuration. */}
+                  {tested[c] && tested[c] !== "testing" && (
+                    <span
+                      className={`mt-0.5 block text-xs ${(tested[c] as { ok: boolean }).ok ? "text-emerald-600 dark:text-emerald-400" : "text-destructive"}`}
+                    >
+                      {(tested[c] as { ok: boolean }).ok ? "✓ " : "✗ "}
+                      {(tested[c] as { detail: string }).detail}
+                    </span>
+                  )}
                   <span className="mt-0.5 block text-xs text-muted-foreground">
                     {!on
                       ? labels[c]?.comingSoon ?? "Not enabled."
@@ -98,7 +121,16 @@ export function PaymentChannels({
                         : "Live — payers can use this now."}
                   </span>
                 </span>
-                <span className="flex shrink-0 items-center gap-2">
+                <span className="flex shrink-0 items-center gap-2" onClick={(e) => e.preventDefault()}>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={tested[c] === "testing"}
+                    onClick={() => void test(c)}
+                  >
+                    {tested[c] === "testing" ? "Testing…" : "Test connection"}
+                  </Button>
                   {/* ON and USABLE are different questions. A rail switched on
                       with no credentials refuses every payer, and the first
                       report of that would otherwise come from a parent. */}

@@ -77,10 +77,17 @@ function makeService(enabled: string[], schools: Array<{ id: string; name: strin
     },
   };
   const db = { runAsTenant: <T>(_c: unknown, fn: (t: unknown) => Promise<T>) => fn({}) };
-  const svc = new PaymentChannelService(db as never, audit as never, privileged as never);
+  // The two card rails are injected so the switchboard can PROVE a key works,
+  // not merely that it is present. Stubbed here — the probe itself is the
+  // rails' own concern.
+  const paystack = { testConnection: jest.fn().mockResolvedValue({ ok: true, detail: "Connected." }) };
+  const stripe = { testConnection: jest.fn().mockResolvedValue({ ok: true, detail: "Connected." }) };
+  const svc = new PaymentChannelService(
+    db as never, audit as never, privileged as never, paystack as never, stripe as never,
+  );
   // Seed the cache so `enabled()` never touches the real prisma singleton.
   (svc as unknown as { cache: unknown }).cache = { at: Date.now(), enabled };
-  return { svc, upsert, audit };
+  return { svc, upsert, audit, paystack, stripe };
 }
 
 const owner = { schoolId: "platform", userId: "owner-1", roles: ["super_admin"], permissions: [] } as never;
@@ -301,5 +308,48 @@ describe("channel readiness (credentials, not the toggle)", () => {
     // then deploy the keys.
     const { svc: s } = makeService([PAYMENT_CHANNELS.PAYSTACK]);
     await expect(s.update(owner, { enabled: [PAYMENT_CHANNELS.PAYSTACK] })).resolves.toBeTruthy();
+  });
+});
+
+// ===========================================================================
+// A PRESENT key is not a WORKING key
+// ===========================================================================
+// readiness() answers "is a credential set". testConnection() answers "does it
+// work", which is the harder question: a key can be a typo, revoked, for a
+// different account, or a test key in a live deployment — and every one of
+// those is indistinguishable from a correct setup until a parent tries to pay.
+describe("testConnection", () => {
+  it("asks the PAYSTACK rail, and reports what it said", async () => {
+    const { svc, paystack } = makeService([PAYMENT_CHANNELS.PAYSTACK]);
+    paystack.testConnection.mockResolvedValue({ ok: true, detail: "Connected. This test account settles NGN.", currencies: ["NGN"], mode: "test" });
+    await expect(svc.testConnection(PAYMENT_CHANNELS.PAYSTACK)).resolves.toMatchObject({
+      channel: "PAYSTACK", ok: true, currencies: ["NGN"], mode: "test",
+    });
+    expect(paystack.testConnection).toHaveBeenCalled();
+  });
+
+  it("reports a REJECTED key as a failure, not as an error to swallow", async () => {
+    const { svc, paystack } = makeService([PAYMENT_CHANNELS.PAYSTACK]);
+    paystack.testConnection.mockResolvedValue({ ok: false, detail: "Paystack rejected the key (401)." });
+    const r = await svc.testConnection(PAYMENT_CHANNELS.PAYSTACK);
+    expect(r.ok).toBe(false);
+    expect(r.detail).toMatch(/401/);
+  });
+
+  it("tests BANK_TRANSFER through Paystack, since that is whose account issues the NUBAN", async () => {
+    const { svc, paystack } = makeService([PAYMENT_CHANNELS.BANK_TRANSFER]);
+    paystack.testConnection.mockResolvedValue({ ok: true, detail: "Connected." });
+    const r = await svc.testConnection(PAYMENT_CHANNELS.BANK_TRANSFER);
+    expect(r.ok).toBe(true);
+    expect(r.detail).toMatch(/same Paystack account/i);
+  });
+
+  it("REFUSES to guess for mobile money rather than claiming it works", async () => {
+    // The rails have no cheap read-only probe. Reporting "ok" from a key's mere
+    // presence would be the exact false assurance this feature removes.
+    const { svc } = makeService([PAYMENT_CHANNELS.MOBILE_MONEY]);
+    const r = await svc.testConnection(PAYMENT_CHANNELS.MOBILE_MONEY);
+    expect(r.ok).toBe(false);
+    expect(r.detail).toMatch(/sandbox charge/i);
   });
 });

@@ -50,6 +50,36 @@ export class StripeService {
     return !!process.env.STRIPE_SECRET_KEY;
   }
 
+  /** Same probe as Paystack's: authenticated, read-only, and it reports the
+   *  account's currencies rather than only that the key authenticated. */
+  async testConnection(): Promise<{ ok: boolean; detail: string; currencies?: string[]; mode?: "test" | "live" }> {
+    const key = process.env.STRIPE_SECRET_KEY;
+    if (!key) return { ok: false, detail: "STRIPE_SECRET_KEY is not set." };
+    const mode = key.startsWith("sk_live") ? "live" : "test";
+    try {
+      const res = await fetch("https://api.stripe.com/v1/balance", {
+        headers: { Authorization: `Bearer ${key}` },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (res.status === 401) {
+        return { ok: false, detail: "Stripe rejected the key (401). It is wrong, revoked, or for another account.", mode };
+      }
+      if (!res.ok) return { ok: false, detail: `Stripe answered ${res.status}.`, mode };
+      const body = (await res.json()) as { available?: Array<{ currency?: string }> };
+      const currencies = [...new Set((body.available ?? []).map((d) => (d.currency ?? "").toUpperCase()).filter(Boolean))];
+      return {
+        ok: true,
+        mode,
+        currencies,
+        detail: currencies.length
+          ? `Connected. This ${mode} account settles ${currencies.join(", ")}.`
+          : `Connected (${mode}), but the account reports no settlement currency yet.`,
+      };
+    } catch (err) {
+      return { ok: false, mode, detail: `Could not reach Stripe: ${(err as Error).message}` };
+    }
+  }
+
   private secret(): string {
     const s = process.env.STRIPE_SECRET_KEY;
     if (!s) throw new ServiceUnavailableException("USD payments are not configured");

@@ -43,6 +43,8 @@ import {
 } from "../integrity/integrity.foundation";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import { RedisPubSubService } from "../common/redis-pubsub.service";
+import { PaystackService } from "./paystack.service";
+import { StripeService } from "./stripe.service";
 
 const CACHE_TTL_MS = 60_000;
 const CONFIG_ID = "default";
@@ -73,8 +75,51 @@ export class PaymentChannelService implements OnModuleInit {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly privileged: PrivilegedDatabaseService,
+    private readonly paystack: PaystackService,
+    private readonly stripe: StripeService,
     @Optional() private readonly pubsub?: RedisPubSubService,
   ) {}
+
+  /**
+   * PROVE a rail works, by talking to it.
+   *
+   * `readiness()` answers "is a credential present". This answers "does that
+   * credential actually work", which is a different and harder question: a key
+   * can be a typo, revoked, for another account, or a test key in a live
+   * deployment, and every one of those looks identical until a parent tries to
+   * pay. Only a real call to the gateway can tell them apart.
+   *
+   * Mobile money is reported as unverifiable rather than guessed at: its
+   * providers have no cheap read-only probe, and claiming "ok" from a key's
+   * mere presence is exactly the false assurance this method exists to remove.
+   */
+  async testConnection(channel: PaymentChannel): Promise<{
+    channel: PaymentChannel;
+    ok: boolean;
+    detail: string;
+    currencies?: string[];
+    mode?: "test" | "live";
+  }> {
+    if (channel === "PAYSTACK" || channel === "BANK_TRANSFER") {
+      const r = await this.paystack.testConnection();
+      return {
+        channel,
+        ...r,
+        detail:
+          channel === "BANK_TRANSFER" && r.ok
+            ? `${r.detail} Dedicated accounts use this same Paystack account.`
+            : r.detail,
+      };
+    }
+    if (channel === "STRIPE") return { channel, ...(await this.stripe.testConnection()) };
+    return {
+      channel,
+      ok: false,
+      detail:
+        "Mobile money cannot be tested from here — the rails have no read-only probe. " +
+        "Confirm it with a sandbox charge on the provider before switching it on for schools.",
+    };
+  }
 
   /**
    * Is each rail switched on, and could it actually take a payment?

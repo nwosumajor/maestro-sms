@@ -2373,6 +2373,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "POST /operator/payment-channels/:p/test": {
+      "kind": "ui",
+      "note": "\"Test connection\" on the PaymentChannels card — calls the gateway to prove a key works"
+    },
     "POST /operator/platform-delegations": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
