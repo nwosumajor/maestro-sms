@@ -14,7 +14,7 @@
 // schoolId (mirrors the Fees online-payment webhook). Mutations are audit-logged.
 // =============================================================================
 
-import { BadRequestException, Inject, Injectable, ServiceUnavailableException, Optional} from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, Logger, ServiceUnavailableException, Optional} from "@nestjs/common";
 import {
   BILLING_CYCLES,
   CURRENCIES,
@@ -75,6 +75,8 @@ function addMonths(from: Date, months: number): Date {
 
 @Injectable()
 export class BillingService {
+  private readonly logger = new Logger("Billing");
+
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
@@ -92,6 +94,34 @@ export class BillingService {
     // parent cannot pay. It gates a commercial choice, not a security boundary.
     @Optional() private readonly channels?: PaymentChannelService,
   ) {}
+
+  /**
+   * The gateway call failed, so the intent is VOID.
+   *
+   * The payment row is deliberately written BEFORE the gateway is called — an
+   * arriving webhook needs something to match, the same intent-first pattern as
+   * MobileMoneyIntent. But nothing undid it when the gateway then refused, so a
+   * refused checkout left a PENDING row in the school's payment history for
+   * ever. PENDING reads as "your money is on its way", which is the one thing
+   * it definitely is not: there was never a charge.
+   *
+   * Marked FAILED rather than deleted — this table is an append-only financial
+   * record. Best-effort: the caller is already throwing the real error, and
+   * losing that error to a bookkeeping failure would be worse.
+   */
+  private async voidIntent(schoolId: string, paymentId: string, reason: string): Promise<void> {
+    try {
+      await this.db.runAsTenant({ schoolId, userId: SYSTEM_ACTOR_ID }, (tx) =>
+        tx.platformSubscriptionPayment.updateMany({
+          where: { id: paymentId, status: "PENDING" },
+          data: { status: "FAILED" },
+        }),
+      );
+      this.logger.warn(`voided subscription intent ${paymentId}: ${reason}`);
+    } catch (e) {
+      this.logger.warn(`could not void subscription intent ${paymentId}: ${(e as Error).message}`);
+    }
+  }
 
   private ctx(p: Principal): TenantContext {
     return { schoolId: p.schoolId, userId: p.userId };
@@ -346,8 +376,11 @@ export class BillingService {
       return payment.id;
     });
 
-    const { authorizationUrl } =
-      rail === PAYMENT_CHANNELS.STRIPE
+    // A gateway refusal must not leave a PENDING row claiming money is in flight.
+    let authorizationUrl: string;
+    try {
+      ({ authorizationUrl } =
+        rail === PAYMENT_CHANNELS.STRIPE
         ? await this.stripe.createCheckoutSession({
             email: prep.email,
             amountMinor,
@@ -363,7 +396,11 @@ export class BillingService {
             currency,
             reference,
             metadata: { kind: "subscription", schoolId: p.schoolId, paymentId, reference },
-          });
+          }));
+    } catch (err) {
+      await this.voidIntent(p.schoolId, paymentId, `Gateway refused: ${(err as Error).message}`);
+      throw err;
+    }
     return { authorizationUrl, reference };
   }
 
@@ -531,8 +568,11 @@ export class BillingService {
     );
 
     const metadata = { kind: "subscription", schoolId: p.schoolId, paymentId, plan, billingCycle, seats };
-    const { authorizationUrl } =
-      rail === PAYMENT_CHANNELS.STRIPE
+    // A gateway refusal must not leave a PENDING row claiming money is in flight.
+    let authorizationUrl: string;
+    try {
+      ({ authorizationUrl } =
+        rail === PAYMENT_CHANNELS.STRIPE
         ? await this.stripe.createCheckoutSession({
             email,
             amountMinor,
@@ -540,7 +580,11 @@ export class BillingService {
             description: `SMS ${plan} plan — ${seats} students, ${billingCycle.toLowerCase()} billing`,
             metadata: { kind: "subscription", schoolId: p.schoolId, paymentId, reference },
           })
-        : await this.paystack.initialize({ email, amountMinor, currency, reference, metadata });
+        : await this.paystack.initialize({ email, amountMinor, currency, reference, metadata }));
+    } catch (err) {
+      await this.voidIntent(p.schoolId, paymentId, `Gateway refused: ${(err as Error).message}`);
+      throw err;
+    }
     return { authorizationUrl, reference };
   }
 
