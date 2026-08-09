@@ -2969,6 +2969,14 @@
       "kind": "ui",
       "note": "Receipt link on the /billing payment history — a subscription purchase produced no filable document before this"
     },
+    "GET /operator/payments": {
+      "kind": "ui",
+      "note": "/operator/payments — cross-tenant subscription revenue ledger, period-filtered, totals per currency"
+    },
+    "GET /operator/payments/export.csv": {
+      "kind": "ui",
+      "note": "Export CSV button on /operator/payments — carries exactly the query the table is showing"
+    },
     "GET /fees/settlement/banks": {
       "kind": "ui",
       "note": "SettlementAccountCard bank picker — the real gateway bank list, replacing ten hard-coded codes"

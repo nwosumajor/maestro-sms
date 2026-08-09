@@ -125,3 +125,59 @@ export interface PlanPriceDto {
 export interface PlanPriceUpdateDto {
   prices: { plan: Plan; perSeatMonthlyMinor: number; currency?: Currency }[];
 }
+
+// --- operator: cross-tenant subscription revenue --------------------------- //
+
+/** One subscription payment, as the platform's finance desk sees it. */
+export interface OperatorPaymentRowDto {
+  id: string;
+  schoolId: string;
+  schoolName: string;
+  reference: string;
+  plan: Plan;
+  billingCycle: BillingCycle;
+  kind: string;
+  seats: number;
+  amountMinor: number;
+  currency: Currency;
+  status: string;
+  periodStart: Date | null;
+  periodEnd: Date | null;
+  paidAt: Date | null;
+  createdAt: Date;
+}
+
+/**
+ * Money totals, ALWAYS split by currency.
+ *
+ * Never one summed number. `amountMinor` is a count of minor units in its OWN
+ * currency, so adding kobo to cents produces a figure that is not money in any
+ * currency — and the platform analytics screen was doing exactly that, summing
+ * every PAID payment into a single total without even selecting the currency
+ * column. It happened to read correctly only because no USD payment had landed
+ * yet.
+ */
+export interface OperatorRevenueTotalDto {
+  currency: Currency;
+  /** Settled money — the only figure that is actually revenue. */
+  paidMinor: number;
+  paidCount: number;
+  /** Started but not settled. NOT revenue; shown so the desk can chase it. */
+  pendingMinor: number;
+  pendingCount: number;
+  /** Refused by the gateway or by our own currency guard. */
+  failedCount: number;
+  /** Checkouts nobody completed. Not a problem — context for conversion. */
+  abandonedCount: number;
+}
+
+/** The operator payments screen: one page of rows + totals for the WHOLE filter,
+ *  not just the visible page. */
+export interface OperatorPaymentPageDto {
+  rows: OperatorPaymentRowDto[];
+  page: number;
+  pageSize: number;
+  total: number;
+  /** Totals over every row matching the filter, split by currency. */
+  totals: OperatorRevenueTotalDto[];
+}

@@ -64,6 +64,12 @@ describe("platform permission split", () => {
         "platform.user.unlock",
         "platform.grace.manage",
         "platform.feedback.review",
+        // Read-only revenue oversight. Delegable alongside platform.audit.read:
+        // it reveals what each school PAYS, which is commercially sensitive but
+        // is not a control and touches no student data. Deliberately separate
+        // from platform.subscription.manage — reconciling what came in is
+        // bookkeeping; comping a plan is a revenue decision.
+        "platform.revenue.read",
       ].sort(),
     );
   });

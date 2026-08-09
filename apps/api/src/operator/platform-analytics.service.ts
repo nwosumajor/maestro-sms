@@ -20,6 +20,7 @@ import type {
   SubscriptionStatus,
 } from "@sms/types";
 import {
+  CURRENCIES,
   DEFAULT_PLAN,
   MODULE_CATALOG,
   PLAN_PRICING,
@@ -30,6 +31,11 @@ import {
   normalizeGender,
   resolveModules,
 } from "@sms/types";
+/** The platform bills its own MRR headline in one currency. Anything sold in
+ *  another currency is real revenue but belongs on the per-currency ledger, not
+ *  added into this figure. */
+const HOME_CURRENCY = CURRENCIES.NGN;
+
 // VALUE import: Prisma.sql/join only resolve as values, not types (CLAUDE.md).
 import { Prisma } from "@sms/db";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
@@ -150,15 +156,26 @@ export class PlatformAnalyticsService {
     });
 
     // --- revenue from PAID platform-subscription payments ---
+    // CURRENCY IS SELECTED, and the totals below are the platform's HOME
+    // currency only. This summed every PAID payment into one number without
+    // even reading the currency column — kobo added to cents, which is not
+    // money in any currency. It read correctly only because no USD payment had
+    // landed yet, so it was a bug with a start date. The full per-currency
+    // breakdown lives on the revenue ledger (/operator/payments).
     const payments = await client.platformSubscriptionPayment.findMany({
       where: { schoolId: { in: customerIds }, status: "PAID" },
-      select: { schoolId: true, plan: true, amountMinor: true, status: true, createdAt: true },
+      select: { schoolId: true, plan: true, amountMinor: true, currency: true, status: true, createdAt: true },
       orderBy: { createdAt: "desc" },
+      // Bounded: this feeds a headline figure and a ten-row preview, and the
+      // unbounded version grew with the platform's whole lifetime.
+      take: 5_000,
     });
     const since30 = Date.now() - 30 * DAY_MS;
     let paidTotalMinor = 0;
     let last30dMinor = 0;
     for (const pay of payments) {
+      // Only the home currency contributes to these headline figures — see above.
+      if ((pay.currency ?? CURRENCIES.NGN) !== HOME_CURRENCY) continue;
       paidTotalMinor += pay.amountMinor;
       if (pay.createdAt.getTime() >= since30) last30dMinor += pay.amountMinor;
     }

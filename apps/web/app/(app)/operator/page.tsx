@@ -101,6 +101,7 @@ export default async function OperatorPage({
             <Link href="/operator/groups"><Button variant="outline" size="sm">School groups →</Button></Link>
           )}
           <Link href="/operator/schools"><Button variant="outline" size="sm">School directory →</Button></Link>
+          <Link href="/operator/payments"><Button variant="outline" size="sm">Subscription revenue →</Button></Link>
           <Link href="/operator/message-credits"><Button variant="outline" size="sm">Message credits →</Button></Link>
           {canAdminScholarships && (
             <Link href="/operator/scholarships"><Button variant="outline" size="sm">Scholarship admin →</Button></Link>

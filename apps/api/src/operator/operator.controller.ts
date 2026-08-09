@@ -3,6 +3,7 @@ import {
 import type { Response } from "express";
 import type {
   MessageCreditBalancePageDto,
+  OperatorPaymentPageDto,
   MessageCreditLedgerEntryDto,
   OperatorAdminAppointmentDto,
   OperatorBillingAlertDto,
@@ -54,6 +55,7 @@ import { PlatformFeeService } from "../billing/platform-fee.service";
 import { GrowthService } from "../billing/growth.service";
 import { GroupService } from "../group/group.service";
 import { OperatorCreditsService } from "./operator-credits.service";
+import { OperatorPaymentsService, type PaymentFilters } from "./operator-payments.service";
 import { PaymentChannelService } from "../payments/payment-channel.service";
 import { PaymentHealthService } from "../payments/payment-health.service";
 
@@ -244,6 +246,7 @@ export class OperatorController {
     private readonly growth: GrowthService,
     private readonly groups: GroupService,
     private readonly credits: OperatorCreditsService,
+    private readonly payments: OperatorPaymentsService,
   ) {}
 
   /** Self-serve onboard a NEW school + its first admin (step-up: creates creds). */
@@ -686,6 +689,50 @@ export class OperatorController {
   @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
   getPlatformFees() {
     return this.platformFees.effective();
+  }
+
+  // --- subscription revenue ledger — the platform's own finance desk ---------
+  /**
+   * Every subscription payment across every tenant, filtered by PERIOD.
+   *
+   * Read-only oversight behind its own permission, deliberately not
+   * platform.subscription.manage: reconciling what came in is bookkeeping, and
+   * comping a plan is a revenue decision.
+   */
+  @Get("payments")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_REVENUE_READ)
+  listPayments(
+    @CurrentPrincipal() p: Principal,
+    @Query() query: Record<string, string | undefined>,
+  ): Promise<OperatorPaymentPageDto> {
+    return this.payments.list(p, this.paymentFilters(query));
+  }
+
+  /** The same filter as a CSV for the books. Audited; formula-guarded. */
+  @Get("payments/export.csv")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_REVENUE_READ)
+  async exportPayments(
+    @CurrentPrincipal() p: Principal,
+    @Query() query: Record<string, string | undefined>,
+    @Res() res: Response,
+  ) {
+    const { csv, filename } = await this.payments.csv(p, this.paymentFilters(query));
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(csv);
+  }
+
+  private paymentFilters(q: Record<string, string | undefined>): PaymentFilters {
+    return {
+      from: q.from,
+      to: q.to,
+      status: q.status,
+      plan: q.plan,
+      currency: q.currency,
+      q: q.q,
+      page: q.page ? Number(q.page) : undefined,
+      pageSize: q.pageSize ? Number(q.pageSize) : undefined,
+    };
   }
 
   // --- message credits (SMS/WhatsApp) oversight — super_admin ----------------

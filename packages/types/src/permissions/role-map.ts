@@ -24,7 +24,7 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     "platform.operate",
     "platform.tenants.read", "platform.tenants.write", "platform.tenants.region", "platform.onboarding.review",
     "platform.audit.read", "platform.user.read", "platform.user.unlock", "platform.grace.manage",
-    "platform.feedback.review",
+    "platform.feedback.review", "platform.revenue.read",
     "platform.impersonate", "platform.user.credentials", "platform.tenants.status",
     "platform.subscription.manage", "platform.pricing.manage", "platform.student.read",
     "platform.staff.manage",

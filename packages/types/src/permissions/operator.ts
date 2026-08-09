@@ -43,6 +43,15 @@ export const OPERATOR_PERMISSIONS = {
    *  bounded goodwill, not a comp. Unbounded plan/period changes stay owner-only
    *  (platform.subscription.manage). */
   PLATFORM_GRACE_MANAGE: "platform.grace.manage",
+  /** Read the cross-tenant SUBSCRIPTION REVENUE ledger — every payment a school
+   *  has made for its plan, with period filters and a CSV export.
+   *
+   *  Delegable oversight, alongside platform.audit.read: it is READ-ONLY and
+   *  touches no school data beyond what each school pays. Deliberately NOT
+   *  platform.subscription.manage — reconciling what came in is a bookkeeping
+   *  job, and comping a plan is a revenue decision. One is the finance desk's
+   *  daily work; the other should stay with the owner. */
+  PLATFORM_REVENUE_READ: "platform.revenue.read",
   /** Read + triage the cross-tenant platform-feedback inbox (complaints / feature
    *  suggestions any signed-in user can send). Delegable support work — it grants
    *  no access to school data beyond the feedback text the sender chose to write. */
@@ -120,6 +129,7 @@ export const DELEGABLE_PLATFORM_PERMISSIONS: readonly string[] = [
   OPERATOR_PERMISSIONS.PLATFORM_USER_UNLOCK,
   OPERATOR_PERMISSIONS.PLATFORM_GRACE_MANAGE,
   OPERATOR_PERMISSIONS.PLATFORM_FEEDBACK_REVIEW,
+  OPERATOR_PERMISSIONS.PLATFORM_REVENUE_READ,
 ];
 
 /**
