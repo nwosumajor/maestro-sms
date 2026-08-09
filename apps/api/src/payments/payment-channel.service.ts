@@ -49,6 +49,17 @@ import { StripeService } from "./stripe.service";
 
 const CACHE_TTL_MS = 60_000;
 const CONFIG_ID = "default";
+
+/** The slice of a persisted health reading this service reads back. Mirrors
+ *  `ChannelHealth` in payment-health.service.ts without importing it — that
+ *  module depends on this one, and the reverse would be a cycle. */
+interface StoredHealth {
+  ok: boolean;
+  detail?: string;
+  /** Currencies the gateway ACCOUNT can settle. Absent = unknown, and unknown
+   *  must never block a payment that might have worked. */
+  currencies?: string[];
+}
 const INVALIDATE_CHANNEL = "payment-channels:invalidate";
 
 /** A school that would have no way to take money under a proposed change. */
@@ -117,6 +128,65 @@ export class PaymentChannelService implements OnModuleInit {
     const health = await this.lastHealth();
     if (health[rail]?.ok === false) {
       return { available: false, reason: "Online card payment is temporarily unavailable. Please try again later." };
+    }
+    // CAN THE ACCOUNT SETTLE THIS CURRENCY? A different question from whether
+    // the RAIL supports it, and the only one that decides if a charge works.
+    // Paystack settles USD as a product; an account not enabled for USD refuses
+    // with a 403 that surfaced as "Payment provider error" — after the payer
+    // had already committed. The probe reported the account's currencies all
+    // along; nothing read them.
+    //
+    // Absent list = unknown, and unknown must not block a payment that might
+    // have worked. Only a POSITIVE list that excludes this currency refuses.
+    const accountCurrencies = health[rail]?.currencies;
+    const code = (currency || "NGN").toUpperCase();
+    if (accountCurrencies?.length && !accountCurrencies.includes(code)) {
+      return {
+        available: false,
+        reason: `Online card payment in ${code} is not available yet. Please ask your school for another way to pay.`,
+      };
+    }
+    return { available: true, reason: null };
+  }
+
+  /**
+   * The same question, phrased for the platform's OWN billing rather than a
+   * parent: can a school be charged in `currency` right now, and if not, why —
+   * in terms an operator can act on.
+   *
+   * Split from `availabilityFor` deliberately. That one is read by parents and
+   * is vague on purpose (a payer must not learn whether a key is missing or an
+   * account is unverified). This one is read by school leadership and the
+   * operator, who need to know that ENTERPRISE cannot be bought because the
+   * gateway account is not enabled for USD — because that is a thing somebody
+   * can go and fix.
+   */
+  async billingAvailabilityFor(currency: string): Promise<{ available: boolean; reason: string | null }> {
+    const code = (currency || "NGN").toUpperCase();
+    const enabled = await this.enabled();
+    const rail = pickCardRail(code, enabled);
+    if (!rail) {
+      return {
+        available: false,
+        reason: `No payment channel is switched on that can charge in ${code}.`,
+      };
+    }
+    const ready = this.readiness(enabled).find((r) => r.channel === rail);
+    if (!ready?.configured) {
+      return { available: false, reason: `${rail} is switched on but not configured (${ready?.missing ?? "missing credentials"}).` };
+    }
+    const health = await this.lastHealth();
+    if (health[rail]?.ok === false) {
+      return { available: false, reason: `${rail} is failing its health check: ${health[rail]?.detail ?? "unknown"}` };
+    }
+    const accountCurrencies = health[rail]?.currencies;
+    if (accountCurrencies?.length && !accountCurrencies.includes(code)) {
+      return {
+        available: false,
+        reason:
+          `The ${rail} account is not enabled for ${code} — it settles ${accountCurrencies.join(", ")}. ` +
+          `Enable ${code} on the account, or switch on a channel that can settle it.`,
+      };
     }
     return { available: true, reason: null };
   }
@@ -220,9 +290,9 @@ export class PaymentChannelService implements OnModuleInit {
   /** Last health reading, from the config row. `{}` when never checked — which
    *  is treated as "no reason to doubt it", not as a failure: a platform that
    *  has not run the sweep yet must not refuse every payment. */
-  private async lastHealth(): Promise<Partial<Record<PaymentChannel, { ok: boolean }>>> {
+  private async lastHealth(): Promise<Partial<Record<PaymentChannel, StoredHealth>>> {
     const row = await prisma.paymentChannelConfigRow.findFirst({ where: { id: CONFIG_ID } });
-    return ((row?.health as Partial<Record<PaymentChannel, { ok: boolean }>> | null) ?? {});
+    return ((row?.health as Partial<Record<PaymentChannel, StoredHealth>> | null) ?? {});
   }
 
   async isEnabled(channel: PaymentChannel): Promise<boolean> {

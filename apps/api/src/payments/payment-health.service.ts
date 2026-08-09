@@ -30,6 +30,21 @@ export interface ChannelHealth {
   ok: boolean;
   at: string;
   detail: string;
+  /**
+   * The currencies the gateway ACCOUNT can actually settle, as the rail itself
+   * reported them.
+   *
+   * A rail supporting a currency and an ACCOUNT being enabled for it are two
+   * different facts, and only the second one decides whether a charge succeeds.
+   * Paystack settles USD as a product; a given Paystack account may not be
+   * enabled for it, and then a USD charge is refused with a 403 that reaches
+   * the customer as an opaque "Payment provider error" — after they have
+   * already re-authenticated and committed to buying.
+   *
+   * The probe has always returned this. It was thrown away here, so nothing
+   * could act on it. Absent (undefined) means unknown — never assume empty.
+   */
+  currencies?: string[];
 }
 export type HealthMap = Partial<Record<PaymentChannel, ChannelHealth>>;
 
@@ -87,7 +102,14 @@ export class PaymentHealthService {
       if (/cannot be tested/i.test(result.detail)) continue;
 
       const before = previous[channel];
-      health[channel] = { ok: result.ok, at: now, detail: result.detail };
+      health[channel] = {
+        ok: result.ok,
+        at: now,
+        detail: result.detail,
+        // Keep the LAST KNOWN list when a failing probe returns none — losing
+        // it would silently widen what the platform believes it can charge.
+        currencies: result.currencies ?? before?.currencies,
+      };
       if (before && before.ok && !result.ok) broke.push(channel);
       if (before && !before.ok && result.ok) recovered.push(channel);
       // No previous reading and it is already failing: alert. A rail that has
