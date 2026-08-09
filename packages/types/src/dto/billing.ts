@@ -80,6 +80,9 @@ export interface CheckoutInitDto {
   plan: Plan;
   billingCycle: BillingCycle;
   currency?: Currency;
+  /** How many cycles to buy at once (default 1). Five academic years is
+   *  `periods: 5` on the YEAR cycle — one charge, one period calculation. */
+  periods?: number;
 }
 
 /** Hosted-checkout handoff returned to the client. */

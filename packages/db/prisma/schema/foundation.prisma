@@ -527,6 +527,14 @@ model PlatformSubscriptionPayment {
   /// RENEWAL extends the period; UPGRADE restarts it from now (unused time was
   /// credited at checkout); TRUEUP updates the billed seats only.
   kind          String    @default("RENEWAL")
+  /// How many CYCLES this one charge bought (1 = the historical meaning).
+  ///
+  /// Snapshotted so the ledger records what was actually sold. Settlement
+  /// advances the period by billingPeriods x the cycle's months, so a school
+  /// buying five years is ONE charge, ONE row and ONE period calculation —
+  /// rather than five concurrent charges racing each other for the same
+  /// currentPeriodEnd.
+  billingPeriods Int      @default(1)
   /// Promo code snapshot when one discounted this charge (settle-time increments
   /// the code's usedCount).
   promoCode     String?

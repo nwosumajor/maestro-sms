@@ -20,13 +20,16 @@ import {
   CURRENCIES,
   CYCLE_MONTHS,
   DEFAULT_PLAN,
+  MAX_CHARGE_MINOR,
   MIN_CHARGE_MINOR,
   PLANS,
   LEGAL_DOCS_VERSION,
   SUBSCRIPTION_PAYMENT_KINDS,
   SUBSCRIPTION_STATUS,
+  billedMonths,
   computeSubscriptionPriceMinor,
   formatMoney,
+  normalisePeriods,
   computeTrueUpMinor,
   defaultCurrencyFor,
   isBillingCycle,
@@ -514,7 +517,7 @@ export class BillingService {
    *  (ENTERPRISE is USD/Stripe only). Returns the gateway pay URL. */
   async initCheckout(
     p: Principal,
-    input: { plan: string; billingCycle: string; currency?: string; promoCode?: string },
+    input: { plan: string; billingCycle: string; currency?: string; promoCode?: string; periods?: number },
   ): Promise<CheckoutInitResultDto> {
     if (!isPlan(input.plan)) throw new BadRequestException("plan must be STANDARD, PREMIUM, ULTIMATE or ENTERPRISE");
     if (!isBillingCycle(input.billingCycle)) throw new BadRequestException("billingCycle must be MONTH, TERM or YEAR");
@@ -573,7 +576,11 @@ export class BillingService {
           if (prior) throw new BadRequestException("Promo codes apply to a school's first subscription payment only");
         }
         const seats = await this.activeStudents(tx);
-        const listMinor = computeSubscriptionPriceMinor(plan, seats, billingCycle, pricing);
+        // N periods in ONE charge. Buying five years by paying five times raced
+        // the same currentPeriodEnd — measured at four concurrent renewals
+        // advancing the period by two. One charge cannot race itself.
+        const periods = normalisePeriods(input.periods ?? 1);
+        const listMinor = computeSubscriptionPriceMinor(plan, seats, billingCycle, pricing) * periods;
         const grossMinor = promo ? Math.round((listMinor * (100 - promo.percentOff)) / 100) : listMinor;
         if (grossMinor <= 0) throw new BadRequestException("Nothing to charge for this plan");
 
@@ -594,6 +601,16 @@ export class BillingService {
         const arrearsCurrency = sub?.currency && isCurrency(sub.currency) ? sub.currency : CURRENCIES.NGN;
         const arrearsMinor = sub && arrearsCurrency === currency ? Math.max(0, sub.seatArrearsMinor) : 0;
         const amountMinor = Math.max(MIN_CHARGE_MINOR, grossMinor - credit) + arrearsMinor;
+        // The ledger stores this in a 32-bit column. Refuse ABOVE the limit
+        // with something a bursar can act on, rather than letting the driver
+        // throw a 500 after they have already re-authenticated.
+        if (amountMinor > MAX_CHARGE_MINOR) {
+          throw new BadRequestException(
+            `That is a single charge of ${formatMoney(amountMinor, currency)}, which is above the maximum we can ` +
+              `process at once. Buy a shorter period (or fewer at a time) and repeat — periods stack, so you end ` +
+              `up at the same date.`,
+          );
+        }
         const kind = isPlanChange ? SUBSCRIPTION_PAYMENT_KINDS.UPGRADE : SUBSCRIPTION_PAYMENT_KINDS.RENEWAL;
 
         const reference = `SUB-${p.schoolId.slice(0, 8)}-${Date.now()}`;
@@ -611,6 +628,7 @@ export class BillingService {
             kind,
             promoCode: promo?.code ?? null,
             arrearsMinor,
+            billingPeriods: periods,
             initiatedById: p.userId,
           },
         });
@@ -835,6 +853,25 @@ export class BillingService {
       const cycle: BillingCycle = isBillingCycle(payment.billingCycle) ? payment.billingCycle : BILLING_CYCLES.TERM;
       const now = new Date();
 
+      // SERIALISE THE PERIOD ARITHMETIC.
+      //
+      // Extending a subscription is a read-modify-write: read currentPeriodEnd,
+      // add the cycle's months, write it back. Two webhooks arriving together —
+      // a school buying several periods at once, a gateway retry racing the
+      // original, or the reconciliation sweep racing a late webhook — each read
+      // the SAME starting value and each wrote base + months, so the last write
+      // won and the others vanished.
+      //
+      // Measured, not theorised: four concurrent RENEWAL webhooks all returned
+      // 201, all four rows were marked PAID, and the period advanced 18 months
+      // instead of 36. The school paid four times and got two, with nothing
+      // anywhere reporting the discrepancy.
+      //
+      // The row lock makes the whole read-modify-write atomic per school, so
+      // concurrent charges queue and stack instead of overwriting. Same pattern
+      // the hostel allocator and the elimination ring already use. It locks ONE
+      // school's row, so it cannot serialise unrelated tenants.
+      await tx.$executeRaw`SELECT id FROM "school_subscription" WHERE "schoolId" = ${schoolId}::uuid FOR UPDATE`;
       const sub = await tx.schoolSubscription.findFirst({ where: { schoolId } });
       // How the payment applies (SUBSCRIPTION_PAYMENT_KINDS):
       //   RENEWAL — stack: extend from the later of now / current period end.
@@ -847,10 +884,14 @@ export class BillingService {
           : sub?.currentPeriodEnd && sub.currentPeriodEnd > now
             ? sub.currentPeriodEnd
             : now;
+      // billedMonths is the ONE rule for "how long is this?" — the quote shown
+      // before payment and the period written here both read it, so the screen
+      // cannot promise a date settlement then disagrees with.
+      const periods = normalisePeriods((payment as { billingPeriods?: number }).billingPeriods ?? 1);
       const periodEnd =
         kind === SUBSCRIPTION_PAYMENT_KINDS.TRUEUP && sub?.currentPeriodEnd
           ? sub.currentPeriodEnd
-          : addMonths(base, CYCLE_MONTHS[cycle]);
+          : addMonths(base, billedMonths(cycle, periods));
 
       await tx.platformSubscriptionPayment.update({
         where: { id: payment.id },
