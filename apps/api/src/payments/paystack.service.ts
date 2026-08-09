@@ -86,6 +86,53 @@ export class PaystackService {
     return s;
   }
 
+  /**
+   * Prove the credential actually works — not merely that it is present.
+   *
+   * A key can be present and useless: a typo, a revoked key, a TEST key in a
+   * live deployment, or a key for a different account entirely. Every one of
+   * those looks identical to a working setup until a parent tries to pay.
+   *
+   * `GET /balance` is the right probe: authenticated, read-only, cheap, and it
+   * returns the account's CURRENCIES — so this can answer the question that
+   * actually matters ("can this account settle what our schools are billed
+   * in?") rather than just "did the key authenticate".
+   *
+   * Never throws. A connectivity check that throws is a check nobody can call
+   * from a UI without wrapping it, and the failure IS the answer here.
+   */
+  async testConnection(): Promise<{ ok: boolean; detail: string; currencies?: string[]; mode?: "test" | "live" }> {
+    const key = process.env.PAYSTACK_SECRET_KEY;
+    if (!key) return { ok: false, detail: "PAYSTACK_SECRET_KEY is not set." };
+    const mode = key.startsWith("sk_live") ? "live" : "test";
+    try {
+      const res = await fetch(`${PAYSTACK}/balance`, {
+        headers: { Authorization: `Bearer ${key}` },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (res.status === 401) {
+        return { ok: false, detail: "Paystack rejected the key (401). It is wrong, revoked, or for another account.", mode };
+      }
+      if (!res.ok) {
+        return { ok: false, detail: `Paystack answered ${res.status}. The key may be valid but the account cannot transact yet.`, mode };
+      }
+      const body = (await res.json()) as { data?: Array<{ currency?: string }> };
+      const currencies = [...new Set((body.data ?? []).map((d) => (d.currency ?? "").toUpperCase()).filter(Boolean))];
+      return {
+        ok: true,
+        mode,
+        currencies,
+        detail: currencies.length
+          ? `Connected. This ${mode} account settles ${currencies.join(", ")}.`
+          : `Connected (${mode}), but the account reports no settlement currency yet.`,
+      };
+    } catch (err) {
+      // Timeout or DNS/network — a real answer for an operator staring at a
+      // checkout that hangs, and distinct from "the key is wrong".
+      return { ok: false, mode, detail: `Could not reach Paystack: ${(err as Error).message}` };
+    }
+  }
+
   /** Start a hosted Paystack checkout; returns the authorization URL.
    *  With `subaccount` set, Paystack SPLITS settlement to that subaccount's bank
    *  (parent fees → the school's own account); `bearer` says who pays Paystack's
