@@ -27,7 +27,7 @@ export interface PlatformPaymentDto {
 }
 
 /** A live price quote for a tier at the school's current seat count + a cycle.
- *  One quote per (tier × cycle × ALLOWED currency) — ENTERPRISE is USD-only. */
+ *  One quote per (tier × cycle × ALLOWED currency); every tier sells in both. */
 export interface BillingQuoteDto {
   plan: Plan;
   billingCycle: BillingCycle;

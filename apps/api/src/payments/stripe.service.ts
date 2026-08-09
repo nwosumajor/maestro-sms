@@ -2,7 +2,7 @@
 // StripeService — shared Stripe client (no SDK; fetch + node:crypto)
 // =============================================================================
 // The USD counterpart to PaystackService: hosted Checkout Sessions for
-// school->platform subscription billing in dollars (ENTERPRISE is USD-only;
+// school->platform subscription billing in dollars (ENTERPRISE presents in USD;
 // other tiers may also be paid in USD by international schools). Mirrors the
 // Paystack posture exactly: fetch-only (no SDK), signature-verified webhook,
 // and a clean 503 / null when STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET are

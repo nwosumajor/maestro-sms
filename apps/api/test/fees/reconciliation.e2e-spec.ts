@@ -275,6 +275,9 @@ d("Online settlement, verify-on-return and reconciliation (real Postgres)", () =
       privileged as never,
       notifications,
       settlement,
+      // Subscription recovery is exercised in checkout-intent/billing suites;
+      // these cases are about invoice charges, so it is a no-op double.
+      { recoverSubscriptionCharge: jest.fn().mockResolvedValue(false) } as never,
     );
 
     const r = await reconcile.sweep("SCHEDULED");
@@ -328,6 +331,7 @@ d("Online settlement, verify-on-return and reconciliation (real Postgres)", () =
     const tenant = new PrismaTenantService() as never;
     const reconcile = new PaymentReconciliationService(
       tenant, new AuditLogService(), paystack as never, stripe as never, privileged as never, notifications, settlement,
+      { recoverSubscriptionCharge: jest.fn().mockResolvedValue(false) } as never,
     );
     const r = await reconcile.sweep("SCHEDULED");
     expect(r).toMatchObject({ scanned: 1, invoiceCharges: 1, missing: 1, posted: 1 });
@@ -361,6 +365,7 @@ d("Online settlement, verify-on-return and reconciliation (real Postgres)", () =
     const reconcile = new PaymentReconciliationService(
       new PrismaTenantService() as never, new AuditLogService(), paystack as never, stripe as never,
       privileged as never, notifications, settlement,
+      { recoverSubscriptionCharge: jest.fn().mockResolvedValue(false) } as never,
     );
     const r = await reconcile.sweep("SCHEDULED");
     expect(r).toMatchObject({ missing: 1, posted: 0 });

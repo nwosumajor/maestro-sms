@@ -232,7 +232,7 @@ export class BillingService {
 
     const billableSeats = Math.max(1, activeStudents);
     // Quote with the operator-effective pricing so the screen matches checkout —
-    // one quote per (tier × cycle × ALLOWED currency); ENTERPRISE is USD-only.
+    // one quote per (tier × cycle × ALLOWED currency).
     const pricing = await this.planPricing.effectiveAll();
     const quotes = SELLABLE_TIERS.flatMap((plan) =>
       planCurrencies(plan).flatMap((currency) =>
@@ -681,6 +681,38 @@ export class BillingService {
    * A mismatch marks the payment FAILED + audits it; the webhook still returns
    * ok so the gateway doesn't retry a permanently-wrong charge forever.
    */
+  /**
+   * RECOVER a subscription charge the gateway took but whose webhook never
+   * arrived. Called by the daily reconciliation sweep.
+   *
+   * The sweep already did this for parent fee invoices and filtered subscription
+   * charges straight out, so the platform's OWN revenue had no recovery path at
+   * all. The consequence was the worst ordering possible: the school is charged,
+   * the payment row stays PENDING, currentPeriodEnd is never extended — and then
+   * dunning flips them PAST_DUE and downgrades them to STANDARD. A school pays
+   * for ENTERPRISE and gets demoted for it, with nothing anywhere connecting the
+   * two.
+   *
+   * Idempotent by construction: it goes through the same applyPaidByReference
+   * the webhook uses, which refuses a row already PAID. So a recovered charge
+   * and a late webhook cannot both extend the period.
+   */
+  async recoverSubscriptionCharge(
+    schoolId: string,
+    reference: string,
+    paid: { amountMinor?: number; currency?: string },
+  ): Promise<boolean> {
+    const before = await this.db.runAsTenant({ schoolId, userId: SYSTEM_ACTOR_ID }, (tx) =>
+      tx.platformSubscriptionPayment.findFirst({ where: { reference }, select: { status: true } }),
+    );
+    if (!before || before.status === "PAID") return false;
+    await this.applyPaidByReference(schoolId, reference, paid);
+    const after = await this.db.runAsTenant({ schoolId, userId: SYSTEM_ACTOR_ID }, (tx) =>
+      tx.platformSubscriptionPayment.findFirst({ where: { reference }, select: { status: true } }),
+    );
+    return after?.status === "PAID";
+  }
+
   private async applyPaidByReference(
     schoolId: string | undefined,
     reference: string | undefined,
