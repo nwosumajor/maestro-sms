@@ -15,6 +15,7 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, ServiceUnavailableException, Optional} from "@nestjs/common";
 import { PLATFORM_FEE_BEARERS, computePlatformFeeMinor, isPlatformFeeBearer,
   PAYMENT_CHANNELS,
+  pickCardRail,
 } from "@sms/types";
 import type { InvoicePayInitDto, PlatformFeeBearer, SettlementAccountDto } from "@sms/types";
 import {
@@ -104,15 +105,35 @@ export class PaymentGatewayService {
       },
     );
 
-    // USD invoice -> Stripe (Paystack is NGN-only). No split settlement or
-    // take-rate on the USD rail: the charge lands on the platform account and
-    // settlement to the school is an operator process. metadata.kind =
-    // "invoice" routes the webhook to the SAME shared settlement path.
-    if (currency === "USD") {
-      // INITIATION gate. The webhook, the verify-on-return confirm and the
-      // reconciliation sweep deliberately do NOT check this — money already
-      // moved on this rail must still settle after it is switched off.
-      await this.channels?.assertEnabled(PAYMENT_CHANNELS.STRIPE);
+    // WHICH RAIL, given the currency AND what the operator has switched on.
+    //
+    // USD normally goes to Stripe. But PAYSTACK ALSO SETTLES USD, so while
+    // Stripe is switched off, routing USD to Paystack collects money that would
+    // otherwise be refused for no reason — ENTERPRISE is priced in USD, so
+    // without this an ENTERPRISE school cannot pay and a USD school fee cannot
+    // be paid at all. When Stripe is switched on, USD returns to it
+    // automatically: the preference order lives in pickCardRail, not here.
+    //
+    // INITIATION only. The webhook, the verify-on-return confirm and the
+    // reconciliation sweep deliberately do NOT consult the switchboard — money
+    // already moved on a rail must still settle after that rail is turned off.
+    const enabledChannels = (await this.channels?.enabled()) ?? [PAYMENT_CHANNELS.PAYSTACK, PAYMENT_CHANNELS.STRIPE];
+    const rail = pickCardRail(currency, enabledChannels);
+    if (!rail) {
+      // Nothing enabled can settle this currency. Say what a payer can act on.
+      throw new ServiceUnavailableException(
+        `Online payment in ${currency} is not available yet. Please ask your school for another way to pay.`,
+      );
+    }
+
+    // No split settlement or take-rate on the USD rail whichever gateway carries
+    // it: a school's Paystack subaccount is registered for its OWN currency, so
+    // splitting a USD charge into it would settle the wrong money. The charge
+    // lands on the platform account and settlement to the school stays an
+    // operator process — the same posture the Stripe path always had.
+    const usdRail = currency === "USD";
+
+    if (rail === PAYMENT_CHANNELS.STRIPE) {
       if (!this.stripe.isConfigured()) {
         throw new ServiceUnavailableException("USD payments are not configured");
       }
@@ -137,7 +158,6 @@ export class PaymentGatewayService {
       return { authorizationUrl, reference, invoiceAmountMinor: balance, feeMinor: 0, chargedMinor: balance };
     }
 
-    await this.channels?.assertEnabled(PAYMENT_CHANNELS.PAYSTACK);
     if (!this.paystack.isConfigured()) {
       throw new ServiceUnavailableException("Online payments are not configured");
     }
@@ -149,7 +169,8 @@ export class PaymentGatewayService {
     // comes out of the school's settlement. Either way the platform's cut is the
     // gateway split's transaction_charge — it never transits the school's bank.
     const cfg = await this.platformFees.effective();
-    const feeMinor = subaccount ? computePlatformFeeMinor(balance, cfg) : 0;
+    const splitTo = usdRail ? undefined : subaccount;
+    const feeMinor = splitTo ? computePlatformFeeMinor(balance, cfg) : 0;
     const bearer: PlatformFeeBearer =
       feeBearerOverride && isPlatformFeeBearer(feeBearerOverride) ? feeBearerOverride : cfg.bearer;
     const chargedMinor = bearer === PLATFORM_FEE_BEARERS.PARENT ? balance + feeMinor : balance;
@@ -180,8 +201,9 @@ export class PaymentGatewayService {
         feeBearer: bearer,
       },
       // Split settlement: money lands in the SCHOOL's bank; the school bears the
-      // gateway fee on its own collections. Unset → legacy platform settlement.
-      subaccount,
+      // gateway fee on its own collections. Unset → legacy platform settlement,
+      // which is also what a USD charge uses (see splitTo above).
+      subaccount: splitTo,
       bearer: "subaccount",
       transactionChargeMinor: feeMinor,
     });
