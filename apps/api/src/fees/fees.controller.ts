@@ -61,11 +61,18 @@ const paymentSchema = z.object({
   paidAt: z.string().datetime().optional(),
 });
 
-const settlementSchema = z.object({
+const resolveAccountSchema = z.object({
   /** Paystack bank code (e.g. "058" GTBank). */
   bankCode: z.string().min(3).max(10),
   /** 10-digit NUBAN — sent to Paystack, never stored. */
   accountNumber: z.string().regex(/^\d{10}$/),
+});
+
+const settlementSchema = resolveAccountSchema.extend({
+  /** The account name the school READ BACK and confirmed. The service compares
+   *  it to what the bank returns, so a save cannot proceed on an account nobody
+   *  looked at — see PaystackService.resolveAccount for why that matters. */
+  confirmedAccountName: z.string().min(2).max(200),
 });
 
 const feeBearerSchema = z.object({ bearer: z.enum(["PARENT", "SCHOOL"]) });
@@ -305,6 +312,25 @@ export class FeesController {
   @RequirePermission(FEES_PERMISSIONS.FEE_MANAGE)
   settlement(@CurrentPrincipal() p: Principal) {
     return this.gateway.getSettlement(p);
+  }
+
+  /** Banks the gateway can settle to, for the settlement picker. Read-only. */
+  @Get("fees/settlement/banks")
+  @RequirePermission(FEES_PERMISSIONS.FEE_MANAGE)
+  settlementBanks() {
+    return this.gateway.listSettlementBanks();
+  }
+
+  /** Read back whose account a bank + NUBAN actually is, BEFORE saving it.
+   *  A lookup: writes nothing, so no step-up — it is the check that makes the
+   *  save safe, and putting a re-auth in front of it would only discourage it. */
+  @Post("fees/settlement/resolve")
+  @RequirePermission(FEES_PERMISSIONS.FEE_MANAGE)
+  resolveSettlement(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(resolveAccountSchema)) body: z.infer<typeof resolveAccountSchema>,
+  ) {
+    return this.gateway.resolveSettlementAccount(p, body);
   }
 
   /** Set the school's settlement bank (creates the Paystack subaccount; every

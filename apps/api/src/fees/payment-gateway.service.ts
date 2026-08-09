@@ -42,6 +42,13 @@ import { VirtualAccountsService, isDedicatedAccountCredit } from "./virtual-acco
 import { PaymentPlansService } from "./payment-plans.service";
 import { PaymentChannelService } from "../payments/payment-channel.service";
 
+/** Compare account names forgivingly: banks return them upper-cased with
+ *  inconsistent spacing and punctuation, and the school is confirming that they
+ *  RECOGNISE the name, not transcribing it. */
+function normaliseAccountName(name: string | null | undefined): string {
+  return (name ?? "").toUpperCase().replace(/[^A-Z0-9]+/g, " ").trim();
+}
+
 @Injectable()
 export class PaymentGatewayService {
   constructor(
@@ -263,6 +270,41 @@ export class PaymentGatewayService {
     });
   }
 
+  /** Every bank the gateway can settle to, for the settlement picker. */
+  async listSettlementBanks(): Promise<Array<{ code: string; name: string }>> {
+    if (!this.paystack.isConfigured()) {
+      throw new ServiceUnavailableException("Online payments are not configured");
+    }
+    return this.paystack.listBanks();
+  }
+
+  /**
+   * Read back the NAME an account is held in, before anything is saved.
+   *
+   * A lookup, not a mutation: it writes nothing and commits the school to
+   * nothing. It exists so the school sees whose account it is about to send
+   * every parent's fees to, while there is still time to notice it is not
+   * theirs. Refused for an unresolvable account rather than guessed at.
+   */
+  async resolveSettlementAccount(
+    p: Principal,
+    input: { bankCode: string; accountNumber: string },
+  ): Promise<{ accountName: string }> {
+    if (!this.paystack.isConfigured()) {
+      throw new ServiceUnavailableException("Online payments are not configured");
+    }
+    if (!/^\d{10}$/.test(input.accountNumber)) {
+      throw new BadRequestException("accountNumber must be a 10-digit NUBAN");
+    }
+    const resolved = await this.paystack.resolveAccount(input.bankCode, input.accountNumber);
+    if (!resolved) {
+      throw new BadRequestException(
+        "That account number could not be verified with the bank. Check the number and the bank, then try again.",
+      );
+    }
+    return resolved;
+  }
+
   /**
    * The school chooses who bears the platform's convenience fee on ITS online
    * collections: PARENT (payer pays invoice + fee) or SCHOOL (fee comes out of
@@ -302,7 +344,7 @@ export class PaymentGatewayService {
    */
   async setSettlement(
     p: Principal,
-    input: { bankCode: string; accountNumber: string },
+    input: { bankCode: string; accountNumber: string; confirmedAccountName: string },
   ): Promise<SettlementAccountDto> {
     if (!this.paystack.isConfigured()) {
       throw new ServiceUnavailableException("Online payments are not configured");
@@ -316,6 +358,28 @@ export class PaymentGatewayService {
     }
     const school = await client.school.findFirst({ where: { id: p.schoolId }, select: { name: true } });
     if (!school) throw new ServiceUnavailableException("School not found");
+
+    // VERIFY THE ACCOUNT BELONGS TO SOMEONE THE SCHOOL RECOGNISES.
+    //
+    // Creating a subaccount proves the account exists; it says nothing about
+    // whose it is. A transposed digit landing on another valid account at the
+    // same bank is accepted silently, and every parent fee then settles to a
+    // stranger — with the invoice marked PAID at both ends, so nothing here
+    // ever notices. The card resolves the name and sends it back with the
+    // save; requiring it to match means the school has actually read it.
+    const resolved = await this.paystack.resolveAccount(input.bankCode, input.accountNumber);
+    if (!resolved) {
+      throw new BadRequestException(
+        "That account number could not be verified with the bank. Check the number and the bank, then try again.",
+      );
+    }
+    // The confirmation is what makes this a human check rather than a round
+    // trip we make on the school's behalf and ignore.
+    if (normaliseAccountName(input.confirmedAccountName) !== normaliseAccountName(resolved.accountName)) {
+      throw new BadRequestException(
+        `This account is in the name "${resolved.accountName}". Confirm that name to continue.`,
+      );
+    }
 
     const { subaccountCode, bankName } = await this.paystack.createSubaccount({
       businessName: school.name,

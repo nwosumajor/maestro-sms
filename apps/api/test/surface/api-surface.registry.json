@@ -2965,6 +2965,14 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "GET /fees/settlement/banks": {
+      "kind": "ui",
+      "note": "SettlementAccountCard bank picker — the real gateway bank list, replacing ten hard-coded codes"
+    },
+    "POST /fees/settlement/resolve": {
+      "kind": "ui",
+      "note": "SettlementAccountCard 'Check account name' — reads back whose account it is before PUT /fees/settlement saves it"
+    },
     "PUT /fees/settlement": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
