@@ -13,6 +13,7 @@
 // =============================================================================
 
 import { BillingDunningService } from "../../src/billing/billing-dunning.service";
+import { BillingService } from "../../src/billing/billing.service";
 
 describe("checkout intents", () => {
   afterEach(() => jest.restoreAllMocks());
@@ -69,11 +70,8 @@ describe("checkout intents", () => {
   });
 
   describe("voiding a refused checkout", () => {
-    // Imported lazily so this file does not drag BillingService's whole DI
-    // graph into the abandonment cases above.
-    async function makeBilling(updateMany = jest.fn().mockResolvedValue({ count: 1 })) {
-      const { BillingService } = await import("../../src/billing/billing.service");
-      const svc = Object.create(BillingService.prototype) as InstanceType<typeof BillingService>;
+    function makeBilling(updateMany = jest.fn().mockResolvedValue({ count: 1 })) {
+      const svc = Object.create(BillingService.prototype) as BillingService;
       const tx = { platformSubscriptionPayment: { updateMany } };
       Object.assign(svc, {
         db: { runAsTenant: jest.fn(async (_c: unknown, fn: (t: unknown) => unknown) => fn(tx)) },
@@ -88,7 +86,7 @@ describe("checkout intents", () => {
     it("marks a refused checkout FAILED, and only if it is still PENDING", async () => {
       // The guard matters: a webhook can win the race and mark it PAID while
       // our own error path is still unwinding. That must not be overwritten.
-      const { voidIntent, updateMany } = await makeBilling();
+      const { voidIntent, updateMany } = makeBilling();
       await voidIntent("school-1", "pay-1", "Gateway refused: 403");
       expect(updateMany.mock.calls[0][0]).toMatchObject({
         where: { id: "pay-1", status: "PENDING" },
@@ -98,7 +96,7 @@ describe("checkout intents", () => {
 
     it("swallows its own errors — the real gateway error must survive", async () => {
       // The caller is already throwing something the school needs to see.
-      const { voidIntent } = await makeBilling(jest.fn().mockRejectedValue(new Error("db down")));
+      const { voidIntent } = makeBilling(jest.fn().mockRejectedValue(new Error("db down")));
       await expect(voidIntent("school-1", "pay-1", "boom")).resolves.toBeUndefined();
     });
   });
