@@ -235,3 +235,71 @@ describe("card rail selection", () => {
     expect(pickCardRail("", [PAYMENT_CHANNELS.PAYSTACK])).toBe(PAYMENT_CHANNELS.PAYSTACK);
   });
 });
+
+// ===========================================================================
+// SWITCHED ON is not the same as USABLE
+// ===========================================================================
+// A rail can be enabled in an environment with no credentials for it. Nothing
+// refuses that — the keys may land minutes later — but it must be VISIBLE, or
+// the first report of "mobile money doesn't work" comes from a parent who
+// could not pay. The toggle is a commercial decision; credentials are a
+// deployment fact, and conflating them is how a rail serves nobody quietly.
+describe("channel readiness (credentials, not the toggle)", () => {
+  const KEYS = [
+    "PAYSTACK_SECRET_KEY", "STRIPE_SECRET_KEY",
+    "MPESA_CONSUMER_KEY", "MPESA_CONSUMER_SECRET", "MPESA_SHORTCODE", "MPESA_PASSKEY",
+    "MTN_MOMO_SUBSCRIPTION_KEY", "MTN_MOMO_API_USER", "MTN_MOMO_API_KEY",
+    "AIRTEL_CLIENT_ID", "AIRTEL_CLIENT_SECRET",
+  ];
+  let saved: Record<string, string | undefined>;
+  beforeEach(() => {
+    saved = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]));
+    for (const k of KEYS) delete process.env[k];
+  });
+  afterEach(() => {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+
+  const svc = () => makeService([PAYMENT_CHANNELS.PAYSTACK]).svc;
+
+  it("reports a channel that is ON but has no credentials, and names what is missing", () => {
+    const r = svc().readiness([PAYMENT_CHANNELS.PAYSTACK]);
+    const paystack = r.find((x) => x.channel === PAYMENT_CHANNELS.PAYSTACK)!;
+    expect(paystack).toMatchObject({ enabled: true, configured: false, missing: "PAYSTACK_SECRET_KEY" });
+  });
+
+  it("counts mobile money ready when ANY ONE rail is configured", () => {
+    process.env.AIRTEL_CLIENT_ID = "x";
+    process.env.AIRTEL_CLIENT_SECRET = "y";
+    const mm = svc().readiness([PAYMENT_CHANNELS.MOBILE_MONEY]).find((x) => x.channel === PAYMENT_CHANNELS.MOBILE_MONEY)!;
+    // Coverage then decides per school; one configured provider is enough for
+    // the channel itself to be usable.
+    expect(mm).toMatchObject({ enabled: true, configured: true, missing: null });
+  });
+
+  it("does NOT require PAYSTACK_DEDICATED_BANK for bank transfer — it has a default", () => {
+    process.env.PAYSTACK_SECRET_KEY = "sk_test";
+    const bank = svc().readiness([PAYMENT_CHANNELS.BANK_TRANSFER]).find((x) => x.channel === PAYMENT_CHANNELS.BANK_TRANSFER)!;
+    expect(bank).toMatchObject({ configured: true, missing: null });
+  });
+
+  it("update() reports which enabled channels are unconfigured, and audits it", async () => {
+    const { svc: s, audit } = makeService([PAYMENT_CHANNELS.PAYSTACK]);
+    const out = await s.update(owner, { enabled: [PAYMENT_CHANNELS.PAYSTACK] });
+    expect(out.unconfigured).toEqual([PAYMENT_CHANNELS.PAYSTACK]);
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({ metadata: expect.objectContaining({ unconfigured: [PAYMENT_CHANNELS.PAYSTACK] }) }),
+      expect.anything(),
+    );
+  });
+
+  it("enabling an unconfigured rail is REPORTED, never refused", async () => {
+    // Refusing would block the legitimate order of operations: switch it on,
+    // then deploy the keys.
+    const { svc: s } = makeService([PAYMENT_CHANNELS.PAYSTACK]);
+    await expect(s.update(owner, { enabled: [PAYMENT_CHANNELS.PAYSTACK] })).resolves.toBeTruthy();
+  });
+});

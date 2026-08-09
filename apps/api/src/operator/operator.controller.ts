@@ -626,7 +626,14 @@ export class OperatorController {
   @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
   async getPaymentChannels() {
     const enabled = await this.channels.enabled();
-    return { enabled, all: PAYMENT_CHANNEL_VALUES, labels: CHANNEL_LABELS, stranded: await this.channels.strandedBy(enabled) };
+    return {
+      enabled,
+      all: PAYMENT_CHANNEL_VALUES,
+      labels: CHANNEL_LABELS,
+      stranded: await this.channels.strandedBy(enabled),
+      // Switched ON is not the same as USABLE — see ChannelReadiness.
+      readiness: this.channels.readiness(enabled),
+    };
   }
 
   /**

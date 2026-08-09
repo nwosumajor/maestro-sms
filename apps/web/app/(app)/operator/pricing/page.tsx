@@ -47,7 +47,7 @@ export default async function OperatorPricingPage() {
   const [pricing, platformFees, channels, promos, agents, commissions] = await Promise.all([
     apiGet<PlanPriceDto[]>("/operator/pricing"),
     apiGet<PlatformFeeConfig>("/operator/platform-fees"),
-    apiGet<{ enabled: string[]; all: string[]; labels: Record<string, { name: string; comingSoon: string }>; stranded: { id: string; name: string; currency: string }[] }>("/operator/payment-channels"),
+    apiGet<{ enabled: string[]; all: string[]; labels: Record<string, { name: string; comingSoon: string }>; stranded: { id: string; name: string; currency: string }[]; readiness: { channel: string; enabled: boolean; configured: boolean; missing: string | null }[] }>("/operator/payment-channels"),
     // Growth reads need the privileged database; a 503 there must not blank the
     // pricing editors beside them, so each falls back to empty independently.
     apiGet<never[]>("/operator/promos").then((r) => r ?? []),
@@ -103,6 +103,7 @@ export default async function OperatorPricingPage() {
             all={channels.all}
             labels={channels.labels}
             initialStranded={channels.stranded}
+            readiness={channels.readiness ?? []}
           />
         )}
 
