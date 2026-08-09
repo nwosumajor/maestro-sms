@@ -66,6 +66,11 @@ services:
       # switchboard says "switched on but NOT usable" rather than failing at a
       # parent's checkout. Use TEST keys locally — sk_test_… / sk_test_… — and
       # prove them with "Test connection" on /operator/pricing.
+      # Where a gateway sends the payer BACK after paying, and the base for the
+      # verify-on-return link. Defaults to the local app; set it to a public
+      # tunnel URL when testing a real gateway round-trip, or Paystack will
+      # redirect a payer to a localhost the gateway cannot reach.
+      PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-http://localhost}
       PAYSTACK_SECRET_KEY: ${PAYSTACK_SECRET_KEY:-}
       PAYSTACK_DEDICATED_BANK: ${PAYSTACK_DEDICATED_BANK:-}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}

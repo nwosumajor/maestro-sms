@@ -33,6 +33,11 @@ CREATE TEMP TABLE doomed_class AS SELECT id FROM class WHERE name LIKE 'VOL %';
 -- breaks again quietly.
 CREATE TEMP TABLE doomed_invoice AS SELECT id FROM invoice WHERE reference LIKE 'VOL-%';
 
+-- payment_dispute has NO foreign key to invoice or payment (it anchors on the
+-- gateway's own ids), so nothing would stop these deletes — it would simply
+-- leave disputes pointing at invoices that no longer exist. Same class as the
+-- payment and document rows the app writes behind this script's back.
+DELETE FROM payment_dispute      WHERE "invoiceId" IN (SELECT id FROM doomed_invoice);
 DELETE FROM payment              WHERE "invoiceId" IN (SELECT id FROM doomed_invoice);
 DELETE FROM invoice_adjustment   WHERE "invoiceId" IN (SELECT id FROM doomed_invoice);
 DELETE FROM invoice_installment  WHERE "invoiceId" IN (SELECT id FROM doomed_invoice);
