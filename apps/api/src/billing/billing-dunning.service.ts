@@ -42,6 +42,11 @@ export type DunningTrigger = "SCHEDULED" | "MANUAL";
 /** How close to the period end the saved-card renewal charge is attempted. */
 const AUTO_RENEW_LEAD_DAYS = 2;
 
+/** How long a checkout intent may sit PENDING before it is treated as
+ *  abandoned. Generous on purpose: marking a real payment abandoned is far
+ *  worse than leaving a dead row visible a little longer. */
+const ABANDON_INTENT_AFTER_HOURS = 48;
+
 export interface DunningResult {
   reminded: number;
   pastDue: number;
@@ -51,6 +56,8 @@ export interface DunningResult {
   /** Saved-card renewal charges attempted / declined this sweep. */
   autoRenewCharged: number;
   autoRenewFailed: number;
+  /** Stale checkout intents closed off this sweep (see expireStaleIntents). */
+  abandoned: number;
   skipped?: "NO_DB";
 }
 
@@ -75,7 +82,10 @@ export class BillingDunningService {
     const client = this.db.client;
     if (!client) {
       this.logger.warn("Dunning sweep requested but no privileged DB — skipping.");
-      return { reminded: 0, pastDue: 0, scanned: 0, alerted: 0, autoRenewCharged: 0, autoRenewFailed: 0, skipped: "NO_DB" };
+      return {
+        reminded: 0, pastDue: 0, scanned: 0, alerted: 0,
+        autoRenewCharged: 0, autoRenewFailed: 0, abandoned: 0, skipped: "NO_DB",
+      };
     }
     const now = new Date();
     const subs = await client.schoolSubscription.findMany({
@@ -154,10 +164,12 @@ export class BillingDunningService {
     // downgraded past grace), so a lapsed school can never sit unnoticed.
     const alerted = await this.alertPlatformOwners(client);
 
+    const abandoned = await this.expireStaleIntents(client);
+
     this.logger.log(
-      `Dunning sweep (${trigger}): scanned=${subs.length} reminded=${reminded} pastDue=${pastDue} alerted=${alerted} autoRenew=${autoRenewCharged}/${autoRenewCharged + autoRenewFailed}`,
+      `Dunning sweep (${trigger}): scanned=${subs.length} reminded=${reminded} pastDue=${pastDue} alerted=${alerted} autoRenew=${autoRenewCharged}/${autoRenewCharged + autoRenewFailed} abandoned=${abandoned}`,
     );
-    return { reminded, pastDue, scanned: subs.length, alerted, autoRenewCharged, autoRenewFailed };
+    return { reminded, pastDue, scanned: subs.length, alerted, autoRenewCharged, autoRenewFailed, abandoned };
   }
 
   /**
@@ -167,6 +179,41 @@ export class BillingDunningService {
    * the meter's). First sight of a sub only stamps the baseline. Best-effort:
    * a metering hiccup must never fail the sweep.
    */
+  /**
+   * Close off checkout intents that were never paid.
+   *
+   * A PENDING row is written before the school is sent to the gateway, so the
+   * webhook has something to match. Most schools who click "upgrade" then look
+   * at the price and close the tab — and that row stayed PENDING for ever.
+   * PENDING on a payment history reads as "your money is on its way", so a
+   * school with three abandoned attempts saw three payments apparently in
+   * flight, which is both alarming and false.
+   *
+   * ABANDONED, not FAILED: nothing went wrong and nobody was charged. The
+   * distinction matters to whoever reads this history looking for a problem.
+   *
+   * THE WINDOW IS DELIBERATELY GENEROUS. A gateway can deliver a webhook late,
+   * a bank transfer against a checkout can take a day, and marking a real
+   * payment abandoned would be far worse than leaving a dead row a while
+   * longer. This is also SAFE against a late webhook regardless: settlement
+   * matches on the reference and only refuses a row already PAID, so an
+   * ABANDONED intent that finally pays still settles correctly.
+   */
+  private async expireStaleIntents(client: NonNullable<PrivilegedDatabaseService["client"]>): Promise<number> {
+    const cutoff = new Date(Date.now() - ABANDON_INTENT_AFTER_HOURS * 3_600_000);
+    try {
+      const { count } = await client.platformSubscriptionPayment.updateMany({
+        where: { status: "PENDING", createdAt: { lt: cutoff } },
+        data: { status: "ABANDONED" },
+      });
+      return count;
+    } catch (e) {
+      // Never fail the whole sweep over bookkeeping — dunning matters more.
+      this.logger.warn(`could not expire stale checkout intents: ${(e as Error).message}`);
+      return 0;
+    }
+  }
+
   private async accrueSeatArrears(
     client: NonNullable<PrivilegedDatabaseService["client"]>,
     subs: Array<{

@@ -24,10 +24,23 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "
   PAST_DUE: "destructive",
   CANCELED: "outline",
 };
-const PAYMENT_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
-  PAID: "secondary",
-  PENDING: "default",
-  FAILED: "destructive",
+/**
+ * What each state MEANS to a school reading its own payment history — not the
+ * raw enum. "Pending" on a row from three weeks ago read as "your money is on
+ * its way", which was the one thing it was not: nobody had been charged.
+ *
+ * ABANDONED is deliberately muted and not alarming. Starting a checkout and
+ * changing your mind is normal, and dressing it as a failure invites a support
+ * call about a problem that does not exist.
+ */
+const PAYMENT_STATE: Record<
+  string,
+  { label: string; variant: "default" | "secondary" | "destructive" | "outline"; hint?: string }
+> = {
+  PAID: { label: "Paid", variant: "secondary" },
+  PENDING: { label: "Awaiting payment", variant: "default", hint: "Checkout started — complete it at the gateway to activate this plan." },
+  ABANDONED: { label: "Not completed", variant: "outline", hint: "This checkout was never paid. Nobody was charged." },
+  FAILED: { label: "Failed", variant: "destructive", hint: "The payment did not go through. Nobody was charged." },
 };
 
 export default async function BillingPage() {
@@ -151,7 +164,11 @@ export default async function BillingPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Payment history</CardTitle>
-                <CardDescription>Your platform subscription payments.</CardDescription>
+                <CardDescription>
+                  Your platform subscription payments, most recent first{" "}
+                  {data.payments.length >= 50 ? "(latest 50)" : ""}. Only rows marked
+                  <span className="font-medium"> Paid</span> were charged.
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 {data.payments.length === 0 ? (
@@ -179,7 +196,12 @@ export default async function BillingPage() {
                             <td className="py-2 pr-4 tabular-nums">{pmt.seats}</td>
                             <td className="py-2 pr-4 tabular-nums">{money(pmt.amountMinor, pmt.currency)}</td>
                             <td className="py-2 pr-4">
-                              <Badge variant={PAYMENT_VARIANT[pmt.status] ?? "outline"}>{titleCase(pmt.status)}</Badge>
+                              <Badge
+                                variant={PAYMENT_STATE[pmt.status]?.variant ?? "outline"}
+                                title={PAYMENT_STATE[pmt.status]?.hint}
+                              >
+                                {PAYMENT_STATE[pmt.status]?.label ?? titleCase(pmt.status)}
+                              </Badge>
                             </td>
                             <td className="py-2 pr-4">{pmt.periodEnd ? shortDate(pmt.periodEnd) : "—"}</td>
                           </tr>
