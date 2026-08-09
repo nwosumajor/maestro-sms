@@ -15,18 +15,18 @@
 locals {
   scaled_services = {
     api = {
-      resource_id  = "service/${aws_ecs_cluster.main.name}/${aws_ecs_service.api.name}"
-      min          = var.api_desired_count
-      max          = var.api_max_count
-      tg_label     = "${aws_lb.main.arn_suffix}/${aws_lb_target_group.api.arn_suffix}"
-      req_per_tgt  = 300 # requests/min/task before adding one — API calls are heavier
+      resource_id = "service/${aws_ecs_cluster.main.name}/${aws_ecs_service.api.name}"
+      min         = var.api_desired_count
+      max         = var.api_max_count
+      tg_label    = "${aws_lb.main.arn_suffix}/${aws_lb_target_group.api.arn_suffix}"
+      req_per_tgt = 300 # requests/min/task before adding one — API calls are heavier
     }
     web = {
-      resource_id  = "service/${aws_ecs_cluster.main.name}/${aws_ecs_service.web.name}"
-      min          = var.web_desired_count
-      max          = var.web_max_count
-      tg_label     = "${aws_lb.main.arn_suffix}/${aws_lb_target_group.web.arn_suffix}"
-      req_per_tgt  = 500
+      resource_id = "service/${aws_ecs_cluster.main.name}/${aws_ecs_service.web.name}"
+      min         = var.web_desired_count
+      max         = var.web_max_count
+      tg_label    = "${aws_lb.main.arn_suffix}/${aws_lb_target_group.web.arn_suffix}"
+      req_per_tgt = 500
     }
   }
 }
