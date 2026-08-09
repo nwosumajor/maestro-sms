@@ -107,6 +107,19 @@ export interface SettlementAccountDto {
   /** The platform fee that would apply to a sample ₦10,000 payment — shown to
    *  the school so the bearer choice is an informed one. */
   sampleFeeMinor: number;
+  /**
+   * Parents' money that landed in the PLATFORM's gateway account because this
+   * school had no settlement subaccount when the charge was made.
+   *
+   * The invoices are correctly PAID — the parents did pay — but the cash is the
+   * platform's to release. Before this existed, that debt was recorded nowhere
+   * and a school could go on collecting into someone else's balance believing
+   * it had been paid. Surfaced so it is a visible balance rather than a silent
+   * loss.
+   */
+  heldByPlatformMinor: number;
+  /** How many payments make up `heldByPlatformMinor`. */
+  heldPaymentCount: number;
 }
 
 /** Returned by the pay-online init so the payer sees the full charge before the

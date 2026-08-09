@@ -19,9 +19,35 @@ import {
   TENANT_DATABASE,
   type AuditLogService,
   type TenantDatabase,
+  type TenantTx,
 } from "../integrity/integrity.foundation";
 import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
 import { NotificationService } from "../notifications/notification.service";
+
+/**
+ * Did this charge land in the PLATFORM's gateway account rather than the
+ * school's own bank?
+ *
+ * True exactly when the school has no settlement subaccount: with nothing to
+ * split to, Paystack keeps the whole charge in the main account. The invoice is
+ * still correctly PAID — the parent did pay — but the cash is the platform's to
+ * release, and until this column existed nothing anywhere recorded that.
+ *
+ * Read inside the settlement transaction. There is a small window in which a
+ * school registers its bank between a charge being initiated and its webhook
+ * arriving, and such a payment is recorded as NOT held when it actually was.
+ * That is minutes wide, self-correcting (the next charge splits properly), and
+ * the alternative — trusting gateway metadata a rail may not echo — fails on
+ * the rails that carry no metadata at all, which are the ones most likely to
+ * land unsplit.
+ */
+async function settledToPlatform(tx: TenantTx, schoolId: string): Promise<boolean> {
+  const school = await tx.school.findFirst({
+    where: { id: schoolId },
+    select: { paystackSubaccountCode: true },
+  });
+  return !school?.paystackSubaccountCode;
+}
 
 export interface OnlinePaymentInput {
   schoolId: string;
@@ -99,6 +125,13 @@ export class InvoiceSettlementService {
           status: "POSTED",
           reference: input.reference,
           platformFeeMinor: input.platformFeeMinor ?? 0,
+          // Snapshot of WHERE this money landed. When the school has no
+          // settlement subaccount the split has nowhere to go and the whole
+          // charge sits in the platform's gateway balance — a debt, which
+          // nothing recorded before this column existed. Read here rather than
+          // derived later, because derived from current state it would silently
+          // stop being owed the day the school registers a bank.
+          settledToPlatform: await settledToPlatform(tx, schoolId),
           note: input.note,
           recordedById: inv.createdById,
         },
