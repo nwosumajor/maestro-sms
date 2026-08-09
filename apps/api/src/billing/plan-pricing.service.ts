@@ -96,7 +96,7 @@ export class PlanPricingService implements OnModuleInit {
   }
 
   /** Per-(tier, currency) list with default/override flags (operator console +
-   *  public page). Only SELLABLE combos appear — ENTERPRISE is USD-only. */
+   *  public page). Only SELLABLE combos appear. */
   async list(): Promise<PlanPriceDto[]> {
     const { pricing, overridden } = await this.resolve();
     return (Object.values(PLANS) as Plan[]).flatMap((plan) =>
@@ -126,8 +126,8 @@ export class PlanPricingService implements OnModuleInit {
     for (const row of rows) {
       if (!isPlan(row.plan)) throw new BadRequestException(`unknown plan tier: ${row.plan}`);
       if (!isCurrency(row.currency)) throw new BadRequestException(`unknown currency: ${String(row.currency)}`);
-      // ENTERPRISE is indicated/sold in USD only — an NGN price would leak onto
-      // the homepage and checkout, so refuse to store one at all.
+      // Refuse a price in a currency the tier is not sold in — it would leak
+      // onto the homepage and checkout as a quote nothing can charge.
       if (!planCurrencies(row.plan).includes(row.currency)) {
         throw new BadRequestException(`${row.plan} is billed in ${planCurrencies(row.plan).join("/")} only`);
       }

@@ -28,6 +28,7 @@ import { StripeService } from "../payments/stripe.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import { NotificationService } from "../notifications/notification.service";
 import { InvoiceSettlementService } from "./settlement.service";
+import { BillingService } from "../billing/billing.service";
 
 export const FEE_RECONCILE_QUEUE = "fee-reconcile";
 export const FEE_RECONCILE_JOB = "fee-reconcile-sweep";
@@ -41,6 +42,10 @@ export const RECONCILE_WINDOW_DAYS = 3;
 export interface ReconcileResult {
   scanned: number;
   invoiceCharges: number;
+  /** Subscription (platform revenue) charges seen in the window, and how many
+   *  had no PAID row until this sweep put one there. */
+  subscriptionCharges: number;
+  subscriptionRecovered: number;
   missing: number;
   posted: number;
 }
@@ -67,6 +72,7 @@ export class PaymentReconciliationService {
     private readonly privileged: PrivilegedDatabaseService,
     private readonly notifications: NotificationService,
     private readonly settlement: InvoiceSettlementService,
+    private readonly billing: BillingService,
   ) {}
 
   /** Manual trigger (fee.reconcile.run — super_admin). Audited to the caller. */
@@ -95,7 +101,7 @@ export class PaymentReconciliationService {
   }
 
   async sweep(trigger: "SCHEDULED" | "MANUAL"): Promise<ReconcileResult> {
-    const zero: ReconcileResult = { scanned: 0, invoiceCharges: 0, missing: 0, posted: 0 };
+    const zero: ReconcileResult = { scanned: 0, invoiceCharges: 0, subscriptionCharges: 0, subscriptionRecovered: 0, missing: 0, posted: 0 };
     const client = this.privileged.client;
     if ((!this.paystack.isConfigured() && !this.stripe.isConfigured()) || !client) {
       if (trigger === "SCHEDULED") this.logger.log("reconcile skipped (no gateway or privileged client)");
@@ -138,6 +144,28 @@ export class PaymentReconciliationService {
     // the whole window (not a findFirst per charge — that was an N+1 over the
     // sweep). The cross-tenant read uses the privileged client; the POST still
     // goes through the normal tenant-scoped settlement path.
+    // SUBSCRIPTION charges first — the platform's own revenue, which this sweep
+    // used to filter out and drop. A lost subscription webhook leaves the school
+    // charged, the payment PENDING and the period unextended; dunning then flips
+    // them PAST_DUE and downgrades them. They pay, and get demoted for it.
+    const subCands = candidates.filter((c) => c.meta.kind === "subscription" && c.meta.schoolId);
+    result.subscriptionCharges = subCands.length;
+    for (const c of subCands) {
+      try {
+        const recovered = await this.billing.recoverSubscriptionCharge(c.meta.schoolId as string, c.reference, {
+          amountMinor: c.amountMinor,
+          currency: c.currency,
+        });
+        if (recovered) {
+          result.subscriptionRecovered++;
+          this.logger.warn(`reconcile: recovered missed SUBSCRIPTION settlement ${c.reference}`);
+        }
+      } catch (e) {
+        // One school's bad row must not stop the sweep reaching the others.
+        this.logger.warn(`reconcile: subscription ${c.reference} failed: ${(e as Error).message}`);
+      }
+    }
+
     const invoiceCands = candidates.filter((c) => c.meta.kind === "invoice" && c.meta.invoiceId && c.meta.schoolId);
     result.invoiceCharges = invoiceCands.length;
     if (invoiceCands.length === 0) return result;

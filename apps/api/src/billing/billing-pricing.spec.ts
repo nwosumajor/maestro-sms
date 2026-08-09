@@ -143,11 +143,25 @@ import {
 } from "@sms/types";
 
 describe("currency rules", () => {
-  it("ENTERPRISE is USD-only; other tiers sell in NGN and USD", () => {
-    expect(planCurrencies(PLANS.ENTERPRISE)).toEqual([CURRENCIES.USD]);
-    for (const plan of [PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE]) {
-      expect(planCurrencies(plan)).toEqual([CURRENCIES.NGN, CURRENCIES.USD]);
+  it("EVERY tier sells in both currencies — ENTERPRISE included", () => {
+    // ENTERPRISE used to be USD-only, on the reasoning that it targets
+    // international schools. The platform's only live card rail is a Paystack
+    // account not enabled for USD, so that made the top tier unbuyable: a
+    // Nigerian group had no way to pay for it, and the NGN price already
+    // existed. A display preference must never gate a sale.
+    for (const plan of [PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE]) {
+      expect({ plan, sells: planCurrencies(plan) }).toEqual({
+        plan,
+        sells: [CURRENCIES.NGN, CURRENCIES.USD],
+      });
     }
+  });
+
+  it("keeps ENTERPRISE PRESENTING in dollars — display is not the same as sale", () => {
+    // The marketing surfaces still read defaultCurrencyFor; what changed is
+    // that the checkout no longer inherits that as a restriction.
+    expect(defaultCurrencyFor(PLANS.ENTERPRISE)).toBe(CURRENCIES.USD);
+    expect(planCurrencies(PLANS.ENTERPRISE)).toContain(CURRENCIES.NGN);
   });
 
   it("defaults: ₦ locally, $ for ENTERPRISE", () => {
@@ -168,7 +182,7 @@ describe("currency rules", () => {
     // Still only two are SOLD in, because only two have prices. Opening a market
     // is a price list, not a code change.
     expect(planCurrencies(PLANS.STANDARD).sort()).toEqual(["NGN", "USD"]);
-    expect(planCurrencies(PLANS.ENTERPRISE)).toEqual(["USD"]);
+    expect(planCurrencies(PLANS.ENTERPRISE).sort()).toEqual(["NGN", "USD"]);
   });
 
   it("USD pricing computes in cents with the USD table", () => {
