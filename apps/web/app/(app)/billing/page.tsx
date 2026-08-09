@@ -52,9 +52,17 @@ export default async function BillingPage() {
         <PageHeader title={<>Billing &amp; Subscription</>} subtitle={<>Your platform subscription. Pricing is per active student; paying activates your plan automatically.</>} />
 
         {data === null ? (
+          /* NOT a permission problem. The gate above already redirected anyone
+             without billing.read, so reaching here with null means the read
+             itself failed — the API is unreachable, or the subscription record
+             is missing. Saying "no access" sent people to their school admin
+             for something only support can fix. */
           <Alert variant="info">
-            <AlertTitle>No access</AlertTitle>
-            <AlertDescription>You don&apos;t have permission to view billing.</AlertDescription>
+            <AlertTitle>Billing details are unavailable</AlertTitle>
+            <AlertDescription>
+              We could not load your subscription just now. Your plan and access are unaffected. Please refresh,
+              and contact support if it persists.
+            </AlertDescription>
           </Alert>
         ) : (
           <>
@@ -101,13 +109,22 @@ export default async function BillingPage() {
               />
             )}
 
-            <BillingCheckout quotes={data.quotes} activeStudents={data.activeStudents} canManage={canManage} />
+            <BillingCheckout
+              quotes={data.quotes}
+              activeStudents={data.activeStudents}
+              canManage={canManage}
+              currencyAvailability={data.currencyAvailability}
+            />
 
             {data.planChangeCreditMinor > 0 && (
               <p className="text-xs text-muted-foreground">
                 Switching plans mid-period? Your unused time is worth about{" "}
                 <span className="tnum font-medium text-foreground">
-                  {new Intl.NumberFormat("en-NG", { style: "currency", currency: data.subscription.currency ?? "NGN" }).format(data.planChangeCreditMinor / 100)}
+                  {/* was a hand-rolled en-NG Intl formatter dividing by 100 —
+                      the one line on this page that skipped the shared helper,
+                      so it printed a different format from every figure beside
+                      it and would be 100x wrong in a zero-decimal currency. */}
+                  {money(data.planChangeCreditMinor, data.subscription.currency ?? "NGN")}
                 </span>{" "}
                 — it is deducted automatically from the plan-change charge, and the new plan runs a full cycle
                 from the day you pay.
@@ -116,11 +133,20 @@ export default async function BillingPage() {
 
             <AutoRenewCard autoRenew={data.autoRenew} cardLast4={data.cardLast4} canManage={canManage} />
 
-            {credits && (
+            {/* A null read is "could not ask", not "you have none" — rendering
+                nothing made a failed fetch look like an empty balance and an
+                absent referral programme. */}
+            {credits ? (
               <MessageCreditsCard balance={credits.balance} bundles={[...credits.bundles]} canManage={canManage} />
+            ) : (
+              <p className="text-xs text-muted-foreground">Message credits could not be loaded just now.</p>
             )}
 
-            {referral && <ReferralPanel initial={referral} canManage={canManage} />}
+            {referral ? (
+              <ReferralPanel initial={referral} canManage={canManage} />
+            ) : (
+              <p className="text-xs text-muted-foreground">Your referral details could not be loaded just now.</p>
+            )}
 
             <Card>
               <CardHeader>

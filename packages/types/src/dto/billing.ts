@@ -58,10 +58,24 @@ export interface BillingOverviewDto {
   /** Metered UNBILLED seat usage already accrued (kobo/cents). Settled by the
    *  top-up, or automatically added to the next renewal charge. */
   seatArrearsMinor: number;
+  /**
+   * Currencies this platform can actually CHARGE in right now, and why not.
+   *
+   * Not a static capability list: it reflects which channels the operator has
+   * switched on AND which currencies the gateway account is really enabled for.
+   * ENTERPRISE is priced in USD, and a Paystack account without USD refused it
+   * with a 403 that reached the school as "Payment provider error" — after they
+   * had re-authenticated and committed to buying. The page needs this to avoid
+   * offering a tier that cannot be bought.
+   */
+  currencyAvailability: Array<{ currency: Currency; available: boolean; reason: string | null }>;
 }
 
-/** School-initiated checkout input. Currency picks the gateway: NGN → Paystack,
- *  USD → Stripe. Omitted → the tier's default (₦, or $ for ENTERPRISE). */
+/** School-initiated checkout input. Currency picks the gateway via
+ *  `pickCardRail`: each currency's natural rail when that rail is switched on,
+ *  otherwise any enabled rail that can genuinely settle it — so USD falls back
+ *  to Paystack while Stripe is off. Omitted → the tier's default (₦, or $ for
+ *  ENTERPRISE). */
 export interface CheckoutInitDto {
   plan: Plan;
   billingCycle: BillingCycle;

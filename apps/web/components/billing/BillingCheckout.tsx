@@ -26,10 +26,15 @@ export function BillingCheckout({
   quotes,
   activeStudents,
   canManage,
+  currencyAvailability = [],
 }: {
   quotes: Quote[];
   activeStudents: number;
   canManage: boolean;
+  /** Which currencies can actually be charged right now, from the server. An
+   *  empty list means the page could not establish it — never a reason to
+   *  block a purchase that might have worked. */
+  currencyAvailability?: Array<{ currency: string; available: boolean; reason: string | null }>;
 }) {
   const plans = React.useMemo(() => Array.from(new Set(quotes.map((q) => q.plan))), [quotes]);
   const cycles = React.useMemo(() => Array.from(new Set(quotes.map((q) => q.billingCycle))), [quotes]);
@@ -50,7 +55,11 @@ export function BillingCheckout({
   const selected = quotes.find(
     (q) => q.plan === plan && q.billingCycle === cycle && q.currency === effectiveCurrency,
   );
-  const gateway = effectiveCurrency === "USD" ? "Stripe" : "Paystack";
+  // NOT "USD means Stripe" any more: pickCardRail falls back to Paystack for
+  // USD while Stripe is switched off, so naming the gateway from the currency
+  // told the school the wrong one. The server knows; the page no longer guesses.
+  const availability = currencyAvailability.find((c) => c.currency === effectiveCurrency);
+  const unavailable = availability != null && !availability.available;
   // Savings vs paying month-by-month for the same coverage: the MONTH quote is
   // undiscounted, so gross = monthly quote × the cycle's months.
   const monthQuote = quotes.find(
@@ -79,11 +88,10 @@ export function BillingCheckout({
       return;
     }
     setBusy(false);
-    setMsg(
-      res.status === 503
-        ? `${effectiveCurrency === "USD" ? "Dollar" : "Naira"} payments are not configured yet. Contact the platform operator.`
-        : await readApiError(res),
-    );
+    // The server now says WHY (which rail, which currency the account settles).
+    // The old text guessed "not configured", which was wrong whenever the real
+    // cause was an account not enabled for the currency.
+    setMsg(await readApiError(res));
   }
 
   return (
@@ -92,9 +100,8 @@ export function BillingCheckout({
         <CardTitle>Upgrade or renew</CardTitle>
         <CardDescription>
           Per-seat pricing across {activeStudents} active student{activeStudents === 1 ? "" : "s"}. Pay monthly,
-          per term (3 months — 5% off) or per year (9 months — 15% off), in naira (Paystack) or US dollars
-          (Stripe) — Enterprise is billed in dollars. Your plan activates automatically once the payment is
-          confirmed.
+          per term (3 months — 5% off) or per year (9 months — 15% off), in naira or US dollars — Enterprise is
+          billed in dollars. Your plan activates automatically once the payment is confirmed.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -162,10 +169,22 @@ export function BillingCheckout({
               )}
             </span>
           </div>
-          <Button type="submit" disabled={busy || !selected}>
-            {busy ? "Redirecting…" : `Pay with ${gateway}`}
+          <Button type="submit" disabled={busy || !selected || unavailable}>
+            {busy ? "Redirecting…" : "Continue to payment"}
           </Button>
         </form>
+
+        {/* NO DEAD BUTTON. ENTERPRISE is priced in USD, and a gateway account
+            not enabled for USD refused the charge with a 403 that reached the
+            school as "Payment provider error" — after they had re-authenticated
+            and committed to buying. Say it before the click instead. */}
+        {unavailable && (
+          <p className="mt-3 text-sm text-muted-foreground">
+            {effectiveCurrency} payments are not available yet — please contact us and we will arrange this
+            plan for you.
+          </p>
+        )}
+
         {msg && <p className="mt-3 text-sm text-muted-foreground">{msg}</p>}
       </CardContent>
     </Card>

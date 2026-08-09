@@ -97,14 +97,20 @@ export class BillingService {
     return { schoolId: p.schoolId, userId: p.userId };
   }
 
-  /** Active students = distinct users holding the `student` role in this school. */
+  /**
+   * Active students = distinct users holding the `student` role in this school.
+   *
+   * A COUNT, not a fetch-and-length. This hydrated one object per student
+   * through the ORM purely to read `rows.length`, and it is not a cold path:
+   * it runs on the billing screen, on every checkout, on the true-up quote and
+   * on the seat top-up — and it is the number the school is BILLED on, so it
+   * scales with exactly the thing that makes a customer valuable.
+   *
+   * Counting `user` rather than `userRole` keeps the distinct-users semantics in
+   * SQL, where a duplicate role assignment cannot inflate a school's bill.
+   */
   private async activeStudents(tx: TenantTx): Promise<number> {
-    const rows = await tx.userRole.findMany({
-      where: { role: { name: "student" } },
-      select: { userId: true },
-      distinct: ["userId"],
-    });
-    return rows.length;
+    return tx.user.count({ where: { roles: { some: { role: { name: "student" } } } } });
   }
 
   private toPaymentDto(r: {
@@ -210,6 +216,17 @@ export class BillingService {
       ),
     );
 
+    // Can each quoted currency actually be charged right now? Asked ONCE per
+    // distinct currency, not per quote — the quote list is tiers x currencies x
+    // cycles, and this reads the channel config behind a cache.
+    const quoteCurrencies = [...new Set(quotes.map((q) => q.currency))];
+    const currencyAvailability = await Promise.all(
+      quoteCurrencies.map(async (currency) => ({
+        currency,
+        ...((await this.channels?.billingAvailabilityFor(currency)) ?? { available: true, reason: null }),
+      })),
+    );
+
     return {
       subscription,
       activeStudents,
@@ -220,6 +237,7 @@ export class BillingService {
       planChangeCreditMinor,
       trueUp,
       seatArrearsMinor: Math.max(0, subRow?.seatArrearsMinor ?? 0),
+      currencyAvailability,
     };
   }
 
@@ -261,6 +279,17 @@ export class BillingService {
     }
     if (rail === PAYMENT_CHANNELS.STRIPE && !this.stripe.isConfigured()) {
       throw new ServiceUnavailableException("USD payments are not configured");
+    }
+    // CAN THE ACCOUNT ACTUALLY SETTLE THIS CURRENCY? Picking a rail that
+    // supports the currency is not the same as an ACCOUNT enabled for it: a
+    // Paystack account without USD refuses with a 403 that reached the school
+    // as "Payment provider error", after they had already re-authenticated.
+    // Refused here, with a reason an operator can act on.
+    const settleable = await this.channels?.billingAvailabilityFor(currency);
+    if (settleable && !settleable.available) {
+      throw new ServiceUnavailableException(
+        `${currency} payments are not available yet. ${settleable.reason ?? ""}`.trim(),
+      );
     }
     const quote = computeTrueUpMinor(
       prep.sub.plan as Plan,
@@ -402,6 +431,17 @@ export class BillingService {
     }
     if (rail === PAYMENT_CHANNELS.STRIPE && !this.stripe.isConfigured()) {
       throw new ServiceUnavailableException("USD payments are not configured");
+    }
+    // CAN THE ACCOUNT ACTUALLY SETTLE THIS CURRENCY? Picking a rail that
+    // supports the currency is not the same as an ACCOUNT enabled for it: a
+    // Paystack account without USD refuses with a 403 that reached the school
+    // as "Payment provider error", after they had already re-authenticated.
+    // Refused here, with a reason an operator can act on.
+    const settleable = await this.channels?.billingAvailabilityFor(currency);
+    if (settleable && !settleable.available) {
+      throw new ServiceUnavailableException(
+        `${currency} payments are not available yet. ${settleable.reason ?? ""}`.trim(),
+      );
     }
 
     // Charge with the same operator-effective pricing the overview quoted.
