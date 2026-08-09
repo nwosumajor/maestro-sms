@@ -40,6 +40,7 @@ import {
   type Plan,
   type PlatformPaymentDto,
   PAYMENT_CHANNELS,
+  pickCardRail,
 } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -241,12 +242,24 @@ export class BillingService {
     if (currency === CURRENCIES.NGN && !this.paystack.isConfigured()) {
       throw new ServiceUnavailableException("Naira payments are not configured");
     }
-    // INITIATION gate — settlement paths deliberately skip it (see
-    // PaymentChannelService: money already moved must still land).
-    await this.channels?.assertEnabled(
-      currency === CURRENCIES.USD ? PAYMENT_CHANNELS.STRIPE : PAYMENT_CHANNELS.PAYSTACK,
+    // WHICH RAIL, given the currency AND what the operator has switched on.
+    // ENTERPRISE is priced in USD, and Paystack settles USD too — so while
+    // Stripe is off, a USD subscription routes to Paystack rather than being
+    // refused. Without this an ENTERPRISE school could not pay at all. When
+    // Stripe is switched on, USD returns to it automatically.
+    //
+    // INITIATION only — settlement paths deliberately skip the switchboard, so
+    // money already taken on a rail still lands after that rail is turned off.
+    const rail = pickCardRail(
+      currency,
+      (await this.channels?.enabled()) ?? [PAYMENT_CHANNELS.PAYSTACK, PAYMENT_CHANNELS.STRIPE],
     );
-    if (currency === CURRENCIES.USD && !this.stripe.isConfigured()) {
+    if (!rail) {
+      throw new ServiceUnavailableException(
+        `Online payment in ${currency} is not available yet — please contact support to arrange payment.`,
+      );
+    }
+    if (rail === PAYMENT_CHANNELS.STRIPE && !this.stripe.isConfigured()) {
       throw new ServiceUnavailableException("USD payments are not configured");
     }
     const quote = computeTrueUpMinor(
@@ -305,7 +318,7 @@ export class BillingService {
     });
 
     const { authorizationUrl } =
-      currency === CURRENCIES.USD
+      rail === PAYMENT_CHANNELS.STRIPE
         ? await this.stripe.createCheckoutSession({
             email: prep.email,
             amountMinor,
@@ -377,12 +390,17 @@ export class BillingService {
     if (currency === CURRENCIES.NGN && !this.paystack.isConfigured()) {
       throw new ServiceUnavailableException("Naira payments are not configured");
     }
-    // INITIATION gate — settlement paths deliberately skip it (see
-    // PaymentChannelService: money already moved must still land).
-    await this.channels?.assertEnabled(
-      currency === CURRENCIES.USD ? PAYMENT_CHANNELS.STRIPE : PAYMENT_CHANNELS.PAYSTACK,
+    // Same rail choice as the subscription checkout above.
+    const rail = pickCardRail(
+      currency,
+      (await this.channels?.enabled()) ?? [PAYMENT_CHANNELS.PAYSTACK, PAYMENT_CHANNELS.STRIPE],
     );
-    if (currency === CURRENCIES.USD && !this.stripe.isConfigured()) {
+    if (!rail) {
+      throw new ServiceUnavailableException(
+        `Online payment in ${currency} is not available yet — please contact support to arrange payment.`,
+      );
+    }
+    if (rail === PAYMENT_CHANNELS.STRIPE && !this.stripe.isConfigured()) {
       throw new ServiceUnavailableException("USD payments are not configured");
     }
 
@@ -474,7 +492,7 @@ export class BillingService {
 
     const metadata = { kind: "subscription", schoolId: p.schoolId, paymentId, plan, billingCycle, seats };
     const { authorizationUrl } =
-      currency === CURRENCIES.USD
+      rail === PAYMENT_CHANNELS.STRIPE
         ? await this.stripe.createCheckoutSession({
             email,
             amountMinor,

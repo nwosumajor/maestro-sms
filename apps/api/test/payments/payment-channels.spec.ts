@@ -23,6 +23,7 @@ import {
   currencyIsChargeable,
   isChannelEnabled,
   normaliseChannels,
+  pickCardRail,
 } from "@sms/types";
 import { PaymentChannelService } from "../../src/payments/payment-channel.service";
 
@@ -193,5 +194,44 @@ describe("the switchboard never reaches settlement", () => {
     const recoverAt = src.indexOf("async recoverPending");
     expect(gateAt).toBeGreaterThan(-1);
     if (recoverAt > -1) expect(gateAt).toBeLessThan(recoverAt);
+  });
+});
+
+// ===========================================================================
+// USD MUST STILL BE PAYABLE WHILE STRIPE IS OFF
+// ===========================================================================
+// USD normally routes to Stripe. But Paystack settles USD too, so refusing a
+// USD payment because "Stripe is off" leaves collectable money uncollected —
+// and ENTERPRISE is priced in USD, so an ENTERPRISE school could not pay its
+// own subscription and a USD school fee could not be paid at all.
+describe("card rail selection", () => {
+  it("routes USD to PAYSTACK while Stripe is switched off", () => {
+    expect(pickCardRail("USD", [PAYMENT_CHANNELS.PAYSTACK])).toBe(PAYMENT_CHANNELS.PAYSTACK);
+  });
+
+  it("returns USD to STRIPE the moment it is switched on — no second switch to remember", () => {
+    expect(pickCardRail("USD", [PAYMENT_CHANNELS.PAYSTACK, PAYMENT_CHANNELS.STRIPE])).toBe(
+      PAYMENT_CHANNELS.STRIPE,
+    );
+  });
+
+  it("keeps NGN on Paystack and never sends it to Stripe, which cannot settle it", () => {
+    expect(pickCardRail("NGN", [PAYMENT_CHANNELS.PAYSTACK, PAYMENT_CHANNELS.STRIPE])).toBe(
+      PAYMENT_CHANNELS.PAYSTACK,
+    );
+    // Stripe-only is not a fallback for naira — it would charge in the wrong
+    // currency, which is the defect PAYSTACK_CURRENCIES exists to prevent.
+    expect(pickCardRail("NGN", [PAYMENT_CHANNELS.STRIPE])).toBeNull();
+  });
+
+  it("returns null when NOTHING enabled can settle the currency", () => {
+    // The honest answer. The caller turns it into a message a payer can act on
+    // rather than a checkout that fails at the gateway.
+    expect(pickCardRail("GBP", [PAYMENT_CHANNELS.PAYSTACK, PAYMENT_CHANNELS.STRIPE])).toBeNull();
+    expect(pickCardRail("XOF", [PAYMENT_CHANNELS.PAYSTACK])).toBeNull();
+  });
+
+  it("treats a missing currency as the platform's home currency", () => {
+    expect(pickCardRail("", [PAYMENT_CHANNELS.PAYSTACK])).toBe(PAYMENT_CHANNELS.PAYSTACK);
   });
 });

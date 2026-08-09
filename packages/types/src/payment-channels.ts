@@ -101,3 +101,41 @@ export function currencyIsChargeable(currency: string, enabled: PaymentChannel[]
     return list === "ANY" || list.includes(code);
   });
 }
+
+// --- choosing a card rail -------------------------------------------------- //
+
+/**
+ * Which card rail should take a charge in `currency`, given what is switched on.
+ *
+ * USD is the case that matters. The platform routes USD to Stripe by default —
+ * but PAYSTACK ALSO SETTLES USD, and until Stripe is funded and switched on,
+ * refusing a USD payment because "Stripe is off" leaves that money uncollected
+ * for no reason. ENTERPRISE is priced in USD, so without this an ENTERPRISE
+ * school cannot pay its own subscription and a USD school fee cannot be paid at
+ * all.
+ *
+ * So: prefer the currency's natural rail if it is enabled, otherwise fall back
+ * to any enabled rail that can genuinely settle that currency. Returns null
+ * only when nothing can — which is the honest answer, and the caller turns it
+ * into the "coming soon" message rather than a broken checkout.
+ *
+ * The preference order matters and is deliberate: when the operator later
+ * switches Stripe on, USD goes back to Stripe automatically with no code change
+ * and no second switch to remember.
+ */
+export function pickCardRail(
+  currency: string,
+  enabled: PaymentChannel[],
+): PaymentChannel | null {
+  const code = (currency || "NGN").toUpperCase();
+  const preferred: PaymentChannel[] =
+    code === "USD"
+      ? [PAYMENT_CHANNELS.STRIPE, PAYMENT_CHANNELS.PAYSTACK]
+      : [PAYMENT_CHANNELS.PAYSTACK, PAYMENT_CHANNELS.STRIPE];
+  for (const ch of preferred) {
+    if (!enabled.includes(ch)) continue;
+    const list = CHANNEL_CURRENCIES[ch];
+    if (list === "ANY" || list.includes(code)) return ch;
+  }
+  return null;
+}
