@@ -881,6 +881,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "GET /invoices/:p/pay/availability": {
+      "kind": "ui",
+      "note": "pre-flight before the payer clicks — PayOnlineButton on /fees/[id]"
+    },
     "GET /invoices/:p/payments": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"

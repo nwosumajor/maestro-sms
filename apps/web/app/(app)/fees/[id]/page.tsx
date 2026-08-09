@@ -41,11 +41,15 @@ export default async function InvoiceDetailPage({ params }: { params: { id: stri
   if (!inv) notFound();
   const canManage = hasPermission(user.permissions, "fee.manage");
   const canApprove = hasPermission(user.permissions, "fee.approve");
-  const [virtualAccount, plan, adjustments, credit] = await Promise.all([
+  const [virtualAccount, plan, adjustments, credit, payAvailability] = await Promise.all([
     apiGet<Serialized<VirtualAccountDto>>(`/students/${inv.studentId}/virtual-account`),
     apiGet<Serialized<PaymentPlanDto>>(`/invoices/${inv.id}/plan`),
     canManage ? apiGet<Serialized<InvoiceAdjustmentDto>[]>(`/invoices/${inv.id}/adjustments`) : Promise.resolve(null),
     apiGet<Serialized<CreditBalanceDto>>(`/students/${inv.studentId}/credit`),
+    // PRE-FLIGHT, in the same round of fetches so it costs no latency: can this
+    // invoice actually be paid online right now? Answered before the payer is
+    // shown a button, rather than after they click one.
+    apiGet<{ available: boolean; reason: string | null }>(`/invoices/${inv.id}/pay/availability`),
   ]);
   const overpaidMinor = Math.max(0, inv.amountPaidMinor - inv.totalMinor);
   // Payments when there's a balance; refunds even on a PAID invoice. Not DRAFT/CANCELLED.
@@ -172,7 +176,7 @@ export default async function InvoiceDetailPage({ params }: { params: { id: stri
               <CardDescription>Pay the outstanding {money(inv.balanceMinor, inv.currency)} by card.</CardDescription>
             </CardHeader>
             <CardContent>
-              <PayOnlineButton invoiceId={inv.id} />
+              <PayOnlineButton invoiceId={inv.id} availability={payAvailability} />
               {/* Renders itself only where a rail operates AND is enabled — most
                   of Africa pays school fees from a phone, not a card. */}
               <MobileMoneyButton invoiceId={inv.id} />

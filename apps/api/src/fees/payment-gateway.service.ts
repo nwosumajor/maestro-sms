@@ -74,6 +74,31 @@ export class PaymentGatewayService {
   /** Start a hosted checkout for the invoice's outstanding balance — Paystack
    *  for NGN invoices (plus the platform take-rate), Stripe for USD ones
    *  (international schools; flat settlement, no split/take-rate). */
+  /**
+   * Can this invoice be paid online right now? Uses the invoice's OWN currency,
+   * because that is what decides the rail — a school billing in XOF is a
+   * different answer from one billing in naira, on the same platform, at the
+   * same moment.
+   *
+   * 404 for an invoice the caller cannot see, matching every other read here.
+   */
+  async paymentAvailability(
+    p: Principal,
+    invoiceId: string,
+  ): Promise<{ available: boolean; reason: string | null }> {
+    const currency = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const inv = await tx.invoice.findFirst({ where: { id: invoiceId }, select: { studentId: true, currency: true } });
+      if (!inv) throw new ForbiddenException("Invoice not found");
+      // Same visibility rule as starting a payment — a pre-flight must not be a
+      // way to probe invoices you cannot see.
+      if (!(await this.canPay(tx, p, inv.studentId))) throw new ForbiddenException("Not your invoice");
+      return inv.currency;
+    });
+    // No switchboard wired (unit wirings): fail OPEN, exactly as the gate does.
+    if (!this.channels) return { available: true, reason: null };
+    return this.channels.availabilityFor(currency);
+  }
+
   async initInvoicePayment(p: Principal, invoiceId: string): Promise<InvoicePayInitDto> {
     const { email, balance, reference, subaccount, feeBearerOverride, currency } = await this.db.runAsTenant(
       this.ctx(p),

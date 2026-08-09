@@ -32,6 +32,7 @@ import {
   DEFAULT_ENABLED_CHANNELS,
   currencyIsChargeable,
   normaliseChannels,
+  pickCardRail,
   type PaymentChannel,
 } from "@sms/types";
 import {
@@ -79,6 +80,46 @@ export class PaymentChannelService implements OnModuleInit {
     private readonly stripe: StripeService,
     @Optional() private readonly pubsub?: RedisPubSubService,
   ) {}
+
+  /**
+   * CAN A PAYER PAY, right now, in this currency? Answered BEFORE the click.
+   *
+   * A checkout button that starts a payment which cannot succeed is the worst
+   * of the options: the payer has committed, waited, and been failed. This
+   * composes everything the platform already knows — is a rail switched on, is
+   * its credential present, did the last daily check pass, and can any enabled
+   * rail settle THIS currency — into one answer the page can act on.
+   *
+   * PAYER-SAFE BY CONSTRUCTION. It returns a boolean and a sentence written for
+   * a parent. It must never leak what testConnection() knows: no gateway status
+   * codes, no account currencies, no test-vs-live, nothing about the platform's
+   * own posture. The person reading this cannot act on any of that, and it is
+   * not theirs to see.
+   */
+  async availabilityFor(currency: string): Promise<{ available: boolean; reason: string | null }> {
+    const enabled = await this.enabled();
+    const rail = pickCardRail(currency, enabled);
+    if (!rail) {
+      return {
+        available: false,
+        reason: `Online card payment in ${(currency || "NGN").toUpperCase()} is not available yet. Please ask your school for another way to pay.`,
+      };
+    }
+    const ready = this.readiness(enabled).find((r) => r.channel === rail);
+    if (!ready?.configured) {
+      // Deliberately the same sentence as a rail that is simply down: a payer
+      // does not need to know whether a key is missing or wrong, and saying so
+      // would tell them something about the platform they cannot use.
+      return { available: false, reason: "Online card payment is temporarily unavailable. Please try again later." };
+    }
+    // The daily check's last reading lives on the SAME row this service already
+    // reads, so asking for it costs nothing and needs no extra dependency.
+    const health = await this.lastHealth();
+    if (health[rail]?.ok === false) {
+      return { available: false, reason: "Online card payment is temporarily unavailable. Please try again later." };
+    }
+    return { available: true, reason: null };
+  }
 
   /**
    * PROVE a rail works, by talking to it.
@@ -174,6 +215,14 @@ export class PaymentChannelService implements OnModuleInit {
     const enabled = parsed.length > 0 ? parsed : DEFAULT_ENABLED_CHANNELS;
     this.cache = { at: now, enabled };
     return enabled;
+  }
+
+  /** Last health reading, from the config row. `{}` when never checked — which
+   *  is treated as "no reason to doubt it", not as a failure: a platform that
+   *  has not run the sweep yet must not refuse every payment. */
+  private async lastHealth(): Promise<Partial<Record<PaymentChannel, { ok: boolean }>>> {
+    const row = await prisma.paymentChannelConfigRow.findFirst({ where: { id: CONFIG_ID } });
+    return ((row?.health as Partial<Record<PaymentChannel, { ok: boolean }>> | null) ?? {});
   }
 
   async isEnabled(channel: PaymentChannel): Promise<boolean> {

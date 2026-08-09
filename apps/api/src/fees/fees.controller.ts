@@ -100,6 +100,24 @@ export class FeesController {
   ) {}
 
   // --- online payments (Paystack) ---
+  /**
+   * PRE-FLIGHT: can this invoice be paid online right now?
+   *
+   * Asked BEFORE the payer clicks. A button that starts a payment which cannot
+   * succeed is the worst outcome — the payer has committed, waited, and been
+   * failed — and until now the only way to find out was to try.
+   *
+   * Payer-safe by construction: a boolean and a sentence written for a parent.
+   * Never the gateway's status code, the account's currencies, or whether a key
+   * is missing versus wrong. None of that is actionable by the person reading
+   * it, and none of it is theirs to see.
+   */
+  @Get("invoices/:id/pay/availability")
+  @RequirePermission(FEES_PERMISSIONS.FEE_READ)
+  payAvailability(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.gateway.paymentAvailability(p, id);
+  }
+
   /** Start a hosted checkout for the invoice's balance; returns the pay URL. */
   @Post("invoices/:id/pay/init")
   @RequirePermission(FEES_PERMISSIONS.FEE_READ)
