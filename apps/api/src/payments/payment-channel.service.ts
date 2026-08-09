@@ -55,6 +55,16 @@ export interface StrandedSchool {
   currency: string;
 }
 
+/** Whether a rail is switched on, and whether it could actually take a payment. */
+export interface ChannelReadiness {
+  channel: PaymentChannel;
+  enabled: boolean;
+  /** Credentials present. A channel can be ON and unusable — that is the point. */
+  configured: boolean;
+  /** What to set to make it usable, for the operator who just switched it on. */
+  missing: string | null;
+}
+
 @Injectable()
 export class PaymentChannelService implements OnModuleInit {
   private cache: { at: number; enabled: PaymentChannel[] } | null = null;
@@ -65,6 +75,43 @@ export class PaymentChannelService implements OnModuleInit {
     private readonly privileged: PrivilegedDatabaseService,
     @Optional() private readonly pubsub?: RedisPubSubService,
   ) {}
+
+  /**
+   * Is each rail switched on, and could it actually take a payment?
+   *
+   * TWO INDEPENDENT THINGS, and conflating them is how a rail gets switched on
+   * and quietly serves nobody. The toggle is a commercial decision; credentials
+   * are a deployment fact. An operator who enables mobile money in an
+   * environment with no M-Pesa keys gets a rail that is "on" and refuses every
+   * payer — and the first report of it comes from a parent.
+   *
+   * Read from the environment rather than injecting the rail services: this
+   * asks a deployment question, and coupling the switchboard to every gateway
+   * client to answer it would drag their construction into a config read.
+   */
+  readiness(enabled: PaymentChannel[]): ChannelReadiness[] {
+    const has = (...keys: string[]) => keys.every((k) => Boolean(process.env[k]));
+    const mobileMoneyReady =
+      has("MPESA_CONSUMER_KEY", "MPESA_CONSUMER_SECRET", "MPESA_SHORTCODE", "MPESA_PASSKEY") ||
+      has("MTN_MOMO_SUBSCRIPTION_KEY", "MTN_MOMO_API_USER", "MTN_MOMO_API_KEY") ||
+      has("AIRTEL_CLIENT_ID", "AIRTEL_CLIENT_SECRET");
+
+    const rows: Array<[PaymentChannel, boolean, string]> = [
+      ["PAYSTACK", has("PAYSTACK_SECRET_KEY"), "PAYSTACK_SECRET_KEY"],
+      ["STRIPE", has("STRIPE_SECRET_KEY"), "STRIPE_SECRET_KEY"],
+      // Any ONE rail configured is enough — coverage then decides per school.
+      ["MOBILE_MONEY", mobileMoneyReady, "credentials for at least one of M-Pesa, MTN MoMo or Airtel"],
+      // Dedicated NUBANs are Paystack accounts. PAYSTACK_DEDICATED_BANK is a
+      // tuning knob with a default, NOT a requirement.
+      ["BANK_TRANSFER", has("PAYSTACK_SECRET_KEY"), "PAYSTACK_SECRET_KEY"],
+    ];
+    return rows.map(([channel, configured, missing]) => ({
+      channel,
+      enabled: enabled.includes(channel),
+      configured,
+      missing: configured ? null : missing,
+    }));
+  }
 
   onModuleInit(): void {
     this.pubsub?.subscribe(INVALIDATE_CHANNEL, () => {
@@ -140,7 +187,7 @@ export class PaymentChannelService implements OnModuleInit {
   async update(
     p: Principal,
     input: { enabled: PaymentChannel[]; note?: string | null; force?: boolean },
-  ): Promise<{ enabled: PaymentChannel[]; stranded: StrandedSchool[] }> {
+  ): Promise<{ enabled: PaymentChannel[]; stranded: StrandedSchool[]; unconfigured: PaymentChannel[] }> {
     const client = this.privileged.client;
     if (!client) {
       throw new ServiceUnavailableException("Payment channel management requires the privileged database configuration");
@@ -151,6 +198,13 @@ export class PaymentChannelService implements OnModuleInit {
       // platform, and nothing else in the system would report why.
       throw new BadRequestException("At least one payment channel must stay enabled — otherwise nobody can pay at all.");
     }
+
+    // Enabling a rail with no credentials is not refused — it is a legitimate
+    // step when the keys land minutes later — but it IS reported, so nobody
+    // discovers it from a parent who could not pay.
+    const unconfigured = this.readiness(enabled)
+      .filter((r) => r.enabled && !r.configured)
+      .map((r) => r.channel);
 
     const stranded = await this.strandedBy(enabled);
     if (stranded.length > 0 && !input.force) {
@@ -179,11 +233,18 @@ export class PaymentChannelService implements OnModuleInit {
           schoolId: p.schoolId,
           // The stranded list is recorded too: if it was overruled, the record
           // says who did it and what they were told at the time.
-          metadata: { enabled, forced: Boolean(input.force), strandedCount: stranded.length },
+          metadata: {
+            enabled,
+            forced: Boolean(input.force),
+            strandedCount: stranded.length,
+            // Recorded so "we turned it on weeks ago" can be checked against
+            // whether it could ever have worked.
+            unconfigured,
+          },
         },
         tx,
       ),
     );
-    return { enabled, stranded };
+    return { enabled, stranded, unconfigured };
   }
 }

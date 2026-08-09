@@ -10,6 +10,7 @@ import { sendSms } from "@/components/game/play-ui";
 type Channel = string;
 type Labels = Record<Channel, { name: string; comingSoon: string }>;
 type Stranded = { id: string; name: string; currency: string };
+type Readiness = { channel: string; enabled: boolean; configured: boolean; missing: string | null };
 
 /**
  * The platform's payment switchboard.
@@ -24,11 +25,13 @@ export function PaymentChannels({
   all,
   labels,
   initialStranded,
+  readiness,
 }: {
   initialEnabled: Channel[];
   all: Channel[];
   labels: Labels;
   initialStranded: Stranded[];
+  readiness: Readiness[];
 }) {
   const [enabled, setEnabled] = React.useState<Channel[]>(initialEnabled);
   const [stranded, setStranded] = React.useState<Stranded[]>(initialStranded);
@@ -59,6 +62,10 @@ export function PaymentChannels({
     setMsg("Saved. New payments will use only the rails above.");
   };
 
+  const ready = React.useMemo(
+    () => Object.fromEntries(readiness.map((r) => [r.channel, r])) as Record<string, Readiness>,
+    [readiness],
+  );
   const dirty = JSON.stringify([...enabled].sort()) !== JSON.stringify([...initialEnabled].sort());
 
   return (
@@ -84,10 +91,22 @@ export function PaymentChannels({
                 <span className="min-w-0">
                   <span className="text-sm font-medium">{labels[c]?.name ?? c}</span>
                   <span className="mt-0.5 block text-xs text-muted-foreground">
-                    {on ? "Live — payers can use this now." : labels[c]?.comingSoon ?? "Not enabled."}
+                    {!on
+                      ? labels[c]?.comingSoon ?? "Not enabled."
+                      : ready[c] && !ready[c].configured
+                        ? `Switched on but NOT usable — set ${ready[c].missing}.`
+                        : "Live — payers can use this now."}
                   </span>
                 </span>
                 <span className="flex shrink-0 items-center gap-2">
+                  {/* ON and USABLE are different questions. A rail switched on
+                      with no credentials refuses every payer, and the first
+                      report of that would otherwise come from a parent. */}
+                  {on && ready[c] && !ready[c].configured && (
+                    <Badge variant="destructive" title={`Set ${ready[c].missing}`}>
+                      no credentials
+                    </Badge>
+                  )}
                   <Badge variant={on ? "secondary" : "outline"}>{on ? "on" : "coming soon"}</Badge>
                   <input type="checkbox" checked={on} onChange={() => toggle(c)} className="h-4 w-4" />
                 </span>
