@@ -12,9 +12,9 @@
 // verified against the raw body, mirroring the Paystack posture.
 // =============================================================================
 
-import { Body, Controller, Get, Headers, Post, Put, Req } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Param, Post, Put, Req, Res } from "@nestjs/common";
 import type { RawBodyRequest } from "@nestjs/common";
-import type { Request } from "express";
+import type { Request, Response } from "express";
 import { BILLING_CYCLES, CURRENCIES, BILLING_PERMISSIONS, PLANS } from "@sms/types";
 import type { BillingOverviewDto, CheckoutInitResultDto, ReferralInfoDto } from "@sms/types";
 import { z } from "zod";
@@ -69,6 +69,18 @@ export class BillingController {
   @RequirePermission(BILLING_PERMISSIONS.BILLING_READ)
   status(@CurrentPrincipal() p: Principal) {
     return this.billing.getStatus(p);
+  }
+
+  /** Receipt PDF for a PAID subscription payment. 404-not-403; audited.
+   *  billing.read, not billing.manage — a bursar who files the receipt is not
+   *  necessarily the person allowed to change the plan. */
+  @Get("payments/:id/receipt.pdf")
+  @RequirePermission(BILLING_PERMISSIONS.BILLING_READ)
+  async receipt(@CurrentPrincipal() p: Principal, @Param("id") id: string, @Res() res: Response) {
+    const { buffer, filename } = await this.billing.receiptPdf(p, id);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(buffer);
   }
 
   /** Start a hosted Paystack checkout for a tier. Step-up re-auth required. */
