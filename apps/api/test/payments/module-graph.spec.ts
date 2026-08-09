@@ -16,7 +16,7 @@
 // at deploy.
 // =============================================================================
 
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 const SRC = join(__dirname, "..", "..", "src");
@@ -102,5 +102,58 @@ describe("no module imports itself, directly or through one hop", () => {
         });
       }
     }
+  });
+});
+
+// ===========================================================================
+// A provider is only injectable where its module is IMPORTED
+// ===========================================================================
+// The leaf/cycle checks above catch a module graph that cannot boot. They do
+// NOT catch the other half of the same class: a controller or service
+// constructor-injecting a provider whose module its own module never imports.
+// Nest fails that at BOOT with "Nest can't resolve dependencies of X ... is
+// available in the Y context?" — after the typecheck, the unit tests and the
+// web build have all gone green, because none of them builds the graph.
+//
+// It happened while adding the payment-channel switchboard: OperatorController
+// injected PaymentChannelService and OperatorModule imported BillingModule (a
+// module that itself imports PaymentsModule but does not re-export it). This
+// pins the rule for everything PaymentsModule exports, which is where the risk
+// concentrates — every payment path in the app injects one of them.
+describe("PaymentsModule's exports are only injected where it is imported", () => {
+  const MODULE_OF_DIR: Record<string, string> = {
+    payments: "payments/payments.module.ts",
+    fees: "fees/fees.module.ts",
+    billing: "billing/billing.module.ts",
+    operator: "operator/operator.module.ts",
+    admissions: "admissions/admissions.module.ts",
+    notifications: "notifications/notification.module.ts",
+  };
+
+  /** Class names PaymentsModule hands out. */
+  function exportsOfPayments(): string[] {
+    const m = /exports:\s*\[([\s\S]*?)\]/.exec(read("payments/payments.module.ts"));
+    return m ? [...m[1].matchAll(/\b([A-Z]\w*(?:Service|Provider))\b/g)].map((x) => x[1]) : [];
+  }
+
+  it("every module whose code injects one of them imports PaymentsModule", () => {
+    const provided = exportsOfPayments();
+    expect(provided.length).toBeGreaterThan(0);
+
+    const offenders: string[] = [];
+    for (const [dir, modulePath] of Object.entries(MODULE_OF_DIR)) {
+      if (dir === "payments") continue; // its own providers
+      const files = readdirSync(join(SRC, dir)).filter((f) => /\.(service|controller)\.ts$/.test(f));
+      const injects = files.filter((f) => {
+        const src = readFileSync(join(SRC, dir, f), "utf8");
+        // A constructor parameter, not merely a type import.
+        return provided.some((p) => new RegExp(`(private|public|readonly)[^,()]*:\\s*${p}\\b`).test(src));
+      });
+      if (injects.length === 0) continue;
+      if (!importsOf(modulePath).includes("PaymentsModule")) {
+        offenders.push(`${modulePath} does not import PaymentsModule but ${injects.join(", ")} inject from it`);
+      }
+    }
+    expect(offenders).toEqual([]);
   });
 });

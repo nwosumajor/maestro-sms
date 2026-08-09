@@ -31,6 +31,9 @@ import {
   type MisplacedPlatformRoleDto,
   type SchoolDirectoryPageDto,
   type SchoolProfileDto,
+  PAYMENT_CHANNEL_VALUES,
+  CHANNEL_LABELS,
+  type PaymentChannel,
 } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { RequireStepUp } from "../auth/require-stepup.decorator";
@@ -51,6 +54,7 @@ import { PlatformFeeService } from "../billing/platform-fee.service";
 import { GrowthService } from "../billing/growth.service";
 import { GroupService } from "../group/group.service";
 import { OperatorCreditsService } from "./operator-credits.service";
+import { PaymentChannelService } from "../payments/payment-channel.service";
 
 /** Delegation input. `days` is bounded here AND in the service — the boundary
  *  rejects nonsense, the service owns the rule. */
@@ -182,6 +186,13 @@ const platformFeeSchema = z.object({
   bearer: z.enum(["PARENT", "SCHOOL"]),
 });
 const requiredSchema = z.object({ required: z.boolean() });
+const paymentChannelSchema = z.object({
+  enabled: z.array(z.enum(PAYMENT_CHANNEL_VALUES as [string, ...string[]])).min(1),
+  note: z.string().max(500).nullish(),
+  /** Apply even though it would strand a live school. Recorded in the audit. */
+  force: z.boolean().optional(),
+});
+
 const onboardingStatusSchema = z.object({
   status: z.enum(["NEW", "REVIEWING", "APPROVED", "REJECTED"]),
   note: z.string().max(1000).optional(),
@@ -227,6 +238,7 @@ export class OperatorController {
     private readonly auditSvc: PlatformAuditService,
     private readonly pricing: PlanPricingService,
     private readonly platformFees: PlatformFeeService,
+    private readonly channels: PaymentChannelService,
     private readonly growth: GrowthService,
     private readonly groups: GroupService,
     private readonly credits: OperatorCreditsService,
@@ -604,6 +616,37 @@ export class OperatorController {
     @Body(new ZodValidationPipe(pricingSchema)) body: z.infer<typeof pricingSchema>,
   ) {
     return this.pricing.update(p, body);
+  }
+
+  /**
+   * Which payment rails the platform will START a charge on, plus the impact of
+   * the current setting: schools that could not be charged at all under it.
+   */
+  @Get("payment-channels")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
+  async getPaymentChannels() {
+    const enabled = await this.channels.enabled();
+    return { enabled, all: PAYMENT_CHANNEL_VALUES, labels: CHANNEL_LABELS, stranded: await this.channels.strandedBy(enabled) };
+  }
+
+  /**
+   * Set the enabled rails. Owner-only + step-up + audited, same posture as
+   * pricing and the take-rate: it decides whether the platform can take money.
+   *
+   * Refuses a set that would leave a LIVE school unable to charge unless
+   * `force` is passed — a warning an operator may overrule, but never one they
+   * can walk past without seeing.
+   */
+  @Put("payment-channels")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_PRICING_MANAGE)
+  @RequireStepUp()
+  setPaymentChannels(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(paymentChannelSchema)) body: z.infer<typeof paymentChannelSchema>,
+  ) {
+    // The zod enum already narrowed these to real channels; normaliseChannels
+    // in the service is the authoritative re-check.
+    return this.channels.update(p, { ...body, enabled: body.enabled as PaymentChannel[] });
   }
 
   /** The platform's convenience fee on online fee collection (take-rate). */

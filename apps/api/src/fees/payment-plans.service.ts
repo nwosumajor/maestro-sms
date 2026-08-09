@@ -1,3 +1,4 @@
+import { PAYMENT_CHANNELS } from "@sms/types";
 // =============================================================================
 // PaymentPlansService — installment schedules + the student credit ledger
 // =============================================================================
@@ -18,7 +19,7 @@
 // Actual outbound refunds still go through maker-checker unchanged.
 // =============================================================================
 
-import { BadRequestException, Inject, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, NotFoundException, ServiceUnavailableException, Optional} from "@nestjs/common";
 import type { CreditBalanceDto, InstallmentDto, PaymentPlanDto } from "@sms/types";
 import { SchoolRegionService } from "../foundation/school-region.service";
 import {
@@ -33,6 +34,7 @@ import {
 import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
 import { NotificationService } from "../notifications/notification.service";
 import { PaystackService, type PaystackEvent } from "../payments/paystack.service";
+import { PaymentChannelService } from "../payments/payment-channel.service";
 
 // SECURITY: no super_admin. A platform user has NO standing role scope over a
 // tenant's data — the supported route to it is impersonation, which is step-up
@@ -49,6 +51,11 @@ export class PaymentPlansService {
     private readonly notifications: NotificationService,
     private readonly paystack: PaystackService,
     private readonly region: SchoolRegionService,
+    // LAST and @Optional deliberately. DI always provides it in the running
+    // app; being optional keeps every existing unit wiring compiling, and
+    // absent it FAILS OPEN — a missing switchboard must never be the reason a
+    // parent cannot pay. It gates a commercial choice, not a security boundary.
+    @Optional() private readonly channels?: PaymentChannelService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -208,6 +215,7 @@ export class PaymentPlansService {
     // charge must be raised in it — crediting a ledger in one currency from a
     // charge in another is a balance that silently drifts.
     const { currency } = await this.region.forSchool(p.schoolId);
+    await this.channels?.assertEnabled(PAYMENT_CHANNELS.PAYSTACK);
     const { authorizationUrl } = await this.paystack.initialize({
       email,
       amountMinor,

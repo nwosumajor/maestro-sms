@@ -1053,6 +1053,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "GET /operator/payment-channels": {
+      "kind": "ui",
+      "note": "payment-rail switchboard — PaymentChannels card on /operator/pricing"
+    },
     "GET /operator/platform-delegations": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
@@ -3028,6 +3032,10 @@
     "PUT /operator/groups/:p/members": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /operator/payment-channels": {
+      "kind": "ui",
+      "note": "same card; owner-only + step-up + audited, refuses a set that strands a live school"
     },
     "PUT /operator/platform-fees": {
       "kind": "ui",

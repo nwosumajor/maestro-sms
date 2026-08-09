@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { PaystackService } from "./paystack.service";
+import { PaymentChannelService } from "./payment-channel.service";
 import { StripeService } from "./stripe.service";
 import { GatewayEventService } from "./gateway-event.service";
 import { AirtelProvider, MpesaProvider, MtnMomoProvider } from "./mobile-money.provider";
@@ -14,7 +15,7 @@ import { AirtelProvider, MpesaProvider, MtnMomoProvider } from "./mobile-money.p
 // its own module; only the stateless provider ADAPTERS live here, beside the other
 // gateway clients.
 @Module({
-  providers: [PaystackService, StripeService, GatewayEventService, MpesaProvider, MtnMomoProvider, AirtelProvider],
-  exports: [PaystackService, StripeService, GatewayEventService, MpesaProvider, MtnMomoProvider, AirtelProvider],
+  providers: [PaystackService, PaymentChannelService, StripeService, GatewayEventService, MpesaProvider, MtnMomoProvider, AirtelProvider],
+  exports: [PaystackService, PaymentChannelService, StripeService, GatewayEventService, MpesaProvider, MtnMomoProvider, AirtelProvider],
 })
 export class PaymentsModule {}

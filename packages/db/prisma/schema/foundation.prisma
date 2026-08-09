@@ -464,6 +464,25 @@ model PlatformFeeConfig {
   @@map("platform_fee_config")
 }
 
+/// Which payment rails the platform is currently willing to CHARGE on.
+/// GLOBAL and operator-owned, exactly like PlatformFeeConfig: one row, no
+/// schoolId, no tenant data. `enabled` is a JSON array of PaymentChannel.
+///
+/// SECURITY / REVENUE: this gates STARTING a payment only. Webhooks,
+/// verify-on-return and the reconciliation sweeps deal with money that has
+/// already moved and must keep working on every channel regardless — see
+/// packages/types/src/payment-channels.ts.
+model PaymentChannelConfigRow {
+  id        String   @id
+  /// PaymentChannel[]. Empty/absent falls back to DEFAULT_ENABLED_CHANNELS.
+  enabled   Json
+  /// Free-text note the operator can leave for the next person.
+  note      String?
+  updatedAt DateTime @updatedAt
+
+  @@map("payment_channel_config")
+}
+
 model PlanPrice {
   /// STANDARD | PREMIUM | ULTIMATE | ENTERPRISE (validated against @sms/types PLANS).
   plan                String

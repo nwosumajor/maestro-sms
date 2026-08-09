@@ -8,8 +8,10 @@
 // with no credits fails those deliveries soft ("no message credits") — email +
 // in-app are never affected.
 
-import { BadRequestException, Inject, Injectable, ServiceUnavailableException } from "@nestjs/common";
-import { MESSAGE_CREDIT_BUNDLES, CURRENCIES } from "@sms/types";
+import { BadRequestException, Inject, Injectable, ServiceUnavailableException, Optional} from "@nestjs/common";
+import { MESSAGE_CREDIT_BUNDLES, CURRENCIES,
+  PAYMENT_CHANNELS,
+} from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -20,6 +22,7 @@ import {
 } from "../integrity/integrity.foundation";
 import { PaystackService, type PaystackEvent } from "../payments/paystack.service";
 import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
+import { PaymentChannelService } from "../payments/payment-channel.service";
 
 @Injectable()
 export class MessageCreditsService {
@@ -27,6 +30,11 @@ export class MessageCreditsService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly paystack: PaystackService,
+    // LAST and @Optional deliberately. DI always provides it in the running
+    // app; being optional keeps every existing unit wiring compiling, and
+    // absent it FAILS OPEN — a missing switchboard must never be the reason a
+    // parent cannot pay. It gates a commercial choice, not a security boundary.
+    @Optional() private readonly channels?: PaymentChannelService,
   ) {}
 
   async balanceInTx(tx: TenantTx, schoolId: string): Promise<number> {
@@ -70,6 +78,7 @@ export class MessageCreditsService {
       return user?.email ?? "billing@school";
     });
     const reference = `CRD-${p.schoolId.slice(0, 8)}-${Date.now()}`;
+    await this.channels?.assertEnabled(PAYMENT_CHANNELS.PAYSTACK);
     const { authorizationUrl } = await this.paystack.initialize({
       email,
       amountMinor: bundle.priceMinor,
