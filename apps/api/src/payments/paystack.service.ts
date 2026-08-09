@@ -15,6 +15,10 @@ import crypto from "node:crypto";
 
 const PAYSTACK = "https://api.paystack.co";
 
+/** Bank lists change a few times a year; a settlement form does not warrant a
+ *  gateway round trip per render. */
+const BANK_CACHE_MS = 60 * 60 * 1000;
+
 /** The slice of a Paystack webhook event we consume. */
 export interface PaystackEvent {
   event: string;
@@ -75,6 +79,7 @@ function assertMinorInteger(amountMinor: number, rail: string): number {
 @Injectable()
 export class PaystackService {
   private readonly logger = new Logger("Paystack");
+  private readonly bankCache = new Map<string, { at: number; banks: Array<{ code: string; name: string }> }>();
 
   isConfigured(): boolean {
     return !!process.env.PAYSTACK_SECRET_KEY;
@@ -216,6 +221,70 @@ export class PaystackService {
     }
     const json = (await res.json()) as { data?: { status?: string } };
     return { ok: json.data?.status === "success", status: json.data?.status };
+  }
+
+  /**
+   * The banks Paystack can actually settle to, for a country.
+   *
+   * This was a hard-coded list of TEN banks in the web form, which is both stale
+   * and a revenue block: Nigeria has ~100 settling institutions and the fintechs
+   * a small school is most likely to bank with — Kuda, Opay, Moniepoint, PalmPay
+   * — were none of them. A school that cannot find its bank cannot set up direct
+   * settlement, and every fee it then collects pools at the platform instead.
+   *
+   * Cached for an hour: the list changes a few times a year, and a settlement
+   * form is not worth a gateway round trip per render.
+   */
+  async listBanks(country = "nigeria"): Promise<Array<{ code: string; name: string }>> {
+    const hit = this.bankCache.get(country);
+    if (hit && Date.now() - hit.at < BANK_CACHE_MS) return hit.banks;
+
+    const res = await fetch(`${PAYSTACK}/bank?country=${encodeURIComponent(country)}&perPage=200`, {
+      headers: { Authorization: `Bearer ${this.secret()}` },
+    });
+    if (!res.ok) {
+      this.logger.warn(`Paystack bank list failed: ${res.status}`);
+      // Serve a stale list rather than an empty picker — an hour-old bank list
+      // is correct, and an empty one strands the school for no reason.
+      if (hit) return hit.banks;
+      throw new ServiceUnavailableException("Could not load the bank list from the payment provider");
+    }
+    const json = (await res.json()) as { data?: Array<{ code?: string; name?: string }> };
+    const banks = (json.data ?? [])
+      .filter((b): b is { code: string; name: string } => Boolean(b.code && b.name))
+      .map((b) => ({ code: b.code, name: b.name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    this.bankCache.set(country, { at: Date.now(), banks });
+    return banks;
+  }
+
+  /**
+   * Resolve a bank account to the NAME it is held in.
+   *
+   * THE POINT: creating a subaccount proves the account EXISTS, never that it
+   * belongs to the school. A transposed digit that still lands on a valid
+   * account at the same bank is accepted silently, and from that moment every
+   * parent's fee settles into a stranger's account — permanently, and with the
+   * invoice correctly marked PAID at both ends, so nothing in this system ever
+   * notices. The only thing that can catch it is a human reading the account
+   * name back, which is why this is a separate step the school must confirm.
+   *
+   * Returns null when the account cannot be resolved, so the caller can say so
+   * plainly rather than treating an unverifiable account as verified.
+   */
+  async resolveAccount(bankCode: string, accountNumber: string): Promise<{ accountName: string } | null> {
+    const qs = `account_number=${encodeURIComponent(accountNumber)}&bank_code=${encodeURIComponent(bankCode)}`;
+    const res = await fetch(`${PAYSTACK}/bank/resolve?${qs}`, {
+      headers: { Authorization: `Bearer ${this.secret()}` },
+    });
+    if (!res.ok) {
+      // 422 is Paystack's "could not resolve" — a wrong number, not an outage.
+      this.logger.warn(`Paystack account resolve failed: ${res.status}`);
+      return null;
+    }
+    const json = (await res.json()) as { data?: { account_name?: string } };
+    const accountName = json.data?.account_name?.trim();
+    return accountName ? { accountName } : null;
   }
 
   /**
