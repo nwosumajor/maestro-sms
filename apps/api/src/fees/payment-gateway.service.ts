@@ -256,7 +256,17 @@ export class PaymentGatewayService {
           paymentFeeBearer: true,
         },
       });
+      // What the platform is holding for this school. An aggregate, not a
+      // hydrate: the count of these rows is unbounded over a school's lifetime
+      // and nothing here needs the rows themselves.
+      const held = await tx.payment.aggregate({
+        where: { schoolId: p.schoolId, settledToPlatform: true, status: "POSTED", kind: "PAYMENT" },
+        _sum: { amountMinor: true },
+        _count: { _all: true },
+      });
       return {
+        heldByPlatformMinor: held._sum.amountMinor ?? 0,
+        heldPaymentCount: held._count._all,
         configured: !!school?.paystackSubaccountCode,
         bankCode: school?.settlementBankCode ?? null,
         bankName: school?.settlementBankName ?? null,

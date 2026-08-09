@@ -43,6 +43,10 @@ function makeService(invoiceCurrency = "GHS") {
     },
     parentChild: { findMany: jest.fn().mockResolvedValue([]) },
     userRole: { findMany: jest.fn().mockResolvedValue([]) },
+    // Settlement reads the school's subaccount to record whether the charge
+    // landed in the school's bank or the platform's — see held-funds.spec.ts.
+    // A registered bank here keeps these cases about currency and nothing else.
+    school: { findFirst: jest.fn().mockResolvedValue({ paystackSubaccountCode: "ACCT_test" }) },
   } as unknown as TenantTx;
 
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };

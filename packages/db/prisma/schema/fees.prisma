@@ -161,6 +161,18 @@ model Payment {
   /// invoice is credited exactly amountMinor; this column is the reporting record
   /// of the platform's cut on the charge.
   platformFeeMinor Int           @default(0)
+  /// TRUE when this online charge settled into the PLATFORM's gateway account
+  /// rather than the school's own bank — i.e. the school had no settlement
+  /// subaccount when the charge was initiated, so the split had nowhere to go.
+  ///
+  /// A SNAPSHOT, deliberately. Derived from current state it would be a lie:
+  /// the day a school registers its bank, every historical payment would
+  /// silently stop being owed. This column is the record of a debt the platform
+  /// incurred at a moment in time, and it must not move afterwards.
+  ///
+  /// Only ever true for gateway payments. Cash/manual payments never touched
+  /// the platform.
+  settledToPlatform Boolean      @default(false)
   note             String?
   paidAt           DateTime      @default(now())
   /// Staff who recorded it (DB FK to user; audit field, no Prisma relation).
