@@ -112,6 +112,23 @@ export function SettlementAccountCard({ initial }: { initial: SettlementAccountD
         </CardDescription>
       </CardHeader>
       <CardContent>
+        {/* MONEY THE SCHOOL IS OWED. Loud and first, because the failure this
+            replaces was silent: parents paid, invoices went PAID, and the cash
+            sat in the platform's balance with nothing anywhere recording it. */}
+        {initial.heldByPlatformMinor > 0 && (
+          <div className="mb-4 rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
+            <p className="text-sm font-medium">
+              {fmtMoney(initial.heldByPlatformMinor)} of parents&apos; payments is held by the platform
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {initial.heldPaymentCount} payment{initial.heldPaymentCount === 1 ? "" : "s"} settled into the
+              platform&apos;s account because no settlement bank was registered at the time. Those invoices are
+              correctly marked paid — this is money owed to you. Register your bank below so future payments
+              come straight to you, then contact support to have this released.
+            </p>
+          </div>
+        )}
+
         <form
           onSubmit={(e) => {
             e.preventDefault();
