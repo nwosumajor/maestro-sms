@@ -353,3 +353,89 @@ describe("testConnection", () => {
     expect(r.detail).toMatch(/sandbox charge/i);
   });
 });
+
+// ===========================================================================
+// The PRE-FLIGHT, and what it must never say
+// ===========================================================================
+// Asked before a payer clicks. A button that starts a payment which cannot
+// succeed is the worst outcome — they have chosen, waited, and been failed.
+//
+// The risk in this method is not that it fails; it is that it says TOO MUCH.
+// It composes everything the platform knows about its own rails, and the
+// person reading the answer is a parent. Gateway status codes, account
+// currencies and test-vs-live are not theirs to see and not actionable by them.
+describe("availabilityFor (payer-facing)", () => {
+  const withHealth = (enabled: string[], health: Record<string, { ok: boolean }>) => {
+    const { svc } = makeService(enabled);
+    jest.spyOn(svc as never as { lastHealth: () => Promise<unknown> }, "lastHealth").mockResolvedValue(health);
+    return svc;
+  };
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it("says yes when the rail is on, configured and healthy", async () => {
+    process.env.PAYSTACK_SECRET_KEY = "sk_test_x";
+    try {
+      const svc = withHealth([PAYMENT_CHANNELS.PAYSTACK], { PAYSTACK: { ok: true } });
+      await expect(svc.availabilityFor("NGN")).resolves.toEqual({ available: true, reason: null });
+    } finally {
+      delete process.env.PAYSTACK_SECRET_KEY;
+    }
+  });
+
+  it("says no, in a parent's words, when no rail settles the currency", async () => {
+    const svc = withHealth([PAYMENT_CHANNELS.PAYSTACK], {});
+    const r = await svc.availabilityFor("XOF");
+    expect(r.available).toBe(false);
+    expect(r.reason).toMatch(/ask your school for another way to pay/i);
+  });
+
+  it("says no when the last daily check FAILED, even though the key is present", async () => {
+    process.env.PAYSTACK_SECRET_KEY = "sk_test_x";
+    try {
+      const svc = withHealth([PAYMENT_CHANNELS.PAYSTACK], { PAYSTACK: { ok: false } });
+      const r = await svc.availabilityFor("NGN");
+      expect(r.available).toBe(false);
+      expect(r.reason).toMatch(/temporarily unavailable/i);
+    } finally {
+      delete process.env.PAYSTACK_SECRET_KEY;
+    }
+  });
+
+  it("NEVER leaks why — a missing key and a broken one read identically", async () => {
+    const missing = await withHealth([PAYMENT_CHANNELS.PAYSTACK], {}).availabilityFor("NGN");
+    process.env.PAYSTACK_SECRET_KEY = "sk_test_x";
+    let broken;
+    try {
+      broken = await withHealth([PAYMENT_CHANNELS.PAYSTACK], { PAYSTACK: { ok: false } }).availabilityFor("NGN");
+    } finally {
+      delete process.env.PAYSTACK_SECRET_KEY;
+    }
+    // A parent can act on neither distinction, and the platform's own posture
+    // is not theirs to see.
+    expect(missing.reason).toEqual(broken!.reason);
+  });
+
+  it("leaks no gateway internals in any answer", async () => {
+    const answers = [
+      await withHealth([PAYMENT_CHANNELS.PAYSTACK], {}).availabilityFor("NGN"),
+      await withHealth([PAYMENT_CHANNELS.PAYSTACK], {}).availabilityFor("XOF"),
+      await withHealth([PAYMENT_CHANNELS.PAYSTACK], { PAYSTACK: { ok: false } }).availabilityFor("NGN"),
+    ];
+    for (const a of answers) {
+      expect(a.reason ?? "").not.toMatch(/401|sk_test|sk_live|PAYSTACK_SECRET_KEY|STRIPE|balance|Paystack/i);
+    }
+  });
+
+  it("a platform that has never run the check is not treated as broken", async () => {
+    // Empty health means "no reason to doubt it". Refusing every payment
+    // because a sweep has not run yet would be the worst possible default.
+    process.env.PAYSTACK_SECRET_KEY = "sk_test_x";
+    try {
+      const svc = withHealth([PAYMENT_CHANNELS.PAYSTACK], {});
+      await expect(svc.availabilityFor("NGN")).resolves.toMatchObject({ available: true });
+    } finally {
+      delete process.env.PAYSTACK_SECRET_KEY;
+    }
+  });
+});
