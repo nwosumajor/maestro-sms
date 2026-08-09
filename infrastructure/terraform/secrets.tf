@@ -36,19 +36,19 @@ locals {
   # Base secrets, plus the Redis auth token only when transit encryption is on.
   secret_values = merge(
     {
-      "auth-secret"          = random_password.auth_secret.result
-      "auth-secret-previous" = var.auth_secret_previous
-      "data-encryption-key" = random_id.data_encryption_key.b64_std
-      "db-app-url"          = local.db_app_url
-      "db-migrate-url"      = local.db_migrate_url
-      "db-replica-url"      = local.db_replica_url
-      "db-app-password"     = random_password.db_app.result
-      "paystack-secret-key" = var.paystack_secret_key
-      "stripe-secret-key"       = var.stripe_secret_key
-      "stripe-webhook-secret"   = var.stripe_webhook_secret
-      "email-api-key"           = var.email_api_key
-      "twilio-auth-token"       = var.twilio_auth_token
-      "metrics-token"           = random_password.metrics_token.result
+      "auth-secret"           = random_password.auth_secret.result
+      "auth-secret-previous"  = var.auth_secret_previous
+      "data-encryption-key"   = random_id.data_encryption_key.b64_std
+      "db-app-url"            = local.db_app_url
+      "db-migrate-url"        = local.db_migrate_url
+      "db-replica-url"        = local.db_replica_url
+      "db-app-password"       = random_password.db_app.result
+      "paystack-secret-key"   = var.paystack_secret_key
+      "stripe-secret-key"     = var.stripe_secret_key
+      "stripe-webhook-secret" = var.stripe_webhook_secret
+      "email-api-key"         = var.email_api_key
+      "twilio-auth-token"     = var.twilio_auth_token
+      "metrics-token"         = random_password.metrics_token.result
     },
     var.redis_transit_encryption ? {
       "redis-auth-token" = random_password.redis_auth[0].result

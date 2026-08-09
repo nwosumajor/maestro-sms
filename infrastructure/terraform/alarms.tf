@@ -65,10 +65,10 @@ resource "aws_cloudwatch_metric_alarm" "latency_p95" {
     web = aws_lb_target_group.web.arn_suffix
     api = aws_lb_target_group.api.arn_suffix
   }
-  alarm_name          = "${local.name}-${each.key}-latency-p95"
-  alarm_description   = "p95 response time > 2s for 15 min on ${each.key} — if auto-scaling is already at max, the bottleneck is the DB (check RDS CPU/connections)."
-  namespace           = "AWS/ApplicationELB"
-  metric_name         = "TargetResponseTime"
+  alarm_name        = "${local.name}-${each.key}-latency-p95"
+  alarm_description = "p95 response time > 2s for 15 min on ${each.key} — if auto-scaling is already at max, the bottleneck is the DB (check RDS CPU/connections)."
+  namespace         = "AWS/ApplicationELB"
+  metric_name       = "TargetResponseTime"
   dimensions = {
     LoadBalancer = aws_lb.main.arn_suffix
     TargetGroup  = each.value
@@ -88,10 +88,10 @@ resource "aws_cloudwatch_metric_alarm" "unhealthy_targets" {
     web = aws_lb_target_group.web.arn_suffix
     api = aws_lb_target_group.api.arn_suffix
   }
-  alarm_name          = "${local.name}-${each.key}-unhealthy-target"
-  alarm_description   = "A ${each.key} task is failing ALB health checks — the circuit breaker may already be rolling back; check ECS service events."
-  namespace           = "AWS/ApplicationELB"
-  metric_name         = "UnHealthyHostCount"
+  alarm_name        = "${local.name}-${each.key}-unhealthy-target"
+  alarm_description = "A ${each.key} task is failing ALB health checks — the circuit breaker may already be rolling back; check ECS service events."
+  namespace         = "AWS/ApplicationELB"
+  metric_name       = "UnHealthyHostCount"
   dimensions = {
     LoadBalancer = aws_lb.main.arn_suffix
     TargetGroup  = each.value
@@ -113,10 +113,10 @@ resource "aws_cloudwatch_metric_alarm" "ecs_cpu_saturation" {
     api = aws_ecs_service.api.name
     web = aws_ecs_service.web.name
   }
-  alarm_name          = "${local.name}-${each.key}-cpu-saturated"
-  alarm_description   = "${each.key} average CPU > 85% for 15 min — auto-scaling is likely at max_capacity; raise the ceiling or upsize tasks."
-  namespace           = "AWS/ECS"
-  metric_name         = "CPUUtilization"
+  alarm_name        = "${local.name}-${each.key}-cpu-saturated"
+  alarm_description = "${each.key} average CPU > 85% for 15 min — auto-scaling is likely at max_capacity; raise the ceiling or upsize tasks."
+  namespace         = "AWS/ECS"
+  metric_name       = "CPUUtilization"
   dimensions = {
     ClusterName = aws_ecs_cluster.main.name
     ServiceName = each.value

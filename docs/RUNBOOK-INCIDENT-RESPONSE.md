@@ -376,6 +376,29 @@ Three migration traps specific to this repo:
 
 Money problems are SEV-2 and parents notice within minutes.
 
+**First, is the rail even switched on?** The platform has an operator-owned
+payment switchboard (`/operator/pricing` → Payment channels). A disabled rail
+answers a payer with "… is coming soon" — a 503, not a 500 — so a sudden wave
+of those is a configuration change, not an outage.
+
+```bash
+# What the platform will currently START a charge on.
+curl -s "$APP_URL/api/sms/operator/payment-channels" -H "Authorization: Bearer <super_admin>"
+# Who changed it, and whether they were warned it would strand a school:
+#   SELECT * FROM audit_log WHERE action = 'operator.payment_channels.update'
+#   ORDER BY "createdAt" DESC LIMIT 5;
+```
+
+A school whose billing currency no rail can settle cannot take money at all.
+The PUT refuses that and names the schools; it can be forced, and the audit
+entry records `forced: true` when it was. Paystack settles NGN/GHS/ZAR/KES/USD
+only — a school in any other currency needs mobile money enabled.
+
+**Switching a rail off never stops money already taken from landing.** The gate
+is on STARTING a payment; webhooks, verify-on-return and both reconciliation
+sweeps keep settling every channel. If a payment made before the change has not
+landed, it is a webhook problem — carry on below.
+
 **The gateway almost never loses a payment — the webhook does.** There is a
 designed recovery path; use it before touching the ledger by hand.
 
@@ -396,6 +419,8 @@ curl -X POST "$APP_URL/api/fees/reconciliation/run" -H "Authorization: Bearer <s
 | Bank transfer unallocated | No open invoice | Landed as student CREDIT; finance notified |
 | Payment stuck pending | ≥₦50,000 needs a second approver | Not a bug — §5.7 |
 | Subscription paid, modules off | Entitlement cache (30s) or invalidation didn't fan out | Wait 30s; if persistent, check Redis pub/sub |
+| "… is coming soon" at checkout | That rail is switched OFF in the switchboard | Intentional unless it isn't — check the audit ↑ |
+| One school cannot pay at all, others fine | No enabled rail settles their currency | Enable a rail that covers them (mobile money for most non-Paystack currencies) |
 
 **Never hand-edit the ledger.** `InvoiceSettlementService` is the single
 idempotent posting path; a manual row bypasses the audit trail and the
@@ -432,12 +457,37 @@ aws scheduler get-schedule --name "$NAME-retention" --query '{state:State,expr:S
 aws ecs list-tasks --cluster "$CLUSTER" --family "$NAME-retention" --desired-status STOPPED
 ```
 
-**The most common cause is a missing privileged URL.** Retention, dunning and HR
-reminders all need `DATABASE_RETENTION_URL` (falling back to
+**The most common cause is a missing privileged URL.** Retention, dunning, the
+fee sweeps and HR reminders all need `DATABASE_RETENTION_URL` (falling back to
 `DATABASE_MIGRATE_URL`) because the app role deliberately has no DELETE on
-telemetry tables and cannot read across tenants. **Unset ⇒ the job silently
-disables itself.** Every one of these also has a manual trigger endpoint — use it
-to catch up, they are all idempotent.
+telemetry tables and cannot read across tenants.
+
+**They no longer fail silently — grep for it.** Each of these logs a SKIPPED
+line naming the reason, so an unconfigured environment is distinguishable from a
+quiet night:
+
+```bash
+docker compose logs backend | grep -iE "SKIPPED|no privileged DB"
+# e.g. "Late-fee sweep SKIPPED (no privileged DB) — this is not a sweep that
+#       found nothing overdue."
+```
+
+A sweep reporting `schools=0` with no SKIPPED line genuinely found nothing.
+
+Every one of these also has a manual trigger endpoint — use it to catch up, they
+are all idempotent. The retention sweep is the exception (it is a one-shot task,
+not an endpoint) and can be run directly:
+
+```bash
+# Inside the API container / task. Purges every tenant plus the platform-wide
+# streams, and prints what it removed.
+node apps/api/dist/integrity/retention/retention-cli.js
+```
+
+**Reading its output:** the total now covers every stream, tenant-scoped and
+platform-wide. The read-notification purge filters on `readAt`, NOT `createdAt`
+— a notification created years ago but read last week is correctly kept, so
+"0 purged" against old-looking data is usually right, not a bug.
 
 ### 5.9 Suspected tenant isolation breach — SEV-1
 

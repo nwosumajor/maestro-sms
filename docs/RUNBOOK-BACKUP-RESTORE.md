@@ -3,6 +3,15 @@
 > **A backup you have never restored is not a backup.** This runbook exists to
 > be *rehearsed*, not just read. The drill in §4 is the part that matters.
 
+> **What the drill's RLS check does and does not cover.** It asserts row-level
+> security on every table carrying a `schoolId`, with `ultimate_participant` as
+> the one documented exemption. GLOBAL operator-owned tables — `plan_price`,
+> `platform_fee_config`, `payment_channel_config` — have no `schoolId` and are
+> correctly out of that scope: they are identical for every tenant and hold no
+> tenant data. Adding a global table therefore needs no drill change; adding a
+> TENANT table does, and the RLS coverage gate in `apps/api/test/rls.e2e-spec.ts`
+> will fail first if you forget its policy file.
+
 > Handling a live incident? Start with
 > [`RUNBOOK-INCIDENT-RESPONSE.md`](RUNBOOK-INCIDENT-RESPONSE.md) — it triages the
 > symptom and sends you back here only if a restore is genuinely the answer.
