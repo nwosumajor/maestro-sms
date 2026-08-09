@@ -18,7 +18,9 @@
 // URL can, at worst, re-notify a charge that already happened.
 // =============================================================================
 
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException,
+  Optional,
+} from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import {
   coverageFor,
@@ -28,6 +30,7 @@ import {
   type MobileMoneyChargeDto,
   type MobileMoneyOptionDto,
   type MobileMoneyProviderKey,
+  PAYMENT_CHANNELS,
 } from "@sms/types";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
@@ -39,6 +42,7 @@ import {
   MpesaProvider,
   MtnMomoProvider,
   type MobileMoneyProvider, type CallbackReading } from "./mobile-money.provider";
+import { PaymentChannelService } from "./payment-channel.service";
 import {
   TENANT_DATABASE,
   type Principal,
@@ -99,6 +103,9 @@ export class MobileMoneyService {
     mpesa: MpesaProvider,
     mtn: MtnMomoProvider,
     airtel: AirtelProvider,
+    // LAST and @Optional deliberately — see the note in PaymentGatewayService.
+    // Absent it FAILS OPEN: a missing switchboard must never stop a payment.
+    @Optional() private readonly channels?: PaymentChannelService,
   ) {
     // A registry, not a switch. Adding a rail is one entry plus its adapter.
     this.providers = new Map<MobileMoneyProviderKey, MobileMoneyProvider>([
@@ -117,12 +124,17 @@ export class MobileMoneyService {
    */
   async options(schoolId: string): Promise<MobileMoneyOptionDto[]> {
     const region = await this.region.forSchool(schoolId);
+    // The platform-wide switch AND the per-rail credentials both have to be on.
+    // Reported here rather than only at charge time so a payer never picks a
+    // rail that will refuse them a click later — the whole point of the
+    // "coming soon" wording is that it appears BEFORE the attempt.
+    const channelOn = (await this.channels?.isEnabled(PAYMENT_CHANNELS.MOBILE_MONEY)) ?? true;
     return coverageFor(region.country).map((c) => ({
       provider: c.provider,
       label: c.label,
       currency: c.currency,
       dialCode: c.dialCode,
-      enabled: this.providers.get(c.provider)?.isConfigured() ?? false,
+      enabled: channelOn && (this.providers.get(c.provider)?.isConfigured() ?? false),
     }));
   }
 
@@ -134,6 +146,7 @@ export class MobileMoneyService {
     p: Principal,
     input: { invoiceId: string; provider: string; phone: string },
   ): Promise<MobileMoneyChargeDto> {
+    await this.channels?.assertEnabled(PAYMENT_CHANNELS.MOBILE_MONEY);
     const region = await this.region.forSchool(p.schoolId);
     const cover = coverageOf(input.provider, region.country);
     if (!cover) {

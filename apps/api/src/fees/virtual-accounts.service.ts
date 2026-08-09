@@ -1,3 +1,4 @@
+import { PAYMENT_CHANNELS } from "@sms/types";
 // =============================================================================
 // VirtualAccountsService — per-student dedicated NUBAN (bank-transfer fees)
 // =============================================================================
@@ -14,7 +15,9 @@
 // provisioning. 503-disabled without gateway creds.
 // =============================================================================
 
-import { Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
+import { Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException,
+  Optional,
+} from "@nestjs/common";
 import type { VirtualAccountDto } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -31,6 +34,7 @@ import { PrivilegedDatabaseService } from "../common/privileged-database.service
 import { PaystackService, type PaystackEvent } from "../payments/paystack.service";
 import { InvoiceSettlementService } from "./settlement.service";
 import { PaymentPlansService } from "./payment-plans.service";
+import { PaymentChannelService } from "../payments/payment-channel.service";
 
 type VaRow = {
   id: string;
@@ -53,6 +57,9 @@ export class VirtualAccountsService {
     private readonly notifications: NotificationService,
     private readonly settlement: InvoiceSettlementService,
     private readonly paymentPlans: PaymentPlansService,
+    // LAST and @Optional deliberately — see the note in PaymentGatewayService.
+    // Absent it FAILS OPEN: a missing switchboard must never stop a payment.
+    @Optional() private readonly channels?: PaymentChannelService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -72,6 +79,10 @@ export class VirtualAccountsService {
   /** Staff provisions a student's dedicated account (idempotent: an existing
    *  row is returned, never a second NUBAN). */
   async provision(p: Principal, studentId: string): Promise<VirtualAccountDto> {
+    // Provisioning a NUBAN is what STARTS this rail for a pupil. Transfers that
+    // arrive on an account provisioned earlier still settle through the shared
+    // webhook path — that is deliberate and must stay so.
+    await this.channels?.assertEnabled(PAYMENT_CHANNELS.BANK_TRANSFER);
     if (!this.paystack.isConfigured()) {
       throw new ServiceUnavailableException("Online payments are not configured");
     }

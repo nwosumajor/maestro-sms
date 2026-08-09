@@ -20,6 +20,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from "@nestjs/common";
 import { Prisma } from "@sms/db";
 import { SchoolRegionService } from "../foundation/school-region.service";
@@ -29,6 +30,7 @@ import {
   type AdmissionApprovalDto,
   type AdmissionDetails,
   type AdmissionStage,
+  PAYMENT_CHANNELS,
 } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -47,6 +49,7 @@ import { computePlatformFeeMinor } from "@sms/types";
 import { PaystackService, type PaystackEvent } from "../payments/paystack.service";
 import { PlatformFeeService } from "../billing/platform-fee.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
+import { PaymentChannelService } from "../payments/payment-channel.service";
 
 const ZERO = "00000000-0000-0000-0000-000000000000";
 
@@ -93,6 +96,11 @@ export class AdmissionsService {
     private readonly platformFees: PlatformFeeService,
     private readonly privileged: PrivilegedDatabaseService,
     private readonly region: SchoolRegionService,
+    // LAST and @Optional deliberately. DI always provides it in the running
+    // app; being optional keeps every existing unit wiring compiling, and
+    // absent it FAILS OPEN — a missing switchboard must never be the reason a
+    // parent cannot pay. It gates a commercial choice, not a security boundary.
+    @Optional() private readonly channels?: PaymentChannelService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -197,6 +205,7 @@ export class AdmissionsService {
     // The SCHOOL's currency — the admission fee is the school's money, and
     // `school.admissionFormFeeMinor` is denominated in it.
     const { currency } = await this.region.forSchool(schoolId);
+    await this.channels?.assertEnabled(PAYMENT_CHANNELS.PAYSTACK);
     const { authorizationUrl } = await this.paystack.initialize({
       email,
       amountMinor: feeMinor,

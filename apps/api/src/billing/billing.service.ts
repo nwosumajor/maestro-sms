@@ -14,7 +14,7 @@
 // schoolId (mirrors the Fees online-payment webhook). Mutations are audit-logged.
 // =============================================================================
 
-import { BadRequestException, Inject, Injectable, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, ServiceUnavailableException, Optional} from "@nestjs/common";
 import {
   BILLING_CYCLES,
   CURRENCIES,
@@ -39,6 +39,7 @@ import {
   type Currency,
   type Plan,
   type PlatformPaymentDto,
+  PAYMENT_CHANNELS,
 } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -59,6 +60,7 @@ import { PlanPricingService } from "./plan-pricing.service";
 import { ReferralService, type ReferralGrant } from "./referral.service";
 import { encryptField } from "../foundation/field-crypto";
 import { GrowthService } from "./growth.service";
+import { PaymentChannelService } from "../payments/payment-channel.service";
 
 /** Tiers a school can actually buy (all four are paid; STANDARD is the floor). */
 const SELLABLE_TIERS: Plan[] = [PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE];
@@ -83,6 +85,11 @@ export class BillingService {
     private readonly planPricing: PlanPricingService,
     private readonly referrals: ReferralService,
     private readonly growth: GrowthService,
+    // LAST and @Optional deliberately. DI always provides it in the running
+    // app; being optional keeps every existing unit wiring compiling, and
+    // absent it FAILS OPEN — a missing switchboard must never be the reason a
+    // parent cannot pay. It gates a commercial choice, not a security boundary.
+    @Optional() private readonly channels?: PaymentChannelService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -234,6 +241,11 @@ export class BillingService {
     if (currency === CURRENCIES.NGN && !this.paystack.isConfigured()) {
       throw new ServiceUnavailableException("Naira payments are not configured");
     }
+    // INITIATION gate — settlement paths deliberately skip it (see
+    // PaymentChannelService: money already moved must still land).
+    await this.channels?.assertEnabled(
+      currency === CURRENCIES.USD ? PAYMENT_CHANNELS.STRIPE : PAYMENT_CHANNELS.PAYSTACK,
+    );
     if (currency === CURRENCIES.USD && !this.stripe.isConfigured()) {
       throw new ServiceUnavailableException("USD payments are not configured");
     }
@@ -365,6 +377,11 @@ export class BillingService {
     if (currency === CURRENCIES.NGN && !this.paystack.isConfigured()) {
       throw new ServiceUnavailableException("Naira payments are not configured");
     }
+    // INITIATION gate — settlement paths deliberately skip it (see
+    // PaymentChannelService: money already moved must still land).
+    await this.channels?.assertEnabled(
+      currency === CURRENCIES.USD ? PAYMENT_CHANNELS.STRIPE : PAYMENT_CHANNELS.PAYSTACK,
+    );
     if (currency === CURRENCIES.USD && !this.stripe.isConfigured()) {
       throw new ServiceUnavailableException("USD payments are not configured");
     }

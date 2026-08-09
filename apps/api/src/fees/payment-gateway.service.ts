@@ -12,8 +12,10 @@
 // disabled path and signature verification are testable.
 // =============================================================================
 
-import { BadRequestException, ForbiddenException, Inject, Injectable, ServiceUnavailableException } from "@nestjs/common";
-import { PLATFORM_FEE_BEARERS, computePlatformFeeMinor, isPlatformFeeBearer } from "@sms/types";
+import { BadRequestException, ForbiddenException, Inject, Injectable, ServiceUnavailableException, Optional} from "@nestjs/common";
+import { PLATFORM_FEE_BEARERS, computePlatformFeeMinor, isPlatformFeeBearer,
+  PAYMENT_CHANNELS,
+} from "@sms/types";
 import type { InvoicePayInitDto, PlatformFeeBearer, SettlementAccountDto } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -37,6 +39,7 @@ import { GatewayEventService } from "../payments/gateway-event.service";
 import { InvoiceSettlementService } from "./settlement.service";
 import { VirtualAccountsService, isDedicatedAccountCredit } from "./virtual-accounts.service";
 import { PaymentPlansService } from "./payment-plans.service";
+import { PaymentChannelService } from "../payments/payment-channel.service";
 
 @Injectable()
 export class PaymentGatewayService {
@@ -56,6 +59,11 @@ export class PaymentGatewayService {
     private readonly virtualAccounts: VirtualAccountsService,
     private readonly paymentPlans: PaymentPlansService,
     private readonly stripe: StripeService,
+    // LAST and @Optional deliberately. DI always provides it in the running
+    // app; being optional keeps every existing unit wiring compiling, and
+    // absent it FAILS OPEN — a missing switchboard must never be the reason a
+    // parent cannot pay. It gates a commercial choice, not a security boundary.
+    @Optional() private readonly channels?: PaymentChannelService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -101,6 +109,10 @@ export class PaymentGatewayService {
     // settlement to the school is an operator process. metadata.kind =
     // "invoice" routes the webhook to the SAME shared settlement path.
     if (currency === "USD") {
+      // INITIATION gate. The webhook, the verify-on-return confirm and the
+      // reconciliation sweep deliberately do NOT check this — money already
+      // moved on this rail must still settle after it is switched off.
+      await this.channels?.assertEnabled(PAYMENT_CHANNELS.STRIPE);
       if (!this.stripe.isConfigured()) {
         throw new ServiceUnavailableException("USD payments are not configured");
       }
@@ -125,6 +137,7 @@ export class PaymentGatewayService {
       return { authorizationUrl, reference, invoiceAmountMinor: balance, feeMinor: 0, chargedMinor: balance };
     }
 
+    await this.channels?.assertEnabled(PAYMENT_CHANNELS.PAYSTACK);
     if (!this.paystack.isConfigured()) {
       throw new ServiceUnavailableException("Online payments are not configured");
     }

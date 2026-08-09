@@ -33,6 +33,7 @@ import { PricingManager } from "@/components/operator/PricingManager";
 import { PlatformFeeManager } from "@/components/operator/PlatformFeeManager";
 import { GrowthManager } from "@/components/operator/GrowthManager";
 import { PageHeader } from "@/components/shell/PageHeader";
+import { PaymentChannels } from "@/components/operator/PaymentChannels";
 
 export const dynamic = "force-dynamic";
 
@@ -43,9 +44,10 @@ export default async function OperatorPricingPage() {
   // the console rather than on a page of controls the API will refuse.
   if (!hasPermission(user.permissions, "platform.pricing.manage")) redirect("/operator");
 
-  const [pricing, platformFees, promos, agents, commissions] = await Promise.all([
+  const [pricing, platformFees, channels, promos, agents, commissions] = await Promise.all([
     apiGet<PlanPriceDto[]>("/operator/pricing"),
     apiGet<PlatformFeeConfig>("/operator/platform-fees"),
+    apiGet<{ enabled: string[]; all: string[]; labels: Record<string, { name: string; comingSoon: string }>; stranded: { id: string; name: string; currency: string }[] }>("/operator/payment-channels"),
     // Growth reads need the privileged database; a 503 there must not blank the
     // pricing editors beside them, so each falls back to empty independently.
     apiGet<never[]>("/operator/promos").then((r) => r ?? []),
@@ -92,6 +94,17 @@ export default async function OperatorPricingPage() {
         )}
 
         {platformFees && <PlatformFeeManager initial={platformFees} />}
+
+        {/* Which rails the platform will charge on at all — above the take-rate,
+            because it decides whether there is anything to take a rate FROM. */}
+        {channels && (
+          <PaymentChannels
+            initialEnabled={channels.enabled}
+            all={channels.all}
+            labels={channels.labels}
+            initialStranded={channels.stranded}
+          />
+        )}
 
         <GrowthManager promos={promos} agents={agents} commissions={commissions} />
       </div>

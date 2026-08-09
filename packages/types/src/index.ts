@@ -7,6 +7,7 @@ export * from "./modules";
 export * from "./notifications";
 export * from "./pagination";
 export * from "./currency";
+export * from "./payment-channels";
 export * from "./mobile-money";
 export * from "./region";
 export * from "./compliance-regime";
