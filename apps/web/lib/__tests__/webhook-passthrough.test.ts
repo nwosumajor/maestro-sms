@@ -69,10 +69,18 @@ describe("webhook passthrough", () => {
     await POST(req("{}", {}), { params: { path: ["paystack"] } });
     await POST(req("{}", {}), { params: { path: ["stripe"] } });
     await PUT(req("{}", {}), { params: { path: ["mobile-money", "mtn"] } });
+    // These are the controllers' REAL routes, prefix included. Two of them were
+    // wrong here and in the passthrough — Stripe's handler lives under the
+    // `billing` controller and mobile money's under `payments/mobile-money` —
+    // and this test pinned the wrong values rather than catching them, because
+    // it was written from the same assumption as the code.
+    // api/test/payments/webhook-targets.spec.ts now derives them from the
+    // controllers instead, so the two cannot agree with each other and both be
+    // wrong.
     expect(calls.map((c) => new URL(c.url).pathname)).toEqual([
       "/payments/webhook",
-      "/stripe/webhook",
-      "/callback/mtn",
+      "/billing/stripe/webhook",
+      "/payments/mobile-money/callback/mtn",
     ]);
   });
 
