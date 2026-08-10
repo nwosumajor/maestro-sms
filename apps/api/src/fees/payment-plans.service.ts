@@ -1,4 +1,4 @@
-import { PAYMENT_CHANNELS } from "@sms/types";
+import { PAYMENT_CHANNELS, formatMoney } from "@sms/types";
 // =============================================================================
 // PaymentPlansService — installment schedules + the student credit ledger
 // =============================================================================
@@ -256,7 +256,9 @@ export class PaymentPlansService {
       return true;
     });
     if (credited) {
-      const amount = new Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN" }).format(event.data.amount / 100);
+      // The EVENT's currency — this notice goes to the payer, who knows what
+      // they were charged in.
+      const amount = formatMoney(event.data.amount, event.data.currency ?? "NGN");
       for (const recipientId of [...new Set([studentId, ...(payerId ? [payerId] : [])])]) {
         try {
           await this.notifications.enqueue(

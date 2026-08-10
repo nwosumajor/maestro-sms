@@ -30,7 +30,7 @@
 // =============================================================================
 
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
-import { DISPUTE_ALERT_THRESHOLD, DISPUTE_ALERT_WINDOW_DAYS } from "@sms/types";
+import { DISPUTE_ALERT_THRESHOLD, DISPUTE_ALERT_WINDOW_DAYS, formatMoney} from "@sms/types";
 import type { PaymentDisputeDto } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -426,9 +426,9 @@ export class DisputesService {
 
   private formatAmount(minor: number, currency: string): string {
     try {
-      return new Intl.NumberFormat("en-NG", { style: "currency", currency }).format(minor / 100);
+      return formatMoney(minor, currency);
     } catch {
-      return `${currency} ${(minor / 100).toFixed(2)}`;
+      return formatMoney(minor, currency);
     }
   }
 

@@ -1,4 +1,4 @@
-import { PAYMENT_CHANNELS } from "@sms/types";
+import { PAYMENT_CHANNELS, formatMoney } from "@sms/types";
 // =============================================================================
 // VirtualAccountsService — per-student dedicated NUBAN (bank-transfer fees)
 // =============================================================================
@@ -213,7 +213,10 @@ export class VirtualAccountsService {
       event.data.reference,
     );
     if (!credited) return { ok: true }; // gateway retry
-    const amount = new Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN" }).format(event.data.amount / 100);
+    // The EVENT's currency, not a hard-coded NGN: a bank transfer in another
+    // currency was being both mislabelled and misscaled in the alert finance
+    // reads to reconcile it.
+    const amount = formatMoney(event.data.amount, event.data.currency ?? "NGN");
     for (const recipientId of target.finance) {
       try {
         await this.notifications.enqueue(
