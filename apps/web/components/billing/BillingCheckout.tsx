@@ -1,6 +1,14 @@
 "use client";
 
-import { CYCLE_MONTHS, type BillingCycle, type BillingQuoteDto, type Serialized } from "@sms/types";
+import {
+  CYCLE_MONTHS,
+  MAX_BILLING_PERIODS,
+  billedMonths,
+  periodEndAfter,
+  type BillingCycle,
+  type BillingQuoteDto,
+  type Serialized,
+} from "@sms/types";
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,10 +35,14 @@ export function BillingCheckout({
   activeStudents,
   canManage,
   currencyAvailability = [],
+  currentPeriodEnd = null,
 }: {
   quotes: Quote[];
   activeStudents: number;
   canManage: boolean;
+  /** Where the school's paid access currently runs to, so the "runs until"
+   *  preview STACKS the same way settlement does. */
+  currentPeriodEnd?: string | null;
   /** Which currencies can actually be charged right now, from the server. An
    *  empty list means the page could not establish it — never a reason to
    *  block a purchase that might have worked. */
@@ -61,6 +73,10 @@ export function BillingCheckout({
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
   const [promo, setPromo] = React.useState("");
+  // How many cycles to buy at once. The alternative — paying repeatedly — is
+  // what raced the subscription's period end, so this is the accurate route to
+  // multi-year access as well as the convenient one.
+  const [periods, setPeriods] = React.useState(1);
 
   const selected = quotes.find(
     (q) => q.plan === plan && q.billingCycle === cycle && q.currency === effectiveCurrency,
@@ -76,7 +92,20 @@ export function BillingCheckout({
     (q) => q.plan === plan && q.billingCycle === "MONTH" && q.currency === effectiveCurrency,
   );
   const savings =
-    selected && monthQuote ? monthQuote.priceMinor * CYCLE_MONTHS[cycle as BillingCycle] - selected.priceMinor : 0;
+    selected && monthQuote
+      ? (monthQuote.priceMinor * CYCLE_MONTHS[cycle as BillingCycle] - selected.priceMinor) * periods
+      : 0;
+  const totalMinor = selected ? selected.priceMinor * periods : 0;
+  // THE DATE, not the label. "1 year" does not mean twelve months here — an
+  // academic year is 3 terms = 9 BILLED months, holidays not charged — and no
+  // amount of wording fixes that. A concrete end date does.
+  const months = billedMonths(cycle as BillingCycle, periods);
+  const runsUntil = periodEndAfter(
+    cycle as BillingCycle,
+    periods,
+    new Date(),
+    currentPeriodEnd ? new Date(currentPeriodEnd) : null,
+  );
 
   if (!canManage) return null;
 
@@ -90,6 +119,7 @@ export function BillingCheckout({
       plan,
       billingCycle: cycle,
       currency: effectiveCurrency,
+      periods,
       ...(promo.trim() ? { promoCode: promo.trim().toUpperCase() } : {}),
     });
     if (res.ok) {
@@ -165,6 +195,22 @@ export function BillingCheckout({
             </select>
           </div>
           <div className="space-y-1.5">
+            <label className="text-sm font-medium" htmlFor="bill-periods">How many</label>
+            <select
+              id="bill-periods"
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+              value={periods}
+              onChange={(e) => setPeriods(Number(e.target.value))}
+            >
+              {Array.from({ length: MAX_BILLING_PERIODS }, (_, i) => i + 1).map((n) => (
+                <option key={n} value={n}>
+                  {n} x {cycle === "MONTH" ? "month" : cycle === "TERM" ? "term" : "year"}
+                  {n === 1 ? "" : "s"}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1.5">
             <label className="text-sm font-medium" htmlFor="bill-promo">
               Promo code <span className="font-normal text-muted-foreground">(first payment only)</span>
             </label>
@@ -179,7 +225,7 @@ export function BillingCheckout({
           <div className="space-y-1.5">
             <span className="block text-sm font-medium">Total</span>
             <span className="block h-9 leading-9 text-lg font-semibold tabular-nums">
-              {selected ? money(selected.priceMinor, selected.currency) : "—"}
+              {selected ? money(totalMinor, selected.currency) : "—"}
               {savings > 0 && selected && (
                 <span className="ml-2 align-middle rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
                   save {money(savings, selected.currency)}
@@ -200,6 +246,21 @@ export function BillingCheckout({
           <p className="mt-3 text-sm text-muted-foreground">
             {effectiveCurrency} payments are not available yet — please contact us and we will arrange this
             plan for you.
+          </p>
+        )}
+
+        {/* WHAT YOU ACTUALLY GET, as a date. Paying more than once to reach the
+            same place used to lose periods to a race; one charge for N periods
+            cannot race itself, and the date here is computed by the same rule
+            settlement uses to write it. */}
+        {selected && (
+          <p className="mt-3 text-sm">
+            Buys <span className="font-medium">{months} billed month{months === 1 ? "" : "s"}</span> — access runs
+            until <span className="font-medium">{runsUntil.toLocaleDateString()}</span>
+            {currentPeriodEnd ? " (added to your current period)" : ""}.
+            <span className="block text-xs text-muted-foreground">
+              An academic year is 3 terms — 9 billed months. Holiday months are not charged.
+            </span>
           </p>
         )}
 

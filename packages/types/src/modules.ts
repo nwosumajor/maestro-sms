@@ -440,6 +440,80 @@ export function computeSubscriptionPriceMinor(
   return applyCycleDiscountMinor(computeSubscriptionGrossMinor(plan, activeStudents, cycle, pricing), cycle);
 }
 
+/**
+ * How many CYCLES a school may buy in one charge.
+ *
+ * A school that wants several years of access had only one route: pay again,
+ * and again, and again. That is worse than tedious — concurrent charges against
+ * the same subscription raced each other, so paying four times could buy two
+ * periods. Buying N periods in ONE charge is one payment, one period
+ * calculation, and one row in the ledger.
+ *
+ * Capped: 20 periods is 5 academic years at the YEAR cycle, and an unbounded
+ * multiplier is a way to mistype a 5 into a 55-year commitment.
+ */
+/**
+ * The largest single charge the ledger can STORE, in minor units.
+ *
+ * `platform_subscription_payment.amountMinor` is a 32-bit integer, so the true
+ * ceiling is 2,147,483,647 minor units — about NGN 21.4m per charge. This is a
+ * REAL revenue limit and not only a multi-year one: at ENTERPRISE rates a
+ * single academic year overflows at roughly 2,245 students, so a large school
+ * could not be charged for a normal annual plan either.
+ *
+ * Widening the column to BIGINT is the actual fix and is deliberately NOT bolted
+ * on here — it changes the type of money across ~70 read sites, and Prisma maps
+ * int8 to a JS BigInt that does not survive JSON. Until then this constant makes
+ * the limit a checked, explained refusal instead of a raw driver error: a school
+ * that hits it is told to buy a shorter period, rather than shown a 500.
+ */
+export const MAX_CHARGE_MINOR = 2_000_000_000;
+
+export const MAX_BILLING_PERIODS = 20;
+
+/** Narrow an arbitrary input to a usable period count. Absent = 1, so every
+ *  existing caller keeps its current meaning. */
+export function normalisePeriods(raw: unknown): number {
+  const n = typeof raw === "number" ? raw : Number(raw ?? 1);
+  if (!Number.isFinite(n)) return 1;
+  return Math.min(MAX_BILLING_PERIODS, Math.max(1, Math.floor(n)));
+}
+
+/**
+ * The MONTHS a purchase of `periods` × `cycle` actually buys.
+ *
+ * The single place that answers "how long is this?", so the price, the period
+ * end written at settlement, and the date shown to the school before they pay
+ * all come from one rule and cannot drift apart.
+ */
+export function billedMonths(cycle: BillingCycle, periods = 1): number {
+  return CYCLE_MONTHS[cycle] * normalisePeriods(periods);
+}
+
+/**
+ * The date a purchase made now would run until.
+ *
+ * Shown to the school BEFORE they pay, because "YEAR" does not mean what a
+ * reader assumes: an academic year is 3 terms = 9 BILLED months (holidays are
+ * not charged), so a "1 year" purchase runs 9 calendar months. A concrete date
+ * removes the ambiguity that no amount of labelling fixes.
+ *
+ * `from` is the later of now and the current period end — the same rule
+ * settlement uses to stack a renewal, so the quote cannot promise a date the
+ * settlement then disagrees with.
+ */
+export function periodEndAfter(
+  cycle: BillingCycle,
+  periods: number,
+  now: Date,
+  currentPeriodEnd?: Date | null,
+): Date {
+  const base = currentPeriodEnd && currentPeriodEnd > now ? new Date(currentPeriodEnd) : new Date(now);
+  const end = new Date(base);
+  end.setMonth(end.getMonth() + billedMonths(cycle, periods));
+  return end;
+}
+
 // --- Mid-cycle upgrade proration + seat true-up --------------------------------
 
 /** Pure: fraction of the paid period still ahead (0..1). The paid period is

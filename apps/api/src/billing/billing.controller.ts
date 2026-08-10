@@ -15,7 +15,7 @@
 import { Body, Controller, Get, Headers, Param, Post, Put, Req, Res } from "@nestjs/common";
 import type { RawBodyRequest } from "@nestjs/common";
 import type { Request, Response } from "express";
-import { BILLING_CYCLES, CURRENCIES, BILLING_PERMISSIONS, PLANS } from "@sms/types";
+import { BILLING_CYCLES, CURRENCIES, BILLING_PERMISSIONS, MAX_BILLING_PERIODS, PLANS } from "@sms/types";
 import type { BillingOverviewDto, CheckoutInitResultDto, ReferralInfoDto } from "@sms/types";
 import { z } from "zod";
 import { Public } from "../auth/public.decorator";
@@ -42,6 +42,10 @@ const checkoutSchema = z.object({
   currency: z.enum([CURRENCIES.NGN, CURRENCIES.USD]).optional(),
   // Operator-issued discount — first paid charge only, validated server-side.
   promoCode: z.string().max(30).optional(),
+  /** How many CYCLES to buy in this one charge (1..MAX_BILLING_PERIODS).
+   *  Five academic years is periods=5 on the YEAR cycle — ONE payment, so it
+   *  cannot race itself the way five separate charges did. */
+  periods: z.number().int().min(1).max(MAX_BILLING_PERIODS).optional(),
 });
 
 @Controller("billing")

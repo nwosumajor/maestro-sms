@@ -127,6 +127,7 @@ export default async function BillingPage() {
               activeStudents={data.activeStudents}
               canManage={canManage}
               currencyAvailability={data.currencyAvailability}
+              currentPeriodEnd={data.subscription.currentPeriodEnd}
             />
 
             {data.planChangeCreditMinor > 0 && (
