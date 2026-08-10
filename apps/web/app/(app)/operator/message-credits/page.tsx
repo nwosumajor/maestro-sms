@@ -13,6 +13,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { MessageCreditFilterBar } from "@/components/operator/MessageCreditFilterBar";
 import { MessageCreditRow } from "@/components/operator/MessageCreditRow";
+import { CreditReconciliationPanel } from "@/components/operator/CreditReconciliationPanel";
 import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
@@ -47,6 +48,10 @@ export default async function MessageCreditsPage({
               self-serve on their Billing page; this is cross-tenant oversight, plus a comp/debit lever for
               support cases (a gateway outage, a duplicate purchase, goodwill).</>}
         />
+
+        {/* Reconciliation posture first: whether the numbers below can be
+            trusted matters before any of them are read. */}
+        <CreditReconciliationPanel canRun={hasPermission(user.permissions, "fee.reconcile.run")} />
 
         {data && <MessageCreditFilterBar q={q} page={data.page} pageSize={data.pageSize} total={data.total} />}
 

@@ -2985,6 +2985,10 @@
       "kind": "internal",
       "note": "Cross-tenant credit reconciliation sweep (fee.reconcile.run, super_admin). Scheduled daily; manual trigger mirrors POST /fees/reconciliation/run."
     },
+    "GET /operator/message-credits/reconciliation": {
+      "kind": "ui",
+      "note": "Reconciliation posture panel on /operator/message-credits — makes a discrepancy visible where credits are managed, not only in an owner email"
+    },
     "GET /operator/payments": {
       "kind": "ui",
       "note": "/operator/payments — cross-tenant subscription revenue ledger, period-filtered, totals per currency"
