@@ -17,6 +17,9 @@ import { FeeOpsProcessor } from "./fee-ops.processor";
 import { NotificationModule } from "../notifications/notification.module";
 import { PaymentsModule } from "../payments/payments.module";
 import { BillingModule } from "../billing/billing.module";
+// A leaf module (controller + service + storage provider), so importing it
+// here cannot create a cycle — verified by module-graph.spec.ts.
+import { BrandingModule } from "../branding/branding.module";
 import { AdmissionsModule } from "../admissions/admissions.module";
 
 // Depends on the global FoundationModule (TENANT_DATABASE, AUDIT_LOG_SERVICE,
@@ -31,6 +34,7 @@ import { AdmissionsModule } from "../admissions/admissions.module";
     NotificationModule,
     PaymentsModule,
     BillingModule,
+    BrandingModule,
     AdmissionsModule,
     DisputesModule,
     SettlementModule,
