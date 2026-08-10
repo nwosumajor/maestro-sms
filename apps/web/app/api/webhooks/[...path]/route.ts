@@ -37,11 +37,18 @@ const API_BASE = process.env.API_BASE_URL ?? "http://localhost:3001";
 /** Public webhook path → the API route that verifies it. Nothing else passes. */
 function resolveTarget(path: string[]): string | null {
   const [provider, ...rest] = path;
+  // These MUST match the controllers' real routes, prefix included. Two of the
+  // three were wrong when this was written — the Stripe handler lives under the
+  // `billing` controller and the mobile-money one under `payments/mobile-money`
+  // — and only Paystack was exercised, because it is the only enabled rail. A
+  // wrong target here is a 404 to a provider, which for mobile money means the
+  // payer is debited and nothing ever settles: those rails do not retry.
+  // webhook-targets.test.ts pins each one against its controller.
   if (provider === "paystack" && rest.length === 0) return "/payments/webhook";
-  if (provider === "stripe" && rest.length === 0) return "/stripe/webhook";
-  // Mobile money: /api/webhooks/mobile-money/mpesa → /callback/mpesa
+  if (provider === "stripe" && rest.length === 0) return "/billing/stripe/webhook";
+  // /api/webhooks/mobile-money/mpesa → /payments/mobile-money/callback/mpesa
   if (provider === "mobile-money" && rest.length === 1 && /^[a-z0-9-]+$/.test(rest[0])) {
-    return `/callback/${rest[0]}`;
+    return `/payments/mobile-money/callback/${rest[0]}`;
   }
   return null;
 }
