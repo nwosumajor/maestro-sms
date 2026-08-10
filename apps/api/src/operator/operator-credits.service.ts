@@ -115,6 +115,65 @@ export class OperatorCreditsService {
   }
 
   /** One school's ledger, newest first — purchases, sends, and operator comps. */
+  /**
+   * The fleet-wide reconciliation posture, WITHOUT calling the provider.
+   *
+   * Everything here is derived from the ledger the platform already owns, so
+   * the console can show whether reconciliation is healthy on every page load
+   * — a figure that needed a Twilio round trip would be too expensive to show
+   * and would go stale the moment it was cached.
+   *
+   * The alert on a discrepancy goes to the owner by email, and an email is a
+   * thing you can miss. This makes the same state visible where the credits are
+   * actually managed.
+   */
+  async reconciliationPosture(p: Principal): Promise<{
+    lastCheckpointAt: Date | null;
+    schoolsCheckpointed: number;
+    unlinkedDebits: number;
+    linkedDebits: number;
+    windowDays: number;
+  }> {
+    const client = this.privileged.client;
+    if (!client) throw new ServiceUnavailableException("Credit oversight needs the privileged database configuration");
+    const since = new Date(Date.now() - 3 * 86_400_000);
+
+    const [latest, checkpointed, unlinked, linked] = await Promise.all([
+      client.messageCreditEntry.findFirst({
+        where: { reason: "CHECKPOINT" },
+        orderBy: { createdAt: "desc" },
+        select: { createdAt: true },
+      }),
+      // How many schools the last sweep actually reached — a sweep that ran but
+      // covered nothing is not a sweep that found nothing wrong.
+      client.messageCreditEntry.findMany({
+        where: { reason: "CHECKPOINT", createdAt: { gte: since } },
+        select: { schoolId: true },
+        distinct: ["schoolId"],
+      }),
+      // Debits with no provider id cannot be checked either way. This is the
+      // honest measure of how much of the recent ledger is verifiable at all.
+      client.messageCreditEntry.count({ where: { reason: "SEND", providerRef: null, createdAt: { gte: since } } }),
+      client.messageCreditEntry.count({ where: { reason: "SEND", providerRef: { not: null }, createdAt: { gte: since } } }),
+    ]);
+
+    await this.auditAsOperator(p, {
+      actorId: p.userId,
+      action: "platform.credits.posture.read",
+      entity: "message_credit_entry",
+      entityId: p.schoolId,
+      schoolId: p.schoolId,
+    });
+
+    return {
+      lastCheckpointAt: latest?.createdAt ?? null,
+      schoolsCheckpointed: (checkpointed as Array<{ schoolId: string }>).length,
+      unlinkedDebits: unlinked as number,
+      linkedDebits: linked as number,
+      windowDays: 3,
+    };
+  }
+
   async listLedger(p: Principal, schoolId: string): Promise<MessageCreditLedgerEntryDto[]> {
     const client = this.privileged.client;
     if (!client) throw new ServiceUnavailableException("Requires the privileged database configuration");

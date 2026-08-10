@@ -3,6 +3,7 @@ import { BullModule } from "@nestjs/bullmq";
 import { PaymentsModule } from "../payments/payments.module";
 import { MessageCreditsService } from "./message-credits.service";
 import { NOTIFICATION_CHANNEL_PROVIDER, NOTIFICATION_QUEUE } from "./notification.constants";
+import { MessageCreditReconciliationService } from "./message-credit-reconciliation.service";
 import { NotificationController } from "./notification.controller";
 import { NotificationService } from "./notification.service";
 import { NotificationProcessor } from "./notification.processor";
@@ -24,6 +25,7 @@ import { EmailChannelProvider } from "./email-channel.provider";
   imports: [BullModule.registerQueue({ name: NOTIFICATION_QUEUE }), PaymentsModule],
   controllers: [NotificationController],
   providers: [
+    MessageCreditReconciliationService,
     NotificationService,
     NotificationProcessor,
     EmailService,
@@ -38,6 +40,6 @@ import { EmailChannelProvider } from "./email-channel.provider";
       },
     },
   ],
-  exports: [NotificationService, EmailService, MessageCreditsService],
+  exports: [MessageCreditReconciliationService, NotificationService, EmailService, MessageCreditsService],
 })
 export class NotificationModule {}

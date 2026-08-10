@@ -38,5 +38,22 @@ export interface ChannelDeliveryRequest {
  * as the integrity embeddings provider.
  */
 export interface NotificationChannelProvider {
-  deliver(req: ChannelDeliveryRequest): Promise<{ ok: boolean; error?: string }>;
+  /**
+   * `providerRef` is the PROVIDER's own id for the message (Twilio's SID).
+   *
+   * It is what makes a credit debit reconcilable: the platform is billed by the
+   * provider per message and charges the school per credit, and without an id
+   * linking the two there is nothing to compare. Twilio returned it all along
+   * and the adapter discarded it.
+   */
+  deliver(req: ChannelDeliveryRequest): Promise<{ ok: boolean; error?: string; providerRef?: string }>;
+  /**
+   * The messages the PROVIDER says it accepted since `since`.
+   *
+   * Optional: a provider with no listing API simply omits it, and the sweep
+   * reports that charges could not be verified rather than pretending they
+   * reconciled. This is the credit-ledger equivalent of the card rails'
+   * `listSuccessfulTransactions`.
+   */
+  listRecentMessages?(since: Date): Promise<Array<{ providerRef: string; status?: string }>>;
 }

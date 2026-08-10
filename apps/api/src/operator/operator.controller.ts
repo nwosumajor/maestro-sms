@@ -753,6 +753,14 @@ export class OperatorController {
     });
   }
 
+  /** Fleet-wide credit reconciliation posture. Derived from our own ledger —
+   *  no provider round trip — so the console can show it on every load. */
+  @Get("message-credits/reconciliation")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
+  creditReconciliationPosture(@CurrentPrincipal() p: Principal) {
+    return this.credits.reconciliationPosture(p);
+  }
+
   /** One school's credit ledger (purchases, sends, comps), newest first. */
   @Get("message-credits/:schoolId/ledger")
   @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)

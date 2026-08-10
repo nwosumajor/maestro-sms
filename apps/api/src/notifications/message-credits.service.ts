@@ -8,10 +8,9 @@
 // with no credits fails those deliveries soft ("no message credits") — email +
 // in-app are never affected.
 
-import { BadRequestException, Inject, Injectable, ServiceUnavailableException, Optional} from "@nestjs/common";
+import { BadRequestException, forwardRef, Inject, Injectable, Logger, ServiceUnavailableException, Optional} from "@nestjs/common";
 import { MESSAGE_CREDIT_BUNDLES, CURRENCIES,
-  PAYMENT_CHANNELS,
-} from "@sms/types";
+  PAYMENT_CHANNELS, MESSAGE_CREDIT_LOW_THRESHOLD, type MessageCreditLedgerPageDto } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -23,9 +22,12 @@ import {
 import { PaystackService, type PaystackEvent } from "../payments/paystack.service";
 import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
 import { PaymentChannelService } from "../payments/payment-channel.service";
+import { NotificationService } from "./notification.service";
+import { prisma } from "@sms/db";
 
 @Injectable()
 export class MessageCreditsService {
+  private readonly logger = new Logger("MessageCredits");
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
@@ -35,14 +37,38 @@ export class MessageCreditsService {
     // absent it FAILS OPEN — a missing switchboard must never be the reason a
     // parent cannot pay. It gates a commercial choice, not a security boundary.
     @Optional() private readonly channels?: PaymentChannelService,
+    // NotificationService injects THIS service, so taking it directly would be
+    // a cycle. forwardRef + @Optional keeps the warning best-effort and keeps
+    // the module graph acyclic — module-graph.spec pins that.
+    @Optional() @Inject(forwardRef(() => NotificationService)) private readonly notifications?: NotificationService,
   ) {}
 
+  /**
+   * The school's credit balance.
+   *
+   * Still SUM(deltaCredits) — a stored counter can drift from its own history
+   * and this one cannot — but bounded by the newest CHECKPOINT rather than
+   * summing the entire ledger. That sum runs before EVERY message, and at
+   * 900,000 entries (a school sending 500/day for five years) it measured as a
+   * 64ms Parallel Seq Scan, so 500 messages cost 32 seconds of arithmetic.
+   *
+   * With no checkpoint yet it falls back to the full sum, which is exactly
+   * right for a young school and is what every existing school gets until the
+   * reconciliation sweep writes its first one.
+   */
   async balanceInTx(tx: TenantTx, schoolId: string): Promise<number> {
+    const checkpoint = await tx.messageCreditEntry.findFirst({
+      where: { schoolId, reason: "CHECKPOINT" },
+      orderBy: { createdAt: "desc" },
+      select: { balanceAfter: true, createdAt: true },
+    });
     const agg = await tx.messageCreditEntry.aggregate({
-      where: { schoolId },
+      where: checkpoint
+        ? { schoolId, createdAt: { gt: checkpoint.createdAt } }
+        : { schoolId },
       _sum: { deltaCredits: true },
     });
-    return agg._sum.deltaCredits ?? 0;
+    return (checkpoint?.balanceAfter ?? 0) + (agg._sum.deltaCredits ?? 0);
   }
 
   /** The billing screen's credits panel. */
@@ -121,6 +147,93 @@ export class MessageCreditsService {
    *  BEFORE attempting a gateway send — an empty balance skips the attempt
    *  entirely so a school never gets billed by the gateway for a send it
    *  can't pay for. */
+  /**
+   * The school's OWN credit ledger.
+   *
+   * The operator could always drill into any school's entries; the school could
+   * see only a number. A parent gets a full payment history with receipts, and
+   * a bursar asking "where did 200 credits go?" had nothing to look at. Same
+   * data the operator sees, scoped by RLS to the caller's own school.
+   *
+   * Paged and newest-first: this table grows with every message ever sent, so
+   * it must never be returned whole.
+   */
+  async ledger(p: Principal, page = 1, pageSize = 25): Promise<MessageCreditLedgerPageDto> {
+    const take = Math.min(100, Math.max(1, pageSize));
+    const skip = (Math.max(1, page) - 1) * take;
+    return this.db.runAsTenant({ schoolId: p.schoolId, userId: p.userId }, async (tx) => {
+      const [rows, total, balance] = await Promise.all([
+        tx.messageCreditEntry.findMany({
+          // CHECKPOINTs are bookkeeping, not activity — showing them would put
+          // rows a school never caused in the middle of its own history.
+          where: { reason: { not: "CHECKPOINT" } },
+          orderBy: { createdAt: "desc" },
+          skip,
+          take,
+        }),
+        tx.messageCreditEntry.count({ where: { reason: { not: "CHECKPOINT" } } }),
+        this.balanceInTx(tx, p.schoolId),
+      ]);
+      return {
+        balance,
+        page: Math.max(1, page),
+        pageSize: take,
+        total,
+        rows: (rows as Array<Record<string, unknown>>).map((r) => ({
+          id: r.id as string,
+          deltaCredits: r.deltaCredits as number,
+          reason: r.reason as string,
+          channel: (r.channel as string | null) ?? null,
+          reference: (r.reference as string | null) ?? null,
+          createdAt: r.createdAt as Date,
+        })),
+      };
+    });
+  }
+
+  /**
+   * REFUND a credit for a message the provider later reported as failed.
+   *
+   * `ok` from the send call means the provider ACCEPTED the message, not that
+   * it arrived. A carrier reject, an unreachable handset or a blocked number
+   * comes back minutes later on a status callback — and until now the school
+   * had already been charged for it and stayed charged.
+   *
+   * Idempotent on the provider's own id: a provider may deliver the same status
+   * callback more than once, and a second refund would hand back a credit that
+   * was never spent.
+   */
+  async refundFailedSend(providerRef: string, status: string): Promise<{ refunded: boolean }> {
+    const debit = await prisma.messageCreditEntry.findFirst({
+      where: { providerRef, reason: "SEND" },
+      select: { id: true, schoolId: true, channel: true },
+    });
+    if (!debit) return { refunded: false };
+    const already = await prisma.messageCreditEntry.findFirst({
+      where: { providerRef, reason: "REFUND" },
+      select: { id: true },
+    });
+    if (already) return { refunded: false };
+
+    await this.db.runAsTenant({ schoolId: debit.schoolId, userId: SYSTEM_ACTOR_ID }, (tx) =>
+      tx.messageCreditEntry.create({
+        data: {
+          schoolId: debit.schoolId,
+          // The ledger is append-only: a refund is a NEW entry, never an edit
+          // of the debit. The history keeps both, which is what makes the
+          // reconciliation sweep able to explain the balance.
+          deltaCredits: 1,
+          reason: "REFUND",
+          channel: debit.channel,
+          reference: `${status}`,
+          providerRef,
+        },
+      }),
+    );
+    this.logger.log(`refunded 1 credit for ${providerRef} (${status})`);
+    return { refunded: true };
+  }
+
   async hasBalanceInTx(tx: TenantTx, schoolId: string): Promise<boolean> {
     return (await this.balanceInTx(tx, schoolId)) > 0;
   }
@@ -132,9 +245,65 @@ export class MessageCreditsService {
    * rare concurrent race can still dip the balance one or two below zero; the
    * next purchase absorbs it (bounded, self-healing — unchanged from before).
    */
-  async debitInTx(tx: TenantTx, schoolId: string, channel: string, notificationId: string): Promise<void> {
+  /**
+   * Warn the school when a send takes it to or below the low threshold, and
+   * again when the balance actually hits zero.
+   *
+   * WHY IT IS NEEDED AT ALL: running out is invisible from inside the school.
+   * The in-app inbox and email still go out, so nothing looks broken — only the
+   * SMS and WhatsApp copies silently stop. The first anyone hears of it is a
+   * parent asking why nobody told them their child was absent.
+   *
+   * Fires on the CROSSING, not on the state, so a school at zero is not told
+   * every single time it tries to send. Best-effort and never inside the
+   * caller's failure path: a warning that fails must not fail the delivery it
+   * was warning about.
+   */
+  private async warnIfLow(tx: TenantTx, schoolId: string, balanceAfter: number): Promise<void> {
+    const crossedZero = balanceAfter === 0;
+    const crossedLow = balanceAfter === MESSAGE_CREDIT_LOW_THRESHOLD;
+    if (!crossedZero && !crossedLow) return;
+    try {
+      const staff = await tx.userRole.findMany({
+        where: { role: { name: { in: ["school_admin", "principal"] } } },
+        select: { userId: true },
+        take: 20,
+      });
+      for (const s of staff) {
+        await this.notifications?.enqueue(
+          { schoolId, userId: SYSTEM_ACTOR_ID },
+          {
+            recipientId: s.userId,
+            type: "BILLING",
+            title: crossedZero ? "SMS and WhatsApp have stopped — no message credits" : "Message credits are running low",
+            body: crossedZero
+              ? "Your school has run out of message credits, so SMS and WhatsApp alerts are no longer being sent. " +
+                "Parents still receive in-app and email notifications. Buy a bundle on the Billing page to restart them."
+              : `Only ${balanceAfter} message credits left. SMS and WhatsApp alerts stop when they run out — ` +
+                "in-app and email keep working. Top up on the Billing page.",
+            data: { balance: balanceAfter },
+          },
+        );
+      }
+    } catch {
+      /* a warning must never cost the delivery it was warning about */
+    }
+  }
+
+  async debitInTx(
+    tx: TenantTx,
+    schoolId: string,
+    channel: string,
+    notificationId: string,
+    providerRef?: string,
+  ): Promise<void> {
     await tx.messageCreditEntry.create({
-      data: { schoolId, deltaCredits: -1, reason: "SEND", channel, reference: notificationId },
+      // providerRef is the PROVIDER's id for the message this credit paid for.
+      // It is what the reconciliation sweep matches on: the platform is billed
+      // per message and charges per credit, and without it the two counts could
+      // never be compared. Null on a provider that does not return one.
+      data: { schoolId, deltaCredits: -1, reason: "SEND", channel, reference: notificationId, providerRef },
     });
+    await this.warnIfLow(tx, schoolId, await this.balanceInTx(tx, schoolId));
   }
 }
