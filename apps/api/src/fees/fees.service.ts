@@ -18,8 +18,7 @@ import {
   PAYMENT_APPROVAL_WINDOW_HOURS,
   paymentNeedsApproval,
   type InvoiceStatusValue,
-  type PaymentMethodValue,
-} from "@sms/types";
+  type PaymentMethodValue, formatMoney } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -771,7 +770,7 @@ export class FeesService {
   }
 
   private money(minor: number, currency: string): string {
-    return `${currency} ${(minor / 100).toFixed(2)}`;
+    return formatMoney(minor, currency);
   }
   private dateOnly(d: Date): string {
     return new Date(d).toISOString().slice(0, 10);

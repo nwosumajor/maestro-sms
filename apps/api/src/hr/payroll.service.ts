@@ -20,6 +20,9 @@ import {
   type MyPayslipDto,
   type PayrollRunDto,
   type PayslipDto,
+  formatMoney,
+  toMajor,
+  currencyDecimals,
 } from "@sms/types";
 import { decryptField, encryptField } from "../foundation/field-crypto";
 import {
@@ -164,7 +167,7 @@ export class PayrollService {
           select: { id: true, name: true },
         });
         const nameById = new Map(names.map((u) => [u.id, u.name]));
-        const naira = (m: number) => `₦${(m / 100).toLocaleString("en-NG", { minimumFractionDigits: 2 })}`;
+        const naira = (m: number) => formatMoney(m, region.currency, region.locale);
         const list = overdrawn
           .map((o) => `${nameById.get(o.e.userId) ?? o.e.userId} (deductions exceed pay by ${naira(-o.bd.netMinor)})`)
           .join("; ");
@@ -325,6 +328,12 @@ export class PayrollService {
    * is what makes this an oversight rather than a decision.
    */
   async bankExport(p: Principal, runId: string): Promise<{ csv: string; filename: string }> {
+    // The school's REAL currency. This file is an instruction to a bank, not a
+    // screen: it carried a hard-coded "Net (NGN)" header and divided by 100
+    // unconditionally, so in a zero-decimal currency (the CFA franc and ten
+    // others in the catalogue) every staff member would have been paid a
+    // HUNDREDTH of their salary, with the column still labelled naira.
+    const region = await this.region.forSchool(p.schoolId);
     const rows = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const run = await tx.payrollRun.findFirst({ where: { id: runId } });
       if (!run) throw new NotFoundException("Payroll run not found");
@@ -355,15 +364,17 @@ export class PayrollService {
       if (/^[=+\-@\t\r]/.test(v)) v = `'${v}`;
       return `"${v.replace(/"/g, '""')}"`;
     };
-    const lines = ['"Employee","Bank","Account","Net (NGN)"'];
+    const lines = [`"Employee","Bank","Account","Net (${region.currency})"`];
     for (const s of rows.slips) {
       const emp = rows.empByUser.get(s.userId);
-      const net = s.netEnc ? Number(decryptField(s.netEnc, p.schoolId)) / 100 : 0;
+      // toMajor asks the currency how many minor units it has, instead of
+      // assuming two.
+      const net = s.netEnc ? toMajor(Number(decryptField(s.netEnc, p.schoolId)), region.currency) : 0;
       lines.push([
         esc(rows.nameById.get(s.userId) ?? ""),
         esc(dec(emp?.bankNameEnc)),
         esc(dec(emp?.bankAccountEnc)),
-        net.toFixed(2),
+        net.toFixed(currencyDecimals(region.currency)),
       ].join(","));
     }
     return {
@@ -485,7 +496,9 @@ export class PayrollService {
     const region = await this.region.forSchool(p.schoolId);
     const cash = (m: number) => {
       try {
-        return new Intl.NumberFormat(region.locale, { style: "currency", currency: region.currency }).format(m / 100);
+        // The locale was already right here; the /100 was not. formatMoney
+        // asks Intl how many minor units the currency actually has.
+        return formatMoney(m, region.currency, region.locale);
       } catch {
         return `${region.currency} ${(m / 100).toFixed(2)}`;
       }

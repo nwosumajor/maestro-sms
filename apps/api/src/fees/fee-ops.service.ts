@@ -38,6 +38,7 @@ import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
 import { NotificationService } from "../notifications/notification.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import { FeesService } from "./fees.service";
+import { currencyDecimals, formatMoney, toMajor } from "@sms/types";
 
 export const FEE_OPS_QUEUE = "fee-ops";
 export const LATE_FEE_JOB = "fee-late-fee-sweep";
@@ -172,7 +173,7 @@ export class FeeOpsService {
       }
       const inv = await tx.invoice.findFirst({
         where: { id: row.invoiceId },
-        select: { totalMinor: true, studentId: true, reference: true },
+        select: { totalMinor: true, studentId: true, reference: true, currency: true },
       });
       if (!inv) throw new NotFoundException("Invoice not found");
       const paid = await this.paidMinor(tx, row.invoiceId);
@@ -215,7 +216,7 @@ export class FeeOpsService {
             recipientId: g.parentId,
             type: "BILLING",
             title: `${row.kind === "WAIVER" ? "Fee waiver" : "Discount"} applied`,
-            body: `Invoice ${inv.reference} was reduced by ${(row.amountMinor / 100).toFixed(2)} (${row.reason}).`,
+            body: `Invoice ${inv.reference} was reduced by ${formatMoney(row.amountMinor, inv.currency)} (${row.reason}).`,
             data: { invoiceId: row.invoiceId },
             channels: ["EMAIL"],
           });
@@ -303,7 +304,7 @@ export class FeeOpsService {
         feesApplied += await this.db.runAsTenant({ schoolId: school.id, userId: SYSTEM_ACTOR_ID }, async (tx) => {
           const overdue = await tx.invoice.findMany({
             where: { status: { in: ["ISSUED", "PARTIALLY_PAID"] }, dueDate: { lt: cutoff } },
-            select: { id: true, totalMinor: true, studentId: true, reference: true, createdById: true },
+            select: { id: true, totalMinor: true, studentId: true, reference: true, createdById: true, currency: true },
             take: 500,
           });
           let applied = 0;
@@ -349,7 +350,7 @@ export class FeeOpsService {
                     recipientId: g.parentId,
                     type: "BILLING",
                     title: "Late fee added",
-                    body: `Invoice ${inv.reference} was overdue past the grace period; a late fee of ${(school.lateFeeFlatMinor / 100).toFixed(2)} was added. Settle the balance to avoid further action.`,
+                    body: `Invoice ${inv.reference} was overdue past the grace period; a late fee of ${formatMoney(school.lateFeeFlatMinor, inv.currency)} was added. Settle the balance to avoid further action.`,
                     data: { invoiceId: inv.id },
                     channels: ["EMAIL"],
                   },
@@ -426,7 +427,10 @@ export class FeeOpsService {
     });
 
     const receiptNo = `RCP-${data.pay.createdAt.toISOString().slice(0, 10).replace(/-/g, "")}-${paymentId.slice(0, 8).toUpperCase()}`;
-    const money = (minor: number) => `${data.pay.invoice.currency} ${(minor / 100).toFixed(2)}`;
+    // formatMoney, never minor/100: a zero-decimal currency (the CFA franc and
+    // ten others in the catalogue) prints at a HUNDREDTH of its value under a
+    // naive divide — on the one document every payer keeps.
+    const money = (minor: number) => formatMoney(minor, data.pay.invoice.currency);
     const buffer = await new Promise<Buffer>((resolve, reject) => {
       const doc = new PDFDocument({ size: "A5", margin: 40 });
       const chunks: Buffer[] = [];
@@ -486,7 +490,10 @@ export class FeeOpsService {
           kind: x.kind,
           currency: x.invoice.currency,
           // Signed major-unit amount: refunds negative — a ready journal column.
-          amount: ((x.kind === "REFUND" ? -x.amountMinor : x.amountMinor) / 100).toFixed(2),
+          // The journal is read into a ledger: scale by the CURRENCY, not by 100.
+          amount: toMajor(x.kind === "REFUND" ? -x.amountMinor : x.amountMinor, x.invoice.currency).toFixed(
+            currencyDecimals(x.invoice.currency),
+          ),
           gatewayRef: x.reference ?? "",
         }),
       );
