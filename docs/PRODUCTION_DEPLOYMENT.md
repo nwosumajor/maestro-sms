@@ -230,12 +230,28 @@ Terraform generates DB passwords, `AUTH_SECRET`, `DATA_ENCRYPTION_KEY`, and
 key (+ webhook secret after Step 7), email API key + provider + from, Sentry
 DSN, Twilio (when ready).
 
+> ⚠️ **`PUBLIC_WEB_URL` must be the real public origin** (`https://<domain>`),
+> and it must be set BEFORE the first live payment. It is what a payer is
+> redirected back to after paying, and the platform verifies the charge on that
+> return (§7.1). Unset, it falls back to `http://localhost:3000`, which a
+> gateway cannot reach — so nothing verifies on return and the whole flow
+> silently depends on webhooks alone. It is a plain env var, not a secret; the
+> failure mode is a paid subscription showing "Awaiting payment".
+
 > ⚠️ **`DATA_ENCRYPTION_KEY` is generated once and must never change** — it
 > derives the per-tenant field-encryption keys for medical/salary/bank/card
 > data. Losing or rotating it without a re-encryption migration bricks that
 > data. Confirm the state bucket versioning (Step 1.4) and additionally store
 > a sealed offline copy of this one secret (e.g. printed, in a safe) — this is
 > the single most important disaster-recovery artifact.
+
+> **New permissions need the SEED to re-run.** Role→permission rows are seeded,
+> not migrated, so a release that adds a permission (recent examples:
+> `platform.revenue.read`, `member.scan`, `attendance.amend.review`) leaves the
+> endpoint 403-ing — even for super_admin — until `prisma db seed` runs against
+> the live database. The one-off `migrate` task in Step 5 does this, so a normal
+> deploy is fine; it only bites if you run `migrate deploy` by hand and skip the
+> seed.
 
 ### Step 5 — First application deploy (~20 min)
 1. In GitHub → repo → Settings → Secrets and variables → Actions, set the
@@ -271,22 +287,128 @@ DSN, Twilio (when ready).
 ```
 
 ### Step 7 — Payment rails (~1 h, needs live business accounts)
-1. **Paystack dashboard** → webhook URL. The API route is
-   `POST /payments/webhook` (`@Public`, HMAC-SHA512-verified). In the cloud
-   topology the ALB sends only `/ws/*` to the API, so the publicly reachable
-   URL goes through the web BFF: `https://<domain>/api/sms/payments/webhook`.
-   ⚠️ Signature verification needs the **exact raw body** — the redelivery
-   test below proves the BFF forwards it byte-for-byte; if signatures fail,
-   this proxy hop is the first suspect (alternative: add an ALB listener rule
-   forwarding `/payments/webhook` straight to the API target group).
-   Test-charge a real card end-to-end (₦100 invoice), confirm the webhook
-   posts the payment, receipt email fires, split settles to a test school
-   subaccount.
-2. **Stripe dashboard** → add the webhook endpoint, copy the signing secret
-   into Secrets Manager (it's per-endpoint), redeploy api service.
-   Run one Enterprise USD test checkout in live mode (refund it after).
-3. Verify webhook **idempotency** by redelivering an event from each
-   dashboard: balance must not double-credit.
+
+Money is the one subsystem where a wrong URL fails silently: the payer is
+charged, the gateway reports success, and the ledger never hears. Do this step
+exactly, and run the verification at the end rather than assuming.
+
+#### 7.1 The URL paths (get these right first)
+
+**Every gateway-facing URL goes through `/api/webhooks/*`, NOT `/api/sms/*`.**
+
+That is not a style preference. The general BFF at `/api/sms/*` mints a Bearer
+token from the caller's **session** and returns `401` without one — a gateway
+has no session — and it forwards only `Authorization` and `x-stepup`, so the
+signature header would be dropped even if it did pass. A webhook sent there is
+rejected 100% of the time. `/api/webhooks/*` is a separate, deliberately
+sessionless route that forwards the **raw bytes** (`arrayBuffer()`, never
+re-serialised JSON — Paystack HMACs the raw body and Stripe HMACs
+`${timestamp}.${rawBody}`, so a byte-identical re-encode still breaks the
+signature) plus exactly the signature headers, and only for an allowlisted
+provider.
+
+| Purpose | Set it in | URL to configure |
+|---|---|---|
+| Paystack webhook | Paystack dashboard → Settings → API Keys & Webhooks | `https://<domain>/api/webhooks/paystack` |
+| Stripe webhook | Stripe dashboard → Developers → Webhooks | `https://<domain>/api/webhooks/stripe` |
+| M-Pesa callback | Daraja app config | `https://<domain>/api/webhooks/mobile-money/mpesa` |
+| MTN MoMo callback | MTN portal (delivers by **PUT**) | `https://<domain>/api/webhooks/mobile-money/mtn` |
+| Airtel callback | Airtel Africa portal | `https://<domain>/api/webhooks/mobile-money/airtel` |
+
+Anything not on that allowlist returns **404** by design; the allowlist lives in
+`apps/web/app/api/webhooks/[...path]/route.ts`.
+
+**`PUBLIC_WEB_URL` must be the real public origin** (e.g. `https://<domain>`),
+not a placeholder. It is not cosmetic — it is what a payer is redirected back
+to after paying, and the platform verifies the charge on that return:
+
+| Return path | Used by |
+|---|---|
+| `https://<domain>/fees/<invoiceId>?verify=1` | parent fee payments |
+| `https://<domain>/billing?verify=<reference>` | school subscription payments |
+
+Both settle through the same idempotent path the webhook uses, so a webhook that
+never arrives is recovered the moment the payer lands back. Get this wrong and
+the flow silently depends on webhooks alone — which is exactly how a paid
+five-year subscription sat showing "Awaiting payment".
+
+#### 7.2 Secrets and configuration
+
+Into Secrets Manager (Step 4), then redeploy the api service:
+
+| Variable | Needed for | Notes |
+|---|---|---|
+| `PAYSTACK_SECRET_KEY` | cards, bank transfer, dedicated NUBAN | `sk_live_…` |
+| `PUBLIC_WEB_URL` | verify-on-return, receipts, invites | the public origin |
+| `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` | USD rail | only when Stripe is switched on |
+| `PAYSTACK_DEDICATED_BANK` | per-pupil virtual accounts | optional |
+| `MPESA_*` / `MTN_MOMO_*` / `AIRTEL_*` | mobile money | per rail; see CLAUDE.md — no provider sandbox has ever been exercised |
+| `PLATFORM_FEES_COMMISSION_PERCENT` | platform take-rate on splits | defaults to 0 |
+
+#### 7.3 Switch the rails on (operator console)
+
+Credentials being present does not enable a rail — that is a separate,
+deliberate commercial decision. At `/operator` → **Payment channels**:
+
+1. Enable **PAYSTACK**. The startup default is Paystack-only; every other rail
+   is off until you fund and support it.
+2. Press **Test connection** on each enabled rail. This calls the gateway and
+   reports the account's real **settlement currencies** — the answer that
+   decides whether a charge succeeds.
+3. ⚠️ **ENTERPRISE is priced in USD.** If the Paystack account is not enabled
+   for USD, a USD checkout is refused with an actionable message and the tier
+   can only be bought in naira. Either enable USD on the Paystack account
+   (Settings → Preferences, or ask Paystack support) or accept naira-only —
+   both work, but decide it deliberately. The checkout defaults to whichever
+   currency can actually be charged and flips back to USD automatically once
+   the account supports it, with no redeploy.
+4. Confirm the **daily payment health check** is scheduled
+   (`PAYMENT_HEALTH_CRON`). It alerts the platform owner on a *transition* —
+   a working rail breaking, or recovering — not on every run.
+
+#### 7.4 Per-school settlement (before a school takes its first fee)
+
+Parent fee payments split to the school's **own** bank via a Paystack
+subaccount. Until a school registers one, its collections settle into the
+**platform's** account and are recorded as a debt on `/fees/reports`
+("₦X of parents' payments is held by the platform"). That is visible and
+recoverable, but it should not be the steady state.
+
+Have each school set this up at `/fees/reports` → **Fee settlement account**
+before inviting parents to pay. The form resolves the account NAME from the
+bank and requires the school to confirm it — creating a subaccount proves an
+account exists, never whose it is.
+
+#### 7.5 Verification — do not skip
+
+1. **Fee payment**: raise a ₦100 invoice, pay it with a real card. Confirm the
+   webhook posts the payment, the invoice goes PAID, the receipt fires, and the
+   split settles to the school's subaccount.
+2. **Subscription payment**: buy the cheapest tier for one month. Confirm you
+   land back on `/billing?verify=…`, the banner says **"Payment confirmed"** and
+   names the new period end, and the history row shows **Paid** with a receipt
+   link. A row still showing *Awaiting payment* means the callback URL or
+   `PUBLIC_WEB_URL` is wrong.
+3. **Idempotency**: redeliver the event from each dashboard. The balance must
+   not double-credit and the subscription period must not extend twice.
+4. **Recovery**: with the invoice still open, delete nothing — instead run
+   `POST /fees/reconciliation/run` and confirm it reports
+   `subscriptionCharges`/`invoiceCharges` seen and `0` recovered. A non-zero
+   `recovered` on a healthy system means webhooks are not being delivered.
+5. **Routing and signature check**: POST an unsigned `{}` to each URL and
+   compare against the expected code — this proves the path reaches the right
+   handler *and* that verification runs:
+
+   | URL | Expected | Why |
+   |---|---|---|
+   | `/api/webhooks/paystack` | **401** | signature verified and rejected. A 200 means verification is not running; a 404 means the path is wrong |
+   | `/api/webhooks/stripe` | **2xx** | reaches the handler; it no-ops until `STRIPE_WEBHOOK_SECRET` is set, then rejects bad signatures |
+   | `/api/webhooks/mobile-money/mpesa` | **2xx** | mobile-money callbacks must ALWAYS answer 2xx — a non-2xx makes some rails retry for ever |
+   | `/api/webhooks/anything-else` | **404** | the allowlist holds |
+
+   A **404 on any of the first three means the URL is wrong**, and that is the
+   failure this step exists to catch: for mobile money it is unrecoverable in
+   the moment, because those callbacks are delivered once with no retry.
 
 ### Step 8 — Observability & alarms (~20 min; provisioned by Terraform)
 The detection layer is code (`alarms.tf`, `autoscaling.tf`) — your job here is
@@ -329,6 +451,12 @@ confirmation, not creation:
 [ ] Legal effective + acceptance flow live (LEGAL_ROLLOUT §7 checklist done)
 [ ] Owner account: strong password + TOTP; demo accounts neutralized
 [ ] All §6 smoke checks green, §7 payment tests settled, §8 alarms firing to a human
+[ ] Webhook URLs point at /api/webhooks/*, NOT /api/sms/* (§7.1) — an unsigned
+    POST to the Paystack one returns 401, proving verification runs
+[ ] PUBLIC_WEB_URL is the real origin, and a live subscription purchase came
+    back to /billing?verify= showing "Payment confirmed" and the new period
+[ ] Paystack account settlement currencies confirmed via Test connection (§7.3)
+    — decide naira-only vs USD-enabled for ENTERPRISE deliberately
 [ ] Restore drill documented (§9)
 [ ] First real school onboarded via /onboard → approve → provision → their
     admin signs in via invite link — the full production path, once, yourself
