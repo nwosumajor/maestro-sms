@@ -22,7 +22,7 @@
 //   date range as formula-guarded CSV for the school's accountant.
 // =============================================================================
 
-import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, Optional, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import PDFDocument from "pdfkit";
 import type { InvoiceAdjustmentDto, LateFeeConfigDto } from "@sms/types";
 import {
@@ -39,6 +39,7 @@ import { NotificationService } from "../notifications/notification.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import { FeesService } from "./fees.service";
 import { currencyDecimals, formatMoney, toMajor } from "@sms/types";
+import { BrandingService } from "../branding/branding.service";
 
 export const FEE_OPS_QUEUE = "fee-ops";
 export const LATE_FEE_JOB = "fee-late-fee-sweep";
@@ -73,6 +74,10 @@ export class FeeOpsService {
     private readonly notifications: NotificationService,
     private readonly privileged: PrivilegedDatabaseService,
     private readonly fees: FeesService,
+    // LAST and @Optional: a receipt is proof of payment, and a branding lookup
+    // must never be the reason one cannot be issued. Absent, the receipt simply
+    // prints without a logo — the same posture the report card takes.
+    @Optional() private readonly branding?: BrandingService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -426,6 +431,10 @@ export class FeeOpsService {
       };
     });
 
+    // Best-effort, and OUTSIDE the transaction: fetching bytes from storage is
+    // a network call, and a receipt must not hold a DB transaction open for it.
+    const logo = (await this.branding?.getLogoBytes(p.schoolId).catch(() => null)) ?? null;
+
     const receiptNo = `RCP-${data.pay.createdAt.toISOString().slice(0, 10).replace(/-/g, "")}-${paymentId.slice(0, 8).toUpperCase()}`;
     // formatMoney, never minor/100: a zero-decimal currency (the CFA franc and
     // ten others in the catalogue) prints at a HUNDREDTH of its value under a
@@ -437,6 +446,14 @@ export class FeeOpsService {
       doc.on("data", (c: Buffer) => chunks.push(c));
       doc.on("end", () => resolve(Buffer.concat(chunks)));
       doc.on("error", reject);
+      if (logo) {
+        try {
+          doc.image(logo, doc.page.width / 2 - 22, 34, { fit: [44, 44], align: "center" });
+          doc.moveDown(3);
+        } catch {
+          /* an unsupported or corrupt image must not cost the payer a receipt */
+        }
+      }
       doc.fontSize(16).text(data.schoolName, { align: "center" });
       doc.moveDown(0.3).fontSize(12).text("OFFICIAL RECEIPT", { align: "center" });
       doc.moveDown();
