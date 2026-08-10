@@ -2973,6 +2973,10 @@
       "kind": "ui",
       "note": "Receipt link on the /billing payment history — a subscription purchase produced no filable document before this"
     },
+    "POST /notifications/credits/reconcile/run": {
+      "kind": "internal",
+      "note": "Cross-tenant credit reconciliation sweep (fee.reconcile.run, super_admin). Scheduled daily; manual trigger mirrors POST /fees/reconciliation/run."
+    },
     "GET /operator/payments": {
       "kind": "ui",
       "note": "/operator/payments — cross-tenant subscription revenue ledger, period-filtered, totals per currency"

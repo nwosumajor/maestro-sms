@@ -37,12 +37,32 @@ export class MessageCreditsService {
     @Optional() private readonly channels?: PaymentChannelService,
   ) {}
 
+  /**
+   * The school's credit balance.
+   *
+   * Still SUM(deltaCredits) — a stored counter can drift from its own history
+   * and this one cannot — but bounded by the newest CHECKPOINT rather than
+   * summing the entire ledger. That sum runs before EVERY message, and at
+   * 900,000 entries (a school sending 500/day for five years) it measured as a
+   * 64ms Parallel Seq Scan, so 500 messages cost 32 seconds of arithmetic.
+   *
+   * With no checkpoint yet it falls back to the full sum, which is exactly
+   * right for a young school and is what every existing school gets until the
+   * reconciliation sweep writes its first one.
+   */
   async balanceInTx(tx: TenantTx, schoolId: string): Promise<number> {
+    const checkpoint = await tx.messageCreditEntry.findFirst({
+      where: { schoolId, reason: "CHECKPOINT" },
+      orderBy: { createdAt: "desc" },
+      select: { balanceAfter: true, createdAt: true },
+    });
     const agg = await tx.messageCreditEntry.aggregate({
-      where: { schoolId },
+      where: checkpoint
+        ? { schoolId, createdAt: { gt: checkpoint.createdAt } }
+        : { schoolId },
       _sum: { deltaCredits: true },
     });
-    return agg._sum.deltaCredits ?? 0;
+    return (checkpoint?.balanceAfter ?? 0) + (agg._sum.deltaCredits ?? 0);
   }
 
   /** The billing screen's credits panel. */
@@ -132,9 +152,19 @@ export class MessageCreditsService {
    * rare concurrent race can still dip the balance one or two below zero; the
    * next purchase absorbs it (bounded, self-healing — unchanged from before).
    */
-  async debitInTx(tx: TenantTx, schoolId: string, channel: string, notificationId: string): Promise<void> {
+  async debitInTx(
+    tx: TenantTx,
+    schoolId: string,
+    channel: string,
+    notificationId: string,
+    providerRef?: string,
+  ): Promise<void> {
     await tx.messageCreditEntry.create({
-      data: { schoolId, deltaCredits: -1, reason: "SEND", channel, reference: notificationId },
+      // providerRef is the PROVIDER's id for the message this credit paid for.
+      // It is what the reconciliation sweep matches on: the platform is billed
+      // per message and charges per credit, and without it the two counts could
+      // never be compared. Null on a provider that does not return one.
+      data: { schoolId, deltaCredits: -1, reason: "SEND", channel, reference: notificationId, providerRef },
     });
   }
 }

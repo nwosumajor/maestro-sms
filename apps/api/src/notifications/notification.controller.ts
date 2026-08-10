@@ -1,20 +1,34 @@
 import { Body, Controller, Get, Param, Post, Put, Query } from "@nestjs/common";
-import type { NotificationInboxDto, NotificationPreferenceDto } from "@sms/types";
+import type {
+  NotificationInboxDto,
+  NotificationPreferenceDto,
+} from "@sms/types";
 import { z } from "zod";
-import { NOTIFICATION_CHANNELS, NOTIFICATION_PERMISSIONS, NOTIFICATION_TYPES } from "@sms/types";
+import {
+  NOTIFICATION_CHANNELS,
+  NOTIFICATION_PERMISSIONS,
+  NOTIFICATION_TYPES,
+  FEES_PERMISSIONS,
+} from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { NotificationService } from "./notification.service";
+import { MessageCreditReconciliationService } from "./message-credit-reconciliation.service";
 
 // Loose E.164: 8–15 digits with an optional +. Empty string clears the number.
-const languageSchema = z.object({ locale: z.string().max(8).nullable().optional() });
+const languageSchema = z.object({
+  locale: z.string().max(8).nullable().optional(),
+});
 const phoneSchema = z.object({
   phone: z
     .string()
     .trim()
-    .regex(/^(\+?\d{8,15})?$/, "Enter the number in international format, e.g. +2348012345678"),
+    .regex(
+      /^(\+?\d{8,15})?$/,
+      "Enter the number in international format, e.g. +2348012345678",
+    ),
 });
 
 const preferencesSchema = z.object({
@@ -35,7 +49,10 @@ const sendSchema = z.object({
 
 @Controller("notifications")
 export class NotificationController {
-  constructor(private readonly notifications: NotificationService) {}
+  constructor(
+    private readonly creditReconcile: MessageCreditReconciliationService,
+    private readonly notifications: NotificationService,
+  ) {}
 
   /** The caller's own inbox (self-scoped). `?unread=1` for unread only. */
   @Get()
@@ -96,7 +113,8 @@ export class NotificationController {
   @RequirePermission(NOTIFICATION_PERMISSIONS.NOTIFICATION_READ)
   setMyLanguage(
     @CurrentPrincipal() p: Principal,
-    @Body(new ZodValidationPipe(languageSchema)) body: z.infer<typeof languageSchema>,
+    @Body(new ZodValidationPipe(languageSchema))
+    body: z.infer<typeof languageSchema>,
   ) {
     return this.notifications.setMyLanguage(p, body.locale || null);
   }
@@ -104,7 +122,9 @@ export class NotificationController {
   /** The caller's own external-channel delivery preferences (self-scoped). */
   @Get("me/preferences")
   @RequirePermission(NOTIFICATION_PERMISSIONS.NOTIFICATION_READ)
-  myPreferences(@CurrentPrincipal() p: Principal): Promise<NotificationPreferenceDto> {
+  myPreferences(
+    @CurrentPrincipal() p: Principal,
+  ): Promise<NotificationPreferenceDto> {
     return this.notifications.getMyPreferences(p);
   }
 
@@ -112,7 +132,8 @@ export class NotificationController {
   @RequirePermission(NOTIFICATION_PERMISSIONS.NOTIFICATION_READ)
   setMyPreferences(
     @CurrentPrincipal() p: Principal,
-    @Body(new ZodValidationPipe(preferencesSchema)) body: z.infer<typeof preferencesSchema>,
+    @Body(new ZodValidationPipe(preferencesSchema))
+    body: z.infer<typeof preferencesSchema>,
   ): Promise<NotificationPreferenceDto> {
     return this.notifications.setMyPreferences(p, body);
   }
@@ -125,5 +146,16 @@ export class NotificationController {
     @Body(new ZodValidationPipe(sendSchema)) body: z.infer<typeof sendSchema>,
   ) {
     return this.notifications.send(p, body);
+  }
+
+  /**
+   * Run the credit reconciliation now. Same permission as the card-rail sweep
+   * (`fee.reconcile.run`, super_admin-only): it is a cross-tenant operation
+   * that touches money, so it is not a school-level button.
+   */
+  @Post("credits/reconcile/run")
+  @RequirePermission(FEES_PERMISSIONS.FEE_RECONCILE_RUN)
+  reconcileCredits() {
+    return this.creditReconcile.sweep("MANUAL");
   }
 }

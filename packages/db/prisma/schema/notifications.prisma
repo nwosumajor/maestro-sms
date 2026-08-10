@@ -28,17 +28,40 @@ model MessageCreditEntry {
   schoolId     String   @db.Uuid
   /// +credits on purchase; -1 per delivered message.
   deltaCredits Int
-  /// PURCHASE | SEND | ADJUST.
+  /// PURCHASE | SEND | ADJUST | CHECKPOINT.
   reason       String
   /// SMS | WHATSAPP for sends; null for purchases.
   channel      String?
   /// Gateway reference (purchases — the idempotency key) or notificationId (sends).
   reference    String?
+  /// The MESSAGING provider's own id for the message this credit paid for
+  /// (Twilio's SID). Without it a debit cannot be tied to a real send, so the
+  /// platform could never check its own charges against what the provider
+  /// actually billed. Null on purchases, adjustments and checkpoints, and on
+  /// sends made before this column existed.
+  providerRef  String?
+  /// Set ONLY on CHECKPOINT rows: the balance as at this entry.
+  ///
+  /// The balance is SUM(deltaCredits) over the whole ledger, which is the right
+  /// invariant — a stored counter can drift from its own history — but it was
+  /// read before EVERY message, so it summed every entry the school had ever
+  /// had. Measured at 900,000 entries (a school sending 500/day for five years)
+  /// that is a 64ms Parallel Seq Scan per message. A checkpoint keeps the
+  /// invariant and bounds the scan: balance = latest checkpoint + entries since.
+  balanceAfter Int?
   createdAt    DateTime @default(now())
 
   school School @relation(fields: [schoolId], references: [id])
 
   @@index([schoolId])
+  /// The balance read: newest checkpoint for a school, then the tail after it.
+  @@index([schoolId, createdAt])
+  /// Reconciliation matches our debits to the provider's own message ids.
+  @@index([providerRef])
+  /// NOTE: the balance read ALSO needs a PARTIAL index on
+  /// (schoolId, createdAt) WHERE reason = 'CHECKPOINT' — Prisma cannot express
+  /// a partial index, so it lives in the migration. Without it, finding the
+  /// checkpoint is a 44ms seq scan and the fast tail-sum buys nothing.
   @@map("message_credit_entry")
 }
 

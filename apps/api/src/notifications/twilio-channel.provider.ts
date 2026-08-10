@@ -14,7 +14,7 @@ import type { ChannelDeliveryRequest, NotificationChannelProvider } from "./noti
 export class TwilioChannelProvider implements NotificationChannelProvider {
   private readonly logger = new Logger("NotificationChannel");
 
-  async deliver(req: ChannelDeliveryRequest): Promise<{ ok: boolean; error?: string }> {
+  async deliver(req: ChannelDeliveryRequest): Promise<{ ok: boolean; error?: string; providerRef?: string }> {
     if (req.channel !== "SMS" && req.channel !== "WHATSAPP") {
       // EMAIL / PUSH / in-app: log-only here (replace with SES/FCM as needed).
       this.logger.log(`[non-sms] ${req.channel} -> ${req.target}`);
@@ -47,10 +47,55 @@ export class TwilioChannelProvider implements NotificationChannelProvider {
         this.logger.error(`${req.channel} -> ${req.target} failed (${res.status})`);
         return { ok: false, error: `twilio ${res.status}: ${text.slice(0, 120)}` };
       }
-      this.logger.log(`[sent] ${req.channel} -> ${req.target}`);
-      return { ok: true };
+      // KEEP THE SID. Twilio returns it on every accepted message and this
+      // adapter used to drop it, which is why no reconciliation between our
+      // debits and the provider's billed messages was possible.
+      //
+      // NOTE what `ok` means here: Twilio has ACCEPTED and queued the message,
+      // not delivered it. A carrier reject afterwards still spent the school's
+      // credit — closing that needs Twilio's status callback, which the SID is
+      // also the key for.
+      const json = (await res.json().catch(() => null)) as { sid?: string } | null;
+      this.logger.log(`[sent] ${req.channel} -> ${req.target}${json?.sid ? ` (${json.sid})` : ""}`);
+      return { ok: true, providerRef: json?.sid };
     } catch (err) {
       return { ok: false, error: String(err) };
     }
+  }
+
+  /**
+   * What Twilio says it accepted since `since` — the other half of the
+   * reconciliation. Mirrors the card rails' listSuccessfulTransactions.
+   *
+   * Paged, because a busy platform sends more than one page a day and a
+   * silently truncated listing would report every un-listed message as
+   * "uncharged" — an alarm about a problem that does not exist.
+   */
+  async listRecentMessages(since: Date): Promise<Array<{ providerRef: string; status?: string }>> {
+    const sid = process.env.TWILIO_ACCOUNT_SID;
+    const token = process.env.TWILIO_AUTH_TOKEN;
+    if (!sid || !token) return [];
+    const auth = Buffer.from(`${sid}:${token}`).toString("base64");
+    const out: Array<{ providerRef: string; status?: string }> = [];
+    let url: string | null =
+      `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json` +
+      `?DateSent%3E=${since.toISOString().slice(0, 10)}&PageSize=1000`;
+
+    for (let page = 0; url && page < 20; page++) {
+      const res: Response = await fetch(url, { headers: { Authorization: `Basic ${auth}` } });
+      if (!res.ok) {
+        this.logger.warn(`Twilio message listing failed: ${res.status}`);
+        // Partial data would understate what the provider sent, which reads as
+        // "the platform was charged for messages it never sent". Refuse instead.
+        throw new Error(`twilio listing ${res.status}`);
+      }
+      const json = (await res.json()) as {
+        messages?: Array<{ sid?: string; status?: string }>;
+        next_page_uri?: string | null;
+      };
+      for (const m of json.messages ?? []) if (m.sid) out.push({ providerRef: m.sid, status: m.status });
+      url = json.next_page_uri ? `https://api.twilio.com${json.next_page_uri}` : null;
+    }
+    return out;
   }
 }

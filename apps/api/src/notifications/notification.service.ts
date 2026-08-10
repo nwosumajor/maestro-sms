@@ -374,9 +374,9 @@ export class NotificationService {
                 body: notification.body,
                 data: (notification.data as Record<string, unknown>) ?? undefined,
               })
-            : { ok: false, error: "no channel provider configured" };
+            : { ok: false, error: "no channel provider configured", providerRef: undefined };
           if (result.ok && metered) {
-            await this.credits!.debitInTx(tx, job.schoolId, d.channel, job.notificationId);
+            await this.credits!.debitInTx(tx, job.schoolId, d.channel, job.notificationId, result.providerRef);
           }
           await tx.notificationDelivery.update({
             where: { id: d.id },
