@@ -22,6 +22,7 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 import { NotificationService } from "../notifications/notification.service";
+import { toMinor } from "../common/money";
 
 const STAFF_WIDE = new Set(["school_admin", "principal"]);
 
@@ -449,14 +450,14 @@ export class ScholarshipService {
   }
 
   private programDto(pr: {
-    id: string; title: string; description: string | null; budgetMinor: number; awardMinor: number;
+    id: string; title: string; description: string | null; budgetMinor: bigint | number; awardMinor: number;
     award2Minor: number | null; award3Minor: number | null;
     awardKind: string; selectionBasis: string; eligibility: unknown; opensAt: Date; closesAt: Date; status: string;
     category: string; examMode: string | null; examAt: Date | null; examVenue: string | null;
     examDurationMin: number; examQuestions: unknown; createdAt: Date;
   }) {
     return {
-      id: pr.id, title: pr.title, description: pr.description, budgetMinor: pr.budgetMinor, awardMinor: pr.awardMinor,
+      id: pr.id, title: pr.title, description: pr.description, budgetMinor: toMinor(pr.budgetMinor), awardMinor: pr.awardMinor,
       award2Minor: pr.award2Minor, award3Minor: pr.award3Minor,
       awardKind: pr.awardKind, selectionBasis: pr.selectionBasis, eligibility: pr.eligibility ?? null,
       opensAt: pr.opensAt, closesAt: pr.closesAt, status: pr.status,

@@ -31,6 +31,7 @@ import {
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
 import { SchoolRegionService } from "../foundation/school-region.service";
+import { toMinor } from "../common/money";
 
 @Injectable()
 export class PayrollService {
@@ -553,7 +554,7 @@ export class PayrollService {
   }
 
   private decorateRun(
-    r: { id: string; periodYear: number; periodMonth: number; runType?: string; bonusPercent?: number | null; status: string; totalGrossMinor: number; totalNetMinor: number; createdAt: Date; finalizedAt: Date | null },
+    r: { id: string; periodYear: number; periodMonth: number; runType?: string; bonusPercent?: number | null; status: string; totalGrossMinor: bigint | number; totalNetMinor: bigint | number; createdAt: Date; finalizedAt: Date | null },
     payslipCount: number,
     payslips: PayslipDto[] | undefined,
   ): PayrollRunDto {
@@ -564,8 +565,8 @@ export class PayrollService {
       runType: r.runType ?? "MONTHLY",
       bonusPercent: r.bonusPercent ?? null,
       status: r.status,
-      totalGrossMinor: r.totalGrossMinor,
-      totalNetMinor: r.totalNetMinor,
+      totalGrossMinor: toMinor(r.totalGrossMinor),
+      totalNetMinor: toMinor(r.totalNetMinor),
       payslipCount,
       createdAt: r.createdAt,
       finalizedAt: r.finalizedAt,

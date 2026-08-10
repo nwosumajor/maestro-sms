@@ -15,6 +15,7 @@ import {
   type TenantContext,
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
+import { toMinor } from "../common/money";
 
 @Injectable()
 export class HrAnalyticsService {
@@ -109,7 +110,7 @@ export class HrAnalyticsService {
         leave: { pendingRequests, approvedThisYear, daysTakenThisYear },
         payroll: {
           latestPeriod: latestRun ? `${latestRun.periodMonth}/${latestRun.periodYear}` : null,
-          totalNetMinor: latestRun?.totalNetMinor ?? 0,
+          totalNetMinor: toMinor(latestRun?.totalNetMinor),
           payslipCount,
         },
         documents: { expiringSoon },
@@ -123,7 +124,7 @@ export class HrAnalyticsService {
         tenure,
         payrollTrend: recentRuns
           .reverse()
-          .map((r) => ({ period: `${r.periodMonth}/${r.periodYear}`, runType: r.runType, totalNetMinor: r.totalNetMinor })),
+          .map((r) => ({ period: `${r.periodMonth}/${r.periodYear}`, runType: r.runType, totalNetMinor: toMinor(r.totalNetMinor) })),
         attendanceThisMonth: att,
         loans: { active: activeLoans.length, outstandingMinor },
         lifecycle: { onProbation, contractsEnding60d },

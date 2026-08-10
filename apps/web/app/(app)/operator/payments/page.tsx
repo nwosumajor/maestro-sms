@@ -43,9 +43,27 @@ export default async function OperatorPaymentsPage({
   // cannot have it should never cause one.
   if (!hasPermission(user.permissions, "platform.revenue.read")) redirect("/dashboard");
 
+  // DEFAULT TO THIS MONTH, not to all time.
+  //
+  // Two reasons, and they point the same way. A finance desk opening this
+  // screen wants the current period, not every payment since the platform
+  // began. And a period filter is INDEXED, while an unfiltered total has to
+  // read every row that has ever existed — 48ms at ten years of a 5,000-school
+  // platform, and linear after that. Clearing the dates still asks the honest
+  // unbounded question; it is just no longer what happens by accident.
+  const hasExplicitPeriod = Boolean(searchParams.from || searchParams.to);
+  const defaultFrom = new Date();
+  defaultFrom.setDate(1);
+  const effective: Record<string, string | undefined> = {
+    ...searchParams,
+    ...(hasExplicitPeriod || searchParams.cleared === "1"
+      ? {}
+      : { from: defaultFrom.toISOString().slice(0, 10) }),
+  };
+
   const query = new URLSearchParams();
   for (const k of ["from", "to", "status", "plan", "currency", "q", "page"]) {
-    const v = searchParams[k];
+    const v = effective[k];
     if (v) query.set(k, v);
   }
   const data = await apiGet<PaymentPage>(`/operator/payments?${query.toString()}`);
@@ -65,8 +83,8 @@ export default async function OperatorPaymentsPage({
 
         <PaymentFilterBar
           initial={{
-            from: searchParams.from ?? "",
-            to: searchParams.to ?? "",
+            from: effective.from ?? "",
+            to: effective.to ?? "",
             status: searchParams.status ?? "",
             plan: searchParams.plan ?? "",
             currency: searchParams.currency ?? "",

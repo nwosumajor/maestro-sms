@@ -28,6 +28,7 @@ import {
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
 import { Inject } from "@nestjs/common";
+import { toMinor } from "../common/money";
 
 interface ProgramInput {
   title: string;
@@ -673,14 +674,14 @@ export class ScholarshipAdminService {
   }
 
   private programDto(r: {
-    id: string; title: string; description: string | null; budgetMinor: number; awardMinor: number;
+    id: string; title: string; description: string | null; budgetMinor: bigint | number; awardMinor: number;
     award2Minor: number | null; award3Minor: number | null;
     awardKind: string; selectionBasis: string; eligibility: unknown; opensAt: Date; closesAt: Date; status: string;
     category: string; examMode: string | null; examAt: Date | null; examVenue: string | null;
     examDurationMin: number; examQuestions: unknown; createdAt: Date;
   }): ScholarshipProgramDto {
     return {
-      id: r.id, title: r.title, description: r.description, budgetMinor: r.budgetMinor, awardMinor: r.awardMinor,
+      id: r.id, title: r.title, description: r.description, budgetMinor: toMinor(r.budgetMinor), awardMinor: r.awardMinor,
       award2Minor: r.award2Minor, award3Minor: r.award3Minor,
       awardKind: r.awardKind, selectionBasis: r.selectionBasis, eligibility: r.eligibility ?? null,
       opensAt: r.opensAt, closesAt: r.closesAt, status: r.status,

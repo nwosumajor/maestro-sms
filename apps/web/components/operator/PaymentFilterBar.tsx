@@ -111,7 +111,12 @@ export function PaymentFilterBar({ initial }: { initial: Filters }) {
         <Button
           type="button"
           variant="outline"
-          onClick={() => apply({ from: "", to: "", status: "", plan: "", currency: "", q: "" })}
+          onClick={() => {
+            // `cleared` tells the page this really is "all time", rather than a
+            // first visit that should default to the current month.
+            setF({ from: "", to: "", status: "", plan: "", currency: "", q: "" });
+            router.push("/operator/payments?cleared=1");
+          }}
         >
           Clear
         </Button>

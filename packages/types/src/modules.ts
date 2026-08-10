@@ -453,21 +453,23 @@ export function computeSubscriptionPriceMinor(
  * multiplier is a way to mistype a 5 into a 55-year commitment.
  */
 /**
- * The largest single charge the ledger can STORE, in minor units.
+ * The largest single charge the ledger will accept, in minor units.
  *
- * `platform_subscription_payment.amountMinor` is a 32-bit integer, so the true
- * ceiling is 2,147,483,647 minor units — about NGN 21.4m per charge. This is a
- * REAL revenue limit and not only a multi-year one: at ENTERPRISE rates a
- * single academic year overflows at roughly 2,245 students, so a large school
- * could not be charged for a normal annual plan either.
+ * The storage ceiling is gone: these columns are BIGINT, so the database can
+ * hold ~9.2 x 10^18 minor units. The binding limit is now the application's,
+ * not the schema's — money crosses the DB boundary as a JavaScript number,
+ * which represents integers exactly only up to 2^53.
  *
- * Widening the column to BIGINT is the actual fix and is deliberately NOT bolted
- * on here — it changes the type of money across ~70 read sites, and Prisma maps
- * int8 to a JS BigInt that does not survive JSON. Until then this constant makes
- * the limit a checked, explained refusal instead of a raw driver error: a school
- * that hits it is told to buy a shorter period, rather than shown a 500.
+ * This sits three orders of magnitude below that, which is not timidity: a
+ * single charge of a trillion naira is a data-entry accident or an attack, not
+ * a school buying a subscription, and refusing it with a sentence is better
+ * than processing it. Gateways impose their own far lower limits anyway.
+ *
+ * It used to be 2,000,000,000 — just under the int4 ceiling of 2,147,483,647
+ * (~NGN 21.4m), which a five-year ENTERPRISE charge and any mid-sized school's
+ * monthly payroll both exceeded.
  */
-export const MAX_CHARGE_MINOR = 2_000_000_000;
+export const MAX_CHARGE_MINOR = 1_000_000_000_000;
 
 export const MAX_BILLING_PERIODS = 20;
 

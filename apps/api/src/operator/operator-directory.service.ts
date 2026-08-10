@@ -33,6 +33,7 @@ import {
 import { headcountInTenant } from "./operator-people";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import { ModuleEntitlementService } from "../foundation/module-entitlement.service";
+import { toMinor, toMinorOrNull } from "../common/money";
 
 type SchoolRow = {
   id: string;
@@ -180,7 +181,7 @@ export class OperatorDirectoryService {
       parents: detail.head.parents,
       billingCycle: detail.sub?.billingCycle ?? "TERM",
       seats: detail.sub?.seats ?? null,
-      priceMinor: detail.sub?.priceMinor ?? null,
+      priceMinor: toMinorOrNull(detail.sub?.priceMinor),
       currency: detail.sub?.currency ?? null,
       graceDays: detail.sub?.graceDays ?? null,
       autoRenew: detail.sub?.autoRenew ?? false,
@@ -191,7 +192,7 @@ export class OperatorDirectoryService {
       settlementAccountLast4: (school as { settlementAccountLast4?: string | null }).settlementAccountLast4 ?? null,
       admissionFormFeeMinor: (school as { admissionFormFeeMinor?: number }).admissionFormFeeMinor ?? 0,
       referredBy: referredBy?.name ?? null,
-      payments: detail.payments,
+      payments: detail.payments.map((x) => ({ ...x, amountMinor: toMinor(x.amountMinor) })),
     };
   }
 
@@ -230,7 +231,7 @@ export class OperatorDirectoryService {
       subscriptionStatus: e.sub?.status ?? "ACTIVE",
       currentPeriodEnd: e.sub?.currentPeriodEnd ?? null,
       lastPaymentAt: e.lastPaid?.paidAt ?? e.lastPaid?.createdAt ?? null,
-      outstandingMinor: e.sub?.seatArrearsMinor ?? 0,
+      outstandingMinor: toMinor(e.sub?.seatArrearsMinor),
       students: e.head.students,
       staff: e.head.staff,
       parents: e.head.parents,

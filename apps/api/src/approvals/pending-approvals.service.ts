@@ -36,6 +36,7 @@ import {
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
+import { toMinor } from "../common/money";
 
 /** Shape every source normalises into before name resolution. */
 interface RawItem {
@@ -274,7 +275,7 @@ export class PendingApprovalsService {
       id: r.id,
       source: "PAYROLL_RUN",
       label: `Payroll run — ${String(r.periodMonth).padStart(2, "0")}/${r.periodYear}`,
-      amountMinor: r.totalNetMinor,
+      amountMinor: toMinor(r.totalNetMinor),
       href: "/hr/payroll",
       inline: false,
       createdAt: r.createdAt,
