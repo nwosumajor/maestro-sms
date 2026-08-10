@@ -24,6 +24,17 @@ export const MESSAGE_CREDIT_BUNDLES = [
 ] as const;
 export type MessageCreditBundle = (typeof MESSAGE_CREDIT_BUNDLES)[number];
 
+/**
+ * Warn the school while it can still act.
+ *
+ * Running out is invisible from inside the school: the in-app inbox and email
+ * still go out, so nothing looks broken — only the SMS and WhatsApp copies stop,
+ * and the first anyone hears of it is a parent asking why they were not told
+ * their child was absent. A threshold that is only reached at zero is a
+ * threshold that warns nobody in time.
+ */
+export const MESSAGE_CREDIT_LOW_THRESHOLD = 50;
+
 export const NOTIFICATION_TYPES = [
   "ATTENDANCE_ABSENCE",
   "GRADE_POSTED",

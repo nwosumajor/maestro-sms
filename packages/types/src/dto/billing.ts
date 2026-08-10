@@ -184,3 +184,28 @@ export interface OperatorPaymentPageDto {
   /** Totals over every row matching the filter, split by currency. */
   totals: OperatorRevenueTotalDto[];
 }
+
+// --- message credits: the school's own ledger ------------------------------ //
+
+/** One movement on a school's message-credit ledger. */
+export interface MessageCreditEntryDto {
+  id: string;
+  /** +credits on purchase or refund; -1 per charged message. */
+  deltaCredits: number;
+  /** PURCHASE | SEND | REFUND | ADJUST. CHECKPOINT rows are bookkeeping and
+   *  are never shown — they record the balance without changing it. */
+  reason: string;
+  channel: string | null;
+  reference: string | null;
+  createdAt: Date;
+}
+
+/** The school's credit history, newest first. Paged: this table grows with
+ *  every message ever sent and must never be returned whole. */
+export interface MessageCreditLedgerPageDto {
+  balance: number;
+  rows: MessageCreditEntryDto[];
+  page: number;
+  pageSize: number;
+  total: number;
+}

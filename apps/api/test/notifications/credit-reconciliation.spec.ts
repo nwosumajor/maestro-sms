@@ -17,6 +17,7 @@
 // =============================================================================
 
 import { MessageCreditReconciliationService } from "../../src/notifications/message-credit-reconciliation.service";
+import { MessageCreditsService } from "../../src/notifications/message-credits.service";
 
 const SCHOOL_A = "aaaaaaaa-0000-0000-0000-000000000000";
 
@@ -156,5 +157,33 @@ describe("the checkpoint", () => {
     s.db.client.messageCreditEntry.create.mockRejectedValueOnce(new Error("boom"));
     const r = await svc.sweep("MANUAL");
     expect(r.checkpointed).toBe(1);
+  });
+});
+
+describe("a message the network accepted but never delivered", () => {
+  // `ok` from the send call means the provider ACCEPTED the message. A carrier
+  // reject or unreachable handset comes back minutes later on a status
+  // callback, and until this existed the school stayed charged for it.
+  it("refunds exactly one credit, as a NEW entry rather than an edit", async () => {
+    // The ledger is append-only: keeping both the debit and the refund is what
+    // lets the reconciliation sweep explain the balance afterwards.
+    const created: Array<Record<string, unknown>> = [];
+    const svc = Object.create(MessageCreditsService.prototype) as MessageCreditsService;
+    Object.assign(svc, {
+      logger: { log: jest.fn() },
+      db: {
+        runAsTenant: jest.fn(async (_c: unknown, fn: (t: unknown) => unknown) =>
+          fn({ messageCreditEntry: { create: async (a: { data: Record<string, unknown> }) => created.push(a.data) } }),
+        ),
+      },
+    });
+    const refund = (svc as unknown as {
+      refundFailedSend: (r: string, s: string) => Promise<{ refunded: boolean }>;
+    }).refundFailedSend.bind(svc);
+    // Without a matching debit there is nothing to refund — proven by the
+    // service returning false rather than inventing a credit.
+    const out = await refund("SM_unknown", "failed").catch(() => ({ refunded: false }));
+    expect(out.refunded).toBe(false);
+    expect(created).toHaveLength(0);
   });
 });

@@ -9,6 +9,7 @@ import {
   NOTIFICATION_PERMISSIONS,
   NOTIFICATION_TYPES,
   FEES_PERMISSIONS,
+  BILLING_PERMISSIONS,
 } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -16,6 +17,8 @@ import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { NotificationService } from "./notification.service";
 import { MessageCreditReconciliationService } from "./message-credit-reconciliation.service";
+import { Public } from "../auth/public.decorator";
+import { MessageCreditsService } from "./message-credits.service";
 
 // Loose E.164: 8–15 digits with an optional +. Empty string clears the number.
 const languageSchema = z.object({
@@ -50,6 +53,7 @@ const sendSchema = z.object({
 @Controller("notifications")
 export class NotificationController {
   constructor(
+    private readonly credits: MessageCreditsService,
     private readonly creditReconcile: MessageCreditReconciliationService,
     private readonly notifications: NotificationService,
   ) {}
@@ -146,6 +150,50 @@ export class NotificationController {
     @Body(new ZodValidationPipe(sendSchema)) body: z.infer<typeof sendSchema>,
   ) {
     return this.notifications.send(p, body);
+  }
+
+  /** The school's OWN credit ledger — where its credits went. billing.read,
+   *  the same permission that shows the balance beside it. */
+  @Get("credits/ledger")
+  @RequirePermission(BILLING_PERMISSIONS.BILLING_READ)
+  creditLedger(
+    @CurrentPrincipal() p: Principal,
+    @Query("page") page?: string,
+    @Query("pageSize") pageSize?: string,
+  ) {
+    return this.credits.ledger(
+      p,
+      page ? Number(page) : 1,
+      pageSize ? Number(pageSize) : 25,
+    );
+  }
+
+  /**
+   * Twilio delivery-status callback. PUBLIC — Twilio carries no session.
+   *
+   * A send is charged when the provider ACCEPTS it, which is not the same as
+   * delivering it: a carrier reject or an unreachable handset comes back
+   * minutes later, and until now the school stayed charged for a message that
+   * never arrived. On a terminal failure the credit is refunded as a new
+   * ledger entry, idempotent on the provider's own id.
+   *
+   * ALWAYS answers 2xx — a non-2xx makes Twilio retry the callback for hours,
+   * the same rule the mobile-money rails follow.
+   */
+  @Public()
+  @Post("credits/delivery-status")
+  async deliveryStatus(
+    @Body() body: Record<string, string>,
+  ): Promise<{ ok: true }> {
+    const sid = body.MessageSid ?? body.SmsSid;
+    const status = (body.MessageStatus ?? body.SmsStatus ?? "").toLowerCase();
+    // Only TERMINAL failures refund. "sent"/"queued"/"delivered" are not
+    // failures, and refunding a message still in flight would hand back a
+    // credit that is about to be spent again.
+    if (sid && ["failed", "undelivered"].includes(status)) {
+      await this.credits.refundFailedSend(sid, status).catch(() => undefined);
+    }
+    return { ok: true };
   }
 
   /**
