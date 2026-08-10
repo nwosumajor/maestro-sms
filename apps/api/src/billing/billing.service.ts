@@ -43,6 +43,7 @@ import {
   type Currency,
   type Plan,
   type PlatformPaymentDto,
+  type SubscriptionDto,
   PAYMENT_CHANNELS,
   pickCardRail,
 } from "@sms/types";
@@ -476,6 +477,7 @@ export class BillingService {
             currency,
             reference,
             metadata: { kind: "subscription", schoolId: p.schoolId, paymentId, reference },
+            callbackUrl: `${process.env.PUBLIC_WEB_URL ?? "http://localhost:3000"}/billing?verify=${encodeURIComponent(reference)}`,
           }));
     } catch (err) {
       await this.voidIntent(p.schoolId, paymentId, `Gateway refused: ${(err as Error).message}`);
@@ -675,7 +677,12 @@ export class BillingService {
             description: `SMS ${plan} plan — ${seats} students, ${billingCycle.toLowerCase()} billing`,
             metadata: { kind: "subscription", schoolId: p.schoolId, paymentId, reference },
           })
-        : await this.paystack.initialize({ email, amountMinor, currency, reference, metadata }));
+        : await this.paystack.initialize({
+            email, amountMinor, currency, reference, metadata,
+            // Bring the school BACK so the page can verify immediately, rather
+            // than leaving the whole flow dependent on a webhook arriving.
+            callbackUrl: `${process.env.PUBLIC_WEB_URL ?? "http://localhost:3000"}/billing?verify=${encodeURIComponent(reference)}`,
+          }));
     } catch (err) {
       await this.voidIntent(p.schoolId, paymentId, `Gateway refused: ${(err as Error).message}`);
       throw err;
@@ -777,6 +784,53 @@ export class BillingService {
    * ok so the gateway doesn't retry a permanently-wrong charge forever.
    */
   /**
+   * VERIFY ON RETURN — the school is back from the gateway; settle now.
+   *
+   * Parent fee payments have had this for a long time: the checkout carries a
+   * callback_url, the payer lands back on the invoice, and the page verifies
+   * against the gateway there and then. The school's OWN subscription — the
+   * larger transaction of the two — had NOTHING. It carried no callback_url at
+   * all, so the flow depended entirely on the webhook arriving.
+   *
+   * When one does not (no public URL configured, a delivery failure, a gateway
+   * hiccup), the school sees "Payment successful" on Paystack and then a
+   * payment history still saying "Awaiting payment", with their plan unchanged.
+   * The daily reconciliation sweep does fix it — but a school that has just
+   * been charged should not have to wait a day to see it, and will reasonably
+   * conclude the payment failed and try again.
+   *
+   * Scoped to the caller's OWN school, and settled through the same
+   * applyPaidByReference the webhook uses — so it is idempotent, takes the same
+   * row lock, and cannot double-extend a period if the webhook then arrives.
+   */
+  async verifyPayment(p: Principal, reference: string): Promise<{ settled: boolean; subscription: SubscriptionDto }> {
+    const row = await this.db.runAsTenant(this.ctx(p), (tx) =>
+      tx.platformSubscriptionPayment.findFirst({
+        where: { reference },
+        select: { id: true, status: true, schoolId: true },
+      }),
+    );
+    // RLS already confines the read, but 404 rather than leak whether a
+    // reference exists in some other school.
+    if (!row) throw new NotFoundException("Payment not found");
+
+    if (row.status !== "PAID") {
+      const verified = await this.paystack.verifyTransaction(reference);
+      if (verified?.status === "success") {
+        await this.applyPaidByReference(p.schoolId, reference, {
+          amountMinor: verified.amountMinor,
+          currency: verified.currency,
+        });
+      }
+    }
+
+    const after = await this.db.runAsTenant(this.ctx(p), (tx) =>
+      tx.platformSubscriptionPayment.findFirst({ where: { reference }, select: { status: true } }),
+    );
+    return { settled: after?.status === "PAID", subscription: await this.getStatus(p) };
+  }
+
+  /**
    * RECOVER a subscription charge the gateway took but whose webhook never
    * arrived. Called by the daily reconciliation sweep.
    *
@@ -876,7 +930,8 @@ export class BillingService {
       const sub = await tx.schoolSubscription.findFirst({ where: { schoolId } });
       // How the payment applies (SUBSCRIPTION_PAYMENT_KINDS):
       //   RENEWAL — stack: extend from the later of now / current period end.
-      //   UPGRADE — restart from now (the unused time was credited at checkout).
+      //   UPGRADE — restart from now (the unused time was credited at checkout),
+      //            but NEVER below the period already paid for — see below.
       //   TRUEUP  — seats only: the period does not move.
       const kind = payment.kind;
       const base =
@@ -889,10 +944,28 @@ export class BillingService {
       // before payment and the period written here both read it, so the screen
       // cannot promise a date settlement then disagrees with.
       const periods = normalisePeriods((payment as { billingPeriods?: number }).billingPeriods ?? 1);
-      const periodEnd =
+      const computedEnd =
         kind === SUBSCRIPTION_PAYMENT_KINDS.TRUEUP && sub?.currentPeriodEnd
           ? sub.currentPeriodEnd
           : addMonths(base, billedMonths(cycle, periods));
+
+      // A PAYMENT MUST NEVER SHORTEN A PERIOD THE SCHOOL HAS ALREADY PAID FOR.
+      //
+      // UPGRADE restarts from now, which is right for the FIRST upgrade — the
+      // unused time on the old plan was credited in cash at checkout. It is
+      // catastrophic for the second: observed on a real purchase, a school
+      // bought five years (period correctly set to 2030-05-10) and a NGN 10,331
+      // term charge settled 67 milliseconds later, also flagged UPGRADE because
+      // it too had been started from the old plan. It restarted the period from
+      // now and left them with three months. They paid NGN 241,912 for it.
+      //
+      // Whatever the kind, and whatever order the webhooks and the
+      // reconciliation sweep happen to arrive in, taking the later of the two
+      // dates makes the outcome order-independent and means no charge can ever
+      // reduce access. The money side is already handled: proration credits the
+      // unused time, so extending here does not give it away twice.
+      const periodEnd =
+        sub?.currentPeriodEnd && sub.currentPeriodEnd > computedEnd ? sub.currentPeriodEnd : computedEnd;
 
       await tx.platformSubscriptionPayment.update({
         where: { id: payment.id },

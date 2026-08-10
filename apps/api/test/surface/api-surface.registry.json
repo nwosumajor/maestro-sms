@@ -2965,6 +2965,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "POST /billing/payments/verify": {
+      "kind": "ui",
+      "note": "PaymentVerifyBanner on /billing?verify= — settles on return from the gateway instead of waiting for a webhook"
+    },
     "GET /billing/payments/:p/receipt.pdf": {
       "kind": "ui",
       "note": "Receipt link on the /billing payment history — a subscription purchase produced no filable document before this"

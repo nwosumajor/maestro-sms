@@ -98,6 +98,22 @@ export class BillingController {
     return this.billing.initCheckout(p, body);
   }
 
+  /** Verify a payment the school has just returned from paying.
+   *
+   *  billing.read, not billing.manage: the person coming back from the gateway
+   *  is whoever started the checkout, and refusing to settle a payment already
+   *  taken because of a permission check would be the wrong way round. It
+   *  settles through the SAME path the webhook uses, so it is idempotent. */
+  @Post("payments/verify")
+  @RequirePermission(BILLING_PERMISSIONS.BILLING_READ)
+  verifyPayment(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(z.object({ reference: z.string().min(4).max(128) })))
+    body: { reference: string },
+  ) {
+    return this.billing.verifyPayment(p, body.reference);
+  }
+
   /** Stripe webhook (USD subscription payments). Public: carries no session;
    *  authenticated by the Stripe-Signature HMAC over the RAW body. Disabled
    *  (no-op 200) when STRIPE_WEBHOOK_SECRET is unset. */

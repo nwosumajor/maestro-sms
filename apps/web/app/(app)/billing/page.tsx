@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { money, shortDate, titleCase } from "@/lib/format";
 import { BillingCheckout } from "@/components/billing/BillingCheckout";
+import { PaymentVerifyBanner } from "@/components/billing/PaymentVerifyBanner";
 import { ReferralPanel } from "@/components/billing/ReferralPanel";
 import { AutoRenewCard } from "@/components/billing/AutoRenewCard";
 import { TrueUpCard } from "@/components/billing/TrueUpCard";
@@ -43,7 +44,11 @@ const PAYMENT_STATE: Record<
   FAILED: { label: "Failed", variant: "destructive", hint: "The payment did not go through. Nobody was charged." },
 };
 
-export default async function BillingPage() {
+export default async function BillingPage({
+  searchParams,
+}: {
+  searchParams: { verify?: string };
+}) {
   const session = await auth();
   const user = session!.user;
   // Gate BEFORE fetching. This page had no gate at all: all three reads
@@ -62,6 +67,11 @@ export default async function BillingPage() {
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="billing" permissions={user.permissions}>
       <div className="space-y-6">
+        {/* Straight after the gateway redirect: settle, then say what the
+            money bought. Above everything, because it answers the question the
+            school came back with. */}
+        {searchParams?.verify && <PaymentVerifyBanner reference={searchParams.verify} />}
+
         <PageHeader title={<>Billing &amp; Subscription</>} subtitle={<>Your platform subscription. Pricing is per active student; paying activates your plan automatically.</>} />
 
         {data === null ? (
