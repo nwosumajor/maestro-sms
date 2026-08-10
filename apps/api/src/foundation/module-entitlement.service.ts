@@ -40,6 +40,7 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 import { RedisPubSubService } from "../common/redis-pubsub.service";
+import { toMinorOrNull } from "../common/money";
 
 // This cache is on the hot path of (almost) EVERY request, so its miss rate is a
 // direct scaling limit: with a process-local TTL, each school reloads once per
@@ -156,7 +157,7 @@ export class ModuleEntitlementService implements OnModuleInit {
       currentPeriodEnd,
       graceDays,
       seats: row?.seats ?? null,
-      priceMinor: row?.priceMinor ?? null,
+      priceMinor: toMinorOrNull(row?.priceMinor),
       currency: row?.currency ?? null,
     };
     this.cache.set(schoolId, { at: Date.now(), value });

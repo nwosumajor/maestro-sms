@@ -37,6 +37,7 @@ import {
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
+import { toMinor } from "../common/money";
 
 const MAX_PAGE_SIZE = 100;
 /** A CSV export is for the books, so it may be large — but not unbounded, or one
@@ -124,7 +125,7 @@ export class OperatorPaymentsService {
     // where clause; the arg shape is correct and the RESULT is typed below.
     const groupBy = this.client().platformSubscriptionPayment.groupBy as unknown as (
       args: Record<string, unknown>,
-    ) => Promise<Array<{ currency: string; status: string; _sum: { amountMinor: number | null }; _count: { _all: number } }>>;
+    ) => Promise<Array<{ currency: string; status: string; _sum: { amountMinor: bigint | number | null }; _count: { _all: number } }>>;
     const grouped = await groupBy({
       by: ["currency", "status"],
       where,
@@ -146,7 +147,7 @@ export class OperatorPaymentsService {
           failedCount: 0,
           abandonedCount: 0,
         } satisfies OperatorRevenueTotalDto);
-      const sum = row._sum.amountMinor ?? 0;
+      const sum = toMinor(row._sum.amountMinor);
       const n = row._count._all;
       // Only PAID is revenue. PENDING is money that may yet arrive, and FAILED
       // and ABANDONED are not money at all — conflating them is how a forecast
@@ -261,7 +262,7 @@ export class OperatorPaymentsService {
       billingCycle: r.billingCycle as BillingCycle,
       kind: (r.kind as string) ?? "RENEWAL",
       seats: (r.seats as number) ?? 0,
-      amountMinor: (r.amountMinor as number) ?? 0,
+      amountMinor: toMinor(r.amountMinor as bigint | number | null),
       currency: (isCurrency(r.currency as string) ? r.currency : CURRENCIES.NGN) as Currency,
       status: r.status as string,
       periodStart: (r.periodStart as Date | null) ?? null,

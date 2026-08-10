@@ -67,6 +67,7 @@ import { encryptField } from "../foundation/field-crypto";
 import PDFDocument from "pdfkit";
 import { GrowthService } from "./growth.service";
 import { PaymentChannelService } from "../payments/payment-channel.service";
+import { toMinor, toMinorOrNull } from "../common/money";
 
 /** Tiers a school can actually buy (all four are paid; STANDARD is the floor). */
 const SELLABLE_TIERS: Plan[] = [PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE];
@@ -168,7 +169,7 @@ export class BillingService {
     const receiptNo = `SUB-${issuedAt.toISOString().slice(0, 10).replace(/-/g, "")}-${paymentId.slice(0, 8).toUpperCase()}`;
     // formatMoney, never minor/100 — a zero-decimal currency prints at a
     // hundredth of its value under a naive divide, on the one page a payer reads.
-    const amount = formatMoney(pay.amountMinor, pay.currency);
+    const amount = formatMoney(toMinor(pay.amountMinor), pay.currency);
 
     const buffer = await new Promise<Buffer>((resolve, reject) => {
       const doc = new PDFDocument({ size: "A5", margin: 40 });
@@ -228,7 +229,7 @@ export class BillingService {
     plan: string;
     billingCycle: string;
     seats: number;
-    amountMinor: number;
+    amountMinor: bigint | number;
     currency: string;
     status: string;
     periodStart: Date | null;
@@ -242,7 +243,7 @@ export class BillingService {
       plan: r.plan as Plan,
       billingCycle: r.billingCycle as BillingCycle,
       seats: r.seats,
-      amountMinor: r.amountMinor,
+      amountMinor: toMinor(r.amountMinor),
       currency: isCurrency(r.currency) ? r.currency : CURRENCIES.NGN,
       status: r.status,
       periodStart: r.periodStart,
@@ -293,7 +294,7 @@ export class BillingService {
       subRow && isBillingCycle(subRow.billingCycle) ? subRow.billingCycle : BILLING_CYCLES.TERM;
     const planChangeCreditMinor =
       subRow && subRow.status === SUBSCRIPTION_STATUS.ACTIVE
-        ? prorationCreditMinor(subRow.priceMinor, subCycle, subRow.currentPeriodEnd, now)
+        ? prorationCreditMinor(toMinor(subRow.priceMinor), subCycle, subRow.currentPeriodEnd, now)
         : 0;
     const subCurrency: Currency = subRow && isCurrency(subRow.currency ?? "") ? (subRow.currency as Currency) : CURRENCIES.NGN;
     const trueUp =
@@ -345,7 +346,7 @@ export class BillingService {
       cardLast4,
       planChangeCreditMinor,
       trueUp,
-      seatArrearsMinor: Math.max(0, subRow?.seatArrearsMinor ?? 0),
+      seatArrearsMinor: Math.max(0, toMinor(subRow?.seatArrearsMinor)),
       currencyAvailability,
     };
   }
@@ -413,7 +414,7 @@ export class BillingService {
     // already accrued (past usage) plus forward coverage for the time left.
     // Near period end the forward quote may be null while arrears remain —
     // still chargeable when the arrears alone clear the gateway floor.
-    const arrearsMinor = Math.max(0, prep.sub.seatArrearsMinor);
+    const arrearsMinor = Math.max(0, toMinor(prep.sub.seatArrearsMinor));
     const amountMinor = (quote?.amountMinor ?? 0) + arrearsMinor;
     if (amountMinor < MIN_CHARGE_MINOR) throw new BadRequestException("No seat top-up is due right now");
 
@@ -594,12 +595,12 @@ export class BillingService {
         const isPlanChange = !!sub && sub.plan !== plan;
         const credit =
           isPlanChange && sub.status === SUBSCRIPTION_STATUS.ACTIVE && sub.currency === currency && isBillingCycle(sub.billingCycle)
-            ? prorationCreditMinor(sub.priceMinor, sub.billingCycle, sub.currentPeriodEnd, new Date())
+            ? prorationCreditMinor(toMinor(sub.priceMinor), sub.billingCycle, sub.currentPeriodEnd, new Date())
             : 0;
         // Outstanding seat arrears (metered unbilled seat-days) ride the next
         // charge in the SAME currency — the guaranteed collection point.
         const arrearsCurrency = sub?.currency && isCurrency(sub.currency) ? sub.currency : CURRENCIES.NGN;
-        const arrearsMinor = sub && arrearsCurrency === currency ? Math.max(0, sub.seatArrearsMinor) : 0;
+        const arrearsMinor = sub && arrearsCurrency === currency ? Math.max(0, toMinor(sub.seatArrearsMinor)) : 0;
         const amountMinor = Math.max(MIN_CHARGE_MINOR, grossMinor - credit) + arrearsMinor;
         // The ledger stores this in a 32-bit column. Refuse ABOVE the limit
         // with something a bursar can act on, rather than letting the driver
@@ -905,7 +906,7 @@ export class BillingService {
         // EXACTLY the snapshot (never blind-zeroing: the meter may have ticked
         // between checkout and webhook; the remainder stays owed).
         ...(payment.arrearsMinor > 0 && sub
-          ? { seatArrearsMinor: Math.max(0, sub.seatArrearsMinor - payment.arrearsMinor) }
+          ? { seatArrearsMinor: Math.max(0, toMinor(sub.seatArrearsMinor) - toMinor(payment.arrearsMinor)) }
           : {}),
         // TRUEUP only tops seats up: plan/cycle/period/last-full-price stay —
         // overwriting priceMinor with the small top-up would corrupt the next
@@ -966,7 +967,7 @@ export class BillingService {
         // counts on settle; agent commission accrues once per school (DB-unique).
         promoCode: payment.promoCode,
         agentId: kind === SUBSCRIPTION_PAYMENT_KINDS.TRUEUP ? null : (sub?.agentId ?? null),
-        chargedMinor: payment.amountMinor,
+        chargedMinor: toMinor(payment.amountMinor),
         chargedCurrency: payment.currency,
       };
     });

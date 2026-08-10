@@ -385,7 +385,7 @@ model SchoolSubscription {
   /// Currency of the last charge (NGN | USD); null when never paid.
   currency                 String?
   /// Amount last charged (minor units, NGN kobo).
-  priceMinor               Int?
+  priceMinor               BigInt?
   /// Paystack customer code (captured with the saved card).
   paystackCustomerCode     String?
   /// Saved-card recurring: the reusable Paystack authorization_code, field-
@@ -407,7 +407,7 @@ model SchoolSubscription {
   /// Metered UNBILLED seat usage (kobo/cents in `currency`): the daily sweep
   /// accrues seat-days for students above the billed `seats` count; settled
   /// (and zeroed by the paid amount) via top-up or the next renewal charge.
-  seatArrearsMinor         Int       @default(0)
+  seatArrearsMinor         BigInt    @default(0)
   /// Last accrual stamp — the elapsed window the next accrual covers.
   arrearsAccruedAt         DateTime?
   createdAt                DateTime  @default(now())
@@ -516,7 +516,7 @@ model PlatformSubscriptionPayment {
   /// Seat count snapshot the price was computed from.
   seats         Int
   /// Charge amount (minor units of `currency`: NGN kobo / USD cents).
-  amountMinor   Int
+  amountMinor   BigInt
   /// NGN (Paystack) | USD (Stripe).
   currency      String    @default("NGN")
   /// Idempotency + gateway transaction reference (Paystack ref / Stripe session).
@@ -540,7 +540,7 @@ model PlatformSubscriptionPayment {
   promoCode     String?
   /// Seat-arrears portion INCLUDED in amountMinor (settle decrements the
   /// subscription's seatArrearsMinor by exactly this — never a blind zeroing).
-  arrearsMinor  Int       @default(0)
+  arrearsMinor  BigInt    @default(0)
   /// Period this payment covers (set when PAID).
   periodStart   DateTime?
   periodEnd     DateTime?
@@ -553,6 +553,10 @@ model PlatformSubscriptionPayment {
   school School @relation(fields: [schoolId], references: [id])
 
   @@index([schoolId])
+  /// The operator revenue ledger orders by createdAt and filters on a period.
+  /// Without this it was a Parallel Seq Scan — fine at 150k rows, linear for
+  /// ever after. This table only ever grows.
+  @@index([createdAt])
   @@map("platform_subscription_payment")
 }
 

@@ -184,8 +184,8 @@ model PayrollRun {
   bonusPercent    Int?
   /// DRAFT | FINALIZED.
   status          String    @default("DRAFT")
-  totalGrossMinor Int       @default(0)
-  totalNetMinor   Int       @default(0)
+  totalGrossMinor BigInt    @default(0)
+  totalNetMinor   BigInt    @default(0)
   runById         String    @db.Uuid
   finalizedById   String?   @db.Uuid
   finalizedAt     DateTime?

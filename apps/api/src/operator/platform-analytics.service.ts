@@ -47,6 +47,7 @@ import {
   type Principal,
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
+import { toMinor } from "../common/money";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -176,13 +177,13 @@ export class PlatformAnalyticsService {
     for (const pay of payments) {
       // Only the home currency contributes to these headline figures — see above.
       if ((pay.currency ?? CURRENCIES.NGN) !== HOME_CURRENCY) continue;
-      paidTotalMinor += pay.amountMinor;
-      if (pay.createdAt.getTime() >= since30) last30dMinor += pay.amountMinor;
+      paidTotalMinor += toMinor(pay.amountMinor);
+      if (pay.createdAt.getTime() >= since30) last30dMinor += toMinor(pay.amountMinor);
     }
     const recentPayments = payments.slice(0, 10).map((pay) => ({
       schoolName: schoolName.get(pay.schoolId) ?? "—",
       plan: pay.plan,
-      amountMinor: pay.amountMinor,
+      amountMinor: toMinor(pay.amountMinor),
       status: pay.status,
       createdAt: pay.createdAt,
     }));
@@ -221,7 +222,7 @@ export class PlatformAnalyticsService {
     }
     for (const pay of payments) {
       const i = bucketOf.get(keyFor(pay.createdAt));
-      if (i !== undefined) buckets[i].revenueMinor += pay.amountMinor;
+      if (i !== undefined) buckets[i].revenueMinor += toMinor(pay.amountMinor);
     }
 
     // --- platform-wide student demographics (from profiles across all schools) ---

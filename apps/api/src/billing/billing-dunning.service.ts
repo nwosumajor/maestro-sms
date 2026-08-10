@@ -36,6 +36,7 @@ import { PrivilegedDatabaseService } from "../common/privileged-database.service
 import { PaystackService } from "../payments/paystack.service";
 import { PlanPricingService } from "./plan-pricing.service";
 import { decryptField } from "../foundation/field-crypto";
+import { toMinor } from "../common/money";
 
 export type DunningTrigger = "SCHEDULED" | "MANUAL";
 
@@ -278,7 +279,7 @@ export class BillingDunningService {
       plan: string;
       billingCycle: string;
       paystackAuthorizationEnc: string | null;
-      seatArrearsMinor: number;
+      seatArrearsMinor: bigint | number;
     },
     now: Date,
   ): Promise<"charged" | "failed" | "skipped"> {
@@ -306,7 +307,7 @@ export class BillingDunningService {
       const seats = Math.max(1, seatRows.length);
       const pricing = await this.pricing.effective(CURRENCIES.NGN);
       // Outstanding metered seat arrears ride the renewal charge (NGN path).
-      const arrearsMinor = Math.max(0, s.seatArrearsMinor);
+      const arrearsMinor = Math.max(0, toMinor(s.seatArrearsMinor));
       const amountMinor = computeSubscriptionPriceMinor(plan, seats, cycle, pricing) + arrearsMinor;
 
       // The charge needs a customer email — the school's first admin.

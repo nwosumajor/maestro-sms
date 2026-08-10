@@ -79,7 +79,7 @@ model ScholarshipProgram {
   description     String?
   /// Total budget + per-award amounts, integer minor units (kobo). awardMinor is
   /// the FIRST-position prize; 2nd/3rd fall back to it when null.
-  budgetMinor     Int                       @default(0)
+  budgetMinor     BigInt                    @default(0)
   awardMinor      Int
   award2Minor     Int?
   award3Minor     Int?

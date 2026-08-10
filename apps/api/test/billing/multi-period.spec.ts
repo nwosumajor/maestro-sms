@@ -98,32 +98,30 @@ describe("settlement serialisation", () => {
 });
 
 describe("the charge ceiling", () => {
-  it("is BELOW the int4 limit the column actually imposes", async () => {
+  it("is no longer bounded by the int4 storage limit", async () => {
     const { MAX_CHARGE_MINOR } = await import("@sms/types");
-    // Headroom on purpose: the guard has to fire before the driver does, or
-    // the school sees a 500 instead of a sentence they can act on.
-    expect(MAX_CHARGE_MINOR).toBeLessThan(2_147_483_647);
+    // The columns are BIGINT now. The cap that mattered — 2,147,483,647 minor
+    // units, about NGN 21.4m — is gone, and a five-year ENTERPRISE charge and a
+    // mid-sized school's monthly payroll both used to exceed it.
+    expect(MAX_CHARGE_MINOR).toBeGreaterThan(2_147_483_647);
   });
 
-  it("is a real limit on ORDINARY plans, not just multi-year ones", async () => {
-    const { MAX_CHARGE_MINOR, PLAN_PRICING, PLANS, computeSubscriptionPriceMinor, BILLING_CYCLES } = await import(
-      "@sms/types"
-    );
-    // At the DEFAULT ENTERPRISE rate a single academic year passes the cap
-    // somewhere around 3,500 students — sooner on an operator-raised price.
-    // So a large school could not buy a normal annual plan either, and this
-    // pins that the ceiling is understood rather than rediscovered in prod.
-    const bigSchool = computeSubscriptionPriceMinor(
-      PLANS.ENTERPRISE,
-      5_000,
-      BILLING_CYCLES.YEAR,
-      PLAN_PRICING,
-    );
-    expect(bigSchool).toBeGreaterThan(MAX_CHARGE_MINOR);
-    // and a mid-sized school is comfortably UNDER it, so the guard is not
-    // quietly blocking ordinary business
-    expect(
-      computeSubscriptionPriceMinor(PLANS.ENTERPRISE, 1_000, BILLING_CYCLES.YEAR, PLAN_PRICING),
-    ).toBeLessThan(MAX_CHARGE_MINOR);
+  it("stays well inside what a double represents EXACTLY", async () => {
+    const { MAX_CHARGE_MINOR } = await import("@sms/types");
+    // Money crosses the DB boundary as a number; beyond 2^53 a double starts
+    // skipping integers, and silently rounding money is the defect class this
+    // whole widening exists to remove.
+    expect(MAX_CHARGE_MINOR).toBeLessThan(Number.MAX_SAFE_INTEGER);
+  });
+
+  it("now admits the charges that used to overflow", async () => {
+    const { MAX_CHARGE_MINOR, PLAN_PRICING, PLANS, computeSubscriptionPriceMinor, BILLING_CYCLES, billedMonths } =
+      await import("@sms/types");
+    // A 5,000-pupil school buying five academic years at once: the case that
+    // returned a raw driver 500 after the bursar had re-authenticated.
+    const yearly = computeSubscriptionPriceMinor(PLANS.ENTERPRISE, 5_000, BILLING_CYCLES.YEAR, PLAN_PRICING);
+    expect(yearly * 5).toBeGreaterThan(2_147_483_647); // would have overflowed
+    expect(yearly * 5).toBeLessThan(MAX_CHARGE_MINOR); // and is accepted now
+    expect(billedMonths(BILLING_CYCLES.YEAR, 5)).toBe(45);
   });
 });
