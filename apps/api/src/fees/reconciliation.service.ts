@@ -29,6 +29,7 @@ import { PrivilegedDatabaseService } from "../common/privileged-database.service
 import { NotificationService } from "../notifications/notification.service";
 import { InvoiceSettlementService } from "./settlement.service";
 import { BillingService } from "../billing/billing.service";
+import { MessageCreditsService } from "../notifications/message-credits.service";
 
 export const FEE_RECONCILE_QUEUE = "fee-reconcile";
 export const FEE_RECONCILE_JOB = "fee-reconcile-sweep";
@@ -46,6 +47,10 @@ export interface ReconcileResult {
    *  had no PAID row until this sweep put one there. */
   subscriptionCharges: number;
   subscriptionRecovered: number;
+  /** Message-credit bundle purchases seen, and how many had never reached the
+   *  ledger until this sweep. */
+  creditCharges: number;
+  creditRecovered: number;
   missing: number;
   posted: number;
 }
@@ -73,6 +78,7 @@ export class PaymentReconciliationService {
     private readonly notifications: NotificationService,
     private readonly settlement: InvoiceSettlementService,
     private readonly billing: BillingService,
+    private readonly credits: MessageCreditsService,
   ) {}
 
   /** Manual trigger (fee.reconcile.run — super_admin). Audited to the caller. */
@@ -101,7 +107,7 @@ export class PaymentReconciliationService {
   }
 
   async sweep(trigger: "SCHEDULED" | "MANUAL"): Promise<ReconcileResult> {
-    const zero: ReconcileResult = { scanned: 0, invoiceCharges: 0, subscriptionCharges: 0, subscriptionRecovered: 0, missing: 0, posted: 0 };
+    const zero: ReconcileResult = { scanned: 0, invoiceCharges: 0, subscriptionCharges: 0, subscriptionRecovered: 0, creditCharges: 0, creditRecovered: 0, missing: 0, posted: 0 };
     const client = this.privileged.client;
     if ((!this.paystack.isConfigured() && !this.stripe.isConfigured()) || !client) {
       if (trigger === "SCHEDULED") this.logger.log("reconcile skipped (no gateway or privileged client)");
@@ -163,6 +169,50 @@ export class PaymentReconciliationService {
       } catch (e) {
         // One school's bad row must not stop the sweep reaching the others.
         this.logger.warn(`reconcile: subscription ${c.reference} failed: ${(e as Error).message}`);
+      }
+    }
+
+    // MESSAGE-CREDIT BUNDLES. The third `kind` on this rail, and it was dropped
+    // on the floor exactly like subscriptions used to be — this sweep handled
+    // "invoice" and then "subscription", and nobody noticed "credits" was still
+    // missing. A school paid for a bundle, the webhook did not arrive, and the
+    // credits simply never existed: no balance, no ledger row, nothing to
+    // explain where the money went.
+    const creditCands = candidates.filter((c) => c.meta.kind === "credits" && c.meta.schoolId);
+    result.creditCharges = creditCands.length;
+    for (const c of creditCands) {
+      try {
+        // applyPurchase is already idempotent on the gateway reference, so
+        // replaying a charge the webhook DID deliver is a no-op — the same
+        // property that lets the webhook and this sweep race safely.
+        // The existence check runs on the PRIVILEGED client, not through the
+        // credits service: message_credit_entry is RLS-protected and this sweep
+        // is cross-tenant, so the app role with no tenant GUC set sees zero
+        // rows — which reads as "not yet credited" for every school at once.
+        const before = await client.messageCreditEntry.findFirst({
+          where: { reference: c.reference },
+          select: { id: true },
+        });
+        if (before) continue;
+        await this.credits.applyPurchase({
+          event: "charge.success",
+          data: {
+            amount: c.amountMinor,
+            currency: c.currency,
+            reference: c.reference,
+            metadata: c.meta as Record<string, unknown>,
+          },
+        } as never);
+        const after = await client.messageCreditEntry.findFirst({
+          where: { reference: c.reference },
+          select: { id: true },
+        });
+        if (after) {
+          result.creditRecovered++;
+          this.logger.warn(`reconcile: recovered missed CREDIT purchase ${c.reference}`);
+        }
+      } catch (e) {
+        this.logger.warn(`reconcile: credits ${c.reference} failed: ${(e as Error).message}`);
       }
     }
 

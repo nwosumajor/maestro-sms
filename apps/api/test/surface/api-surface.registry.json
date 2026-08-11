@@ -2973,6 +2973,10 @@
       "kind": "ui",
       "note": "Receipt link on the /billing payment history — a subscription purchase produced no filable document before this"
     },
+    "POST /notifications/credits/verify": {
+      "kind": "ui",
+      "note": "Settles a credit bundle on return from the gateway — /billing?verifyCredits=. Without it the purchase depended entirely on a webhook arriving."
+    },
     "GET /notifications/credits/ledger": {
       "kind": "ui",
       "note": "MessageCreditsCard on /billing — the school's own credit history; previously only the operator could see where credits went"
