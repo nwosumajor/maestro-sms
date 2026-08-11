@@ -47,6 +47,10 @@ function resolveTarget(path: string[]): string | null {
   if (provider === "paystack" && rest.length === 0) return "/payments/webhook";
   if (provider === "stripe" && rest.length === 0) return "/billing/stripe/webhook";
   // /api/webhooks/mobile-money/mpesa → /payments/mobile-money/callback/mpesa
+  // Twilio delivery status. Added late and initially MISSED: the API route was
+  // marked @Public but never given a passthrough, so Twilio got a 404 and the
+  // credit-refund path could never have fired in production.
+  if (provider === "twilio" && rest.length === 0) return "/notifications/credits/delivery-status";
   if (provider === "mobile-money" && rest.length === 1 && /^[a-z0-9-]+$/.test(rest[0])) {
     return `/payments/mobile-money/callback/${rest[0]}`;
   }
@@ -58,7 +62,9 @@ const FORWARD_HEADERS = [
   "content-type",
   "x-paystack-signature",
   "stripe-signature",
-  "verif-hash", // Flutterwave-style, harmless to carry
+  "verif-hash",
+  // Twilio signs with HMAC-SHA1 over the URL + sorted params.
+  "x-twilio-signature",
 ];
 
 async function proxy(req: NextRequest, ctx: { params: { path: string[] } }) {
