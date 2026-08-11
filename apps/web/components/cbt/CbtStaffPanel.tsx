@@ -86,7 +86,20 @@ function compactQuestion(q: DraftQuestion, n: number): DraftQuestion | string {
   return { ...q, prompt, choices: kept, answerIndex };
 }
 
-export function CbtStaffPanel({ banks, exams, options }: { banks: Bank[]; exams: Exam[]; options: Options }) {
+export function CbtStaffPanel({
+  banks,
+  exams,
+  options,
+  canManage = false,
+}: {
+  banks: Bank[];
+  exams: Exam[];
+  options: Options;
+  /** cbt.manage — an EDITOR. A cbt.review head teacher sees this panel too but
+   *  must never be offered the answer key; the server refuses them anyway, and
+   *  a button that always 404s is a worse experience than no button. */
+  canManage?: boolean;
+}) {
   // Levels the caller can actually target, derived from their own classes — so a
   // teacher tags questions with the levels they teach, not a free-typed number.
   const levelOptions = React.useMemo(() => {
@@ -477,6 +490,26 @@ export function CbtStaffPanel({ banks, exams, options }: { banks: Bank[]; exams:
                       >
                         Results
                       </Button>
+                      {/* PRINTABLE PAPER — for an offline sitting, moderation, or
+                          a paper archive. Two documents, deliberately: the paper
+                          carries no answers and anyone who may see the bank may
+                          print it; the key is editors only and the server
+                          refuses a reviewer with a 404. Both audited. */}
+                      <a
+                        href={`/api/sms/cbt/exams/${e.id}/paper.pdf`}
+                        className="inline-flex h-8 items-center rounded-md border border-input px-3 text-xs font-medium hover:bg-accent"
+                      >
+                        Print paper
+                      </a>
+                      {canManage && (
+                        <a
+                          href={`/api/sms/cbt/exams/${e.id}/answer-key.pdf`}
+                          className="inline-flex h-8 items-center rounded-md border border-destructive/40 px-3 text-xs font-medium text-destructive hover:bg-destructive/10"
+                          title="Contains the answer key — do not hand to candidates"
+                        >
+                          Answer key
+                        </a>
+                      )}
                       {/* Theory marking: vertical, one question across the class. */}
                       <Button size="sm" variant="outline" disabled={busy} onClick={() => setMarking({ id: e.id, title: e.title })}>
                         Mark theory
@@ -562,6 +595,22 @@ export function CbtStaffPanel({ banks, exams, options }: { banks: Bank[]; exams:
               deliberate staff action.
             </CardDescription>
           </CardHeader>
+          {/* Say it once, loudly, above the table — and explain what the order
+              means, because a list that is NOT ranked while it usually is would
+              otherwise look like a bug. */}
+          {results.provisional && (
+            <CardContent className="pt-0">
+              <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
+                <p className="text-sm font-medium">Theory marking is not finished</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Scores marked <span className="font-medium">part-marked</span> show the objective section only —
+                  a low figure may be an unmarked script, not a weak one. The table is ordered by submission time
+                  until marking completes, because ranking half-marked papers puts the strongest theory
+                  candidates last. Recording grades is blocked until every script is marked.
+                </p>
+              </div>
+            </CardContent>
+          )}
           <CardContent className="p-0">
             {results.rows.length === 0 ? (
               <p className="px-4 py-4 text-sm text-muted-foreground">No sittings yet.</p>
@@ -578,6 +627,14 @@ export function CbtStaffPanel({ banks, exams, options }: { banks: Bank[]; exams:
                       </td>
                       <td className="tnum px-4 py-2 text-right font-medium">
                         {r.score != null ? `${r.score} / ${r.total}` : "—"}
+                        {/* A provisional score is the OBJECTIVE half only. Shown
+                            flat it reads as a weak candidate rather than an
+                            unmarked script. */}
+                        {r.provisional && (
+                          <span className="ml-2 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
+                            part-marked
+                          </span>
+                        )}
                       </td>
                     </tr>
                   ))}

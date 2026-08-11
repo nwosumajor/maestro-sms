@@ -54,7 +54,12 @@ export default async function CbtPage() {
       <div className="space-y-6">
         <PageHeader title={<>CBT Exam Hall</>} subtitle={<>{subtitle}</>} />
         {isStaff ? (
-          <CbtStaffPanel banks={banks} exams={exams} options={options} />
+          <CbtStaffPanel
+            banks={banks}
+            exams={exams}
+            options={options}
+            canManage={hasPermission(user.permissions, "cbt.manage")}
+          />
         ) : isReviewer ? (
           <CbtReviewPanel banks={banks} />
         ) : (

@@ -14,6 +14,7 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  Optional,
   NotFoundException,
 } from "@nestjs/common";
 import { Prisma } from "@sms/db";
@@ -57,6 +58,8 @@ import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 import { TermResultService } from "../gradebook/term-result.service";
 import { NotificationService } from "../notifications/notification.service";
+import PDFDocument from "pdfkit";
+import { BrandingService } from "../branding/branding.service";
 
 /** Grace after the duration elapses before a late save/submit is refused. */
 const SUBMIT_GRACE_MS = 30_000;
@@ -92,6 +95,9 @@ export class CbtService {
     private readonly termResults: TermResultService,
     private readonly notifications: NotificationService,
     hooks: WorkflowHooksService,
+    // LAST and @Optional, like every other PDF here: a branding lookup must
+    // never be the reason an invigilator cannot print a paper.
+    @Optional() private readonly branding?: BrandingService,
   ) {
     // Maker-checker reactors, run in the SAME tenant tx as the workflow
     // transition (atomic). Both are idempotent: the status-guarded updateMany
@@ -884,12 +890,251 @@ export class CbtService {
     });
   }
 
+  /**
+   * Draw a paper from a bank, exactly as a live sitting does.
+   *
+   * Extracted so the PRINTED paper and the ON-SCREEN paper come from one rule.
+   * Two copies of a sampling algorithm is how an offline sitting ends up asking
+   * different questions from the online one, which nobody would notice until a
+   * candidate disputed a mark.
+   *
+   * `deterministic` forces the un-shuffled draw. A printed paper needs a fixed
+   * set of questions on the page; when the exam shuffles, that set is ONE
+   * variant and the document says so rather than implying every candidate got
+   * this sheet.
+   */
+  private async drawPaper(
+    tx: TenantTx,
+    exam: { id: string; bankId: string; classId: string | null; shuffle: boolean; blueprint: unknown; objectiveCount: number; theoryCount: number; questionCount: number },
+    opts: { deterministic?: boolean } = {},
+  ): Promise<string[]> {
+    const level = await this.classLevel(tx, exam.classId ?? null);
+    const blueprint = Array.isArray(exam.blueprint) ? (exam.blueprint as unknown as CbtBlueprintItem[]) : null;
+    const shuffle = opts.deterministic ? false : exam.shuffle;
+    const pick = (arr: string[], n: number) => {
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j]!, arr[i]!];
+      }
+      return arr.slice(0, n);
+    };
+    const drawFrom = async (type: "OBJECTIVE" | "THEORY", n: number, topic?: string) => {
+      if (n <= 0) return [];
+      const rows = await tx.cbtQuestion.findMany({
+        where: { ...this.poolWhere(exam.bankId, level, topic), type },
+        select: { id: true },
+      });
+      const ids = rows.map((q) => q.id);
+      return shuffle ? pick(ids, n) : ids.sort().slice(0, n);
+    };
+    let sectionA: string[] = [];
+    if (blueprint) {
+      for (const line of blueprint) sectionA.push(...(await drawFrom("OBJECTIVE", line.count, line.topic)));
+      if (shuffle) sectionA = pick(sectionA, sectionA.length);
+      else sectionA.sort();
+    } else {
+      const wantA = exam.objectiveCount > 0 ? exam.objectiveCount : exam.questionCount - exam.theoryCount;
+      sectionA = await drawFrom("OBJECTIVE", wantA);
+    }
+    const sectionB = await drawFrom("THEORY", exam.theoryCount);
+    return [...sectionA, ...sectionB];
+  }
+
+  /**
+   * A PRINTABLE paper — for an offline sitting, moderation, or a paper archive.
+   *
+   * TWO DOCUMENTS, and the split is the security property, not a convenience:
+   *
+   *   withAnswers = false  QUESTION PAPER. Anyone who may see the bank may
+   *     print it, including a cbt.review head teacher who never holds the key.
+   *   withAnswers = true   ANSWER KEY. EDITORS ONLY — the author, a teacher of
+   *     the bank's subject, or school-wide staff. A reviewer asking for it gets
+   *     404, the same answer they get for a bank outside their scope.
+   *
+   * Both are audited. A question key leaving the building on paper is exam
+   * integrity material, and the audit trail is what makes a leak investigable.
+   *
+   * ON SHUFFLED EXAMS: when the exam shuffles, every candidate receives a
+   * DIFFERENT sample, so there is no single paper to print. The document is
+   * generated from the deterministic draw and says so on the page — printing a
+   * sheet that implies "this is what they all sat" would be worse than not
+   * printing one.
+   */
+  async examPaperPdf(
+    p: Principal,
+    examId: string,
+    withAnswers: boolean,
+  ): Promise<{ buffer: Buffer; filename: string }> {
+    const data = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const exam = await tx.cbtExam.findFirst({ where: { id: examId } });
+      if (!exam) throw new NotFoundException("Exam not found");
+      const bank = await tx.cbtQuestionBank.findFirst({ where: { id: exam.bankId } });
+      if (!bank) throw new NotFoundException("Exam not found");
+
+      const isEditor =
+        p.permissions.includes(CBT_PERMISSIONS.CBT_MANAGE) && (await this.canTouchBank(tx, p, bank));
+      const isReviewer = p.permissions.includes(CBT_PERMISSIONS.CBT_REVIEW);
+      if (!isEditor && !isReviewer) throw new NotFoundException("Exam not found");
+      // The key is the thing being protected: a reviewer may print the paper,
+      // never the answers. 404 rather than 403 HERE, so it never confirms that
+      // this particular exam's key exists — a caller with no cbt.manage at all
+      // is already stopped by the guard with the platform's usual 403.
+      if (withAnswers && !isEditor) throw new NotFoundException("Exam not found");
+
+      const ids = await this.drawPaper(tx, exam as never, { deterministic: true });
+      const questions = ids.length
+        ? await tx.cbtQuestion.findMany({
+            where: { id: { in: ids } },
+            select: { id: true, prompt: true, choices: true, answerIndex: true, type: true, maxMarks: true },
+          })
+        : [];
+      const byId = new Map(questions.map((q) => [q.id, q]));
+      const school = await tx.school.findFirst({ where: { id: p.schoolId }, select: { name: true } });
+      const subject = bank.subjectId
+        ? await tx.subject.findFirst({ where: { id: bank.subjectId }, select: { name: true } })
+        : null;
+      const klass = exam.classId
+        ? await tx.class.findFirst({ where: { id: exam.classId }, select: { name: true } })
+        : null;
+
+      await this.log(tx, p, withAnswers ? "cbt.exam.answer_key_print" : "cbt.exam.paper_print", examId, {
+        questions: ids.length,
+        withAnswers,
+      });
+
+      return {
+        exam,
+        bankName: bank.name,
+        schoolName: school?.name ?? "",
+        subjectName: subject?.name ?? null,
+        className: klass?.name ?? null,
+        ordered: ids.map((id) => byId.get(id)).filter((q): q is NonNullable<typeof q> => Boolean(q)),
+      };
+    });
+
+    // Outside the transaction: object storage is a network call and a PDF must
+    // not hold a DB transaction open across one.
+    const logo = (await this.branding?.getLogoBytes(p.schoolId).catch(() => null)) ?? null;
+    const buffer = await this.renderPaperPdf(data as never, withAnswers, logo);
+    const kind = withAnswers ? "answer-key" : "question-paper";
+    const safe = data.exam.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase().slice(0, 40);
+    return { buffer, filename: `${kind}-${safe}.pdf` };
+  }
+
+  /** Render the paper. Deliberately plain: this is a document an invigilator
+   *  photocopies, so it must survive a monochrome printer and a stapler. */
+  private renderPaperPdf(
+    d: {
+      exam: { title: string; durationMinutes: number; shuffle: boolean };
+      bankName: string;
+      schoolName: string;
+      subjectName: string | null;
+      className: string | null;
+      ordered: Array<{ prompt: string; choices: string[]; answerIndex: number; type: string; maxMarks: number }>;
+    },
+    withAnswers: boolean,
+    logo: Buffer | null,
+  ): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+      const doc = new PDFDocument({ size: "A4", margin: 50 });
+      const chunks: Buffer[] = [];
+      doc.on("data", (c: Buffer) => chunks.push(c));
+      doc.on("end", () => resolve(Buffer.concat(chunks)));
+      doc.on("error", reject);
+
+      if (logo) {
+        try {
+          doc.image(logo, doc.page.width / 2 - 22, 40, { fit: [44, 44], align: "center" });
+          doc.moveDown(3);
+        } catch {
+          /* an unsupported image must not cost an invigilator their paper */
+        }
+      }
+      doc.fontSize(15).text(d.schoolName || "Question Paper", { align: "center" });
+      doc.moveDown(0.2).fontSize(13).text(d.exam.title, { align: "center" });
+      doc.moveDown(0.2).fontSize(9);
+      const meta = [d.subjectName, d.className, `${d.exam.durationMinutes} minutes`].filter(Boolean).join("  ·  ");
+      doc.text(meta, { align: "center" });
+
+      if (withAnswers) {
+        // Unmissable on a photocopy: this sheet carries the key.
+        doc.moveDown(0.5).fontSize(11).fillColor("#b00").text("ANSWER KEY — NOT FOR CANDIDATES", { align: "center" });
+        doc.fillColor("#000");
+      }
+      if (d.exam.shuffle) {
+        // The honest caveat. Online candidates each get their own draw, so this
+        // sheet is one variant — printing it as "the paper" would be a lie.
+        doc.moveDown(0.4).fontSize(8).fillColor("#666").text(
+          "This exam shuffles: each online candidate receives a different selection. " +
+            "This sheet is ONE variant, suitable for an offline sitting or moderation.",
+          { align: "center" },
+        );
+        doc.fillColor("#000");
+      }
+
+      doc.moveDown(1).fontSize(9).fillColor("#444")
+        .text("Answer ALL questions. Shade or write your answer clearly.", { align: "center" });
+      doc.fillColor("#000").moveDown(1);
+
+      let n = 0;
+      let section = "";
+      for (const q of d.ordered) {
+        const label = q.type === "THEORY" ? "SECTION B — Theory" : "SECTION A — Objective";
+        if (label !== section) {
+          section = label;
+          doc.moveDown(0.6).fontSize(11).text(label);
+          doc.moveDown(0.3);
+        }
+        n += 1;
+        doc.fontSize(10).text(`${n}.  ${q.prompt}`, { paragraphGap: 2 });
+        if (q.type === "THEORY") {
+          doc.fontSize(8).fillColor("#666").text(`(${q.maxMarks} mark${q.maxMarks === 1 ? "" : "s"})`);
+          doc.fillColor("#000");
+          // Ruled space to actually write in — a theory paper with no room to
+          // answer is not a usable document.
+          doc.moveDown(0.4);
+          for (let i = 0; i < 4; i++) doc.moveDown(0.9);
+        } else {
+          q.choices.forEach((c, i) => {
+            const letter = String.fromCharCode(65 + i);
+            const correct = withAnswers && i === q.answerIndex;
+            doc.fontSize(10).fillColor(correct ? "#0a0" : "#000")
+              .text(`     ${correct ? "*" : " "}${letter}.  ${c}`);
+          });
+          doc.fillColor("#000");
+        }
+        doc.moveDown(0.5);
+        if (doc.y > doc.page.height - 90) doc.addPage();
+      }
+
+      doc.moveDown(1).fontSize(8).fillColor("#666")
+        .text(`${n} question${n === 1 ? "" : "s"} · generated ${new Date().toISOString().slice(0, 10)}`, {
+          align: "center",
+        });
+      doc.end();
+    });
+  }
+
   /** Staff: per-exam results table (names + scores; no answer sheets here). */
   async examResults(p: Principal, examId: string): Promise<CbtExamResultsDto> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const exam = await tx.cbtExam.findFirst({ where: { id: examId } });
       if (!exam) throw new NotFoundException("Exam not found");
-      const sittings = await tx.cbtSitting.findMany({ where: { examId }, orderBy: { score: "desc" } });
+      // ORDER BY SUBMISSION, NOT BY SCORE, WHILE ANYTHING IS UNMARKED.
+      //
+      // A table sorted by score is a ranking, and a ranking built on half-marked
+      // scripts actively inverts: the candidates strongest on theory sit at the
+      // bottom until Section B is marked. Ordering by submission time says
+      // nothing untrue, and the ranking returns the moment marking completes.
+      const unmarked = await tx.cbtTheoryAnswer.findMany({
+        where: { examId, marksAwarded: null },
+        select: { sittingId: true },
+      });
+      const provisionalSittings = new Set(unmarked.map((t) => t.sittingId));
+      const sittings = await tx.cbtSitting.findMany({
+        where: { examId },
+        orderBy: provisionalSittings.size > 0 ? { submittedAt: "asc" } : { score: "desc" },
+      });
       const students = await tx.user.findMany({
         where: { id: { in: sittings.map((s) => s.studentId) } },
         select: { id: true, name: true },
@@ -898,7 +1143,9 @@ export class CbtService {
       await this.log(tx, p, "cbt.exam.results_read", examId, { sittings: sittings.length });
       return {
         exam: await this.toExamDto(tx, exam, p),
+        provisional: provisionalSittings.size > 0,
         rows: sittings.map((s) => ({
+          provisional: provisionalSittings.has(s.id),
           sittingId: s.id,
           studentId: s.studentId,
           studentName: nameOf.get(s.studentId) ?? "Student",
