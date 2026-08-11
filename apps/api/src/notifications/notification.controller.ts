@@ -152,6 +152,20 @@ export class NotificationController {
     return this.notifications.send(p, body);
   }
 
+  /** Settle a credit bundle the school has just returned from paying for.
+   *  billing.read: the person coming back from the gateway is whoever started
+   *  the checkout, and refusing to credit a bundle already paid for because of
+   *  a permission check would be the wrong way round. */
+  @Post("credits/verify")
+  @RequirePermission(BILLING_PERMISSIONS.BILLING_READ)
+  verifyCredits(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(z.object({ reference: z.string().min(4).max(128) })))
+    body: { reference: string },
+  ) {
+    return this.credits.verifyPurchase(p, body.reference);
+  }
+
   /** The school's OWN credit ledger — where its credits went. billing.read,
    *  the same permission that shows the balance beside it. */
   @Get("credits/ledger")

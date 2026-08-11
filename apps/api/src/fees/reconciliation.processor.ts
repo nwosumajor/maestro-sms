@@ -21,11 +21,15 @@ export class PaymentReconciliationProcessor extends WorkerHost {
 
   async process(job: Job): Promise<ReconcileResult> {
     if (job.name !== FEE_RECONCILE_JOB)
-      return { scanned: 0, invoiceCharges: 0, subscriptionCharges: 0, subscriptionRecovered: 0, missing: 0, posted: 0 };
+      return {
+        scanned: 0, invoiceCharges: 0, subscriptionCharges: 0, subscriptionRecovered: 0,
+        creditCharges: 0, creditRecovered: 0, missing: 0, posted: 0,
+      };
     const r = await this.reconcile.sweep("SCHEDULED");
     this.logger.log(
       `Reconcile done: scanned=${r.scanned} invoiceCharges=${r.invoiceCharges} missing=${r.missing} posted=${r.posted}` +
-        ` subscriptionCharges=${r.subscriptionCharges} subscriptionRecovered=${r.subscriptionRecovered}`,
+        ` subscriptionCharges=${r.subscriptionCharges} subscriptionRecovered=${r.subscriptionRecovered}` +
+        ` creditCharges=${r.creditCharges} creditRecovered=${r.creditRecovered}`,
     );
     return r;
   }

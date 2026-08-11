@@ -24,6 +24,7 @@ import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
 import { PaymentChannelService } from "../payments/payment-channel.service";
 import { NotificationService } from "./notification.service";
 import { prisma } from "@sms/db";
+import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 
 @Injectable()
 export class MessageCreditsService {
@@ -32,6 +33,11 @@ export class MessageCreditsService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly paystack: PaystackService,
+    // Cross-tenant reads only: a gateway callback and the reconciliation
+    // sweep both arrive with no tenant context, and the app role sees zero
+    // rows on an RLS table without one. Every WRITE still goes through
+    // runAsTenant, scoped to the school the metadata names.
+    @Optional() private readonly privileged?: PrivilegedDatabaseService,
     // LAST and @Optional deliberately. DI always provides it in the running
     // app; being optional keeps every existing unit wiring compiling, and
     // absent it FAILS OPEN — a missing switchboard must never be the reason a
@@ -112,6 +118,12 @@ export class MessageCreditsService {
       currency: CURRENCIES.NGN,
       reference,
       metadata: { kind: "credits", schoolId: p.schoolId, bundleId: bundle.id },
+      // Bring the school BACK so the page can settle immediately. Without this
+      // the whole purchase depended on a webhook arriving — and when one did
+      // not, three bundles worth NGN 74,000 were charged by the gateway and
+      // never became credits: no balance, no ledger row, nothing to explain
+      // where the money went. Fees and subscriptions both learned this already.
+      callbackUrl: `${process.env.PUBLIC_WEB_URL ?? "http://localhost:3000"}/billing?verifyCredits=${encodeURIComponent(reference)}`,
     });
     return { authorizationUrl, reference };
   }
@@ -119,6 +131,52 @@ export class MessageCreditsService {
   /** Verified webhook (metadata.kind === "credits"): credit the ledger once.
    *  The bundle is re-resolved SERVER-SIDE and the settled amount checked —
    *  metadata can never mint more credits than were paid for. */
+  /**
+   * VERIFY ON RETURN — the school is back from the gateway; settle the bundle.
+   *
+   * Same shape as the subscription one: verify against the gateway, then apply
+   * through the SAME idempotent applyPurchase the webhook uses, so a late
+   * webhook cannot credit the bundle twice.
+   */
+  async verifyPurchase(p: Principal, reference: string): Promise<{ credited: boolean; balance: number }> {
+    if (!(await this.hasEntryForReference(reference))) {
+      const verified = await this.paystack.verifyTransaction(reference);
+      const meta = (verified?.metadata ?? {}) as { schoolId?: string };
+      // Never settle another school's reference into this one.
+      if (verified?.status === "success" && meta.schoolId === p.schoolId) {
+        await this.applyPurchase({
+          event: "charge.success",
+          data: {
+            amount: verified.amountMinor,
+            currency: verified.currency,
+            reference,
+            metadata: verified.metadata,
+          },
+        } as never);
+      }
+    }
+    const credited = await this.hasEntryForReference(reference);
+    const balance = await this.db.runAsTenant({ schoolId: p.schoolId, userId: p.userId }, (tx) =>
+      this.balanceInTx(tx, p.schoolId),
+    );
+    return { credited, balance };
+  }
+
+  /**
+   * Has this gateway reference already produced a ledger entry?
+   *
+   * PRIVILEGED read: message_credit_entry is RLS-protected and the callers here
+   * (a gateway callback, a cross-tenant sweep) have no tenant context. Under the
+   * app role with no GUC set this returns zero rows for every school, which
+   * reads as "not credited yet" — the exact false negative that would credit a
+   * bundle twice.
+   */
+  async hasEntryForReference(reference: string): Promise<boolean> {
+    const client = this.privileged?.client;
+    if (!client) return false;
+    return (await client.messageCreditEntry.findFirst({ where: { reference }, select: { id: true } })) !== null;
+  }
+
   async applyPurchase(event: PaystackEvent): Promise<{ ok: boolean }> {
     if (event.event !== "charge.success") return { ok: true };
     const { schoolId, bundleId } = (event.data.metadata ?? {}) as { schoolId?: string; bundleId?: string };
@@ -204,12 +262,16 @@ export class MessageCreditsService {
    * was never spent.
    */
   async refundFailedSend(providerRef: string, status: string): Promise<{ refunded: boolean }> {
-    const debit = await prisma.messageCreditEntry.findFirst({
+    // PRIVILEGED: a delivery-status callback carries only the provider's id —
+    // no session and no tenant — so the school has to be found across tenants.
+    const client = this.privileged?.client;
+    if (!client) return { refunded: false };
+    const debit = await client.messageCreditEntry.findFirst({
       where: { providerRef, reason: "SEND" },
       select: { id: true, schoolId: true, channel: true },
     });
     if (!debit) return { refunded: false };
-    const already = await prisma.messageCreditEntry.findFirst({
+    const already = await client.messageCreditEntry.findFirst({
       where: { providerRef, reason: "REFUND" },
       select: { id: true },
     });
