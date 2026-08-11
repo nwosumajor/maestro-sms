@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { Injectable, Logger } from "@nestjs/common";
 import type { ChannelDeliveryRequest, NotificationChannelProvider } from "./notification.constants";
 
@@ -98,4 +99,39 @@ export class TwilioChannelProvider implements NotificationChannelProvider {
     }
     return out;
   }
+
+  /**
+   * Twilio signs a callback with HMAC-SHA1 over the full URL plus every POST
+   * parameter appended in sorted key order, base64-encoded.
+   *
+   * Every other webhook on this platform is verified, and this one arrives at a
+   * PUBLIC route that hands credits back — unverified, anyone who learned a
+   * message SID could refund a school's credits at will. The refund is bounded
+   * (one per SID, only for a credit actually spent), so the loss is capped, but
+   * an unauthenticated write to a money ledger should not be reachable at all.
+   *
+   * Returns false when no auth token is configured: an unverifiable callback is
+   * refused, not trusted.
+   */
+  verifyCallbackSignature(url: string, params: Record<string, string>, signature: string | null): boolean {
+    return verifyTwilioSignature(url, params, signature);
+  }
+}
+
+export function verifyTwilioSignature(
+  url: string,
+  params: Record<string, string>,
+  signature: string | null,
+): boolean {
+    const token = process.env.TWILIO_AUTH_TOKEN;
+    if (!token || !signature) return false;
+    const payload = Object.keys(params)
+      .sort()
+      .reduce((acc, k) => acc + k + params[k], url);
+    const expected = crypto.createHmac("sha1", token).update(Buffer.from(payload, "utf8")).digest("base64");
+    const a = Buffer.from(expected);
+    const b = Buffer.from(signature);
+    // Length-guard first: timingSafeEqual THROWS on a length mismatch, so an
+    // unguarded short signature is a 500 rather than a rejection.
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
 }

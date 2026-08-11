@@ -314,6 +314,7 @@ provider.
 | M-Pesa callback | Daraja app config | `https://<domain>/api/webhooks/mobile-money/mpesa` |
 | MTN MoMo callback | MTN portal (delivers by **PUT**) | `https://<domain>/api/webhooks/mobile-money/mtn` |
 | Airtel callback | Airtel Africa portal | `https://<domain>/api/webhooks/mobile-money/airtel` |
+| Twilio delivery status | Twilio Console → Messaging Service → **Status callback** | `https://<domain>/api/webhooks/twilio` |
 
 Anything not on that allowlist returns **404** by design; the allowlist lives in
 `apps/web/app/api/webhooks/[...path]/route.ts`.
@@ -343,6 +344,7 @@ Into Secrets Manager (Step 4), then redeploy the api service:
 | `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` | USD rail | only when Stripe is switched on |
 | `PAYSTACK_DEDICATED_BANK` | per-pupil virtual accounts | optional |
 | `MPESA_*` / `MTN_MOMO_*` / `AIRTEL_*` | mobile money | per rail; see CLAUDE.md — no provider sandbox has ever been exercised |
+| `TWILIO_ACCOUNT_SID` + `TWILIO_AUTH_TOKEN` + `TWILIO_FROM` | SMS / WhatsApp message credits | the auth token also **verifies the status callback** — without it every callback is refused, which is the safe direction but disables credit refunds |
 | `PLATFORM_FEES_COMMISSION_PERCENT` | platform take-rate on splits | defaults to 0 |
 
 #### 7.3 Switch the rails on (operator console)
@@ -366,7 +368,38 @@ deliberate commercial decision. At `/operator` → **Payment channels**:
    (`PAYMENT_HEALTH_CRON`). It alerts the platform owner on a *transition* —
    a working rail breaking, or recovering — not on every run.
 
-#### 7.4 Per-school settlement (before a school takes its first fee)
+#### 7.4 Message credits (SMS / WhatsApp)
+
+Credits are money on a second ledger, and they follow the same three rules as
+the payment rails — a purchase must not depend on a webhook, a charge must be
+reconcilable, and a sweep that could not run must never read as a clean result.
+
+1. **Status callback** (table in §7.1). A send is charged when Twilio ACCEPTS
+   it, which is not the same as delivering it: a carrier reject arrives minutes
+   later on this callback and refunds the credit. Without the callback
+   configured the school stays charged for messages that never arrived.
+2. **The callback is signature-verified** with `TWILIO_AUTH_TOKEN` (HMAC-SHA1
+   over the URL plus sorted parameters). It is a public route that hands credits
+   back, so an unverifiable callback is REFUSED rather than trusted — and it
+   still answers 2xx either way, because a non-2xx makes Twilio retry for hours.
+   If refunds never appear, check that `PUBLIC_WEB_URL` matches the URL
+   registered in the Twilio console **exactly**: the signature covers the URL,
+   so `https://x/` and `https://x` produce different signatures.
+3. **Reconciliation** runs daily and can be triggered at
+   `POST /notifications/credits/reconcile/run` (`fee.reconcile.run`). It
+   compares charged credits to messages Twilio says it sent, in both directions:
+   credits charged with no matching message, and messages sent with no charge —
+   the second being the platform paying for something it never billed. The
+   result is on `/operator/message-credits`, which also warns when the sweep
+   has not run recently.
+4. ⚠️ **A credit purchase is recovered by the CARD reconciliation sweep**
+   (`POST /fees/reconciliation/run`), not the credit one — bundles are bought on
+   the Paystack rail like everything else. Three bundles worth NGN 74,000 were
+   once charged and never credited because that sweep handled `invoice` and
+   `subscription` and silently dropped `credits`. Verify a real bundle purchase
+   end to end at go-live.
+
+#### 7.5 Per-school settlement (before a school takes its first fee)
 
 Parent fee payments split to the school's **own** bank via a Paystack
 subaccount. Until a school registers one, its collections settle into the
@@ -379,7 +412,7 @@ before inviting parents to pay. The form resolves the account NAME from the
 bank and requires the school to confirm it — creating a subaccount proves an
 account exists, never whose it is.
 
-#### 7.5 Verification — do not skip
+#### 7.6 Verification — do not skip
 
 1. **Fee payment**: raise a ₦100 invoice, pay it with a real card. Confirm the
    webhook posts the payment, the invoice goes PAID, the receipt fires, and the
@@ -404,6 +437,7 @@ account exists, never whose it is.
    | `/api/webhooks/paystack` | **401** | signature verified and rejected. A 200 means verification is not running; a 404 means the path is wrong |
    | `/api/webhooks/stripe` | **2xx** | reaches the handler; it no-ops until `STRIPE_WEBHOOK_SECRET` is set, then rejects bad signatures |
    | `/api/webhooks/mobile-money/mpesa` | **2xx** | mobile-money callbacks must ALWAYS answer 2xx — a non-2xx makes some rails retry for ever |
+   | `/api/webhooks/twilio` | **2xx** | reaches the handler; an unsigned callback is refused inside it, not by the status code |
    | `/api/webhooks/anything-else` | **404** | the allowlist holds |
 
    A **404 on any of the first three means the URL is wrong**, and that is the
@@ -457,6 +491,9 @@ confirmation, not creation:
     back to /billing?verify= showing "Payment confirmed" and the new period
 [ ] Paystack account settlement currencies confirmed via Test connection (§7.3)
     — decide naira-only vs USD-enabled for ENTERPRISE deliberately
+[ ] If SMS/WhatsApp are live: a real bundle purchase credited the school, the
+    Twilio status callback is registered and signature-verified, and
+    /operator/message-credits shows a recent reconciliation run (§7.4)
 [ ] Restore drill documented (§9)
 [ ] First real school onboarded via /onboard → approve → provision → their
     admin signs in via invite link — the full production path, once, yourself

@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Param, Post, Put, Query } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Put,
+  Query,
+  Headers,
+  Logger,
+} from "@nestjs/common";
 import type {
   NotificationInboxDto,
   NotificationPreferenceDto,
@@ -19,6 +29,7 @@ import { NotificationService } from "./notification.service";
 import { MessageCreditReconciliationService } from "./message-credit-reconciliation.service";
 import { Public } from "../auth/public.decorator";
 import { MessageCreditsService } from "./message-credits.service";
+import { verifyTwilioSignature } from "./twilio-channel.provider";
 
 // Loose E.164: 8–15 digits with an optional +. Empty string clears the number.
 const languageSchema = z.object({
@@ -52,6 +63,7 @@ const sendSchema = z.object({
 
 @Controller("notifications")
 export class NotificationController {
+  private readonly logger = new Logger("Notifications");
   constructor(
     private readonly credits: MessageCreditsService,
     private readonly creditReconcile: MessageCreditReconciliationService,
@@ -160,7 +172,11 @@ export class NotificationController {
   @RequirePermission(BILLING_PERMISSIONS.BILLING_READ)
   verifyCredits(
     @CurrentPrincipal() p: Principal,
-    @Body(new ZodValidationPipe(z.object({ reference: z.string().min(4).max(128) })))
+    @Body(
+      new ZodValidationPipe(
+        z.object({ reference: z.string().min(4).max(128) }),
+      ),
+    )
     body: { reference: string },
   ) {
     return this.credits.verifyPurchase(p, body.reference);
@@ -198,7 +214,16 @@ export class NotificationController {
   @Post("credits/delivery-status")
   async deliveryStatus(
     @Body() body: Record<string, string>,
+    @Headers("x-twilio-signature") signature?: string,
   ): Promise<{ ok: true }> {
+    // VERIFIED, like every other webhook here. This is a PUBLIC route that
+    // hands credits back: unverified, anyone who learned a message SID could
+    // refund a school's credits. Still answers 2xx on a bad signature — a
+    // non-2xx makes Twilio retry for hours, and a forged callback should be
+    // dropped quietly rather than invited back.
+    const url = `${process.env.PUBLIC_WEB_URL ?? "http://localhost:3000"}/api/webhooks/twilio`;
+    if (!verifyTwilioSignature(url, body, signature ?? null))
+      return { ok: true };
     const sid = body.MessageSid ?? body.SmsSid;
     const status = (body.MessageStatus ?? body.SmsStatus ?? "").toLowerCase();
     // Only TERMINAL failures refund. "sent"/"queued"/"delivered" are not

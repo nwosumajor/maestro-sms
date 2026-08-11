@@ -63,6 +63,20 @@ describe("webhook passthrough targets", () => {
     expect(passthrough).toContain("/payments/mobile-money/callback/${rest[0]}");
   });
 
+  it("routes Twilio delivery status to the handler that refunds the credit", () => {
+    // Added late and initially MISSED: the API route was marked @Public but
+    // never given a passthrough, so Twilio got a 404 and the refund path could
+    // never have fired in production. The route is @Public on a controller with
+    // no prefix collision, so its full path is what the passthrough must name.
+    const route = actualRoute("notifications/notification.controller.ts", "credits/delivery-status");
+    expect(route).toBe("/notifications/credits/delivery-status");
+    expect(passthrough).toContain(`return "${route}"`);
+  });
+
+  it("carries the header Twilio signs with", () => {
+    expect(passthrough).toContain("x-twilio-signature");
+  });
+
   it("still refuses anything not on the allowlist", () => {
     // The allowlist is the security property: this route is sessionless, so it
     // must reach signature-verifying handlers and nothing else.
