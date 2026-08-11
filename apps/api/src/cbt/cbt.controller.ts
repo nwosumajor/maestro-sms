@@ -2,7 +2,7 @@
 // and run exams; students (cbt.take) sit them. Every answer key stays
 // server-side until a sitting closes; the clock is server law.
 
-import { Body, Controller, Get, Param, Post, Put, Query } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Put, Query, Res } from "@nestjs/common";
 import { CBT_PERMISSIONS, CBT_BLUEPRINT_MAX_ITEMS, CBT_QUESTION_TYPES, CBT_INTEGRITY_BATCH_MAX, MODULES } from "@sms/types";
 import type { CbtAuthoringOptionsDto, CbtBankDto, CbtExamDto, CbtExamResultsDto, CbtSittingViewDto, CbtBankQuestionsDto, CbtAvailabilityDto, CbtMarkingQueueDto, CbtMarkingProgressDto, CbtIntegritySummaryDto } from "@sms/types";
 import { z } from "zod";
@@ -12,6 +12,7 @@ import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { CbtService } from "./cbt.service";
+import type { Response } from "express";
 
 const bankSchema = z.object({
   name: z.string().min(1).max(160),
@@ -183,6 +184,46 @@ export class CbtController {
   }
 
   /** Per-candidate integrity report for staff review. */
+  /**
+   * PRINTABLE QUESTION PAPER — no answers. For an offline sitting, moderation,
+   * or a paper archive.
+   *
+   * UNGATED here for the same reason as banks/:id/questions: two audiences
+   * reach it — an author via cbt.manage (their own banks) or an oversight
+   * reader via cbt.review (any bank) — and @RequirePermission takes exactly
+   * one, so naming either locks out the other. Gating on cbt.review alone did
+   * exactly that: the teacher who WROTE the paper could not print it.
+   * CbtService.examPaperPdf enforces "cbt.manage + bank scope OR cbt.review",
+   * 404-not-403 otherwise.
+   */
+  @Get("exams/:id/paper.pdf")
+  async paperPdf(@CurrentPrincipal() p: Principal, @Param("id") id: string, @Res() res: Response) {
+    const { buffer, filename } = await this.cbt.examPaperPdf(p, id, false);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(buffer);
+  }
+
+  /**
+   * ANSWER KEY — editors only. TWO layers, and they answer differently on
+   * purpose:
+   *   - the guard 403s anyone without cbt.manage at all (a reviewer, a
+   *     student) — the platform's normal answer for a permission you do not
+   *     hold, and consistent with every other endpoint;
+   *   - the SERVICE 404s an editor whose scope does not cover this bank, so it
+   *     never confirms that a particular exam's key exists.
+   * Audited separately from the paper: a key leaving on paper is
+   * exam-integrity material and must be distinguishable in the trail.
+   */
+  @Get("exams/:id/answer-key.pdf")
+  @RequirePermission(CBT_PERMISSIONS.CBT_MANAGE)
+  async answerKeyPdf(@CurrentPrincipal() p: Principal, @Param("id") id: string, @Res() res: Response) {
+    const { buffer, filename } = await this.cbt.examPaperPdf(p, id, true);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(buffer);
+  }
+
   @Get("exams/:id/integrity")
   @RequirePermission(CBT_PERMISSIONS.CBT_MANAGE)
   examIntegrity(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<CbtIntegritySummaryDto[]> {

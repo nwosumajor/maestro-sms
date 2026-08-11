@@ -2977,6 +2977,14 @@
       "kind": "ui",
       "note": "Settles a credit bundle on return from the gateway — /billing?verifyCredits=. Without it the purchase depended entirely on a webhook arriving."
     },
+    "GET /cbt/exams/:p/paper.pdf": {
+      "kind": "ui",
+      "note": "Printable question paper (no answers) on the CBT staff panel — for an offline sitting, moderation or a paper archive"
+    },
+    "GET /cbt/exams/:p/answer-key.pdf": {
+      "kind": "ui",
+      "note": "Answer key PDF — EDITORS ONLY, 404 for a reviewer; audited separately from the paper"
+    },
     "GET /notifications/credits/ledger": {
       "kind": "ui",
       "note": "MessageCreditsCard on /billing — the school's own credit history; previously only the operator could see where credits went"

@@ -94,11 +94,23 @@ export interface CbtExamResultRowDto {
   status: string;
   score: number | null;
   total: number | null;
+  /** This SCRIPT still has unmarked theory, so its score is the objective part
+   *  only. Per-row because marking finishes script by script. */
+  provisional: boolean;
   startedAt: Date;
   submittedAt: Date | null;
 }
 
 export interface CbtExamResultsDto {
+  /**
+   * TRUE while any theory answer on this paper is still unmarked.
+   *
+   * On a paper with a Section B, `score` holds only the OBJECTIVE part until a
+   * human marks the theory — so a row reading 12/40 may be a script with 28
+   * marks not yet looked at, not a weak candidate. The marking console showed
+   * this; the results table every teacher actually opens did not.
+   */
+  provisional: boolean;
   exam: CbtExamDto;
   rows: CbtExamResultRowDto[];
 }
