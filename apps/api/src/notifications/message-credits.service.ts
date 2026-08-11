@@ -220,24 +220,28 @@ export class MessageCreditsService {
     const take = Math.min(100, Math.max(1, pageSize));
     const skip = (Math.max(1, page) - 1) * take;
     return this.db.runAsTenant({ schoolId: p.schoolId, userId: p.userId }, async (tx) => {
-      const [rows, total, balance] = await Promise.all([
+      const [rows, balance] = await Promise.all([
         tx.messageCreditEntry.findMany({
           // CHECKPOINTs are bookkeeping, not activity — showing them would put
           // rows a school never caused in the middle of its own history.
           where: { reason: { not: "CHECKPOINT" } },
           orderBy: { createdAt: "desc" },
           skip,
-          take,
+          // One extra row to detect a next page. A COUNT here would scan every
+          // message the school has ever sent — 70ms at 900,000 entries and
+          // growing for ever — to produce a number nobody asked for.
+          take: take + 1,
         }),
-        tx.messageCreditEntry.count({ where: { reason: { not: "CHECKPOINT" } } }),
         this.balanceInTx(tx, p.schoolId),
       ]);
+      const hasMore = (rows as unknown[]).length > take;
+      const page_ = (rows as unknown[]).slice(0, take);
       return {
         balance,
         page: Math.max(1, page),
         pageSize: take,
-        total,
-        rows: (rows as Array<Record<string, unknown>>).map((r) => ({
+        hasMore,
+        rows: (page_ as Array<Record<string, unknown>>).map((r) => ({
           id: r.id as string,
           deltaCredits: r.deltaCredits as number,
           reason: r.reason as string,

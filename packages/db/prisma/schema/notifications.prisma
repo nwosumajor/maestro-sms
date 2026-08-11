@@ -58,6 +58,9 @@ model MessageCreditEntry {
   @@index([schoolId, createdAt])
   /// Reconciliation matches our debits to the provider's own message ids.
   @@index([providerRef])
+  /// The idempotency lookup before crediting a purchase, and the sweep's
+  /// per-charge recovery check. Unindexed it was a 94ms seq scan at 900k rows.
+  @@index([reference])
   /// NOTE: the balance read ALSO needs a PARTIAL index on
   /// (schoolId, createdAt) WHERE reason = 'CHECKPOINT' — Prisma cannot express
   /// a partial index, so it lives in the migration. Without it, finding the
