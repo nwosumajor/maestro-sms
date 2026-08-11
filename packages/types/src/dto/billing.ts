@@ -207,5 +207,13 @@ export interface MessageCreditLedgerPageDto {
   rows: MessageCreditEntryDto[];
   page: number;
   pageSize: number;
-  total: number;
+  /**
+   * Whether another page exists — NOT a total.
+   *
+   * A COUNT over this table is a scan of every message the school has ever
+   * sent: 70ms at 900,000 entries and growing for ever. Detecting "is there
+   * more" by asking for one extra row costs the same at any size, and a
+   * ledger reader wants the next page, not a grand total of their own history.
+   */
+  hasMore: boolean;
 }

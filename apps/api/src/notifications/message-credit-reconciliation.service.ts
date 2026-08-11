@@ -70,6 +70,14 @@ export class MessageCreditReconciliationService {
     const result: CreditReconcileResult = { checkpointed: 0, unlinked: 0, unknownToProvider: 0, uncharged: 0 };
 
     // --- 1. Rewrite every active school's checkpoint from the FULL ledger ----
+    //
+    // THIS IS A FULL-TABLE AGGREGATE AND THAT IS DELIBERATE. Measured at
+    // 900,000 entries it is 165ms. Summing from the previous checkpoint instead
+    // would make it O(a day) — and would make every checkpoint inherit any
+    // drift in the one before it, for ever, which is the exact failure a
+    // SUM-of-ledger balance exists to prevent. Correctness wins here because
+    // this is a once-daily background job, not a request path; the READ side,
+    // which does run per message, is bounded by the checkpoint this writes.
     // reason: groupBy's generated overload rejects a dynamically-shaped arg;
     // the shape is correct and the RESULT is typed here.
     const groupBy = client.messageCreditEntry.groupBy as unknown as (
