@@ -9,6 +9,7 @@ import type {
   TimetableEntryDto,
   TimetableGenerateResultDto,
   CoverLessonDto,
+  UnstaffedLessonDto,
   MyCoverDutyDto,
 } from "@sms/types";
 import { z } from "zod";
@@ -122,6 +123,18 @@ export class TimetableController {
   }
 
   // --- periods ---
+  /**
+   * Lessons whose regular teacher has left the school.
+   *
+   * A departure closes the account but not the timetable, and nothing else in
+   * the product tells a school that a lesson has no teacher.
+   */
+  @Get("unstaffed")
+  @RequirePermission(TIMETABLE_PERMISSIONS.TIMETABLE_READ)
+  unstaffed(@CurrentPrincipal() p: Principal): Promise<UnstaffedLessonDto[]> {
+    return this.timetable.unstaffedLessons(p);
+  }
+
   @Get("periods")
   @RequirePermission(TIMETABLE_PERMISSIONS.TIMETABLE_READ)
   listPeriods(@CurrentPrincipal() p: Principal): Promise<PeriodDto[]> {

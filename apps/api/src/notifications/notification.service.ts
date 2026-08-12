@@ -455,7 +455,26 @@ export class NotificationService {
     const pref = requested.length
       ? await this.recipientPreference(tx, input.recipientId)
       : null;
-    const channels = allowedChannels(pref, input.type, requested) as NotificationChannelValue[];
+    let channels = allowedChannels(pref, input.type, requested) as NotificationChannelValue[];
+
+    // NOTHING LEAVES THE BUILDING FOR SOMEBODY WHO HAS LEFT IT.
+    //
+    // The inbox row above is always written — it is the record, and they cannot
+    // sign in to read it anyway. External delivery is a different matter: an SMS
+    // or email to a departed pupil or teacher costs the school a paid message
+    // credit and sends them school information they are no longer entitled to.
+    // A withdrawn child's guardian being texted about next term's fees is the
+    // shape of complaint this produces.
+    //
+    // Checked once, HERE, rather than at each of the ~40 producers: a rule that
+    // has to be remembered at every call site is one that will be missed.
+    if (channels.length > 0) {
+      const recipient = await tx.user.findFirst({
+        where: { id: input.recipientId },
+        select: { status: true },
+      });
+      if (recipient && recipient.status !== "ACTIVE") channels = [];
+    }
     for (const channel of channels) {
       await tx.notificationDelivery.create({
         data: { schoolId: actor.schoolId, notificationId: notification.id, channel },

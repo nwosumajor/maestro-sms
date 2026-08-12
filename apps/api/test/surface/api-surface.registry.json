@@ -1437,6 +1437,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "GET /timetable/unstaffed": {
+      "kind": "ui",
+      "note": "'Lessons with no teacher' card on /timetable — lessons whose regular teacher has left the school. A departure closes the account but not the timetable, and nothing else tells a school a class has nobody to teach it."
+    },
     "GET /timetable/view": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"

@@ -27,6 +27,7 @@ import {
 import { Prisma } from "@sms/db";
 import type {
   DayOfWeekValue,
+  UnstaffedLessonDto,
   DayStructureInput,
   TeacherUnavailabilityDto,
   TimetableDiagnosticDto,
@@ -1118,5 +1119,83 @@ export class TimetableService {
       { actorId: p.userId, action, entity, entityId, schoolId: p.schoolId, metadata },
       tx,
     );
+  }
+
+  /**
+   * Lessons whose regular teacher has LEFT the school.
+   *
+   * WHY THIS EXISTS. A departure closes the employment record and the account,
+   * but it does not touch the timetable — so the lessons stay, timetabled to
+   * somebody who will not arrive, and NOTHING anywhere says so. The class turns
+   * up, the room is booked, the grid renders normally, and the school finds out
+   * when thirty pupils sit unattended.
+   *
+   * Deliberately NOT the cover feature. Cover answers "who is out today"
+   * (approved leave, a bounded window, assign a reliever for that date). This
+   * answers "which lessons have no teacher at all, permanently" — a staffing
+   * decision, not a daily one. Folding it into cover would have offered a
+   * reliever for one Tuesday on a vacancy that needs filling for the year.
+   *
+   * A read, and only a read: it changes nothing and reassigns nothing, because
+   * who takes over a departed colleague's classes is a decision a human makes.
+   */
+  async unstaffedLessons(p: Principal): Promise<UnstaffedLessonDto[]> {
+    if (!this.isStaffWide(p)) {
+      // Whole-school staffing, so whole-school staff only. 404 rather than 403
+      // — the same posture as every other out-of-scope read here.
+      throw new NotFoundException("Not found");
+    }
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      // ONE joined query. These models carry scalar ids with FKs in the DB and
+      // no Prisma relations (the documented pattern that keeps `User` lean), so
+      // the alternative is four round trips and a manual join in Node — for a
+      // page a school opens precisely when it is already short-staffed.
+      //
+      // RLS still applies: this runs inside the tenant transaction, so the
+      // policies scope every table to the caller's school without a schoolId
+      // predicate having to be written here by hand and kept right.
+      const rows = await tx.$queryRaw<
+        Array<{
+          entryId: string;
+          dayOfWeek: string;
+          periodName: string | null;
+          startTime: string | null;
+          classId: string | null;
+          className: string | null;
+          subjectName: string | null;
+          teacherId: string;
+          teacherName: string | null;
+          leftOn: Date | null;
+        }>
+      >`
+        SELECT te.id                AS "entryId",
+               te."dayOfWeek"::text AS "dayOfWeek",
+               p.name               AS "periodName",
+               p."startTime"        AS "startTime",
+               c.id                 AS "classId",
+               c.name               AS "className",
+               te.subject           AS "subjectName",
+               te."teacherId"       AS "teacherId",
+               u.name               AS "teacherName",
+               u."exitedAt"         AS "leftOn"
+        FROM timetable_entry te
+        JOIN "user" u ON u.id = te."teacherId" AND u.status <> 'ACTIVE'
+        LEFT JOIN period p ON p.id = te."periodId"
+        LEFT JOIN class c  ON c.id = te."classId"
+        ORDER BY te."dayOfWeek", p."startTime"
+      `;
+      return rows.map((r) => ({
+        entryId: r.entryId,
+        dayOfWeek: r.dayOfWeek,
+        periodName: r.periodName ?? "\u2014",
+        startsAt: r.startTime ?? null,
+        classId: r.classId,
+        className: r.className ?? "\u2014",
+        subjectName: r.subjectName ?? null,
+        teacherId: r.teacherId,
+        teacherName: r.teacherName ?? "\u2014",
+        leftOn: r.leftOn,
+      }));
+    });
   }
 }
