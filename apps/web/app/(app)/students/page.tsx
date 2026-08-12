@@ -49,6 +49,13 @@ export default async function StudentsPage({
 
         <div className="flex flex-wrap items-center justify-between gap-2">
           <StudentSearch initial={q ?? ""} />
+          {/* This list is who is HERE. Leavers live on their own page so they
+              can never drift back onto a register or a print run. */}
+          {hasPermission(user.permissions, "student.profile.read") && (
+            <Link href="/students/leavers" className="text-sm text-muted-foreground hover:underline">
+              Students who have left →
+            </Link>
+          )}
           <span className="text-sm text-muted-foreground tabular-nums">
             {q
               ? `${shown.length} match${shown.length === 1 ? "" : "es"}`

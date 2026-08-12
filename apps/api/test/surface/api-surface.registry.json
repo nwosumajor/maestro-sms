@@ -2985,6 +2985,22 @@
       "kind": "ui",
       "note": "Answer key PDF — EDITORS ONLY, 404 for a reviewer; audited separately from the paper"
     },
+    "GET /students/exited": {
+      "kind": "ui",
+      "note": "Leavers register on /admin/students — who has left and when. Paged; the list only ever grows."
+    },
+    "GET /students/:p/exit/preview": {
+      "kind": "ui",
+      "note": "StudentExitDialog — classes and money owed shown to the approver BEFORE the exit is raised"
+    },
+    "POST /students/:p/exit": {
+      "kind": "ui",
+      "note": "Raises the two-stage STUDENT_EXIT workflow. There is deliberately NO endpoint that applies an exit directly."
+    },
+    "POST /students/:p/readmit": {
+      "kind": "ui",
+      "note": "Principal-only, single step: the chain exists to stop one person REMOVING access, not restoring it"
+    },
     "GET /notifications/credits/ledger": {
       "kind": "ui",
       "note": "MessageCreditsCard on /billing — the school's own credit history; previously only the operator could see where credits went"

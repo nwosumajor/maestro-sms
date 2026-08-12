@@ -29,6 +29,7 @@ export default async function ClassRosterPage({ params }: { params: { id: string
   const roster = await apiGet<Roster>(`/classes/${params.id}`);
   if (!roster) notFound();
   const canWrite = hasPermission(user.permissions, "enrollment.write");
+  const canRequestExit = hasPermission(user.permissions, "student.exit.request");
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="classes" permissions={user.permissions}>
@@ -60,7 +61,12 @@ export default async function ClassRosterPage({ params }: { params: { id: string
             <CardTitle className="text-base">Students ({roster.students.length})</CardTitle>
           </CardHeader>
           <CardContent>
-            <RosterStudents classId={params.id} students={roster.students} canWrite={canWrite} />
+            <RosterStudents
+              classId={params.id}
+              students={roster.students}
+              canWrite={canWrite}
+              canRequestExit={canRequestExit}
+            />
           </CardContent>
         </Card>
       </div>

@@ -286,6 +286,12 @@ export function WorkflowInbox({
                       {w.type.replace("_", " ")} ·{" "}
                       {w.initiatorId === userId ? "you initiated" : "from a colleague"}
                     </CardDescription>
+                    {/* The facts behind the request. An approver deciding on a
+                        title alone is guessing — and on a student exit, what
+                        they are approving is the end of a child's access. */}
+                    {w.summary && (
+                      <p className="mt-1 text-sm text-muted-foreground">{w.summary}</p>
+                    )}
                   </div>
                   <div className="flex flex-col items-end gap-1">
                     <Badge variant={STATE_VARIANT[w.state] ?? "secondary"}>

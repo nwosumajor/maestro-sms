@@ -823,6 +823,28 @@ export class LmsService {
       if (!enr) throw new NotFoundException("Enrollment not found");
       // Reactivating must still respect capacity.
       if (status === "ACTIVE") await this.assertCapacity(tx, classId, 1);
+      else {
+        // THE BACK DOOR THIS CLOSES. This endpoint answers "is this pupil in
+        // THIS class" — a roster edit, one permission, one person, and rightly
+        // so when a child was put in the wrong class. But taking them out of
+        // their LAST class is not a roster edit: they vanish from every
+        // register, every print run and every classmate list, while their
+        // account stays ACTIVE and they can still sign in. That is an exit
+        // performed by one person with none of an exit's guarantees — and
+        // `enrollment.write` is held by junior_admin, the tier defined by
+        // having no approval powers.
+        //
+        // So the last one is refused and pointed at the two-stage exit, which
+        // is the only thing that actually ends access.
+        const otherActive = await tx.enrollment.count({
+          where: { studentId, status: "ACTIVE", NOT: { id: enr.id } },
+        });
+        if (otherActive === 0) {
+          throw new ConflictException(
+            "This is the student's only class. Leaving the school is a Student exit request — it needs a second approval from the principal, and it ends their sign-in access.",
+          );
+        }
+      }
       const updated = await tx.enrollment.update({
         where: { id: enr.id },
         data: { status, statusReason: reason ?? null },

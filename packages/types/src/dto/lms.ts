@@ -155,6 +155,9 @@ export interface WorkflowInboxItemDto {
   stageCount: number;
   /** Label of the stage currently awaiting approval (null when not staged/terminal). */
   stageLabel: string | null;
+  /** A one-line, service-written summary of what is being approved — the facts
+   *  an approver would otherwise have to go and look up. Never the raw payload. */
+  summary: string | null;
 }
 
 /** A senior staff member the initiator can route an approval stage to

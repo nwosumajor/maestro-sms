@@ -48,12 +48,35 @@ describe("LmsService lifecycle", () => {
   });
 
   it("setEnrollmentStatus records a transfer with reason", async () => {
-    const { service, tx } = svc({ enrollment: { id: "en1" } });
+    // activeCount = the pupil's OTHER active enrolments. They are in another
+    // class, so taking them off this list is a roster correction and allowed.
+    const { service, tx } = svc({ enrollment: { id: "en1" }, activeCount: 1 });
     await service.setEnrollmentStatus(admin, "c1", "s1", "TRANSFERRED", "moved town");
     const enr = tx.enrollment as unknown as { update: jest.Mock };
     expect(enr.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: { status: "TRANSFERRED", statusReason: "moved town" } }),
     );
+  });
+
+  it("setEnrollmentStatus REFUSES to take a pupil out of their last class", async () => {
+    // Their only class. Removing it drops them from every register and print
+    // run while their account stays ACTIVE and they can still sign in — an exit
+    // done by one person, with none of an exit's guarantees. `enrollment.write`
+    // is held by junior_admin, the tier defined by having no approval powers.
+    // Leaving the school is the two-stage STUDENT_EXIT workflow instead.
+    const { service, tx } = svc({ enrollment: { id: "en1" }, activeCount: 0 });
+    await expect(
+      service.setEnrollmentStatus(admin, "c1", "s1", "WITHDRAWN", "left"),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect((tx.enrollment as unknown as { update: jest.Mock }).update).not.toHaveBeenCalled();
+  });
+
+  it("still lets a pupil be put BACK into a class they are their only enrolment in", async () => {
+    // The refusal is about removal. Reactivating is the safe direction and must
+    // not be caught by it, or a mistake becomes unfixable.
+    const { service, tx } = svc({ enrollment: { id: "en1" }, cls: { id: "c1", capacity: null }, activeCount: 0 });
+    await service.setEnrollmentStatus(admin, "c1", "s1", "ACTIVE");
+    expect((tx.enrollment as unknown as { update: jest.Mock }).update).toHaveBeenCalled();
   });
 
   it("eligibility computes avg score (%) and attendance (%) per student", async () => {
