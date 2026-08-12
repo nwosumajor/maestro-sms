@@ -717,13 +717,41 @@ export class TransportService {
       const due = input.due;
       const where = input.routeId ? { routeId: input.routeId, status: "ACTIVE" } : { status: "ACTIVE" };
       const assignments = await tx.transportAssignment.findMany({ where });
+
+      // IDEMPOTENCY — same defect and same fix as the hostel run. A fare run
+      // posts money onto a passenger's invoice, and a second press or a replayed
+      // FEE_SCHEDULE approval charged every passenger again, with no marker to
+      // tell the duplicate from the original afterwards.
+      const lineDescription = input.description ?? "Transport fare";
+      // The SCHOOL's currency, not the column default of NGN: settlement refuses
+      // a charge whose currency differs from the invoice, so an invoice raised
+      // in the wrong one can never be paid online.
+      const school = await tx.school.findFirst({ where: { id: schoolId }, select: { currency: true } });
+      const schoolCurrency = school?.currency ?? "NGN";
+      const passengerIds = (assignments as Array<{ passengerId: string }>).map((a) => a.passengerId);
+      const alreadyBilled = passengerIds.length
+        ? await tx.invoiceLineItem.findMany({
+            where: { description: lineDescription, invoice: { studentId: { in: passengerIds }, status: "DRAFT" } },
+            select: { invoice: { select: { studentId: true } } },
+          })
+        : [];
+      const billed = new Set(
+        (alreadyBilled as Array<{ invoice: { studentId: string } }>).map((l) => l.invoice.studentId),
+      );
+
       let invoicesCreated = 0;
+      let skippedAlreadyBilled = 0;
       let totalBilledMinor = 0;
       let passengersBilled = 0;
       for (const a of assignments as Array<{ routeId: string; stopId: string | null; passengerId: string; passengerType: string }>) {
         if (a.passengerType !== "STUDENT") continue; // only students are invoiced
         const fare = await this.fareFor(tx, a.routeId, a.stopId);
         if (fare <= 0) continue;
+        if (billed.has(a.passengerId)) {
+          skippedAlreadyBilled++;
+          continue;
+        }
+        billed.add(a.passengerId);
         let invoice = await tx.invoice.findFirst({ where: { studentId: a.passengerId, status: "DRAFT" } });
         if (!invoice) {
           invoice = await tx.invoice.create({
@@ -734,20 +762,21 @@ export class TransportService {
               reference: `TRANSPORT-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
               status: "DRAFT",
               totalMinor: 0,
+              currency: schoolCurrency,
               dueDate: due,
             },
           });
           invoicesCreated++;
         }
         await tx.invoiceLineItem.create({
-          data: { schoolId, invoiceId: invoice.id, description: input.description ?? "Transport fare", amountMinor: fare, quantity: 1 },
+          data: { schoolId, invoiceId: invoice.id, description: lineDescription, amountMinor: fare, quantity: 1 },
         });
         await tx.invoice.update({ where: { id: invoice.id }, data: { totalMinor: { increment: fare } } });
         totalBilledMinor += fare;
         passengersBilled++;
       }
       await this.audit.record(
-        { actorId, action: "transport.fees.schedule", entity: "transport", entityId: input.routeId ?? "all", schoolId, metadata: { invoicesCreated, totalBilledMinor, passengersBilled } },
+        { actorId, action: "transport.fees.schedule", entity: "transport", entityId: input.routeId ?? "all", schoolId, metadata: { invoicesCreated, totalBilledMinor, passengersBilled, skippedAlreadyBilled } },
         tx,
       );
       return { invoicesCreated, totalBilledMinor, passengersBilled };
