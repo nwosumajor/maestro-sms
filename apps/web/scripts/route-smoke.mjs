@@ -171,6 +171,10 @@ function fill(route, ids) {
     .replace(/\/games\/(duel|league|race|ring|ultimate)\/\[id\]/, `/games/$1/${DUMMY_UUID}`);
 }
 
+/** Pause before re-requesting a failed route. Long enough for the per-tenant
+ *  rate-limit window to give back budget, short enough to stay usable. */
+const RETRY_PAUSE_MS = Number(process.env.SMOKE_RETRY_PAUSE_MS ?? 8000);
+
 const ERROR_RE = /Application error|server-side exception|is not a function|Cannot read propert|TypeError|__NEXT_ERROR/i;
 
 // A page that THROWS during SSR is served as a 200 carrying the error boundary,
@@ -237,13 +241,33 @@ async function main() {
     }
     for (const route of routes) {
       const url = fill(route, ids);
-      let res;
-      try { res = await client.get(url); } catch (e) { bad.push(`${url} (fetch error: ${e.message})`); continue; }
-      const html = res.status === 200 ? await res.text() : "";
-      if (classify(res.status, html) === "FAIL") {
+      // RETRY ONCE ON FAILURE — this is what separates a defect from a 429.
+      //
+      // The API rate-limits per TENANT (1200/min, shared by the whole school).
+      // This tool asks for 104 routes as fast as it can, several API calls each,
+      // all as the demo school — so it exhausts that budget on its own and the
+      // tail of every run comes back rate limited. Those arrive as SSR throws
+      // with a digest, which looked EXACTLY like a broken page: three separate
+      // investigations here ended in "all of them were 429s". A run that cannot
+      // tell a defect from its own load is not measuring the app.
+      //
+      // A real SSR throw is deterministic and repeats; a rate-limit is
+      // transient and clears. So a failure is re-requested once after a pause,
+      // and only a SECOND failure is reported. Costs one pause per failure and
+      // nothing at all on a clean run.
+      let res, html, verdict;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        if (attempt) await new Promise((r) => setTimeout(r, RETRY_PAUSE_MS));
+        try { res = await client.get(url); } catch (e) { verdict = `fetch error: ${e.message}`; continue; }
+        html = res.status === 200 ? await res.text() : "";
+        verdict = classify(res.status, html) === "FAIL" ? null : "ok";
+        if (verdict === "ok") break;
+        verdict = null;
+      }
+      if (verdict !== "ok") {
         // Pull the Next digest if present for quick server-log correlation.
-        const dig = errorDigests(html)[0] ?? html.match(/Digest:\s*(\d+)/)?.[1];
-        bad.push(`${url} -> ${res.status}${dig ? ` (digest ${dig})` : ""}`);
+        const dig = html ? (errorDigests(html)[0] ?? html.match(/Digest:\s*(\d+)/)?.[1]) : undefined;
+        bad.push(`${url} -> ${res?.status ?? "-"}${dig ? ` (digest ${dig})` : ""} [failed twice]`);
       }
     }
     if (bad.length) { failures.push({ email, bad }); console.log(`✗ ${email}: ${bad.length} failing`); bad.forEach((b) => console.log(`    ${b}`)); }

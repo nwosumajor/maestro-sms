@@ -15,6 +15,7 @@
 // =============================================================================
 
 import { Pool } from "pg";
+import { prisma } from "@sms/db";
 import { randomUUID } from "node:crypto";
 import { BadRequestException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import { TimetableService } from "../../src/timetable/timetable.service";
@@ -116,6 +117,14 @@ d("TimetableService integration (CSP auto-generation, RLS)", () => {
     await admin.query(`DELETE FROM "user" WHERE "schoolId" = ANY($1)`, [[SA, SB]]);
     await admin.query(`DELETE FROM school WHERE id = ANY($1)`, [[SA, SB]]);
     await admin.end();
+    // The suite drives a real TimetableService, which reaches the DB through
+    // the `@sms/db` singleton — not through the `admin` pool above. Leaving it
+    // connected keeps the jest worker alive after the tests finish and HANGS
+    // the CI test step; every sibling DB suite disconnects it for this reason.
+    // Locally it hides: another suite's disconnect closes the shared pool for
+    // everyone under --runInBand, so this looked fine until the full suite ran
+    // and jest force-exited with a leaked-worker warning.
+    await prisma.$disconnect();
   });
 
   it("staff set a teacher's unavailability; the teacher lists only their own", async () => {
