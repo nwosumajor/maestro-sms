@@ -23,7 +23,7 @@
 // the string in the test.
 // =============================================================================
 
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 const WEB_ROUTE = join(__dirname, "../../../web/app/api/webhooks/[...path]/route.ts");
@@ -95,5 +95,51 @@ describe("webhook passthrough targets", () => {
     for (const header of ["x-paystack-signature", "stripe-signature", "verif-hash"]) {
       expect(passthrough).toContain(header);
     }
+  });
+});
+
+describe("every gateway RETURN url has a page that acts on it", () => {
+  // The defect this catches, twice over: a checkout sends the gateway a
+  // callback_url, the API grows the endpoint to settle it — and nothing on the
+  // page ever calls that endpoint. The redirect then lands on a screen that
+  // does nothing, and the money only appears when a daily sweep next runs.
+  //
+  // It happened to credit bundles exactly this way: callback_url shipped,
+  // POST /notifications/credits/verify shipped, no caller. A school charged
+  // NGN 50,000 saw an unchanged balance and reasonably assumed it had failed.
+  const WEB = join(__dirname, "../../../web");
+
+  function apiSources(dir: string, out: string[] = []): string[] {
+    for (const e of readdirSync(dir)) {
+      const full = join(dir, e);
+      if (statSync(full).isDirectory()) apiSources(full, out);
+      else if (e.endsWith(".ts") && !e.endsWith(".spec.ts")) out.push(full);
+    }
+    return out;
+  }
+
+  function webSources(dir: string, out: string[] = []): string[] {
+    for (const e of readdirSync(dir)) {
+      if (e === "node_modules" || e === ".next") continue;
+      const full = join(dir, e);
+      if (statSync(full).isDirectory()) webSources(full, out);
+      else if (e.endsWith(".tsx") || e.endsWith(".ts")) out.push(full);
+    }
+    return out;
+  }
+
+  it("names a query parameter the billing/fees pages actually read", () => {
+    // Collect every `?<param>=` a callback_url is built with in the API...
+    const params = new Set<string>();
+    for (const f of apiSources(join(__dirname, "../../src"))) {
+      const src = readFileSync(f, "utf8");
+      for (const m of src.matchAll(/callbackUrl:[\s\S]{0,200}?\?([a-zA-Z]+)=/g)) params.add(m[1]);
+    }
+    expect(params.size).toBeGreaterThan(0);
+
+    // ...and require the web tier to mention each one somewhere.
+    const web = webSources(WEB).map((f) => readFileSync(f, "utf8")).join("\n");
+    const unhandled = [...params].filter((p) => !web.includes(p));
+    expect(unhandled).toEqual([]);
   });
 });
