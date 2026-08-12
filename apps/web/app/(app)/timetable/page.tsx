@@ -1,4 +1,4 @@
-import type { IdNameDto, PeriodDto, TimetableEntryDto, Serialized } from "@sms/types";
+import type { IdNameDto, PeriodDto, TimetableEntryDto, UnstaffedLessonDto, Serialized } from "@sms/types";
 import { hasPermission } from "@/lib/permissions";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
@@ -7,10 +7,13 @@ import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { TimetableAdmin } from "@/components/timetable/TimetableAdmin";
 import { CoverPanel } from "@/components/timetable/CoverPanel";
+import { UnstaffedLessons } from "@/components/timetable/UnstaffedLessons";
 import { TimetableViews, TeacherLoadPanel } from "@/components/timetable/TimetableViews";
 import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
+
+type Unstaffed = Serialized<UnstaffedLessonDto>;
 
 type Period = Serialized<PeriodDto>;
 type ClassRow = Serialized<IdNameDto>;
@@ -28,7 +31,7 @@ export default async function TimetablePage({
   // cannot be reached by URL by someone the nav hides it from.
   if (!hasPermission(user.permissions, "timetable.read")) redirect("/dashboard");
   const canWrite = hasPermission(user.permissions, "timetable.write");
-  const [periods, classes, rooms, allTeachers] = await Promise.all([
+  const [periods, classes, rooms, allTeachers, unstaffed] = await Promise.all([
     apiGet<Period[]>("/timetable/periods"),
     apiGet<ClassRow[]>("/classes/mine"),
     // Rooms are needed by the ROOM view too, not just the admin editor, so this is
@@ -37,6 +40,10 @@ export default async function TimetablePage({
     // Teacher directory for the availability editor AND the teacher view (class.write
     // accompanies timetable.write on every writing role).
     hasPermission(user.permissions, "directory.people.read") ? apiGet<{ id: string; name: string; roles?: string[] }[]>("/directory/people?kind=teacher") : Promise.resolve(null),
+    // Lessons whose teacher has left. Staff-wide only (the API 404s otherwise),
+    // and fetched with the rest rather than after them — it is a small joined
+    // query and this page already waits on four.
+    canWrite ? apiGet<Unstaffed[]>("/timetable/unstaffed") : Promise.resolve(null),
   ]);
 
   const list = classes ?? [];
@@ -77,6 +84,9 @@ export default async function TimetablePage({
           />
         )}
 
+        {/* Before cover: cover is "who is out today", this is "which lessons
+            have nobody at all". The permanent problem reads first. */}
+        {canWrite && unstaffed !== null && <UnstaffedLessons rows={unstaffed} />}
         {canWrite && <CoverPanel teachers={allTeachers ?? []} />}
 
         {list.length === 0 ? (

@@ -158,6 +158,11 @@ export class WorkflowService {
     const eligible = await tx.user.findMany({
       where: {
         id: { in: approverIds },
+        // ON ROLL. Routing a stage to somebody who has already left creates a
+        // request that is stuck the moment it is submitted. The review path
+        // now falls back when an approver leaves AFTER routing, but there is
+        // no reason to allow it at the outset.
+        status: "ACTIVE",
         roles: {
           some: {
             role: {
@@ -196,6 +201,9 @@ export class WorkflowService {
       const users = await tx.user.findMany({
         where: {
           id: { not: p.userId },
+          // Never offer somebody who has left as an approver — the picker is
+          // where the bad choice would be made.
+          status: "ACTIVE",
           roles: {
             some: {
               role: {
@@ -322,6 +330,10 @@ export class WorkflowService {
       let nextStage = req.currentStage;
       let nextApprovals = approvals;
       let stageNote: string | undefined;
+      // Set when a routed stage was acted on by somebody OTHER than its named
+      // approver, because that approver has left. Recorded on the audit entry —
+      // a stage that quietly changed hands must be visible afterwards.
+      let routedApproverGone: string | undefined;
 
       // A ROUTED stage names its approver: only that person may act on it —
       // including REQUEST_REVISION, so a bystander reviewer can't bounce a
@@ -332,9 +344,34 @@ export class WorkflowService {
       ) {
         const named = stages[req.currentStage]?.approverId;
         if (named && named !== p.userId) {
-          throw new ForbiddenException(
-            `This stage is routed to ${stages[req.currentStage]?.approverName ?? "a designated approver"}`,
-          );
+          // …UNLESS THE NAMED APPROVER HAS LEFT THE SCHOOL.
+          //
+          // A routed stage names ONE person, and every exit from PENDING_REVIEW
+          // — approve, reject, even bouncing it back — is gated to them. There
+          // is no cancel, no withdraw and no reassign. So when that person
+          // left, the request was stuck FOREVER, and silently: the initiator
+          // saw "pending", the principal was refused, and nothing anywhere said
+          // the approver no longer existed. Confirmed by exiting a routed
+          // approver and finding all six escape routes closed.
+          //
+          // Falling back to the stage's PERMISSION gate is the fix that
+          // self-heals. The routing is honoured while the person is there, and
+          // when they are gone the stage becomes an ordinary one that any
+          // eligible reviewer can act on — still a different person from the
+          // initiator, still holding the right permission, still recorded. A
+          // reassign button would have been more machinery AND would have
+          // needed somebody to notice the deadlock first, which is precisely
+          // what nobody does.
+          const stillHere = await tx.user.findFirst({
+            where: { id: named, status: "ACTIVE" },
+            select: { id: true },
+          });
+          if (stillHere) {
+            throw new ForbiddenException(
+              `This stage is routed to ${stages[req.currentStage]?.approverName ?? "a designated approver"}`,
+            );
+          }
+          routedApproverGone = stages[req.currentStage]?.approverName ?? "the routed approver";
         }
       }
 
@@ -400,7 +437,12 @@ export class WorkflowService {
         approverId: action === "SUBMIT" ? null : p.userId,
         oldState: req.state,
         newState: nextState,
-        comments: comments ?? stageNote ?? null,
+        comments:
+          comments ??
+          ([stageNote, routedApproverGone && `routed approver ${routedApproverGone} has left the school`]
+            .filter(Boolean)
+            .join("; ") ||
+            null),
       });
 
       // Fan out to reactors (e.g. HR leave) on a terminal state, in-tx.

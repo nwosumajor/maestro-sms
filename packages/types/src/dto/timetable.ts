@@ -83,3 +83,19 @@ export interface MyCoverDutyDto {
   periodName: string;
   note: string | null;
 }
+
+
+/** A lesson whose regular teacher has left the school — a permanent vacancy,
+ *  not a day's absence. Read-only: reassignment is a human decision. */
+export interface UnstaffedLessonDto {
+  entryId: string;
+  dayOfWeek: string;
+  periodName: string;
+  startsAt: string | null;
+  classId: string | null;
+  className: string;
+  subjectName: string | null;
+  teacherId: string;
+  teacherName: string;
+  leftOn: Date | null;
+}

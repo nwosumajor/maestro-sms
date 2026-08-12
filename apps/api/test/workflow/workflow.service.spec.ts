@@ -199,7 +199,11 @@ describe("WorkflowService multi-stage chain (head -> HR -> principal)", () => {
 
 describe("WorkflowService initiator-routed chains (named approvers)", () => {
   // Harness with a user model so buildCustomChain / listEligibleApprovers work.
-  function makeRoutedService(request: Record<string, unknown> | null, eligibleUsers: { id: string; name: string }[]) {
+  function makeRoutedService(
+    request: Record<string, unknown> | null,
+    eligibleUsers: { id: string; name: string }[],
+    opts: { namedApproverStillHere?: boolean } = {},
+  ) {
     const updateMany = jest.fn().mockResolvedValue({ count: 1 });
     const tx = {
       workflowRequest: {
@@ -209,7 +213,16 @@ describe("WorkflowService initiator-routed chains (named approvers)", () => {
         updateMany,
       },
       workflowAuditLog: { create: jest.fn().mockResolvedValue({}), findMany: jest.fn().mockResolvedValue([]) },
-      user: { findMany: jest.fn().mockResolvedValue(eligibleUsers) },
+      user: {
+        findMany: jest.fn().mockResolvedValue(eligibleUsers),
+        // The named approver is STILL AT THE SCHOOL by default, so the routing
+        // is enforced. The review path looks this up before refusing, because a
+        // stage routed to somebody who has LEFT would otherwise be stuck
+        // forever — see departed-approver.spec.ts.
+        findFirst: jest
+          .fn()
+          .mockResolvedValue(opts.namedApproverStillHere === false ? null : { id: "senior1" }),
+      },
     } as unknown as TenantTx;
     const db = { runAsTenant: <T,>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
     const hooks = { onFinalized: jest.fn(), runFinalized: jest.fn().mockResolvedValue(undefined) };
@@ -280,6 +293,41 @@ describe("WorkflowService initiator-routed chains (named approvers)", () => {
     await expect(
       service.review(p(["workflow.review"], "some-other-reviewer"), "w1", "APPROVE"),
     ).rejects.toThrow(/routed to Head One/i);
+  });
+
+  it("but once that approver has LEFT, an eligible reviewer can move it on", async () => {
+    // THE DEADLOCK. Every exit from PENDING_REVIEW — approve, reject, even
+    // bouncing it back for revision — is gated to the named approver, and
+    // WORKFLOW_TRANSITIONS has no cancel, withdraw or reassign. So when that
+    // person left the school the request was stuck permanently, and silently:
+    // the initiator saw "pending" and the principal was refused. Confirmed live
+    // on a real request before the fix.
+    //
+    // The routing now falls back to the stage's PERMISSION gate when the named
+    // approver is no longer ACTIVE.
+    const { service } = makeRoutedService(routed(), [], { namedApproverStillHere: false });
+    const r = (await service.review(p(["workflow.review"], "some-other-reviewer"), "w1", "APPROVE")) as {
+      state: string;
+      currentStage: number;
+    };
+    expect(r.state).toBe("PENDING_REVIEW");
+    expect(r.currentStage).toBe(1);
+  });
+
+  it("the fallback does NOT let the initiator approve their own request", async () => {
+    // The point of the fallback is to widen WHO may act, never to remove the
+    // rule that makes an approval mean anything.
+    const { service } = makeRoutedService(routed(), [], { namedApproverStillHere: false });
+    await expect(service.review(p(["workflow.review"], "staff"), "w1", "APPROVE")).rejects.toThrow(
+      /your own request/i,
+    );
+  });
+
+  it("the fallback still requires the stage's permission", async () => {
+    const { service } = makeRoutedService(routed(), [], { namedApproverStillHere: false });
+    await expect(
+      service.review(p([], "some-other-reviewer"), "w1", "APPROVE"),
+    ).rejects.toThrow();
   });
 
   it("the named approver advances the chain to the next named stage", async () => {
