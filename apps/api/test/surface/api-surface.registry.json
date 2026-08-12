@@ -2185,6 +2185,10 @@
       "kind": "ui",
       "note": "reached via a runtime-built path (web builds \"/hr/exits\")"
     },
+    "POST /hr/exits/revoke-elapsed": {
+      "kind": "ui",
+      "note": "'Close elapsed exits' on /hr — closes the account of anyone whose last working day has passed. The nightly sweep does the whole fleet; this is the same job for one school, on demand, so it can be verified rather than assumed."
+    },
     "POST /hr/leave/requests": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"

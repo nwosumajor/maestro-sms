@@ -48,6 +48,18 @@ export class ExitController {
     return this.exits.decide(p, id, b.approve);
   }
 
+  /**
+   * Close the access of anyone whose last working day has passed.
+   *
+   * The nightly sweep does this for the whole fleet; this is the same job for
+   * one school, on demand, so the behaviour can be verified rather than assumed.
+   */
+  @Post("revoke-elapsed")
+  @RequirePermission(HR_PERMISSIONS.HR_WRITE)
+  revokeElapsed(@CurrentPrincipal() p: Principal) {
+    return this.exits.revokeElapsed(p);
+  }
+
   @Get()
   @RequirePermission(HR_PERMISSIONS.HR_READ)
   list(@CurrentPrincipal() p: Principal): Promise<StaffExitDto[]> {

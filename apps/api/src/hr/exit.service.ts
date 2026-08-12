@@ -14,6 +14,7 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { computeFinalSettlement, type FinalSettlement, type StaffExitDto } from "@sms/types";
 import { decryptField, encryptField } from "../foundation/field-crypto";
+import { endsOnOrBefore, revokeStaffAccessInTx } from "./staff-access";
 import { StaffLifecycleService } from "./staff-lifecycle.service";
 import {
   AUDIT_LOG_SERVICE,
@@ -115,6 +116,25 @@ export class ExitService {
           where: { id: emp.id },
           data: { status: "EXITED", endDate: row.lastWorkingDay },
         });
+        // AND END THEIR ACCESS — which nothing did before this.
+        //
+        // Approving an exit closed the EMPLOYMENT record and stopped there. The
+        // account stayed ACTIVE, so a departed teacher could still sign in and
+        // still held every permission they left with: grades, attendance,
+        // student profiles, medical records, messaging. The offboarding
+        // checklist's "Revoke system access" is a TICKBOX — ticking it changes
+        // nothing — so the platform looked like it had handled this while doing
+        // nothing at all, which is worse than an obvious omission.
+        //
+        // NOT ALWAYS TODAY. Unlike a pupil's exit, a staff exit is normally
+        // approved BEFORE the last working day — someone serving a month's
+        // notice still has to teach. Revoking on approval would lock a teacher
+        // out of their own classes for their whole notice period. So access
+        // ends ON the last working day: immediately if that day has passed,
+        // otherwise the daily sweep does it (StaffReminderService.sweep).
+        if (endsOnOrBefore(row.lastWorkingDay, new Date())) {
+          await revokeStaffAccessInTx(tx, row.userId);
+        }
         // Recover loans against the settlement (order: oldest first), posting
         // ledger rows with NULL payrollRunId (= exit recovery). Anything the
         // settlement can't cover stays on the loan (balance > 0, still ACTIVE).
@@ -160,6 +180,49 @@ export class ExitService {
       }
     }
     return decided;
+  }
+
+  /**
+   * Close the access of anyone in THIS school whose last working day has passed.
+   *
+   * The nightly cross-tenant sweep does the whole fleet; this is the same job
+   * for one school, on demand. It exists for two reasons the dunning sweep
+   * taught us: a scheduled job with no manual trigger cannot be verified after
+   * an incident, and "did it run?" is a question an administrator will ask.
+   *
+   * Shares `endsOnOrBefore` and `revokeStaffAccessInTx` with both the approval
+   * path and the nightly sweep, so the three cannot disagree about who should
+   * still have access.
+   */
+  async revokeElapsed(p: Principal): Promise<{ revoked: number; scanned: number }> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const now = new Date();
+      const rows = (await tx.staffExit.findMany({
+        where: { status: "APPROVED", lastWorkingDay: { lte: now } },
+        select: { userId: true, lastWorkingDay: true },
+      })) as Array<{ userId: string; lastWorkingDay: Date }>;
+      let revoked = 0;
+      for (const r of rows) {
+        if (!endsOnOrBefore(r.lastWorkingDay, now)) continue;
+        if (await revokeStaffAccessInTx(tx, r.userId)) revoked += 1;
+      }
+      if (revoked > 0) {
+        await this.audit.record(
+          {
+            actorId: p.userId,
+            action: "hr.exit.access.revoked",
+            entity: "user",
+            entityId: p.schoolId,
+            schoolId: p.schoolId,
+            metadata: { revoked, scanned: rows.length },
+          },
+          tx,
+        );
+      }
+      // Reports what it DID and what it LOOKED AT — "revoked 0 of 12 already
+      // closed" and "revoked 0 of 0 because nothing ran" are different facts.
+      return { revoked, scanned: rows.length };
+    });
   }
 
   /** All exits (hr.read) with names + decrypted settlements (audited). */

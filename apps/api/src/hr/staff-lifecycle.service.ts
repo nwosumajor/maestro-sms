@@ -29,7 +29,12 @@ const DEFAULT_ITEMS: Record<string, string[]> = {
     "Add to payroll",
   ],
   OFFBOARDING: [
-    "Revoke system access",
+    // The PLATFORM account is now closed automatically on the last working day
+    // (see staff-access.ts). This item is about everything OUTSIDE it — email,
+    // door badge, shared drives — and is named for what a human must still do.
+    // It used to read "Revoke system access" while the platform did nothing,
+    // so ticking it created the belief that the account was closed.
+    "Revoke external access (email, building, third-party tools)",
     "Return equipment",
     "Handover notes",
     "Final settlement",

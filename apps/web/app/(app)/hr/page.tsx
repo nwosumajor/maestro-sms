@@ -8,6 +8,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { LoadFailure } from "@/components/ui/load-failure";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { ElapsedExitsCard } from "@/components/hr/ElapsedExitsCard";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { money, shortDate, titleCase } from "@/lib/format";
 import { EmployeeForm } from "@/components/hr/EmployeeForm";
@@ -130,6 +131,8 @@ export default async function HrPage() {
           </LoadFailure>
         )}
         {canLeaveManage && <LeaveAdmin types={leaveTypes ?? []} requests={leaveRequests ?? []} coverage={coverage ?? []} />}
+        {/* School-wide, so it lives here rather than on one person's page. */}
+        {canWrite && <ElapsedExitsCard />}
       </div>
     </AppShell>
   );

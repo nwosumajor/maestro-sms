@@ -17,10 +17,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { useFormat } from "@/components/shell/RegionProvider";
 
 type Exit = Serialized<StaffExitDto>;
 
-const naira = (m: number) => `₦${(m / 100).toLocaleString("en-NG", { minimumFractionDigits: 2 })}`;
+// Money is scaled by the CURRENCY, never by 100 — dividing by 100 is right for
+// naira and a HUNDRED TIMES wrong for the CFA franc and every other zero-decimal
+// currency. These are final-settlement figures a departing employee is paid on,
+// so the school's own currency is the only correct one to print them in.;
 
 async function req(method: string, path: string, body?: unknown) {
   const res = await fetch(`/api/sms${path}`, {
@@ -46,6 +50,8 @@ export function ExitPanel({
   canApprove: boolean;
 }) {
   const router = useRouter();
+  // Formats in the SCHOOL's currency and its own minor-unit scale.
+  const { money } = useFormat();
   const mine = initial.filter((e) => e.userId === userId);
   const [exits, setExits] = React.useState<Exit[]>(mine);
   const [type, setType] = React.useState("RESIGNATION");
@@ -143,15 +149,15 @@ export function ExitPanel({
               )}
             </div>
             <div className="mt-2 grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
-              <span>Pro-rata final month: {naira(e.settlement.proRataMinor)}</span>
+              <span>Pro-rata final month: {money(e.settlement.proRataMinor)}</span>
               <span>
-                Leave payout ({e.settlement.leaveDaysRemaining}d): {naira(e.settlement.leavePayoutMinor)}
+                Leave payout ({e.settlement.leaveDaysRemaining}d): {money(e.settlement.leavePayoutMinor)}
               </span>
-              <span>Loan recovery: −{naira(e.settlement.loanRecoveredMinor)}</span>
+              <span>Loan recovery: −{money(e.settlement.loanRecoveredMinor)}</span>
               {e.settlement.loanUnrecoveredMinor > 0 && (
-                <span className="text-destructive">Still owed after settlement: {naira(e.settlement.loanUnrecoveredMinor)}</span>
+                <span className="text-destructive">Still owed after settlement: {money(e.settlement.loanUnrecoveredMinor)}</span>
               )}
-              <span className="font-medium text-foreground">Net settlement: {naira(e.settlement.netMinor)}</span>
+              <span className="font-medium text-foreground">Net settlement: {money(e.settlement.netMinor)}</span>
             </div>
           </div>
         ))}
