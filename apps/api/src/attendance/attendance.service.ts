@@ -375,7 +375,14 @@ export class AttendanceService {
 
   /** Every marked student must be enrolled in the class. */
   private async assertAllEnrolled(tx: TenantTx, classId: string, records: MarkInput["records"]) {
-    const enrolled = await tx.enrollment.findMany({ where: { classId }, select: { studentId: true } });
+    // ACTIVE only. A pupil who has left — WITHDRAWN, TRANSFERRED, PROMOTED
+    // out or GRADUATED — must not still appear on today's register for a
+    // teacher to mark present. Every other reader in the app already filters;
+    // these two were missed when enrolment gained a status.
+    const enrolled = await tx.enrollment.findMany({
+      where: { classId, status: "ACTIVE" },
+      select: { studentId: true },
+    });
     const ids = new Set(enrolled.map((e: { studentId: string }) => e.studentId));
     for (const r of records) {
       if (!ids.has(r.studentId)) {
@@ -731,7 +738,10 @@ export class AttendanceService {
               _count: { _all: true },
             } as never) as unknown as Promise<Array<{ sessionId: string; _count: { _all: number } }>>)
           : Promise.resolve([] as Array<{ sessionId: string; _count: { _all: number } }>),
-        tx.enrollment.groupBy({ by: ["classId"], where: { classId: { in: classIds } }, _count: { _all: true } } as never) as unknown as Promise<
+        // The EXPECTED count on the daily overview. Unfiltered it counts
+        // pupils who have left, so a fully-marked register reads "28 of 32"
+        // and looks like the teacher forgot four children.
+        tx.enrollment.groupBy({ by: ["classId"], where: { classId: { in: classIds }, status: "ACTIVE" }, _count: { _all: true } } as never) as unknown as Promise<
           Array<{ classId: string; _count: { _all: number } }>
         >,
       ]);

@@ -147,8 +147,10 @@ export class CertificateService {
       const cls = await tx.class.findFirst({ where: { id: input.classId }, select: { id: true, name: true } });
       if (!cls) throw new NotFoundException("Class not found");
 
+      // ACTIVE only: a bulk ID-card or certificate run must not print for a
+      // pupil who has already left the school.
       const enrolled = (await tx.enrollment.findMany({
-        where: { classId: input.classId },
+        where: { classId: input.classId, status: "ACTIVE" },
         select: { studentId: true },
       })) as Array<{ studentId: string }>;
       const studentIds = [...new Set(enrolled.map((e) => e.studentId))];

@@ -428,7 +428,7 @@ export class LmsContentService {
 
   /** Enrolled students of a class + their linked guardians (de-duplicated). */
   private async contentAudience(tx: TenantTx, classId: string): Promise<string[]> {
-    const enrolled = await tx.enrollment.findMany({ where: { classId }, select: { studentId: true } });
+    const enrolled = await tx.enrollment.findMany({ where: { status: "ACTIVE", classId }, select: { studentId: true } });
     const studentIds = enrolled.map((e: { studentId: string }) => e.studentId);
     const recipients = new Set<string>(studentIds);
     if (studentIds.length > 0) {
@@ -1253,7 +1253,7 @@ export class LmsContentService {
       if (!staff) {
         await this.assertEnrolledOrGuardian(tx, p, classId);
         const enrolled = await tx.enrollment.findFirst({
-          where: { classId, studentId: p.userId },
+          where: { status: "ACTIVE", classId, studentId: p.userId },
           select: { id: true },
         });
         if (enrolled) {
@@ -1556,7 +1556,7 @@ export class LmsContentService {
       // Record attendance for an enrolled STUDENT only (never host/staff/guardian).
       if (!staff && !isHost) {
         const enrolled = await tx.enrollment.findFirst({
-          where: { classId: s.classId, studentId: p.userId },
+          where: { status: "ACTIVE", classId: s.classId, studentId: p.userId },
           select: { id: true },
         });
         if (enrolled) {
@@ -2127,7 +2127,7 @@ export class LmsContentService {
   ): Promise<void> {
     if (this.isSchoolWide(p)) return;
     const enrolled = await tx.enrollment.findFirst({
-      where: { classId, studentId: p.userId },
+      where: { status: "ACTIVE", classId, studentId: p.userId },
       select: { id: true },
     });
     if (enrolled) return;
@@ -2139,7 +2139,7 @@ export class LmsContentService {
       });
       if (children.length > 0) {
         const childEnrolled = await tx.enrollment.findFirst({
-          where: { classId, studentId: { in: children.map((c: { studentId: string }) => c.studentId) } },
+          where: { status: "ACTIVE", classId, studentId: { in: children.map((c: { studentId: string }) => c.studentId) } },
           select: { id: true },
         });
         if (childEnrolled) return;

@@ -322,7 +322,9 @@ export class DisciplineService {
       }
       // STUDENT targets = classmates in the caller's related classes, minus self.
       if (classIds.length === 0) return [];
-      const enr = await tx.enrollment.findMany({ where: { classId: { in: classIds } }, select: { studentId: true }, distinct: ["studentId"] });
+      // ACTIVE only — a departed pupil is not a classmate any more, and must
+      // not appear as a target a report can be filed against.
+      const enr = await tx.enrollment.findMany({ where: { classId: { in: classIds }, status: "ACTIVE" }, select: { studentId: true }, distinct: ["studentId"] });
       const ids = enr.map((e: { studentId: string }) => e.studentId).filter((id: string) => id !== p.userId);
       if (ids.length === 0) return [];
       return tx.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true }, orderBy: { name: "asc" }, take: TARGET_CAP });
@@ -348,12 +350,12 @@ export class DisciplineService {
   /** Classes the caller relates to: their own enrolments + their children's. */
   private async relatedClassIds(tx: TenantTx, p: Principal): Promise<string[]> {
     const ids = new Set<string>();
-    const own = await tx.enrollment.findMany({ where: { studentId: p.userId }, select: { classId: true } });
+    const own = await tx.enrollment.findMany({ where: { studentId: p.userId, status: "ACTIVE" }, select: { classId: true } });
     own.forEach((e: { classId: string }) => ids.add(e.classId));
     const children = await tx.parentChild.findMany({ where: { parentId: p.userId }, select: { studentId: true } });
     if (children.length > 0) {
       const childEnr = await tx.enrollment.findMany({
-        where: { studentId: { in: children.map((c: { studentId: string }) => c.studentId) } },
+        where: { studentId: { in: children.map((c: { studentId: string }) => c.studentId) }, status: "ACTIVE" },
         select: { classId: true },
       });
       childEnr.forEach((e: { classId: string }) => ids.add(e.classId));
@@ -384,7 +386,7 @@ export class DisciplineService {
       return (await this.teacherIdsOfClasses(tx, classIds)).includes(againstId);
     }
     if (classIds.length === 0 || againstId === p.userId) return false;
-    const en = await tx.enrollment.findFirst({ where: { classId: { in: classIds }, studentId: againstId }, select: { id: true } });
+    const en = await tx.enrollment.findFirst({ where: { status: "ACTIVE", classId: { in: classIds }, studentId: againstId }, select: { id: true } });
     return Boolean(en);
   }
   private async requireComplaint(tx: TenantTx, id: string): Promise<void> {
