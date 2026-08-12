@@ -184,12 +184,33 @@ export class PublicService {
    * find the account across tenants without weakening RLS.
    */
   async requestPasswordReset(email: string): Promise<{ ok: true }> {
+    // ANSWER IMMEDIATELY, THEN DO THE WORK.
+    //
+    // The response body was already constant — always {ok:true}, errors
+    // swallowed — so there was no oracle in what we SAY. There was one in how
+    // long we take to say it. A known address cost two extra queries, a JWT
+    // sign and an awaited email send; an unknown one returned after a single
+    // lookup. Measured locally with the mail provider STUBBED, so with no
+    // network call at all, that was still 0.06s against 0.01s — and a real
+    // provider turns the gap into hundreds of milliseconds. Anyone can sit and
+    // ask "does this address have an account here?" and read the answer off a
+    // stopwatch.
+    //
+    // Detaching also stops a person who is waiting on a web page from waiting
+    // on somebody else's SMTP.
+    void this.deliverPasswordReset(email);
+    return { ok: true };
+  }
+
+  /** The actual work, off the response path. Never throws to a caller: failures
+   *  are logged, exactly as they were when this ran inline. */
+  private async deliverPasswordReset(email: string): Promise<void> {
     try {
       const rows = await prisma.$queryRaw<
         Array<{ id: string; school_id: string; status: string; name: string }>
       >`SELECT * FROM app_login_lookup(${email})`;
       const user = rows[0];
-      if (!user || user.status !== "ACTIVE") return { ok: true };
+      if (!user || user.status !== "ACTIVE") return;
       const detail = await this.db.runAsTenant({ schoolId: user.school_id, userId: user.id }, async (tx) => {
         const u = await tx.user.findFirst({ where: { id: user.id }, select: { passwordChangedAt: true } });
         const school = await tx.school.findFirst({ where: { id: user.school_id }, select: { slug: true } });
@@ -209,7 +230,6 @@ export class PublicService {
     } catch (err) {
       this.logger.warn(`password-reset request failed: ${(err as Error).message}`);
     }
-    return { ok: true };
   }
 
   /** PUBLIC: apply a password reset. Single-use via the pca binding (see
