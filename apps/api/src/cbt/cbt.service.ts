@@ -772,7 +772,7 @@ export class CbtService {
       if (now < exam.startAt) throw new ConflictException("The exam has not opened yet");
       if (now > exam.endAt) throw new ConflictException("The exam window has closed");
       if (exam.classId) {
-        const enrolled = await tx.enrollment.findFirst({ where: { classId: exam.classId, studentId: p.userId } });
+        const enrolled = await tx.enrollment.findFirst({ where: { status: "ACTIVE", classId: exam.classId, studentId: p.userId } });
         if (!enrolled) throw new NotFoundException("Exam not found"); // 404-not-403
       }
 

@@ -492,7 +492,7 @@ export class LiveQuizService {
   private async assertEnrolled(tx: TenantTx, p: Principal, classId: string | null): Promise<void> {
     if (!classId) throw new NotFoundException("Session not found");
     if (this.isSchoolWide(p)) return;
-    const enrolled = await tx.enrollment.findFirst({ where: { classId, studentId: p.userId }, select: { id: true } });
+    const enrolled = await tx.enrollment.findFirst({ where: { status: "ACTIVE", classId, studentId: p.userId }, select: { id: true } });
     if (!enrolled) throw new NotFoundException("Session not found");
   }
 
@@ -528,7 +528,7 @@ export class LiveQuizService {
       });
       if (teaches) return;
       const enrolled = await tx.enrollment.findFirst({
-        where: { classId: session.classId, studentId: p.userId },
+        where: { status: "ACTIVE", classId: session.classId, studentId: p.userId },
         select: { id: true },
       });
       if (enrolled) return;

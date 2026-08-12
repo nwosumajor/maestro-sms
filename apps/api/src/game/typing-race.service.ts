@@ -322,7 +322,7 @@ export class TypingRaceService {
 
   private async assertEnrolled(tx: TenantTx, p: Principal, classId: string): Promise<void> {
     if (this.isSchoolWide(p)) return;
-    const enrolled = await tx.enrollment.findFirst({ where: { classId, studentId: p.userId }, select: { id: true } });
+    const enrolled = await tx.enrollment.findFirst({ where: { status: "ACTIVE", classId, studentId: p.userId }, select: { id: true } });
     if (!enrolled) throw new NotFoundException("Race not found");
   }
 
@@ -349,7 +349,7 @@ export class TypingRaceService {
     });
     if (teaches) return;
     const enrolled = await tx.enrollment.findFirst({
-      where: { classId: race.classId, studentId: p.userId },
+      where: { status: "ACTIVE", classId: race.classId, studentId: p.userId },
       select: { id: true },
     });
     if (enrolled) return;

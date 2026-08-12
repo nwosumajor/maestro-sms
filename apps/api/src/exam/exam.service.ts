@@ -713,7 +713,7 @@ export class ExamService {
     const hasSeats = new Set(already.map((g) => g.sittingId));
     const classIds = [...new Set(sittings.map(classOf).filter((x): x is string => !!x))];
     if (classIds.length === 0) return 0;
-    const enr = (await tx.enrollment.findMany({ where: { classId: { in: classIds } }, select: { classId: true, studentId: true } })) as Array<{ classId: string; studentId: string }>;
+    const enr = (await tx.enrollment.findMany({ where: { status: "ACTIVE", classId: { in: classIds } }, select: { classId: true, studentId: true } })) as Array<{ classId: string; studentId: string }>;
     const byClass = new Map<string, string[]>();
     for (const e of enr) byClass.set(e.classId, [...(byClass.get(e.classId) ?? []), e.studentId]);
     let seatedCount = 0;
@@ -763,7 +763,7 @@ export class ExamService {
   /** Auto-seat every student enrolled in a class into the sitting. */
   async seatClass(p: Principal, sittingId: string, classId: string): Promise<ExamSeatDto[]> {
     const studentIds = await this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
-      const enr = await tx.enrollment.findMany({ where: { classId }, select: { studentId: true } });
+      const enr = await tx.enrollment.findMany({ where: { status: "ACTIVE", classId }, select: { studentId: true } });
       return enr.map((e: { studentId: string }) => e.studentId);
     });
     if (studentIds.length === 0) throw new BadRequestException("That class has no enrolled students");

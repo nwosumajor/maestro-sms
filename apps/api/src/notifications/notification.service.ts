@@ -502,7 +502,7 @@ export class NotificationService {
     if (taught.length > 0) {
       const classIds = taught.map((t: { classId: string }) => t.classId);
       const myStudents = await tx.enrollment.findMany({
-        where: { classId: { in: classIds } },
+        where: { status: "ACTIVE", classId: { in: classIds } },
         select: { studentId: true },
       });
       const studentIds = myStudents.map((e: { studentId: string }) => e.studentId);
