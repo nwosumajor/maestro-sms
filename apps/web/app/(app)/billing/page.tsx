@@ -10,6 +10,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { money, shortDate, titleCase } from "@/lib/format";
 import { BillingCheckout } from "@/components/billing/BillingCheckout";
 import { PaymentVerifyBanner } from "@/components/billing/PaymentVerifyBanner";
+import { CreditVerifyBanner } from "@/components/billing/CreditVerifyBanner";
 import { ReferralPanel } from "@/components/billing/ReferralPanel";
 import { AutoRenewCard } from "@/components/billing/AutoRenewCard";
 import { TrueUpCard } from "@/components/billing/TrueUpCard";
@@ -47,7 +48,7 @@ const PAYMENT_STATE: Record<
 export default async function BillingPage({
   searchParams,
 }: {
-  searchParams: { verify?: string };
+  searchParams: { verify?: string; verifyCredits?: string };
 }) {
   const session = await auth();
   const user = session!.user;
@@ -71,6 +72,10 @@ export default async function BillingPage({
             money bought. Above everything, because it answers the question the
             school came back with. */}
         {searchParams?.verify && <PaymentVerifyBanner reference={searchParams.verify} />}
+        {/* The credit-bundle return. The checkout has always sent Paystack this
+            callback and the API has always had the endpoint — nothing on the
+            page called it, so the redirect landed here and did nothing. */}
+        {searchParams?.verifyCredits && <CreditVerifyBanner reference={searchParams.verifyCredits} />}
 
         <PageHeader title={<>Billing &amp; Subscription</>} subtitle={<>Your platform subscription. Pricing is per active student; paying activates your plan automatically.</>} />
 
