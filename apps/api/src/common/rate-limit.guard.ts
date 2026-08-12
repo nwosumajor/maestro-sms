@@ -12,6 +12,7 @@
 // =============================================================================
 
 import { CanActivate, ExecutionContext, HttpException, HttpStatus, Injectable } from "@nestjs/common";
+import { clientIp } from "./client-ip";
 
 @Injectable()
 export class RateLimitGuard implements CanActivate {
@@ -30,11 +31,10 @@ export class RateLimitGuard implements CanActivate {
       route?: { path?: string };
       method?: string;
     }>();
-    // Trust the platform's forwarded client IP first (ALB/CloudFront), then peer.
-    const xff = req.headers?.["x-forwarded-for"];
-    const fwd = Array.isArray(xff) ? xff[0] : xff?.split(",")[0]?.trim();
-    const ip = fwd || req.ip || req.socket?.remoteAddress || "unknown";
-    const key = `${req.method ?? ""}:${req.route?.path ?? ""}:${ip}`;
+    // See client-ip.ts: the RIGHTMOST forwarded entry, because that is the one
+    // our own proxy appended and therefore the only one a caller cannot forge.
+    // Reading the leftmost made this limiter bypassable with a single header.
+    const key = `${req.method ?? ""}:${req.route?.path ?? ""}:${clientIp(req)}`;
 
     const now = Date.now();
     const cutoff = now - this.windowMs;

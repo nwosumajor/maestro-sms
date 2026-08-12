@@ -8,6 +8,7 @@
 // =============================================================================
 
 import { NextRequest, NextResponse } from "next/server";
+import { forwardedFor } from "@/lib/forwarded";
 import { bearerForSession } from "@/lib/apiToken";
 
 const API_BASE = process.env.API_BASE_URL ?? "http://localhost:3001";
@@ -17,7 +18,12 @@ async function proxy(req: NextRequest, ctx: { params: { path: string[] } }) {
   if (!token) return new NextResponse("Unauthorized", { status: 401 });
 
   const target = `${API_BASE}/${ctx.params.path.join("/")}${req.nextUrl.search}`;
-  const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    // The client's address — the API's per-tenant and per-IP limits are both
+    // meaningless when every request appears to come from this web task.
+    ...forwardedFor(req),
+  };
   // Forward a step-up re-auth token for sensitive routes (the API verifies it).
   const stepup = req.headers.get("x-stepup");
   if (stepup) headers["x-stepup"] = stepup;

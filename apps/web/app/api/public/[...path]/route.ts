@@ -8,12 +8,15 @@
 // =============================================================================
 
 import { NextRequest, NextResponse } from "next/server";
+import { forwardedFor } from "@/lib/forwarded";
 
 const API_BASE = process.env.API_BASE_URL ?? "http://localhost:3001";
 
 async function proxy(req: NextRequest, ctx: { params: { path: string[] } }) {
   const target = `${API_BASE}/public/${ctx.params.path.join("/")}${req.nextUrl.search}`;
-  const headers: Record<string, string> = {};
+  // The client's address. Without it the API sees only this web task and
+  // rate-limits the whole world against one bucket — see lib/forwarded.ts.
+  const headers: Record<string, string> = { ...forwardedFor(req) };
   let body: BodyInit | undefined;
   if (req.method !== "GET" && req.method !== "HEAD") {
     // Pass the ORIGINAL content type through (multipart uploads carry their
