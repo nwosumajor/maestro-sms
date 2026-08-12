@@ -35,7 +35,14 @@ function makeService(over: Record<string, unknown> = {}) {
         ...data,
       })),
     },
-    user: { findFirst: jest.fn().mockResolvedValue({ name: "Ada" }), findMany: jest.fn().mockResolvedValue([{ id: "u-1", name: "Ada" }]) },
+    user: {
+      findFirst: jest.fn().mockResolvedValue({ name: "Ada" }),
+      findMany: jest.fn().mockResolvedValue([{ id: "u-1", name: "Ada" }]),
+      // 50 pupils ON ROLL. A COUNT now, not a hydrate — consent coverage is a
+      // statement about the children who are HERE, so pupils who have left must
+      // not sit in the denominator and depress it forever.
+      count: jest.fn().mockResolvedValue(50),
+    },
     school: {
       findFirst: jest.fn().mockResolvedValue({
         dpoName: (over.dpoName as string) ?? null,
@@ -45,7 +52,6 @@ function makeService(over: Record<string, unknown> = {}) {
     },
     erasureRequest: { count: jest.fn().mockResolvedValue(2) },
     integrityConsent: { count: jest.fn().mockResolvedValue(40) },
-    userRole: { findMany: jest.fn().mockResolvedValue(new Array(50).fill({ userId: "x" }).map((_, i) => ({ userId: `s${i}` }))) },
   } as unknown as TenantTx;
   const db = {
     runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),

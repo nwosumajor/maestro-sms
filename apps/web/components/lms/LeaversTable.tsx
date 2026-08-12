@@ -1,23 +1,39 @@
 "use client";
 
-// The leavers list, plus the one control that undoes a mistake.
+// The leavers desk: who has left, what is still owed to them, and the one
+// control that undoes a mistake.
+//
+// THIS PAGE CARRIES REAL WEIGHT NOW. A departed pupil is correctly gone from the
+// student list, the pickers and search — so this is the ONLY route staff have to
+// reach them. If it did not link through to the record, "they left" would also
+// mean "you can never issue their transcript again", which is a worse problem
+// than the one exiting solved. Every row therefore opens the profile, and the
+// two documents a leaver is actually entitled to are one click away.
 //
 // RE-ADMIT IS PRINCIPAL-ONLY AND ONE STEP, on purpose. The two-stage chain
-// exists to stop a single person REMOVING a child's access. Restoring it is the
+// exists to stop a single person REMOVING a child's access; restoring it is the
 // safe direction, and making an undo as heavy as the mistake is how mistakes
-// stay in place for a term.
-//
-// It restores ACCESS and nothing else — which class they rejoin is a decision
-// somebody has to make, not a reversal, so the page says so rather than leaving
-// staff to discover it from an empty roster.
+// stay in place for a term. It restores ACCESS only — which class they rejoin is
+// a decision, not a reversal, so the page says so rather than leaving staff to
+// discover it from an empty roster.
 
 import * as React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { readApiError } from "@/lib/api-error";
+import { sendWithStepUp } from "@/lib/stepup";
 import { useFormat } from "@/components/shell/RegionProvider";
 
-type Leaver = { id: string; name: string; email: string; exitedAt: string | null };
+export type Leaver = {
+  id: string;
+  name: string;
+  email: string;
+  exitedAt: string | null;
+  retentionDueAt: string | null;
+  dueForReview: boolean;
+};
 
 export function LeaversTable({ rows, canReadmit }: { rows: Leaver[]; canReadmit: boolean }) {
   const router = useRouter();
@@ -60,18 +76,46 @@ export function LeaversTable({ rows, canReadmit }: { rows: Leaver[]; canReadmit:
           <thead>
             <tr className="border-b border-border text-left text-xs uppercase text-muted-foreground">
               <th className="px-3 py-2 font-medium">Student</th>
-              <th className="px-3 py-2 font-medium">Email</th>
               <th className="px-3 py-2 font-medium">Left on</th>
+              <th className="px-3 py-2 font-medium">Record kept until</th>
+              <th className="px-3 py-2 font-medium">Documents</th>
               {canReadmit && <th className="px-3 py-2" />}
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.id} className="border-b border-border last:border-0">
-                <td className="px-3 py-2 font-medium">{r.name}</td>
-                <td className="px-3 py-2 text-muted-foreground">{r.email}</td>
+                <td className="px-3 py-2">
+                  {/* The way back to the record. Without this the exit would
+                      have made the pupil unreachable everywhere at once. */}
+                  <Link href={`/students/${r.id}`} className="font-medium hover:underline">
+                    {r.name}
+                  </Link>
+                  <div className="text-xs text-muted-foreground">{r.email}</div>
+                </td>
                 <td className="px-3 py-2 text-muted-foreground">
                   {r.exitedAt ? shortDate(r.exitedAt) : "—"}
+                </td>
+                <td className="px-3 py-2">
+                  {r.retentionDueAt ? (
+                    r.dueForReview ? (
+                      // "Review", never "delete". Nothing disposes of a child's
+                      // academic record on a timer — a human decides.
+                      <Badge variant="secondary" title="Past the school's retention window — due for a disposal decision">
+                        Due for review
+                      </Badge>
+                    ) : (
+                      <span className="text-muted-foreground">{shortDate(r.retentionDueAt)}</span>
+                    )
+                  ) : (
+                    <span className="text-muted-foreground">No limit set</span>
+                  )}
+                </td>
+                <td className="px-3 py-2">
+                  {/* What a leaver is actually entitled to ask for. Both paths
+                      already existed and kept working after an exit; they were
+                      simply unreachable once the pupil left every list. */}
+                  <LeaverDocuments studentId={r.id} name={r.name} />
                 </td>
                 {canReadmit && (
                   <td className="px-3 py-2 text-right">
@@ -91,6 +135,131 @@ export function LeaversTable({ rows, canReadmit }: { rows: Leaver[]; canReadmit:
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+/**
+ * How long this school keeps a leaver's record.
+ *
+ * Deliberately on THIS page rather than buried in a settings screen: the number
+ * only means anything next to the list it governs, and an administrator who can
+ * see "12 due for review" while setting it is far likelier to set it thoughtfully.
+ */
+export function RetentionPolicyCard({ years, canEdit }: { years: number; canEdit: boolean }) {
+  const router = useRouter();
+  const [value, setValue] = React.useState(String(years));
+  const [busy, setBusy] = React.useState(false);
+  const [msg, setMsg] = React.useState<string | null>(null);
+
+  const save = async () => {
+    setBusy(true);
+    setMsg(null);
+    // Step-up gated on the API: changing how long a child's record is kept is
+    // a records-disposal decision, not a preference. `sendWithStepUp` prompts
+    // for the re-auth and forwards the token — a plain fetch would 401.
+    const res = await sendWithStepUp("PUT", "students/exited/retention", { years: Number(value) });
+    setBusy(false);
+    if (res.ok) {
+      setMsg("Saved.");
+      router.refresh();
+    } else setMsg(await readApiError(res));
+  };
+
+  if (!canEdit) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        {years > 0
+          ? `Leavers' records are kept for ${years} year${years === 1 ? "" : "s"} before being flagged for review.`
+          : "No retention limit is set, so no leaver's record is ever flagged for review."}
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="space-y-1">
+          <label className="text-sm font-medium" htmlFor="retention-years">
+            Keep a leaver&apos;s record for
+          </label>
+          <div className="flex items-center gap-2">
+            <input
+              id="retention-years"
+              type="number"
+              min={0}
+              max={50}
+              className="h-9 w-24 rounded-md border border-border bg-background px-2 text-sm"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+            />
+            <span className="text-sm text-muted-foreground">years</span>
+          </div>
+        </div>
+        <Button onClick={save} disabled={busy || value === String(years)}>
+          {busy ? "Saving…" : "Save"}
+        </Button>
+      </div>
+      <p className="text-sm text-muted-foreground">
+        This flags a record for a human to review — it never deletes anything. The statutory minimum differs
+        by country, so set it to your own regulator&apos;s figure. Set 0 to turn the prompt off.
+      </p>
+      {msg && <p className="text-sm text-muted-foreground">{msg}</p>}
+    </div>
+  );
+}
+
+/**
+ * The two documents a school owes a leaver.
+ *
+ * The transcript is a POST that streams a PDF — NOT something an `<a href>` can
+ * fetch, which is exactly the trap: a plain link renders fine, looks correct in
+ * review, and quietly does nothing when clicked. It reuses the same
+ * blob-download the report-card button has always used rather than a second
+ * implementation that can drift from it.
+ */
+function LeaverDocuments({ studentId, name }: { studentId: string; name: string }) {
+  const [busy, setBusy] = React.useState<"pdf" | "json" | null>(null);
+  const [msg, setMsg] = React.useState<string | null>(null);
+
+  const save = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || studentId;
+
+  const transcript = async () => {
+    setBusy("pdf");
+    setMsg(null);
+    const res = await fetch(`/api/sms/reportcards/${studentId}/generate`, { method: "POST" });
+    setBusy(null);
+    if (!res.ok) return setMsg(await readApiError(res));
+    save(await res.blob(), `transcript-${slug}.pdf`);
+  };
+
+  const dataExport = async () => {
+    setBusy("json");
+    setMsg(null);
+    const res = await fetch(`/api/sms/privacy/export/${studentId}`, { cache: "no-store" });
+    setBusy(null);
+    if (!res.ok) return setMsg(await readApiError(res));
+    save(new Blob([JSON.stringify(await res.json(), null, 2)], { type: "application/json" }),
+      `data-export-${slug}.json`);
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={busy !== null} onClick={transcript}>
+        {busy === "pdf" ? "Preparing…" : "Transcript"}
+      </Button>
+      <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={busy !== null} onClick={dataExport}>
+        {busy === "json" ? "Preparing…" : "Data export"}
+      </Button>
+      {msg && <span className="text-xs text-destructive">{msg}</span>}
     </div>
   );
 }

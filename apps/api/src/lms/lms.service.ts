@@ -15,6 +15,7 @@ import { BadRequestException, ConflictException, Inject, Injectable, NotFoundExc
 import { SchoolRegionService } from "../foundation/school-region.service";
 // VALUE import: Prisma.sql/join only resolve as values, not types (CLAUDE.md).
 import { Prisma } from "@sms/db";
+import { ON_ROLL_STUDENT } from "../common/student-scope";
 import {
   NON_STAFF_ROLE_NAMES,
   ROSTER_CAP,
@@ -1073,9 +1074,7 @@ export class LmsService {
   async countStudents(p: Principal): Promise<{ students: number }> {
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       if (this.isRosterWide(p)) {
-        const students = (await tx.user.count({
-          where: { roles: { some: { role: { name: "student" } } } },
-        })) as number;
+        const students = (await tx.user.count({ where: ON_ROLL_STUDENT })) as number;
         return { students };
       }
       // Relationship-scoped callers: the count must match what listStudents would
@@ -1108,7 +1107,9 @@ export class LmsService {
         // platform-wide) and is a single relation-filtered query instead of a
         // two-step ID-set round trip.
         return tx.user.findMany({
-          where: { roles: { some: { role: { name: "student" } } }, ...nameFilter },
+          // ON ROLL: a picker must not offer a pupil who has left as someone to
+          // enrol, invoice or message.
+          where: { ...ON_ROLL_STUDENT, ...nameFilter },
           select: { id: true, name: true },
           orderBy: { name: "asc" },
           // Bounded either way: SEARCH_CAP when narrowing, ROSTER_CAP otherwise.

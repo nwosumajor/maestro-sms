@@ -25,7 +25,7 @@
 // failure. What ends is authentication.
 // =============================================================================
 
-import { ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { STUDENT_EXIT_CHAIN, formatMoney } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -38,6 +38,7 @@ import {
 } from "../integrity/integrity.foundation";
 import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
+import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 
 export type ExitKind = "WITHDRAWN" | "TRANSFERRED" | "GRADUATED";
 
@@ -63,6 +64,7 @@ export class StudentExitService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly workflow: WorkflowService,
+    private readonly privileged: PrivilegedDatabaseService,
     hooks: WorkflowHooksService,
   ) {
     // The reactor runs IN the transition's own transaction, so the exit is
@@ -78,6 +80,36 @@ export class StudentExitService {
 
   private ctx(p: Principal): TenantContext {
     return { schoolId: p.schoolId, userId: p.userId };
+  }
+
+  /**
+   * Set how long this school keeps a leaver's record before prompting review.
+   *
+   * A POLICY setting on the global registry, so it goes through the privileged
+   * client like every other `school` write — the app role is SELECT-only there.
+   */
+  async setRetentionYears(p: Principal, years: number): Promise<{ leaverRetentionYears: number }> {
+    this.assertWholeSchool(p);
+    if (!Number.isInteger(years) || years < 0 || years > 50) {
+      throw new BadRequestException("Retention must be a whole number of years between 0 and 50");
+    }
+    const client = this.privileged.client;
+    if (!client) throw new ServiceUnavailableException("Registry writes are not configured");
+    await client.school.update({ where: { id: p.schoolId }, data: { leaverRetentionYears: years } });
+    await this.db.runAsTenant(this.ctx(p), (tx) =>
+      this.audit.record(
+        {
+          actorId: p.userId,
+          action: "student.exit.retention.set",
+          entity: "school",
+          entityId: p.schoolId,
+          schoolId: p.schoolId,
+          metadata: { years },
+        },
+        tx,
+      ),
+    );
+    return { leaverRetentionYears: years };
   }
 
   /**
@@ -235,8 +267,18 @@ export class StudentExitService {
     });
   }
 
-  /** The leavers register: who has left, newest first. Paged — this list only
-   *  ever grows, so it must never be returned whole. */
+  /**
+   * The leavers register: who has left, newest first, with how long each record
+   * still has to run.
+   *
+   * THIS LIST IS NOW LOad-BEARING. Leavers are correctly gone from the student
+   * list, the pickers and search — so this page is the ONLY way staff can reach
+   * a departed pupil to issue the transcript or data export they are entitled
+   * to. Losing them from every surface at once would have traded one problem
+   * for a worse one.
+   *
+   * Paged, because it only ever grows.
+   */
   async listExited(p: Principal, page = 1, pageSize = 25) {
     this.assertWholeSchool(p);
     const take = Math.min(100, Math.max(1, pageSize));
@@ -251,11 +293,31 @@ export class StudentExitService {
         take: take + 1,
         select: { id: true, name: true, email: true, exitedAt: true },
       });
+      // The school's own retention policy, not a platform-wide one — the
+      // statutory minimum for school records differs by country.
+      const school = await tx.school.findFirst({
+        where: { id: p.schoolId },
+        select: { leaverRetentionYears: true },
+      });
+      const years = school?.leaverRetentionYears ?? 0;
+      const now = Date.now();
+
       return {
-        rows: rows.slice(0, take).map((r) => ({ ...r, exitedAt: r.exitedAt })),
+        rows: rows.slice(0, take).map((r) => {
+          // DUE FOR REVIEW, never "deleted". Nothing here disposes of anything;
+          // this flags the record for a human, because the statutory floor
+          // varies and destroying a child's academic history on a timer is the
+          // more serious failure. 0 years disables the prompt entirely.
+          const dueAt =
+            years > 0 && r.exitedAt
+              ? new Date(new Date(r.exitedAt).setFullYear(new Date(r.exitedAt).getFullYear() + years))
+              : null;
+          return { ...r, retentionDueAt: dueAt, dueForReview: dueAt != null && dueAt.getTime() <= now };
+        }),
         page: Math.max(1, page),
         pageSize: take,
         hasMore: rows.length > take,
+        retentionYears: years,
       };
     });
   }

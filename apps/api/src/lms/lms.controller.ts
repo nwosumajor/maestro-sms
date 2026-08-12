@@ -7,6 +7,7 @@ import { LMS_PERMISSIONS, SIS_PERMISSIONS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
+import { RequireStepUp } from "../auth/require-stepup.decorator";
 import type { Principal } from "../integrity/integrity.foundation";
 import { LmsService } from "./lms.service";
 import { SyllabusService } from "./syllabus.service";
@@ -159,6 +160,7 @@ const exitSchema = z.object({
   reason: z.string().max(500).optional(),
 });
 const readmitSchema = z.object({ reason: z.string().max(500).optional() });
+const retentionSchema = z.object({ years: z.number().int().min(0).max(50) });
 
 @RequireModule(MODULES.LMS)
 
@@ -541,6 +543,22 @@ export class LmsController {
     @Body(new ZodValidationPipe(readmitSchema)) body: z.infer<typeof readmitSchema>,
   ) {
     return this.exits.readmit(p, studentId, body.reason);
+  }
+
+  /**
+   * How long this school keeps a leaver's record before prompting a review.
+   *
+   * Principal-tier: it is a records-disposal policy, so it sits with the person
+   * who authorises exits rather than with whoever can raise one.
+   */
+  @Put("students/exited/retention")
+  @RequirePermission(WORKFLOW_PERMISSIONS.STUDENT_EXIT_APPROVE)
+  @RequireStepUp()
+  setLeaverRetention(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(retentionSchema)) body: z.infer<typeof retentionSchema>,
+  ) {
+    return this.exits.setRetentionYears(p, body.years);
   }
 
   /** Transfer / withdraw / reactivate a student's enrollment (lifecycle). */

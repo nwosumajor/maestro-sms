@@ -11,6 +11,7 @@
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import jwt from "jsonwebtoken";
 import { Prisma } from "@sms/db";
+import { ON_ROLL_STUDENT } from "../common/student-scope";
 import {
   COMPLIANCE_REGIMES,
   CALENDAR_TEMPLATES,
@@ -477,12 +478,13 @@ export class OperatorService {
     const result = await this.db.runAsTenant({ schoolId, userId: p.userId }, async (tx) => {
       const school = await tx.school.findFirst({ where: { id: schoolId }, select: { id: true } });
       if (!school) throw new NotFoundException("School not found");
-      // By ROLE, not by enrollment — enrollment-derived listing hid every
-      // not-yet-enrolled student from the operator (while the school's own
-      // /students page, already role-based, showed them). One platform-wide
-      // definition of "student"; active-class names are attached where present.
+      // By ROLE and ON ROLL, not by enrollment — enrollment-derived listing hid
+      // every not-yet-enrolled student from the operator (while the school's own
+      // /students page, already role-based, showed them), while an unfiltered
+      // role listing showed pupils who had LEFT. This is a cross-tenant read of
+      // minors' data, so it is exactly where the narrower answer belongs.
       const students = await tx.user.findMany({
-        where: { roles: { some: { role: { name: "student" } } } },
+        where: ON_ROLL_STUDENT,
         select: { id: true, uniqueId: true, name: true, email: true },
         orderBy: { name: "asc" },
       });

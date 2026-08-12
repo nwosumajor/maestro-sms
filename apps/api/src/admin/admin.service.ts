@@ -24,6 +24,7 @@ import { NON_STAFF_ROLE_NAMES } from "@sms/types";
 import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
+import { ON_ROLL_STUDENT } from "../common/student-scope";
 
 export interface ImportRow {
   name: string;
@@ -145,10 +146,10 @@ export class AdminService {
   /** Every student with the class they are actively enrolled in. */
   async studentRosterCsv(p: Principal): Promise<string> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      // Students are those holding the student ROLE — the same definition the
-      // billing seat count uses, so a not-yet-enrolled pupil still appears.
+      // ON ROLL — the roster is who is HERE, so a not-yet-enrolled pupil still
+      // appears but one who has left does not. Leavers have their own register.
       const students = await tx.user.findMany({
-        where: { roles: { some: { role: { name: "student" } } } },
+        where: ON_ROLL_STUDENT,
         select: { id: true, name: true, status: true },
         orderBy: { name: "asc" },
       });

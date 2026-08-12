@@ -31,6 +31,7 @@ import {
   type CompliancePostureDto,
 } from "@sms/types";
 import { SchoolRegionService } from "../foundation/school-region.service";
+import { countOnRollStudents } from "../common/student-scope";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -340,14 +341,13 @@ export class ComplianceService {
     });
   }
 
-  /** Students by ROLE — the same definition as the billing seat count and the
-   *  operator console, so the three cannot disagree. */
+  /** ON-ROLL students — the same definition the billing seat count uses, so the
+   *  two cannot disagree. Consent coverage is a statement about the children who
+   *  are HERE; leavers in the denominator understate it forever.
+   *
+   *  A COUNT, not a hydrate: this pulled every student row through the ORM to
+   *  read `.length`. */
   private async countStudents(tx: TenantTx): Promise<number> {
-    const rows = (await tx.userRole.findMany({
-      where: { role: { name: "student" } },
-      select: { userId: true },
-      distinct: ["userId"],
-    })) as Array<{ userId: string }>;
-    return rows.length;
+    return countOnRollStudents(tx);
   }
 }

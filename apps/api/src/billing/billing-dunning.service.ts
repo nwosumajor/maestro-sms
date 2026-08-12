@@ -33,6 +33,7 @@ import { ModuleEntitlementService } from "../foundation/module-entitlement.servi
 import { NotificationService } from "../notifications/notification.service";
 import { BILLING_DATABASE } from "./billing.constants";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
+import { ON_ROLL_STUDENT, STUDENT_ROLE } from "../common/student-scope";
 import { PaystackService } from "../payments/paystack.service";
 import { PlanPricingService } from "./plan-pricing.service";
 import { decryptField } from "../foundation/field-crypto";
@@ -229,14 +230,30 @@ export class BillingDunningService {
     now: Date,
   ): Promise<void> {
     try {
-      // One fleet-wide count of distinct student-role users, grouped by school.
-      const rows = await client.userRole.findMany({
-        where: { role: { name: "student" }, schoolId: { in: subs.map((s) => s.schoolId) } },
-        select: { schoolId: true, userId: true },
-        distinct: ["schoolId", "userId"],
-      });
+      // ON-ROLL seats per school, counted IN THE DATABASE.
+      //
+      // Two things were wrong here. It counted pupils who had LEFT, so a school
+      // that exited a hundred children went on accruing arrears for them. And it
+      // hydrated one row per student across the WHOLE FLEET through the ORM
+      // purely to read a count — at 5,000 schools of ~900 pupils that is over
+      // four million objects built and thrown away on a nightly sweep, which is
+      // the shape that turns a background job into an outage as the platform
+      // grows.
+      //
+      // `count(DISTINCT "userId")` keeps the distinct-user semantics in SQL,
+      // where a duplicate role assignment cannot inflate a school's bill, and
+      // returns one row per school instead of one per pupil.
+      const seatRows = await client.$queryRaw<Array<{ schoolId: string; seats: bigint }>>`
+        SELECT ur."schoolId" AS "schoolId", count(DISTINCT ur."userId") AS seats
+        FROM user_role ur
+        JOIN role r ON r.id = ur."roleId" AND r.name = ${STUDENT_ROLE}
+        JOIN "user" u ON u.id = ur."userId" AND u.status = 'ACTIVE'
+        WHERE ur."schoolId" = ANY(${subs.map((s) => s.schoolId)}::uuid[])
+        GROUP BY ur."schoolId"
+      `;
       const seatCount = new Map<string, number>();
-      for (const r of rows) seatCount.set(r.schoolId, (seatCount.get(r.schoolId) ?? 0) + 1);
+      // int8 arrives as a BigInt and would break JSON downstream — narrow here.
+      for (const r of seatRows) seatCount.set(r.schoolId, Number(r.seats));
 
       for (const s of subs) {
         if (!isPlan(s.plan) || s.seats == null || s.seats <= 0) continue; // never seat-billed (trial/comp)
@@ -297,14 +314,9 @@ export class BillingDunningService {
 
       const plan: Plan = isPlan(s.plan) ? s.plan : "STANDARD";
       const cycle: BillingCycle = isBillingCycle(s.billingCycle) ? s.billingCycle : BILLING_CYCLES.TERM;
-      // Current seats: distinct student-role users — the SAME definition
-      // checkout bills (one definition of "student" platform-wide).
-      const seatRows = await client.userRole.findMany({
-        where: { schoolId: s.schoolId, role: { name: "student" } },
-        select: { userId: true },
-        distinct: ["userId"],
-      });
-      const seats = Math.max(1, seatRows.length);
+      // Current seats: ON-ROLL students — the SAME definition checkout bills,
+      // so a renewal can never charge for a different roster than the quote.
+      const seats = Math.max(1, await client.user.count({ where: { schoolId: s.schoolId, ...ON_ROLL_STUDENT } }));
       const pricing = await this.pricing.effective(CURRENCIES.NGN);
       // Outstanding metered seat arrears ride the renewal charge (NGN path).
       const arrearsMinor = Math.max(0, toMinor(s.seatArrearsMinor));
