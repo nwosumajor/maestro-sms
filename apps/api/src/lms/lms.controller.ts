@@ -1,9 +1,9 @@
 import { Body, Controller, Delete, Get, Header, Param, Post, Put, Query } from "@nestjs/common";
-import { MODULES, USER_KINDS, type UserKind , SUBJECT_STAGES, CLASS_STREAMS, CLASS_ARMS} from "@sms/types";
+import { MODULES, USER_KINDS, type UserKind , SUBJECT_STAGES, CLASS_STREAMS, CLASS_ARMS, WORKFLOW_PERMISSIONS } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
 import type { AcademicSessionDto, ClassDto, ClassEligibilityDto, ClassInfoDto, ClassOverviewDto, ClassSubjectDto, IdNameDto, PromotionBatchDto, SchoolHolidayDto, SubjectDto, UserWithEmailDto } from "@sms/types";
 import { z } from "zod";
-import { LMS_PERMISSIONS } from "@sms/types";
+import { LMS_PERMISSIONS, SIS_PERMISSIONS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
@@ -12,6 +12,7 @@ import { LmsService } from "./lms.service";
 import { SyllabusService } from "./syllabus.service";
 import { PromotionService } from "./promotion.service";
 import { AcademicService } from "./academic.service";
+import { StudentExitService } from "./student-exit.service";
 
 // stage / stream / arm are ENUMS, not free text: the web offers them as selects
 // so nobody can create a fifth spelling of "Science" and split a year group in
@@ -153,11 +154,19 @@ const promotionSchema = z.object({
 });
 const promoteRejectSchema = z.object({ note: z.string().max(1000).optional() });
 
+const exitSchema = z.object({
+  kind: z.enum(["WITHDRAWN", "TRANSFERRED", "GRADUATED"]),
+  reason: z.string().max(500).optional(),
+});
+const readmitSchema = z.object({ reason: z.string().max(500).optional() });
+
 @RequireModule(MODULES.LMS)
+
 @Controller()
 export class LmsController {
   constructor(
-    private readonly lms: LmsService,
+    
+    private readonly exits: StudentExitService,private readonly lms: LmsService,
     private readonly syllabus: SyllabusService,
     private readonly promotion: PromotionService,
     private readonly academic: AcademicService,
@@ -474,6 +483,64 @@ export class LmsController {
       (s, i) => `${i + 1},"${s.name.replace(/"/g, '""')}",${s.email}`,
     );
     return `#,name,email\n${rows.join("\n")}\n`;
+  }
+
+  // --- student exit: leaving the SCHOOL (two-stage, principal finalises) -----
+  /** What the approver should see first: classes, money owed, already-left. */
+  @Get("students/:studentId/exit/preview")
+  // READ, so gated on the student-record permission rather than the raise one:
+  // the PRINCIPAL deliberately does not hold `student.exit.request` (it would
+  // make them eligible for stage 1 and then bar them from stage 2), and the
+  // approver of all people must be able to see what they are approving. The
+  // service narrows the rows to whole-school staff.
+  @RequirePermission(SIS_PERMISSIONS.STUDENT_PROFILE_READ)
+  exitPreview(@CurrentPrincipal() p: Principal, @Param("studentId") studentId: string) {
+    return this.exits.preview(p, studentId);
+  }
+
+  /**
+   * RAISE a student exit. Stage 1 of two — the principal authorises it, and the
+   * engine enforces that they are a different person. There is deliberately no
+   * endpoint that applies an exit directly: the only path runs through the
+   * workflow, so one person can never end a child's access.
+   */
+  @Post("students/:studentId/exit")
+  @RequirePermission(WORKFLOW_PERMISSIONS.STUDENT_EXIT_REQUEST)
+  requestExit(
+    @CurrentPrincipal() p: Principal,
+    @Param("studentId") studentId: string,
+    @Body(new ZodValidationPipe(exitSchema)) body: z.infer<typeof exitSchema>,
+  ) {
+    return this.exits.request(p, studentId, body.kind, body.reason);
+  }
+
+  /** The leavers register. Paged — it only ever grows. */
+  @Get("students/exited")
+  // Same reasoning as the preview: a coarse read permission gates the route,
+  // and the service narrows the rows to whole-school staff — a class teacher
+  // holding student.profile.read must not get a school-wide leavers list.
+  @RequirePermission(SIS_PERMISSIONS.STUDENT_PROFILE_READ)
+  listExited(
+    @CurrentPrincipal() p: Principal,
+    @Query("page") page?: string,
+    @Query("pageSize") pageSize?: string,
+  ) {
+    return this.exits.listExited(p, page ? Number(page) : 1, pageSize ? Number(pageSize) : 25);
+  }
+
+  /**
+   * RE-ADMIT. Principal only, and a single step on purpose: the two-stage chain
+   * exists to stop one person REMOVING access. Restoring it is the safe
+   * direction, and needing a committee to undo a mistake is how mistakes stay.
+   */
+  @Post("students/:studentId/readmit")
+  @RequirePermission(WORKFLOW_PERMISSIONS.STUDENT_EXIT_APPROVE)
+  readmit(
+    @CurrentPrincipal() p: Principal,
+    @Param("studentId") studentId: string,
+    @Body(new ZodValidationPipe(readmitSchema)) body: z.infer<typeof readmitSchema>,
+  ) {
+    return this.exits.readmit(p, studentId, body.reason);
   }
 
   /** Transfer / withdraw / reactivate a student's enrollment (lifecycle). */

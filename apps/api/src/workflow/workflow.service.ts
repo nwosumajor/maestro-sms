@@ -260,6 +260,14 @@ export class WorkflowService {
           currentStage: r.currentStage,
           stageCount: stages.length,
           stageLabel: pending,
+          // ONE named field, never the raw payload. An approver needs the facts
+          // behind a request — a title alone is not enough to decide on, least
+          // of all one that ends a child's access — but payloads carry ids and
+          // whatever a future type puts there, so only a summary a service
+          // deliberately wrote for the approver is surfaced.
+          summary: (r.payload as { summary?: unknown } | null)?.summary
+            ? String((r.payload as { summary: unknown }).summary).slice(0, 300)
+            : null,
         };
       });
     });

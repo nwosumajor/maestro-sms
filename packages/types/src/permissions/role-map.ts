@@ -62,6 +62,15 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
   ],
   // Principal: full operational view of their school (can grade, review workflows).
   principal: ["directory.people.read", "cbt.review", "attendance.amend.review", "member.scan", 
+    // Stage 2 of a pupil's exit — the principal ALONE authorises it.
+    //
+    // AND DELIBERATELY NOT THE STAGE-1 PERMISSION. A principal holding both is
+    // eligible for both stages; the engine then bars them from the second
+    // because they already acted on the first, leaving a request nobody can
+    // finish. Holding only the approve half makes that impossible rather than
+    // merely discouraged. It is also the right posture — the final approver
+    // should not be the person who raised what they are approving.
+    "student.exit.approve",
     "assessment.read", "assessment.write", "submission.read",
     "integrity.report.read", "integrity.exemption.read", "integrity.exemption.write",
     "integrity.retention.run",
@@ -93,6 +102,9 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
   ],
   // School Administrator: SIS / enrollment / workflows — but NOT grade books, NOT veto.
   school_admin: ["directory.people.read", "cbt.review", "attendance.amend.review", "member.scan", 
+    // Stage 1 of a pupil exit — raise it, or approve one a colleague raised.
+    // NOT the approve half: ending a child's access takes two people.
+    "student.exit.request",
     "class.read", "class.write", "enrollment.read", "enrollment.write", "guardian.write", "subject.manage", "subject.selection.approve", "student.import", "parent.import", "class.promote", "academic.manage",
     "assessment.read", "integrity.report.read", "integrity.exemption.read", "integrity.exemption.write",
     "integrity.retention.run",
@@ -215,6 +227,9 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
   ],
   // Head of teaching: stage-1 approver for teaching staff requests.
   head_teacher: ["directory.people.read", 
+    // Stage 1 of a pupil exit — raise it, or approve one a colleague raised.
+    // NOT the approve half: ending a child's access takes two people.
+    "student.exit.request",
     // Stage 1 of LMS_CONTENT_PUBLISH_CHAIN is the HEAD TEACHER, but the review
     // route gates on lms.content.approve, which only the principal held — so
     // stage 1 was refused at the door and the chain could never complete.

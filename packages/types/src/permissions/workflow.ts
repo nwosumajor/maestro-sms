@@ -22,6 +22,13 @@ export const WORKFLOW_PERMISSIONS = {
   REVIEW_HR: "workflow.review.hr",
   /** Stage-3 (final) approver: the principal. */
   REVIEW_PRINCIPAL: "workflow.review.principal",
+  /** Stage 1 of a pupil's departure: raise the exit request. school_admin /
+   *  head_teacher — the people who actually handle a child leaving. */
+  STUDENT_EXIT_REQUEST: "student.exit.request",
+  /** Stage 2, PRINCIPAL ONLY: authorise the exit. Ending a pupil's access and
+   *  closing every enrolment is not something one person should be able to do,
+   *  and it is not delegable to the tier that raises it. */
+  STUDENT_EXIT_APPROVE: "student.exit.approve",
   /** Approve a stale (>7-day) attendance amendment. head_teacher/school_admin/principal. */
   ATTENDANCE_AMEND_REVIEW: "attendance.amend.review",
 } as const;
@@ -62,6 +69,27 @@ export const STAFF_REQUEST_CHAIN: WorkflowStage[] = [
   { key: "HEAD", label: "Head of teaching / administration", permission: WORKFLOW_PERMISSIONS.REVIEW_HEAD },
   { key: "HR", label: "HR manager", permission: WORKFLOW_PERMISSIONS.REVIEW_HR },
   { key: "PRINCIPAL", label: "Principal (final)", permission: WORKFLOW_PERMISSIONS.REVIEW_PRINCIPAL },
+];
+
+/**
+ * STUDENT EXIT chain: a pupil LEAVES THE SCHOOL.
+ *
+ * Two stages, and the second is the principal ALONE. Exit is the one action
+ * that ends a child's access to the platform and closes their enrolment
+ * everywhere at once — it is not a roster edit, and it should not be reachable
+ * by one person holding one permission.
+ *
+ * Stage 1 is whoever handles the leaving in practice (school admin, head
+ * teacher): they raise it and confirm records are in order. Stage 2 is the
+ * principal, who authorises it. The engine already guarantees the two are
+ * DIFFERENT people.
+ *
+ * Deliberately NOT reusing STAFF_REQUEST_CHAIN: that routes through the HR
+ * manager, who has no business in a pupil's departure.
+ */
+export const STUDENT_EXIT_CHAIN: WorkflowStage[] = [
+  { key: "SCHOOL_ADMIN", label: "School admin / head teacher", permission: WORKFLOW_PERMISSIONS.STUDENT_EXIT_REQUEST },
+  { key: "PRINCIPAL", label: "Principal (final)", permission: WORKFLOW_PERMISSIONS.STUDENT_EXIT_APPROVE },
 ];
 
 /** Grade-publish chain: a subject teacher's term grades go live to families only
@@ -173,6 +201,7 @@ export const WORKFLOW_TYPES = [
   "EXAM_SCHEDULE_APPROVAL",
   "ADMIN_APPOINTMENT",
   "ATTENDANCE_AMENDMENT",
+  "STUDENT_EXIT",
 ] as const;
 export type WorkflowType = (typeof WORKFLOW_TYPES)[number];
 
@@ -212,6 +241,10 @@ export interface WorkflowTypeMeta {
 
 export const WORKFLOW_TYPE_META: Record<WorkflowType, WorkflowTypeMeta> = {
   LEAVE: { label: "Leave", selfService: true },
+  // A pupil leaving. systemOnly: it is raised by the student-exit endpoint,
+  // never typed into the generic "new request" form, so the payload always
+  // carries the studentId the reactor needs.
+  STUDENT_EXIT: { label: "Student exit", selfService: false, systemOnly: true },
   STAFF_REQUEST: { label: "Special request", selfService: true },
   PURCHASE_ORDER: { label: "Purchase order", selfService: false, initiatePermission: "fee.manage" },
   DISCIPLINARY: { label: "Disciplinary", selfService: false, initiatePermission: "rbac.manage" },
