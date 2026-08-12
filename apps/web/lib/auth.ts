@@ -8,6 +8,7 @@
 // =============================================================================
 
 import NextAuth from "next-auth";
+import { forwardedFor } from "./forwarded";
 import type { JWT } from "next-auth/jwt";
 import Credentials from "next-auth/providers/credentials";
 import jwt from "jsonwebtoken";
@@ -131,14 +132,22 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         password: { label: "Password" },
         code: { label: "2FA code" },
       },
-      authorize: async (creds) => {
+      authorize: async (creds, request) => {
         const email = String(creds?.email ?? "");
         const password = String(creds?.password ?? "");
         const mfaCode = creds?.code ? String(creds.code) : undefined;
         if (!email || !password) return null;
         const res = await fetch(`${API_BASE}/auth/login`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            // WHO IS TRYING TO SIGN IN. Without this the API sees only the web
+            // task and rate-limits every school on earth against ONE bucket:
+            // ten sign-in attempts a minute platform-wide, and the eleventh
+            // person to try anywhere is turned away. It also means the per-IP
+            // brute-force backstop protected nobody in particular.
+            ...forwardedFor(request),
+          },
           body: JSON.stringify({ email, password, mfaCode }),
           cache: "no-store",
         });
