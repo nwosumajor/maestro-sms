@@ -32,7 +32,15 @@ function makeTx(over: Partial<Record<string, unknown>> = {}) {
       create: jest.fn(() => { calls.invoiceCreate++; return Promise.resolve({ id: "inv1" }); }),
       update: jest.fn(() => { calls.invoiceUpdate++; return Promise.resolve({}); }),
     },
-    invoiceLineItem: { create: jest.fn(() => { calls.lineCreate++; return Promise.resolve({}); }) },
+    // The fee runs now (a) read the SCHOOL's currency, so an invoice is not
+    // raised in the column default that settlement would later refuse, and
+    // (b) look for an existing charge line so a second run cannot double-bill.
+    // Both are new reads these doubles have to model.
+    school: { findFirst: jest.fn().mockResolvedValue({ currency: "NGN" }) },
+    invoiceLineItem: {
+      findMany: jest.fn().mockResolvedValue([]),
+      create: jest.fn(() => { calls.lineCreate++; return Promise.resolve({}); }),
+    },
     user: { findFirst: jest.fn().mockResolvedValue({ id: "stu1", name: "Stu" }) },
     // Row-lock the room for allocation concurrency (no-op in the mock).
     $executeRaw: jest.fn().mockResolvedValue(0),

@@ -758,13 +758,52 @@ export class HostelService {
       if (roomIds.length === 0) return { invoicesCreated: 0, totalBilledMinor: 0, studentsBilled: 0 };
 
       const allocs = await tx.hostelAllocation.findMany({ where: { roomId: { in: roomIds }, status: "ACTIVE" } });
+
+      // IDEMPOTENCY. A fee run MOVES MONEY onto a boarder's invoice, and
+      // nothing stopped it running twice: a second press, an impatient retry,
+      // or the FEE_SCHEDULE approval hook replaying charged every boarder rent
+      // AGAIN, silently, with no marker to tell the two charges apart
+      // afterwards. The late-fee sweep already solved this shape with a marker
+      // line item; this borrowed the pattern and not the guard.
+      //
+      // The description IS the key, because it is what a bursar reads on the
+      // invoice: two lines saying the same thing for the same period is the
+      // bug, and one line is the correct outcome whether the run fired once or
+      // five times.
+      const lineDescription = input.description ?? "Hostel rent";
+      // The SCHOOL's currency, not the column default of NGN. An invoice raised
+      // in the wrong currency cannot be paid online at all: settlement compares
+      // the charge currency to the invoice and REFUSES a mismatch, so a school
+      // billing in cedis would have had hostel rent it could never collect.
+      const school = await tx.school.findFirst({ where: { id: schoolId }, select: { currency: true } });
+      const schoolCurrency = school?.currency ?? "NGN";
+      const studentIds = allocs.map((a: { studentId: string }) => a.studentId);
+      const alreadyBilled = studentIds.length
+        ? await tx.invoiceLineItem.findMany({
+            where: { description: lineDescription, invoice: { studentId: { in: studentIds }, status: "DRAFT" } },
+            select: { invoice: { select: { studentId: true } } },
+          })
+        : [];
+      const billed = new Set(
+        (alreadyBilled as Array<{ invoice: { studentId: string } }>).map((l) => l.invoice.studentId),
+      );
+
       let invoicesCreated = 0;
+      let skippedAlreadyBilled = 0;
       let totalBilledMinor = 0;
       let studentsBilled = 0;
 
       for (const a of allocs as Array<{ id: string; roomId: string; studentId: string }>) {
         const rent = rentByRoom.get(a.roomId) ?? 0;
         if (rent <= 0) continue;
+        if (billed.has(a.studentId)) {
+          // Already carrying this charge on an open invoice. Counted, not
+          // silently dropped: "billed 0" and "skipped 40 already billed" are
+          // different facts and an operator needs to tell them apart.
+          skippedAlreadyBilled++;
+          continue;
+        }
+        billed.add(a.studentId);
         // Reuse an existing DRAFT invoice for the student, else open one.
         let invoice = await tx.invoice.findFirst({ where: { studentId: a.studentId, status: "DRAFT" } });
         if (!invoice) {
@@ -776,6 +815,7 @@ export class HostelService {
               reference: `HOSTEL-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
               status: "DRAFT",
               totalMinor: 0,
+              currency: schoolCurrency,
               dueDate: due,
             },
           });
@@ -785,7 +825,7 @@ export class HostelService {
           data: {
             schoolId,
             invoiceId: invoice.id,
-            description: input.description ?? "Hostel rent",
+            description: lineDescription,
             amountMinor: rent,
             quantity: 1,
           },
@@ -795,7 +835,7 @@ export class HostelService {
         studentsBilled++;
       }
       await this.audit.record(
-        { actorId, action: "hostel.fees.schedule", entity: "hostel", entityId: input.hostelId ?? "all", schoolId, metadata: { invoicesCreated, totalBilledMinor, studentsBilled } },
+        { actorId, action: "hostel.fees.schedule", entity: "hostel", entityId: input.hostelId ?? "all", schoolId, metadata: { invoicesCreated, totalBilledMinor, studentsBilled, skippedAlreadyBilled } },
         tx,
       );
       return { invoicesCreated, totalBilledMinor, studentsBilled };
