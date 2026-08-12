@@ -301,6 +301,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "GET /billing/payments/:p/receipt.pdf": {
+      "kind": "ui",
+      "note": "Receipt link on the /billing payment history — a subscription purchase produced no filable document before this"
+    },
     "GET /billing/referral": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
@@ -329,6 +333,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "GET /cbt/exams/:p/answer-key.pdf": {
+      "kind": "ui",
+      "note": "Answer key PDF — EDITORS ONLY, 404 for a reviewer; audited separately from the paper"
+    },
     "GET /cbt/exams/:p/integrity": {
       "kind": "ui",
       "note": "reviewed: a call in app/(app)/cbt/page.tsx builds this path"
@@ -340,6 +348,10 @@
     "GET /cbt/exams/:p/marking/progress": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
+    },
+    "GET /cbt/exams/:p/paper.pdf": {
+      "kind": "ui",
+      "note": "Printable question paper (no answers) on the CBT staff panel — for an offline sitting, moderation or a paper archive"
     },
     "GET /cbt/exams/:p/results": {
       "kind": "ui",
@@ -616,6 +628,10 @@
     "GET /fees/settlement": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
+    },
+    "GET /fees/settlement/banks": {
+      "kind": "ui",
+      "note": "SettlementAccountCard bank picker — the real gateway bank list, replacing ten hard-coded codes"
     },
     "GET /forms": {
       "kind": "ui",
@@ -973,6 +989,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "GET /notifications/credits/ledger": {
+      "kind": "ui",
+      "note": "MessageCreditsCard on /billing — the school's own credit history; previously only the operator could see where credits went"
+    },
     "GET /notifications/me/language": {
       "kind": "ui",
       "note": "reviewed: components/account/LanguageCard.tsx loads the caller's writing language on /account"
@@ -1053,6 +1073,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "GET /operator/message-credits/reconciliation": {
+      "kind": "ui",
+      "note": "Reconciliation posture panel on /operator/message-credits — makes a discrepancy visible where credits are managed, not only in an owner email"
+    },
     "GET /operator/onboarding-requests": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
@@ -1060,6 +1084,14 @@
     "GET /operator/payment-channels": {
       "kind": "ui",
       "note": "payment-rail switchboard — PaymentChannels card on /operator/pricing"
+    },
+    "GET /operator/payments": {
+      "kind": "ui",
+      "note": "/operator/payments — cross-tenant subscription revenue ledger, period-filtered, totals per currency"
+    },
+    "GET /operator/payments/export.csv": {
+      "kind": "ui",
+      "note": "Export CSV button on /operator/payments — carries exactly the query the table is showing"
     },
     "GET /operator/platform-delegations": {
       "kind": "ui",
@@ -1281,6 +1313,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "GET /students/:p/exit/preview": {
+      "kind": "ui",
+      "note": "StudentExitDialog — classes and money owed shown to the approver BEFORE the exit is raised"
+    },
     "GET /students/:p/medical": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
@@ -1300,6 +1336,10 @@
     "GET /students/count": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
+    },
+    "GET /students/exited": {
+      "kind": "ui",
+      "note": "Leavers register on /admin/students — who has left and when. Paged; the list only ever grows."
     },
     "GET /subject-selections": {
       "kind": "ui",
@@ -1645,6 +1685,10 @@
       "kind": "system",
       "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
     },
+    "POST /billing/payments/verify": {
+      "kind": "ui",
+      "note": "PaymentVerifyBanner on /billing?verify= — settles on return from the gateway instead of waiting for a webhook"
+    },
     "POST /billing/referral/code": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
@@ -1972,6 +2016,10 @@
     "POST /fees/reminders/run": {
       "kind": "system",
       "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
+    },
+    "POST /fees/settlement/resolve": {
+      "kind": "ui",
+      "note": "SettlementAccountCard 'Check account name' — reads back whose account it is before PUT /fees/settlement saves it"
     },
     "POST /forms": {
       "kind": "ui",
@@ -2332,6 +2380,18 @@
     "POST /notifications/:p/read": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
+    },
+    "POST /notifications/credits/delivery-status": {
+      "kind": "public",
+      "note": "Twilio delivery-status callback. Refunds a credit on a terminal failure (a send is charged on ACCEPTANCE, not delivery). Always answers 2xx or Twilio retries for hours."
+    },
+    "POST /notifications/credits/reconcile/run": {
+      "kind": "internal",
+      "note": "Cross-tenant credit reconciliation sweep (fee.reconcile.run, super_admin). Scheduled daily; manual trigger mirrors POST /fees/reconciliation/run."
+    },
+    "POST /notifications/credits/verify": {
+      "kind": "ui",
+      "note": "Settles a credit bundle on return from the gateway — /billing?verifyCredits=. Without it the purchase depended entirely on a webhook arriving."
     },
     "POST /notifications/read-all": {
       "kind": "ui",
@@ -2701,6 +2761,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "POST /students/:p/exit": {
+      "kind": "ui",
+      "note": "Raises the two-stage STUDENT_EXIT workflow. There is deliberately NO endpoint that applies an exit directly."
+    },
     "POST /students/:p/prepay/init": {
       "kind": "ui",
       "note": "reviewed: a call in components/attendance/StudentPicker.tsx builds this path"
@@ -2716,6 +2780,10 @@
     "POST /students/:p/profile/supervisor-review": {
       "kind": "ui",
       "note": "reached via a runtime-built path (web builds \"/students/:p/profile\")"
+    },
+    "POST /students/:p/readmit": {
+      "kind": "ui",
+      "note": "Principal-only, single step: the chain exists to stop one person REMOVING access, not restoring it"
     },
     "POST /students/:p/virtual-account": {
       "kind": "ui",
@@ -2965,74 +3033,6 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
-    "POST /billing/payments/verify": {
-      "kind": "ui",
-      "note": "PaymentVerifyBanner on /billing?verify= — settles on return from the gateway instead of waiting for a webhook"
-    },
-    "GET /billing/payments/:p/receipt.pdf": {
-      "kind": "ui",
-      "note": "Receipt link on the /billing payment history — a subscription purchase produced no filable document before this"
-    },
-    "POST /notifications/credits/verify": {
-      "kind": "ui",
-      "note": "Settles a credit bundle on return from the gateway — /billing?verifyCredits=. Without it the purchase depended entirely on a webhook arriving."
-    },
-    "GET /cbt/exams/:p/paper.pdf": {
-      "kind": "ui",
-      "note": "Printable question paper (no answers) on the CBT staff panel — for an offline sitting, moderation or a paper archive"
-    },
-    "GET /cbt/exams/:p/answer-key.pdf": {
-      "kind": "ui",
-      "note": "Answer key PDF — EDITORS ONLY, 404 for a reviewer; audited separately from the paper"
-    },
-    "GET /students/exited": {
-      "kind": "ui",
-      "note": "Leavers register on /admin/students — who has left and when. Paged; the list only ever grows."
-    },
-    "GET /students/:p/exit/preview": {
-      "kind": "ui",
-      "note": "StudentExitDialog — classes and money owed shown to the approver BEFORE the exit is raised"
-    },
-    "POST /students/:p/exit": {
-      "kind": "ui",
-      "note": "Raises the two-stage STUDENT_EXIT workflow. There is deliberately NO endpoint that applies an exit directly."
-    },
-    "POST /students/:p/readmit": {
-      "kind": "ui",
-      "note": "Principal-only, single step: the chain exists to stop one person REMOVING access, not restoring it"
-    },
-    "GET /notifications/credits/ledger": {
-      "kind": "ui",
-      "note": "MessageCreditsCard on /billing — the school's own credit history; previously only the operator could see where credits went"
-    },
-    "POST /notifications/credits/delivery-status": {
-      "kind": "public",
-      "note": "Twilio delivery-status callback. Refunds a credit on a terminal failure (a send is charged on ACCEPTANCE, not delivery). Always answers 2xx or Twilio retries for hours."
-    },
-    "POST /notifications/credits/reconcile/run": {
-      "kind": "internal",
-      "note": "Cross-tenant credit reconciliation sweep (fee.reconcile.run, super_admin). Scheduled daily; manual trigger mirrors POST /fees/reconciliation/run."
-    },
-    "GET /operator/message-credits/reconciliation": {
-      "kind": "ui",
-      "note": "Reconciliation posture panel on /operator/message-credits — makes a discrepancy visible where credits are managed, not only in an owner email"
-    },
-    "GET /operator/payments": {
-      "kind": "ui",
-      "note": "/operator/payments — cross-tenant subscription revenue ledger, period-filtered, totals per currency"
-    },
-    "GET /operator/payments/export.csv": {
-      "kind": "ui",
-      "note": "Export CSV button on /operator/payments — carries exactly the query the table is showing"
-    },
-    "GET /fees/settlement/banks": {
-      "kind": "ui",
-      "note": "SettlementAccountCard bank picker — the real gateway bank list, replacing ten hard-coded codes"
-    },
-    "POST /fees/settlement/resolve": {
-      "kind": "ui",
-      "note": "SettlementAccountCard 'Check account name' — reads back whose account it is before PUT /fees/settlement saves it"
-    },
     "PUT /fees/settlement": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
@@ -3196,6 +3196,10 @@
     "PUT /students/:p/profile": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
+    },
+    "PUT /students/exited/retention": {
+      "kind": "ui",
+      "note": "Retention policy card on /students/leavers — how many years a leaver's record is kept before it is flagged for a human to review. Step-up gated; principal-tier, since it is a records-disposal policy."
     },
     "PUT /subjects/:p": {
       "kind": "ui",

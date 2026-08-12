@@ -10,6 +10,7 @@
 // =============================================================================
 
 import { Inject, Injectable } from "@nestjs/common";
+import { ON_ROLL_STUDENT } from "../common/student-scope";
 import type { SearchResultDto, SearchHitDto } from "@sms/types";
 import {
   TENANT_DATABASE,
@@ -63,7 +64,7 @@ export class SearchService {
       if (this.has(p, "student.profile.read") || this.has(p, "grade.read") || this.has(p, "class.read")) {
         const studentIds = await this.visibleStudentIds(tx, p);
         const where = studentIds === "all"
-          ? { roles: { some: { role: { name: "student" } } }, name: like }
+          ? { ...ON_ROLL_STUDENT, name: like }
           : { id: { in: studentIds }, name: like };
         const students = await tx.user.findMany({ where, select: { id: true, name: true, email: true }, take: PER_CATEGORY });
         for (const s of students) {

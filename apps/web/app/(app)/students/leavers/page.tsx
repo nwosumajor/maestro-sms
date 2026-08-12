@@ -17,13 +17,26 @@ import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/shell/PageHeader";
-import { LeaversTable } from "@/components/lms/LeaversTable";
+import { LeaversTable, RetentionPolicyCard } from "@/components/lms/LeaversTable";
 import { buttonVariants } from "@/components/ui/button";
 
 export const dynamic = "force-dynamic";
 
-type Leaver = { id: string; name: string; email: string; exitedAt: string | null };
-type Page = { rows: Leaver[]; page: number; pageSize: number; hasMore: boolean };
+type Leaver = {
+  id: string;
+  name: string;
+  email: string;
+  exitedAt: string | null;
+  retentionDueAt: string | null;
+  dueForReview: boolean;
+};
+type Page = {
+  rows: Leaver[];
+  page: number;
+  pageSize: number;
+  hasMore: boolean;
+  retentionYears: number;
+};
 
 export default async function LeaversPage({
   searchParams,
@@ -53,9 +66,30 @@ export default async function LeaversPage({
           </Link>
         </div>
 
+        {/* The policy sits WITH the list it governs. A number like this only
+            means something next to "3 due for review". */}
+        {data && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Records retention</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <RetentionPolicyCard
+                years={data.retentionYears}
+                canEdit={hasPermission(user.permissions, "student.exit.approve")}
+              />
+            </CardContent>
+          </Card>
+        )}
+
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Leavers register</CardTitle>
+            <CardTitle className="text-base">
+              Leavers register
+              {data && data.rows.some((r) => r.dueForReview)
+                ? ` — ${data.rows.filter((r) => r.dueForReview).length} due for review`
+                : ""}
+            </CardTitle>
           </CardHeader>
           <CardContent>
             {/* `null` from apiGet means the read FAILED, which is not the same

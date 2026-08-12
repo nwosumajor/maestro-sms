@@ -230,12 +230,15 @@ async function main() {
 
   const failures = [];
   let skipped = 0;
+  let unchecked = 0;
   for (const email of ROLES) {
     const client = makeClient();
     if (!(await client.login(email))) { console.log(`- ${email}: login failed (skipped)`); skipped++; continue; }
     const cookieBytes = client.sessionCookieBytes();
     if (cookieBytes > maxCookie.bytes) maxCookie = { email, bytes: cookieBytes };
     const bad = [];
+    // Routes we could not judge because the API was rate-limiting THIS RUN.
+    const rateLimited = new Set();
     if (cookieBytes > COOKIE_BUDGET_BYTES) {
       bad.push(`session cookie is ${cookieBytes} bytes (> ${COOKIE_BUDGET_BYTES} budget) — the cookie is re-inflating; see route-smoke guardrail note`);
     }
@@ -265,13 +268,34 @@ async function main() {
         verdict = null;
       }
       if (verdict !== "ok") {
+        // STILL FAILING — so ASK the API whether we are the problem.
+        //
+        // A rate-limited page throws during SSR and arrives as a 200 carrying a
+        // digest, exactly like a broken one. The digest is a hash, so the tool
+        // cannot read the reason out of the HTML. But it CAN put one cheap
+        // question to the API directly: are you rate-limiting me right now? If
+        // so this run has exhausted the school's per-tenant budget and the
+        // "failure" is our own load, which must be reported as such rather than
+        // counted as a defect — a tool that cries wolf gets ignored, and then
+        // the real SSR throw goes with it.
+        const probe = await client.get("/api/sms/notifications").catch(() => null);
+        if (probe?.status === 429) {
+          rateLimited.add(url);
+          continue;
+        }
         // Pull the Next digest if present for quick server-log correlation.
         const dig = html ? (errorDigests(html)[0] ?? html.match(/Digest:\s*(\d+)/)?.[1]) : undefined;
         bad.push(`${url} -> ${res?.status ?? "-"}${dig ? ` (digest ${dig})` : ""} [failed twice]`);
       }
     }
     if (bad.length) { failures.push({ email, bad }); console.log(`✗ ${email}: ${bad.length} failing`); bad.forEach((b) => console.log(`    ${b}`)); }
-    else console.log(`✓ ${email}: all ${routes.length} routes ok`);
+    else console.log(`✓ ${email}: all ${routes.length - rateLimited.size} routes ok`);
+    if (rateLimited.size) {
+      // Said out loud, never silently: these were NOT checked, and a run that
+      // hides that is claiming coverage it does not have.
+      console.log(`    (${rateLimited.size} not checked — the API rate-limited this run: ${[...rateLimited].join(", ")})`);
+      unchecked += rateLimited.size;
+    }
   }
 
   console.log("");
@@ -280,7 +304,10 @@ async function main() {
     console.log(`ROUTE SMOKE FAILED — ${failures.reduce((n, f) => n + f.bad.length, 0)} bad render(s) across ${failures.length} role(s).`);
     process.exit(1);
   }
-  console.log(`ROUTE SMOKE PASSED — every route rendered for every role${skipped ? ` (${skipped} role login(s) skipped)` : ""}.`);
+  console.log(
+    `ROUTE SMOKE PASSED — every route rendered for every role${skipped ? ` (${skipped} role login(s) skipped)` : ""}` +
+      `${unchecked ? `, ${unchecked} route(s) NOT CHECKED because the API rate-limited this run` : ""}.`,
+  );
 }
 
 main().catch((e) => { console.error("SMOKE ERROR:", e.stack ?? e.message); process.exit(1); });

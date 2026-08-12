@@ -88,6 +88,18 @@ model School {
   /// privileged retention job; rows older than this are purged. Per-school policy
   /// on the global registry (RLS-exempt). 0 disables purging for the school.
   integrityRetentionDays Int      @default(365)
+  /// How many YEARS a departed pupil's record is kept before the school is
+  /// prompted to dispose of it. Years, not days, because school records are
+  /// governed in years and because the two windows answer different questions:
+  /// integrity telemetry is surveillance data that should die quickly, while a
+  /// leaver's academic record must SURVIVE long enough to issue a transcript.
+  ///
+  /// Deliberately a PROMPT, never an automatic purge. Nothing in this platform
+  /// deletes a child's academic history on a timer — the statutory minimum
+  /// varies by country and a wrong default would destroy records a school is
+  /// legally required to hold. The sweep reports what is due; a human disposes.
+  /// 0 disables the prompt for the school.
+  leaverRetentionYears   Int      @default(7)
   /// Proprietor/owner contact — the business relationship the platform bills.
   /// Captured at onboarding (public form requires it; provisioning stamps it,
   /// falling back to the linked request), shown in the operator directory.

@@ -22,6 +22,7 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 import { NotificationService } from "../notifications/notification.service";
+import { ON_ROLL_STUDENT } from "../common/student-scope";
 import { toMinor } from "../common/money";
 
 const STAFF_WIDE = new Set(["school_admin", "principal"]);
@@ -49,7 +50,9 @@ export class ScholarshipService {
     }
     if (p.roles.some((r) => STAFF_WIDE.has(r))) {
       const students = await tx.user.findMany({
-        where: { roles: { some: { role: { name: "student" } } } },
+        // ON ROLL — a scholarship cannot be applied for on behalf of a pupil
+        // who has already left the school.
+        where: ON_ROLL_STUDENT,
         select: { id: true },
       });
       students.forEach((s: { id: string }) => ids.add(s.id));

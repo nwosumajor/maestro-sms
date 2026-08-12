@@ -63,6 +63,7 @@ import { StripeService, type StripeEvent } from "../payments/stripe.service";
 import { SYSTEM_ACTOR_ID } from "./billing.constants";
 import { BillingDunningService, type DunningResult } from "./billing-dunning.service";
 import { PlanPricingService } from "./plan-pricing.service";
+import { countOnRollStudents } from "../common/student-scope";
 import { ReferralService, type ReferralGrant } from "./referral.service";
 import { encryptField } from "../foundation/field-crypto";
 import PDFDocument from "pdfkit";
@@ -221,7 +222,9 @@ export class BillingService {
    * SQL, where a duplicate role assignment cannot inflate a school's bill.
    */
   private async activeStudents(tx: TenantTx): Promise<number> {
-    return tx.user.count({ where: { roles: { some: { role: { name: "student" } } } } });
+    // ON ROLL, not "ever enrolled". This is the number a school is BILLED on;
+    // counting pupils who have left charges them for children who are gone.
+    return countOnRollStudents(tx);
   }
 
   private toPaymentDto(r: {
