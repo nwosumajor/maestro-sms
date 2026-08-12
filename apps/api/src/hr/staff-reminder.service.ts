@@ -11,10 +11,13 @@ import { Inject, Injectable, Logger } from "@nestjs/common";
 import { NotificationService } from "../notifications/notification.service";
 import { HR_NOTIFY_ROLES, HR_REMINDER_DATABASE } from "./hr.constants";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
+import { endsOnOrBefore } from "./staff-access";
 
 export interface ReminderResult {
   reminded: number;
   scanned: number;
+  /** Departed staff whose access this run actually closed. */
+  accessRevoked?: number;
   skipped?: "NO_DB";
 }
 
@@ -30,12 +33,17 @@ export class StaffReminderService {
   async sweep(): Promise<ReminderResult> {
     const client = this.db.client;
     if (!client) return { reminded: 0, scanned: 0, skipped: "NO_DB" };
+    // Close the access of anyone whose last working day has now passed. This
+    // runs FIRST and independently of the document reminders: a failure to
+    // notify HR about an expiring certificate must never leave a departed
+    // teacher's account open, so the two do not share a try block.
+    const accessRevoked = await this.revokeElapsedExits(client);
     const cutoff = new Date(Date.now() + 30 * 86_400_000);
     const due = await client.staffDocument.findMany({
       where: { reminderSentAt: null, expiresAt: { not: null, lte: cutoff } },
       select: { id: true, schoolId: true, userId: true, kind: true, name: true, expiresAt: true },
     });
-    if (due.length === 0) return { reminded: 0, scanned: 0 };
+    if (due.length === 0) return { reminded: 0, scanned: 0, accessRevoked };
 
     // Group due docs by school so we notify each school's HR.
     const bySchool = new Map<string, typeof due>();
@@ -71,7 +79,7 @@ export class StaffReminderService {
     }
     this.logger.log(`Staff reminder sweep: scanned=${due.length} reminded=${due.length}`);
     await this.sweepContracts(client);
-    return { reminded: due.length, scanned: due.length };
+    return { reminded: due.length, scanned: due.length, accessRevoked };
   }
 
   /** Fixed-term contracts ending within 30 days: nudge each school's HR once
@@ -116,5 +124,47 @@ export class StaffReminderService {
       }
     }
     this.logger.log(`Contract reminder sweep: reminded=${ending.length}`);
+  }
+
+  /**
+   * Close the account of every staff member whose exit is APPROVED and whose
+   * last working day has passed.
+   *
+   * WHY A SWEEP AND NOT JUST THE APPROVAL. A staff exit is normally approved
+   * before the person leaves — someone serving a month's notice still has to
+   * teach — so the approval revokes access only when the last working day has
+   * already arrived. Everyone else is picked up here, on the day.
+   *
+   * Cross-tenant and privileged, like the dunning sweep. Guarded on ACTIVE, so
+   * re-running it is safe and it never reopens or overwrites a status a human
+   * has since changed.
+   */
+  private async revokeElapsedExits(
+    client: NonNullable<PrivilegedDatabaseService["client"]>,
+  ): Promise<number> {
+    try {
+      const now = new Date();
+      const elapsed = await client.staffExit.findMany({
+        where: { status: "APPROVED", lastWorkingDay: { lte: now } },
+        select: { userId: true, schoolId: true, lastWorkingDay: true },
+      });
+      if (elapsed.length === 0) return 0;
+      // One statement, not one per person: this is a fleet-wide nightly job and
+      // the candidate set grows with every school's whole staff history.
+      const stillActive = elapsed.filter((e) => endsOnOrBefore(e.lastWorkingDay, now));
+      const result = await client.user.updateMany({
+        where: { id: { in: [...new Set(stillActive.map((e) => e.userId))] }, status: "ACTIVE" },
+        data: { status: "EXITED", exitedAt: now },
+      });
+      if (result.count > 0) {
+        // Said out loud. An account closing is exactly the kind of thing whose
+        // absence from the logs is noticed only during an incident.
+        this.logger.log(`revoked access for ${result.count} departed staff member(s)`);
+      }
+      return result.count;
+    } catch (err) {
+      this.logger.error(`access revocation sweep failed: ${(err as Error).message}`);
+      return 0;
+    }
   }
 }
