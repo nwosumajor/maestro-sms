@@ -230,6 +230,30 @@ export class StudentExitService {
       where: { studentId, status: "ACTIVE" },
       data: { status: kind, statusReason: reason ?? null },
     });
+    // 3. THEIR BED AND THEIR BUS SEAT.
+    //
+    // These are not paperwork. The hostel allocation list IS the night roll
+    // call — the list staff use to account for children in the building — and
+    // the route assignment list IS the driver's manifest. Leaving a departed
+    // child on either means staff looking for someone who is not there, and a
+    // register that stops being trusted the first time it is wrong.
+    //
+    // They also hold a bed and a seat that a real boarder cannot be given, and
+    // the rent run bills on ACTIVE allocations: verified live, a pupil whose
+    // exit two people had approved was invoiced 150000 minor units for next
+    // month's boarding.
+    //
+    // Same reasoning as the enrolments above — a departure closes the things
+    // the departure ends, in the same transaction, so a pupil is never half
+    // gone. History is retained: both tables keep the row and move its status.
+    await tx.hostelAllocation.updateMany({
+      where: { studentId, status: "ACTIVE" },
+      data: { status: "VACATED" },
+    });
+    await tx.transportAssignment.updateMany({
+      where: { passengerId: studentId, status: "ACTIVE" },
+      data: { status: "CANCELLED" },
+    });
     await this.audit.record(
       {
         actorId,
