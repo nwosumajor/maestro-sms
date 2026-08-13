@@ -161,6 +161,7 @@ const exitSchema = z.object({
 });
 const readmitSchema = z.object({ reason: z.string().max(500).optional() });
 const retentionSchema = z.object({ years: z.number().int().min(0).max(50) });
+const docReleaseSchema = z.object({ released: z.boolean(), reason: z.string().max(500).optional() });
 
 @RequireModule(MODULES.LMS)
 
@@ -543,6 +544,22 @@ export class LmsController {
     @Body(new ZodValidationPipe(readmitSchema)) body: z.infer<typeof readmitSchema>,
   ) {
     return this.exits.readmit(p, studentId, body.reason);
+  }
+
+  /**
+   * Release (or withhold) a leaver's academic documents.
+   *
+   * Principal-tier — the same person who authorises the exit. Gates transcripts,
+   * report cards and certificates; deliberately NOT the data-protection export.
+   */
+  @Post("students/:studentId/documents/release")
+  @RequirePermission(WORKFLOW_PERMISSIONS.STUDENT_EXIT_APPROVE)
+  setDocumentRelease(
+    @CurrentPrincipal() p: Principal,
+    @Param("studentId") studentId: string,
+    @Body(new ZodValidationPipe(docReleaseSchema)) body: z.infer<typeof docReleaseSchema>,
+  ) {
+    return this.exits.setDocumentRelease(p, studentId, body.released, body.reason);
   }
 
   /**

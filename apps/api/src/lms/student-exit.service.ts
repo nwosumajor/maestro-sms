@@ -86,6 +86,54 @@ export class StudentExitService {
   }
 
   /**
+   * RELEASE (or withhold) a leaver's academic documents.
+   *
+   * Principal-only, and the same person who authorises the exit. Schools
+   * commonly hold a transcript or a leaving certificate until the family has
+   * settled what they owe, and the platform gave them nowhere to record that —
+   * so it happened in someone's head, or not at all.
+   *
+   * It gates ACADEMIC artefacts only: transcript, report card, certificate. It
+   * deliberately does NOT gate the data-protection export. A data subject's
+   * right to their own personal data is not a debt-collection lever, and
+   * withholding it over money is unlawful rather than merely firm.
+   *
+   * Reversible in both directions, because a release given on a promise that is
+   * not kept has to be retractable, and a release withheld in error has to be
+   * grantable without a committee.
+   */
+  async setDocumentRelease(
+    p: Principal,
+    studentId: string,
+    released: boolean,
+    reason?: string,
+  ): Promise<{ docsReleased: boolean }> {
+    this.assertWholeSchool(p);
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const changed = await tx.user.updateMany({
+        where: { id: studentId, status: "EXITED" },
+        data: released
+          ? { docsReleasedAt: new Date(), docsReleasedById: p.userId }
+          : { docsReleasedAt: null, docsReleasedById: null },
+      });
+      // 404-not-403 for anyone who is not a leaver of this school.
+      if (changed.count === 0) throw new NotFoundException("No exited student found");
+      await this.audit.record(
+        {
+          actorId: p.userId,
+          action: released ? "student.documents.released" : "student.documents.withheld",
+          entity: "user",
+          entityId: studentId,
+          schoolId: p.schoolId,
+          metadata: { reason: reason ?? null },
+        },
+        tx,
+      );
+      return { docsReleased: released };
+    });
+  }
+
+  /**
    * Set how long this school keeps a leaver's record before prompting review.
    *
    * A POLICY setting on the global registry, so it goes through the privileged
@@ -344,16 +392,53 @@ export class StudentExitService {
         // One extra row to detect a next page — a COUNT here would scan every
         // user the school has ever had.
         take: take + 1,
-        select: { id: true, name: true, email: true, exitedAt: true },
+        select: { id: true, name: true, email: true, exitedAt: true, docsReleasedAt: true },
       });
       // The school's own retention policy, not a platform-wide one — the
       // statutory minimum for school records differs by country.
       const school = await tx.school.findFirst({
         where: { id: p.schoolId },
-        select: { leaverRetentionYears: true },
+        select: { leaverRetentionYears: true, currency: true },
       });
       const years = school?.leaverRetentionYears ?? 0;
       const now = Date.now();
+
+      // WHAT EACH LEAVER STILL OWES.
+      //
+      // TWO grouped queries for the whole page, not two per row: this list is
+      // paged but a school's leavers only ever grow, and a per-row balance is
+      // the shape that turns a fast page into a slow one three years in.
+      const ids = rows.slice(0, take).map((r) => r.id);
+      const [billed, paid] = ids.length
+        ? await Promise.all([
+            tx.invoice.groupBy({
+              by: ["studentId"],
+              where: { studentId: { in: ids }, status: { in: ["ISSUED", "PARTIALLY_PAID"] } },
+              _sum: { totalMinor: true },
+            }),
+            tx.payment.groupBy({
+              by: ["invoiceId"],
+              where: { invoice: { studentId: { in: ids } }, status: "POSTED", kind: "PAYMENT" },
+              _sum: { amountMinor: true },
+            }),
+          ])
+        : [[], []];
+      // Payments group by invoice, so map them back to the pupil.
+      const invoices = ids.length
+        ? await tx.invoice.findMany({
+            where: { studentId: { in: ids } },
+            select: { id: true, studentId: true },
+          })
+        : [];
+      const studentOfInvoice = new Map(invoices.map((i) => [i.id, i.studentId]));
+      const owedBy = new Map<string, number>();
+      for (const b of billed as Array<{ studentId: string; _sum: { totalMinor: number | null } }>) {
+        owedBy.set(b.studentId, (owedBy.get(b.studentId) ?? 0) + (b._sum.totalMinor ?? 0));
+      }
+      for (const pmt of paid as Array<{ invoiceId: string; _sum: { amountMinor: number | null } }>) {
+        const sid = studentOfInvoice.get(pmt.invoiceId);
+        if (sid) owedBy.set(sid, (owedBy.get(sid) ?? 0) - (pmt._sum.amountMinor ?? 0));
+      }
 
       return {
         rows: rows.slice(0, take).map((r) => {
@@ -365,12 +450,22 @@ export class StudentExitService {
             years > 0 && r.exitedAt
               ? new Date(new Date(r.exitedAt).setFullYear(new Date(r.exitedAt).getFullYear() + years))
               : null;
-          return { ...r, retentionDueAt: dueAt, dueForReview: dueAt != null && dueAt.getTime() <= now };
+          return {
+            ...r,
+            retentionDueAt: dueAt,
+            dueForReview: dueAt != null && dueAt.getTime() <= now,
+            // Never negative: an overpayment is a credit, not a debt, and
+            // showing "owes -5,000" on a leavers page is how a bursar chases
+            // somebody who owes nothing.
+            outstandingMinor: Math.max(0, owedBy.get(r.id) ?? 0),
+            docsReleased: r.docsReleasedAt != null,
+          };
         }),
         page: Math.max(1, page),
         pageSize: take,
         hasMore: rows.length > take,
         retentionYears: years,
+        currency: school?.currency ?? "NGN",
       };
     });
   }

@@ -47,6 +47,17 @@ function makeTx(over: Record<string, unknown> = {}) {
       update: jest.fn().mockResolvedValue({}),
     },
     user: { findFirst: jest.fn().mockResolvedValue({ id: "stu1", name: "Stu" }) },
+    // An overdue fine is now a CHARGE on the ledger, not just a number on the
+    // loan row — returning a late book raises an invoice line for it. Without
+    // these the fine would still be computed and would reach nobody's account.
+    invoiceLineItem: { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn().mockResolvedValue({}) },
+    invoice: {
+      findFirst: jest.fn().mockResolvedValue(null),
+      create: jest.fn().mockResolvedValue({ id: "inv-1" }),
+      update: jest.fn().mockResolvedValue({}),
+    },
+    payment: { create: jest.fn().mockResolvedValue({}), aggregate: jest.fn().mockResolvedValue({ _sum: { amountMinor: 0 } }) },
+    school: { findFirst: jest.fn().mockResolvedValue({ currency: "NGN" }) },
   } as unknown as TenantTx;
   return { tx, calls };
 }

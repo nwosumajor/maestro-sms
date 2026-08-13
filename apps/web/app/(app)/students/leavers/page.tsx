@@ -29,6 +29,8 @@ type Leaver = {
   exitedAt: string | null;
   retentionDueAt: string | null;
   dueForReview: boolean;
+  outstandingMinor: number;
+  docsReleased: boolean;
 };
 type Page = {
   rows: Leaver[];
@@ -36,6 +38,7 @@ type Page = {
   pageSize: number;
   hasMore: boolean;
   retentionYears: number;
+  currency: string;
 };
 
 export default async function LeaversPage({
@@ -103,6 +106,7 @@ export default async function LeaversPage({
               <LeaversTable
                 rows={data.rows}
                 canReadmit={hasPermission(user.permissions, "student.exit.approve")}
+                currency={data.currency}
               />
             )}
           </CardContent>

@@ -13,6 +13,8 @@
 // school had already taken.
 // =============================================================================
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { LibraryService } from "../../src/library/library.service";
 
@@ -21,12 +23,23 @@ const librarian = { schoolId: "S", userId: "lib-1", roles: ["librarian"], permis
 const borrower = { schoolId: "S", userId: "kid-1", roles: ["student"], permissions: [] };
 const other = { schoolId: "S", userId: "kid-2", roles: ["student"], permissions: [] };
 
-function makeService(loan: Record<string, unknown> | null) {
+function makeService(loan: Record<string, unknown> | null, line: { invoiceId: string } | null = { invoiceId: "inv-1" }) {
   const update = jest.fn().mockResolvedValue({});
+  const paymentCreate = jest.fn().mockResolvedValue({});
   const tx = {
     bookLoan: { findFirst: jest.fn().mockResolvedValue(loan), update },
     libraryBook: { findFirstOrThrow: jest.fn().mockResolvedValue({ title: "Things Fall Apart" }) },
     user: { findFirst: jest.fn().mockResolvedValue({ name: "Ada Obi" }) },
+    // A fine is a charge on the ledger now, so paying one settles a real
+    // invoice line rather than flipping a boolean.
+    invoiceLineItem: { findFirst: jest.fn().mockResolvedValue(line), create: jest.fn().mockResolvedValue({}) },
+    invoice: {
+      findFirst: jest.fn().mockResolvedValue({ totalMinor: 15000, status: "DRAFT" }),
+      create: jest.fn().mockResolvedValue({ id: "inv-1" }),
+      update: jest.fn().mockResolvedValue({}),
+    },
+    payment: { create: paymentCreate, aggregate: jest.fn().mockResolvedValue({ _sum: { amountMinor: 15000 } }) },
+    school: { findFirst: jest.fn().mockResolvedValue({ currency: "NGN" }) },
   };
   const db = {
     runAsTenant: <T>(_c: unknown, fn: (t: unknown) => Promise<T>) => fn(tx),
@@ -34,7 +47,7 @@ function makeService(loan: Record<string, unknown> | null) {
   };
   const svc = Object.create(LibraryService.prototype) as LibraryService;
   Object.assign(svc, { db, audit: { record: jest.fn() } });
-  return { svc, tx, update };
+  return { svc, tx, update, paymentCreate };
 }
 
 const paidLoan = {
@@ -56,6 +69,16 @@ describe("paying a fine", () => {
     // The receipt states the SAME instant that was stored, not a second one
     // computed on the way out.
     expect(receipt.paidAt).toEqual(update.mock.calls[0][0].data.finePaidAt);
+  });
+
+  it("POSTS the money to the ledger, not just a boolean", async () => {
+    // The whole point of the ledger fix: a fine paid at the desk is countable in
+    // the same place as every other payment.
+    const { svc, paymentCreate } = makeService({ ...paidLoan, finePaid: false, finePaidAt: null });
+    await svc.payFine(librarian as never, LOAN);
+    expect(paymentCreate).toHaveBeenCalled();
+    const data = paymentCreate.mock.calls[0][0].data;
+    expect(data).toMatchObject({ invoiceId: "inv-1", amountMinor: 15000, status: "POSTED", kind: "PAYMENT" });
   });
 
   it("still refuses to take the same fine twice", async () => {
@@ -122,5 +145,51 @@ describe("the backfill for rows paid before the date was recorded", () => {
     expect(sql).toMatch(/SET "finePaidAt" = "returnedAt"/);
     expect(sql).toMatch(/"returnedAt" IS NOT NULL/);
     expect(sql).toMatch(/"finePaidAt" IS NULL/);
+  });
+});
+
+describe("a fine reaches the ledger", () => {
+  // THE GAP THIS CLOSES. `payFine` marked a boolean and printed a receipt, and
+  // wrote nothing to the ledger: no invoice line, no Payment. The money was
+  // invisible to the finance reports, the receivables ageing, the journal export
+  // and reconciliation — a school could not tell you what it was owed in fines
+  // or what it had collected, from the place it keeps every other figure.
+  //
+  // It also made "what does this leaver owe" a lie, because the exit preview and
+  // the leavers page read the invoice ledger.
+  const src = readFileSync(join(__dirname, "../../src/library/library.service.ts"), "utf8");
+
+  it("is billed as an invoice line when the book comes back late", () => {
+    const ret = src.slice(src.indexOf("async returnLoan"), src.indexOf("private async billFine"));
+    expect(ret).toMatch(/if \(fineMinor > 0\) await this\.billFine/);
+  });
+
+  it("is idempotent, so a replay cannot charge the fine twice", () => {
+    // Same marker-description guard the late-fee sweep and the hostel rent run
+    // use: two lines saying the same thing is what a bursar cannot untangle.
+    const bill = src.slice(src.indexOf("private async billFine"), src.indexOf("async payFine"));
+    expect(bill).toMatch(/Library fine — loan/);
+    expect(bill).toMatch(/if \(existing\) return;/);
+  });
+
+  it("raises the invoice in the SCHOOL's currency", () => {
+    // Settlement REFUSES a charge whose currency differs from the invoice, so a
+    // fine raised in the column default could never be paid online.
+    const bill = src.slice(src.indexOf("private async billFine"), src.indexOf("async payFine"));
+    expect(bill).toMatch(/school\?\.currency \?\? "NGN"/);
+  });
+
+  it("posts a real POSTED payment when the fine is paid", () => {
+    const pay = src.slice(src.indexOf("async payFine"), src.indexOf("private async settleInvoiceIfPaid"));
+    expect(pay).toMatch(/tx\.payment\.create/);
+    expect(pay).toMatch(/status: "POSTED"/);
+    expect(pay).toMatch(/kind: "PAYMENT"/);
+  });
+
+  it("moves the invoice out of DRAFT so receivables stop reporting a settled debt", () => {
+    expect(src).toMatch(/settleInvoiceIfPaid/);
+    const settle = src.slice(src.indexOf("private async settleInvoiceIfPaid"));
+    expect(settle).toMatch(/"PAID"/);
+    expect(settle).toMatch(/"PARTIALLY_PAID"/);
   });
 });

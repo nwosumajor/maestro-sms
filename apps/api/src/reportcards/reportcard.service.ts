@@ -14,6 +14,7 @@
 // =============================================================================
 
 import { Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { assertDocumentsReleasable } from "../lms/leaver-documents";
 import PDFDocument from "pdfkit";
 import {
   AUDIT_LOG_SERVICE,
@@ -53,6 +54,10 @@ export class ReportCardService {
   async generate(p: Principal, studentId: string, termId?: string): Promise<{ buffer: Buffer; filename: string }> {
     // Resolve the term: the one asked for, else the current term. A report card
     // is a TERM document.
+    // A LEAVER'S DOCUMENTS ARE THE PRINCIPAL'S TO RELEASE. No effect on a pupil
+    // still at the school — report cards go out every term and this must not
+    // touch that. See StudentExitService.assertDocumentsReleasable.
+    await this.db.runAsTenant(this.ctx(p), (tx) => assertDocumentsReleasable(tx, studentId));
     const term = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const t = termId
         ? await tx.term.findFirst({ where: { id: termId }, select: { id: true, name: true, sessionId: true, startDate: true, endDate: true } })

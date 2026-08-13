@@ -200,11 +200,73 @@ export class LibraryService {
       const now = new Date();
       const daysLate = Math.max(0, Math.floor((now.getTime() - loan.dueAt.getTime()) / DAY_MS));
       const fineMinor = daysLate * FINE_PER_DAY_MINOR;
+      // A FINE IS A CHARGE, so it goes on the ledger like every other charge.
+      //
+      // It used to live only on the loan row: `payFine` marked a boolean and
+      // printed a receipt, and no Payment or invoice was ever written. The money
+      // was therefore invisible to the finance reports, the receivables ageing,
+      // the journal export and reconciliation — a school could not tell you what
+      // it was owed in fines, or what it had collected, from the place it keeps
+      // every other figure.
+      //
+      // It also made "what does this leaver owe" a lie: the exit preview reads
+      // the invoice ledger, so a pupil with unpaid fines showed as owing nothing.
+      if (fineMinor > 0) await this.billFine(tx, p, loan, fineMinor, daysLate);
       await tx.bookLoan.update({ where: { id: loanId }, data: { status: "RETURNED", returnedAt: now, fineMinor } });
       await tx.libraryBook.update({ where: { id: loan.bookId }, data: { availableCopies: { increment: 1 } } });
       await this.log(tx, p, "library.return", loanId, { daysLate, fineMinor });
       return this.loanDto(tx, loanId);
     });
+  }
+
+  /**
+   * Put an overdue fine on the borrower's invoice.
+   *
+   * IDEMPOTENT on a marker description keyed to the loan, the same guard the
+   * late-fee sweep and the hostel rent run use: returning a book is a single
+   * act, but a retry or a replay must not charge the fine twice, and two lines
+   * saying the same thing is exactly what a bursar cannot untangle afterwards.
+   *
+   * Staff borrow books too. Only a charge against a real invoice makes sense, so
+   * this bills whoever borrowed it — the ledger is per-user, not per-pupil.
+   */
+  private async billFine(
+    tx: TenantTx,
+    p: Principal,
+    loan: { id: string; borrowerId: string; bookId: string },
+    fineMinor: number,
+    daysLate: number,
+  ): Promise<void> {
+    const description = `Library fine — loan ${loan.id.slice(0, 8).toUpperCase()}`;
+    const existing = await tx.invoiceLineItem.findFirst({
+      where: { description, invoice: { studentId: loan.borrowerId } },
+      select: { id: true },
+    });
+    if (existing) return; // already billed — a replay, not a second fine
+    // The SCHOOL's currency: settlement refuses a charge whose currency differs
+    // from the invoice, so a fine raised in the column default could never be
+    // paid online by a school billing in anything else.
+    const school = await tx.school.findFirst({ where: { id: p.schoolId }, select: { currency: true } });
+    let invoice = await tx.invoice.findFirst({ where: { studentId: loan.borrowerId, status: "DRAFT" } });
+    if (!invoice) {
+      invoice = await tx.invoice.create({
+        data: {
+          schoolId: p.schoolId,
+          studentId: loan.borrowerId,
+          createdById: p.userId,
+          reference: `FINE-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          status: "DRAFT",
+          totalMinor: 0,
+          currency: school?.currency ?? "NGN",
+          dueDate: new Date(),
+        },
+      });
+    }
+    await tx.invoiceLineItem.create({
+      data: { schoolId: p.schoolId, invoiceId: invoice.id, description, amountMinor: fineMinor, quantity: 1 },
+    });
+    await tx.invoice.update({ where: { id: invoice.id }, data: { totalMinor: { increment: fineMinor } } });
+    await this.log(tx, p, "library.fine.billed", loan.id, { fineMinor, daysLate, invoiceId: invoice.id });
   }
 
   /** Record payment of an overdue fine → a digital receipt. Librarian. */
@@ -216,7 +278,37 @@ export class LibraryService {
       if (loan.finePaid) throw new BadRequestException("Fine already paid");
       const paidAt = new Date();
       await tx.bookLoan.update({ where: { id: loanId }, data: { finePaid: true, finePaidAt: paidAt } });
-      await this.log(tx, p, "library.fine.pay", loanId, { fineMinor: loan.fineMinor });
+
+      // POST THE MONEY, do not just tick a box.
+      //
+      // This used to set a boolean and print a receipt, and write nothing to the
+      // ledger — cash over the desk that the finance reports, the journal export
+      // and reconciliation never saw. The charge is billed on return; this is
+      // the settlement of it, and it goes through the same Payment table as
+      // every other payment so a fine is countable in the same place as a fee.
+      const line = await tx.invoiceLineItem.findFirst({
+        where: {
+          description: `Library fine — loan ${loanId.slice(0, 8).toUpperCase()}`,
+          invoice: { studentId: loan.borrowerId },
+        },
+        select: { invoiceId: true },
+      });
+      if (line) {
+        await tx.payment.create({
+          data: {
+            schoolId: p.schoolId,
+            invoiceId: line.invoiceId,
+            amountMinor: loan.fineMinor,
+            method: "CASH",
+            kind: "PAYMENT",
+            status: "POSTED",
+            recordedById: p.userId,
+            reference: `FINE-${loanId.slice(0, 8).toUpperCase()}`,
+          },
+        });
+        await this.settleInvoiceIfPaid(tx, line.invoiceId);
+      }
+      await this.log(tx, p, "library.fine.pay", loanId, { fineMinor: loan.fineMinor, invoiceId: line?.invoiceId ?? null });
       const book = await tx.libraryBook.findFirstOrThrow({ where: { id: loan.bookId }, select: { title: true } });
       const borrower = await tx.user.findFirst({ where: { id: loan.borrowerId }, select: { name: true } });
       return {
@@ -260,6 +352,30 @@ export class LibraryService {
         reference: `FINE-${loanId.slice(0, 8).toUpperCase()}`,
       };
     });
+  }
+
+  /**
+   * Move the invoice to PARTIALLY_PAID / PAID once a fine payment lands.
+   *
+   * The fees module owns this lifecycle; a fine paid at the library desk must
+   * not leave an invoice sitting DRAFT with money against it, or the receivables
+   * ageing reports a debt that has been settled.
+   */
+  private async settleInvoiceIfPaid(tx: TenantTx, invoiceId: string): Promise<void> {
+    const invoice = await tx.invoice.findFirst({
+      where: { id: invoiceId },
+      select: { totalMinor: true, status: true },
+    });
+    if (!invoice) return;
+    const paid = await tx.payment.aggregate({
+      where: { invoiceId, status: "POSTED", kind: "PAYMENT" },
+      _sum: { amountMinor: true },
+    });
+    const settled = paid._sum?.amountMinor ?? 0;
+    const status = settled >= invoice.totalMinor ? "PAID" : settled > 0 ? "PARTIALLY_PAID" : invoice.status;
+    if (status !== invoice.status) {
+      await tx.invoice.update({ where: { id: invoiceId }, data: { status } });
+    }
   }
 
   /** A borrower's loans (self), or all loans (librarian). */
