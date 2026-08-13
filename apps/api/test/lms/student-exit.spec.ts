@@ -77,6 +77,10 @@ describe("applying an exit", () => {
     const tx = {
       user: { updateMany: userUpdate },
       enrollment: { updateMany: enrolUpdate },
+      // A departure also releases the bed and the bus seat — see
+      // exit-boarding.spec.ts for why those two lists are not paperwork.
+      hostelAllocation: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      transportAssignment: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     };
     const svc = Object.create(StudentExitService.prototype) as StudentExitService;
     Object.assign(svc, { audit, db: {} });
@@ -124,7 +128,14 @@ describe("applying an exit", () => {
     // destroyed report cards or invoices would be the more serious failure.
     const { apply, tx } = makeService();
     await apply(tx, SCHOOL, "actor", STUDENT, "WITHDRAWN");
-    expect(Object.keys(tx)).toEqual(["user", "enrollment"]);
+    // The full set of things a departure touches. Listed rather than counted so
+    // that adding a fifth is a deliberate edit here, not a silent widening.
+    expect(Object.keys(tx)).toEqual([
+      "user",
+      "enrollment",
+      "hostelAllocation",
+      "transportAssignment",
+    ]);
   });
 });
 
