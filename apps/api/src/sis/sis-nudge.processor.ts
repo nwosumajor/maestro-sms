@@ -6,6 +6,7 @@
 // =============================================================================
 
 import { Processor, WorkerHost } from "@nestjs/bullmq";
+import { JobRunsService } from "../maintenance/job-runs.service";
 import { Logger } from "@nestjs/common";
 import type { Job } from "bullmq";
 import { SIS_NUDGE_QUEUE, SIS_NUDGE_SWEEP_JOB } from "./sis.constants";
@@ -15,14 +16,19 @@ import { SisNudgeService } from "./sis-nudge.service";
 export class SisNudgeProcessor extends WorkerHost {
   private readonly logger = new Logger(SisNudgeProcessor.name);
 
-  constructor(private readonly nudge: SisNudgeService) {
+  constructor(private readonly nudge: SisNudgeService,
+    private readonly runs: JobRunsService,
+  ) {
     super();
   }
 
   async process(job: Job): Promise<{ nudged: number; scanned: number }> {
-    if (job.name !== SIS_NUDGE_SWEEP_JOB) return { nudged: 0, scanned: 0 };
-    const r = await this.nudge.sweep();
-    this.logger.log(`SIS nudge done: scanned=${r.scanned} nudged=${r.nudged}${r.skipped ? ` skipped=${r.skipped}` : ""}`);
-    return { nudged: r.nudged, scanned: r.scanned };
+    return this.runs.record("sis.nudge", "SCHEDULE", async () => {
+      if (job.name !== SIS_NUDGE_SWEEP_JOB) return { nudged: 0, scanned: 0 };
+      const r = await this.nudge.sweep();
+      this.logger.log(`SIS nudge done: scanned=${r.scanned} nudged=${r.nudged}${r.skipped ? ` skipped=${r.skipped}` : ""}`);
+      return { nudged: r.nudged, scanned: r.scanned };
+  
+    });
   }
 }

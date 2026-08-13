@@ -1,4 +1,5 @@
 import { Processor, WorkerHost } from "@nestjs/bullmq";
+import { JobRunsService } from "../../maintenance/job-runs.service";
 import { Logger } from "@nestjs/common";
 import type { Job } from "bullmq";
 import { ACADEMIC_PROGRESSION_QUEUE, ADVANCE_TERMS_JOB } from "./academic-progression.constants";
@@ -13,14 +14,19 @@ import { AcademicProgressionService } from "./academic-progression.service";
 export class AcademicProgressionProcessor extends WorkerHost {
   private readonly logger = new Logger(AcademicProgressionProcessor.name);
 
-  constructor(private readonly progression: AcademicProgressionService) {
+  constructor(private readonly progression: AcademicProgressionService,
+    private readonly runs: JobRunsService,
+  ) {
     super();
   }
 
   async process(job: Job): Promise<{ schools: number; advanced: number }> {
-    if (job.name !== ADVANCE_TERMS_JOB) return { schools: 0, advanced: 0 };
-    const r = await this.progression.runSweep("SCHEDULED");
-    this.logger.log(`Progression sweep done: schools=${r.schools} advanced=${r.advanced}`);
-    return { schools: r.schools, advanced: r.advanced };
+    return this.runs.record("lms.progression", "SCHEDULE", async () => {
+      if (job.name !== ADVANCE_TERMS_JOB) return { schools: 0, advanced: 0 };
+      const r = await this.progression.runSweep("SCHEDULED");
+      this.logger.log(`Progression sweep done: schools=${r.schools} advanced=${r.advanced}`);
+      return { schools: r.schools, advanced: r.advanced };
+  
+    });
   }
 }

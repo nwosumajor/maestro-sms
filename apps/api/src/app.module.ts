@@ -15,6 +15,7 @@ import { NotificationModule } from "./notifications/notification.module";
 import { FeesModule } from "./fees/fees.module";
 import { BillingModule } from "./billing/billing.module";
 import { MaintenanceModule } from "./maintenance/maintenance.module";
+import { JobRunsModule } from "./maintenance/job-runs.module";
 import { RequestContextMiddleware } from "./auth/request-context.middleware";
 import { DocumentsModule } from "./documents/documents.module";
 import { BrandingModule } from "./branding/branding.module";
@@ -121,6 +122,7 @@ import { HealthController } from "./health.controller";
     GameModule,
     GameSocketModule,
     MaintenanceModule,
+    JobRunsModule,
   ],
   controllers: [HealthController],
 })

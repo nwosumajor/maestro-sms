@@ -1,4 +1,5 @@
 import { Processor, WorkerHost } from "@nestjs/bullmq";
+import { JobRunsService } from "../maintenance/job-runs.service";
 import { Logger } from "@nestjs/common";
 import type { Job } from "bullmq";
 import { SchoolArchiveService, TERM_ARCHIVE_JOB, TERM_ARCHIVE_QUEUE } from "./archive.service";
@@ -9,19 +10,24 @@ import { SchoolArchiveService, TERM_ARCHIVE_JOB, TERM_ARCHIVE_QUEUE } from "./ar
 export class TermArchiveProcessor extends WorkerHost {
   private readonly logger = new Logger(TermArchiveProcessor.name);
 
-  constructor(private readonly archives: SchoolArchiveService) {
+  constructor(private readonly archives: SchoolArchiveService,
+    private readonly runs: JobRunsService,
+  ) {
     super();
   }
 
   async process(job: Job) {
-    const zero = { scanned: 0, archived: 0, skipped: 0 };
-    if (job.name !== TERM_ARCHIVE_JOB) return zero;
-    const r = await this.archives.archiveEndedTerms("SCHEDULED");
-    // At WARN when it actually archived: a new permanent record of the whole
-    // institution came into existence, which is worth seeing in the log.
-    const line = `Term archive: scanned=${r.scanned} archived=${r.archived} skipped=${r.skipped}`;
-    if (r.archived > 0) this.logger.warn(line);
-    else this.logger.log(line);
-    return r;
+    return this.runs.record("privacy.archive", "SCHEDULE", async () => {
+      const zero = { scanned: 0, archived: 0, skipped: 0 };
+      if (job.name !== TERM_ARCHIVE_JOB) return zero;
+      const r = await this.archives.archiveEndedTerms("SCHEDULED");
+      // At WARN when it actually archived: a new permanent record of the whole
+      // institution came into existence, which is worth seeing in the log.
+      const line = `Term archive: scanned=${r.scanned} archived=${r.archived} skipped=${r.skipped}`;
+      if (r.archived > 0) this.logger.warn(line);
+      else this.logger.log(line);
+      return r;
+  
+    });
   }
 }

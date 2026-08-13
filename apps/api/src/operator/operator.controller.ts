@@ -41,6 +41,7 @@ import { RequireStepUp } from "../auth/require-stepup.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
+import { JobRunsService, type JobStatusDto } from "../maintenance/job-runs.service";
 import { OperatorService } from "./operator.service";
 import { OperatorProvisioningService } from "./operator-provisioning.service";
 import { OperatorUserService } from "./operator-user.service";
@@ -247,6 +248,7 @@ export class OperatorController {
     private readonly groups: GroupService,
     private readonly credits: OperatorCreditsService,
     private readonly payments: OperatorPaymentsService,
+    private readonly jobRuns: JobRunsService,
   ) {}
 
   /** Self-serve onboard a NEW school + its first admin (step-up: creates creds). */
@@ -386,6 +388,20 @@ export class OperatorController {
     @Body(new ZodValidationPipe(staffStatusSchema)) body: z.infer<typeof staffStatusSchema>,
   ): Promise<PlatformStaffDto> {
     return this.provisioning.setPlatformStaffStatus(p, userId, body.status);
+  }
+
+  /**
+   * Every scheduled job, and whether it has actually been running.
+   *
+   * Thirteen jobs run on timers and nothing recorded that any of them had. A
+   * scheduler that stops does not error — it goes quiet, and dunning stops
+   * charging while reconciliation stops recovering lost payments. This is the
+   * screen that makes that visible.
+   */
+  @Get("jobs")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
+  jobs(): Promise<JobStatusDto[]> {
+    return this.jobRuns.status();
   }
 
   @Get("tenants")

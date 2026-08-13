@@ -171,6 +171,7 @@ apply_rls packages/db/prisma/rls/98_attendance_rollup_rls.sql attendance_term_ro
 apply_rls packages/db/prisma/rls/99_platform_delegation_rls.sql platform_delegation_update
 apply_rls packages/db/prisma/rls/100_data_breach_rls.sql data_breach_incident_update
 apply_rls packages/db/prisma/rls/101_mobile_money_rls.sql mobile_money_intent_update
+apply_rls packages/db/prisma/rls/102_job_run_rls.sql job_run_select
 apply_rls packages/db/prisma/rls/102_school_archive_rls.sql school_archive_insert
 apply_rls 103_subject_syllabus_rls.sql subject_syllabus_item_delete
 apply_rls 104_meeting_invitee_rls.sql meeting_invitee_delete

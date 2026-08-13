@@ -1069,6 +1069,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "GET /operator/jobs": {
+      "kind": "ui",
+      "note": "Background jobs console at /operator/jobs — every scheduled job, when it last ran, what it reported, and whether it is late. Thirteen jobs ran on timers with nothing recording that they had; a scheduler that stops does not error, it goes quiet."
+    },
     "GET /operator/message-credits": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"

@@ -1,4 +1,5 @@
 import { Processor, WorkerHost } from "@nestjs/bullmq";
+import { JobRunsService } from "../maintenance/job-runs.service";
 import { Logger } from "@nestjs/common";
 import type { Job } from "bullmq";
 import {
@@ -15,22 +16,27 @@ import {
 export class PaymentReconciliationProcessor extends WorkerHost {
   private readonly logger = new Logger(PaymentReconciliationProcessor.name);
 
-  constructor(private readonly reconcile: PaymentReconciliationService) {
+  constructor(private readonly reconcile: PaymentReconciliationService,
+    private readonly runs: JobRunsService,
+  ) {
     super();
   }
 
   async process(job: Job): Promise<ReconcileResult> {
-    if (job.name !== FEE_RECONCILE_JOB)
-      return {
-        scanned: 0, invoiceCharges: 0, subscriptionCharges: 0, subscriptionRecovered: 0,
-        creditCharges: 0, creditRecovered: 0, missing: 0, posted: 0,
-      };
-    const r = await this.reconcile.sweep("SCHEDULED");
-    this.logger.log(
-      `Reconcile done: scanned=${r.scanned} invoiceCharges=${r.invoiceCharges} missing=${r.missing} posted=${r.posted}` +
-        ` subscriptionCharges=${r.subscriptionCharges} subscriptionRecovered=${r.subscriptionRecovered}` +
-        ` creditCharges=${r.creditCharges} creditRecovered=${r.creditRecovered}`,
-    );
-    return r;
+    return this.runs.record("fees.reconciliation", "SCHEDULE", async () => {
+      if (job.name !== FEE_RECONCILE_JOB)
+        return {
+          scanned: 0, invoiceCharges: 0, subscriptionCharges: 0, subscriptionRecovered: 0,
+          creditCharges: 0, creditRecovered: 0, missing: 0, posted: 0,
+        };
+      const r = await this.reconcile.sweep("SCHEDULED");
+      this.logger.log(
+        `Reconcile done: scanned=${r.scanned} invoiceCharges=${r.invoiceCharges} missing=${r.missing} posted=${r.posted}` +
+          ` subscriptionCharges=${r.subscriptionCharges} subscriptionRecovered=${r.subscriptionRecovered}` +
+          ` creditCharges=${r.creditCharges} creditRecovered=${r.creditRecovered}`,
+      );
+      return r;
+  
+    });
   }
 }
