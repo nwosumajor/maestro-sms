@@ -20,11 +20,13 @@ import {
   type TenantDatabase,
 } from "../integrity.foundation";
 import { IntegrityRetentionService } from "./integrity-retention.service";
+import { JobRunsService } from "../../maintenance/job-runs.service";
 
 @RequireModule(MODULES.INTEGRITY)
 @Controller("integrity/retention")
 export class IntegrityRetentionController {
   constructor(
+    private readonly jobRuns: JobRunsService,
     private readonly retention: IntegrityRetentionService,
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
   ) {}
@@ -42,7 +44,9 @@ export class IntegrityRetentionController {
       });
       return (s?.integrityRetentionDays as number | undefined) ?? 0;
     });
-    return this.retention.purgeSchool(p.schoolId, days, "MANUAL");
+    return this.jobRuns.record("integrity.retention", "MANUAL", () =>
+      this.retention.purgeSchool(p.schoolId, days, "MANUAL"),
+    );
   }
 
   /** Immutable retention-run history for the caller's school (RLS-scoped read). */

@@ -34,21 +34,124 @@ export type JobTrigger = "SCHEDULE" | "MANUAL";
  * `everyMinutes` is what the console judges lateness against. Deliberately
  * generous: a daily job is not in trouble at 25 hours, and an alert that cries
  * wolf is one people turn off.
+ *
+ * `manual` is the endpoint that runs the job by hand, and the SCOPE matters more
+ * than the path. A PLATFORM sweep is cross-tenant and privileged — running it
+ * from the operator console does what the timer would have done. A SCHOOL sweep
+ * runs inside ONE tenant, so pressing it from the operator console would sweep
+ * the PLATFORM's own org and report "0 found" — an answer that looks like
+ * success and means nothing. Those are named here so the console can say where
+ * their control actually lives rather than offering a button that lies.
  */
 export const SCHEDULED_JOBS = [
-  { key: "billing.dunning", label: "Subscription dunning", everyMinutes: 1440 },
-  { key: "fees.reconciliation", label: "Payment reconciliation", everyMinutes: 1440 },
-  { key: "fees.ops", label: "Late fees + overdue reminders", everyMinutes: 1440 },
-  { key: "payments.mobileMoneyRecovery", label: "Mobile-money recovery", everyMinutes: 60 },
-  { key: "payments.health", label: "Payment rail health", everyMinutes: 60 },
-  { key: "hostel.exeatOverdue", label: "Boarders late back", everyMinutes: 60 },
-  { key: "hr.staffReminders", label: "Staff document expiry", everyMinutes: 1440 },
-  { key: "sis.nudge", label: "Incomplete profile nudges", everyMinutes: 1440 },
-  { key: "lms.progression", label: "Term / session roll-over", everyMinutes: 1440 },
-  { key: "integrity.retention", label: "Integrity telemetry purge", everyMinutes: 1440 },
-  { key: "privacy.archive", label: "End-of-term archive sweep", everyMinutes: 1440 },
-  { key: "maintenance.auditPartition", label: "Audit-log partitioning", everyMinutes: 1440 },
-  { key: "operator.feedbackDigest", label: "Feedback digest", everyMinutes: 1440 },
+  {
+    key: "billing.dunning",
+    label: "Subscription dunning",
+    everyMinutes: 1440,
+    manual: { path: "billing/dunning/run", permission: "billing.dunning.run", scope: "PLATFORM" },
+  },
+  {
+    key: "fees.reconciliation",
+    label: "Payment reconciliation",
+    everyMinutes: 1440,
+    manual: { path: "fees/reconciliation/run", permission: "fee.reconcile.run", scope: "PLATFORM" },
+  },
+  {
+    key: "fees.ops",
+    label: "Late fees + overdue reminders",
+    everyMinutes: 1440,
+    // Per-school: the fees page has the button, and it bills THAT school.
+    manual: { path: "fees/reminders/run", permission: "fee.manage", scope: "SCHOOL", where: "Fees → reports" },
+  },
+  {
+    key: "payments.mobileMoneyRecovery",
+    label: "Mobile-money recovery",
+    everyMinutes: 60,
+    manual: {
+      path: "payments/mobile-money/recovery/run",
+      permission: "fee.reconcile.run",
+      scope: "PLATFORM",
+    },
+  },
+  {
+    key: "payments.health",
+    label: "Payment rail health",
+    everyMinutes: 60,
+    manual: {
+      path: "operator/payment-channels/health/run",
+      permission: "platform.pricing.manage",
+      scope: "PLATFORM",
+    },
+  },
+  {
+    key: "hostel.exeatOverdue",
+    label: "Boarders late back",
+    everyMinutes: 60,
+    manual: { path: "hostels/exeats/overdue/run", permission: "hostel.manage", scope: "SCHOOL", where: "Hostel" },
+  },
+  {
+    key: "hr.staffReminders",
+    label: "Staff document expiry",
+    everyMinutes: 1440,
+    manual: {
+      path: "hr/staff/documents/reminders/run",
+      permission: "hr.write",
+      scope: "SCHOOL",
+      where: "HR → a staff member's lifecycle panel",
+    },
+  },
+  {
+    key: "sis.nudge",
+    label: "Incomplete profile nudges",
+    everyMinutes: 1440,
+    manual: { path: "admin/sis/nudge/run", permission: "rbac.manage", scope: "SCHOOL", where: "Admin" },
+  },
+  {
+    key: "lms.progression",
+    label: "Term / session roll-over",
+    everyMinutes: 1440,
+    manual: { path: "academic/progression/run", permission: "platform.operate", scope: "PLATFORM" },
+  },
+  {
+    key: "integrity.retention",
+    label: "Integrity telemetry purge",
+    everyMinutes: 1440,
+    manual: {
+      path: "integrity/retention/run",
+      permission: "integrity.retention.run",
+      scope: "SCHOOL",
+      where: "Admin → privacy",
+    },
+  },
+  {
+    key: "privacy.archive",
+    label: "End-of-term archive sweep",
+    everyMinutes: 1440,
+    // Step-up gated, so it stays where the operator can re-authenticate for it.
+    manual: {
+      path: "privacy/archives/run-term-sweep",
+      permission: "privacy.archive.manage",
+      scope: "SCHOOL",
+      where: "Admin → privacy",
+    },
+  },
+  {
+    // No manual endpoint: rolling a partition forward by hand outside its
+    // window would create an empty future partition, so it is timer-only.
+    key: "maintenance.auditPartition",
+    label: "Audit-log partitioning",
+    everyMinutes: 1440,
+  },
+  {
+    key: "operator.feedbackDigest",
+    label: "Feedback digest",
+    everyMinutes: 1440,
+    manual: {
+      path: "operator/feedback/digest/run",
+      permission: "platform.feedback.review",
+      scope: "PLATFORM",
+    },
+  },
 ] as const;
 
 export type JobKey = (typeof SCHEDULED_JOBS)[number]["key"];
@@ -67,6 +170,8 @@ export interface JobStatusDto {
   overdue: boolean;
   /** Has never run at all — a different problem from "late". */
   neverRun: boolean;
+  /** How to run it by hand, if it can be. Absent = timer only. */
+  manual?: { path: string; permission: string; scope: "PLATFORM" | "SCHOOL"; where?: string };
 }
 
 /** How far past its cadence a job may drift before the console calls it late. */
@@ -167,6 +272,9 @@ export class JobRunsService {
         lastSummary: last?.summary ?? null,
         lastError: last?.error ?? null,
         neverRun: !last,
+        ...("manual" in j
+          ? { manual: (j as { manual: NonNullable<JobStatusDto["manual"]> }).manual }
+          : {}),
         overdue: Boolean(last) && now - new Date(last!.startedAt).getTime() > lateAfterMs,
       };
     });

@@ -10,6 +10,7 @@ import type { Principal } from "../integrity/integrity.foundation";
 import { AdminService } from "./admin.service";
 import { StudentImportService } from "./student-import.service";
 import { SisNudgeService } from "../sis/sis-nudge.service";
+import { JobRunsService } from "../maintenance/job-runs.service";
 
 const roleSchema = z.object({ roleName: z.string().min(1).max(40) });
 const createUserSchema = z.object({
@@ -48,6 +49,7 @@ const rejectSchema = z.object({ note: z.string().max(1000).optional() });
 @Controller("admin")
 export class AdminController {
   constructor(
+    private readonly jobRuns: JobRunsService,
     private readonly admin: AdminService,
     private readonly studentImport: StudentImportService,
     private readonly sisNudge: SisNudgeService,
@@ -68,7 +70,9 @@ export class AdminController {
   @Post("sis/nudge/run")
   @RequirePermission(ADMIN_PERMISSIONS.RBAC_MANAGE)
   runSisNudge(@CurrentPrincipal() p: Principal): Promise<{ nudged: number; scanned: number }> {
-    return this.sisNudge.sweep(p.schoolId).then((r) => ({ nudged: r.nudged, scanned: r.scanned }));
+    return this.jobRuns.record("sis.nudge", "MANUAL", () =>
+      this.sisNudge.sweep(p.schoolId).then((r) => ({ nudged: r.nudged, scanned: r.scanned })),
+    );
   }
 
   @Get("export/staff.csv")

@@ -25,6 +25,7 @@ import { PaymentReconciliationService } from "./reconciliation.service";
 import { VirtualAccountsService } from "./virtual-accounts.service";
 import { PaymentPlansService } from "./payment-plans.service";
 import { FeeOpsService } from "./fee-ops.service";
+import { JobRunsService } from "../maintenance/job-runs.service";
 
 const minor = z.number().int().min(0);
 const feeItemSchema = z.object({
@@ -98,6 +99,7 @@ const planSchema = z.object({
 @Controller()
 export class FeesController {
   constructor(
+    private readonly jobRuns: JobRunsService,
     private readonly fees: FeesService,
     private readonly gateway: PaymentGatewayService,
     private readonly reconciliation: PaymentReconciliationService,
@@ -293,7 +295,9 @@ export class FeesController {
   @Post("fees/reconciliation/run")
   @RequirePermission(FEES_PERMISSIONS.FEE_RECONCILE_RUN)
   reconcile(@CurrentPrincipal() p: Principal) {
-    return this.reconciliation.runManual(p);
+    return this.jobRuns.record("fees.reconciliation", "MANUAL", () =>
+      this.reconciliation.runManual(p),
+    );
   }
 
   /** Paystack webhook (HMAC-verified). Public: it carries no session. */
@@ -362,7 +366,9 @@ export class FeesController {
   @Post("fees/reminders/run")
   @RequirePermission(FEES_PERMISSIONS.FEE_MANAGE)
   sendReminders(@CurrentPrincipal() p: Principal, @Query("overdueOnly") overdueOnly?: string) {
-    return this.fees.sendFeeReminders(p, { overdueOnly: overdueOnly === "true" });
+    return this.jobRuns.record("fees.ops", "MANUAL", () =>
+      this.fees.sendFeeReminders(p, { overdueOnly: overdueOnly === "true" }),
+    );
   }
 
   // --- fee catalog (manage) ---

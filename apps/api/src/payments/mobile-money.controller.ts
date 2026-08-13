@@ -16,6 +16,7 @@ import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { MobileMoneyService } from "./mobile-money.service";
+import { JobRunsService } from "../maintenance/job-runs.service";
 
 const chargeSchema = z.object({
   invoiceId: z.string().uuid(),
@@ -30,7 +31,7 @@ const chargeSchema = z.object({
 
 @Controller("payments/mobile-money")
 export class MobileMoneyController {
-  constructor(private readonly mm: MobileMoneyService) {}
+  constructor(private readonly mm: MobileMoneyService, private readonly jobRuns: JobRunsService) {}
 
   /** Which rails this school's payers can use, and which are enabled. */
   @Get("options")
@@ -89,7 +90,9 @@ export class MobileMoneyController {
   @Post("recovery/run")
   @RequirePermission(FEES_PERMISSIONS.FEE_RECONCILE_RUN)
   runRecovery() {
-    return this.mm.recoverPending("MANUAL");
+    return this.jobRuns.record("payments.mobileMoneyRecovery", "MANUAL", () =>
+      this.mm.recoverPending("MANUAL"),
+    );
   }
 
   /** @see callback — MTN MoMo delivers the same payload as a PUT. */

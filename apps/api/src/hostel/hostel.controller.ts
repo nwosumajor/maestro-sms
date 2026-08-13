@@ -18,6 +18,7 @@ import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { HostelService } from "./hostel.service";
 import { ExeatOverdueService } from "./exeat-overdue.service";
+import { JobRunsService } from "../maintenance/job-runs.service";
 
 const customFields = z.record(z.string()).optional();
 const hostelSchema = z.object({
@@ -90,6 +91,7 @@ const incidentUpdateSchema = z.object({
 @Controller("hostels")
 export class HostelController {
   constructor(
+    private readonly jobRuns: JobRunsService,
     private readonly hostel: HostelService,
     private readonly overdue: ExeatOverdueService,
   ) {}
@@ -189,7 +191,9 @@ export class HostelController {
   @Post("exeats/overdue/run")
   @RequirePermission(HOSTEL_PERMISSIONS.HOSTEL_MANAGE)
   runOverdueCheck(): Promise<{ scanned: number; alerted: number }> {
-    return this.overdue.sweep();
+    return this.jobRuns.record("hostel.exeatOverdue", "MANUAL", () =>
+      this.overdue.sweep(),
+    );
   }
 
   @Post("allocations/:id/vacate")

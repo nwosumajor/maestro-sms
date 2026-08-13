@@ -12,15 +12,18 @@ import { Controller, Post } from "@nestjs/common";
 import { OPERATOR_PERMISSIONS } from "@sms/types";
 import { RequirePermission } from "../../auth/require-permission.decorator";
 import { AcademicProgressionService } from "./academic-progression.service";
+import { JobRunsService } from "../../maintenance/job-runs.service";
 
 @Controller("academic/progression")
 export class AcademicProgressionController {
-  constructor(private readonly progression: AcademicProgressionService) {}
+  constructor(private readonly progression: AcademicProgressionService, private readonly jobRuns: JobRunsService) {}
 
   /** Run the auto-progression sweep across all tenants now (platform operator). */
   @Post("run")
   @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
   run() {
-    return this.progression.runSweep("MANUAL");
+    return this.jobRuns.record("lms.progression", "MANUAL", () =>
+      this.progression.runSweep("MANUAL"),
+    );
   }
 }

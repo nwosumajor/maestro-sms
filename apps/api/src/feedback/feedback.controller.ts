@@ -8,6 +8,7 @@ import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { RateLimitGuard } from "../common/rate-limit.guard";
 import type { Principal } from "../integrity/integrity.foundation";
 import { FeedbackService } from "./feedback.service";
+import { JobRunsService } from "../maintenance/job-runs.service";
 
 const sendSchema = z.object({
   kind: z.enum(FEEDBACK_KINDS),
@@ -26,7 +27,7 @@ const bulkSchema = z.object({
 // regardless of the school's plan.
 @Controller()
 export class FeedbackController {
-  constructor(private readonly feedback: FeedbackService) {}
+  constructor(private readonly feedback: FeedbackService, private readonly jobRuns: JobRunsService) {}
 
   /** Send feedback. NO @RequirePermission → any authenticated user (the guard
    *  only enforces a permission when one is declared). A per-IP guard is a coarse
@@ -88,7 +89,9 @@ export class FeedbackController {
   @Post("operator/feedback/digest/run")
   @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_FEEDBACK_REVIEW)
   digest() {
-    return this.feedback.digestSweep();
+    return this.jobRuns.record("operator.feedbackDigest", "MANUAL", () =>
+      this.feedback.digestSweep(),
+    );
   }
 
   /** Platform owner: read the full conversation (cross-tenant). */

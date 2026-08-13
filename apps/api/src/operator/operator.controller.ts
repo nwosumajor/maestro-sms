@@ -684,7 +684,9 @@ export class OperatorController {
   @Post("payment-channels/health/run")
   @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_PRICING_MANAGE)
   runPaymentHealth() {
-    return this.paymentHealth.run("MANUAL");
+    return this.jobRuns.record("payments.health", "MANUAL", () =>
+      this.paymentHealth.run("MANUAL"),
+    );
   }
 
   /**

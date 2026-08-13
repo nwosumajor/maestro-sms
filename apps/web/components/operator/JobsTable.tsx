@@ -14,8 +14,12 @@
 // or says plainly that it has not run.
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { useFormat } from "@/components/shell/RegionProvider";
+import { sendSms } from "@/components/game/play-ui";
+import { hasPermission, type Permission } from "@/lib/permissions";
 
 export type JobStatus = {
   key: string;
@@ -29,6 +33,12 @@ export type JobStatus = {
   lastError: string | null;
   overdue: boolean;
   neverRun: boolean;
+  manual?: {
+    path: string;
+    permission: string;
+    scope: "PLATFORM" | "SCHOOL";
+    where?: string;
+  };
 };
 
 const cadence = (m: number) =>
@@ -44,8 +54,35 @@ function summarise(s: unknown): string {
   return entries.map(([k, v]) => `${k} ${v}`).join(", ");
 }
 
-export function JobsTable({ jobs }: { jobs: JobStatus[] }) {
+export function JobsTable({ jobs, permissions }: { jobs: JobStatus[]; permissions: string[] }) {
   const { shortDate } = useFormat();
+  const router = useRouter();
+  const [busy, setBusy] = React.useState<string | null>(null);
+  const [note, setNote] = React.useState<{ key: string; text: string; ok: boolean } | null>(null);
+
+  /**
+   * Run a sweep by hand.
+   *
+   * Only offered for PLATFORM-scoped jobs. A school-scoped sweep pressed here
+   * would run inside the PLATFORM's own org and report "0 found" — an answer
+   * that looks like success and means nothing — so those say where their control
+   * lives instead.
+   */
+  const runNow = async (job: JobStatus) => {
+    if (!job.manual) return;
+    setBusy(job.key);
+    setNote(null);
+    const res = await sendSms(job.manual.scope === "PLATFORM" ? "POST" : "POST", job.manual.path);
+    setBusy(null);
+    setNote({
+      key: job.key,
+      ok: res.ok,
+      text: res.ok ? summarise(res.data) : (res.error ?? "It did not run."),
+    });
+    // The row's own state is what the operator came here to read, so refresh it
+    // rather than leaving a stale "Late" beside a run that just succeeded.
+    if (res.ok) router.refresh();
+  };
   const when = (iso: string | null) => {
     if (!iso) return "—";
     const d = new Date(iso);
@@ -80,6 +117,7 @@ export function JobsTable({ jobs }: { jobs: JobStatus[] }) {
               <th className="px-3 py-2 font-medium">Last run</th>
               <th className="px-3 py-2 font-medium">State</th>
               <th className="px-3 py-2 font-medium">What it did</th>
+              <th className="px-3 py-2 font-medium">Run</th>
             </tr>
           </thead>
           <tbody>
@@ -119,6 +157,33 @@ export function JobsTable({ jobs }: { jobs: JobStatus[] }) {
                     <span className="text-destructive">{j.lastError.slice(0, 160)}</span>
                   ) : (
                     summarise(j.lastSummary)
+                  )}
+                  {note?.key === j.key && (
+                    <div className={note.ok ? "mt-1 text-xs text-primary" : "mt-1 text-xs text-destructive"}>
+                      {note.ok ? `Ran just now — ${note.text}` : note.text}
+                    </div>
+                  )}
+                </td>
+                <td className="px-3 py-2">
+                  {!j.manual ? (
+                    // Timer-only, and the reason belongs on the screen: rolling a
+                    // partition forward outside its window creates an empty one.
+                    <span className="text-xs text-muted-foreground">On a timer only</span>
+                  ) : j.manual.scope === "SCHOOL" ? (
+                    <span className="text-xs text-muted-foreground">
+                      Per school{j.manual.where ? ` — ${j.manual.where}` : ""}
+                    </span>
+                  ) : !hasPermission(permissions, j.manual.permission as Permission) ? (
+                    <span className="text-xs text-muted-foreground">Needs {j.manual.permission}</span>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={busy !== null}
+                      onClick={() => runNow(j)}
+                    >
+                      {busy === j.key ? "Running…" : "Run now"}
+                    </Button>
                   )}
                 </td>
               </tr>

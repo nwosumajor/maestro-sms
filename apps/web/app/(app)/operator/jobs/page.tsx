@@ -52,7 +52,7 @@ export default async function JobsPage() {
                 necessarily with the jobs — please refresh.
               </p>
             ) : (
-              <JobsTable jobs={jobs} />
+              <JobsTable jobs={jobs} permissions={user.permissions} />
             )}
           </CardContent>
         </Card>

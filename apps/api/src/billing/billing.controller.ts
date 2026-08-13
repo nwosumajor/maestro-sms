@@ -31,6 +31,7 @@ import { InvoiceSettlementService } from "../fees/settlement.service";
 import { BillingService } from "./billing.service";
 import { ReferralService } from "./referral.service";
 import { MessageCreditsService } from "../notifications/message-credits.service";
+import { JobRunsService } from "../maintenance/job-runs.service";
 
 const autoRenewSchema = z.object({ enabled: z.boolean() });
 const creditsSchema = z.object({ bundleId: z.string().min(1).max(10) });
@@ -51,6 +52,7 @@ const checkoutSchema = z.object({
 @Controller("billing")
 export class BillingController {
   constructor(
+    private readonly jobRuns: JobRunsService,
     private readonly billing: BillingService,
     private readonly stripe: StripeService,
     private readonly referrals: ReferralService,
@@ -175,7 +177,9 @@ export class BillingController {
   @Post("dunning/run")
   @RequirePermission(BILLING_PERMISSIONS.BILLING_DUNNING_RUN)
   dunning(@CurrentPrincipal() p: Principal) {
-    return this.billing.runDunning(p);
+    return this.jobRuns.record("billing.dunning", "MANUAL", () =>
+      this.billing.runDunning(p),
+    );
   }
 
   /** The school's referral panel: shareable code + conversions earned. */

@@ -16,6 +16,7 @@ import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { SchoolArchiveService, type ArchiveSummary } from "./archive.service";
+import { JobRunsService } from "../maintenance/job-runs.service";
 
 const createSchema = z.object({
   /** e.g. "2025/2026" — how a human will look for it in ten years. */
@@ -25,7 +26,7 @@ const createSchema = z.object({
 
 @Controller("privacy/archives")
 export class SchoolArchiveController {
-  constructor(private readonly archives: SchoolArchiveService) {}
+  constructor(private readonly archives: SchoolArchiveService, private readonly jobRuns: JobRunsService) {}
 
   /** The archives this school holds. Metadata and counts only. */
   @Get()
@@ -51,7 +52,9 @@ export class SchoolArchiveController {
   @RequirePermission(PRIVACY_PERMISSIONS.ARCHIVE_MANAGE)
   @RequireStepUp()
   runTermSweep(): Promise<{ scanned: number; archived: number; skipped: number }> {
-    return this.archives.archiveEndedTerms("MANUAL");
+    return this.jobRuns.record("privacy.archive", "MANUAL", () =>
+      this.archives.archiveEndedTerms("MANUAL"),
+    );
   }
 
   /**

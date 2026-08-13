@@ -8,6 +8,7 @@ import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { StaffLifecycleService } from "./staff-lifecycle.service";
+import { JobRunsService } from "../maintenance/job-runs.service";
 
 const checklistSchema = z.object({ type: z.enum(["ONBOARDING", "OFFBOARDING"]) });
 const toggleSchema = z.object({ done: z.boolean() });
@@ -28,7 +29,7 @@ const trainingSchema = z.object({
 @RequireModule(MODULES.HR)
 @Controller("hr/staff")
 export class StaffLifecycleController {
-  constructor(private readonly lifecycle: StaffLifecycleService) {}
+  constructor(private readonly lifecycle: StaffLifecycleService, private readonly jobRuns: JobRunsService) {}
 
   // --- checklists ------------------------------------------------------------
   @Post(":userId/checklists")
@@ -77,7 +78,9 @@ export class StaffLifecycleController {
   @Post("documents/reminders/run")
   @RequirePermission(HR_PERMISSIONS.HR_WRITE)
   runReminders(@CurrentPrincipal() p: Principal): Promise<{ reminded: number }> {
-    return this.lifecycle.runDocumentReminders(p);
+    return this.jobRuns.record("hr.staffReminders", "MANUAL", () =>
+      this.lifecycle.runDocumentReminders(p),
+    );
   }
 
   // --- training --------------------------------------------------------------
