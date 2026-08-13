@@ -154,11 +154,37 @@ function ExeatPanel({ students, onMsg }: { students: { id: string; name: string 
     onMsg(r.ok ? "Done." : (r.error ?? "Failed."));
     void load();
   };
+  // The API computes `overdue` on every read, so this cannot be staler than the
+  // list it came with.
+  const overdue = list.filter((e) => e.overdue);
   const variant = (s: string) => (s === "APPROVED" || s === "RETURNED" ? "secondary" : s === "REJECTED" ? "destructive" : "outline");
   return (
     <Card>
       <CardHeader><CardTitle className="text-base">Exeat / gate-pass</CardTitle><CardDescription>Approved leave; guardians are notified on approval + movement.</CardDescription></CardHeader>
       <CardContent className="space-y-3">
+        {/* LATE BACK, first and loudest. A boarder who has not returned is the
+            thing this register exists to notice, and it used to be invisible:
+            `expectedReturnAt` was recorded, shown to the parent once, and never
+            read again. Anyone opening this page now sees it before anything
+            else, and the hourly sweep tells the warden without them looking. */}
+        {overdue.length > 0 && (
+          <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3">
+            <p className="text-sm font-medium text-destructive">
+              {overdue.length} boarder{overdue.length === 1 ? " is" : "s are"} late back
+            </p>
+            <ul className="mt-1 space-y-0.5 text-sm">
+              {overdue.map((e) => (
+                <li key={e.id}>
+                  {e.studentName} — due back {new Date(e.expectedReturnAt).toLocaleString()}
+                  {e.destination ? ` from ${e.destination}` : ""}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Check on them, then record the return below.
+            </p>
+          </div>
+        )}
         <div className="flex flex-wrap items-end gap-2">
           {/* Searched, not enumerated: the roster list is bounded, so a
     dropdown built from it would silently omit people. */}
@@ -172,7 +198,7 @@ function ExeatPanel({ students, onMsg }: { students: { id: string; name: string 
           {list.length === 0 && <p className="text-sm text-muted-foreground">No exeats.</p>}
           {list.map((e) => (
             <div key={e.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
-              <span>{e.studentName} — {e.reason} <Badge variant={variant(e.status)}>{e.status.toLowerCase()}</Badge></span>
+              <span>{e.studentName} — {e.reason} <Badge variant={e.overdue ? "destructive" : variant(e.status)}>{e.overdue ? "late back" : e.status.toLowerCase()}</Badge></span>
               <span className="flex gap-1">
                 {e.status === "REQUESTED" && <>
                   <Button size="sm" variant="outline" className="h-7" onClick={() => act(e.id, "decide", { approve: true })}>Approve</Button>

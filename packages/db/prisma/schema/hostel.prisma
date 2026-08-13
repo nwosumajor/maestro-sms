@@ -110,6 +110,10 @@ model HostelExeat {
   actualReturnAt   DateTime?
   /// REQUESTED | APPROVED | REJECTED | DEPARTED | RETURNED | CANCELLED
   status           String    @default("REQUESTED")
+  /// Set when the school has been alerted that this boarder is late back, so
+  /// the hourly sweep alerts ONCE rather than every hour until someone acts.
+  /// Cleared on return, so a second late return is alerted again.
+  overdueNotifiedAt DateTime?
   requestedById    String    @db.Uuid
   decidedById      String?   @db.Uuid
   decidedAt        DateTime?

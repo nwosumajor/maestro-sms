@@ -77,6 +77,9 @@ export const EXEAT_STATUSES = ["REQUESTED", "APPROVED", "REJECTED", "DEPARTED", 
 export type ExeatStatus = (typeof EXEAT_STATUSES)[number];
 
 export interface HostelExeatDto {
+  /** Still out and past the expected return time — computed, never stored, so it
+   *  cannot go stale between the sweep and somebody opening the page. */
+  overdue?: boolean;
   id: string;
   hostelId: string;
   hostelName: string;
