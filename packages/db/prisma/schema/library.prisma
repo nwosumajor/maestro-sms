@@ -44,6 +44,10 @@ model BookLoan {
   /// Overdue fine accrued on return, in MINOR units. finePaid records the receipt.
   fineMinor    Int       @default(0)
   finePaid     Boolean   @default(false)
+  /// WHEN the fine was paid. `finePaid` recorded that money changed hands and
+  /// not when, so the receipt's date was invented at print time and the school
+  /// had no record of the date at all — only the audit entry.
+  finePaidAt   DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 

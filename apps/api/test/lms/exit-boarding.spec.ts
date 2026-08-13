@@ -116,3 +116,38 @@ describe("the rows left behind before this existed", () => {
     expect(sql).not.toMatch(/\bDELETE\b/i);
   });
 });
+
+describe("books, which are NOT closed by the exit", () => {
+  // The distinction that matters. A pupil leaving DOES vacate their bed — the
+  // fact and the record agree, so the exit closes it. A pupil leaving does NOT
+  // return their library books: marking those loans returned would record
+  // something that did not happen, put a copy back on the shelf that is not
+  // there, and quietly close the school's only claim on it.
+  //
+  // So they are SURFACED to the approver instead, while the family is still
+  // reachable.
+  it("the exit never touches a loan", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const src = readFileSync(join(__dirname, "../../src/lms/student-exit.service.ts"), "utf8");
+    const apply = src.slice(src.indexOf("private async applyExit"), src.indexOf("async readmit"));
+    expect(apply).not.toMatch(/bookLoan/);
+  });
+
+  it("but the PREVIEW tells the approver what is still out", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const src = readFileSync(join(__dirname, "../../src/lms/student-exit.service.ts"), "utf8");
+    const preview = src.slice(src.indexOf("async preview("), src.indexOf("async request("));
+    expect(preview).toMatch(/tx\.bookLoan\.findMany/);
+    expect(preview).toMatch(/status: "ISSUED"/);
+    expect(preview).toMatch(/unreturnedBooks/);
+  });
+
+  it("and the approver's summary line counts them", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const src = readFileSync(join(__dirname, "../../src/lms/student-exit.service.ts"), "utf8");
+    expect(src).toMatch(/library book\$\{preview\.unreturnedBooks\.length === 1 \? "" : "s"\} not returned/);
+  });
+});
