@@ -25,7 +25,9 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 
-const SCHOOL_WIDE_ROLES = new Set(["school_admin"]);
+// `principal` holds grade.write; leaving them out of this set made every row of
+// that permission a 404.
+const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal"]);
 
 interface GradeInput {
   score: number;

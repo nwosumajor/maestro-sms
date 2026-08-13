@@ -87,12 +87,19 @@ function makeService(over: {
   // CBT pushes scores into the gradebook; the push itself is tested there.
   const notifications = { enqueue: jest.fn().mockResolvedValue(undefined) };
   const termResults = { applyExamComponent: jest.fn().mockResolvedValue({}) };
-  const service = new CbtService(db as never, audit as never, workflow as never, termResults as never, notifications as never, hooks as never);
+  const service = new CbtService(db as never, audit as never, workflow as never, termResults as never, notifications as never, REGION_STUB, hooks as never);
   return { service, tx, audit, workflow, examUpdateMany, bankCreate, finalized: finalized! };
 }
 
 const teacher = (userId = "t1"): Principal => ({ schoolId: "A", userId, roles: ["teacher"], permissions: [] });
 const admin = (userId = "adm1"): Principal => ({ schoolId: "A", userId, roles: ["school_admin"], permissions: [] });
+
+import { GRADE_COMPONENTS } from "@sms/types";
+
+const REGION_STUB = {
+  academicInTx: async () => ({ calendarTemplate: "THREE_TERM", grading: { components: GRADE_COMPONENTS } }),
+  academicForSchool: async () => ({ calendarTemplate: "THREE_TERM", grading: { components: GRADE_COMPONENTS } }),
+} as never;
 
 describe("CbtService — teacher subject scoping", () => {
   it("a teacher must pick a subject for a new bank", async () => {

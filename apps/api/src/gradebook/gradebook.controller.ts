@@ -3,7 +3,7 @@ import type { Response } from "express";
 import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
 import { z } from "zod";
-import { GRADEBOOK_PERMISSIONS, gradeComponentMax, type GradeComponentKey } from "@sms/types";
+import { GRADEBOOK_PERMISSIONS, GRADE_TOTAL_MAX } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
@@ -22,18 +22,26 @@ const gradeSchema = z.object({
 
 const uuid = z.string().uuid();
 const rosterQuerySchema = z.object({ classId: uuid, subjectId: uuid, termId: uuid });
-// Each component is a raw mark bounded by ITS OWN maximum (the service re-validates
-// as defense in depth). Maxima come from the single GRADE_COMPONENTS source.
-const markField = (key: GradeComponentKey) => z.number().min(0).max(gradeComponentMax(key)).nullish();
+// A raw mark: a sane number at the boundary, bounded by the widest any component
+// could be. The REAL ceiling is per-component AND per-school, and only the
+// service knows it — it resolves the school's policy and rejects with the actual
+// maximum by name.
+//
+// This used to cap at the PLATFORM maximum here, ahead of that check. A school
+// that had raised its exam weighting to /70 then could not enter 65: the request
+// was refused at the boundary, by a bound the school's own policy did not agree
+// with, with a message that never mentioned which mark or which limit. The
+// narrower ceiling is not the safer one when it is the wrong one.
+const markField = () => z.number().min(0).max(GRADE_TOTAL_MAX).nullish();
 const upsertResultSchema = z.object({
   termId: uuid,
   classId: uuid,
   subjectId: uuid,
   studentId: uuid,
-  exam: markField("exam"),
-  midterm: markField("midterm"),
-  assignment: markField("assignment"),
-  classNote: markField("classNote"),
+  exam: markField(),
+  midterm: markField(),
+  assignment: markField(),
+  classNote: markField(),
 });
 const publishSchema = z.object({ classId: uuid, subjectId: uuid, termId: uuid });
 const broadsheetQuerySchema = z.object({ classId: uuid, termId: uuid });

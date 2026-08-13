@@ -29,7 +29,8 @@ import { BrandingService } from "../branding/branding.service";
 import { DocumentsService } from "../documents/documents.service";
 import { ReportCardRemarkService } from "./report-card-remark.service";
 import { TermResultService } from "../gradebook/term-result.service";
-import { computeTermSubjectGrade, gradeLetter, averageOf, sessionAverageScope } from "@sms/types";
+import { computeTermSubjectGrade, averageOf, sessionAverageScope } from "@sms/types";
+import { SchoolRegionService } from "../foundation/school-region.service";
 import type { TermSubjectRowDto } from "@sms/types";
 
 const STAFF_WIDE = new Set(["school_admin", "principal"]);
@@ -45,6 +46,7 @@ export class ReportCardService {
     private readonly documents: DocumentsService,
     private readonly remarks: ReportCardRemarkService,
     private readonly termResults: TermResultService,
+    private readonly region: SchoolRegionService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -71,6 +73,12 @@ export class ReportCardService {
     // PUBLISHED-only, staff-of-class all).
     let subjectRows: TermSubjectRowDto[] = [];
     let termAverage: number | null = null;
+    // The LETTER comes from the term report, not from a second call here. It used
+    // to be computed locally with no bands — so every subject grade on the card
+    // used the school's own scale while the overall grade beneath them used the
+    // platform default. On a school with its own bands the two disagreed, on the
+    // one line a family reads most closely.
+    let termGrade: string | null = null;
     let sessionAverage: number | null = null;
     // How many of the session's terms the cumulative average actually covers.
     // `getStudentSessionReport` averages only terms that HAVE marks, which is the
@@ -84,6 +92,7 @@ export class ReportCardService {
       const tr = report.terms.find((t) => t.termId === term.id);
       subjectRows = tr?.subjects ?? [];
       termAverage = tr?.average ?? null;
+      termGrade = tr?.averageGrade ?? null;
       sessionAverage = report.sessionAverage;
       sessionTermsTotal = report.terms.length;
       sessionTermsCounted = report.terms.filter((t) => t.average !== null).length;
@@ -107,13 +116,21 @@ export class ReportCardService {
       let position: number | null = null;
       let classSize: number | null = null;
       if (term && enrolment) {
+        // Rank on the SCHOOL's weighting, the same one the printed average uses.
+        // Ranking on platform defaults while printing a school-weighted average
+        // put the two numbers on different scales: a pupil could show the higher
+        // average and the lower position, on the same page.
+        const grading = (await this.region.academicInTx(tx, p.schoolId)).grading;
         const classResults = await tx.subjectResult.findMany({
           where: { classId: enrolment.classId, termId: term.id, status: "PUBLISHED" },
           select: { studentId: true, exam: true, midterm: true, assignment: true, classNote: true },
         });
         const byStudent = new Map<string, number[]>();
         for (const r of classResults) {
-          const { total } = computeTermSubjectGrade({ exam: r.exam, midterm: r.midterm, assignment: r.assignment, classNote: r.classNote });
+          const { total } = computeTermSubjectGrade(
+            { exam: r.exam, midterm: r.midterm, assignment: r.assignment, classNote: r.classNote },
+            grading?.components,
+          );
           const arr = byStudent.get(r.studentId) ?? [];
           arr.push(total);
           byStudent.set(r.studentId, arr);
@@ -160,7 +177,7 @@ export class ReportCardService {
         termName: term?.name ?? null,
         subjects: subjectRows,
         termAverage,
-        termGrade: termAverage !== null ? gradeLetter(termAverage) : null,
+        termGrade,
         position,
         classSize,
         sessionAverage,

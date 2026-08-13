@@ -7,7 +7,7 @@
 // client figure is display-only. Publish makes a class-subject-term's grades
 // visible to students and parents.
 
-import type { GradingRosterDto, IdNameDto, AcademicSessionDto, Serialized } from "@sms/types";
+import type { GradingRosterDto, IdNameDto, AcademicSessionDto, Serialized, GradeComponentKey } from "@sms/types";
 import { GRADE_COMPONENTS, GRADE_TOTAL_MAX, gradeComponentMax, computeTermSubjectGrade } from "@sms/types";
 import * as React from "react";
 import { sendSms } from "@/components/game/play-ui";
@@ -33,11 +33,21 @@ function toDraft(r: Roster["students"][number]): Draft {
   };
 }
 
-function livePreview(d: Draft) {
+/**
+ * The total this row will be SAVED with, previewed as the teacher types.
+ *
+ * It must be computed with the school's own weighting and letter scale, which
+ * ride on the roster. Computing with the platform defaults here — as this did —
+ * showed one number while the server stored another, on any school that had set
+ * its own weights: the teacher watched a total that was never real.
+ */
+function livePreview(d: Draft, roster: Roster | null) {
   const num = (s: string) => (s.trim() === "" ? null : Number(s));
-  const { total, grade, complete } = computeTermSubjectGrade({
-    exam: num(d.exam), midterm: num(d.midterm), assignment: num(d.assignment), classNote: num(d.classNote),
-  });
+  const { total, grade, complete } = computeTermSubjectGrade(
+    { exam: num(d.exam), midterm: num(d.midterm), assignment: num(d.assignment), classNote: num(d.classNote) },
+    roster?.components,
+    roster?.bands,
+  );
   const any = [d.exam, d.midterm, d.assignment, d.classNote].some((s) => s.trim() !== "");
   return any ? { total, grade, complete } : { total: null as number | null, grade: null as string | null, complete: false };
 }
@@ -51,6 +61,11 @@ export function GradingConsole({ classes, sessions }: { classes: Named[]; sessio
   const [termId, setTermId] = React.useState(defaultTerm?.id ?? "");
 
   const [roster, setRoster] = React.useState<Roster | null>(null);
+  // The school's components, falling back to the platform's only before a roster
+  // has loaded (there is nothing to grade against yet at that point).
+  const comps = roster?.components ?? GRADE_COMPONENTS;
+  const maxOf = (k: GradeComponentKey) =>
+    roster?.components.find((c) => c.key === k)?.max ?? gradeComponentMax(k);
   const [drafts, setDrafts] = React.useState<Record<string, Draft>>({});
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
@@ -112,7 +127,10 @@ export function GradingConsole({ classes, sessions }: { classes: Named[]; sessio
       <CardHeader>
         <CardTitle className="text-base">Grade a subject</CardTitle>
         <CardDescription>
-          Enter each score out of its maximum — {GRADE_COMPONENTS.map((c) => `${c.label} /${c.max}`).join(" · ")}. The four
+          {/* The maxima shown are the SCHOOL's, off the loaded roster — the same
+              ones the save enforces. Printing the platform's here told a teacher
+              their exam was out of 60 while the server accepted 70. */}
+          Enter each score out of its maximum — {comps.map((c) => `${c.label} /${c.max}`).join(" · ")}. The four
           add up to the term total /{GRADE_TOTAL_MAX}, computed automatically.
         </CardDescription>
       </CardHeader>
@@ -156,7 +174,7 @@ export function GradingConsole({ classes, sessions }: { classes: Named[]; sessio
                 <tbody>
                   {roster.students.map((s) => {
                     const d = drafts[s.studentId] ?? { exam: "", midterm: "", assignment: "", classNote: "" };
-                    const pv = livePreview(d);
+                    const pv = livePreview(d, roster);
                     return (
                       <tr key={s.studentId} className="border-b border-border last:border-0">
                         <td className="whitespace-nowrap px-3 py-2">
@@ -165,7 +183,7 @@ export function GradingConsole({ classes, sessions }: { classes: Named[]; sessio
                         </td>
                         {(["exam", "midterm", "assignment", "classNote"] as const).map((k) => (
                           <td key={k} className="px-2 py-2">
-                            <Input type="number" min={0} max={gradeComponentMax(k)} value={d[k]} className="h-8 w-16 text-xs"
+                            <Input type="number" min={0} max={maxOf(k)} value={d[k]} className="h-8 w-16 text-xs"
                               onChange={(e) => setField(s.studentId, k, e.target.value)} />
                           </td>
                         ))}

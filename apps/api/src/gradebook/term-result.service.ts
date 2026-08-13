@@ -41,6 +41,7 @@ import {
   type TermSubjectRowDto,
   type ClassBroadsheetDto,
   resolveGradeBands,
+  gradeLetter,
 } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -55,7 +56,18 @@ import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 import { SchoolRegionService } from "../foundation/school-region.service";
 
-const SCHOOL_WIDE_ROLES = new Set(["school_admin"]);
+// Who may grade ANY class-subject in the school. `principal` was missing while
+// holding `grade.write` — a permission whose rows were all 404. Every comparable
+// module (attendance, SIS, timetable, CBT, and the report card built on THIS
+// data) already treats a principal as school-wide.
+const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal"]);
+
+// Who may READ any class's marks. Strictly wider, and deliberately a separate
+// set: `board` is read-only oversight and `head_teacher` a stage-1 approver, and
+// both hold `grade.read`. Folding them into the set above would have handed them
+// grade WRITING, since one set gated both — which is why the read grants had
+// been left dead rather than honoured.
+const READ_WIDE_ROLES = new Set([...SCHOOL_WIDE_ROLES, "board", "head_teacher", "junior_admin"]);
 
 interface ComponentInput {
   exam?: number | null;
@@ -112,6 +124,11 @@ export class TermResultService {
   }
   private isSchoolWide(p: Principal): boolean {
     return p.roles.some((r) => SCHOOL_WIDE_ROLES.has(r));
+  }
+
+  /** School-wide for READS only. Never call this on a write path. */
+  private isReadWide(p: Principal): boolean {
+    return p.roles.some((r) => READ_WIDE_ROLES.has(r));
   }
 
   /** The students who take `subjectId` in this class+term. APPROVED subject
@@ -193,10 +210,18 @@ export class TermResultService {
     };
   }
 
-  /** Recompute the total/grade from a row's four components at READ time, so a
-   *  report is correct even if the denormalised `total` column was written under
-   *  an older scoring rule (or left stale). Returns null total when nothing is
-   *  entered yet. */
+  /**
+   * Recompute a row's total from its four components AT READ TIME, so a report is
+   * correct even if the denormalised `total` column was written under an older
+   * scoring rule (or left stale). Null total when nothing is entered yet.
+   *
+   * THE POLICY IS NOT OPTIONAL IN PRACTICE. It was declared optional and then
+   * never passed by any of the four callers, so every read — the roster, the
+   * broadsheet, the session report and the report card behind it — recomputed on
+   * the PLATFORM defaults while the write path had used the SCHOOL's. A school
+   * with its own weighting or letter scale saw one set of numbers when a mark was
+   * saved and another whenever it was read back.
+   */
   private recomputeTotal(
     row: {
       exam: number | null;
@@ -218,14 +243,19 @@ export class TermResultService {
         classNote: row.classNote,
       },
       policy?.components,
-      // The school's own letter scale. Everything a family reads — the subject
-      // grade, the overall grade — comes through here, so one thread carries it.
+      // The school's own letter scale. This is now TRUE of every subject grade a
+      // family reads, and of the term average beside them — the term report
+      // states its own `averageGrade` rather than leaving the report card to
+      // derive one. It was written as if it were already true while `policy`
+      // arrived undefined at every call site, which is how the divergence went
+      // unnoticed: the comment described the intent, not the wiring.
       resolveGradeBands(policy),
     );
     return { total, grade, complete };
   }
 
   private toResultDto(
+    policy: GradingPolicy | undefined,
     row: {
       id: string;
       sessionId: string;
@@ -246,7 +276,7 @@ export class TermResultService {
     subjectName: string,
     studentName: string,
   ): SubjectResultDto {
-    const { total, grade, complete } = this.recomputeTotal(row);
+    const { total, grade, complete } = this.recomputeTotal(row, policy);
     return {
       id: row.id,
       sessionId: row.sessionId,
@@ -280,6 +310,9 @@ export class TermResultService {
   ): Promise<GradingRosterDto> {
     const { classId, subjectId, termId } = args;
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      // The teacher's own roster must show the same numbers the mark was saved
+      // with — the school's weighting, not the platform's.
+      const grading = (await this.region.academicInTx(tx, p.schoolId)).grading;
       const term = await tx.term.findFirst({
         where: { id: termId },
         select: { id: true, name: true, sessionId: true },
@@ -322,7 +355,7 @@ export class TermResultService {
           studentName: nameById.get(sid) ?? "Unknown",
           admissionNumber: admById.get(sid) ?? null,
           result: resultByStudent.has(sid)
-            ? this.toResultDto(resultByStudent.get(sid)!, subject.name, nameById.get(sid) ?? "Unknown")
+            ? this.toResultDto(grading, resultByStudent.get(sid)!, subject.name, nameById.get(sid) ?? "Unknown")
             : null,
           position: null as number | null,
         }))
@@ -355,6 +388,10 @@ export class TermResultService {
         termId,
         termName: term.name,
         students: roster,
+        // The console previews totals in the browser; it now previews with THIS,
+        // the same policy the save will use, instead of the platform defaults.
+        components: grading.components.map((c) => ({ ...c })),
+        bands: [...resolveGradeBands(grading)],
       };
     });
   }
@@ -409,8 +446,14 @@ export class TermResultService {
       // hidden from families again until it goes back through the publish chain.
       const unpublished = existing?.status === "PUBLISHED";
 
-      const scored = this.applyComponents(input, (await this.region.academicInTx(tx, p.schoolId)).grading);
-      const data = { ...scored, gradedById: p.userId, gradedAt: new Date() };
+      const grading = (await this.region.academicInTx(tx, p.schoolId)).grading;
+      const scored = this.applyComponents(input, grading);
+      // `complete` is COMPUTED, not stored — there is no such column, and
+      // spreading it into the write makes Prisma reject the whole upsert. It is
+      // derived on every read from the four components, which is the only way it
+      // can stay true when a component is filled in later.
+      const { complete: _complete, ...persisted } = scored;
+      const data = { ...persisted, gradedById: p.userId, gradedAt: new Date() };
       const row = await tx.subjectResult.upsert({
         where: { sessionId_termId_subjectId_studentId: { sessionId: term.sessionId, termId, subjectId, studentId } },
         create: { schoolId: p.schoolId, sessionId: term.sessionId, termId, classId, subjectId, studentId, ...data },
@@ -428,7 +471,7 @@ export class TermResultService {
         },
         tx,
       );
-      return this.toResultDto(row, subject.name, student.name);
+      return this.toResultDto(grading, row, subject.name, student.name);
     });
   }
 
@@ -487,6 +530,7 @@ export class TermResultService {
       }
       const unpublished = existing?.status === "PUBLISHED";
       // MERGE: keep the other three components; only the exam slice changes.
+      const grading = (await this.region.academicInTx(tx, p.schoolId)).grading;
       const scored = this.applyComponents(
         {
           exam,
@@ -494,9 +538,14 @@ export class TermResultService {
           assignment: existing?.assignment ?? null,
           classNote: existing?.classNote ?? null,
         },
-        (await this.region.academicInTx(tx, p.schoolId)).grading,
+        grading,
       );
-      const data = { ...scored, gradedById: p.userId, gradedAt: new Date() };
+      // `complete` is COMPUTED, not stored — there is no such column, and
+      // spreading it into the write makes Prisma reject the whole upsert. It is
+      // derived on every read from the four components, which is the only way it
+      // can stay true when a component is filled in later.
+      const { complete: _complete, ...persisted } = scored;
+      const data = { ...persisted, gradedById: p.userId, gradedAt: new Date() };
       const row = await tx.subjectResult.upsert({
         where: { sessionId_termId_subjectId_studentId: { sessionId: term.sessionId, termId, subjectId, studentId } },
         create: { schoolId: p.schoolId, sessionId: term.sessionId, termId, classId, subjectId, studentId, ...data },
@@ -513,7 +562,7 @@ export class TermResultService {
         },
         tx,
       );
-      return this.toResultDto(row, subject.name, student.name);
+      return this.toResultDto(grading, row, subject.name, student.name);
     });
   }
 
@@ -550,6 +599,7 @@ export class TermResultService {
       }
       const unpublished = existing?.status === "PUBLISHED";
       // MERGE: keep the other three components; only the assignment slice changes.
+      const grading = (await this.region.academicInTx(tx, p.schoolId)).grading;
       const scored = this.applyComponents(
         {
           exam: existing?.exam ?? null,
@@ -557,9 +607,14 @@ export class TermResultService {
           assignment,
           classNote: existing?.classNote ?? null,
         },
-        (await this.region.academicInTx(tx, p.schoolId)).grading,
+        grading,
       );
-      const data = { ...scored, gradedById: p.userId, gradedAt: new Date() };
+      // `complete` is COMPUTED, not stored — there is no such column, and
+      // spreading it into the write makes Prisma reject the whole upsert. It is
+      // derived on every read from the four components, which is the only way it
+      // can stay true when a component is filled in later.
+      const { complete: _complete, ...persisted } = scored;
+      const data = { ...persisted, gradedById: p.userId, gradedAt: new Date() };
       const row = await tx.subjectResult.upsert({
         where: { sessionId_termId_subjectId_studentId: { sessionId: term.sessionId, termId, subjectId, studentId } },
         create: { schoolId: p.schoolId, sessionId: term.sessionId, termId, classId, subjectId, studentId, ...data },
@@ -576,7 +631,7 @@ export class TermResultService {
         },
         tx,
       );
-      return this.toResultDto(row, subject.name, student.name);
+      return this.toResultDto(grading, row, subject.name, student.name);
     });
   }
 
@@ -678,7 +733,7 @@ export class TermResultService {
   // ---------------------------------------------------------------------------
   /** Whether the caller may view this student's full report (any status). */
   private async canReadReport(tx: TenantTx, p: Principal, studentId: string): Promise<boolean> {
-    if (this.isSchoolWide(p)) return true;
+    if (this.isReadWide(p)) return true;
     if (p.userId === studentId) return true;
     // The student's supervisor or any teacher of a class they're enrolled in.
     const enrollments = await tx.enrollment.findMany({
@@ -712,6 +767,10 @@ export class TermResultService {
   ): Promise<StudentSessionReportDto> {
     const { studentId, sessionId } = args;
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      // The SCHOOL's weighting and letter scale, resolved once for the whole
+      // report. Every grade on it — each subject, and the term average beneath
+      // them — now comes from this one policy; they used to come from two.
+      const policy = (await this.region.academicInTx(tx, p.schoolId)).grading;
       const session = await tx.academicSession.findFirst({
         where: { id: sessionId },
         select: { id: true, name: true },
@@ -790,7 +849,7 @@ export class TermResultService {
           // Group by (term, subject), then rank each group.
           const groups = new Map<string, Array<{ studentId: string; total: number }>>();
           for (const r of peerRows) {
-            const { total } = this.recomputeTotal(r);
+            const { total } = this.recomputeTotal(r, policy);
             if (total === null) continue; // ungraded is UNRANKED, never last
             const key = `${r.termId}:${r.subjectId}`;
             const arr = groups.get(key) ?? [];
@@ -821,7 +880,7 @@ export class TermResultService {
         const rows: TermSubjectRowDto[] = results
           .filter((r) => r.termId === t.id)
           .map((r) => {
-            const { total, grade, complete } = this.recomputeTotal(r);
+            const { total, grade, complete } = this.recomputeTotal(r, policy);
             return {
               subjectId: r.subjectId,
               subjectName: subjectName.get(r.subjectId) ?? "Unknown",
@@ -838,12 +897,18 @@ export class TermResultService {
           })
           .sort((a, b) => a.subjectName.localeCompare(b.subjectName));
         const totals = rows.map((r) => r.total).filter((v): v is number => v !== null);
+        const avg = averageOf(totals);
         return {
           termId: t.id,
           termName: t.name,
           sequence: t.sequence,
           subjects: rows,
-          average: averageOf(totals),
+          average: avg,
+          // On the SCHOOL's scale, from the same policy the subject grades above
+          // used. The report card derived this itself with no bands, so a school
+          // with its own scale printed subject grades on one scale and the
+          // overall grade beneath them on another.
+          averageGrade: avg !== null ? gradeLetter(avg, resolveGradeBands(policy)) : null,
         };
       });
       const termAverages = termReports
@@ -1080,7 +1145,7 @@ export class TermResultService {
    *  supervisor, any teacher of the class (form teacher or a subject teacher),
    *  or a school-wide role. Anyone else gets 404 (never reveal existence). */
   private async canViewClass(tx: TenantTx, p: Principal, classId: string): Promise<boolean> {
-    if (this.isSchoolWide(p)) return true;
+    if (this.isReadWide(p)) return true;
     const klass = await tx.class.findFirst({ where: { id: classId }, select: { supervisorId: true } });
     if (klass?.supervisorId === p.userId) return true;
     const teaches = await tx.classTeacher.findFirst({
@@ -1107,6 +1172,9 @@ export class TermResultService {
   ): Promise<ClassBroadsheetDto> {
     const { classId, termId } = args;
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      // The broadsheet is what a head teacher reads a whole class off. It must
+      // be the school's own weighting — the same numbers the report cards carry.
+      const policy = (await this.region.academicInTx(tx, p.schoolId)).grading;
       const [klass, term] = await Promise.all([
         tx.class.findFirst({ where: { id: classId }, select: { id: true, name: true } }),
         tx.term.findFirst({ where: { id: termId }, select: { id: true, name: true, sessionId: true } }),
@@ -1144,7 +1212,7 @@ export class TermResultService {
           const cells = orderedSubjectIds.map((subId) => {
             const r = cellByKey.get(`${sid}:${subId}`);
             const { total, grade, complete } = r
-              ? this.recomputeTotal(r)
+              ? this.recomputeTotal(r, policy)
               : { total: null, grade: null, complete: false };
             return { subjectId: subId, total, grade, complete, status: r?.status ?? "" };
           });

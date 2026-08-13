@@ -24,6 +24,7 @@ import {
 import { NotificationService } from "../notifications/notification.service";
 import { ON_ROLL_STUDENT } from "../common/student-scope";
 import { toMinor } from "../common/money";
+import { SchoolRegionService } from "../foundation/school-region.service";
 
 const STAFF_WIDE = new Set(["school_admin", "principal"]);
 
@@ -33,6 +34,7 @@ export class ScholarshipService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly notifications: NotificationService,
+    private readonly region: SchoolRegionService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -259,7 +261,7 @@ export class ScholarshipService {
       } else if (!app.consentAt) {
         throw new BadRequestException("A guardian must give consent before this application can be submitted");
       }
-      const signals = await this.collectSignals(tx, app.studentId);
+      const signals = await this.collectSignals(tx, app.studentId, p.schoolId);
       const row = await tx.scholarshipApplication.update({
         where: { id: app.id },
         data: { status: isStudentChain ? "PENDING_SUPERVISOR" : "SUBMITTED", signals: signals as never },
@@ -401,7 +403,11 @@ export class ScholarshipService {
   }
 
   /** Verified merit/need signals for the reviewer (Golden Rule #8: signals only). */
-  private async collectSignals(tx: TenantTx, studentId: string) {
+  private async collectSignals(tx: TenantTx, studentId: string, schoolId: string) {
+    // The applicant's own school's weighting. A merit signal computed on the
+    // platform's weights would not match the average on the pupil's own report
+    // card — and this figure is read by a reviewer deciding an award.
+    const grading = (await this.region.academicInTx(tx, schoolId)).grading;
     const published = await tx.subjectResult.findMany({
       where: { studentId, status: "PUBLISHED" },
       select: { exam: true, midterm: true, assignment: true, classNote: true },
@@ -409,7 +415,7 @@ export class ScholarshipService {
     const totals = published
       .map((r: { exam: number | null; midterm: number | null; assignment: number | null; classNote: number | null }) => {
         const any = [r.exam, r.midterm, r.assignment, r.classNote].some((v) => v !== null);
-        return any ? computeTermSubjectGrade(r).total : null;
+        return any ? computeTermSubjectGrade(r, grading.components).total : null;
       })
       .filter((v): v is number => v !== null);
     const publishedSessionAverage = totals.length ? Math.round((totals.reduce((s, v) => s + v, 0) / totals.length) * 100) / 100 : null;

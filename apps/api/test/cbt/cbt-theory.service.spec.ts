@@ -76,7 +76,7 @@ function makeService(over: {
   // CBT pushes scores into the gradebook; the push itself is tested there.
   const notifications = { enqueue: jest.fn().mockResolvedValue(undefined) };
   const termResults = { applyExamComponent: jest.fn().mockResolvedValue({}) };
-  const service = new CbtService(db as never, audit as never, workflow as never, termResults as never, notifications as never, hooks as never);
+  const service = new CbtService(db as never, audit as never, workflow as never, termResults as never, notifications as never, REGION_STUB, hooks as never);
   return { service, tx, audit, createMany, upsert, update, termResults, notifications };
 }
 
@@ -88,6 +88,13 @@ const admin = (): Principal => ({ schoolId: "A", userId: "adm", roles: ["school_
 const BANK = { id: "b1", createdById: "t1", subjectId: "sub-phy" };
 const EXAM = { id: "e1", bankId: "b1" };
 const THEORY_Q = { id: "q1", prompt: "State Newton's laws", markGuide: "1 mark per law", maxMarks: 5, type: "THEORY", bankId: "b1" };
+
+import { GRADE_COMPONENTS } from "@sms/types";
+
+const REGION_STUB = {
+  academicInTx: async () => ({ calendarTemplate: "THREE_TERM", grading: { components: GRADE_COMPONENTS } }),
+  academicForSchool: async () => ({ calendarTemplate: "THREE_TERM", grading: { components: GRADE_COMPONENTS } }),
+} as never;
 
 describe("CBT theory questions", () => {
   describe("authoring", () => {

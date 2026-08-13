@@ -390,6 +390,14 @@ export interface StudentTermReportDto {
   sequence: number;
   subjects: TermSubjectRowDto[];
   average: number | null;
+  /** The letter for `average`, on the SCHOOL's scale.
+   *
+   *  Carried rather than recomputed by each consumer. The report card used to
+   *  derive it locally with `gradeLetter(average)` and no bands, so a school
+   *  with its own scale printed subject grades on that scale and the overall
+   *  grade underneath them on the platform default — two scales on one page a
+   *  family reads. */
+  averageGrade: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -492,6 +500,18 @@ export interface GradingRosterDto {
   termId: string;
   termName: string;
   students: GradingRosterStudentDto[];
+  /**
+   * The SCHOOL's weighting and letter scale, carried on the roster itself.
+   *
+   * The console previews each total in the browser as the teacher types. It used
+   * to preview with the platform defaults while the server saved with the
+   * school's policy, so on any school that had set its own weights the number
+   * the teacher watched was not the number that got stored. Sending the policy
+   * with the roster means the preview cannot drift from the save: there is no
+   * second source to fall out of step with.
+   */
+  components: { key: GradeComponentKey; label: string; max: number }[];
+  bands: GradeBand[];
 }
 
 /** One subject's cumulative line across the whole session: its total in each

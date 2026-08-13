@@ -79,8 +79,9 @@ d("ReportCardService generate() persists to the Document Vault (real Postgres)",
     const remarks = new ReportCardRemarkService(tenant, audit);
     const workflow = { createRequest: jest.fn(), submit: jest.fn() } as never;
     const hooks = { onFinalized: jest.fn() } as never;
-    const termResults = new TermResultService(tenant, audit, workflow, hooks, { academicInTx: async () => ({ calendarTemplate: "THREE_TERM", grading: { components: GRADE_COMPONENTS } }), academicForSchool: async () => ({ calendarTemplate: "THREE_TERM", grading: { components: GRADE_COMPONENTS } }) } as never);
-    reportCards = new ReportCardService(tenant, audit, branding, documents, remarks, termResults);
+    const region = { academicInTx: async () => ({ calendarTemplate: "THREE_TERM", grading: { components: GRADE_COMPONENTS } }), academicForSchool: async () => ({ calendarTemplate: "THREE_TERM", grading: { components: GRADE_COMPONENTS } }) } as never;
+    const termResults = new TermResultService(tenant, audit, workflow, hooks, region);
+    reportCards = new ReportCardService(tenant, audit, branding, documents, remarks, termResults, region);
   });
 
   afterAll(async () => {

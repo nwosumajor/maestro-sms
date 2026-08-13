@@ -9,6 +9,7 @@
 // Mutations audited. Auto-marks are numbers staff review — no automated
 // consequence attaches to them (Golden Rule #8).
 
+import { SchoolRegionService } from "../foundation/school-region.service";
 import {
   BadRequestException,
   ConflictException,
@@ -94,6 +95,7 @@ export class CbtService {
     // knows nothing about CBT, so there is no cycle.
     private readonly termResults: TermResultService,
     private readonly notifications: NotificationService,
+    private readonly region: SchoolRegionService,
     hooks: WorkflowHooksService,
     // LAST and @Optional, like every other PDF here: a branding lookup must
     // never be the reason an invigilator cannot print a paper.
@@ -1394,12 +1396,18 @@ export class CbtService {
         const theoryMarks = marksBySitting.get(sg.id) ?? 0;
         return { studentId: sg.studentId, raw: objective + theoryMarks, paperMax };
       });
-      return { classId: exam.classId, subjectId: bank.subjectId, termId, rows };
+      // The school's own exam maximum, resolved in the same tx that built the plan.
+      const examMax =
+        (await this.region.academicInTx(tx, p.schoolId)).grading.components.find((c: { key: string; max: number }) => c.key === "exam")
+          ?.max ?? gradeComponentMax("exam");
+      return { classId: exam.classId, subjectId: bank.subjectId, termId, rows, examMax };
     });
 
     // Scale to the gradesheet's exam component and write through the merge-aware
     // path (one call per candidate; each is an upsert, so re-pressing is safe).
-    const examMax = gradeComponentMax("exam");
+    // The maximum is the SCHOOL's: a school that weights its exam /70 was having
+    // every CBT result scaled to /60 and capped ten marks short of full.
+    const { examMax } = plan;
     let recorded = 0;
     let skipped = 0;
     for (const r of plan.rows) {

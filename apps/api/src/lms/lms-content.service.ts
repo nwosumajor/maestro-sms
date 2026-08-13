@@ -1725,7 +1725,11 @@ export class LmsContentService {
    *  grading screen exactly (404 if the caller can't grade the class-subject). */
   async lmsGradebook(p: Principal, classId: string, subjectId: string, termId: string): Promise<LmsGradebookDto> {
     const roster = await this.termResults.getGradingRoster(p, { classId, subjectId, termId });
-    const componentMax = gradeComponentMax("assignment");
+    // The SCHOOL's assignment maximum, off the roster we just read — not the
+    // platform's. Scaling to a maximum the school does not use puts every pushed
+    // mark on the wrong scale, silently and for everyone.
+    const componentMax =
+      roster.components.find((c) => c.key === "assignment")?.max ?? gradeComponentMax("assignment");
     const rows = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const contents = (await tx.lmsContent.findMany({
         where: { classId, subjectId, termId, status: "PUBLISHED", type: { in: ["QUIZ", "ASSIGNMENT"] } },
