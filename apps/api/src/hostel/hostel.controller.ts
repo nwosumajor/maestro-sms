@@ -17,6 +17,7 @@ import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { HostelService } from "./hostel.service";
+import { ExeatOverdueService } from "./exeat-overdue.service";
 
 const customFields = z.record(z.string()).optional();
 const hostelSchema = z.object({
@@ -88,7 +89,10 @@ const incidentUpdateSchema = z.object({
 @RequireModule(MODULES.HOSTEL)
 @Controller("hostels")
 export class HostelController {
-  constructor(private readonly hostel: HostelService) {}
+  constructor(
+    private readonly hostel: HostelService,
+    private readonly overdue: ExeatOverdueService,
+  ) {}
 
   @Get()
   @RequirePermission(HOSTEL_PERMISSIONS.HOSTEL_READ)
@@ -173,6 +177,19 @@ export class HostelController {
     @Body(new ZodValidationPipe(allocateSchema)) body: z.infer<typeof allocateSchema>,
   ): Promise<HostelAllocationDto> {
     return this.hostel.allocate(p, body.roomId, body.studentId);
+  }
+
+  /**
+   * Run the overdue-boarder check now.
+   *
+   * The hourly sweep is the mechanism; this exists because a scheduled job
+   * nobody can trigger is a job nobody can verify — the same lesson the billing
+   * dunning sweep taught. Reports what it FOUND as well as what it alerted on.
+   */
+  @Post("exeats/overdue/run")
+  @RequirePermission(HOSTEL_PERMISSIONS.HOSTEL_MANAGE)
+  runOverdueCheck(): Promise<{ scanned: number; alerted: number }> {
+    return this.overdue.sweep();
   }
 
   @Post("allocations/:id/vacate")

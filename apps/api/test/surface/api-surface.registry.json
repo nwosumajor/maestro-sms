@@ -2125,6 +2125,10 @@
       "kind": "ui",
       "note": "reviewed: a call in components/hostel/HostelOps.tsx builds this path"
     },
+    "POST /hostels/exeats/overdue/run": {
+      "kind": "ui",
+      "note": "'Check now' on the overdue-boarders card on /hostel — runs the late-back check for this school immediately. The hourly sweep is the mechanism; this exists so it can be verified rather than assumed."
+    },
     "POST /hostels/fees/schedule": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"

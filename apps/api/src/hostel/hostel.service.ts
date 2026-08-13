@@ -604,7 +604,13 @@ export class HostelService {
       if (movement === "RETURNED" && row.status !== "DEPARTED") throw new BadRequestException("Only a departed boarder can be marked returned");
       const updated = await tx.hostelExeat.update({
         where: { id },
-        data: { status: movement, ...(movement === "RETURNED" ? { actualReturnAt: new Date() } : {}) },
+        data: {
+          status: movement,
+          // Clearing the overdue mark on return is what makes a SECOND late
+          // return alert again. Left set, the child could go out next weekend,
+          // fail to come back, and nobody would be told.
+          ...(movement === "RETURNED" ? { actualReturnAt: new Date(), overdueNotifiedAt: null } : {}),
+        },
       });
       await this.log(tx, p, `hostel.exeat.${movement.toLowerCase()}`, id, { studentId: row.studentId });
       return { dto: await this.exeatDto(tx, updated.id), studentId: row.studentId };
@@ -923,6 +929,12 @@ export class HostelService {
       decidedById: x.decidedById,
       decidedAt: x.decidedAt,
       note: x.note,
+      // LATE BACK. Computed on every read rather than stored, so the flag can
+      // never be staler than the page showing it — a boarder who became overdue
+      // ten minutes ago must show as overdue now, not after the next sweep.
+      // DEPARTED is the only status where it means anything: the child is
+      // physically out of the building and has not signed back in.
+      overdue: x.status === "DEPARTED" && !x.actualReturnAt && x.expectedReturnAt < new Date(),
       createdAt: x.createdAt,
     }));
   }
