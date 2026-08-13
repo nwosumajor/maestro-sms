@@ -272,8 +272,23 @@ export class ReportCardService {
           // knowing how many were ranked, and ungraded pupils are excluded from
           // that count rather than counted as beaten.
           const pos = sub.subjectPosition && sub.subjectRanked ? `${sub.subjectPosition}/${sub.subjectRanked}` : "—";
-          drawRow([sub.subjectName, fmt(sub.exam), fmt(sub.midterm), fmt(sub.assignment), fmt(sub.classNote), fmt(sub.total), sub.grade ?? "—", pos]);
+          // An asterisk, not a footnote nobody reads in isolation: a total with a
+          // component still unmarked counts that component as ZERO, so 24 here can
+          // mean "scored 24" or "only the class note is in". A family cannot tell
+          // those apart, and the second one is not a fail.
+          drawRow([sub.subjectName + (sub.complete ? "" : " *"), fmt(sub.exam), fmt(sub.midterm), fmt(sub.assignment), fmt(sub.classNote), fmt(sub.total), sub.grade ?? "—", pos]);
         }
+      }
+      // Said once, plainly, and only when it applies — a standing disclaimer on
+      // every report card is one nobody reads.
+      if (d.subjects.some((sx) => !sx.complete)) {
+        doc.moveDown(0.2);
+        doc.fontSize(8).font("Helvetica-Oblique").fillColor("#a15c00")
+          .text(
+            "* Not every component has been marked for this subject yet. Unmarked components count as zero, so this total is provisional.",
+            startX,
+          );
+        doc.fillColor("#000");
       }
       doc.moveDown(0.4);
       doc.fontSize(11).font("Helvetica-Bold")

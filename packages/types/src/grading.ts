@@ -337,6 +337,14 @@ export interface SubjectResultDto {
   /** Weighted total (null until at least one component is entered). */
   total: number | null;
   grade: string | null;
+  /** Are ALL of the school's components marked?
+   *
+   *  A missing component counts as ZERO in the total, so a pupil whose exam has
+   *  not been entered yet reads as a fail rather than as unmarked. The
+   *  computation always knew this and returned it; every consumer discarded it,
+   *  so an interim mark was indistinguishable from a final one — on the
+   *  approver's screen and on the report card that reaches the family. */
+  complete: boolean;
   /** DRAFT (teacher-only) | PENDING_APPROVAL (awaiting the head-teacher →
    *  principal publish approval) | PUBLISHED (visible to student/parent). */
   status: string;
@@ -354,6 +362,10 @@ export interface TermSubjectRowDto {
   classNote: number | null;
   total: number | null;
   grade: string | null;
+  /** Are all of the school's components marked? A missing one counts as ZERO in
+   *  the total, so without this a report card cannot tell a pupil who scored 24
+   *  from one whose exam has simply not been marked yet. */
+  complete: boolean;
   /**
    * This student's rank in THIS subject among classmates, and how many were
    * ranked. Null when they have no total for it — an ungraded pupil is unranked
@@ -520,6 +532,9 @@ export interface BroadsheetCellDto {
   subjectId: string;
   total: number | null;
   grade: string | null;
+  /** Every component marked? An unmarked one counts as zero, so a provisional
+   *  total is a real number that reads like a poor result. */
+  complete: boolean;
   /** DRAFT | PENDING_APPROVAL | PUBLISHED | "" (no row yet). */
   status: string;
 }
