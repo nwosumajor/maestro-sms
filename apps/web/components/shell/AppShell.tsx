@@ -272,6 +272,10 @@ const PLATFORM_OWNER_NAV = new Set<NavKey>([
   "operatorpricing",
   "operatorgroups",
   "operatortenants",
+  // Background jobs. Omitted when the page was added, so the one role that runs
+  // the platform's sweeps was the one role the link was hidden from — the page
+  // and its permission were right, only this allow-list was not.
+  "operatorjobs",
   "operatorscholarships",
   "operatoraudit",
   "directory",
