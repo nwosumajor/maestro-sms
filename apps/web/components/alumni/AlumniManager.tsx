@@ -51,7 +51,7 @@ export function AlumniManager({ alumni }: { alumni: Alumnus[] }) {
         <CardContent className="flex flex-wrap items-end gap-2">
           <div className="space-y-1.5"><Label>Title</Label><Input value={bTitle} onChange={(e) => setBTitle(e.target.value)} /></div>
           <div className="space-y-1.5 flex-1 min-w-60"><Label>Message</Label><Input value={bBody} onChange={(e) => setBBody(e.target.value)} /></div>
-          <Button variant="outline" disabled={busy || !bTitle || !bBody} onClick={() => run(() => postSms("alumni/broadcast", { title: bTitle, body: bBody }), "Broadcast sent.").then(() => { setBTitle(""); setBBody(""); })}>Send</Button>
+          <Button variant="outline" disabled={busy || !bTitle || !bBody} onClick={() => run(() => postSms("alumni/broadcast", { title: bTitle, body: bBody }), "Broadcast queued — it goes out to the alumni body in the background.").then(() => { setBTitle(""); setBBody(""); })}>Send</Button>
         </CardContent>
       </Card>
 
