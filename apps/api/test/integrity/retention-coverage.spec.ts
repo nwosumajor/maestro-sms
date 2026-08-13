@@ -23,6 +23,11 @@ import { IntegrityRetentionService } from "../../src/integrity/retention/integri
 import { IntegrityRetentionProcessor } from "../../src/integrity/retention/integrity-retention.processor";
 import { PURGE_EXPIRED_JOB } from "../../src/integrity/integrity.constants";
 
+/** The job-run recorder, stubbed: it runs the work and records nothing. These
+ *  suites are about what a sweep REPORTS, not about its run history. */
+const norecord = { record: <T,>(_j: string, _t: string, fn: () => Promise<T>) => fn() } as never;
+
+
 /** Source with comments stripped — the file explains these table names in prose. */
 const SERVICE_SRC = readFileSync(
   join(__dirname, "..", "..", "src", "integrity", "retention", "integrity-retention.service.ts"),
@@ -250,7 +255,7 @@ describe("IntegrityRetentionProcessor job result", () => {
     // test that summed the fields itself would agree with a wrong processor
     // just as readily as a right one.
     const expected = (await makeService(counts).svc.purgeAllSchools("SCHEDULED")).purged;
-    const out = await new IntegrityRetentionProcessor(makeService(counts).svc).process(job);
+    const out = await new IntegrityRetentionProcessor(makeService(counts).svc, norecord).process(job);
     expect(out).toEqual({ schools: 1, purged: expected });
   });
 
@@ -258,13 +263,13 @@ describe("IntegrityRetentionProcessor job result", () => {
   // processor dropped. It reported 0 — indistinguishable from a quiet night.
   it("a sweep of ONLY xapi + scan events does not report zero", async () => {
     const { svc } = makeService({ xapiStatement: 50, scanEvent: 40 });
-    const out = await new IntegrityRetentionProcessor(svc).process(job);
+    const out = await new IntegrityRetentionProcessor(svc, norecord).process(job);
     expect(out.purged).toBe(90);
   });
 
   it("a sweep with NO privileged DB is not a sweep that found nothing", async () => {
     const svc = new IntegrityRetentionService({ client: null } as never);
-    const processor = new IntegrityRetentionProcessor(svc);
+    const processor = new IntegrityRetentionProcessor(svc, norecord);
     const logged: string[] = [];
     jest.spyOn(Logger.prototype, "log").mockImplementation((m: unknown) => { logged.push(String(m)); });
     try {

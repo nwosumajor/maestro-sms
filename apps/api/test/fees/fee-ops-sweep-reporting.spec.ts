@@ -14,6 +14,11 @@ import { Logger } from "@nestjs/common";
 import { FeeOpsService, LATE_FEE_JOB, REMINDER_JOB } from "../../src/fees/fee-ops.service";
 import { FeeOpsProcessor } from "../../src/fees/fee-ops.processor";
 
+/** The job-run recorder, stubbed: it runs the work and records nothing. These
+ *  suites are about what a sweep REPORTS, not about its run history. */
+const norecord = { record: <T,>(_j: string, _t: string, fn: () => Promise<T>) => fn() } as never;
+
+
 /** A service with NO privileged client — the misconfigured environment. */
 function unconfigured() {
   return new FeeOpsService(
@@ -51,7 +56,7 @@ describe("fee sweeps report a skip as a skip", () => {
   // The log line is what an operator actually reads back, so the distinction
   // has to survive into it — not merely exist on the return value.
   it("the processor's line distinguishes SKIPPED from 'nothing overdue'", async () => {
-    const processor = new FeeOpsProcessor(unconfigured());
+    const processor = new FeeOpsProcessor(unconfigured(), norecord);
     await processor.process({ name: LATE_FEE_JOB } as never);
     await processor.process({ name: REMINDER_JOB } as never);
     expect(logged.join(" ")).toMatch(/SKIPPED/);

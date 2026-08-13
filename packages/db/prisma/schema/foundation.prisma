@@ -838,3 +838,37 @@ model SchoolBranding {
   @@index([schoolId])
   @@map("school_branding")
 }
+
+/// A run of a SCHEDULED background job.
+///
+/// Thirteen jobs run on timers — dunning, payment reconciliation, mobile-money
+/// recovery, late fees, retention purges, the overdue-boarder check — and until
+/// this table existed, nothing recorded that any of them had run. The only trace
+/// was a log line, which needs shell access to read and is gone on rotation.
+///
+/// That is the failure mode the platform is least equipped to notice: a
+/// scheduler that silently stops (a Redis flush, a deploy that drops the
+/// repeatable job) does not error. Dunning simply stops charging, reconciliation
+/// stops recovering lost payments, and the first sign is a customer complaint
+/// months later.
+///
+/// PLATFORM-GLOBAL and RLS-EXEMPT, like `school` and `plan_price`: these jobs run
+/// across every tenant and belong to no one school. The app role reads; the
+/// privileged client writes.
+model JobRun {
+  id         String    @id @default(uuid()) @db.Uuid
+  /// Stable key, e.g. "billing.dunning". Matches the JOBS catalogue in code.
+  job        String
+  /// SCHEDULE | MANUAL — a run somebody triggered is not evidence the timer works.
+  trigger    String    @default("SCHEDULE")
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+  ok         Boolean?
+  /// What it did — the job's own result object, so "0 billed" and "0 because it
+  /// never ran" are distinguishable after the fact.
+  summary    Json?
+  error      String?
+
+  @@index([job, startedAt])
+  @@map("job_run")
+}

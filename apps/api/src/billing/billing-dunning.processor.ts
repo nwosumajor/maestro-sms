@@ -8,6 +8,7 @@
 // =============================================================================
 
 import { Processor, WorkerHost } from "@nestjs/bullmq";
+import { JobRunsService } from "../maintenance/job-runs.service";
 import { Logger } from "@nestjs/common";
 import type { Job } from "bullmq";
 import { BILLING_DUNNING_QUEUE, DUNNING_SWEEP_JOB } from "./billing.constants";
@@ -17,14 +18,19 @@ import { BillingDunningService } from "./billing-dunning.service";
 export class BillingDunningProcessor extends WorkerHost {
   private readonly logger = new Logger(BillingDunningProcessor.name);
 
-  constructor(private readonly dunning: BillingDunningService) {
+  constructor(private readonly dunning: BillingDunningService,
+    private readonly runs: JobRunsService,
+  ) {
     super();
   }
 
   async process(job: Job): Promise<{ reminded: number; pastDue: number; scanned: number }> {
-    if (job.name !== DUNNING_SWEEP_JOB) return { reminded: 0, pastDue: 0, scanned: 0 };
-    const r = await this.dunning.sweep("SCHEDULED");
-    this.logger.log(`Dunning done: scanned=${r.scanned} reminded=${r.reminded} pastDue=${r.pastDue}`);
-    return { reminded: r.reminded, pastDue: r.pastDue, scanned: r.scanned };
+    return this.runs.record("billing.dunning", "SCHEDULE", async () => {
+      if (job.name !== DUNNING_SWEEP_JOB) return { reminded: 0, pastDue: 0, scanned: 0 };
+      const r = await this.dunning.sweep("SCHEDULED");
+      this.logger.log(`Dunning done: scanned=${r.scanned} reminded=${r.reminded} pastDue=${r.pastDue}`);
+      return { reminded: r.reminded, pastDue: r.pastDue, scanned: r.scanned };
+  
+    });
   }
 }
