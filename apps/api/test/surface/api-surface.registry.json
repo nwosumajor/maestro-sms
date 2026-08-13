@@ -929,6 +929,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "GET /library/loans/:p/fine/receipt": {
+      "kind": "ui",
+      "note": "Re-print a paid fine's receipt from the library loans list. payFine was the only source of it and refuses a second call, so closing the dialog lost the receipt permanently — for money the school had taken."
+    },
     "GET /library/report": {
       "kind": "ui",
       "note": "FIXED: now reached from app/(app)/library/page.tsx"

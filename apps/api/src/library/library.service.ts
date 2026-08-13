@@ -214,7 +214,8 @@ export class LibraryService {
       if (!loan) throw new NotFoundException("Loan not found");
       if (loan.fineMinor <= 0) throw new BadRequestException("No fine to pay");
       if (loan.finePaid) throw new BadRequestException("Fine already paid");
-      await tx.bookLoan.update({ where: { id: loanId }, data: { finePaid: true } });
+      const paidAt = new Date();
+      await tx.bookLoan.update({ where: { id: loanId }, data: { finePaid: true, finePaidAt: paidAt } });
       await this.log(tx, p, "library.fine.pay", loanId, { fineMinor: loan.fineMinor });
       const book = await tx.libraryBook.findFirstOrThrow({ where: { id: loan.bookId }, select: { title: true } });
       const borrower = await tx.user.findFirst({ where: { id: loan.borrowerId }, select: { name: true } });
@@ -223,7 +224,39 @@ export class LibraryService {
         bookTitle: book.title,
         borrowerName: borrower?.name ?? "",
         fineMinor: loan.fineMinor,
-        paidAt: new Date(),
+        paidAt,
+        reference: `FINE-${loanId.slice(0, 8).toUpperCase()}`,
+      };
+    });
+  }
+
+  /**
+   * Re-issue the receipt for a fine already paid.
+   *
+   * `payFine` was the ONLY source of the receipt and refuses a second call, so
+   * a librarian who closed the dialog, or a parent asking for a copy the next
+   * day, had no way to get it back — for money the school had taken. This is a
+   * read: it prints what was recorded, and cannot mark anything paid.
+   */
+  async fineReceipt(p: Principal, loanId: string): Promise<FineReceiptDto> {
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      const loan = await tx.bookLoan.findFirst({ where: { id: loanId } });
+      // 404 rather than 403 for someone else's loan — the same posture as the
+      // rest of this service.
+      if (!loan) throw new NotFoundException("Loan not found");
+      if (!this.isLibrarian(p) && loan.borrowerId !== p.userId) throw new NotFoundException("Loan not found");
+      if (!loan.finePaid) throw new BadRequestException("This fine has not been paid");
+      const book = await tx.libraryBook.findFirstOrThrow({ where: { id: loan.bookId }, select: { title: true } });
+      const borrower = await tx.user.findFirst({ where: { id: loan.borrowerId }, select: { name: true } });
+      return {
+        loanId,
+        bookTitle: book.title,
+        borrowerName: borrower?.name ?? "",
+        fineMinor: loan.fineMinor,
+        // The recorded date. Older rows backfilled to the return date, and NULL
+        // where even that is unknown — an absent date is visibly absent, an
+        // invented one is not.
+        paidAt: loan.finePaidAt,
         reference: `FINE-${loanId.slice(0, 8).toUpperCase()}`,
       };
     });

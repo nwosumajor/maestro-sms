@@ -27,6 +27,7 @@ type Preview = {
   classNames: string[];
   outstandingMinor: number;
   currency: string;
+  unreturnedBooks: string[];
   alreadyExited: boolean;
 };
 
@@ -130,13 +131,33 @@ export function StudentExitDialog({
                       {preview.classNames.length ? preview.classNames.join(", ") : "None"}
                     </dd>
                   </div>
-                  <div className="flex justify-between gap-4 px-3 py-2">
+                  <div className="flex justify-between gap-4 border-b border-border px-3 py-2">
                     <dt className="text-muted-foreground">Fees still outstanding</dt>
                     <dd className="text-right font-medium">
                       {money(preview.outstandingMinor, preview.currency)}
                     </dd>
                   </div>
+                  {/* Books are NOT closed by the exit — a pupil leaving does not
+                      return them, and marking the loans returned would record
+                      something that did not happen. So the approver is told
+                      while the family is still reachable. */}
+                  <div className="flex justify-between gap-4 px-3 py-2">
+                    <dt className="text-muted-foreground">Library books not returned</dt>
+                    <dd className="text-right font-medium">
+                      {preview.unreturnedBooks.length === 0
+                        ? "None"
+                        : preview.unreturnedBooks.join(", ")}
+                    </dd>
+                  </div>
                 </dl>
+
+                {preview.unreturnedBooks.length > 0 && (
+                  <p className="text-sm text-muted-foreground">
+                    Chase the {preview.unreturnedBooks.length === 1 ? "book" : "books"} before approving —
+                    once the family has gone it is much harder, and the copies stay off the shelf until
+                    they come back.
+                  </p>
+                )}
 
                 {preview.outstandingMinor > 0 && (
                   // A SIGNAL, never a block. A school that cannot release a

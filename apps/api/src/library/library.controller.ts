@@ -96,6 +96,19 @@ export class LibraryController {
     return this.library.payFine(p, id);
   }
 
+  /**
+   * Re-print a receipt for a fine already paid.
+   *
+   * `payFine` was the only source of it and refuses a second call, so closing
+   * the dialog lost the receipt permanently — for money the school had taken.
+   * A read: it cannot mark anything paid.
+   */
+  @Get("loans/:id/fine/receipt")
+  @RequirePermission(LIBRARY_PERMISSIONS.LIBRARY_BORROW)
+  fineReceipt(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<FineReceiptDto> {
+    return this.library.fineReceipt(p, id);
+  }
+
   // reports (librarian)
   @Get("report")
   @RequirePermission(LIBRARY_PERMISSIONS.LIBRARY_MANAGE)

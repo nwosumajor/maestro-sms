@@ -49,6 +49,9 @@ export interface FineReceiptDto {
   bookTitle: string;
   borrowerName: string;
   fineMinor: number;
-  paidAt: Date;
+  /** When the money was taken. NULL only on rows paid before this was recorded
+   *  and whose return date is also unknown — an absent date is visibly absent,
+   *  an invented one is not. */
+  paidAt: Date | null;
   reference: string;
 }

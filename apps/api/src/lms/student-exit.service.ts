@@ -55,6 +55,9 @@ export interface StudentExitPreviewDto {
    *  collections one. */
   outstandingMinor: number;
   currency: string;
+  /** Library books still out. SURFACED, never auto-closed — see the note in
+   *  preview(). */
+  unreturnedBooks: string[];
   alreadyExited: boolean;
 }
 
@@ -155,12 +158,35 @@ export class StudentExitService {
       });
       const school = await tx.school.findFirst({ where: { id: p.schoolId }, select: { currency: true } });
 
+      // BOOKS STILL OUT.
+      //
+      // Deliberately shown to the approver and NOT closed by the exit, which is
+      // the opposite of what the exit does to a bed and a bus seat. A pupil
+      // leaving DOES vacate their bed — the fact and the record agree. A pupil
+      // leaving does NOT return their books: marking those loans returned would
+      // record something that did not happen, put a copy back on the shelf that
+      // is not there, and quietly close the school's only claim on it.
+      //
+      // So the approver is told, before they approve, and can chase the books
+      // while the family is still reachable. Afterwards is much harder.
+      const loans = await tx.bookLoan.findMany({
+        where: { borrowerId: studentId, status: "ISSUED" },
+        select: { bookId: true },
+      });
+      const titles = loans.length
+        ? await tx.libraryBook.findMany({
+            where: { id: { in: loans.map((l) => l.bookId) } },
+            select: { title: true },
+          })
+        : [];
+
       return {
         studentId,
         studentName: student.name,
         classNames: (enrolments as Array<{ class: { name: string } | null }>).map((e) => e.class?.name ?? "—"),
         outstandingMinor: Math.max(0, (owed._sum?.totalMinor ?? 0) - (paid._sum?.amountMinor ?? 0)),
         currency: school?.currency ?? "NGN",
+        unreturnedBooks: titles.map((t) => t.title),
         alreadyExited: student.status === "EXITED",
       };
     });
@@ -189,6 +215,9 @@ export class StudentExitService {
       `${preview.classNames.length} class${preview.classNames.length === 1 ? "" : "es"}`,
       preview.classNames.length ? preview.classNames.join(", ") : null,
       preview.outstandingMinor > 0 ? `${money} still outstanding` : "nothing outstanding",
+      preview.unreturnedBooks.length
+        ? `${preview.unreturnedBooks.length} library book${preview.unreturnedBooks.length === 1 ? "" : "s"} not returned`
+        : null,
       reason?.trim() || null,
     ]
       .filter(Boolean)
