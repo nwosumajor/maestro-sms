@@ -497,6 +497,19 @@ exists to prevent, and it is a reportable data breach under NDPR.
 1. **Preserve evidence.** Screenshot, capture `request_id`, do not clear logs.
 2. **Establish whether data actually crossed**, or whether it is a display bug —
    a stale cache or a wrong label is not a breach.
+
+   The fastest broad check is the isolation probe, which signs in as a real
+   school admin and reaches for another school's records by id through the
+   front door — session, BFF, guard, service scoping and RLS, in composition:
+
+   ```
+   WEB_URL=<origin> pnpm --filter @sms/web isolation:probe
+   ```
+
+   It exits non-zero on the first response that carries another school's data.
+   An empty list is NOT a leak and the probe says so. Note it proves the paths
+   it covers are sound — it cannot prove the one you are investigating is, so
+   continue with the steps below regardless of the result.
 3. **Verify RLS is still enabled** on the table in question:
 
 ```sql
@@ -746,6 +759,7 @@ The controls already in place, so you know what you are relying on:
 | RLS coverage meta-test | `apps/api/test/rls.e2e-spec.ts` | A new tenant table with no isolation test |
 | Pricing consistency test | `apps/web/lib/__tests__/` | Owner-facing docs drifting from real pricing |
 | Route smoke, 18 roles × 91 routes | `pnpm smoke:routes` | SSR 500s that unit tests miss |
+| Cross-tenant isolation probe | `pnpm --filter @sms/web isolation:probe` | A school reaching another school's records BY ID through the real front door |
 | Restore drill | `infrastructure/scripts/restore-drill.sh` | Backups that don't actually restore |
 | Fail-closed demo seeding | `packages/db/prisma/seed.ts` | Demo credentials reaching production |
 | 12 CloudWatch alarms → SNS | `alarms.tf` | Infrastructure symptoms |

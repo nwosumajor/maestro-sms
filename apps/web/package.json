@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "jest",
     "smoke:routes": "node scripts/route-smoke.mjs",
-    "build:manual": "node scripts/build-manual.mjs"
+    "build:manual": "node scripts/build-manual.mjs",
+    "isolation:probe": "node scripts/isolation-probe.mjs"
   },
   "dependencies": {
     "@sms/tokens": "workspace:*",
