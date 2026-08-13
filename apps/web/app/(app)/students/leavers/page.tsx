@@ -31,6 +31,8 @@ type Leaver = {
   dueForReview: boolean;
   outstandingMinor: number;
   docsReleased: boolean;
+  exitKind: string | null;
+  exitReason: string | null;
 };
 type Page = {
   rows: Leaver[];
