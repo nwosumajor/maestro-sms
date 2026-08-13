@@ -2777,6 +2777,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "POST /students/:p/documents/release": {
+      "kind": "ui",
+      "note": "Release/withhold toggle on /students/leavers. Schools hold a transcript until the family settles what they owe; this records that decision. Gates transcripts, report cards and certificates — NOT the data-protection export, which is a right and not a collections lever."
+    },
     "POST /students/:p/exit": {
       "kind": "ui",
       "note": "Raises the two-stage STUDENT_EXIT workflow. There is deliberately NO endpoint that applies an exit directly."

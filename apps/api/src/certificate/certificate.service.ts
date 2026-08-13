@@ -11,6 +11,7 @@
 // =============================================================================
 
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { assertDocumentsReleasable } from "../lms/leaver-documents";
 import { randomUUID } from "node:crypto";
 import {
   AUDIT_LOG_SERVICE,
@@ -50,6 +51,9 @@ export class CertificateService {
     input: { type: string; subjectId: string; title?: string; body?: string },
   ): Promise<{ buffer: Buffer; filename: string }> {
     if (!TYPES.includes(input.type)) throw new BadRequestException("invalid certificate type");
+    // Same gate as the report card: a leaver's certificate is released by the
+    // principal, once anything outstanding is settled.
+    await this.db.runAsTenant(this.ctx(p), (tx) => assertDocumentsReleasable(tx, input.subjectId));
     const data = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const subject = await tx.user.findFirst({
         where: { id: input.subjectId },

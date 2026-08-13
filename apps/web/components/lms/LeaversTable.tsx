@@ -33,11 +33,22 @@ export type Leaver = {
   exitedAt: string | null;
   retentionDueAt: string | null;
   dueForReview: boolean;
+  /** What they still owe. The figure the principal decides against. */
+  outstandingMinor: number;
+  docsReleased: boolean;
 };
 
-export function LeaversTable({ rows, canReadmit }: { rows: Leaver[]; canReadmit: boolean }) {
+export function LeaversTable({
+  rows,
+  canReadmit,
+  currency,
+}: {
+  rows: Leaver[];
+  canReadmit: boolean;
+  currency: string;
+}) {
   const router = useRouter();
-  const { shortDate } = useFormat();
+  const { shortDate, money } = useFormat();
   const [busy, setBusy] = React.useState<string | null>(null);
   const [msg, setMsg] = React.useState<string | null>(null);
   const [done, setDone] = React.useState<string | null>(null);
@@ -59,6 +70,25 @@ export function LeaversTable({ rows, canReadmit }: { rows: Leaver[]; canReadmit:
     } else setMsg(await readApiError(res));
   };
 
+  const setRelease = async (r: Leaver, released: boolean) => {
+    const reason =
+      window.prompt(
+        released
+          ? `Release ${r.name}'s documents? A short note for the record:`
+          : `Withhold ${r.name}'s documents again? A short note for the record:`,
+      ) ?? undefined;
+    setBusy(r.id);
+    setMsg(null);
+    const res = await fetch(`/api/sms/students/${r.id}/documents/release`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ released, reason: reason?.trim() || undefined }),
+    });
+    setBusy(null);
+    if (res.ok) router.refresh();
+    else setMsg(await readApiError(res));
+  };
+
   if (rows.length === 0) {
     return <p className="text-sm text-muted-foreground">No students have left.</p>;
   }
@@ -77,6 +107,8 @@ export function LeaversTable({ rows, canReadmit }: { rows: Leaver[]; canReadmit:
             <tr className="border-b border-border text-left text-xs uppercase text-muted-foreground">
               <th className="px-3 py-2 font-medium">Student</th>
               <th className="px-3 py-2 font-medium">Left on</th>
+              <th className="px-3 py-2 font-medium">Outstanding</th>
+              <th className="px-3 py-2 font-medium">Documents</th>
               <th className="px-3 py-2 font-medium">Record kept until</th>
               <th className="px-3 py-2 font-medium">Documents</th>
               {canReadmit && <th className="px-3 py-2" />}
@@ -95,6 +127,39 @@ export function LeaversTable({ rows, canReadmit }: { rows: Leaver[]; canReadmit:
                 </td>
                 <td className="px-3 py-2 text-muted-foreground">
                   {r.exitedAt ? shortDate(r.exitedAt) : "—"}
+                </td>
+                {/* What they owe, and what the principal has decided about it.
+                    Side by side on purpose: the decision is made against the
+                    figure, and putting them on different screens is how a
+                    transcript gets released to somebody who owes a term's fees. */}
+                <td className="px-3 py-2">
+                  {r.outstandingMinor > 0 ? (
+                    <span className="font-medium text-destructive">
+                      {money(r.outstandingMinor, currency)}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">Nothing owed</span>
+                  )}
+                </td>
+                <td className="px-3 py-2">
+                  {r.docsReleased ? (
+                    <Badge variant="secondary">Released</Badge>
+                  ) : (
+                    <Badge variant="outline" title="Transcripts, report cards and certificates are held">
+                      Withheld
+                    </Badge>
+                  )}
+                  {canReadmit && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="ml-2 h-7 px-2 text-xs"
+                      disabled={busy === r.id}
+                      onClick={() => setRelease(r, !r.docsReleased)}
+                    >
+                      {r.docsReleased ? "Withhold" : "Release"}
+                    </Button>
+                  )}
                 </td>
                 <td className="px-3 py-2">
                   {r.retentionDueAt ? (
