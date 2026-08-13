@@ -179,12 +179,17 @@ export class TermResultService {
       classNote: c.classNote ?? null,
     };
     const anyEntered = Object.values(components).some((v) => v !== null);
-    const { total, grade } = computeTermSubjectGrade(components, policy?.components, resolveGradeBands(policy));
+    const { total, grade, complete } = computeTermSubjectGrade(components, policy?.components, resolveGradeBands(policy));
     return {
       ...components,
       // total/grade only meaningful once at least one component is entered.
       total: anyEntered ? total : null,
       grade: anyEntered ? grade : null,
+      // Carried, not discarded. A missing component counts as zero in the
+      // total, so without this an interim mark and a final one are the same
+      // number — and the report card that reaches the family cannot tell a
+      // pupil who scored 24 from one whose exam has not been marked.
+      complete,
     };
   }
 
@@ -202,10 +207,10 @@ export class TermResultService {
     /** The SCHOOL's weighting. Omitted = the platform default, which is what every
      *  school already live uses. */
     policy?: GradingPolicy,
-  ): { total: number | null; grade: string | null } {
+  ): { total: number | null; grade: string | null; complete: boolean } {
     const anyEntered = [row.exam, row.midterm, row.assignment, row.classNote].some((v) => v !== null);
-    if (!anyEntered) return { total: null, grade: null };
-    const { total, grade } = computeTermSubjectGrade(
+    if (!anyEntered) return { total: null, grade: null, complete: false };
+    const { total, grade, complete } = computeTermSubjectGrade(
       {
         exam: row.exam,
         midterm: row.midterm,
@@ -217,7 +222,7 @@ export class TermResultService {
       // grade, the overall grade — comes through here, so one thread carries it.
       resolveGradeBands(policy),
     );
-    return { total, grade };
+    return { total, grade, complete };
   }
 
   private toResultDto(
@@ -241,7 +246,7 @@ export class TermResultService {
     subjectName: string,
     studentName: string,
   ): SubjectResultDto {
-    const { total, grade } = this.recomputeTotal(row);
+    const { total, grade, complete } = this.recomputeTotal(row);
     return {
       id: row.id,
       sessionId: row.sessionId,
@@ -260,6 +265,7 @@ export class TermResultService {
       status: row.status,
       gradedById: row.gradedById,
       gradedAt: row.gradedAt,
+      complete,
     };
   }
 
@@ -607,6 +613,17 @@ export class TermResultService {
           "No draft grades to submit — save scores first, or this batch is already awaiting approval or published.",
         );
       }
+            // HOW MANY ARE PROVISIONAL. An approver publishing to families sees a
+      // count of rows and nothing about whether the marks behind them are
+      // finished — and a missing component counts as ZERO, so an unmarked exam
+      // publishes as a fail. Counted here so the request can say it.
+      const pending = await tx.subjectResult.findMany({
+        where: { classId, subjectId, termId, status: "PENDING_APPROVAL" },
+        select: { exam: true, midterm: true, assignment: true, classNote: true },
+      });
+      const incomplete = pending.filter(
+        (r) => [r.exam, r.midterm, r.assignment, r.classNote].some((v) => v === null),
+      ).length;
       await this.audit.record(
         {
           actorId: p.userId,
@@ -614,11 +631,11 @@ export class TermResultService {
           entity: "subject_result",
           entityId: `${classId}:${subjectId}:${termId}`,
           schoolId: p.schoolId,
-          metadata: { submitted: res.count },
+          metadata: { submitted: res.count, incomplete },
         },
         tx,
       );
-      return { count: res.count, title: `Publish grades: ${subject.name} — ${klass.name} (${term.name})` };
+      return { count: res.count, incomplete, title: `Publish grades: ${subject.name} — ${klass.name} (${term.name})` };
     });
 
     // Step 2: raise + submit the approval request. If this fails, RELEASE the
@@ -627,7 +644,20 @@ export class TermResultService {
       const req = (await this.workflow.createRequest(p, {
         type: "GRADE_PUBLISH",
         title: claimed.title,
-        payload: { classId, subjectId, termId, count: claimed.count },
+        payload: {
+          classId,
+          subjectId,
+          termId,
+          count: claimed.count,
+          incomplete: claimed.incomplete,
+          // The approver's one-line summary — the same `payload.summary` the
+          // inbox already surfaces. "12 grades" and "12 grades, 4 with a
+          // component still unmarked" call for different decisions.
+          summary:
+            claimed.incomplete > 0
+              ? `${claimed.count} grades — ${claimed.incomplete} with a component still unmarked, which publishes as if it scored zero`
+              : `${claimed.count} grades, all components marked`,
+        },
         stages: GRADE_PUBLISH_CHAIN,
       })) as { id: string };
       await this.workflow.submit(p, req.id);
@@ -791,7 +821,7 @@ export class TermResultService {
         const rows: TermSubjectRowDto[] = results
           .filter((r) => r.termId === t.id)
           .map((r) => {
-            const { total, grade } = this.recomputeTotal(r);
+            const { total, grade, complete } = this.recomputeTotal(r);
             return {
               subjectId: r.subjectId,
               subjectName: subjectName.get(r.subjectId) ?? "Unknown",
@@ -803,6 +833,7 @@ export class TermResultService {
               classNote: r.classNote,
               total,
               grade,
+              complete,
             };
           })
           .sort((a, b) => a.subjectName.localeCompare(b.subjectName));
@@ -1112,8 +1143,10 @@ export class TermResultService {
         .map((sid) => {
           const cells = orderedSubjectIds.map((subId) => {
             const r = cellByKey.get(`${sid}:${subId}`);
-            const { total, grade } = r ? this.recomputeTotal(r) : { total: null, grade: null };
-            return { subjectId: subId, total, grade, status: r?.status ?? "" };
+            const { total, grade, complete } = r
+              ? this.recomputeTotal(r)
+              : { total: null, grade: null, complete: false };
+            return { subjectId: subId, total, grade, complete, status: r?.status ?? "" };
           });
           const totals = cells.map((c) => c.total).filter((v): v is number => v !== null);
           return {

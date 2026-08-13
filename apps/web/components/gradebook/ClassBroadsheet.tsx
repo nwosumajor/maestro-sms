@@ -92,7 +92,13 @@ export function ClassBroadsheet({ classes, sessions }: { classes: Named[]; sessi
                           <span className="text-muted-foreground">—</span>
                         ) : (
                           <span title={c.status || undefined}>
-                            {c.total} <span className="text-xs text-muted-foreground">({c.grade})</span>
+                            {c.total}
+                            {/* An unmarked component counts as ZERO, so this
+                                number reads like a poor result when it only
+                                means "not finished". The teacher's own console
+                                said so; the broadsheet did not. */}
+                            {!c.complete && <span className="ml-0.5 text-[10px] text-amber-600" title="Not every component is marked — this total counts the missing ones as zero">*</span>}
+                            <span className="text-xs text-muted-foreground">({c.grade})</span>
                             {c.status && c.status !== "PUBLISHED" && (
                               <span className="ml-0.5 text-[10px] uppercase text-amber-600 dark:text-amber-500">
                                 {c.status === "PENDING_APPROVAL" ? "·pending" : "·draft"}
