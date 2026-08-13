@@ -50,6 +50,10 @@ model DisciplineAssignee {
 
   @@unique([complaintId, assigneeId])
   @@index([schoolId])
+  /// "Which cases am I responsible for?" — the unique above leads on
+  /// complaintId, so it cannot answer a lookup by assignee. Without this the
+  /// assignee's own list is a scan of every assignment the school has ever made.
+  @@index([schoolId, assigneeId])
   @@map("discipline_assignee")
 }
 

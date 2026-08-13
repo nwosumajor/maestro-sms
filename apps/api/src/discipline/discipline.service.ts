@@ -44,6 +44,33 @@ export class DisciplineService {
     return p.permissions.includes("discipline.manage");
   }
 
+  /**
+   * Which complaints this caller may see.
+   *
+   * A manager sees the school's. Everyone else sees the ones they FILED — and,
+   * now, the ones they have been ASSIGNED.
+   *
+   * That last clause was missing entirely. `assign` accepts any user in the
+   * school, but `assigneeId` was only ever written: it appeared in no read scope
+   * anywhere, and nothing notified the person. So assigning a case to a teacher
+   * told them nothing and showed them nothing — the list omitted it and fetching
+   * it by id returned 404. The row existed and did nothing, which is worse than
+   * having no assignment feature, because the manager believes it was handed on.
+   *
+   * Deliberately narrow: it grants sight of the complaints assigned to THAT
+   * person and nothing else. These are records about children and the default
+   * stays closed.
+   */
+  private async visibleComplaintWhere(tx: TenantTx, p: Principal): Promise<Record<string, unknown>> {
+    if (this.canManage(p)) return {};
+    const mine = await tx.disciplineAssignee.findMany({
+      where: { assigneeId: p.userId },
+      select: { complaintId: true },
+    });
+    if (mine.length === 0) return { complainantId: p.userId };
+    return { OR: [{ complainantId: p.userId }, { id: { in: mine.map((a) => a.complaintId) } }] };
+  }
+
   // --- file (anyone) --------------------------------------------------------
 
   async file(
@@ -89,6 +116,20 @@ export class DisciplineService {
       if (dup) throw new BadRequestException("Already assigned");
       await tx.disciplineAssignee.create({ data: { schoolId: p.schoolId, complaintId, assigneeId } });
       await this.log(tx, p, "discipline.assign", complaintId, { assigneeId });
+      // TELL THEM. Handing a case to somebody who is never informed is not
+      // handing it on; the case simply sits. Deliberately says nothing about the
+      // substance — these are records about children, and the notification is a
+      // pointer, not a summary.
+      await this.notifications.enqueue(
+        { schoolId: p.schoolId, userId: p.userId },
+        {
+          recipientId: assigneeId,
+          type: "WORKFLOW_UPDATE",
+          title: "A discipline case has been assigned to you",
+          body: "You are now responsible for a discipline case. Open Discipline to see the details.",
+          data: { complaintId },
+        },
+      );
       return this.complaintDto(tx, complaintId);
     });
   }
@@ -243,7 +284,7 @@ export class DisciplineService {
     const limit = pageLimit(opts.limit);
     const cursor = decodeCursor(opts.cursor);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const where = this.canManage(p) ? {} : { complainantId: p.userId };
+      const where = await this.visibleComplaintWhere(tx, p);
       const rows = (await tx.disciplineComplaint.findMany({
         where: { ...where, ...seekWhere(cursor) },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -335,7 +376,15 @@ export class DisciplineService {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const c = await tx.disciplineComplaint.findFirst({ where: { id: complaintId } });
       if (!c) throw new NotFoundException("Complaint not found");
-      if (!this.canManage(p) && c.complainantId !== p.userId) throw new NotFoundException("Complaint not found");
+      if (!this.canManage(p) && c.complainantId !== p.userId) {
+        // …unless it is assigned to them. 404-not-403 either way: a 403 would
+        // confirm that a complaint exists about somebody.
+        const assigned = await tx.disciplineAssignee.findFirst({
+          where: { complaintId, assigneeId: p.userId },
+          select: { id: true },
+        });
+        if (!assigned) throw new NotFoundException("Complaint not found");
+      }
       await this.log(tx, p, "discipline.read", complaintId, {});
       return this.complaintDto(tx, complaintId);
     });
