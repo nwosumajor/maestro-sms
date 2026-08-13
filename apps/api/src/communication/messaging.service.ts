@@ -13,7 +13,40 @@ import { NotificationService } from "../notifications/notification.service";
 import { Prisma } from "@sms/db";
 import { decodeCursor, pageLimit, seekWhere, toPage } from "../common/keyset-cursor";
 
-const STAFF = new Set(["school_admin", "principal"]);
+// =============================================================================
+// Who may START a conversation with whom
+// =============================================================================
+// The rule was: a "staff" sender may write to anyone, everyone else may write
+// only to staff/teachers. But STAFF was `{school_admin, principal}` — two roles
+// — and a TEACHER was not one of them. So a teacher could not write to a pupil
+// they teach, or to that pupil's parent; nor could the bursar chasing a fee, or
+// the librarian chasing a book. Only the principal and the school admin could
+// reach a family at all.
+//
+// Families could always write TO teachers, and teachers could reply inside a
+// thread a parent had opened. So the module was one-way in practice: a teacher
+// could answer a parent but never raise anything with them. That is the wrong
+// half of a parent-teacher relationship to support, and it is not what the rule
+// was meant to say — a teacher IS staff by any ordinary reading of it.
+//
+// The replacement is the platform's own model everywhere else: coarse role, then
+// a RELATIONSHIP narrows the rows.
+//   * school-wide staff        -> anyone in the school
+//   * a teacher                -> staff, their OWN pupils, and those pupils'
+//                                 guardians. Deliberately not every child in the
+//                                 school: an adult opening a channel to a minor
+//                                 they have no connection to is exactly what
+//                                 relationship scoping is for (Golden Rule #5).
+//   * finance staff            -> staff and GUARDIANS (adults). They already see
+//                                 every family's invoice; being unable to write
+//                                 to the parent whose debt they are chasing was
+//                                 the same gap. No pupils.
+//   * everyone else            -> staff and teachers, as before.
+const SCHOOL_WIDE_SENDERS = new Set(["school_admin", "principal"]);
+/** Staff who deal with families' money school-wide, but never with pupils. */
+const GUARDIAN_WIDE_SENDERS = new Set(["accountant"]);
+/** Staff whose reach over pupils comes from the classes they actually teach. */
+const CLASS_SCOPED_SENDERS = new Set(["teacher", "head_teacher"]);
 const STAFF_OR_TEACHER = new Set(["teacher", "school_admin", "principal", "accountant", "hr_clerk", "board"]);
 /** Safety cap on messages returned for a single thread (most-recent-first). */
 const MESSAGE_PAGE = 500;
@@ -49,13 +82,13 @@ export class MessagingService {
    * `q` narrows by name so a large school stays usable.
    */
   async contacts(p: Principal, q?: string) {
-    const staff = p.roles.some((r) => STAFF.has(r));
     const term = (q ?? "").trim();
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const scope = await this.recipientScope(tx, p);
       const users = await tx.user.findMany({
         where: {
           id: { not: p.userId },
-          ...(staff ? {} : { roles: { some: { role: { name: { in: [...STAFF_OR_TEACHER] } } } } }),
+          ...(scope ?? {}),
           ...(term ? { name: { contains: term, mode: Prisma.QueryMode.insensitive } } : {}),
         },
         select: { id: true, name: true, roles: { select: { role: { select: { name: true } } } } },
@@ -68,6 +101,61 @@ export class MessagingService {
         roles: u.roles.map((r) => r.role.name),
       }));
     });
+  }
+
+
+  /**
+   * The Prisma `where` that describes exactly who this caller may open a thread
+   * with — `null` meaning "anyone in the school".
+   *
+   * ONE definition, consumed by BOTH the compose picker and the send guard. They
+   * were separate expressions of the same rule before, which is the shape that
+   * lets a list offer someone the send then refuses (or, worse, hides someone
+   * the send would allow).
+   */
+  private async recipientScope(tx: TenantTx, p: Principal): Promise<Prisma.UserWhereInput | null> {
+    if (p.roles.some((r) => SCHOOL_WIDE_SENDERS.has(r))) return null;
+
+    const staffOrTeacher: Prisma.UserWhereInput = {
+      roles: { some: { role: { name: { in: [...STAFF_OR_TEACHER] } } } },
+    };
+    const anyOf: Prisma.UserWhereInput[] = [staffOrTeacher];
+
+    // Finance: every guardian, because they already see every family's invoice.
+    if (p.roles.some((r) => GUARDIAN_WIDE_SENDERS.has(r))) {
+      anyOf.push({ parentLinks: { some: {} } });
+    }
+
+    // A teacher's own pupils, and those pupils' guardians.
+    if (p.roles.some((r) => CLASS_SCOPED_SENDERS.has(r))) {
+      const [taught, supervised, subjectTaught] = await Promise.all([
+        tx.classTeacher.findMany({ where: { teacherId: p.userId }, select: { classId: true } }),
+        tx.class.findMany({ where: { supervisorId: p.userId }, select: { id: true } }),
+        tx.classSubjectTeacher.findMany({ where: { teacherId: p.userId }, select: { classId: true } }),
+      ]);
+      const classIds = [
+        ...new Set([
+          ...taught.map((c: { classId: string }) => c.classId),
+          ...supervised.map((c: { id: string }) => c.id),
+          ...subjectTaught.map((c: { classId: string }) => c.classId),
+        ]),
+      ];
+      if (classIds.length) {
+        // ACTIVE enrolment only: a pupil who has left is no longer theirs to write to.
+        const pupils = await tx.enrollment.findMany({
+          where: { classId: { in: classIds }, status: "ACTIVE" },
+          select: { studentId: true },
+          distinct: ["studentId"],
+        });
+        const studentIds = pupils.map((e: { studentId: string }) => e.studentId);
+        if (studentIds.length) {
+          anyOf.push({ id: { in: studentIds } });
+          anyOf.push({ parentLinks: { some: { studentId: { in: studentIds } } } });
+        }
+      }
+    }
+
+    return { OR: anyOf };
   }
 
   /** The caller's threads, newest activity first, keyset-paginated. */
@@ -237,11 +325,19 @@ export class MessagingService {
   private async assertCanMessage(tx: TenantTx, p: Principal, recipientId: string) {
     const recipient = await tx.user.findFirst({ where: { id: recipientId }, select: { id: true } });
     if (!recipient) throw new NotFoundException("Recipient not found");
-    if (p.roles.some((r) => STAFF.has(r))) return;
-    const rr = await tx.userRole.findMany({ where: { userId: recipientId }, include: { role: { select: { name: true } } } });
-    const names = (rr as Array<{ role: { name: string } }>).map((x) => x.role.name);
-    if (names.some((n) => STAFF_OR_TEACHER.has(n))) return;
-    throw new ForbiddenException("You can only message staff and teachers");
+    const scope = await this.recipientScope(tx, p);
+    if (scope === null) return;
+    // The SAME clause the picker filtered by, asked about one person. Anyone the
+    // compose box offered passes here by construction.
+    const allowed = await tx.user.findFirst({ where: { id: recipientId, ...scope }, select: { id: true } });
+    if (allowed) return;
+    // Say which rule was missed. "You can only message staff and teachers" was
+    // shown to a teacher writing to their own pupil, and named the wrong reason.
+    throw new ForbiddenException(
+      p.roles.some((r) => CLASS_SCOPED_SENDERS.has(r))
+        ? "You can message staff, the pupils you teach, and their parents. This person is none of those — ask the school office to pass it on."
+        : "You can only message staff and teachers.",
+    );
   }
 
   private async notify(p: Principal, recipientIds: string[], subject: string) {

@@ -9,7 +9,8 @@
     "lint": "eslint \"src/**/*.ts\"",
     "typecheck": "tsc --noEmit",
     "test": "jest",
-    "loadtest": "node scripts/loadtest.mjs"
+    "loadtest": "node scripts/loadtest.mjs",
+    "write-coverage": "rm -f /tmp/write-coverage.txt && WRITE_COVERAGE=1 jest --silent --setupFilesAfterEnv ./test/write-coverage.setup.js; node scripts/write-coverage-report.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1073.0",
