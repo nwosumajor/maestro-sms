@@ -36,6 +36,9 @@ export type Leaver = {
   /** What they still owe. The figure the principal decides against. */
   outstandingMinor: number;
   docsReleased: boolean;
+  /** Why they left — captured at the exit and, until now, never shown again. */
+  exitKind: string | null;
+  exitReason: string | null;
 };
 
 export function LeaversTable({
@@ -107,6 +110,7 @@ export function LeaversTable({
             <tr className="border-b border-border text-left text-xs uppercase text-muted-foreground">
               <th className="px-3 py-2 font-medium">Student</th>
               <th className="px-3 py-2 font-medium">Left on</th>
+              <th className="px-3 py-2 font-medium">Why</th>
               <th className="px-3 py-2 font-medium">Outstanding</th>
               <th className="px-3 py-2 font-medium">Documents</th>
               <th className="px-3 py-2 font-medium">Record kept until</th>
@@ -127,6 +131,21 @@ export function LeaversTable({
                 </td>
                 <td className="px-3 py-2 text-muted-foreground">
                   {r.exitedAt ? shortDate(r.exitedAt) : "—"}
+                </td>
+                {/* The school answered this when it approved the exit. It was
+                    recorded and then never read back — the first question
+                    anybody asks of a leavers list. */}
+                <td className="px-3 py-2">
+                  {r.exitKind ? (
+                    <>
+                      <span className="capitalize">{r.exitKind.toLowerCase()}</span>
+                      {r.exitReason && (
+                        <div className="text-xs text-muted-foreground">{r.exitReason}</div>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
                 </td>
                 {/* What they owe, and what the principal has decided about it.
                     Side by side on purpose: the decision is made against the

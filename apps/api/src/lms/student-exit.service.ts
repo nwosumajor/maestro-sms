@@ -431,6 +431,34 @@ export class StudentExitService {
           })
         : [];
       const studentOfInvoice = new Map(invoices.map((i) => [i.id, i.studentId]));
+
+      // WHY THEY LEFT.
+      //
+      // The exit captures both — the kind (transferred / withdrawn / graduated)
+      // onto every enrolment's status, and the free-text note onto
+      // statusReason. Neither was ever read again anywhere in the API or the
+      // web: a sweep for columns written and never read found `statusReason`
+      // among 29 candidates, and it was the only true one.
+      //
+      // So a leavers register could tell a school WHO left and when, and not
+      // whether they graduated or were withdrawn — the first question anybody
+      // asks of that list, and the one the school already answered when it
+      // approved the exit.
+      //
+      // ONE query for the page, keyed by pupil. Their enrolments all carry the
+      // same kind (the exit sets them together), so the most recent is the
+      // exit's own record.
+      const exitRows = ids.length
+        ? await tx.enrollment.findMany({
+            where: { studentId: { in: ids }, status: { not: "ACTIVE" } },
+            select: { studentId: true, status: true, statusReason: true, enrolledAt: true },
+            orderBy: { enrolledAt: "desc" },
+          })
+        : [];
+      const reasonOf = new Map<string, { kind: string; reason: string | null }>();
+      for (const e of exitRows as Array<{ studentId: string; status: string; statusReason: string | null }>) {
+        if (!reasonOf.has(e.studentId)) reasonOf.set(e.studentId, { kind: e.status, reason: e.statusReason });
+      }
       const owedBy = new Map<string, number>();
       for (const b of billed as Array<{ studentId: string; _sum: { totalMinor: number | null } }>) {
         owedBy.set(b.studentId, (owedBy.get(b.studentId) ?? 0) + (b._sum.totalMinor ?? 0));
@@ -459,6 +487,8 @@ export class StudentExitService {
             // somebody who owes nothing.
             outstandingMinor: Math.max(0, owedBy.get(r.id) ?? 0),
             docsReleased: r.docsReleasedAt != null,
+            exitKind: reasonOf.get(r.id)?.kind ?? null,
+            exitReason: reasonOf.get(r.id)?.reason ?? null,
           };
         }),
         page: Math.max(1, page),
