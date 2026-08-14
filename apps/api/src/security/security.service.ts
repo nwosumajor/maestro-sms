@@ -339,7 +339,39 @@ export class SecurityService {
         .map(([id, count]) => ({ actorName: name.get(id) ?? "?", count }))
         .sort((a, b) => b.count - a.count)
         .slice(0, 5);
-      return { breakGlassCount: breakGlass.length, breakGlassEvents: breakGlass, topMedicalReaders };
+      // Sign-in trouble over the same window. One query for both signals: a
+      // lockout IS a failed attempt, so counting them separately would need two
+      // passes over the same rows.
+      const authFailures = await tx.auditLog.findMany({
+        where: { action: { in: ["auth.login.failed", "auth.account.locked"] }, createdAt: { gte: since } },
+        select: { actorId: true, action: true },
+      });
+      const failCounts = new Map<string, { count: number; locked: boolean }>();
+      for (const r of authFailures as Array<{ actorId: string; action: string }>) {
+        const cur = failCounts.get(r.actorId) ?? { count: 0, locked: false };
+        cur.count += 1;
+        if (r.action === "auth.account.locked") cur.locked = true;
+        failCounts.set(r.actorId, cur);
+      }
+      // Resolve names in ONE query alongside the medical readers, rather than a
+      // second round trip — these lists overlap in a small school.
+      const failUsers = await tx.user.findMany({
+        where: { id: { in: [...failCounts.keys()] } },
+        select: { id: true, name: true },
+      });
+      const failName = new Map(failUsers.map((u: { id: string; name: string }) => [u.id, u.name]));
+      const topFailedLogins = [...failCounts.entries()]
+        .map(([id, v]) => ({ actorName: failName.get(id) ?? "?", count: v.count, locked: v.locked }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5);
+
+      return {
+        breakGlassCount: breakGlass.length,
+        breakGlassEvents: breakGlass,
+        topMedicalReaders,
+        lockedOutCount: [...failCounts.values()].filter((v) => v.locked).length,
+        topFailedLogins,
+      };
     });
   }
 

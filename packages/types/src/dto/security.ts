@@ -27,6 +27,18 @@ export interface RecertificationDto {
 export interface SecurityAnomaliesDto {
   breakGlassCount: number;
   topMedicalReaders: { actorName: string; count: number }[];
+  /**
+   * Sign-in trouble over the same window.
+   *
+   * The platform locks an account PERMANENTLY on the third failure, and until
+   * these events were recorded (#187) an operator reactivating one had nothing
+   * to say why it locked. Recording them was only half the job: a signal nobody
+   * is shown is not a signal, so they surface here beside break-glass, which is
+   * where someone is already looking for exactly this kind of thing.
+   */
+  lockedOutCount: number;
+  /** Accounts with the most failed attempts in the window, worst first. */
+  topFailedLogins: { actorName: string; count: number; locked: boolean }[];
 }
 
 export interface AuditLogRowDto {

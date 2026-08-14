@@ -35,7 +35,11 @@ export default async function AuditPage({ searchParams }: { searchParams: { acti
 
         <div className="flex flex-wrap gap-2 text-sm">
           <span className="text-muted-foreground">Quick filters:</span>
-          {["security.", "medical", "fee.", "document.", "attendance."].map((a) => (
+          {/* `auth.` covers sign-ins, failed attempts and lockouts (#187). It was
+              missing here after those events started being recorded, so the rows
+              existed and nothing offered a way to them — the filter matches by
+              `contains`, so someone would have had to know to type it. */}
+          {["auth.", "security.", "medical", "fee.", "document.", "attendance."].map((a) => (
             <Link key={a} href={`/admin/audit?action=${a}`} className="rounded-md border border-border px-2 py-0.5 text-muted-foreground hover:bg-accent">{a}</Link>
           ))}
           {(searchParams.action || searchParams.entity) && (

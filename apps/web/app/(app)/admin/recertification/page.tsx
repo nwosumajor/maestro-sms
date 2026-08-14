@@ -56,12 +56,17 @@ export default async function RecertificationPage() {
           </Alert>
         )}
 
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-4">
           <Card>
             <CardHeader><CardDescription>Active elevations</CardDescription><CardTitle className="text-2xl">{num(rec?.activeElevations.length, rec === null)}</CardTitle></CardHeader>
           </Card>
           <Card>
             <CardHeader><CardDescription>Break-glass (30d)</CardDescription><CardTitle className="text-2xl">{num(anom?.breakGlassCount, anom === null)}</CardTitle></CardHeader>
+          </Card>
+          <Card>
+            {/* A permanent lock needs an operator to undo, so this is a queue as
+                much as a statistic. */}
+            <CardHeader><CardDescription>Accounts locked (30d)</CardDescription><CardTitle className="text-2xl">{num(anom?.lockedOutCount, anom === null)}</CardTitle></CardHeader>
           </Card>
           <Card>
             <CardHeader><CardDescription>Users reviewed</CardDescription><CardTitle className="text-2xl">{num(rec?.assignments.length, rec === null)}</CardTitle></CardHeader>
@@ -82,6 +87,41 @@ export default async function RecertificationPage() {
                   ))}
                 </tbody>
               </table>
+            </CardContent>
+          </Card>
+        )}
+
+        {anom && anom.topFailedLogins.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Failed sign-ins (30 days)</CardTitle>
+              <CardDescription>
+                Three failures lock an account permanently, and only an operator can reactivate it. A
+                cluster here is either someone who has forgotten their password or someone guessing at
+                it — the count tells you which.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-0">
+              <table className="w-full text-sm">
+                <tbody>
+                  {anom.topFailedLogins.map((r) => (
+                    <tr key={r.actorName} className="border-b border-border last:border-0">
+                      <td className="px-4 py-2">{r.actorName}</td>
+                      <td className="px-4 py-2">
+                        {r.locked && <Badge variant="destructive">Locked</Badge>}
+                      </td>
+                      <td className="px-4 py-2 text-right text-muted-foreground">
+                        {r.count} attempt{r.count === 1 ? "" : "s"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </CardContent>
+            <CardContent className="pt-0 text-xs text-muted-foreground">
+              <Link href="/admin/audit?action=auth." className="underline">
+                See every sign-in event
+              </Link>
             </CardContent>
           </Card>
         )}
