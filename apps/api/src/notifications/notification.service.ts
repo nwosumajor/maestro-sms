@@ -320,75 +320,131 @@ export class NotificationService {
   }
 
   // --- worker: perform external deliveries -----------------------------------
+  /**
+   * Deliver a notification's pending channels.
+   *
+   * THE GATEWAY CALL IS NOT INSIDE A TRANSACTION, and that is the whole shape of
+   * this method. It used to be: the loop ran inside `runAsTenant`, so a Twilio
+   * round trip was held open inside a Prisma interactive transaction whose
+   * default cap is five seconds — and the provider's `fetch` had no timeout at
+   * all, so a stalled connection could sit there indefinitely.
+   *
+   * When that cap fires the transaction ROLLS BACK. The SMS has already gone:
+   * Twilio has taken it, the parent has read it, the platform has been billed.
+   * What is undone is our side of it — the SENT row and the credit debit — after
+   * which BullMQ retries the job and sends the message AGAIN. Duplicate messages
+   * to families, double gateway spend, and a school under-charged for both.
+   *
+   * So: read in a transaction, deliver outside one, record in a transaction.
+   */
   async runDeliveries(job: DeliverNotificationJob): Promise<{ sent: number; failed: number }> {
-    return this.db.runAsTenant(
-      { schoolId: job.schoolId, userId: job.userId },
-      async (tx) => {
-        const notification = await tx.notification.findFirst({
-          where: { id: job.notificationId },
-        });
-        if (!notification) return { sent: 0, failed: 0 };
-        const recipient = await tx.user.findFirst({
-          where: { id: notification.recipientId },
-          select: { email: true, contactEmail: true, phone: true },
-        });
-        const pending = await tx.notificationDelivery.findMany({
-          where: { notificationId: job.notificationId, status: "PENDING" },
-        });
+    const ctx = { schoolId: job.schoolId, userId: job.userId };
 
-        let sent = 0;
-        let failed = 0;
-        for (const d of pending) {
-          // SAFETY: never deliver to a GENERATED login identifier — it has no
-          // mailbox, so sending there drops receipts and reset links silently.
-          // deliverableEmail() returns the real contactEmail, or null; the null
-          // is then recorded as a real FAILED delivery the operator can see.
-          const mailTo = recipient ? deliverableEmail(recipient) : null;
-          const target = this.resolveTarget(d.channel, mailTo, recipient?.phone ?? null);
-          if (!target) {
-            await tx.notificationDelivery.update({
-              where: { id: d.id },
-              data: { status: "FAILED", error: `no target for ${d.channel}` },
-            });
-            failed++;
-            continue;
-          }
-          // SMS/WhatsApp are METERED: an empty balance skips the gateway call
-          // entirely (email + in-app still go out — parents are never silently
-          // cut off entirely). The credit itself is spent only AFTER a CONFIRMED
-          // send below — a gateway failure must never consume a paid credit.
-          const metered = this.credits && (d.channel === "SMS" || d.channel === "WHATSAPP");
-          if (metered && !(await this.credits!.hasBalanceInTx(tx, job.schoolId))) {
-            await tx.notificationDelivery.update({
-              where: { id: d.id },
-              data: { status: "FAILED", error: "no message credits — buy a bundle on the Billing page" },
-            });
-            failed++;
-            continue;
-          }
-          const result = this.channels
-            ? await this.channels.deliver({
-                channel: d.channel,
-                target,
-                title: notification.title,
-                body: notification.body,
-                data: (notification.data as Record<string, unknown>) ?? undefined,
-              })
-            : { ok: false, error: "no channel provider configured", providerRef: undefined };
-          if (result.ok && metered) {
-            await this.credits!.debitInTx(tx, job.schoolId, d.channel, job.notificationId, result.providerRef);
-          }
+    // --- 1. Decide what to attempt. No external calls in here. ---------------
+    const plan = await this.db.runAsTenant(ctx, async (tx) => {
+      const notification = await tx.notification.findFirst({ where: { id: job.notificationId } });
+      if (!notification) return null;
+      const recipient = await tx.user.findFirst({
+        where: { id: notification.recipientId },
+        select: { email: true, contactEmail: true, phone: true },
+      });
+      const pending = await tx.notificationDelivery.findMany({
+        where: { notificationId: job.notificationId, status: "PENDING" },
+      });
+
+      // The metered budget is taken ONCE and shared out below. Checking per
+      // delivery used to work because each debit landed in the same transaction
+      // the next check read; now that the debits happen later, an allowance is
+      // what keeps two metered channels from both spending the school's last
+      // credit.
+      //
+      // Read LAZILY: an email-only notification is the common case and has no
+      // business asking the ledger anything.
+      let allowance: number | null = null;
+      const remaining = async (): Promise<number> => {
+        if (allowance === null) {
+          allowance = this.credits ? await this.credits.balanceInTx(tx, job.schoolId) : 0;
+        }
+        return allowance;
+      };
+
+      const attempts: Array<{ id: string; channel: NotificationChannelValue; target: string; metered: boolean }> = [];
+      let failed = 0;
+      for (const d of pending as Array<{ id: string; channel: NotificationChannelValue }>) {
+        // SAFETY: never deliver to a GENERATED login identifier — it has no
+        // mailbox, so sending there drops receipts and reset links silently.
+        // deliverableEmail() returns the real contactEmail, or null.
+        const target = this.resolveTarget(
+          d.channel,
+          recipient ? deliverableEmail(recipient) : null,
+          recipient?.phone ?? null,
+        );
+        if (!target) {
           await tx.notificationDelivery.update({
             where: { id: d.id },
-            data: result.ok
-              ? { status: "SENT", target, sentAt: new Date(), error: null }
-              : { status: "FAILED", target, error: result.error ?? "delivery failed" },
+            data: { status: "FAILED", error: `no target for ${d.channel}` },
           });
-          result.ok ? sent++ : failed++;
+          failed++;
+          continue;
         }
-        return { sent, failed };
-      },
-    );
+        const metered = Boolean(this.credits) && (d.channel === "SMS" || d.channel === "WHATSAPP");
+        if (metered && (await remaining()) <= 0) {
+          // An empty balance skips the gateway call entirely. Email and the
+          // in-app inbox still go out — a school out of credit is never
+          // silently cut off from its families altogether.
+          await tx.notificationDelivery.update({
+            where: { id: d.id },
+            data: { status: "FAILED", error: "no message credits — buy a bundle on the Billing page" },
+          });
+          failed++;
+          continue;
+        }
+        if (metered) allowance = (await remaining()) - 1;
+        attempts.push({ id: d.id, channel: d.channel, target, metered });
+      }
+      return { notification, attempts, failed };
+    });
+    if (!plan) return { sent: 0, failed: 0 };
+
+    // --- 2. Talk to the gateway. NO transaction is open. ---------------------
+    const outcomes: Array<{
+      id: string;
+      channel: NotificationChannelValue;
+      target: string;
+      metered: boolean;
+      result: { ok: boolean; error?: string; providerRef?: string };
+    }> = [];
+    for (const a of plan.attempts) {
+      const result = this.channels
+        ? await this.channels.deliver({
+            channel: a.channel,
+            target: a.target,
+            title: plan.notification.title,
+            body: plan.notification.body,
+            data: (plan.notification.data as Record<string, unknown>) ?? undefined,
+          })
+        : { ok: false, error: "no channel provider configured", providerRef: undefined };
+      outcomes.push({ ...a, result });
+    }
+
+    // --- 3. Record what happened, and spend a credit only for a CONFIRMED send.
+    let sent = 0;
+    let failed = plan.failed;
+    await this.db.runAsTenant(ctx, async (tx) => {
+      for (const o of outcomes) {
+        if (o.result.ok && o.metered) {
+          await this.credits!.debitInTx(tx, job.schoolId, o.channel, job.notificationId, o.result.providerRef);
+        }
+        await tx.notificationDelivery.update({
+          where: { id: o.id },
+          data: o.result.ok
+            ? { status: "SENT", target: o.target, sentAt: new Date(), error: null }
+            : { status: "FAILED", target: o.target, error: o.result.error ?? "delivery failed" },
+        });
+        o.result.ok ? sent++ : failed++;
+      }
+    });
+    return { sent, failed };
   }
 
   // --- helpers ---------------------------------------------------------------

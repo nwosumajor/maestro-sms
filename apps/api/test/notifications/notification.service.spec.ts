@@ -18,7 +18,7 @@ interface Fakes {
   notificationRow?: { id: string; recipientId: string; title: string; body: string; data: unknown } | null;
 }
 
-function makeService(f: Fakes, provider?: { deliver: jest.Mock }, credits?: { hasBalanceInTx: jest.Mock; debitInTx: jest.Mock }) {
+function makeService(f: Fakes, provider?: { deliver: jest.Mock }, credits?: { balanceInTx: jest.Mock; debitInTx: jest.Mock }) {
   const created = { id: "notif-1" };
   const tx = {
     notification: {
@@ -144,7 +144,7 @@ describe("NotificationService", () => {
 
   it("a CONFIRMED SMS send debits exactly one credit", async () => {
     const provider = { deliver: jest.fn().mockResolvedValue({ ok: true }) };
-    const credits = { hasBalanceInTx: jest.fn().mockResolvedValue(true), debitInTx: jest.fn().mockResolvedValue(undefined) };
+    const credits = { balanceInTx: jest.fn().mockResolvedValue(5), debitInTx: jest.fn().mockResolvedValue(undefined) };
     const { service } = makeService(
       {
         notificationRow: { id: "notif-1", recipientId: "r-1", title: "T", body: "B", data: null },
@@ -155,14 +155,16 @@ describe("NotificationService", () => {
       credits,
     );
     const res = await service.runDeliveries({ schoolId: "school-A", userId: "sys", notificationId: "notif-1" });
-    expect(credits.hasBalanceInTx).toHaveBeenCalledTimes(1);
+    // Read ONCE per notification now — the allowance is shared out across its
+    // channels rather than re-read per delivery.
+    expect(credits.balanceInTx).toHaveBeenCalledTimes(1);
     expect(credits.debitInTx).toHaveBeenCalledTimes(1);
     expect(res).toEqual({ sent: 1, failed: 0 });
   });
 
   it("a FAILED SMS send (gateway error) never debits a credit — no charge for no delivery", async () => {
     const provider = { deliver: jest.fn().mockResolvedValue({ ok: false, error: "twilio 500" }) };
-    const credits = { hasBalanceInTx: jest.fn().mockResolvedValue(true), debitInTx: jest.fn().mockResolvedValue(undefined) };
+    const credits = { balanceInTx: jest.fn().mockResolvedValue(5), debitInTx: jest.fn().mockResolvedValue(undefined) };
     const { service, tx } = makeService(
       {
         notificationRow: { id: "notif-1", recipientId: "r-1", title: "T", body: "B", data: null },
@@ -183,7 +185,7 @@ describe("NotificationService", () => {
 
   it("an empty credit balance fails the SMS soft WITHOUT calling the gateway at all", async () => {
     const provider = { deliver: jest.fn().mockResolvedValue({ ok: true }) };
-    const credits = { hasBalanceInTx: jest.fn().mockResolvedValue(false), debitInTx: jest.fn() };
+    const credits = { balanceInTx: jest.fn().mockResolvedValue(0), debitInTx: jest.fn() };
     const { service, tx } = makeService(
       {
         notificationRow: { id: "notif-1", recipientId: "r-1", title: "T", body: "B", data: null },
@@ -205,7 +207,7 @@ describe("NotificationService", () => {
 
   it("EMAIL delivery never touches credits (only SMS/WHATSAPP are metered)", async () => {
     const provider = { deliver: jest.fn().mockResolvedValue({ ok: true }) };
-    const credits = { hasBalanceInTx: jest.fn(), debitInTx: jest.fn() };
+    const credits = { balanceInTx: jest.fn().mockResolvedValue(5), debitInTx: jest.fn() };
     const { service } = makeService(
       {
         notificationRow: { id: "notif-1", recipientId: "r-1", title: "T", body: "B", data: null },
@@ -216,7 +218,7 @@ describe("NotificationService", () => {
       credits,
     );
     await service.runDeliveries({ schoolId: "school-A", userId: "sys", notificationId: "notif-1" });
-    expect(credits.hasBalanceInTx).not.toHaveBeenCalled();
+    expect(credits.balanceInTx).not.toHaveBeenCalled();
     expect(credits.debitInTx).not.toHaveBeenCalled();
   });
 });
@@ -248,5 +250,83 @@ describe("allowedChannels (notification preference filtering)", () => {
     const pref = { emailEnabled: true, smsEnabled: false, whatsappEnabled: true, mutedTypes: ["PAYMENT_RECEIVED"] };
     // PAYMENT_RECEIVED is essential: mute is ignored, but SMS is still off.
     expect(allowedChannels(pref, "PAYMENT_RECEIVED", ALL)).toEqual(["EMAIL", "WHATSAPP"]);
+  });
+});
+
+// =============================================================================
+// The gateway call is not inside a transaction
+// =============================================================================
+// It used to be. The delivery loop ran inside `runAsTenant`, so a Twilio round
+// trip was held open inside a Prisma interactive transaction whose default cap
+// is five seconds — and the provider's `fetch` had no timeout at all, so a
+// stalled socket could sit there indefinitely.
+//
+// When that cap fires the transaction ROLLS BACK, and the message has already
+// gone: Twilio has taken it, the parent has read it, the platform has been
+// billed. What is undone is our side — the SENT row and the credit debit — after
+// which BullMQ retries the job and sends it AGAIN. Duplicate messages to
+// families, double gateway spend, and a school under-charged for both.
+// =============================================================================
+describe("delivery does not hold a transaction open across the network", () => {
+  it("reads the credit balance ONCE per notification, not per delivery", async () => {
+    // The allowance replaced a per-delivery check. That check only worked
+    // because each debit landed in the same transaction the next one read;
+    // with the debits moved after the gateway calls, one read shared out is
+    // what stops two channels spending the same last credit.
+    const provider = { deliver: jest.fn().mockResolvedValue({ ok: true, providerRef: "SM1" }) };
+    const credits = { balanceInTx: jest.fn().mockResolvedValue(5), debitInTx: jest.fn().mockResolvedValue(undefined) };
+    const { service } = makeService(
+      {
+        notificationRow: { id: "notif-1", recipientId: "r-1", title: "T", body: "B", data: null },
+        recipientUser: { id: "r-1", phone: "+2348000000000", contactEmail: "p@x.test" } as never,
+        pendingDeliveries: [
+          { id: "d-1", channel: "SMS" },
+          { id: "d-2", channel: "WHATSAPP" },
+        ],
+      },
+      provider,
+      credits,
+    );
+    await service.runDeliveries({ schoolId: "s", userId: "u", notificationId: "notif-1" } as never);
+    expect(credits.balanceInTx).toHaveBeenCalledTimes(1);
+    expect(credits.debitInTx).toHaveBeenCalledTimes(2);
+  });
+
+  it("one credit does not pay for two metered channels", async () => {
+    // The regression the restructure could have introduced: both attempts read
+    // the same balance and both proceed. The allowance is decremented as it is
+    // handed out, so the second is refused BEFORE the gateway is called.
+    const provider = { deliver: jest.fn().mockResolvedValue({ ok: true, providerRef: "SM1" }) };
+    const credits = { balanceInTx: jest.fn().mockResolvedValue(1), debitInTx: jest.fn().mockResolvedValue(undefined) };
+    const { service } = makeService(
+      {
+        notificationRow: { id: "notif-1", recipientId: "r-1", title: "T", body: "B", data: null },
+        recipientUser: { id: "r-1", phone: "+2348000000000", contactEmail: "p@x.test" } as never,
+        pendingDeliveries: [
+          { id: "d-1", channel: "SMS" },
+          { id: "d-2", channel: "WHATSAPP" },
+        ],
+      },
+      provider,
+      credits,
+    );
+    const res = await service.runDeliveries({ schoolId: "s", userId: "u", notificationId: "notif-1" } as never);
+    expect(provider.deliver).toHaveBeenCalledTimes(1); // the gateway is not even asked for the second
+    expect(credits.debitInTx).toHaveBeenCalledTimes(1);
+    expect(res).toEqual({ sent: 1, failed: 1 });
+  });
+});
+
+describe("the gateway call is bounded", () => {
+  it("the SMS provider gives up rather than hanging", async () => {
+    // Node's fetch has no default timeout. Without this a stalled socket pinned
+    // the delivery worker, and — while the call was still inside the delivery
+    // transaction — rolled back a message that had already been sent.
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const src = readFileSync(join(__dirname, "../../src/notifications/twilio-channel.provider.ts"), "utf8");
+    expect(src).toMatch(/const GATEWAY_TIMEOUT_MS = /);
+    // Both calls out to Twilio: the send AND the delivery-status read.
+    expect(src.match(/signal: AbortSignal\.timeout\(GATEWAY_TIMEOUT_MS\)/g) ?? []).toHaveLength(2);
   });
 });

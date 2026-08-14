@@ -2,6 +2,11 @@ import crypto from "node:crypto";
 import { Injectable, Logger } from "@nestjs/common";
 import type { ChannelDeliveryRequest, NotificationChannelProvider } from "./notification.constants";
 
+/** How long to wait on the SMS gateway before giving up. Long enough for a slow
+ *  but healthy Twilio response, short enough that a stalled socket cannot pin a
+ *  delivery worker. */
+const GATEWAY_TIMEOUT_MS = 10_000;
+
 /**
  * Production channel provider with a LIVE SMS gateway (Twilio) for SMS deliveries.
  * Non-SMS channels (EMAIL / PUSH / in-app) fall back to log-only here — wire SES /
@@ -38,10 +43,18 @@ export class TwilioChannelProvider implements NotificationChannelProvider {
         From: `${prefix}${from}`,
         Body: `${req.title}\n${req.body}`,
       });
+      // A BOUNDED wait. Node's fetch has no default timeout, so a stalled
+      // connection here hung the delivery worker indefinitely — and until this
+      // call was moved out of the delivery transaction, it hung that too, until
+      // Prisma's five-second cap rolled back a message Twilio had already sent.
+      // Timing out is also the honest answer: an unanswered request must be
+      // treated as "unknown, do not spend a credit", which is what the FAILED
+      // path below does.
       const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
         method: "POST",
         headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/x-www-form-urlencoded" },
         body,
+        signal: AbortSignal.timeout(GATEWAY_TIMEOUT_MS),
       });
       if (!res.ok) {
         const text = await res.text();
@@ -83,7 +96,10 @@ export class TwilioChannelProvider implements NotificationChannelProvider {
       `?DateSent%3E=${since.toISOString().slice(0, 10)}&PageSize=1000`;
 
     for (let page = 0; url && page < 20; page++) {
-      const res: Response = await fetch(url, { headers: { Authorization: `Basic ${auth}` } });
+      const res: Response = await fetch(url, {
+        headers: { Authorization: `Basic ${auth}` },
+        signal: AbortSignal.timeout(GATEWAY_TIMEOUT_MS),
+      });
       if (!res.ok) {
         this.logger.warn(`Twilio message listing failed: ${res.status}`);
         // Partial data would understate what the provider sent, which reads as
