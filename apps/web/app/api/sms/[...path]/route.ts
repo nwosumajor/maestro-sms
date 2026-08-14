@@ -27,10 +27,20 @@ async function proxy(req: NextRequest, ctx: { params: { path: string[] } }) {
   // Forward a step-up re-auth token for sensitive routes (the API verifies it).
   const stepup = req.headers.get("x-stepup");
   if (stepup) headers["x-stepup"] = stepup;
-  let body: string | undefined;
+  let body: BodyInit | undefined;
   if (req.method !== "GET" && req.method !== "HEAD") {
-    headers["Content-Type"] = "application/json";
-    body = await req.text();
+    // Pass the ORIGINAL content type through and forward RAW BYTES, matching the
+    // public proxy beside this one.
+    //
+    // This used to hard-code `application/json` and re-encode the body as text.
+    // Nothing authenticated sends multipart today — document uploads go straight
+    // to storage on a presigned URL — so it was not a live fault. It was a trap:
+    // the first authenticated file upload would arrive at the API as JSON-
+    // labelled text with the multipart boundary lost, and would fail in a way
+    // that looks like a broken endpoint rather than a broken proxy. The public
+    // proxy already hit exactly that and was fixed; this one was left behind.
+    headers["Content-Type"] = req.headers.get("content-type") ?? "application/json";
+    body = Buffer.from(await req.arrayBuffer());
   }
 
   const res = await fetch(target, { method: req.method, headers, body });
