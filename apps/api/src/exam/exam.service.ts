@@ -612,8 +612,11 @@ export class ExamService {
    *  A single authorized action (exam.release: principal / head teacher /
    *  school admin). The exam must be PUBLISHED (schedule approved) and its date
    *  today; releasing sets releasedAt, which startSitting requires. */
-  async releaseSitting(p: Principal, sittingId: string): Promise<{ released: true; examId: string }> {
-    const { examId, title, recipients } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+  async releaseSitting(
+    p: Principal,
+    sittingId: string,
+  ): Promise<{ released: true; examId: string; alreadyReleased?: true }> {
+    const { examId, title, recipients, alreadyReleased } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const sitting = (await tx.examSitting.findFirst({ where: { id: sittingId }, select: { cbtExamId: true, date: true, title: true } })) as { cbtExamId: string | null; date: Date; title: string } | null;
       if (!sitting) throw new NotFoundException("Sitting not found");
       if (!sitting.cbtExamId) throw new BadRequestException("This is a paper sitting — nothing to release online");
@@ -623,12 +626,39 @@ export class ExamService {
       // previous day, so the sitting looked like it was in the future and an
       // invigilator was refused at exactly the moment they needed it.
       const today = await this.region.todayInTx(tx, p.schoolId);
-      if (new Date(sitting.date) > today) throw new ConflictException("The exam can only be released on or after its scheduled date");
+      if (new Date(sitting.date) > today) {
+        // NAME THE DATE. An invigilator refused on exam morning could not tell
+        // whether they were early or the sitting was mis-dated, and the CBT page
+        // does not show the sitting at all — so there was nowhere to go and look.
+        throw new ConflictException(
+          `"${sitting.title}" is scheduled for ${new Date(sitting.date).toISOString().slice(0, 10)}, so it cannot be released yet.`,
+        );
+      }
       const res = await tx.cbtExam.updateMany({
         where: { id: sitting.cbtExamId, status: "PUBLISHED", releasedAt: null },
         data: { releasedAt: new Date(), releasedById: p.userId },
       });
-      if (res.count === 0) throw new ConflictException("The exam is not approved for release, or has already been released");
+      if (res.count === 0) {
+        // "Not approved OR already released" is an OR of two opposite
+        // situations: one means go and get it approved, the other means the
+        // paper is already open and the hall can start. Told both at once, on
+        // exam morning, an invigilator cannot tell whether to panic.
+        const exam = await tx.cbtExam.findFirst({
+          where: { id: sitting.cbtExamId },
+          select: { status: true, releasedAt: true },
+        });
+        if (exam?.releasedAt) {
+          // ALREADY RELEASED IS NOT A FAILURE. The desired state holds; pressing
+          // the button twice — two invigilators, or one impatient click — must
+          // not read as something broken. Idempotent, and says when it happened.
+          return { examId: sitting.cbtExamId, title: sitting.title, recipients: [], alreadyReleased: true };
+        }
+        throw new ConflictException(
+          exam
+            ? `"${sitting.title}" is ${exam.status}, not PUBLISHED — its schedule needs approving before the paper can be released.`
+            : "That paper no longer exists.",
+        );
+      }
       await this.audit.record(
         { actorId: p.userId, action: "exam.release", entity: "cbt", entityId: sitting.cbtExamId, schoolId: p.schoolId, metadata: { sittingId } },
         tx,
@@ -641,7 +671,7 @@ export class ExamService {
         ? ((await tx.parentChild.findMany({ where: { studentId: { in: studentIds } }, select: { parentId: true } })) as Array<{ parentId: string }>)
         : [];
       const recipients = [...new Set([...studentIds, ...guardians.map((g) => g.parentId)])];
-      return { examId: sitting.cbtExamId, title: sitting.title, recipients };
+      return { examId: sitting.cbtExamId, title: sitting.title, recipients, alreadyReleased: undefined as true | undefined };
     });
     // AUTO-NOTIFY every seated student + guardian, in ONE batch. This used to be a
     // sequential await per recipient — ~100 transactions and queue round-trips for a
@@ -658,7 +688,9 @@ export class ExamService {
     } catch {
       /* non-fatal: the exam is open either way */
     }
-    return { released: true as const, examId };
+    // `alreadyReleased` lets the screen say "already open" instead of implying a
+    // fresh release — the hall is running either way, which is what matters.
+    return { released: true as const, examId, ...(alreadyReleased ? { alreadyReleased } : {}) };
   }
 
   // --- staff: seating ---------------------------------------------------------

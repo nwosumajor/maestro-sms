@@ -177,8 +177,19 @@ d("ExamService (real Postgres)", () => {
     const notif = await admin.query(`SELECT "recipientId" FROM notification WHERE title = $1`, [`Exam open: Maths`]);
     expect(notif.rowCount).toBe(2); // S1 + S2 (no guardians linked in this fixture)
 
-    // Releasing again is a no-op conflict (idempotent guard).
-    await expect(svc.releaseSitting(releaser(), sit.id)).rejects.toMatchObject({ status: 409 });
+    // Releasing again SUCCEEDS, and says it was already open. This assertion
+    // used to expect a 409, and that was a deliberate change: the old code could
+    // not tell "already released" from "not approved" — one updateMany matching
+    // nothing — so it refused for both. Now that they are distinguishable, they
+    // get different answers. The hall is running either way, so an invigilator
+    // pressing the button twice must not be shown a failure; a paper still
+    // awaiting approval genuinely is one, and still 409s (asserted below).
+    const again = await svc.releaseSitting(releaser(), sit.id);
+    expect(again).toMatchObject({ released: true, alreadyReleased: true });
+
+    // And it does NOT notify the hall a second time.
+    const notifAgain = await admin.query(`SELECT "recipientId" FROM notification WHERE title = $1`, [`Exam open: Maths`]);
+    expect(notifAgain.rowCount).toBe(2);
   });
 
   it("refuses to release a paper (non-CBT) sitting", async () => {
