@@ -161,7 +161,19 @@ function reflector(required: string): Reflector {
 }
 const allowRate = { consume: jest.fn().mockResolvedValue({ allowed: true, limit: 1, remaining: 1, resetMs: 1 }) };
 // No JIT grant exists — and even if one did, these permissions are non-elevatable.
-const noGrantDb = { runAsTenant: async () => false, runAsTenantReadOnly: async () => false };
+// This stub answers TWO different reads in the guard — the elevation grants and
+// the platform delegation — so it invokes the callback with a tx that serves
+// both. Returning one bare value for both (a `[]` is truthy) admitted a
+// manager_admin to owner-only permissions, which is what these cases exist to
+// catch and duly did.
+const noGrantDb = {
+  runAsTenant: async (_c: unknown, fn: (tx: unknown) => Promise<unknown>) =>
+    fn({
+      privilegeGrant: { findFirst: async () => null, findMany: async () => [] },
+      platformDelegation: { findFirst: async () => null },
+    }),
+  runAsTenantReadOnly: async () => false,
+};
 
 describe("PermissionGuard — manager_admin boundary", () => {
   it.each(OWNER_ONLY)("403s a manager_admin on owner-only %s", async (perm) => {
@@ -194,7 +206,7 @@ describe("PermissionGuard — manager_admin boundary", () => {
       runAsTenant: async (_c: unknown, fn: (tx: unknown) => Promise<unknown>) =>
         fn({
           platformDelegation: { findFirst: async () => ({ id: "live" }) },
-          privilegeGrant: { findFirst: async () => null },
+          privilegeGrant: { findFirst: async () => null, findMany: async () => [] },
           auditLog: { create: async () => ({}) },
         }),
       runAsTenantReadOnly: async () => false,
@@ -215,7 +227,7 @@ describe("PermissionGuard — manager_admin boundary", () => {
     // is refused, because the guard re-checks the lendable set before it looks.
     const lentDb = {
       runAsTenant: async (_c: unknown, fn: (tx: unknown) => Promise<unknown>) =>
-        fn({ platformDelegation: { findFirst: async () => ({ id: "tampered" }) }, privilegeGrant: { findFirst: async () => null } }),
+        fn({ platformDelegation: { findFirst: async () => ({ id: "tampered" }) }, privilegeGrant: { findFirst: async () => null, findMany: async () => [] } }),
       runAsTenantReadOnly: async () => false,
     };
     const guard = new PermissionGuard(

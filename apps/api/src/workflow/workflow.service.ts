@@ -53,6 +53,10 @@ interface StageApproval {
   stageKey: string;
   approverId: string;
   at: string;
+  /** True when the approver's authority for this stage came from an elevation
+   *  grant rather than their role — the cover case. Recorded because the trail
+   *  should show that a stand-in decided it, not merely who. */
+  viaElevation?: boolean;
 }
 
 interface RequestRow {
@@ -390,6 +394,7 @@ export class WorkflowService {
           stageKey: stage.key,
           approverId: p.userId,
           at: new Date().toISOString(),
+          ...(p.elevated?.includes(stage.permission) ? { viaElevation: true } : {}),
         };
         if (action === "APPROVE") {
           nextApprovals = [...approvals, record];

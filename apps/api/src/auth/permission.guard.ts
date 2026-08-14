@@ -119,16 +119,43 @@ export class PermissionGuard implements CanActivate {
       context.getHandler(),
       context.getClass(),
     ]);
+    // ELEVATION IS ADDITIVE TO THE JWT — which it was not. The gate below
+    // honoured a grant, and nothing else did: `principal.permissions` still held
+    // only the role permissions, so every service that re-checks it (the
+    // approval engine, the approvals inbox, the stale-register edit, content
+    // approval, subject selection) refused an elevated holder.
+    //
+    // The approval chains showed it worst. The decide ROUTE requires the generic
+    // `workflow.review`, which a school_admin already holds, so the gate passed
+    // on the JWT and never consulted grants at all — then the engine checked the
+    // GRANULAR `workflow.review.principal` and answered "You are not the
+    // Principal (final) approver". An active, audited, correctly-issued grant
+    // was inert for the six chains that end at the principal.
+    //
+    // Merging here rather than at fourteen call sites: the guard is where the
+    // JWT is verified and the only place that can speak for all of them.
+    const jwtPermissions = principal.permissions;
+    const granted = await this.activeGrantPermissions(principal);
+    if (granted.length) {
+      principal.permissions = [...new Set([...principal.permissions, ...granted])];
+      principal.elevated = granted;
+    }
+
     // Permission gate, in order of decreasing durability: the role permission in the
     // verified JWT, then an active JIT elevation grant (bottom-up, never platform.*),
     // then a live owner-granted platform delegation (top-down, delegable subset only).
     if (
       required &&
       !principal.permissions.includes(required) &&
-      !(await this.hasActiveGrant(principal, required)) &&
       !(await this.hasPlatformDelegation(principal, required))
     ) {
       throw new ForbiddenException();
+    }
+    // Audit the elevated use where the grant is what let this route through —
+    // unchanged in meaning, but now asked AFTER the merge, so it reports the
+    // grant that mattered rather than re-querying for it.
+    if (required && granted.includes(required) && !jwtPermissions.includes(required)) {
+      await this.recordElevatedUse(principal, required);
     }
 
     // Step-up gate: the most sensitive routes also need a fresh re-auth token.
@@ -170,7 +197,10 @@ export class PermissionGuard implements CanActivate {
     // and almost every permission in the product is not a lendable platform duty.
     if (!isDelegatablePlatformPermission(permission)) return false;
     try {
-      return await this.db.runAsTenant(
+      // `=== true` rather than the raw result: this admits a request, so it
+      // must be a boolean and not merely truthy. A tenant runner handing back
+      // any other shape denies, which is the safe direction.
+      const allowed = await this.db.runAsTenant(
         { schoolId: principal.schoolId, userId: principal.userId },
         async (tx) => {
           const held = await hasLiveDelegation(tx, principal.userId, permission);
@@ -191,6 +221,7 @@ export class PermissionGuard implements CanActivate {
           return true;
         },
       );
+      return allowed === true;
     } catch {
       // A failed lookup denies. Delegation is additive: falling back to "no" leaves
       // the caller exactly where their JWT put them.
@@ -199,13 +230,52 @@ export class PermissionGuard implements CanActivate {
   }
 
   /** True if an ACTIVE, unexpired grant for `permission` exists; audits the use. */
-  private async hasActiveGrant(principal: Principal, permission: string): Promise<boolean> {
-    // SECURITY: platform/cross-tenant + maker-checker permissions are NEVER
-    // honoured from a JIT grant, even if an ACTIVE row exists (legacy/tampered).
-    // They must come from the verified JWT. Mirrors the request-time check.
-    if (!isElevatable(permission)) return false;
+  /**
+   * Every ELEVATABLE permission this user currently holds by an active grant.
+   *
+   * One indexed read per authenticated request. It replaces a per-permission
+   * lookup that only ever asked about the ONE permission a route required —
+   * which is why a grant for a permission checked deeper in a service was never
+   * seen at all.
+   *
+   * SECURITY: platform/cross-tenant and maker-checker permissions are NEVER
+   * honoured from a grant, even if an ACTIVE row exists (legacy or tampered).
+   * They must come from the verified JWT. Filtered here so a non-elevatable
+   * permission cannot enter `principal.permissions` by this route either — the
+   * merge would otherwise be a way around `isElevatable`.
+   */
+  private async activeGrantPermissions(principal: Principal): Promise<string[]> {
     try {
       return await this.db.runAsTenant(
+        { schoolId: principal.schoolId, userId: principal.userId },
+        async (tx) => {
+          const grants = await tx.privilegeGrant.findMany({
+            where: {
+              userId: principal.userId,
+              status: "ACTIVE",
+              expiresAt: { gt: new Date() },
+            },
+            select: { permission: true },
+          });
+          // Array.isArray rather than a cast: a tenant runner that returns
+          // nothing must degrade to "no grants", not crash the gate for every
+          // request. A `try` does not catch a wrong SHAPE.
+          if (!Array.isArray(grants)) return [];
+          return (grants as Array<{ permission: string }>)
+            .map((g) => g.permission)
+            .filter((perm) => typeof perm === "string" && isElevatable(perm));
+        },
+      );
+    } catch {
+      // Fail closed: an error resolving elevation grants nothing.
+      return [];
+    }
+  }
+
+  /** Record that a grant — not the JWT — is what admitted this request. */
+  private async recordElevatedUse(principal: Principal, permission: string): Promise<void> {
+    try {
+      await this.db.runAsTenant(
         { schoolId: principal.schoolId, userId: principal.userId },
         async (tx) => {
           const grant = await tx.privilegeGrant.findFirst({
@@ -217,7 +287,7 @@ export class PermissionGuard implements CanActivate {
             },
             select: { id: true },
           });
-          if (!grant) return false;
+          if (!grant) return;
           await this.audit.record(
             {
               actorId: principal.userId,
@@ -229,12 +299,10 @@ export class PermissionGuard implements CanActivate {
             },
             tx,
           );
-          return true;
         },
       );
     } catch {
-      // Fail closed: any error checking elevation denies access.
-      return false;
+      // Never let an audit failure deny a request the gate has already allowed.
     }
   }
 }

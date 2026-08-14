@@ -30,7 +30,18 @@ export interface TenantContext {
  */
 export interface Principal extends TenantContext {
   roles: string[];
+  /** Role permissions from the verified JWT, PLUS any active elevation grants —
+   *  the guard merges them so every downstream check agrees with the gate. */
   permissions: string[];
+  /**
+   * The subset of `permissions` that came from an active grant rather than the
+   * JWT. Carried so a service can RECORD that an action was taken under
+   * elevation: the guard only audits `security.elevation.used` when the grant is
+   * what admitted the ROUTE, and the interesting cases are deeper than that — an
+   * approval stage, a stale-register edit — where the route was satisfied by an
+   * ordinary role permission.
+   */
+  elevated?: string[];
 }
 
 /**
