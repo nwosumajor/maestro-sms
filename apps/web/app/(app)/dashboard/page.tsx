@@ -26,7 +26,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { auth } from "@/lib/auth";
-import { hasPermission } from "@/lib/permissions";
+import { hasPermission, type Permission } from "@/lib/permissions";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { Button } from "@/components/ui/button";
@@ -86,21 +86,42 @@ function typeDot(type: string): string {
   return "bg-primary";
 }
 
-function Stat({ label, value, sub, href }: { label: string; value: string; sub?: string; href: string }) {
-  return (
-    <Link
-      href={href}
-      className="group flex-1 basis-40 border-border/60 px-5 py-4 transition-colors hover:bg-accent/50 sm:border-l first:sm:border-l-0"
-    >
+/**
+ * A KPI tile. `href` is OPTIONAL, and that is the point.
+ *
+ * The figure and the door are separate questions. A bursar legitimately sees
+ * "Students 901 — on the register": it is the roll their invoices are raised
+ * against. They may not open the student records behind it. Linking anyway gave
+ * them a tile that bounced straight back to this page.
+ *
+ * So the number stays and the link goes. Removing the tile instead would hide a
+ * figure the role is entitled to; keeping the link made a promise the next page
+ * refuses.
+ */
+function Stat({ label, value, sub, href }: { label: string; value: string; sub?: string; href?: string }) {
+  const inner = (
+    <>
       <p className="eyebrow text-[0.62rem]">{label}</p>
       <p className="tnum mt-1.5 font-display text-[1.7rem] font-semibold leading-none tracking-tight text-foreground">
         {value}
       </p>
       <p className="mt-1.5 text-xs text-muted-foreground">
-        {sub ?? " "}
-        <span aria-hidden className="ml-1 inline-block translate-x-0 text-primary opacity-0 transition-all group-hover:translate-x-0.5 group-hover:opacity-100">→</span>
+        {sub ?? " "}
+        {href && (
+          <span aria-hidden className="ml-1 inline-block translate-x-0 text-primary opacity-0 transition-all group-hover:translate-x-0.5 group-hover:opacity-100">
+            &rarr;
+          </span>
+        )}
       </p>
+    </>
+  );
+  const className = "group flex-1 basis-40 border-border/60 px-5 py-4 transition-colors";
+  return href ? (
+    <Link href={href} className={`${className} hover:bg-muted/40`}>
+      {inner}
     </Link>
+  ) : (
+    <div className={className}>{inner}</div>
   );
 }
 
@@ -195,39 +216,57 @@ export default async function DashboardPage() {
   // --- KPI strip: pick the four figures this role actually steers by ---------
   const isFamily = overview?.scope === "family";
   const att = overview?.attendance?.ratePct;
-  const stats: { label: string; value: string; sub?: string; href: string }[] = [];
+  const stats: { label: string; value: string; sub?: string; href?: string }[] = [];
+  /** A destination, but only for someone who may open it. Every tile below goes
+   *  through this, so a new one cannot quietly link somewhere refused. */
+  const linkIf = (perm: Permission, href: string) => (can(perm) ? href : undefined);
   if (overview?.operations?.students != null)
-    stats.push({ label: "Students", value: overview.operations.students.toLocaleString(), sub: "on the register", href: "/students" });
+    stats.push({
+      label: "Students",
+      value: overview.operations.students.toLocaleString(),
+      sub: "on the register",
+      href: linkIf("student.profile.read", "/students"),
+    });
   if (classCount > 0 || can("class.read"))
     stats.push({
       label: isFamily ? "Classes" : "My classes",
       value: num(classCount, summaryFailed),
       sub: summaryFailed ? "could not be loaded" : "this session",
-      href: "/classes",
+      href: linkIf("class.read", "/classes"),
     });
   if (att != null)
-    stats.push({ label: "Attendance", value: `${att}%`, sub: isFamily ? "your record" : "school-wide", href: "/attendance" });
+    stats.push({
+      label: "Attendance",
+      value: `${att}%`,
+      sub: isFamily ? "your record" : "school-wide",
+      href: linkIf("attendance.read", "/attendance"),
+    });
   if (overview?.fees && can("fee.read"))
     stats.push({
       label: "Fees outstanding",
       value: money(overview.fees.outstandingMinor),
       sub: `${money(overview.fees.collectedMinor)} collected`,
-      href: "/fees",
+      href: linkIf("fee.read", "/fees"),
     });
   if (overview?.grades?.averagePct != null && isFamily)
-    stats.push({ label: "Grade average", value: `${overview.grades.averagePct}%`, sub: "published results", href: "/gradebook" });
+    stats.push({
+      label: "Grade average",
+      value: `${overview.grades.averagePct}%`,
+      sub: "published results",
+      href: linkIf("grade.read", "/gradebook"),
+    });
   if (can("workflow.read"))
     stats.push({
       label: "Approvals",
       value: num(pending, summaryFailed),
       sub: summaryFailed ? "could not be loaded" : "awaiting review",
-      href: "/workflows",
+      href: linkIf("workflow.read", "/workflows"),
     });
   stats.push({
     label: "Unread",
     value: num(unread, unreadUnknown),
     sub: unreadUnknown ? "could not be loaded" : "in your inbox",
-    href: "/notifications",
+    href: linkIf("notification.read", "/notifications"),
   });
   const kpis = stats.slice(0, 4);
 
