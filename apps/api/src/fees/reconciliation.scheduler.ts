@@ -7,6 +7,7 @@ import {
   FEE_RECONCILE_QUEUE,
   FEE_RECONCILE_SCHEDULER_ID,
 } from "./reconciliation.service";
+import { pruneStaleRepeatables } from "../common/repeatable";
 
 /** Registers the daily reconciliation sweep (idempotent by stable job id;
  *  schedule overridable via FEE_RECONCILE_CRON). Mirrors the dunning scheduler. */
@@ -18,6 +19,9 @@ export class PaymentReconciliationScheduler implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     const pattern = process.env.FEE_RECONCILE_CRON ?? DEFAULT_RECONCILE_CRON;
+    // Replace, do not accumulate: a changed cron would otherwise leave the old
+    // schedule firing in Redis forever.
+    await pruneStaleRepeatables(this.queue, FEE_RECONCILE_JOB, [pattern], this.logger);
     await this.queue.add(
       FEE_RECONCILE_JOB,
       {},

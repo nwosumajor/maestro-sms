@@ -7,6 +7,7 @@ import {
   DUNNING_SCHEDULER_ID,
   DUNNING_SWEEP_JOB,
 } from "./billing.constants";
+import { pruneStaleRepeatables } from "../common/repeatable";
 
 /**
  * Registers the daily dunning sweep as a BullMQ repeatable job. Keyed by a stable
@@ -21,6 +22,9 @@ export class BillingDunningScheduler implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     const pattern = process.env.BILLING_DUNNING_CRON ?? DEFAULT_DUNNING_CRON;
+    // Replace, do not accumulate: a changed cron would otherwise leave the old
+    // schedule firing in Redis forever.
+    await pruneStaleRepeatables(this.queue, DUNNING_SWEEP_JOB, [pattern], this.logger);
     await this.queue.add(
       DUNNING_SWEEP_JOB,
       {},

@@ -2,6 +2,7 @@ import { InjectQueue } from "@nestjs/bullmq";
 import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import type { Queue } from "bullmq";
 import { DEFAULT_HR_REMINDER_CRON, HR_REMINDER_QUEUE, HR_REMINDER_SCHEDULER_ID, HR_REMINDER_SWEEP_JOB } from "./hr.constants";
+import { pruneStaleRepeatables } from "../common/repeatable";
 
 /** Registers the daily staff-document expiry sweep as a BullMQ repeatable job
  *  (idempotent via a stable id). Override the schedule with HR_REMINDER_CRON. */
@@ -13,6 +14,9 @@ export class StaffReminderScheduler implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     const pattern = process.env.HR_REMINDER_CRON ?? DEFAULT_HR_REMINDER_CRON;
+    // Replace, do not accumulate: a changed cron would otherwise leave the old
+    // schedule firing in Redis forever.
+    await pruneStaleRepeatables(this.queue, HR_REMINDER_SWEEP_JOB, [pattern], this.logger);
     await this.queue.add(
       HR_REMINDER_SWEEP_JOB,
       {},

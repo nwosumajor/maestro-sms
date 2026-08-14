@@ -7,6 +7,7 @@ import {
   TERM_ARCHIVE_QUEUE,
   TERM_ARCHIVE_SCHEDULER_ID,
 } from "./archive.service";
+import { pruneStaleRepeatables } from "../common/repeatable";
 
 /** Registers the daily term-boundary archive (idempotent by stable job id;
  *  overridable via TERM_ARCHIVE_CRON). Mirrors the retention scheduler. */
@@ -18,6 +19,9 @@ export class TermArchiveScheduler implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     const pattern = process.env.TERM_ARCHIVE_CRON ?? DEFAULT_TERM_ARCHIVE_CRON;
+    // Replace, do not accumulate: a changed cron would otherwise leave the old
+    // schedule firing in Redis forever.
+    await pruneStaleRepeatables(this.queue, TERM_ARCHIVE_JOB, [pattern], this.logger);
     await this.queue.add(
       TERM_ARCHIVE_JOB,
       {},

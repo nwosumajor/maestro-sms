@@ -10,6 +10,7 @@ import {
   REMINDER_JOB,
   REMINDER_SCHEDULER_ID,
 } from "./fee-ops.service";
+import { pruneStaleRepeatables } from "../common/repeatable";
 
 /** Registers the daily late-fee sweep + weekly overdue-reminder sweep
  *  (idempotent by stable job ids; FEE_LATE_FEE_CRON / FEE_REMINDER_SWEEP_CRON
@@ -23,6 +24,10 @@ export class FeeOpsScheduler implements OnModuleInit {
   async onModuleInit(): Promise<void> {
     const lateCron = process.env.FEE_LATE_FEE_CRON ?? DEFAULT_LATE_FEE_CRON;
     const remindCron = process.env.FEE_REMINDER_SWEEP_CRON ?? DEFAULT_REMINDER_CRON;
+    // TWO schedules here on purpose — a daily late-fee sweep and a weekly
+    // reminder sweep — so each is pruned against its OWN job name.
+    await pruneStaleRepeatables(this.queue, LATE_FEE_JOB, [lateCron], this.logger);
+    await pruneStaleRepeatables(this.queue, REMINDER_JOB, [remindCron], this.logger);
     await this.queue.add(LATE_FEE_JOB, {}, { repeat: { pattern: lateCron }, jobId: LATE_FEE_SCHEDULER_ID, removeOnComplete: true, removeOnFail: 50 });
     await this.queue.add(REMINDER_JOB, {}, { repeat: { pattern: remindCron }, jobId: REMINDER_SCHEDULER_ID, removeOnComplete: true, removeOnFail: 50 });
     this.logger.log(`Fee ops scheduled: late fees "${lateCron}", reminders "${remindCron}".`);

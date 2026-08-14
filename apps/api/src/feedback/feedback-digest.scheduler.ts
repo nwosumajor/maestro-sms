@@ -7,6 +7,7 @@ import {
   FEEDBACK_DIGEST_QUEUE,
   FEEDBACK_DIGEST_SCHEDULER_ID,
 } from "./feedback.constants";
+import { pruneStaleRepeatables } from "../common/repeatable";
 
 /**
  * Registers the hourly feedback-digest sweep as a repeatable BullMQ job. Keyed
@@ -21,6 +22,9 @@ export class FeedbackDigestScheduler implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     const pattern = process.env.FEEDBACK_DIGEST_CRON ?? DEFAULT_FEEDBACK_DIGEST_CRON;
+    // Replace, do not accumulate: a changed cron would otherwise leave the old
+    // schedule firing in Redis forever.
+    await pruneStaleRepeatables(this.queue, FEEDBACK_DIGEST_JOB, [pattern], this.logger);
     await this.queue.add(
       FEEDBACK_DIGEST_JOB,
       {},

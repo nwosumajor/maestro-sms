@@ -7,6 +7,7 @@ import {
   DEFAULT_PROGRESSION_CRON,
   PROGRESSION_SCHEDULER_ID,
 } from "./academic-progression.constants";
+import { pruneStaleRepeatables } from "../../common/repeatable";
 
 /**
  * Registers the daily auto-progression sweep as a BullMQ repeatable job. Keyed
@@ -21,6 +22,9 @@ export class AcademicProgressionScheduler implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     const pattern = process.env.ACADEMIC_PROGRESSION_CRON ?? DEFAULT_PROGRESSION_CRON;
+    // Replace, do not accumulate: a changed cron would otherwise leave the old
+    // schedule firing in Redis forever.
+    await pruneStaleRepeatables(this.queue, ADVANCE_TERMS_JOB, [pattern], this.logger);
     await this.queue.add(
       ADVANCE_TERMS_JOB,
       {},

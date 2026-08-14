@@ -8,6 +8,7 @@ import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import { InjectQueue } from "@nestjs/bullmq";
 import type { Queue } from "bullmq";
 import { EXEAT_OVERDUE_QUEUE, EXEAT_OVERDUE_JOB, DEFAULT_EXEAT_OVERDUE_CRON } from "./hostel.constants";
+import { pruneStaleRepeatables } from "../common/repeatable";
 
 @Injectable()
 export class ExeatOverdueScheduler implements OnModuleInit {
@@ -17,6 +18,9 @@ export class ExeatOverdueScheduler implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     const pattern = process.env.EXEAT_OVERDUE_CRON ?? DEFAULT_EXEAT_OVERDUE_CRON;
+    // Replace, do not accumulate: a changed cron would otherwise leave the old
+    // schedule firing in Redis forever.
+    await pruneStaleRepeatables(this.queue, EXEAT_OVERDUE_JOB, [pattern], this.logger);
     await this.queue.add(
       EXEAT_OVERDUE_JOB,
       {},

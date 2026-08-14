@@ -145,7 +145,11 @@ export const SCHEDULED_JOBS = [
   {
     key: "operator.feedbackDigest",
     label: "Feedback digest",
-    everyMinutes: 1440,
+    // HOURLY — `DEFAULT_FEEDBACK_DIGEST_CRON` is "0 * * * *". Declared as daily
+    // when this catalogue was written, which made the console judge it against
+    // 2.5 DAYS: it would have reported "OK" on a digest that had been dead since
+    // the previous morning.
+    everyMinutes: 60,
     manual: {
       path: "operator/feedback/digest/run",
       permission: "platform.feedback.review",

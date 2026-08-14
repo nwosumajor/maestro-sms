@@ -7,6 +7,7 @@ import {
   PAYMENT_HEALTH_QUEUE,
   PAYMENT_HEALTH_SCHEDULER_ID,
 } from "./payment-health.constants";
+import { pruneStaleRepeatables } from "../common/repeatable";
 
 /**
  * Registers the daily payment-rail health check. Keyed by a stable job id so
@@ -21,6 +22,9 @@ export class PaymentHealthScheduler implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     const pattern = process.env.PAYMENT_HEALTH_CRON ?? DEFAULT_PAYMENT_HEALTH_CRON;
+    // Replace, do not accumulate: a changed cron would otherwise leave the old
+    // schedule firing in Redis forever.
+    await pruneStaleRepeatables(this.queue, PAYMENT_HEALTH_JOB, [pattern], this.logger);
     await this.queue.add(
       PAYMENT_HEALTH_JOB,
       {},

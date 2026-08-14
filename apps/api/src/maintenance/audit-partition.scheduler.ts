@@ -7,6 +7,7 @@ import {
   AUDIT_PARTITION_SCHEDULER_ID,
   DEFAULT_AUDIT_PARTITION_CRON,
 } from "./maintenance.constants";
+import { pruneStaleRepeatables } from "../common/repeatable";
 
 /**
  * Registers the daily audit_log partition sweep as a BullMQ repeatable job. Keyed
@@ -21,6 +22,9 @@ export class AuditPartitionScheduler implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     const pattern = process.env.AUDIT_PARTITION_CRON ?? DEFAULT_AUDIT_PARTITION_CRON;
+    // Replace, do not accumulate: a changed cron would otherwise leave the old
+    // schedule firing in Redis forever.
+    await pruneStaleRepeatables(this.queue, AUDIT_PARTITION_JOB, [pattern], this.logger);
     await this.queue.add(
       AUDIT_PARTITION_JOB,
       {},

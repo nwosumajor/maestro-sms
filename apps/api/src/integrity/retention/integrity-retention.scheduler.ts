@@ -7,6 +7,7 @@ import {
   PURGE_EXPIRED_JOB,
   RETENTION_SCHEDULER_ID,
 } from "../integrity.constants";
+import { pruneStaleRepeatables } from "../../common/repeatable";
 
 /**
  * Registers the daily retention sweep as a BullMQ repeatable job. Keyed by a
@@ -23,6 +24,9 @@ export class IntegrityRetentionScheduler implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     const pattern = process.env.INTEGRITY_RETENTION_CRON ?? DEFAULT_RETENTION_CRON;
+    // Replace, do not accumulate: a changed cron would otherwise leave the old
+    // schedule firing in Redis forever.
+    await pruneStaleRepeatables(this.queue, PURGE_EXPIRED_JOB, [pattern], this.logger);
     await this.queue.add(
       PURGE_EXPIRED_JOB,
       {},
