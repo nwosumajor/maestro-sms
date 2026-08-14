@@ -82,11 +82,14 @@ function makeService(over: {
 
 const teacher = (): Principal => ({ schoolId: "A", userId: "t1", roles: ["teacher"], permissions: ["cbt.manage"] });
 const student = (): Principal => ({ schoolId: "A", userId: "s1", roles: ["student"], permissions: ["cbt.take"] });
-const EXAM_FOR_INTEGRITY = { id: "e1", title: "Physics SS2A", classId: "c1", bankId: "b1" };
+// durationMinutes + endAt: every real exam row has them, and the overdue-sitting
+// sweep reads both. endAt far in the future so nothing expires mid-test.
+const TIMING = { durationMinutes: 60, endAt: new Date(Date.now() + 86_400_000) };
+const EXAM_FOR_INTEGRITY = { id: "e1", title: "Physics SS2A", classId: "c1", bankId: "b1", ...TIMING };
 const admin = (): Principal => ({ schoolId: "A", userId: "adm", roles: ["school_admin"], permissions: ["cbt.manage"] });
 
 const BANK = { id: "b1", createdById: "t1", subjectId: "sub-phy" };
-const EXAM = { id: "e1", bankId: "b1" };
+const EXAM = { id: "e1", bankId: "b1", ...TIMING };
 const THEORY_Q = { id: "q1", prompt: "State Newton's laws", markGuide: "1 mark per law", maxMarks: 5, type: "THEORY", bankId: "b1" };
 
 import { GRADE_COMPONENTS } from "@sms/types";
@@ -263,14 +266,15 @@ describe("CBT theory questions", () => {
   });
 
   describe("recording the combined score to the gradesheet", () => {
-    const EXAM_FULL = { id: "e1", bankId: "b1", classId: "c1", termId: "term1" };
+    const EXAM_FULL = { id: "e1", bankId: "b1", classId: "c1", termId: "term1", ...TIMING };
 
     it("records objective + theory, scaled to the exam component", async () => {
       // Paper: 2 objective (1 each) + 1 theory (5) = ceiling 7.
       // Script: 2 objective correct + 4 theory marks = 6/7 -> 6/7 * 60 = 51.43
       const { service, termResults } = makeService({
         bank: BANK, exam: EXAM_FULL, taught: [{ subjectId: "sub-phy" }],
-        sittings: [{ id: "sg1", studentId: "s1", score: 2, questionIds: ["o1", "o2", "t1"] }],
+        // startedAt: a real sitting always has one, and the expiry sweep reads it.
+        sittings: [{ id: "sg1", studentId: "s1", startedAt: new Date(), score: 2, questionIds: ["o1", "o2", "t1"] }],
         answers: [{ sittingId: "sg1", questionId: "t1", marksAwarded: 4 }],
         question: { id: "t1", type: "THEORY", maxMarks: 5 },
       });
@@ -285,7 +289,8 @@ describe("CBT theory questions", () => {
     it("REFUSES while any theory answer is unmarked (never files a provisional total)", async () => {
       const { service, termResults } = makeService({
         bank: BANK, exam: EXAM_FULL, taught: [{ subjectId: "sub-phy" }],
-        sittings: [{ id: "sg1", studentId: "s1", score: 2, questionIds: ["o1", "t1"] }],
+        // startedAt: a real sitting always has one, and the expiry sweep reads it.
+        sittings: [{ id: "sg1", studentId: "s1", startedAt: new Date(), score: 2, questionIds: ["o1", "t1"] }],
         answers: [{ sittingId: "sg1", questionId: "t1", marksAwarded: null }],
         question: { id: "t1", type: "THEORY", maxMarks: 5 },
       });
@@ -297,7 +302,8 @@ describe("CBT theory questions", () => {
       // 2 objective, both correct -> 2/2 * 60 = 60. No theory rows at all.
       const { service, termResults } = makeService({
         bank: BANK, exam: EXAM_FULL, taught: [{ subjectId: "sub-phy" }],
-        sittings: [{ id: "sg1", studentId: "s1", score: 2, questionIds: ["o1", "o2"] }],
+        // startedAt: a real sitting always has one, and the expiry sweep reads it.
+        sittings: [{ id: "sg1", studentId: "s1", startedAt: new Date(), score: 2, questionIds: ["o1", "o2"] }],
         answers: [],
         question: { id: "o1", type: "OBJECTIVE", maxMarks: 1 },
       });
@@ -311,7 +317,7 @@ describe("CBT theory questions", () => {
 
     it("refuses a paper with no class or no subject (nothing to write to)", async () => {
       const noClass = makeService({
-        bank: BANK, exam: { id: "e1", bankId: "b1", classId: null, termId: "term1" }, taught: [{ subjectId: "sub-phy" }],
+        bank: BANK, exam: { id: "e1", bankId: "b1", classId: null, termId: "term1", ...TIMING }, taught: [{ subjectId: "sub-phy" }],
       });
       await expect(noClass.service.recordExamGrades(teacher(), "e1")).rejects.toBeInstanceOf(BadRequestException);
 

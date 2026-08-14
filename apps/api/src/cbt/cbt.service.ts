@@ -1128,6 +1128,9 @@ export class CbtService {
       // scripts actively inverts: the candidates strongest on theory sit at the
       // bottom until Section B is marked. Ordering by submission time says
       // nothing untrue, and the ranking returns the moment marking completes.
+      // Before counting anything: close the sittings whose time is up, so the
+      // page reports what IS rather than what was left open.
+      await this.expireOverdueSittings(tx, p, exam);
       const unmarked = await tx.cbtTheoryAnswer.findMany({
         where: { examId, marksAwarded: null },
         select: { sittingId: true },
@@ -1360,7 +1363,9 @@ export class CbtService {
       const termId = exam.termId ?? (await tx.term.findFirst({ where: { isCurrent: true }, select: { id: true } }))?.id;
       if (!termId) throw new BadRequestException("No term is set for this paper and no current term is configured");
 
-      // Only finished scripts are gradeable.
+      // Only finished scripts are gradeable — so finish the ones that are over
+      // first, or an abandoned tab silently costs that pupil their mark.
+      await this.expireOverdueSittings(tx, p, exam);
       const sittings = await tx.cbtSitting.findMany({
         where: { examId, status: { in: ["SUBMITTED", "EXPIRED"] } },
         select: { id: true, studentId: true, score: true, questionIds: true },
@@ -1655,6 +1660,42 @@ export class CbtService {
   }
 
   // --- internals ---------------------------------------------------------------
+
+
+  /**
+   * Finalise any sitting on this paper whose time is up but which is still
+   * IN_PROGRESS.
+   *
+   * A sitting expires "on read" — but the only read that did it was the PUPIL's
+   * own (`getSitting` is scoped to `studentId: p.userId`). A pupil who closed
+   * the laptop and never came back left the row IN_PROGRESS for ever: the
+   * results page showed them still sitting an exam that ended weeks ago, and
+   * `pushToGradebook` takes only SUBMITTED/EXPIRED, so their script was never
+   * marked and the gradesheet was quietly one candidate short. The push reported
+   * how many it wrote, not who it left out.
+   *
+   * Called from BOTH staff doors — reading the results and pushing to the
+   * gradebook — because a sitting must not depend on which one they opened
+   * first. Their work is still scored: EXPIRED marks what was answered, exactly
+   * as it does for a pupil who runs out of time with the tab open.
+   */
+  private async expireOverdueSittings(tx: TenantTx, p: Principal, exam: { id: string; durationMinutes: number; endAt: Date }): Promise<number> {
+    const open = await tx.cbtSitting.findMany({
+      where: { examId: exam.id, status: "IN_PROGRESS" },
+      select: { id: true, startedAt: true },
+    });
+    const now = new Date();
+    let expired = 0;
+    for (const s of open as Array<{ id: string; startedAt: Date | null }>) {
+      // A sitting with no start time cannot be timed, so it is not overdue —
+      // leave it for a human rather than crash a teacher's gradebook push on a
+      // row that should not exist.
+      if (!s.startedAt || !this.timeUp(s.startedAt, exam, now)) continue;
+      await this.finalize(tx, p, s.id, "EXPIRED");
+      expired++;
+    }
+    return expired;
+  }
 
   private timeUp(startedAt: Date, exam: { durationMinutes: number; endAt: Date }, now: Date): boolean {
     const deadline = Math.min(
