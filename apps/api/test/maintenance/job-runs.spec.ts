@@ -139,3 +139,77 @@ describe("the catalogue", () => {
     expect(schedulers.length).toBe(SCHEDULED_JOBS.length);
   });
 });
+
+// =============================================================================
+// The failure this console could not see
+// =============================================================================
+// It asked whether a job had run RECENTLY, so a sweep firing sixty times an hour
+// was the healthiest-looking row on the page. That is how a stale every-minute
+// repeatable hid in Redis for 874 firings while the code said hourly — the
+// console reported OK throughout, because "ran a minute ago" was all it checked.
+// =============================================================================
+describe("a job running far too often", () => {
+  const runsRow = (job: string, ago: number) => ({
+    job, startedAt: new Date(Date.now() - ago), finishedAt: new Date(Date.now() - ago),
+    ok: true, trigger: "SCHEDULE", summary: {}, error: null,
+  });
+
+  function withCounts(last: Array<Record<string, unknown>>, counts: Array<{ job: string; runs: number }>) {
+    const svc = Object.create(JobRunsService.prototype) as JobRunsService;
+    const $queryRaw = jest
+      .fn()
+      // status() asks for the newest run per job first, then the 24h counts.
+      .mockResolvedValueOnce(last)
+      .mockResolvedValueOnce(counts.map((c) => ({ job: c.job, runs: BigInt(c.runs) })));
+    Object.assign(svc, {
+      db: { client: { jobRun: { create: jest.fn(), update: jest.fn() }, $queryRaw } },
+      logger: { warn: jest.fn(), error: jest.fn(), log: jest.fn() },
+    });
+    return svc;
+  }
+
+  it("flags an hourly job that fired 60 times an hour", async () => {
+    // The real case: exeat-overdue is declared hourly (24/day) and was firing
+    // every minute (~1440/day).
+    const svc = withCounts([runsRow("hostel.exeatOverdue", 60_000)], [
+      { job: "hostel.exeatOverdue", runs: 1440 },
+    ]);
+    const s = (await svc.status()).find((x) => x.key === "hostel.exeatOverdue")!;
+    expect(s.overrunning).toBe(true);
+    expect(s.expectedInDay).toBe(24);
+    expect(s.runsInDay).toBe(1440);
+    // And it is NOT late — which is exactly why the old console said OK.
+    expect(s.overdue).toBe(false);
+  });
+
+  it("does not accuse a job that merely drifts", async () => {
+    // An hourly job expects 24; 30 is drift, not a fault. An alert that cries
+    // wolf is one people turn off.
+    const svc = withCounts([runsRow("hostel.exeatOverdue", 60_000)], [
+      { job: "hostel.exeatOverdue", runs: 30 },
+    ]);
+    const s = (await svc.status()).find((x) => x.key === "hostel.exeatOverdue")!;
+    expect(s.overrunning).toBe(false);
+  });
+
+  it("ignores MANUAL runs when judging the timer", async () => {
+    // Pressing "Run now" repeatedly must not make the console accuse an operator
+    // of a fault they caused by asking. The count query filters on trigger.
+    const svc = withCounts([], []);
+    await svc.status();
+    const sql = ((svc as unknown as { db: { client: { $queryRaw: jest.Mock } } }).db.client.$queryRaw)
+      .mock.calls[1][0]
+      .join("");
+    expect(sql).toContain("trigger = 'SCHEDULE'");
+    expect(sql).toContain("24 hours");
+  });
+
+  it("a daily job expects one run, not zero", async () => {
+    // Rounding must never produce an expectation of 0, or every daily job would
+    // read as over-running the moment it ran at all.
+    const svc = withCounts([], []);
+    const s = (await svc.status()).find((x) => x.key === "billing.dunning")!;
+    expect(s.expectedInDay).toBe(1);
+    expect(s.overrunning).toBe(false);
+  });
+});

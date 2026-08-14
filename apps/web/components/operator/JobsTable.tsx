@@ -33,6 +33,9 @@ export type JobStatus = {
   lastError: string | null;
   overdue: boolean;
   neverRun: boolean;
+  runsInDay: number;
+  expectedInDay: number;
+  overrunning: boolean;
   manual?: {
     path: string;
     permission: string;
@@ -94,12 +97,13 @@ export function JobsTable({ jobs, permissions }: { jobs: JobStatus[]; permission
 
   // Problems first. An operator opening this page is asking "is anything
   // wrong?", and making them scan thirteen rows for it is the wrong answer.
-  const sorted = [...jobs].sort(
-    (a, b) =>
-      Number(b.neverRun || b.overdue || b.lastOk === false) -
-      Number(a.neverRun || a.overdue || a.lastOk === false),
-  );
-  const problems = sorted.filter((j) => j.neverRun || j.overdue || j.lastOk === false).length;
+  // A job firing far more often than declared is a fault too, and the one this
+  // page could not see: it asks whether a job ran RECENTLY, so a sweep running
+  // sixty times an hour was the healthiest-looking row here. That is how a stale
+  // every-minute schedule hid for 874 firings.
+  const wrong = (j: JobStatus) => j.neverRun || j.overdue || j.lastOk === false || j.overrunning;
+  const sorted = [...jobs].sort((a, b) => Number(wrong(b)) - Number(wrong(a)));
+  const problems = sorted.filter(wrong).length;
 
   return (
     <div className="space-y-3">
@@ -127,7 +131,16 @@ export function JobsTable({ jobs, permissions }: { jobs: JobStatus[]; permission
                   <span className="font-medium">{j.label}</span>
                   <div className="text-xs text-muted-foreground">{j.key}</div>
                 </td>
-                <td className="px-3 py-2 text-muted-foreground">{cadence(j.everyMinutes)}</td>
+                <td className="px-3 py-2 text-muted-foreground">
+                  {cadence(j.everyMinutes)}
+                  {/* What it ACTUALLY did, beside what it should. A schedule
+                      changed in the code does not move the old one in Redis, so
+                      these two can disagree without anything looking broken. */}
+                  <div className={j.overrunning ? "text-xs text-destructive" : "text-xs"}>
+                    {j.runsInDay} run{j.runsInDay === 1 ? "" : "s"} in 24h
+                    {j.overrunning ? ` — expected about ${j.expectedInDay}` : ""}
+                  </div>
+                </td>
                 <td className="px-3 py-2 text-muted-foreground">
                   {when(j.lastStartedAt)}
                   {j.lastTrigger === "MANUAL" && (
@@ -143,12 +156,19 @@ export function JobsTable({ jobs, permissions }: { jobs: JobStatus[]; permission
                     <Badge variant="destructive">Failed</Badge>
                   ) : j.overdue ? (
                     <Badge variant="destructive">Late</Badge>
+                  ) : j.overrunning ? (
+                    <Badge variant="destructive">Too often</Badge>
                   ) : (
                     <Badge variant="secondary">OK</Badge>
                   )}
                 </td>
                 <td className="px-3 py-2 text-muted-foreground">
-                  {j.neverRun ? (
+                  {j.overrunning ? (
+                    <span className="text-destructive">
+                      Firing far more often than its schedule says. Usually a second, older
+                      repeatable left in Redis by a cron change — it is removed at the next restart.
+                    </span>
+                  ) : j.neverRun ? (
                     <span>
                       No record of this job ever running. Check the scheduler is registered and the
                       worker is up.

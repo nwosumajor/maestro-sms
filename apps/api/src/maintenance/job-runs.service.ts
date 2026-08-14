@@ -76,7 +76,11 @@ export const SCHEDULED_JOBS = [
   {
     key: "payments.health",
     label: "Payment rail health",
-    everyMinutes: 60,
+    // DAILY at 06:15 (`DEFAULT_PAYMENT_HEALTH_CRON` = "15 6 * * *"). Declared
+    // hourly when this catalogue was written, so the console called a perfectly
+    // healthy job LATE every day — and a console that cries wolf is one nobody
+    // reads. Found by the over-run check flagging the disagreement.
+    everyMinutes: 1440,
     manual: {
       path: "operator/payment-channels/health/run",
       permission: "platform.pricing.manage",
@@ -174,12 +178,28 @@ export interface JobStatusDto {
   overdue: boolean;
   /** Has never run at all — a different problem from "late". */
   neverRun: boolean;
+  /** SCHEDULE-triggered runs in the last 24 hours, and how many the declared
+   *  cadence implies. A hand-run is excluded: it says nothing about the timer. */
+  runsInDay: number;
+  expectedInDay: number;
+  /** Running far MORE often than declared — the opposite failure from `overdue`,
+   *  and the one this console could not see. */
+  overrunning: boolean;
   /** How to run it by hand, if it can be. Absent = timer only. */
   manual?: { path: string; permission: string; scope: "PLATFORM" | "SCHOOL"; where?: string };
 }
 
 /** How far past its cadence a job may drift before the console calls it late. */
 const LATE_FACTOR = 2.5;
+
+/**
+ * How many times over its declared rate a job may fire before the console says
+ * so. Generous on purpose: a job whose cron is "every 5 minutes" against a
+ * declared 5 will drift a run either side of the hour, and an alert that cries
+ * wolf is one people turn off. The failure this exists for was THIRTY times the
+ * declared rate, so a threshold of three is nowhere near it.
+ */
+const OVERRUN_FACTOR = 3;
 
 @Injectable()
 export class JobRunsService {
@@ -261,10 +281,27 @@ export class JobRunsService {
           ORDER BY job, "startedAt" DESC
         `
       : [];
+    // A second cheap aggregate: how often each job actually fired. MANUAL runs
+    // are excluded — pressing "Run now" is not evidence about the timer, and
+    // counting it would make the console accuse an operator of a fault they
+    // caused by asking.
+    const counts = client
+      ? await client.$queryRaw<Array<{ job: string; runs: bigint }>>`
+          SELECT job, count(*) AS runs
+          FROM job_run
+          WHERE trigger = 'SCHEDULE' AND "startedAt" > now() - interval '24 hours'
+          GROUP BY job
+        `
+      : [];
+    const runsByJob = new Map(counts.map((c) => [c.job, Number(c.runs)]));
     const byJob = new Map(rows.map((r) => [r.job, r]));
     return SCHEDULED_JOBS.map((j) => {
       const last = byJob.get(j.key);
       const lateAfterMs = j.everyMinutes * 60_000 * LATE_FACTOR;
+      const runsInDay = runsByJob.get(j.key) ?? 0;
+      // A daily job expects 1; an hourly job 24. Rounded up so a job that fires
+      // slightly off the hour is never accused on a rounding artefact.
+      const expectedInDay = Math.max(1, Math.ceil(1440 / j.everyMinutes));
       return {
         key: j.key,
         label: j.label,
@@ -276,6 +313,9 @@ export class JobRunsService {
         lastSummary: last?.summary ?? null,
         lastError: last?.error ?? null,
         neverRun: !last,
+        runsInDay,
+        expectedInDay,
+        overrunning: runsInDay > expectedInDay * OVERRUN_FACTOR,
         ...("manual" in j
           ? { manual: (j as { manual: NonNullable<JobStatusDto["manual"]> }).manual }
           : {}),

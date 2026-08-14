@@ -111,19 +111,38 @@ describe("the catalogue matches the cron the code actually uses", () => {
   // The console judges lateness against `everyMinutes`. Declaring an HOURLY job
   // as daily makes that window 2.5 DAYS, so the row reads OK on a digest that
   // died yesterday morning.
-  const CRON_DEFAULTS: Array<[string, string, number]> = [
-    ["DEFAULT_FEEDBACK_DIGEST_CRON", "feedback/feedback.constants.ts", 60],
-    ["DEFAULT_EXEAT_OVERDUE_CRON", "hostel/hostel.constants.ts", 60],
+  // EVERY job, derived from its own cron rather than a hand-kept list of two.
+  // The catalogue drifted twice — feedbackDigest declared daily when it is
+  // hourly, payments.health declared hourly when it is daily — and each made the
+  // console wrong in a different direction: one would have reported OK on a job
+  // dead since yesterday, the other cried "late" at a healthy one every day.
+  const CRON_TO_JOB: Array<[string, string, string]> = [
+    ["DEFAULT_HR_REMINDER_CRON", "hr/hr.constants.ts", "hr.staffReminders"],
+    ["DEFAULT_SIS_NUDGE_CRON", "sis/sis.constants.ts", "sis.nudge"],
+    ["DEFAULT_PAYMENT_HEALTH_CRON", "payments/payment-health.constants.ts", "payments.health"],
+    ["DEFAULT_MM_RECOVERY_CRON", "payments/mobile-money.service.ts", "payments.mobileMoneyRecovery"],
+    ["DEFAULT_EXEAT_OVERDUE_CRON", "hostel/hostel.constants.ts", "hostel.exeatOverdue"],
+    ["DEFAULT_DUNNING_CRON", "billing/billing.constants.ts", "billing.dunning"],
+    ["DEFAULT_FEEDBACK_DIGEST_CRON", "feedback/feedback.constants.ts", "operator.feedbackDigest"],
+    ["DEFAULT_PROGRESSION_CRON", "lms/progression/academic-progression.constants.ts", "lms.progression"],
+    ["DEFAULT_RECONCILE_CRON", "fees/reconciliation.service.ts", "fees.reconciliation"],
+    ["DEFAULT_TERM_ARCHIVE_CRON", "privacy/archive.service.ts", "privacy.archive"],
+    ["DEFAULT_AUDIT_PARTITION_CRON", "maintenance/maintenance.constants.ts", "maintenance.auditPartition"],
+    ["DEFAULT_LATE_FEE_CRON", "fees/fee-ops.service.ts", "fees.ops"],
+    ["DEFAULT_RETENTION_CRON", "integrity/integrity.constants.ts", "integrity.retention"],
   ];
 
-  it.each(CRON_DEFAULTS)("%s implies the catalogue's cadence", (name, file, expectedMinutes) => {
+  it.each(CRON_TO_JOB)("%s matches the catalogue's cadence", (name, file, jobKey) => {
     const src = readFileSync(join(SRC, file as string), "utf8");
     const pattern = new RegExp(`${name} = "([^"]+)"`).exec(src)?.[1];
-    expect(pattern).toBeDefined();
-    // "m * * * *" fires hourly; "m h * * *" daily.
-    const fields = (pattern as string).split(" ");
-    const impliedMinutes = fields[1] === "*" ? 60 : 1440;
-    expect({ name, impliedMinutes }).toEqual({ name, impliedMinutes: expectedMinutes });
+    expect({ name, found: Boolean(pattern) }).toEqual({ name, found: true });
+    // Minute field "*" => every minute; hour field "*" => hourly; else daily or
+    // rarer. Good enough to catch an order-of-magnitude disagreement, which is
+    // the only kind that has ever gone wrong here.
+    const [min, hour] = (pattern as string).split(" ");
+    const implied = min === "*" ? 1 : hour === "*" ? 60 : 1440;
+    const declared = SCHEDULED_JOBS.find((j) => j.key === jobKey)?.everyMinutes;
+    expect({ jobKey, declared }).toEqual({ jobKey, declared: implied });
   });
 
   it("the jobs catalogue agrees", () => {
