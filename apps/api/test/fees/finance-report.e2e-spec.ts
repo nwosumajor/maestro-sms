@@ -24,6 +24,7 @@ import { NotificationService } from "../../src/notifications/notification.servic
 import { PrismaTenantService } from "../../src/foundation/prisma-tenant.service";
 import { AuditLogService } from "../../src/foundation/audit-log.service";
 import type { Principal } from "../../src/integrity/integrity.foundation";
+import { SchoolRegionService } from "../../src/foundation/school-region.service";
 
 const APP_URL = process.env.TEST_DATABASE_URL;
 const ADMIN_URL = process.env.TEST_ADMIN_URL;
@@ -94,7 +95,7 @@ d("FeesService.financeReport aging + totals (real Postgres)", () => {
     const auditLog = new AuditLogService();
     const queue = { add: jest.fn().mockResolvedValue(undefined) };
     const notifications = new NotificationService(tenant, auditLog, queue as never);
-    fees = new FeesService(tenant, auditLog, notifications, { isConfigured: () => false } as never);
+    fees = new FeesService(tenant, auditLog, notifications, { isConfigured: () => false } as never, new SchoolRegionService(tenant));
   });
 
   afterAll(async () => {

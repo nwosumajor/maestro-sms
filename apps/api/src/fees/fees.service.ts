@@ -30,6 +30,7 @@ import {
 } from "../integrity/integrity.foundation";
 import { NotificationService } from "../notifications/notification.service";
 import { PaystackService } from "../payments/paystack.service";
+import { SchoolRegionService } from "../foundation/school-region.service";
 
 /** Roles that see ALL billing rows in the tenant. */
 /** Invoices per page. One issue run for a class is ~30-40 rows, so a page shows a
@@ -95,6 +96,7 @@ export class FeesService {
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly notifications: NotificationService,
     private readonly paystack: PaystackService,
+    private readonly region: SchoolRegionService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -305,7 +307,12 @@ export class FeesService {
   async financeReport(p: Principal) {
     if (!this.isBillingWide(p)) return { scope: "none" as const };
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const today = new Date(new Date().toISOString().slice(0, 10));
+      // Aging buckets are measured from the SCHOOL's today. The ladder is coarse
+      // (0/30/60 days), so a UTC day boundary only ever moved an invoice one
+      // bucket — but it moved it on the school's clock, not the server's, and a
+      // finance report that disagrees with the calendar on the wall is one
+      // nobody trusts twice.
+      const today = await this.region.todayInTx(tx, p.schoolId);
       // Each bucket is (count, outstanding) over invoices with a POSITIVE
       // balance, split by how far past `today` the due date is — the same
       // days <= 0 / <= 30 / <= 60 / else ladder this replaces. Written out in

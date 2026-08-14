@@ -150,14 +150,19 @@ export class PaymentPlansService {
       if (!inv || !(await this.canSeeStudent(tx, p, inv.studentId))) throw new NotFoundException("Not found");
       const rows = await tx.invoiceInstallment.findMany({ where: { invoiceId }, orderBy: { seq: "asc" } });
       const paid = rows.length ? await this.paidMinor(tx, invoiceId) : 0;
-      const today = new Date().toISOString().slice(0, 10);
+      // The SCHOOL's calendar day, not the server's. A tranche due today is not
+      // overdue, and comparing against UTC made it so from early evening in every
+      // timezone west of it — a parent in Toronto saw OVERDUE on the due date.
+      // Both sides are UTC-midnight Dates (`dueDate` is a @db.Date), so this is a
+      // direct comparison rather than string slicing.
+      const today = await this.region.todayInTx(tx, p.schoolId);
       let cumulative = 0;
       let firstUnpaidMarked = false;
       const tranches: InstallmentDto[] = rows.map((r: { seq: number; dueDate: Date; amountMinor: number }) => {
         cumulative += r.amountMinor;
         let state: InstallmentDto["state"];
         if (paid >= cumulative) state = "PAID";
-        else if (new Date(r.dueDate).toISOString().slice(0, 10) < today) {
+        else if (new Date(r.dueDate).getTime() < today.getTime()) {
           state = "OVERDUE";
           firstUnpaidMarked = true; // an overdue tranche IS the first unpaid one
         } else if (!firstUnpaidMarked) {

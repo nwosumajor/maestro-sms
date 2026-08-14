@@ -118,7 +118,8 @@ conflicts with it, flag the conflict before proceeding.
   holds a 12-country catalogue; `SchoolRegionService` (foundation, @Global, 60s cache)
   resolves and caches it. // GOTCHA: **"today" is the SCHOOL's calendar day**, not the
   server's UTC day — `schoolToday(tz)`. The register, the gate-scan check-in, the term
-  lock and the 7-day stale rule all use it; deciding in UTC filed a Singapore morning
+  lock, the 7-day stale rule, the EXAM RELEASE gate, the STAFF clock-in, the
+  installment OVERDUE state and the receivables aging buckets all use it; deciding in UTC filed a Singapore morning
   register against Sunday and a Toronto evening one against Tuesday. Statutory payroll
   is COUNTRY PACKS (`PAYROLL_PACKS`): **Nigeria and the UK** implemented, everything
   else `payrollPack: null` and `createRun` REFUSES — a payslip wrong about tax goes to an

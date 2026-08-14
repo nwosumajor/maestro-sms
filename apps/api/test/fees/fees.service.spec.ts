@@ -67,7 +67,7 @@ function makeService(f: Fakes) {
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const notifications = { enqueue: jest.fn().mockResolvedValue({ id: "n-1" }) };
   const paystack = { isConfigured: () => false, refund: jest.fn() };
-  const service = new FeesService(db as never, audit as never, notifications as never, paystack as never);
+  const service = new FeesService(db as never, audit as never, notifications as never, paystack as never, { todayInTx: async () => new Date(new Date().toISOString().slice(0, 10)) } as never);
   return { service, tx, audit, notifications, paystack };
 }
 

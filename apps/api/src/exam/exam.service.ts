@@ -39,6 +39,7 @@ import {
 import { NotificationService } from "../notifications/notification.service";
 import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
+import { SchoolRegionService } from "../foundation/school-region.service";
 
 /** How many upcoming exams a personal list will return. A student sits a dozen a
  *  term; a parent of several children a few dozen. Well clear of real use, but it
@@ -55,6 +56,7 @@ export class ExamService {
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly notifications: NotificationService,
     private readonly workflow: WorkflowService,
+    private readonly region: SchoolRegionService,
     hooks: WorkflowHooksService,
   ) {
     // Maker-checker reactor: when the exam-schedule approval finalizes, publish
@@ -615,8 +617,12 @@ export class ExamService {
       const sitting = (await tx.examSitting.findFirst({ where: { id: sittingId }, select: { cbtExamId: true, date: true, title: true } })) as { cbtExamId: string | null; date: Date; title: string } | null;
       if (!sitting) throw new NotFoundException("Sitting not found");
       if (!sitting.cbtExamId) throw new BadRequestException("This is a paper sitting — nothing to release online");
-      // Release is meant for the exam day: refuse before the scheduled date.
-      const today = new Date(); today.setUTCHours(0, 0, 0, 0);
+      // Release is meant for the exam day: refuse before the scheduled date —
+      // the SCHOOL's date. Judged in UTC, a school east of it could not release
+      // its own morning paper: at 07:00 in Singapore the server still reads the
+      // previous day, so the sitting looked like it was in the future and an
+      // invigilator was refused at exactly the moment they needed it.
+      const today = await this.region.todayInTx(tx, p.schoolId);
       if (new Date(sitting.date) > today) throw new ConflictException("The exam can only be released on or after its scheduled date");
       const res = await tx.cbtExam.updateMany({
         where: { id: sitting.cbtExamId, status: "PUBLISHED", releasedAt: null },
@@ -1177,7 +1183,7 @@ export class ExamService {
           // three children pulled every seat ever scheduled into the future; the
           // horizon below covers a term, which is as far ahead as a schedule is
           // ever published.
-          sitting: { date: { gte: new Date(new Date().toISOString().slice(0, 10)), lte: MY_EXAMS_HORIZON() } },
+          sitting: { date: { gte: await this.region.todayInTx(tx, p.schoolId), lte: MY_EXAMS_HORIZON() } },
         },
         include: { sitting: { select: { title: true, subject: true, date: true, startsAt: true, endsAt: true, hall: true } } },
         orderBy: { sitting: { date: "asc" } },
@@ -1206,7 +1212,7 @@ export class ExamService {
       const rows = await tx.examInvigilator.findMany({
         where: {
           staffId: p.userId,
-          sitting: { date: { gte: new Date(new Date().toISOString().slice(0, 10)), lte: MY_EXAMS_HORIZON() } },
+          sitting: { date: { gte: await this.region.todayInTx(tx, p.schoolId), lte: MY_EXAMS_HORIZON() } },
         },
         include: { sitting: { select: { title: true, subject: true, date: true, startsAt: true, endsAt: true, hall: true } } },
         orderBy: { sitting: { date: "asc" } },

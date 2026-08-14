@@ -16,6 +16,7 @@ import { NotificationService } from "../../src/notifications/notification.servic
 import { PrismaTenantService } from "../../src/foundation/prisma-tenant.service";
 import { AuditLogService } from "../../src/foundation/audit-log.service";
 import type { Principal } from "../../src/integrity/integrity.foundation";
+import { SchoolRegionService } from "../../src/foundation/school-region.service";
 
 const APP_URL = process.env.TEST_DATABASE_URL;
 const ADMIN_URL = process.env.TEST_ADMIN_URL;
@@ -68,7 +69,7 @@ d("ExamService (real Postgres)", () => {
     // Capture the maker-checker reactor so the test can fire it like the engine.
     const hooks = { onFinalized: (h: never) => { reactor = h as never; } };
     const workflow = { createRequest: jest.fn().mockResolvedValue({ id: "wf-1" }), submit: jest.fn().mockResolvedValue({}) };
-    svc = new ExamService(tenant, audit, new NotificationService(tenant, audit, queue as never), workflow as never, hooks as never);
+    svc = new ExamService(tenant, audit, new NotificationService(tenant, audit, queue as never), workflow as never, new SchoolRegionService(tenant), hooks as never);
   });
 
   afterAll(async () => {

@@ -35,6 +35,7 @@ import {
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
+import { SchoolRegionService } from "../foundation/school-region.service";
 
 const KIOSK_STEP_SEC = 30;
 const ZERO = "00000000-0000-0000-0000-000000000000"; // system actor for device events
@@ -62,6 +63,7 @@ export class StaffAttendanceService {
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
+    private readonly region: SchoolRegionService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -255,7 +257,12 @@ export class StaffAttendanceService {
         );
         throw new ConflictException("That code isn't current — read it off the display and try again");
       }
-      const date = dayUtc(now.toISOString().slice(0, 10));
+      // The SCHOOL's day. The PUPIL register was moved onto this and the STAFF
+      // register was not — the same failure the pupil one was fixed for: a
+      // Toronto member of staff clocking in for an evening duty is already on
+      // the server's tomorrow, so the shift filed against the wrong day and the
+      // "already clocked in today" check looked at the wrong day too.
+      const date = await this.region.todayInTx(tx, p.schoolId);
       const existing = await tx.staffAttendance.findFirst({ where: { userId: p.userId, date } });
       if (existing) return this.toDto(existing, null); // already clocked in today
       const flagged = !ipMatchesAllowlist(ip, k.allowedIps);
