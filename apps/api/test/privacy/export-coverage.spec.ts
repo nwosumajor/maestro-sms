@@ -32,6 +32,13 @@ function makeTx(notificationCount: number) {
       invoice: { findMany: jest.fn().mockResolvedValue([]) },
       document: { findMany: jest.fn().mockResolvedValue([]) },
       notification: { findMany },
+      // GRADES are part of the bundle: a pupil's published results are their own
+      // personal data, and the bundle omitted them while reporting complete.
+      subjectResult: {
+        findMany: jest.fn().mockResolvedValue([
+          { id: "r-1", subjectId: "sub-1", termId: "t-1", total: 82, grade: "A", status: "PUBLISHED" },
+        ]),
+      },
     } as unknown as TenantTx,
     findMany,
   };
@@ -84,5 +91,25 @@ describe("collectStudentBundle coverage", () => {
 
     const allowed = await svc().collectStudentBundle(tx, "stu-1", { schoolId: "A", includeMedical: true });
     expect(allowed.coverage.medicalIncluded).toBe(true);
+  });
+});
+
+describe("what the bundle declares about itself", () => {
+  it("carries the pupil's published grades", async () => {
+    // Added after the bundle was found to omit them entirely while its coverage
+    // block said `complete: true` — which a recipient reads as "everything".
+    const { tx } = makeTx(1);
+    const b = await svc().collectStudentBundle(tx, "stu-1", { schoolId: "A", includeMedical: true });
+    expect(b.grades).toHaveLength(1);
+  });
+
+  it("lists its sections and its exclusions", async () => {
+    const { tx } = makeTx(1);
+    const b = await svc().collectStudentBundle(tx, "stu-1", { schoolId: "A", includeMedical: true });
+    expect(b.coverage.sections).toContain("grades");
+    // The omission that is DELIBERATE is named, with a reason and a next step,
+    // rather than being indistinguishable from an oversight.
+    expect(b.coverage.excluded.map((e) => e.section)).toContain("integritySignals");
+    expect(b.coverage.excluded[0].reason).toMatch(/data controller/);
   });
 });

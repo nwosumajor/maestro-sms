@@ -8,7 +8,7 @@
 // one-click deletion of a minor's record.
 // =============================================================================
 
-import { ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { decryptField } from "../foundation/field-crypto";
 import { STORAGE_PROVIDER, type StorageProvider } from "../documents/storage.provider";
 import {
@@ -26,6 +26,8 @@ const MEDICAL_FIELDS = ["bloodGroup", "allergies", "conditions", "medications", 
 
 @Injectable()
 export class PrivacyService {
+  private readonly logger = new Logger("Privacy");
+
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
@@ -91,7 +93,7 @@ export class PrivacyService {
         medical = dec;
       }
     }
-    const [enrollments, attendance, invoices, documents, notifications] = await Promise.all([
+    const [enrollments, attendance, invoices, documents, notifications, grades] = await Promise.all([
       tx.enrollment.findMany({ where: { studentId } }),
       tx.attendanceRecord.findMany({ where: { studentId }, orderBy: { createdAt: "desc" } }),
       tx.invoice.findMany({ where: { studentId }, include: { lineItems: true, payments: true } }),
@@ -112,6 +114,15 @@ export class PrivacyService {
         where: { recipientId: studentId },
         orderBy: { createdAt: "desc" },
         ...(opts.notificationLimit ? { take: opts.notificationLimit } : {}),
+      }),
+      // GRADES. A pupil's results are unambiguously their own personal data and
+      // the family already reads them on every report card, yet the bundle
+      // omitted them entirely — and said `complete: true` while doing so.
+      // PUBLISHED only: a draft mark is the teacher's working note, not a
+      // finding about the pupil, and the report card does not show it either.
+      tx.subjectResult.findMany({
+        where: { studentId, status: "PUBLISHED" },
+        orderBy: { updatedAt: "desc" },
       }),
     ]);
 
@@ -134,6 +145,7 @@ export class PrivacyService {
       invoices,
       documents,
       notifications,
+      grades,
       // What this bundle does and does NOT contain, stated IN the artifact. A
       // recipient cannot otherwise tell whether "medical": "(not included)"
       // means the pupil has no record or that the exporter could not read one.
@@ -144,6 +156,33 @@ export class PrivacyService {
         // record the exporter was not allowed to read. That is the same
         // ambiguity this block exists to remove.
         medicalIncluded: opts.includeMedical,
+        // WHAT IS IN HERE, named. `complete: true` used to mean "nothing was
+        // truncated", which a recipient reads as "this is everything" — and
+        // grades were missing from the bundle altogether.
+        sections: [
+          "student",
+          "profile",
+          "emergencyContacts",
+          "medical",
+          "enrollments",
+          "attendance",
+          "invoices",
+          "documents",
+          "notifications",
+          "grades",
+        ],
+        // And what is NOT, with the reason. Integrity telemetry is about this
+        // pupil and is deliberately not served to families here: the platform's
+        // rule is that raw signals go to a teacher for human judgement, never to
+        // a parent as a verdict (Golden Rule #8). Saying so beats omitting it
+        // silently — a data subject can then ask the school for it directly.
+        excluded: [
+          {
+            section: "integritySignals",
+            reason:
+              "Assessment-integrity signals are held for human review by school staff and are not released through this bundle. Ask the school's data controller for them.",
+          },
+        ],
         note: opts.includeMedical
           ? completenessNote
           : "Medical records are EXCLUDED from this export because the person who ran it does not hold student.medical.read — this is not a statement that the pupil has no medical record. Every other section is complete and untruncated.",
@@ -217,9 +256,40 @@ export class PrivacyService {
       return { updated, fileKeys };
     });
 
-    // Delete the bytes from storage after the tx commits (best-effort).
+    // Delete the bytes after the tx commits — and RECORD what did not go.
+    //
+    // This used to be `.catch(() => undefined)`: a swallowed failure, on the one
+    // operation whose whole purpose is that something ceases to exist. The row's
+    // `fileKey` has already been nulled by then, so a failed delete leaves a
+    // minor's file in object storage with NO pointer to it anywhere — orphaned,
+    // unfindable, and unerasable — while the request reads APPROVED and the
+    // audit says the files were erased. Asked by a regulator whether the data
+    // was destroyed, the school's own evidence would have said yes.
+    //
+    // The decision stays APPROVED (it was made, and correctly). What changes is
+    // that incomplete EXECUTION is written down, with the keys, in the
+    // append-only log — so the objects can still be found and purged by hand.
+    const failedKeys: string[] = [];
     for (const key of fileKeys) {
-      await this.storage.delete(key).catch(() => undefined);
+      try {
+        await this.storage.delete(key);
+      } catch (err) {
+        failedKeys.push(key);
+        this.logger.error(`erasure ${id}: storage delete failed for ${key}: ${(err as Error).message}`);
+      }
+    }
+    if (failedKeys.length > 0) {
+      await this.db
+        .runAsTenant(this.ctx(p), (tx) =>
+          this.log(tx, p, "privacy.erasure.incomplete", id, {
+            failedKeys,
+            failed: failedKeys.length,
+            of: fileKeys.length,
+          }),
+        )
+        // Even this must not throw: the erasure itself succeeded in the database,
+        // and losing that because the follow-up record failed would be worse.
+        .catch(() => this.logger.error(`erasure ${id}: could not record ${failedKeys.length} failed deletes`));
     }
     return updated;
   }
