@@ -26,6 +26,7 @@ import {
 } from "../integrity/integrity.foundation";
 import { NotificationService } from "../notifications/notification.service";
 import { STORAGE_PROVIDER, type StorageProvider } from "./storage.provider";
+import { assertDocumentsReleasable } from "../lms/leaver-documents";
 
 // junior_admin is the operational tier that owns the document vault (CLAUDE.md)
 // and holds document.write; without it here, both student-doc and school-level
@@ -53,6 +54,14 @@ export interface CreateDocumentInput {
 const DOCUMENT_PAGE_SIZE = 50;
 /** Ceiling a caller can request per page. */
 const DOCUMENT_PAGE_MAX = 200;
+
+/**
+ * Document types the leaver gate covers: the academic artefacts a school
+ * withholds pending settlement. Deliberately NOT receipts (a financial record
+ * the family is owed) or OTHER (which is where a data-protection export would
+ * land, and that is never a debt-collection lever).
+ */
+const GATED_ON_RELEASE = new Set(["REPORT_CARD", "CERTIFICATE", "TRANSCRIPT"]);
 
 @Injectable()
 export class DocumentsService {
@@ -232,6 +241,21 @@ export class DocumentsService {
     const doc = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const d = await this.requireVisible(tx, p, id);
       if (d.status !== "UPLOADED") throw new NotFoundException("Document not available");
+      // The leaver gate applies HERE too, or it does not apply at all.
+      //
+      // Generating a report card or issuing a certificate for a withheld leaver
+      // is refused. But generating a report card also FILES a copy in this vault
+      // — so every artefact the gate blocks at issue was already retrievable
+      // through a second door, and a family could simply download the previous
+      // term's copy. A control with another way round it is not a control.
+      //
+      // ACADEMIC TYPES ONLY, matching the gate's own scope. A RECEIPT is a
+      // financial record the family is entitled to whatever they owe, and
+      // withholding personal data over a debt is unlawful rather than firm —
+      // the same distinction the gate draws for the data-protection export.
+      if (d.studentId && GATED_ON_RELEASE.has(d.type as string)) {
+        await assertDocumentsReleasable(tx, d.studentId);
+      }
       // Golden Rule #5: log access to a student's document, with the actor.
       await this.log(tx, p, "document.download", "document", id, { studentId: d.studentId });
       return d;

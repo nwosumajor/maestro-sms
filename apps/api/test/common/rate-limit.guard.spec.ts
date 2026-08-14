@@ -77,15 +77,26 @@ describe("RateLimitGuard", () => {
   });
 
   it("ages hits out of the window", () => {
-    const guard = new RateLimitGuard(1, 50);
-    const ctx = ctxFor("9.9.9.9");
-    expect(guard.canActivate(ctx)).toBe(true);
-    expect(() => guard.canActivate(ctx)).toThrow();
-    return new Promise<void>((resolve) => {
-      setTimeout(() => {
-        expect(guard.canActivate(ctx)).toBe(true); // window elapsed
-        resolve();
-      }, 70);
-    });
+    // FAKE TIMERS, not a 50ms real window and a setTimeout.
+    //
+    // This test used to build a 50ms window and expect two SYNCHRONOUS calls to
+    // land inside it. Under parallel jest workers they sometimes did not: the
+    // first hit aged out between the two lines, the second was allowed, and the
+    // suite failed on a machine being busy rather than on anything being wrong.
+    // Measured at roughly one run in three.
+    //
+    // The guard reads `Date.now()`, which jest's modern fake timers control, so
+    // the window can be crossed deliberately instead of waited out.
+    jest.useFakeTimers();
+    try {
+      const guard = new RateLimitGuard(1, 50);
+      const ctx = ctxFor("9.9.9.9");
+      expect(guard.canActivate(ctx)).toBe(true);
+      expect(() => guard.canActivate(ctx)).toThrow();
+      jest.advanceTimersByTime(70);
+      expect(guard.canActivate(ctx)).toBe(true); // window elapsed
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

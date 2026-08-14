@@ -50,6 +50,10 @@ const normalUser = (over: Row = {}): Row => ({
   ...over,
 });
 
+/** bcrypt at cost 10 is hundreds of ms alone and seconds under parallel jest
+ *  workers; jest's 5s default made these fail on a busy machine. */
+const BCRYPT_TIMEOUT_MS = 30_000;
+
 describe("OperatorUserService", () => {
   it("listUsers maps rows to the DTO shape (roles flattened)", async () => {
     const { service } = makeService({
@@ -113,6 +117,10 @@ describe("OperatorUserService", () => {
     );
   });
 
+  // BCRYPT_TIMEOUT_MS, not jest's 5s default: hashing at cost 10 takes a few
+  // hundred ms alone and several seconds when the machine is running a dozen
+  // jest workers. This test failed roughly one run in three on timeout, which
+  // trains people to re-run rather than look — the worst thing a suite can do.
   it("resetPassword returns a one-time temp password and clears the lockout", async () => {
     const { service, userUpdate } = makeService({ findFirst: () => normalUser() });
     const res = await service.resetPassword(op, "A", "u1");
@@ -121,7 +129,7 @@ describe("OperatorUserService", () => {
     expect(userUpdate).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ failedLoginCount: 0, lockedUntil: null }) }),
     );
-  });
+  }, BCRYPT_TIMEOUT_MS);
 
   it("setRoleMfaRequired bulk-flags holders but refuses the super_admin role", async () => {
     const { service, updateMany } = makeService({});
