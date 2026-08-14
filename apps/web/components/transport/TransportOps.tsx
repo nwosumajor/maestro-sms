@@ -1,5 +1,7 @@
 "use client";
 
+import { useFormat } from "@/components/shell/RegionProvider";
+
 import type { TransportRouteDto, TransportTripDto, TransportBoardingDto, VehicleMaintenanceDto, VehicleLocationDto, VehicleDto, TransportAssignmentDto, Serialized } from "@sms/types";
 import * as React from "react";
 import { Button } from "@/components/ui/button";
@@ -14,7 +16,6 @@ type Vehicle = Serialized<VehicleDto>;
 type Assignment = Serialized<TransportAssignmentDto>;
 const sel = "h-9 rounded-md border border-input bg-background px-3 text-sm";
 const today = () => new Date().toISOString().slice(0, 10);
-const naira = (m: number) => `₦${(m / 100).toLocaleString("en-NG", { minimumFractionDigits: 2 })}`;
 
 async function send(method: string, path: string, body?: unknown) {
   const res = await fetch(`/api/sms${path}`, {
@@ -33,6 +34,9 @@ export function TransportOps({ routes, vehicles, assignments, canManage }: {
   assignments: Assignment[];
   canManage: boolean;
 }) {
+  // The SCHOOL's currency and locale, not the platform's — this used to be a
+  // module-level `naira()` that hard-coded ₦, en-NG and a divide by 100.
+  const { money } = useFormat();
   const [msg, setMsg] = React.useState<string | null>(null);
   return (
     <div className="space-y-4">
@@ -199,6 +203,7 @@ function TripsPanel({ routes, onMsg }: { routes: Route[]; onMsg: (s: string) => 
 }
 
 function MaintenancePanel({ vehicles, onMsg }: { vehicles: Vehicle[]; onMsg: (s: string) => void }) {
+  const { money } = useFormat();
   const [list, setList] = React.useState<Serialized<VehicleMaintenanceDto>[]>([]);
   const [vehicleId, setVehicleId] = React.useState(vehicles[0]?.id ?? "");
   const [type, setType] = React.useState("SERVICE");
@@ -237,7 +242,7 @@ function MaintenancePanel({ vehicles, onMsg }: { vehicles: Vehicle[]; onMsg: (s:
           {list.map((m) => (
             <div key={m.id} className="flex items-center justify-between gap-2 text-sm">
               <span>{m.vehicleName} · <Badge variant="outline">{m.type.toLowerCase()}</Badge> {shortDate(m.date)}{m.litres ? ` · ${m.litres}L` : ""}</span>
-              <span className="tabular-nums">{naira(m.costMinor)}</span>
+              <span className="tabular-nums">{money(m.costMinor)}</span>
             </div>
           ))}
         </div>

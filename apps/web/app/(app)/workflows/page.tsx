@@ -1,6 +1,7 @@
 import type { PendingApprovalDto, Serialized } from "@sms/types";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
+import { regionOf } from "@/lib/format";
 import { hasPermission } from "@/lib/permissions";
 import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -39,7 +40,7 @@ export default async function WorkflowsPage() {
             immutable, append-only audit trail, and you cannot review a request
             you initiated (separation of duties).</>} />
 
-        <OtherApprovals items={other} />
+        <OtherApprovals items={other} region={regionOf(user)} />
 
         {requests === null ? (
           other.length === 0 ? (

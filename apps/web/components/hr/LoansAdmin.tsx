@@ -1,5 +1,7 @@
 "use client";
 
+import { useFormat } from "@/components/shell/RegionProvider";
+
 // =============================================================================
 // LoansAdmin — school-wide staff loans (HR view) with maker-checker decisions
 // =============================================================================
@@ -19,7 +21,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 
 type Loan = Serialized<StaffLoanDto>;
 
-const naira = (m: number) => `₦${(m / 100).toLocaleString("en-NG", { minimumFractionDigits: 2 })}`;
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
   ACTIVE: "default",
   PENDING: "secondary",
@@ -28,6 +29,9 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "dest
 };
 
 export function LoansAdmin({ initial, canApprove }: { initial: Loan[]; canApprove: boolean }) {
+  // The SCHOOL's currency and locale, not the platform's — this used to be a
+  // module-level `naira()` that hard-coded ₦, en-NG and a divide by 100.
+  const { money } = useFormat();
   const router = useRouter();
   const [loans, setLoans] = React.useState<Loan[]>(initial);
   const [err, setErr] = React.useState<string | null>(null);
@@ -79,9 +83,9 @@ export function LoansAdmin({ initial, canApprove }: { initial: Loan[]; canApprov
                   <tr key={l.id} className="border-b last:border-0">
                     <td className="py-1.5 pr-2 font-medium">{l.userName ?? "Staff"}</td>
                     <td className="px-2">{l.purpose}</td>
-                    <td className="px-2 tabular-nums">{naira(l.principalMinor)}</td>
-                    <td className="px-2 tabular-nums">{naira(l.monthlyMinor)}</td>
-                    <td className="px-2 tabular-nums">{naira(l.balanceMinor)}</td>
+                    <td className="px-2 tabular-nums">{money(l.principalMinor)}</td>
+                    <td className="px-2 tabular-nums">{money(l.monthlyMinor)}</td>
+                    <td className="px-2 tabular-nums">{money(l.balanceMinor)}</td>
                     <td className="px-2">
                       <Badge variant={STATUS_VARIANT[l.status] ?? "outline"}>{l.status.toLowerCase()}</Badge>
                     </td>

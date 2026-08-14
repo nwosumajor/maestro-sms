@@ -212,7 +212,10 @@ export class FeesService {
       if (opts.overdueOnly) where.dueDate = { lt: today };
       const invoices = await tx.invoice.findMany({
         where,
-        select: { id: true, studentId: true, reference: true, totalMinor: true, dueDate: true },
+        // `currency` is selected because the reminder QUOTES the balance. An
+        // invoice carries its own currency per row, so an NGN invoice prints in
+        // naira whatever the school has since moved to.
+        select: { id: true, studentId: true, reference: true, totalMinor: true, dueDate: true, currency: true },
         take: 2000,
       });
       // Sum paid per invoice to compute the outstanding balance.
@@ -225,7 +228,7 @@ export class FeesService {
         paidByInvoice.set(pay.invoiceId, (paidByInvoice.get(pay.invoiceId) ?? 0) + pay.amountMinor);
       }
       return invoices
-        .map((inv: { id: string; studentId: string; reference: string; totalMinor: number; dueDate: Date }) => ({
+        .map((inv: { id: string; studentId: string; reference: string; totalMinor: number; dueDate: Date; currency: string }) => ({
           ...inv,
           outstanding: inv.totalMinor - (paidByInvoice.get(inv.id) ?? 0),
         }))
@@ -238,7 +241,11 @@ export class FeesService {
       await this.notifyGuardians(p, inv.studentId, {
         type: "FEE_REMINDER",
         title: overdue ? "Overdue fee reminder" : "Fee payment reminder",
-        body: `Invoice ${inv.reference} has an outstanding balance of ${(inv.outstanding / 100).toFixed(2)}${overdue ? ` (due ${inv.dueDate.toISOString().slice(0, 10)})` : ""}.`,
+        // formatMoney, never minor/100: this service already had the helper and
+        // this one call site did not use it. A bare `/100` with no symbol told a
+        // Ghanaian parent they owed "5000.00" of nothing, and a CFA-franc parent
+        // a HUNDREDTH of what they owe — in a message asking them to pay it.
+        body: `Invoice ${inv.reference} has an outstanding balance of ${this.money(inv.outstanding, inv.currency)}${overdue ? ` (due ${inv.dueDate.toISOString().slice(0, 10)})` : ""}.`,
         data: { invoiceId: inv.id, outstandingMinor: inv.outstanding },
       });
       reminded++;

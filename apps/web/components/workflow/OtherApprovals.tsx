@@ -2,12 +2,17 @@ import Link from "next/link";
 import type { PendingApprovalDto, Serialized } from "@sms/types";
 import { APPROVAL_SOURCE_LABELS } from "@sms/types";
 import { Badge } from "@/components/ui/badge";
+import { money as fmtMoney, type DisplayRegion } from "@/lib/format";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 type Item = Serialized<PendingApprovalDto>;
 
-function money(minor: number): string {
-  return `₦${(minor / 100).toLocaleString("en-NG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+// This is a SERVER component, so it takes the region as a prop rather than
+// through the useFormat() hook. It used to hard-code ₦, en-NG and a divide by
+// 100 — an approval queue quoting a Ghanaian school's money in naira, at a
+// hundredth of its value in any zero-decimal currency.
+function moneyIn(region: DisplayRegion) {
+  return (minor: number) => fmtMoney(minor, region.currency, region.locale);
 }
 
 function age(iso: string): string {
@@ -25,8 +30,9 @@ function age(iso: string): string {
  * but each row deep-links to the module that owns the decision — those keep
  * their own maker-checker rules, step-up and context.
  */
-export function OtherApprovals({ items }: { items: Item[] }) {
+export function OtherApprovals({ items, region }: { items: Item[]; region: DisplayRegion }) {
   if (items.length === 0) return null;
+  const money = moneyIn(region);
 
   return (
     <Card>

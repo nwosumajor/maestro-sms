@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { toMajor, toMinor } from "@sms/types";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,7 +21,12 @@ export function RecordPaymentForm({
   currency: string;
 }) {
   const router = useRouter();
-  const [amountMajor, setAmountMajor] = React.useState((balanceMinor / 100).toFixed(2));
+  // toMajor/toMinor ask the CURRENCY how many minor units it has. Dividing and
+  // multiplying by 100 is not a display rounding here — this field WRITES money.
+  // In a zero-decimal currency (the CFA franc and ten others in the catalogue)
+  // it prefilled a hundredth of the balance and then multiplied whatever the
+  // bursar typed by 100 on the way back in.
+  const [amountMajor, setAmountMajor] = React.useState(String(toMajor(balanceMinor, currency)));
   const [method, setMethod] = React.useState<(typeof METHODS)[number]>("CASH");
   const [kind, setKind] = React.useState<"PAYMENT" | "REFUND">("PAYMENT");
   const [busy, setBusy] = React.useState(false);
@@ -29,7 +35,7 @@ export function RecordPaymentForm({
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const amountMinor = Math.round(parseFloat(amountMajor) * 100);
+    const amountMinor = toMinor(parseFloat(amountMajor), currency);
     if (!Number.isFinite(amountMinor) || amountMinor <= 0) {
       setError("Enter a valid amount.");
       return;

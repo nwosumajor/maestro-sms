@@ -1,5 +1,7 @@
 "use client";
 
+import { useFormat } from "@/components/shell/RegionProvider";
+
 // =============================================================================
 // CompensationPanel — recurring pay components on one employee (client island)
 // =============================================================================
@@ -18,7 +20,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 
 type Component = Serialized<PayComponentDto>;
 
-const naira = (m: number) => `₦${(m / 100).toLocaleString("en-NG", { minimumFractionDigits: 2 })}`;
 
 async function req(method: string, path: string, body?: unknown) {
   const res = await fetch(`/api/sms${path}`, {
@@ -35,6 +36,9 @@ async function req(method: string, path: string, body?: unknown) {
 }
 
 export function CompensationPanel({ userId, initial }: { userId: string; initial: Component[] }) {
+  // The SCHOOL's currency and locale, not the platform's — this used to be a
+  // module-level `naira()` that hard-coded ₦, en-NG and a divide by 100.
+  const { money } = useFormat();
   const router = useRouter();
   const [items, setItems] = React.useState<Component[]>(initial);
   const [kind, setKind] = React.useState("ALLOWANCE");
@@ -115,7 +119,7 @@ export function CompensationPanel({ userId, initial }: { userId: string; initial
                   {c.kind === "ALLOWANCE" ? "+" : "−"} {c.kind.toLowerCase()}
                 </Badge>
                 <span className="font-medium">{c.name}</span>
-                <span className="ml-auto tabular-nums">{naira(c.amountMinor)}/mo</span>
+                <span className="ml-auto tabular-nums">{money(c.amountMinor)}/mo</span>
                 <Button size="sm" variant="ghost" className="h-7 px-2 text-destructive" onClick={() => remove(c.id)}>
                   ✕
                 </Button>
