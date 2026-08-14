@@ -30,11 +30,15 @@ export default async function UltimateDetailPage({ params }: { params: { id: str
   const canEnroll = hasPermission(user.permissions, "game.ultimate.enroll");
   const canConsent = hasPermission(user.permissions, "game.ultimate.consent");
 
-  const [comps, board, entry, students] = await Promise.all([
+  const [comps, board, entry, students, guardians] = await Promise.all([
     apiGet<Serialized<UltimateCompetitionDto>[]>("/ultimate/competitions"),
     apiGet<Serialized<UltimateLeaderboardDto>>(`/ultimate/competitions/${params.id}/leaderboard`),
     apiGet<Serialized<UltimateEntryDto>>(`/ultimate/competitions/${params.id}/me`),
     canConsent ? apiGet<Serialized<IdNameDto>[]>("/students") : Promise.resolve(null),
+    // Guardians, so consent names the person who gave it rather than only the
+    // admin who recorded it. The server still verifies the pick really is a
+    // guardian of the chosen pupil.
+    canConsent ? apiGet<Serialized<IdNameDto>[]>("/users?kind=parent") : Promise.resolve(null),
   ]);
   const comp = (comps ?? []).find((c) => c.id === params.id) ?? null;
 
@@ -65,7 +69,7 @@ export default async function UltimateDetailPage({ params }: { params: { id: str
                   {canConsent && students && (
                     <div className="border-t border-border pt-4">
                       <p className="mb-3 text-sm font-medium">Guardian consent</p>
-                      <ConsentForm students={students} />
+                      <ConsentForm students={students} guardians={guardians ?? []} />
                     </div>
                   )}
                 </CardContent>

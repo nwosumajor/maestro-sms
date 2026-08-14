@@ -193,9 +193,31 @@ export class UltimateService {
   // =========================================================================
   // Tier 2 — per-student guardian consent (school_admin, game.ultimate.consent)
   // =========================================================================
+  /**
+   * Record a guardian's consent for a pupil to enter the cross-school arena.
+   *
+   * The staff member RECORDS it; the guardian GIVES it, and must be named. The
+   * row used to carry only `grantedById` — the admin who ticked a box labelled
+   * "Guardian consent granted" — so a school could assert a parent's decision
+   * about their child with nothing behind it, on the one surface where a minor's
+   * handle and school name leave the tenant.
+   *
+   * The scholarship flow already holds the stricter line (`only a guardian of
+   * this student can give consent`), and it decides less: money to the family,
+   * inside their own school. Two standards for the same children was the part
+   * that could not be defended.
+   *
+   * Consent is still recorded by staff rather than clicked by the parent —
+   * schools collect these on paper and that is legitimate — but naming the
+   * guardian turns an assertion into evidence, and the named person is verified
+   * to actually BE a guardian of that child.
+   *
+   * REVOKING needs no guardian: withdrawing protection must never be harder than
+   * granting it.
+   */
   async setConsent(
     p: Principal,
-    input: { studentId: string; granted: boolean },
+    input: { studentId: string; granted: boolean; guardianId?: string },
   ): Promise<{ studentId: string; granted: boolean }> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       // The student must be in the caller's school (RLS scopes the lookup).
@@ -204,13 +226,35 @@ export class UltimateService {
         select: { id: true },
       });
       if (!student) throw new NotFoundException("Student not found");
+
+      let guardianId: string | null = null;
+      if (input.granted) {
+        if (!input.guardianId) {
+          throw new BadRequestException(
+            "Name the guardian who gave consent — a consent record with nobody behind it is not consent",
+          );
+        }
+        // The same check the scholarship flow makes: this person must really be
+        // a guardian of THIS child. RLS scopes the lookup to the school.
+        const link = await tx.parentChild.findFirst({
+          where: { parentId: input.guardianId, studentId: input.studentId },
+          select: { id: true },
+        });
+        if (!link) {
+          throw new BadRequestException(
+            "That person is not recorded as a guardian of this pupil. Link them on the pupil's record first.",
+          );
+        }
+        guardianId = input.guardianId;
+      }
+
       const existing = await tx.ultimateConsent.findFirst({
         where: { schoolId: p.schoolId, studentId: input.studentId },
       });
       if (existing) {
         await tx.ultimateConsent.update({
           where: { id: existing.id },
-          data: { granted: input.granted, grantedById: p.userId },
+          data: { granted: input.granted, grantedById: p.userId, guardianId },
         });
       } else {
         await tx.ultimateConsent.create({
@@ -219,11 +263,17 @@ export class UltimateService {
             studentId: input.studentId,
             granted: input.granted,
             grantedById: p.userId,
+            guardianId,
           },
         });
       }
       // SECURITY: consent state changes are audit-logged (spec §7).
-      await this.log(tx, p, "ultimate.consent.set", input.studentId, { granted: input.granted });
+      // The guardian is on the audit entry too: the consent row holds the current
+      // state, the audit holds who said so and when it changed.
+      await this.log(tx, p, "ultimate.consent.set", input.studentId, {
+        granted: input.granted,
+        guardianId,
+      });
       return { studentId: input.studentId, granted: input.granted };
     });
   }

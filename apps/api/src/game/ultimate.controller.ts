@@ -33,7 +33,14 @@ const createSchema = z.object({
   startAt: z.string(),
   endAt: z.string(),
 });
-const consentSchema = z.object({ studentId: z.string().uuid(), granted: z.boolean() });
+// `guardianId` is required to GRANT (checked in the service, which can see
+// whether the person is really a guardian of this pupil) and meaningless to
+// revoke — withdrawing protection must never be harder than granting it.
+const consentSchema = z.object({
+  studentId: z.string().uuid(),
+  granted: z.boolean(),
+  guardianId: z.string().uuid().optional(),
+});
 const enterSchema = z.object({ handle: z.string() });
 const guessSchema = z.object({ value: z.string() });
 

@@ -117,7 +117,11 @@ model UltimateConsent {
   schoolId    String   @db.Uuid
   studentId   String   @db.Uuid
   granted     Boolean  @default(false)
+  /// The staff member who RECORDED the consent.
   grantedById String   @db.Uuid
+  /// The guardian who GAVE it — verified against parentChild at write time.
+  /// Nullable only for rows written before this was required.
+  guardianId  String?  @db.Uuid
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

@@ -43,9 +43,12 @@ export function EnrollSchoolButton({ competitionId, enrolled }: { competitionId:
   );
 }
 
-export function ConsentForm({ students }: { students: Person[] }) {
+export function ConsentForm({ students, guardians }: { students: Person[]; guardians: Person[] }) {
   const [studentId, setStudentId] = React.useState(students[0]?.id ?? "");
   const [granted, setGranted] = React.useState(true);
+  // WHO gave it. The row used to record only the admin who ticked the box, on
+  // the one surface where a pupil's handle and school leave the tenant.
+  const [guardianId, setGuardianId] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
 
@@ -73,15 +76,35 @@ export function ConsentForm({ students }: { students: Person[] }) {
         <input type="checkbox" checked={granted} onChange={(e) => setGranted(e.target.checked)} className="h-4 w-4" />
         Guardian consent granted
       </label>
+      {/* Only when granting: withdrawing consent must never be harder than
+          giving it, so revoking needs no guardian named. */}
+      {granted && (
+        <div className="space-y-1.5">
+          <Label htmlFor="cons-guardian">Consent given by</Label>
+          <select
+            id="cons-guardian"
+            value={guardianId}
+            onChange={(e) => setGuardianId(e.target.value)}
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+          >
+            <option value="">Select the guardian…</option>
+            {guardians.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       <Button
-        disabled={busy || !studentId}
+        disabled={busy || !studentId || (granted && !guardianId)}
         onClick={async () => {
           setBusy(true);
           setMsg(null);
           const res = await fetch("/api/sms/ultimate/consent", {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ studentId, granted }),
+            body: JSON.stringify({ studentId, granted, guardianId: granted ? guardianId : undefined }),
           });
           setBusy(false);
           setMsg(res.ok ? "Consent updated." : await readApiError(res));
