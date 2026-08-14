@@ -218,7 +218,17 @@ export class BrandingService {
   async getPublicBranding(slug: string): Promise<PublicBrandingDto> {
     const data = await this.publicCache.get(slug, async (): Promise<PublicBrandingData> => {
       // School registry is global / RLS-exempt — readable without a tenant GUC.
-      const school = await prisma.school.findUnique({ where: { slug }, select: { id: true, name: true } });
+      // isPlatform is EXCLUDED, like every other public slug resolver (the
+      // school directory, the careers board, admissions intake). The platform
+      // org is not a customer school, and this route brands the sign-in page —
+      // so `/login?school=sms-platform` rendered the platform's own name in the
+      // slot where a school's belongs, presenting the operator's org as a tenant.
+      // Nothing secret leaked; the inconsistency is the point, and this was the
+      // one resolver the earlier sweep missed.
+      const school = await prisma.school.findFirst({
+        where: { slug, isPlatform: false },
+        select: { id: true, name: true },
+      });
       if (!school) throw new NotFoundException("School not found");
       const gated = await this.db.runAsTenant({ schoolId: school.id, userId: SYSTEM_ACTOR_ID }, async (tx) => {
         const sub = await tx.schoolSubscription.findFirst({
