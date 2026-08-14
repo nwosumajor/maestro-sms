@@ -35,7 +35,7 @@ function makeService(threadCount = 3) {
     $queryRaw: queryRaw,
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
-  const service = new MessagingService(db as never, { enqueue: jest.fn() } as never);
+  const service = new MessagingService(db as never, { enqueue: jest.fn() } as never, { record: jest.fn() } as never);
   return { service, threadFindMany, participantFindMany, queryRaw };
 }
 

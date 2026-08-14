@@ -3,6 +3,7 @@
 // =============================================================================
 import { ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import {
+  AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
   type Principal,
   type TenantContext,
@@ -10,6 +11,7 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 import { NotificationService } from "../notifications/notification.service";
+import { type AuditLogService } from "../foundation/audit-log.service";
 import { Prisma } from "@sms/db";
 import { decodeCursor, pageLimit, seekWhere, toPage } from "../common/keyset-cursor";
 
@@ -67,6 +69,7 @@ export class MessagingService {
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     private readonly notifications: NotificationService,
+    @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -293,6 +296,38 @@ export class MessagingService {
       await tx.threadParticipant.create({ data: { schoolId: p.schoolId, threadId: t.id, userId: p.userId, lastReadAt: new Date() } });
       await tx.threadParticipant.create({ data: { schoolId: p.schoolId, threadId: t.id, userId: input.recipientId } });
       await tx.message.create({ data: { schoolId: p.schoolId, threadId: t.id, senderId: p.userId, body: input.body } });
+
+      // WHO OPENED A PRIVATE LINE TO WHOM. Recorded here and not on each reply:
+      // `message` rows are append-only in practice — this service has no update
+      // or delete path for them — so what was SAID is already durable and an
+      // audit row per reply would be volume without information. What was not
+      // recoverable was the act of starting the channel, and that is the one an
+      // investigator begins from.
+      //
+      // `recipientIsStudent` is stamped rather than left to a join because the
+      // safeguarding question — which adults opened channels with which children
+      // — should be one query, and because a pupil who later leaves may lose the
+      // role that would have answered it retrospectively.
+      const recipientRoles = await tx.userRole.findMany({
+        where: { userId: input.recipientId },
+        select: { role: { select: { name: true } } },
+      });
+      const recipientIsStudent = (recipientRoles as Array<{ role: { name: string } }>).some(
+        (r) => r.role.name === "student",
+      );
+      await this.audit.record(
+        {
+          actorId: p.userId,
+          action: "message.thread.create",
+          entity: "message_thread",
+          entityId: t.id,
+          schoolId: p.schoolId,
+          // The SUBJECT only — never the body. An audit log is read by people
+          // with no business reading the correspondence itself.
+          metadata: { recipientId: input.recipientId, recipientIsStudent, subject: input.subject },
+        },
+        tx,
+      );
       return { thread: t, recipientId: input.recipientId, subject: input.subject };
     });
     await this.notify(p, [thread.recipientId], thread.subject);

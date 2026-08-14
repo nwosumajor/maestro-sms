@@ -17,6 +17,7 @@ import { randomUUID } from "node:crypto";
 import { prisma } from "@sms/db";
 import { MessagingService } from "../../src/communication/messaging.service";
 import { PrismaTenantService } from "../../src/foundation/prisma-tenant.service";
+import { AuditLogService } from "../../src/foundation/audit-log.service";
 import type { Principal } from "../../src/integrity/integrity.foundation";
 
 const APP_URL = process.env.TEST_DATABASE_URL;
@@ -147,9 +148,13 @@ d("who a teacher may write to (real Postgres)", () => {
       [randomUUID(), SCHOOL, OTHER_PARENT, OTHER_PUPIL],
     );
 
-    messaging = new MessagingService(new PrismaTenantService() as never, {
-      enqueue: jest.fn().mockResolvedValue(undefined),
-    } as never);
+    messaging = new MessagingService(
+      new PrismaTenantService() as never,
+      { enqueue: jest.fn().mockResolvedValue(undefined) } as never,
+      // The REAL audit service: a thread whose record fails to write should fail
+      // the suite rather than pass quietly.
+      new AuditLogService(),
+    );
   });
 
   afterAll(async () => {
@@ -233,6 +238,64 @@ d("who a teacher may write to (real Postgres)", () => {
     const librarian = who(LIBRARIAN, ["librarian"]);
     expect(await canWrite(librarian, TEACHER)).toBe(true);
     expect(await canWrite(librarian, MY_PUPIL)).toBe(false);
+  });
+
+  it("opening a thread with a pupil is AUDITED, and flagged as a pupil", async () => {
+    // #183 widened this: before it, a teacher could not open a private line to a
+    // child at all. Widening the capability without recording its use left the
+    // safeguarding question — which adults started channels with which children —
+    // answerable only by joining messages to roles, and not at all once a pupil
+    // leaves and loses the role.
+    await messaging.createThread(teacher(), { recipientId: MY_PUPIL, subject: "audited", body: "b" });
+    const { rows } = await admin.query(
+      `SELECT action, "actorId", metadata FROM audit_log
+        WHERE "schoolId" = $1 AND action = 'message.thread.create'
+        ORDER BY "createdAt" DESC LIMIT 1`,
+      [SCHOOL],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].actorId).toBe(TEACHER);
+    expect(rows[0].metadata.recipientId).toBe(MY_PUPIL);
+    expect(rows[0].metadata.recipientIsStudent).toBe(true);
+  });
+
+  it("records the subject but NEVER the message body", async () => {
+    // An audit log is read by people with no business reading the correspondence.
+    await messaging.createThread(teacher(), {
+      recipientId: MY_PARENT,
+      subject: "about attendance",
+      body: "a private detail that must not leak into the audit trail",
+    });
+    const { rows } = await admin.query(
+      `SELECT metadata FROM audit_log
+        WHERE "schoolId" = $1 AND action = 'message.thread.create'
+        ORDER BY "createdAt" DESC LIMIT 1`,
+      [SCHOOL],
+    );
+    expect(rows[0].metadata.subject).toBe("about attendance");
+    expect(JSON.stringify(rows[0].metadata)).not.toContain("private detail");
+  });
+
+  it("a thread with an adult is recorded, and not flagged as a pupil", async () => {
+    await messaging.createThread(teacher(), { recipientId: OTHER_TEACHER, subject: "staff", body: "b" });
+    const { rows } = await admin.query(
+      `SELECT metadata FROM audit_log
+        WHERE "schoolId" = $1 AND action = 'message.thread.create'
+        ORDER BY "createdAt" DESC LIMIT 1`,
+      [SCHOOL],
+    );
+    expect(rows[0].metadata.recipientIsStudent).toBe(false);
+  });
+
+  it("a REPLY writes no audit row, deliberately", async () => {
+    // The message table has no update or delete path in this service, so what was
+    // said is already durable; a row per reply would be volume without
+    // information. If replies ever become editable this stops being true.
+    const t = await messaging.createThread(teacher(), { recipientId: MY_PUPIL, subject: "reply-test", body: "b" });
+    const before = await admin.query(`SELECT count(*)::int AS n FROM audit_log WHERE "schoolId" = $1`, [SCHOOL]);
+    await messaging.reply(teacher(), (t as { id: string }).id, "a follow-up");
+    const after = await admin.query(`SELECT count(*)::int AS n FROM audit_log WHERE "schoolId" = $1`, [SCHOOL]);
+    expect(after.rows[0].n).toBe(before.rows[0].n);
   });
 
   it("the compose list offers exactly what the send allows", async () => {
