@@ -560,7 +560,31 @@ pointer, not a substitute.
    that data **permanently unreadable**. Plan a migration; do not rotate it in a
    panic.
 4. Audit what the credential touched via `audit_log`, then work out disclosure
-   obligations.
+   obligations. **Start with the sign-ins**, which answer "when did they get in"
+   and "how many accounts were tried" before you look at what was changed:
+
+```sql
+-- Authentication events. auth.login = a successful sign-in;
+-- auth.login.failed carries the running attempt count; auth.account.locked is
+-- the third strike, which locks PERMANENTLY until an operator reactivates.
+SELECT "createdAt", "actorId", action, metadata
+FROM audit_log
+WHERE action LIKE 'auth.%'
+  AND "createdAt" > now() - interval '24 hours'
+ORDER BY "createdAt" DESC;
+
+-- Accounts under attack right now, worst first.
+SELECT "actorId", count(*) AS attempts, max("createdAt") AS latest
+FROM audit_log
+WHERE action IN ('auth.login.failed', 'auth.account.locked')
+  AND "createdAt" > now() - interval '1 hour'
+GROUP BY "actorId" ORDER BY attempts DESC;
+```
+
+   An attempt against an email matching NO account is deliberately absent: there
+   is no actor to attribute it to (`actorId` is a foreign key) and no tenant to
+   file it under. For that, use the login rate limiter's 429s in CloudWatch and
+   the WAF — not this table.
 
 **Known precedent worth checking on any pre-existing environment:** databases
 seeded before the demo-data fix contain `owner@sms.platform` with a public
@@ -581,7 +605,9 @@ Almost always configuration rather than a fault. Check in this order:
 3. **The user's roles** — a missing menu item is usually a missing role.
 4. **Relationship scoping** — a teacher sees only their classes, a parent only
    their children. Working as designed, and the most common false report.
-5. **`disabledAt` on the school**, and lockout state on the user.
+5. **`disabledAt` on the school**, and lockout state on the user. To see WHY an
+   account locked rather than only that it did:
+   `SELECT "createdAt", action, metadata FROM audit_log WHERE "actorId" = '<user-uuid>' AND action LIKE 'auth.%' ORDER BY "createdAt" DESC LIMIT 20;`
 
 ---
 

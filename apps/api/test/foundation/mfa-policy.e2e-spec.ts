@@ -16,6 +16,7 @@ import { prisma } from "@sms/db";
 import { AuthService } from "../../src/foundation/auth.service";
 import { ModuleEntitlementService } from "../../src/foundation/module-entitlement.service";
 import { PrismaTenantService } from "../../src/foundation/prisma-tenant.service";
+import { AuditLogService } from "../../src/foundation/audit-log.service";
 
 const APP_URL = process.env.TEST_DATABASE_URL;
 const ADMIN_URL = process.env.TEST_ADMIN_URL;
@@ -52,10 +53,17 @@ d("AuthService requireStaffMfa policy (real Postgres)", () => {
     await admin.query(`INSERT INTO user_role (id,"schoolId","userId","roleId") VALUES ($1,$2,$3,$4)`, [randomUUID(), SA, STUDENT, sid]);
 
     const tenant = new PrismaTenantService() as never;
-    auth = new AuthService(tenant, new ModuleEntitlementService(tenant));
+    // A REAL audit service, not a stub: this suite runs against Postgres, and a
+    // login that fails to write its audit row should fail the test rather than
+    // pass quietly.
+    auth = new AuthService(tenant, new ModuleEntitlementService(tenant), new AuditLogService());
   });
 
   afterAll(async () => {
+    // BEFORE the users: audit_log.actorId is a foreign key to "user", and these
+    // logins now write auth.login rows. Deleting the users first fails the whole
+    // teardown on audit_log_actorId_fkey.
+    await admin.query(`DELETE FROM audit_log WHERE "schoolId" = $1`, [SA]);
     await admin.query(`DELETE FROM user_role WHERE "schoolId" = $1`, [SA]);
     await admin.query(`DELETE FROM role WHERE id = ANY($1)`, [[teacherRoleId, studentRoleId]]);
     await admin.query(`DELETE FROM "user" WHERE "schoolId" = $1`, [SA]);

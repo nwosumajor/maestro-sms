@@ -5,10 +5,12 @@ import { effectivePermissions, resolveRegion } from "@sms/types";
 import { verifyTotp } from "../auth/totp";
 import { ModuleEntitlementService } from "./module-entitlement.service";
 import {
+  AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
+import { type AuditLogService } from "./audit-log.service";
 
 /** The three region facts the web needs to format identically on server and
  *  client. Derived from the school row through the same resolver the API uses, so
@@ -106,6 +108,7 @@ export class AuthService {
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     private readonly modules: ModuleEntitlementService,
+    @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
   ) {}
 
   /**
@@ -180,6 +183,20 @@ export class AuthService {
               lockedUntil: nowLocked ? new Date() : null,
             },
           });
+          // In the SAME transaction as the counter, so the record and the state
+          // it describes cannot disagree — a lock with no entry explaining it is
+          // exactly what an operator is left holding today.
+          await this.audit.record(
+            {
+              actorId: user.id,
+              action: nowLocked ? "auth.account.locked" : "auth.login.failed",
+              entity: "user",
+              entityId: user.id,
+              schoolId: user.school_id,
+              metadata: { failedLoginCount: fails, locked: nowLocked },
+            },
+            tx,
+          );
           return nowLocked ? { status: "LOCKED" as const } : { status: "BAD_PASSWORD" as const };
         }
 
@@ -211,6 +228,13 @@ export class AuthService {
           where: { id: user.id },
           data: { failedLoginCount: 0, locked: false, lockedUntil: null, lastLoginAt: new Date() },
         });
+        // The answer to "when did they get in?". The security-incident runbook
+        // sends an on-call engineer to audit_log to work out what a stolen
+        // credential touched; without this the trail begins after the sign-in.
+        await this.audit.record(
+          { actorId: user.id, action: "auth.login", entity: "user", entityId: user.id, schoolId: user.school_id },
+          tx,
+        );
         const userRoles = await tx.userRole.findMany({
           where: { userId: user.id },
           include: { role: { include: { permissions: { include: { permission: true } } } } },
@@ -394,6 +418,14 @@ export class AuthService {
         // at a credential that no longer exists.
         data: { passwordHash, passwordChangedAt: new Date(), failedLoginCount: 0, tempPasswordSetAt: null },
       });
+      // Never the password, in any form — only that it changed, and when. An
+      // attacker who takes an account changes this first, and the operator's own
+      // reset (`operator.user.password_reset`) was already recorded while the
+      // self-service one was not.
+      await this.audit.record(
+        { actorId: userId, action: "auth.password.changed", entity: "user", entityId: userId, schoolId },
+        tx,
+      );
     });
   }
 }
