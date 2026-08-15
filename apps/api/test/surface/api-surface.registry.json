@@ -1334,8 +1334,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /students/:p/profile/completion": {
-      "kind": "ui",
-      "note": "reached via a runtime-built path (web builds \"/students/:p/profile\")"
+      "kind": "gap",
+      "note": "BACKEND ONLY: the pupil profile review chain (completion/submit/supervisor-review/approve) has no screen. The comment calls this the first-sign-in prompt; that prompt does not exist."
     },
     "GET /students/:p/virtual-account": {
       "kind": "ui",
@@ -1423,7 +1423,7 @@
     },
     "GET /timetable/cover/mine": {
       "kind": "ui",
-      "note": "reached via a runtime-built path (web builds \"/timetable/cover\")"
+      "note": "components/timetable/MyCoverDuties.tsx \u2014 the teacher's own duty list"
     },
     "GET /timetable/entries": {
       "kind": "ui",
@@ -1834,8 +1834,8 @@
       "note": "reached via a runtime-built path (web builds \"/classes/:p\")"
     },
     "POST /classes/:p/enrollments/bulk": {
-      "kind": "ui",
-      "note": "reached via a runtime-built path (web builds \"/classes/:p\")"
+      "kind": "gap",
+      "note": "BACKEND ONLY: the class admin enrols one pupil at a time; nothing calls the bulk form."
     },
     "POST /classes/:p/live": {
       "kind": "ui",
@@ -1854,8 +1854,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "POST /classes/:p/subjects/bulk": {
-      "kind": "ui",
-      "note": "reached via a runtime-built path (web builds \"/classes/:p\")"
+      "kind": "gap",
+      "note": "BACKEND ONLY: nothing calls the bulk form."
     },
     "POST /classes/:p/subjects/copy-to-arms": {
       "kind": "ui",
@@ -2798,16 +2798,16 @@
       "note": "reviewed: a call in components/attendance/StudentPicker.tsx builds this path"
     },
     "POST /students/:p/profile/approve": {
-      "kind": "ui",
-      "note": "reached via a runtime-built path (web builds \"/students/:p/profile\")"
+      "kind": "gap",
+      "note": "BACKEND ONLY: no screen for the school-admin approval \u2014 see profile/completion."
     },
     "POST /students/:p/profile/submit": {
-      "kind": "ui",
-      "note": "reached via a runtime-built path (web builds \"/students/:p/profile\")"
+      "kind": "gap",
+      "note": "BACKEND ONLY: no screen submits a pupil profile for review \u2014 see profile/completion."
     },
     "POST /students/:p/profile/supervisor-review": {
-      "kind": "ui",
-      "note": "reached via a runtime-built path (web builds \"/students/:p/profile\")"
+      "kind": "gap",
+      "note": "BACKEND ONLY: no screen for the class supervisor's check \u2014 see profile/completion."
     },
     "POST /students/:p/readmit": {
       "kind": "ui",

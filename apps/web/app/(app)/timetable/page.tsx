@@ -7,6 +7,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { TimetableAdmin } from "@/components/timetable/TimetableAdmin";
 import { CoverPanel } from "@/components/timetable/CoverPanel";
+import { MyCoverDuties } from "@/components/timetable/MyCoverDuties";
 import { UnstaffedLessons } from "@/components/timetable/UnstaffedLessons";
 import { TimetableViews, TeacherLoadPanel } from "@/components/timetable/TimetableViews";
 import { PageHeader } from "@/components/shell/PageHeader";
@@ -88,6 +89,11 @@ export default async function TimetablePage({
             have nobody at all". The permanent problem reads first. */}
         {canWrite && unstaffed !== null && <UnstaffedLessons rows={unstaffed} />}
         {canWrite && <CoverPanel teachers={allTeachers ?? []} />}
+        {/* The duties assigned TO the reader. Not gated on timetable.write —
+            that is the permission of the person who ASSIGNS cover, and the whole
+            point is the teacher receiving it, who does not hold it. Renders
+            nothing when there is nothing to cover. */}
+        <MyCoverDuties />
 
         {list.length === 0 ? (
           <Alert variant="info">
