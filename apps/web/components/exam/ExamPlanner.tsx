@@ -51,6 +51,47 @@ export function ExamPlanner({
   const [editing, setEditing] = React.useState<string | null>(null);
   const [expanded, setExpanded] = React.useState<string | null>(null);
 
+  /**
+   * Seat a whole schedule and SAY WHAT HAPPENED.
+   *
+   * This used to announce "Seated every unseated sitting in this schedule." on
+   * any success, without reading the response — and the response was counting
+   * SITTINGS. A hall smaller than its class is filled to capacity and the rest
+   * of the roll gets no seat, so a class of 30 in a hall of 5 reported one
+   * sitting seated, nothing skipped, and five children with seats.
+   */
+  const seatAll = async (scheduleId: string) => {
+    setBusy(true);
+    setMsg(null);
+    const res = await postSms<{
+      seated: number;
+      skipped: number;
+      seatedStudents: number;
+      unseatedStudents: number;
+      overflow: Array<{ title: string; hall: string; capacity: number; classSize: number; unseated: number }>;
+      skippedReasons: { alreadySeated: number; noClass: number; emptyClass: number };
+    }>(`exams/schedules/${scheduleId}/seat`, {});
+    setBusy(false);
+    if (!res.ok || !res.data) {
+      setMsg(res.error ?? "Failed.");
+      return;
+    }
+    const d = res.data;
+    const parts: string[] = [`Seated ${d.seatedStudents} candidate${d.seatedStudents === 1 ? "" : "s"} across ${d.seated} sitting${d.seated === 1 ? "" : "s"}.`];
+    if (d.unseatedStudents > 0) {
+      // The loud one: children with no seat.
+      const halls = d.overflow.map((o) => `${o.title || o.hall} holds ${o.capacity} of ${o.classSize}`).join("; ");
+      parts.push(`${d.unseatedStudents} candidate${d.unseatedStudents === 1 ? " has" : "s have"} NO seat — ${halls}. Open another hall or raise the capacity.`);
+    }
+    if (d.skippedReasons.noClass > 0) {
+      parts.push(`${d.skippedReasons.noClass} sitting${d.skippedReasons.noClass === 1 ? " has" : "s have"} no class attached, so nobody can be seated in ${d.skippedReasons.noClass === 1 ? "it" : "them"}.`);
+    }
+    if (d.skippedReasons.emptyClass > 0) parts.push(`${d.skippedReasons.emptyClass} skipped: the class has no enrolled pupils.`);
+    if (d.skippedReasons.alreadySeated > 0) parts.push(`${d.skippedReasons.alreadySeated} already seated (left untouched).`);
+    setMsg(parts.join(" "));
+    router.refresh();
+  };
+
   const run = async (fn: () => Promise<{ ok: boolean; error?: string | null }>, ok: string) => {
     setBusy(true);
     setMsg(null);
@@ -109,7 +150,7 @@ export function ExamPlanner({
   return (
     <div className="space-y-6">
       {/* ---------------- schedules ---------------- */}
-      <ScheduleBar schedules={schedules} busy={busy} run={run} />
+      <ScheduleBar schedules={schedules} busy={busy} run={run} seatAll={seatAll} />
 
       {/* ---------------- term grid ---------------- */}
       {days.length > 0 && gridHalls.length > 0 && (
@@ -243,10 +284,13 @@ function ScheduleBar({
   schedules,
   busy,
   run,
+  seatAll,
 }: {
   schedules: Schedule[];
   busy: boolean;
   run: (fn: () => Promise<{ ok: boolean; error?: string | null }>, ok: string) => Promise<boolean>;
+  /** Reports the seating outcome rather than announcing a fixed success. */
+  seatAll: (scheduleId: string) => Promise<void>;
 }) {
   const [title, setTitle] = React.useState("");
   return (
@@ -281,7 +325,7 @@ function ScheduleBar({
                 size="sm"
                 variant="outline"
                 disabled={busy || sc.sittingCount === 0}
-                onClick={() => run(() => postSms(`exams/schedules/${sc.id}/seat`, {}), "Seated every unseated sitting in this schedule.")}
+                onClick={() => void seatAll(sc.id)}
               >
                 Seat all
               </Button>

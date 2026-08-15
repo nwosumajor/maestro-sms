@@ -85,7 +85,15 @@ export class ExamService {
       // class roster (skips any already-seated) — so approval turns empty seat
       // plans into populated ones instead of an admin seating every subject.
       let autoSeated = 0;
-      if (approved) autoSeated = await this.autoSeatSchedule(tx, req.schoolId, scheduleId);
+      // The shortfall matters just as much here: approval seats the schedule
+      // unattended, so if a hall is too small for its class nobody is watching a
+      // screen to notice. It goes on the audit row.
+      let autoUnseated = 0;
+      if (approved) {
+        const outcome = await this.autoSeatSchedule(tx, req.schoolId, scheduleId);
+        autoSeated = outcome.seatedCount;
+        autoUnseated = outcome.overflow.reduce((n, o) => n + o.unseated, 0);
+      }
       await this.audit.record(
         {
           actorId: req.initiatorId,
@@ -93,7 +101,7 @@ export class ExamService {
           entity: "exam_schedule",
           entityId: scheduleId,
           schoolId: req.schoolId,
-          metadata: { requestId: req.id, exams: examIds.length, autoSeated },
+          metadata: { requestId: req.id, exams: examIds.length, autoSeated, autoUnseated },
         },
         tx,
       );
@@ -725,7 +733,16 @@ export class ExamService {
    * bulk createMany per sitting) — bounded by the schedule size, never per-student
    * fan-out. Returns how many sittings were seated. Runs inside the reactor tx.
    */
-  private async autoSeatSchedule(tx: TenantTx, schoolId: string, scheduleId: string): Promise<number> {
+  private async autoSeatSchedule(
+    tx: TenantTx,
+    schoolId: string,
+    scheduleId: string,
+  ): Promise<{
+    seatedCount: number;
+    seatedStudents: number;
+    overflow: Array<{ sittingId: string; capacity: number; classSize: number; unseated: number }>;
+    reasons: { alreadySeated: number; noClass: number; emptyClass: number };
+  }> {
     // EVERY sitting in the schedule, not just the CBT-backed ones. A sitting knows
     // its class either directly (sitting.classId — the only source a PAPER exam
     // has) or through its backing CBT exam. Before sitting.classId existed this
@@ -735,7 +752,8 @@ export class ExamService {
       where: { scheduleId },
       select: { id: true, cbtExamId: true, classId: true, capacity: true },
     })) as Array<{ id: string; cbtExamId: string | null; classId: string | null; capacity: number }>;
-    if (sittings.length === 0) return 0;
+    const empty = { seatedCount: 0, seatedStudents: 0, overflow: [], reasons: { alreadySeated: 0, noClass: 0, emptyClass: 0 } };
+    if (sittings.length === 0) return empty;
     const examIds = [...new Set(sittings.map((s) => s.cbtExamId).filter((x): x is string => !!x))];
     const exams = examIds.length
       ? ((await tx.cbtExam.findMany({ where: { id: { in: examIds } }, select: { id: true, classId: true } })) as Array<{ id: string; classId: string | null }>)
@@ -750,22 +768,46 @@ export class ExamService {
     const already = (await tx.examSeat.groupBy({ by: ["sittingId"], where: { sittingId: { in: sittings.map((s) => s.id) } }, _count: { _all: true } } as never)) as unknown as Array<{ sittingId: string }>;
     const hasSeats = new Set(already.map((g) => g.sittingId));
     const classIds = [...new Set(sittings.map(classOf).filter((x): x is string => !!x))];
-    if (classIds.length === 0) return 0;
+    if (classIds.length === 0) return { ...empty, reasons: { alreadySeated: 0, noClass: sittings.length, emptyClass: 0 } };
     const enr = (await tx.enrollment.findMany({ where: { status: "ACTIVE", classId: { in: classIds } }, select: { classId: true, studentId: true } })) as Array<{ classId: string; studentId: string }>;
     const byClass = new Map<string, string[]>();
     for (const e of enr) byClass.set(e.classId, [...(byClass.get(e.classId) ?? []), e.studentId]);
     let seatedCount = 0;
+    let seatedStudents = 0;
+    // WHO WAS LEFT WITHOUT A SEAT, and why a sitting was passed over. Counting
+    // SITTINGS was the whole story before, and it hid the case that matters: a
+    // hall smaller than its class is truncated silently below, the sitting still
+    // counts as seated, and nobody learns that children have no seat until they
+    // are standing in the corridor on exam morning.
+    const overflow: Array<{ sittingId: string; capacity: number; classSize: number; unseated: number }> = [];
+    const reasons = { alreadySeated: 0, noClass: 0, emptyClass: 0 };
     for (const s of sittings) {
-      if (hasSeats.has(s.id)) continue;
+      if (hasSeats.has(s.id)) {
+        reasons.alreadySeated += 1;
+        continue;
+      }
       const classId = classOf(s);
-      if (!classId) continue;
-      let studentIds = byClass.get(classId) ?? [];
-      if (s.capacity > 0) studentIds = studentIds.slice(0, s.capacity);
-      if (studentIds.length === 0) continue;
+      if (!classId) {
+        // Nothing tells this sitting whose exam it is — it can never seat, and
+        // an exam officer needs to know that now rather than on the day.
+        reasons.noClass += 1;
+        continue;
+      }
+      const roll = byClass.get(classId) ?? [];
+      let studentIds = roll;
+      if (s.capacity > 0 && roll.length > s.capacity) {
+        studentIds = roll.slice(0, s.capacity);
+        overflow.push({ sittingId: s.id, capacity: s.capacity, classSize: roll.length, unseated: roll.length - s.capacity });
+      }
+      if (studentIds.length === 0) {
+        reasons.emptyClass += 1;
+        continue;
+      }
       await tx.examSeat.createMany({ data: studentIds.map((studentId, i) => ({ schoolId, sittingId: s.id, studentId, seatNo: i + 1 })) });
       seatedCount += 1;
+      seatedStudents += studentIds.length;
     }
-    return seatedCount;
+    return { seatedCount, seatedStudents, overflow, reasons };
   }
 
   /**
@@ -777,12 +819,48 @@ export class ExamService {
    * exposed as a button, and because it skips already-seated sittings it is safe to
    * press repeatedly: it never renumbers a seat a student has already been told.
    */
-  async seatSchedule(p: Principal, scheduleId: string): Promise<{ seated: number; skipped: number }> {
+  /**
+   * Seat every unseated sitting in a schedule.
+   *
+   * REPORTS PUPILS, not just sittings. It used to answer `{ seated, skipped }`
+   * counting SITTINGS, which hid the case that matters: a hall smaller than its
+   * class is filled to capacity and the rest of the roll gets no seat, while the
+   * sitting counts as seated and `skipped` stays 0. Verified live — a class of
+   * 30 in a hall of 5 returned `{"seated":1,"skipped":0}` with five seats
+   * created, and the screen said "Seated every unseated sitting in this
+   * schedule." Twenty-five children would have found that out in the corridor on
+   * exam morning.
+   *
+   * Partial seating is still done rather than refused — filling one hall and
+   * opening another is ordinary practice — but the shortfall is now named, per
+   * hall, along with why any sitting was passed over.
+   */
+  async seatSchedule(
+    p: Principal,
+    scheduleId: string,
+  ): Promise<{
+    seated: number;
+    skipped: number;
+    seatedStudents: number;
+    unseatedStudents: number;
+    overflow: Array<{ sittingId: string; title: string; hall: string; capacity: number; classSize: number; unseated: number }>;
+    skippedReasons: { alreadySeated: number; noClass: number; emptyClass: number };
+  }> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const sched = await tx.examSchedule.findFirst({ where: { id: scheduleId }, select: { id: true } });
       if (!sched) throw new NotFoundException("Schedule not found");
       const total = (await tx.examSitting.count({ where: { scheduleId } })) as number;
-      const seated = await this.autoSeatSchedule(tx, p.schoolId, scheduleId);
+      const outcome = await this.autoSeatSchedule(tx, p.schoolId, scheduleId);
+      const seated = outcome.seatedCount;
+      const unseatedStudents = outcome.overflow.reduce((n, o) => n + o.unseated, 0);
+      // Name the halls that came up short, so the officer can open another one.
+      const overflowSittings = outcome.overflow.length
+        ? ((await tx.examSitting.findMany({
+            where: { id: { in: outcome.overflow.map((o) => o.sittingId) } },
+            select: { id: true, title: true, hall: true },
+          })) as Array<{ id: string; title: string; hall: string }>)
+        : [];
+      const nameOf = new Map(overflowSittings.map((x) => [x.id, x]));
       await this.audit.record(
         {
           actorId: p.userId,
@@ -790,11 +868,25 @@ export class ExamService {
           entity: "exam_schedule",
           entityId: scheduleId,
           schoolId: p.schoolId,
-          metadata: { seated, total },
+          metadata: { seated, total, seatedStudents: outcome.seatedStudents, unseatedStudents, reasons: outcome.reasons },
         },
         tx,
       );
-      return { seated, skipped: total - seated };
+      return {
+        seated,
+        skipped: total - seated,
+        seatedStudents: outcome.seatedStudents,
+        unseatedStudents,
+        overflow: outcome.overflow.map((o) => ({
+          sittingId: o.sittingId,
+          title: nameOf.get(o.sittingId)?.title ?? "",
+          hall: nameOf.get(o.sittingId)?.hall ?? "",
+          capacity: o.capacity,
+          classSize: o.classSize,
+          unseated: o.unseated,
+        })),
+        skippedReasons: outcome.reasons,
+      };
     });
   }
 
