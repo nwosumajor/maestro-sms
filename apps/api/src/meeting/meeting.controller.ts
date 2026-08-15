@@ -173,9 +173,25 @@ export class MeetingController {
     return this.meetings.book(p, body.slotId, body.studentId, body.note);
   }
 
-  // --- cancel (either party) ---
+  /**
+   * Cancel a booking — EITHER party, which is what the service has always
+   * implemented and what the gate prevented.
+   *
+   * Deliberately no @RequirePermission, for the same reason as
+   * `GET approvals/pending`: no single permission means "a party to this
+   * booking". `meeting.book` is held by parents alone and `meeting.host` by
+   * staff alone, so gating on either one locks the other out. It was gated on
+   * `meeting.book`, so a teacher who fell ill could not release their own slot:
+   * cancelling the booking was 403, withdrawing the slot was 409 "the slot has
+   * bookings — cancel those first", and the only person who could act was the
+   * parent. The error message named the one action the system forbade them.
+   *
+   * The service decides: the parent who booked, the teacher whose slot it is, or
+   * a school-wide administrator. That check already existed — and so did the
+   * branch choosing which side to notify when the TEACHER cancels, which could
+   * never run.
+   */
   @Delete("bookings/:id")
-  @RequirePermission(MEETING_PERMISSIONS.MEETING_BOOK)
   cancel(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
     return this.meetings.cancelBooking(p, id);
   }

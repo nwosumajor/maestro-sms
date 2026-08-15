@@ -242,7 +242,28 @@ export function MeetingsClient({
                     </td>
                     <td className="px-4 py-2 text-right">
                       {s.booked > 0 ? (
-                        <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs text-emerald-600 dark:text-emerald-400">{s.booked}/{s.capacity} booked</span>
+                        // WHO booked, and a way to release each one. The host
+                        // used to get this count and nothing else: no name to
+                        // know who was coming, and no way to free a slot they
+                        // could no longer keep — withdrawing answered "cancel
+                        // those first" and cancelling was refused. These names
+                        // are on the host's own view of their own slot; the
+                        // parent-facing list never carries them.
+                        <div className="flex flex-col items-end gap-1">
+                          <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs text-emerald-600 dark:text-emerald-400">{s.booked}/{s.capacity} booked</span>
+                          {(s.bookings ?? []).map((b) => (
+                            <span key={b.id} className="flex items-center gap-2 text-xs text-muted-foreground">
+                              {b.studentName ?? "Pupil"}{b.parentName ? ` · ${b.parentName}` : ""}
+                              <button
+                                className="hover:text-destructive"
+                                disabled={busy}
+                                onClick={() => run(() => sendSms("DELETE", `meetings/bookings/${b.id}`, {}), "Booking cancelled.")}
+                              >
+                                Cancel
+                              </button>
+                            </span>
+                          ))}
+                        </div>
                       ) : s.active ? (
                         <button className="text-xs text-muted-foreground hover:text-destructive" onClick={() => run(() => sendSms("DELETE", `meetings/slots/${s.id}`), "Slot withdrawn.")}>withdraw</button>
                       ) : (

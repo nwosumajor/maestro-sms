@@ -103,7 +103,7 @@ function harness(opts: {
     },
     // SELECTED is matched through the invitee table; a parent on no list gets none.
     meetingInvitee: { findMany: jest.fn().mockResolvedValue([]), createMany: jest.fn().mockResolvedValue({ count: 0 }) },
-    meetingBooking: { groupBy: jest.fn().mockResolvedValue([]), count: jest.fn().mockResolvedValue(0) },
+    meetingBooking: { groupBy: jest.fn().mockResolvedValue([]), count: jest.fn().mockResolvedValue(0), findMany: jest.fn().mockResolvedValue([]) },
   } as unknown as TenantTx;
   const db = {
     runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
@@ -263,7 +263,7 @@ function announceHarness(guardians: string[], opts: { stageClasses?: string[] } 
     },
     meetingInvitee: { findMany: jest.fn().mockResolvedValue([]), createMany: jest.fn().mockResolvedValue({ count: 0 }) },
     meetingSlot: { create: jest.fn(({ data }: { data: Record<string, unknown> }) => Promise.resolve({ id: "sl1", ...data, provider: null, joinUrl: null, active: true })), findMany: jest.fn().mockResolvedValue([]) },
-    meetingBooking: { groupBy: jest.fn().mockResolvedValue([]), count: jest.fn().mockResolvedValue(0) },
+    meetingBooking: { groupBy: jest.fn().mockResolvedValue([]), count: jest.fn().mockResolvedValue(0), findMany: jest.fn().mockResolvedValue([]) },
   } as unknown as TenantTx;
   const db = {
     runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
@@ -411,7 +411,7 @@ function selectHarness(realParents: string[]) {
       findMany: jest.fn().mockResolvedValue([]),
     },
     meetingSlot: { create: jest.fn(({ data }: { data: Record<string, unknown> }) => Promise.resolve({ id: "sl1", ...data, provider: null, joinUrl: null, active: true })), findMany: jest.fn().mockResolvedValue([]) },
-    meetingBooking: { groupBy: jest.fn().mockResolvedValue([]), count: jest.fn().mockResolvedValue(0) },
+    meetingBooking: { groupBy: jest.fn().mockResolvedValue([]), count: jest.fn().mockResolvedValue(0), findMany: jest.fn().mockResolvedValue([]) },
   } as unknown as TenantTx;
   const db = {
     runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
@@ -580,7 +580,7 @@ function cohostHarness(staffIds: string[], seeingIds?: string[]) {
       findMany: jest.fn().mockResolvedValue([]),
     },
     meetingSlot: { create: jest.fn(({ data }: { data: Record<string, unknown> }) => Promise.resolve({ id: "sl1", ...data, provider: null, joinUrl: null, active: true })), findMany: jest.fn().mockResolvedValue([]) },
-    meetingBooking: { groupBy: jest.fn().mockResolvedValue([]), count: jest.fn().mockResolvedValue(0) },
+    meetingBooking: { groupBy: jest.fn().mockResolvedValue([]), count: jest.fn().mockResolvedValue(0), findMany: jest.fn().mockResolvedValue([]) },
   } as unknown as TenantTx;
   const db = {
     runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
@@ -707,7 +707,7 @@ describe("a co-host is a host for the things that matter", () => {
         ]);
         }),
       },
-      meetingBooking: { groupBy: jest.fn().mockResolvedValue([]) },
+      meetingBooking: { groupBy: jest.fn().mockResolvedValue([]), findMany: jest.fn().mockResolvedValue([]) },
       user: { findMany: jest.fn().mockResolvedValue([{ id: "t2", name: "Colleague" }]) },
       class: { findMany: jest.fn().mockResolvedValue([]) },
     } as unknown as TenantTx;

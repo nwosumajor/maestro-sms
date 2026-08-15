@@ -533,17 +533,20 @@ export class MeetingService {
         take: 200,
       });
       const counts = await this.bookingCounts(tx, slots.map((s: { id: string }) => s.id));
+      // Host view only — see bookingsForHost.
+      const bookings = await this.bookingsForHost(tx, slots.map((s: { id: string }) => s.id));
       const teacherNames = await this.userNames(tx, slots.map((s: { teacherId: string }) => s.teacherId));
       const namesFor = await this.audienceNamesFor(tx, slots as SlotRow[]);
       const cohosts = await this.cohostsFor(tx, slots as SlotRow[]);
       // A co-host must count as a host for the join link, so their ids ride on
       // the row rather than being looked up again inside toSlotDto.
-      return slots.map((s: SlotRow) =>
-        this.toSlotDto(
+      return slots.map((s: SlotRow) => ({
+        ...this.toSlotDto(
           { ...s, cohostIds: (cohosts.get(s.id) ?? []).map((c) => c.id) },
           counts.get(s.id) ?? 0, p, teacherNames.get(s.teacherId), namesFor(s), cohosts.get(s.id) ?? [],
         ),
-      );
+        bookings: bookings.get(s.id) ?? [],
+      }));
     });
   }
 
@@ -746,6 +749,39 @@ export class MeetingService {
   }
 
   // --- helpers ----------------------------------------------------------------
+
+  /**
+   * The bookings on a host's own slots, with names.
+   *
+   * ONLY ever called from `mySlots`. A host needs this twice over: to know which
+   * family is coming, and — since a cancellation needs a booking id — to be able
+   * to release a slot at all. It must never reach `openSlots`, where one parent
+   * would learn which other families had booked.
+   */
+  private async bookingsForHost(
+    tx: TenantTx,
+    slotIds: string[],
+  ): Promise<Map<string, Array<{ id: string; parentName: string | null; studentName: string | null }>>> {
+    const out = new Map<string, Array<{ id: string; parentName: string | null; studentName: string | null }>>();
+    if (slotIds.length === 0) return out;
+    const rows = (await tx.meetingBooking.findMany({
+      where: { slotId: { in: slotIds }, status: "BOOKED" },
+      select: { id: true, slotId: true, parentId: true, studentId: true },
+      take: 2000,
+    })) as Array<{ id: string; slotId: string; parentId: string; studentId: string }>;
+    if (rows.length === 0) return out;
+    const names = await this.userNames(tx, [...rows.map((r) => r.parentId), ...rows.map((r) => r.studentId)]);
+    for (const r of rows) {
+      const list = out.get(r.slotId) ?? [];
+      list.push({
+        id: r.id,
+        parentName: names.get(r.parentId) ?? null,
+        studentName: names.get(r.studentId) ?? null,
+      });
+      out.set(r.slotId, list);
+    }
+    return out;
+  }
 
   private async bookingCounts(tx: TenantTx, slotIds: string[]): Promise<Map<string, number>> {
     if (slotIds.length === 0) return new Map();
