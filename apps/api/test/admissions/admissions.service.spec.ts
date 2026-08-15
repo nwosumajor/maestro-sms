@@ -41,11 +41,22 @@ function makeService(app: Row) {
     state.app = { ...state.app, ...args.data };
     return Promise.resolve(state.app);
   });
+  // The write is now optimistic on (status, currentStage), matching the workflow
+  // engine — see review-chain-solvable.spec.ts for why.
+  const updateMany = jest.fn((args: { data: Row }) => {
+    state.app = { ...state.app, ...args.data };
+    return Promise.resolve({ count: 1 });
+  });
   const tx = {
     admissionApplication: {
       findFirst: jest.fn(() => Promise.resolve(state.app)),
       update,
+      updateMany,
     },
+    // These tests are about the stage/permission rules, so the school is staffed
+    // generously: every stage has other people who could decide it, and nobody
+    // is anyone's ONLY approver. The "sole approver" rule has its own suite.
+    user: { count: jest.fn().mockResolvedValue(3) },
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };

@@ -38,6 +38,7 @@ import {
   type AuditLogService,
   type Principal,
   type TenantContext,
+  type TenantTx,
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
 import {
@@ -125,8 +126,9 @@ export class AdmissionsService {
     // only while the gateway is configured.
     const formFeeMinor = this.paystack.isConfigured() ? Math.max(0, school.admissionFormFeeMinor) : 0;
 
-    const created = await this.db.runAsTenant({ schoolId: school.id, userId: ZERO }, (tx) =>
-      tx.admissionApplication.create({
+    const created = await this.db.runAsTenant({ schoolId: school.id, userId: ZERO }, async (tx) => {
+      const stages = await this.resolveChain(tx);
+      return tx.admissionApplication.create({
         data: {
           schoolId: school.id,
           applicantName: input.applicantName,
@@ -138,15 +140,16 @@ export class AdmissionsService {
           notes: input.notes ?? input.details?.notes ?? null,
           details: input.details ? (input.details as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
           formFeeMinor,
-          // Initialise the maker-checker chain (Admin → HR → Principal).
-          stages: ADMISSION_REVIEW_CHAIN as unknown as Prisma.InputJsonValue,
+          // The maker-checker chain (Admin → HR → Principal), narrowed to the
+          // stages this school has somebody to decide.
+          stages: stages as unknown as Prisma.InputJsonValue,
           currentStage: 0,
           approvals: [] as unknown as Prisma.InputJsonValue,
           status: "NEW",
         },
         select: { id: true, status: true },
-      }),
-    );
+      });
+    });
 
     // Fee due → hand the applicant straight to the hosted checkout. A failure
     // here never loses the application: the public retry init covers it.
@@ -315,6 +318,25 @@ export class AdmissionsService {
         throw new ForbiddenException("You have already acted on this application");
       }
 
+      // SECURITY/SAFETY: approving here must not make the REST of the chain
+      // impossible. `admission.review` is held by principal and hr_manager as
+      // well as the admin roles, while each later stage has exactly one role —
+      // so a principal helpfully clearing the intake queue spent the only
+      // signature stage 2 would ever have, and the application stuck at
+      // REVIEWING for ever with no reassign, no reset and no way out. Refuse
+      // where it is still recoverable, and say what to do instead.
+      if (action === "APPROVE") {
+        for (const later of stages.slice(app.currentStage + 1)) {
+          if ((await this.approverCount(tx, later.permission, p.userId)) === 0) {
+            throw new ConflictException(
+              `You are the only ${later.label} approver, and each stage must be decided by a different person. ` +
+                `Approving here would leave nobody able to complete this application — leave the ${stage.label} ` +
+                `stage to a colleague, or appoint another ${later.label}.`,
+            );
+          }
+        }
+      }
+
       const record: AdmissionApprovalDto = {
         stageKey: stage.key,
         approverId: p.userId,
@@ -334,8 +356,18 @@ export class AdmissionsService {
         currentStage = app.currentStage + 1;
       }
 
-      await tx.admissionApplication.update({
-        where: { id },
+      // Optimistic write on (status, currentStage) — the same guard the workflow
+      // engine carries, and for the same reason. Two approvers deciding the same
+      // stage at once both read `approvals: []`, both pass the SoD check and
+      // both write: one approval record is silently lost, and the approver whose
+      // record vanished is then free to decide a LATER stage as well. The lost
+      // write is a bookkeeping bug; the separation of duties it defeats is not.
+      const written = await tx.admissionApplication.updateMany({
+        where: {
+          id,
+          status: app.status as "NEW" | "REVIEWING" | "ACCEPTED" | "REJECTED",
+          currentStage: app.currentStage,
+        },
         data: {
           status: status as "NEW" | "REVIEWING" | "ACCEPTED" | "REJECTED",
           currentStage,
@@ -344,6 +376,9 @@ export class AdmissionsService {
           reviewNote: note ?? null,
         },
       });
+      if (written.count === 0) {
+        throw new ConflictException("Somebody else reviewed this application a moment ago — reopen it to see where it stands");
+      }
       await this.audit.record(
         {
           actorId: p.userId,
@@ -400,6 +435,44 @@ export class AdmissionsService {
   private stagesOf(app: AppRow): AdmissionStage[] {
     const s = (app.stages as AdmissionStage[] | null) ?? [];
     return s.length > 0 ? s : ADMISSION_REVIEW_CHAIN;
+  }
+
+  /**
+   * How many ACTIVE people in this school could decide this stage.
+   *
+   * The chain is Admin → HR → Principal, but a school is not obliged to employ
+   * an HR manager, and `workflow.review.hr` has exactly one role holding it. A
+   * live tenant had ZERO holders: every application that school received could
+   * pass stage 0 and then stalled at stage 1 for ever, form fee already taken,
+   * with no person on earth able to advance it.
+   */
+  private async approverCount(tx: TenantTx, permission: string, excludeUserId?: string): Promise<number> {
+    return tx.user.count({
+      where: {
+        status: "ACTIVE",
+        ...(excludeUserId ? { id: { not: excludeUserId } } : {}),
+        roles: { some: { role: { permissions: { some: { permission: { key: permission } } } } } },
+      },
+    });
+  }
+
+  /**
+   * The chain this school can actually staff.
+   *
+   * A stage nobody can decide is not a control — it is a dead end that stops the
+   * ones after it from ever being reached. Dropping it is recorded on the row
+   * (the resolved chain is what `stages` stores), so the review screen shows the
+   * route an application will really take rather than an aspirational one.
+   *
+   * If NOTHING can be staffed we keep the full chain: an application that cannot
+   * be reviewed must stay unreviewed, never sail through by default.
+   */
+  private async resolveChain(tx: TenantTx): Promise<AdmissionStage[]> {
+    const staffed: AdmissionStage[] = [];
+    for (const stage of ADMISSION_REVIEW_CHAIN) {
+      if ((await this.approverCount(tx, stage.permission)) > 0) staffed.push(stage);
+    }
+    return staffed.length > 0 ? staffed : ADMISSION_REVIEW_CHAIN;
   }
 
   /** Best-effort email to the (non-user) applicant. Never throws into the request. */
