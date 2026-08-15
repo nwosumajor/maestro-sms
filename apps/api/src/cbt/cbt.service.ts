@@ -1350,7 +1350,13 @@ export class CbtService {
   async recordExamGrades(
     p: Principal,
     examId: string,
-  ): Promise<{ recorded: number; skipped: number; examMax: number }> {
+  ): Promise<{
+    recorded: number;
+    skipped: number;
+    examMax: number;
+    /** Why each skipped candidate was skipped — see the loop below. */
+    reasons: { awaitingApproval: number; notInClass: number; unmarked: number; failed: number };
+  }> {
     const plan = await this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       const exam = await tx.cbtExam.findFirst({ where: { id: examId } });
       if (!exam) throw new NotFoundException("Exam not found");
@@ -1415,9 +1421,25 @@ export class CbtService {
     const { examMax } = plan;
     let recorded = 0;
     let skipped = 0;
+    // WHY a candidate was skipped, not just how many.
+    //
+    // Every failure here used to be caught by one bare `catch` and counted as
+    // "skipped", and the screen then announced "Scores recorded to the
+    // gradesheet." on any 2xx without reading the numbers at all. So a press
+    // that recorded NOTHING looked exactly like one that recorded everything.
+    //
+    // The reasons are not interchangeable. A candidate who left the class is
+    // routine. Grades sitting in PENDING_APPROVAL is not: `applyExamComponent`
+    // refuses while a publish request is under head-teacher/principal review, so
+    // a whole class can be skipped for a reason the teacher can actually resolve
+    // — and, believing the marks were filed, they would never look again until
+    // the exam column came out empty on the report cards.
+    const reasons = { awaitingApproval: 0, notInClass: 0, unmarked: 0, failed: 0 };
     for (const r of plan.rows) {
       if (r.paperMax <= 0) {
+        // Nothing to scale: the paper carries no marks for this candidate.
         skipped += 1;
+        reasons.unmarked += 1;
         continue;
       }
       const scaled = Math.round((r.raw / r.paperMax) * examMax * 100) / 100;
@@ -1430,16 +1452,17 @@ export class CbtService {
           exam: Math.min(scaled, examMax),
         });
         recorded += 1;
-      } catch {
-        // A candidate who has left the class or doesn't offer the subject for the
-        // term is skipped rather than failing the whole batch.
+      } catch (err) {
         skipped += 1;
+        if (err instanceof ConflictException) reasons.awaitingApproval += 1;
+        else if (err instanceof NotFoundException) reasons.notInClass += 1;
+        else reasons.failed += 1;
       }
     }
     await this.db.runAsTenant(this.ctx(p), (tx) =>
-      this.log(tx, p, "cbt.exam.grades.record", examId, { recorded, skipped, examMax }),
+      this.log(tx, p, "cbt.exam.grades.record", examId, { recorded, skipped, examMax, reasons }),
     );
-    return { recorded, skipped, examMax };
+    return { recorded, skipped, examMax, reasons };
   }
 
   // --- exam integrity ------------------------------------------------------------

@@ -157,6 +157,44 @@ export function CbtStaffPanel({
     return null;
   };
 
+  /**
+   * Push Section A + B to the gradesheet and SAY WHAT HAPPENED.
+   *
+   * The server returns how many candidates were recorded and, for those it
+   * skipped, why: grades away at head-teacher/principal review, a candidate no
+   * longer in the class, or a script with no marks. Those are not
+   * interchangeable — the first is something the teacher can act on, and it can
+   * account for an entire class.
+   */
+  const recordGrades = async (examId: string) => {
+    setBusy(true);
+    setMsg(null);
+    const res = await post(`cbt/exams/${examId}/record-grades`);
+    setBusy(false);
+    if (!res.ok) {
+      setMsg(await readApiError(res));
+      return;
+    }
+    const r = (await res.json().catch(() => null)) as {
+      recorded?: number;
+      skipped?: number;
+      reasons?: { awaitingApproval?: number; notInClass?: number; unmarked?: number; failed?: number };
+    } | null;
+    const recorded = r?.recorded ?? 0;
+    const skipped = r?.skipped ?? 0;
+    const why: string[] = [];
+    if (r?.reasons?.awaitingApproval) why.push(`${r.reasons.awaitingApproval} awaiting head-teacher/principal approval`);
+    if (r?.reasons?.notInClass) why.push(`${r.reasons.notInClass} no longer in the class or not offering the subject`);
+    if (r?.reasons?.unmarked) why.push(`${r.reasons.unmarked} with no marks to record`);
+    if (r?.reasons?.failed) why.push(`${r.reasons.failed} failed`);
+    const tail = why.length ? ` Skipped ${skipped}: ${why.join("; ")}.` : "";
+    setMsg(
+      recorded === 0
+        ? `Nothing was recorded.${tail || ` Skipped ${skipped}.`}`
+        : `Recorded ${recorded} to the gradesheet.${tail}`,
+    );
+  };
+
   const saveQuestions = () => {
     let payload: DraftQuestion[];
     if (qMode === "form") {
@@ -515,17 +553,20 @@ export function CbtStaffPanel({
                         Mark theory
                       </Button>
                       {/* ONE PRESS: Section A + Section B -> each candidate's
-                          gradesheet. Refused server-side while marking is open. */}
+                          gradesheet. Refused server-side while marking is open.
+
+                          REPORT WHAT HAPPENED, not that something did. This said
+                          "Scores recorded to the gradesheet." on any 2xx without
+                          reading the response, so a press that recorded NOTHING —
+                          every candidate skipped because the grades were away at
+                          head-teacher review — looked exactly like one that
+                          recorded the whole class. The teacher would not look
+                          again until the exam column came out empty on the
+                          report cards. */}
                       <Button
                         size="sm"
                         disabled={busy}
-                        onClick={() =>
-                          void act(
-                            () => post(`cbt/exams/${e.id}/record-grades`),
-                            "Scores recorded to the gradesheet.",
-                            false,
-                          )
-                        }
+                        onClick={() => void recordGrades(e.id)}
                       >
                         Record to gradesheet
                       </Button>
