@@ -7,6 +7,8 @@
 // consistent with the platform's signals-not-verdicts rule.
 // =============================================================================
 
+import { schoolMinutesOfDay } from "@sms/types";
+
 /** Minutes since midnight for an "HH:MM" string; NaN if malformed. */
 export function hhmmToMinutes(v: string): number {
   const m = /^(\d{1,2}):(\d{2})$/.exec((v ?? "").trim());
@@ -18,19 +20,41 @@ export function hhmmToMinutes(v: string): number {
 }
 
 /** Is `now` inside the [windowStart, windowEnd] clock-in window? */
-export function inClockInWindow(windowStart: string, windowEnd: string, now: Date): boolean {
+/**
+ * Is `now` inside the school's clock-in window?
+ *
+ * The window is a wall-clock range the school set ("06:00"–"10:00"), so it must
+ * be judged on the school's clock. This is the worst of the three server-clock
+ * comparisons in this file, because it does not merely mis-label a record — it
+ * REFUSES the clock-in. With the server on UTC, a Singapore school's 07:00 local
+ * arrival is 23:00 the previous UTC day: outside the window, rejected, every
+ * member of staff, every morning, with the kiosk simply saying they were outside
+ * the hours their own school had configured.
+ */
+export function inClockInWindow(windowStart: string, windowEnd: string, now: Date, timezone: string): boolean {
   const start = hhmmToMinutes(windowStart);
   const end = hhmmToMinutes(windowEnd);
   if (Number.isNaN(start) || Number.isNaN(end)) return false;
-  const cur = now.getHours() * 60 + now.getMinutes();
+  const cur = schoolMinutesOfDay(timezone, now);
   return cur >= start && cur <= end;
 }
 
 /** PRESENT before/at `lateAfter`, LATE after it. */
-export function deriveClockInStatus(lateAfter: string, now: Date): "PRESENT" | "LATE" {
+/**
+ * Late or not, judged on the clock the staff member is actually reading.
+ *
+ * `lateAfter` is a wall-clock time the SCHOOL configured ("08:00"), so the
+ * comparison has to happen in the SCHOOL's timezone. This used to call
+ * `now.getHours()`, which answers with the server process's zone — UTC in a
+ * container. With an 08:00 boundary that made a Lagos arrival at 08:30 (07:30
+ * UTC) PRESENT, and meant nobody in Singapore could ever be late, since their
+ * whole working morning falls on the previous UTC day. The setting silently did
+ * nothing for every school not sitting on the server's zone.
+ */
+export function deriveClockInStatus(lateAfter: string, now: Date, timezone: string): "PRESENT" | "LATE" {
   const boundary = hhmmToMinutes(lateAfter);
   if (Number.isNaN(boundary)) return "PRESENT";
-  const cur = now.getHours() * 60 + now.getMinutes();
+  const cur = schoolMinutesOfDay(timezone, now);
   return cur <= boundary ? "PRESENT" : "LATE";
 }
 

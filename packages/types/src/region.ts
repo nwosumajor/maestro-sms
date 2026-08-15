@@ -198,6 +198,37 @@ export function schoolToday(timezone: string, at: Date = new Date()): Date {
   return new Date(`${schoolDateString(timezone, at)}T00:00:00.000Z`);
 }
 
+/**
+ * Minutes since midnight AT THE SCHOOL — the clock a person there is reading.
+ *
+ * The companion to `schoolDateString`, and needed for the same reason. Anything
+ * comparing an instant against a wall-clock setting the school configured — a
+ * "late after 08:00" boundary, an opening time, a curfew — has to ask what time
+ * it is THERE. `Date#getHours()` answers with the server process's timezone,
+ * which in a container is UTC: with a lateAfter of 08:00, nobody in Singapore is
+ * ever late (08:30 local is 00:30 UTC) and everybody in Toronto is.
+ *
+ * Same Intl approach as the date, so daylight saving comes from the tz database.
+ */
+export function schoolMinutesOfDay(timezone: string, at: Date = new Date()): number {
+  try {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: timezone,
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).formatToParts(at);
+    const hour = Number(parts.find((p) => p.type === "hour")?.value ?? "0");
+    const minute = Number(parts.find((p) => p.type === "minute")?.value ?? "0");
+    // en-GB renders midnight as 24 in some runtimes; normalise it to 0.
+    return (hour % 24) * 60 + minute;
+  } catch {
+    // An invalid zone must not decide that everybody is late. Fall back to UTC,
+    // exactly as the date helper does.
+    return at.getUTCHours() * 60 + at.getUTCMinutes();
+  }
+}
+
 /** Whole days between two school-local dates. Used by the stale-register rule, so
  *  that "more than 7 days old" means seven of the school's days. */
 export function daysBetweenSchoolDates(a: Date, b: Date): number {

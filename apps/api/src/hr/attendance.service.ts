@@ -15,6 +15,7 @@
 // =============================================================================
 
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { schoolToday } from "@sms/types";
 import type {
   AttendanceRegisterDto,
   AttendanceSummaryDto,
@@ -245,7 +246,9 @@ export class StaffAttendanceService {
       if (!emp) throw new BadRequestException("You need an active employment record to clock in");
       const k = await tx.attendanceKiosk.findFirst({});
       if (!k || !k.enabled) throw new NotFoundException("Clock-in kiosk is not enabled");
-      if (!inClockInWindow(k.windowStart, k.windowEnd, now)) {
+      // Needed BEFORE the window check: the window is the school's wall clock.
+      const { timezone } = await this.region.inTx(tx, p.schoolId);
+      if (!inClockInWindow(k.windowStart, k.windowEnd, now, timezone)) {
         throw new ConflictException(`Clock-in is open ${k.windowStart}–${k.windowEnd}`);
       }
       const secret = decryptField(k.secretEnc, p.schoolId);
@@ -271,7 +274,7 @@ export class StaffAttendanceService {
           schoolId: p.schoolId,
           userId: p.userId,
           date,
-          status: deriveClockInStatus(k.lateAfter, now),
+          status: deriveClockInStatus(k.lateAfter, now, timezone),
           source: "SELF_KIOSK",
           markedById: p.userId,
           clockInAt: now,
@@ -402,6 +405,7 @@ export class StaffAttendanceService {
       }
       const kiosk = await tx.attendanceKiosk.findFirst({});
       const lateAfter = kiosk?.lateAfter ?? "08:00";
+      const { timezone } = await this.region.inTx(tx, school.id);
       const codes = [...new Set(body.events.map((e) => e.deviceUserId))];
       const maps = await tx.biometricEnrollment.findMany({ where: { deviceUserId: { in: codes } } });
       const userByCode = new Map(maps.map((m) => [m.deviceUserId, m.userId]));
@@ -419,7 +423,14 @@ export class StaffAttendanceService {
           unknown++;
           continue;
         }
-        const date = new Date(`${at.toISOString().slice(0, 10)}T00:00:00.000Z`);
+        // The SCHOOL's day containing this event, not the server's UTC day. The
+        // kiosk path was corrected for exactly this and its sibling here was
+        // not: a Singapore terminal reporting an 07:00 local arrival is 23:00
+        // UTC the day BEFORE, so almost every clock-in filed against yesterday —
+        // where the (userId, date) idempotency check would find yesterday's real
+        // row, count the event "already marked", and drop it. The day itself
+        // then had no record at all.
+        const date = schoolToday(timezone, at);
         const existing = await tx.staffAttendance.findFirst({ where: { userId, date }, select: { id: true } });
         if (existing) {
           alreadyMarked++;
@@ -430,7 +441,7 @@ export class StaffAttendanceService {
             schoolId: school.id,
             userId,
             date,
-            status: deriveClockInStatus(lateAfter, at),
+            status: deriveClockInStatus(lateAfter, at, timezone),
             source: "BIOMETRIC",
             markedById: ZERO,
             clockInAt: at,

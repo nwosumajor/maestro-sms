@@ -17,6 +17,7 @@ import {
   countryProfile,
   resolveRegion,
   schoolDateString,
+  schoolMinutesOfDay,
   schoolToday,
   complianceProfile,
 } from "@sms/types";
@@ -61,6 +62,41 @@ describe("schoolToday — stored as the @db.Date columns expect", () => {
     const sg = schoolToday("Asia/Singapore", at);
     expect(sg.toISOString()).toBe("2026-08-03T00:00:00.000Z");
     expect(sg.getUTCHours()).toBe(0);
+  });
+});
+
+
+describe("schoolMinutesOfDay — the clock a person there is reading", () => {
+  // The companion to schoolDateString, added because three staff-attendance
+  // comparisons were asking the SERVER what time it was. `lateAfter`,
+  // `windowStart` and `windowEnd` are wall-clock times a school configured, so
+  // they can only be judged against that school's clock.
+  const instant = new Date("2026-08-17T23:30:00.000Z");
+
+  it("reads the same instant differently in each zone", () => {
+    expect(schoolMinutesOfDay("Asia/Singapore", instant)).toBe(7 * 60 + 30); // 07:30 next day
+    expect(schoolMinutesOfDay("Africa/Lagos", instant)).toBe(0 * 60 + 30); // 00:30 next day
+    expect(schoolMinutesOfDay("America/Toronto", instant)).toBe(19 * 60 + 30); // 18:30 same day (EDT)
+    expect(schoolMinutesOfDay("UTC", instant)).toBe(23 * 60 + 30);
+  });
+
+  it("normalises midnight to 0, not 1440", () => {
+    // Some runtimes render midnight as 24 under en-GB; a 24:00 reading would put
+    // every midnight event past any configured boundary.
+    expect(schoolMinutesOfDay("UTC", new Date("2026-08-17T00:00:00.000Z"))).toBe(0);
+    expect(schoolMinutesOfDay("UTC", new Date("2026-08-17T00:07:00.000Z"))).toBe(7);
+  });
+
+  it("follows daylight saving via the tz database, not arithmetic", () => {
+    // Toronto is UTC-4 in August and UTC-5 in January. A fixed offset would get
+    // one of these wrong.
+    expect(schoolMinutesOfDay("America/Toronto", new Date("2026-08-17T16:00:00.000Z"))).toBe(12 * 60);
+    expect(schoolMinutesOfDay("America/Toronto", new Date("2026-01-17T17:00:00.000Z"))).toBe(12 * 60);
+  });
+
+  it("falls back to UTC on an unusable zone rather than throwing", () => {
+    // Same posture as the date helper: a bad region must not take the kiosk down.
+    expect(schoolMinutesOfDay("Not/AZone", instant)).toBe(23 * 60 + 30);
   });
 });
 
