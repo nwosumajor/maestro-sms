@@ -389,6 +389,18 @@ export interface StudentTermReportDto {
   termName: string;
   sequence: number;
   subjects: TermSubjectRowDto[];
+  /**
+   * Subjects the pupil takes whose marks are NOT released yet — names only, no
+   * figures.
+   *
+   * A family view shows published results only, which is right. But an
+   * unreleased subject used to disappear from the report altogether, and a pupil
+   * looking at eight of their nine subjects could not tell whether the ninth was
+   * still being marked, was held at head-teacher review, or was simply not one
+   * of theirs. Saying the name — and nothing else — answers that without
+   * releasing a provisional mark. Always empty for staff, who see every row.
+   */
+  awaitingRelease: string[];
   average: number | null;
   /** The letter for `average`, on the SCHOOL's scale.
    *

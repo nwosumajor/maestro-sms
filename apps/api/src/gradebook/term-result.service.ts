@@ -799,14 +799,16 @@ export class TermResultService {
         orderBy: { sequence: "asc" },
         select: { id: true, name: true, sequence: true },
       });
-      const results = await tx.subjectResult.findMany({
-        where: {
-          studentId,
-          sessionId,
-          ...(publishedOnly ? { status: "PUBLISHED" } : {}),
-        },
-      });
-      const subjectIds = [...new Set(results.map((r) => r.subjectId))];
+      // Read EVERY row, then split. A family view still shows published marks
+      // only — but a subject whose mark is not released yet used to vanish from
+      // the report entirely, and a pupil looking at eight of their nine subjects
+      // cannot tell whether the ninth is being marked, is held at review, or
+      // whether they are simply not taking it. The subject is NAMED below
+      // instead, with no figures attached.
+      const allResults = await tx.subjectResult.findMany({ where: { studentId, sessionId } });
+      const results = publishedOnly ? allResults.filter((r) => r.status === "PUBLISHED") : allResults;
+      const awaiting = publishedOnly ? allResults.filter((r) => r.status !== "PUBLISHED") : [];
+      const subjectIds = [...new Set([...results, ...awaiting].map((r) => r.subjectId))];
       const subjects = await tx.subject.findMany({
         where: { id: { in: subjectIds } },
         select: { id: true, name: true },
@@ -905,6 +907,12 @@ export class TermResultService {
           termName: t.name,
           sequence: t.sequence,
           subjects: rows,
+          // Named, never scored: a subject the pupil takes whose mark is not
+          // released yet. Empty for staff, who see every row anyway.
+          awaitingRelease: awaiting
+            .filter((r) => r.termId === t.id)
+            .map((r) => subjectName.get(r.subjectId) ?? "Unknown")
+            .sort((a, b) => a.localeCompare(b)),
           average: avg,
           // On the SCHOOL's scale, from the same policy the subject grades above
           // used. The report card derived this itself with no bands, so a school

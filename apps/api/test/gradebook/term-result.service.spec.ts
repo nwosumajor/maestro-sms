@@ -327,7 +327,11 @@ describe("TermResultService — report read scope", () => {
   const student = { id: "stu1", name: "Ada" };
 
   it("a parent sees ONLY their child's PUBLISHED results", async () => {
-    const publishedFindMany = jest.fn().mockResolvedValue([]);
+    // One released row and one still at DRAFT, so the split is observable.
+    const publishedFindMany = jest.fn().mockResolvedValue([
+      { termId: "t1", subjectId: "sub-open", studentId: "stu1", status: "PUBLISHED", exam: 40, midterm: 15, assignment: 8, classNote: 7, total: 70, grade: "B" },
+      { termId: "t1", subjectId: "sub-held", studentId: "stu1", status: "DRAFT", exam: 30, midterm: 10, assignment: 5, classNote: 5, total: 50, grade: "C" },
+    ]);
     const { service } = makeService({
       session,
       student,
@@ -345,15 +349,31 @@ describe("TermResultService — report read scope", () => {
           classSubjectTeacher: { findFirst: jest.fn().mockResolvedValue(null) },
           enrollment: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn().mockResolvedValue(null) },
           parentChild: { findFirst: jest.fn().mockResolvedValue({ id: "pc1" }) },
-          term: { findMany: jest.fn().mockResolvedValue([]) },
-          subject: { findMany: jest.fn().mockResolvedValue([]) },
+          term: { findMany: jest.fn().mockResolvedValue([{ id: "t1", name: "Term 1", sequence: 1 }]) },
+          subject: {
+            findMany: jest.fn().mockResolvedValue([
+              { id: "sub-open", name: "Published Subject" },
+              { id: "sub-held", name: "Held Subject" },
+            ]),
+          },
           subjectResult: { findMany: publishedFindMany },
         } as unknown as TenantTx),
     };
-    await service.getStudentSessionReport(p(["parent"], "parent-1"), { studentId: "stu1", sessionId: "sess1" });
-    expect(publishedFindMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ status: "PUBLISHED" }) }),
-    );
+    const report = await service.getStudentSessionReport(p(["parent"], "parent-1"), {
+      studentId: "stu1",
+      sessionId: "sess1",
+    });
+    // Asserted on the RESULT, not on the where clause. The published/unpublished
+    // split moved out of SQL when unreleased subjects started being NAMED (they
+    // used to vanish from the report entirely) — and a test that pins the query
+    // shape would have called that a regression while the property it cares
+    // about still held. The property is: an unapproved mark never reaches a
+    // family.
+    const term = report.terms[0];
+    expect(term.subjects.map((x) => x.subjectName)).toEqual(["Published Subject"]);
+    expect(JSON.stringify(term.subjects)).not.toContain("Held Subject");
+    // …and the held one is named, with no figures.
+    expect(term.awaitingRelease).toEqual(["Held Subject"]);
   });
 
   it("an unrelated user (not staff, not parent, not the student) gets 404", async () => {

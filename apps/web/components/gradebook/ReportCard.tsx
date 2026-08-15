@@ -125,6 +125,16 @@ export function ReportCard({ report }: { report: Report }) {
                   </tbody>
                 </table>
               </div>
+              {/* Subjects taken whose marks are not released yet. Named only,
+                  never scored: without this the subject vanished from the report
+                  and a pupil could not tell whether it was still being marked or
+                  simply not one of theirs. */}
+              {term.awaitingRelease.length > 0 && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Awaiting release: {term.awaitingRelease.join(", ")} — {term.awaitingRelease.length === 1 ? "this result has" : "these results have"}{" "}
+                  not been published yet.
+                </p>
+              )}
             </div>
           ),
         )}
