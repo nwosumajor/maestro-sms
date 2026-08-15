@@ -5,12 +5,16 @@
 // for an audience, and read responses. Members (form.respond) see open forms in
 // their audience and submit ONE response. ANONYMITY: when a form is anonymous, no
 // read returns respondentId/name — only the answers (identity recorded solely to
-// enforce one-per-member, mirroring the polling model). Audited.
+// enforce one-per-member, mirroring the polling model). Audited — but a response
+// to an ANONYMOUS form is audited under the SYSTEM actor, because an audit row
+// naming the respondent, timestamped alongside a timestamped answer, attributed
+// every answer to a pupil on the screen next door.
 // =============================================================================
 
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@sms/db";
 import type { PageDto, FormDto, FormFieldDef, FormResponseDto } from "@sms/types";
+import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
 import { decodeCursor, pageLimit, seekWhere, toPage } from "../common/keyset-cursor";
 import {
   AUDIT_LOG_SERVICE,
@@ -97,7 +101,25 @@ export class FormService {
       const already = await tx.formResponse.findFirst({ where: { formId, respondentId: p.userId }, select: { id: true } });
       if (already) throw new BadRequestException("You have already responded to this form");
       await tx.formResponse.create({ data: { schoolId: p.schoolId, formId, respondentId: p.userId, answers: answers as unknown as Prisma.InputJsonValue } });
-      await this.log(tx, p, "form.respond", formId, {});
+      // ANONYMITY BEATS ATTRIBUTION HERE.
+      //
+      // Auditing this with the real actor undid the whole feature. The form
+      // screen showed `respondentName: null` while the audit viewer — one click
+      // away, open to the same principal — showed "Demo Student" against the
+      // same form four milliseconds later. Both screens carry timestamps and the
+      // answers list is timestamped too, so the pair did not merely reveal WHO
+      // took part: it attributed each answer to a named pupil. On the survey a
+      // school runs about bullying, or about its own leadership, read by exactly
+      // the people the anonymity is meant to hold at arm's length.
+      //
+      // The event is still recorded — a response arrived, on this form, at this
+      // time — under the SYSTEM actor, so the operational trail survives and the
+      // link does not exist to be read. Not merely hidden from the viewer:
+      // absent from the row, so a backup, a restore drill or a support query
+      // cannot reconstruct it either.
+      await this.logAs(tx, form.anonymous ? SYSTEM_ACTOR_ID : p.userId, p.schoolId, "form.respond", formId, {
+        anonymous: form.anonymous,
+      });
       return this.formDto(tx, formId, p);
     });
   }
@@ -175,10 +197,23 @@ export class FormService {
   }
 
   private log(tx: TenantTx, p: Principal, action: string, entityId: string, metadata: Record<string, unknown>) {
-    return this.audit.record(
-      { actorId: p.userId, action, entity: "form", entityId, schoolId: p.schoolId, metadata },
-      tx,
-    );
+    return this.logAs(tx, p.userId, p.schoolId, action, entityId, metadata);
+  }
+
+  /**
+   * Audit under an explicit actor — the SYSTEM actor when the event must not be
+   * attributable. See `respond`: naming the actor on an anonymous form is what
+   * deanonymised it.
+   */
+  private logAs(
+    tx: TenantTx,
+    actorId: string,
+    schoolId: string,
+    action: string,
+    entityId: string,
+    metadata: Record<string, unknown>,
+  ) {
+    return this.audit.record({ actorId, action, entity: "form", entityId, schoolId, metadata }, tx);
   }
 }
 

@@ -4,7 +4,9 @@
 // Tenant-scoped (RLS). Staff (poll.manage) create a poll with options for an
 // audience; members (poll.vote) cast ONE anonymous vote. ANONYMITY is structural:
 //   - the vote write stores voterId ONLY to enforce one-vote-per-member (unique
-//     [pollId, voterId]) and to audit participation;
+//     [pollId, voterId]) — NOT to audit participation: the audit row is written
+//     under the SYSTEM actor, because naming the voter there handed leadership
+//     the roll of who answered a poll about leadership;
 //   - NO read ever returns voterId↔optionId together — results are per-option
 //     TALLIES via groupBy(optionId), and hasVoted is a boolean existence check.
 //   - voters see tallies only AFTER the poll closes (live votes stay blind); the
@@ -15,6 +17,7 @@
 
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { PageDto, PollDto } from "@sms/types";
+import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
 import { decodeCursor, pageLimit, seekWhere, toPage } from "../common/keyset-cursor";
 import {
   AUDIT_LOG_SERVICE,
@@ -102,7 +105,8 @@ export class PollService {
       if (already) throw new BadRequestException("You have already voted in this poll");
       await tx.pollVote.create({ data: { schoolId: p.schoolId, pollId, optionId, voterId: p.userId } });
       // Audit records ONLY that this member voted — never which option.
-      await this.log(tx, p, "poll.vote", pollId, {});
+      // SYSTEM actor: a vote must not be attributable — see logAs.
+      await this.logAs(tx, SYSTEM_ACTOR_ID, p.schoolId, "poll.vote", pollId, {});
       return this.pollDto(tx, pollId, p);
     });
   }
@@ -214,10 +218,29 @@ export class PollService {
   }
 
   private log(tx: TenantTx, p: Principal, action: string, entityId: string, metadata: Record<string, unknown>) {
-    return this.audit.record(
-      { actorId: p.userId, action, entity: "poll", entityId, schoolId: p.schoolId, metadata },
-      tx,
-    );
+    return this.logAs(tx, p.userId, p.schoolId, action, entityId, metadata);
+  }
+
+  /**
+   * Audit under an explicit actor — the SYSTEM actor for a vote.
+   *
+   * A poll is anonymous by construction: the tally groups by option and voterId
+   * is never read. Recording the voter on the audit row put the participant list
+   * back, under a screen the same leadership can open. It reveals less than the
+   * form case did (which option you chose is not in the row) but it is the same
+   * mistake: a poll on confidence in leadership, with the roll of who answered
+   * it available to leadership, is not an anonymous poll — and in a small
+   * cohort, participation plus the tally can be enough on its own.
+   */
+  private logAs(
+    tx: TenantTx,
+    actorId: string,
+    schoolId: string,
+    action: string,
+    entityId: string,
+    metadata: Record<string, unknown>,
+  ) {
+    return this.audit.record({ actorId, action, entity: "poll", entityId, schoolId, metadata }, tx);
   }
 }
 
