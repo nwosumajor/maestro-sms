@@ -285,7 +285,17 @@ function PullPanel({
                 <tbody>
                   {gb.rows.map((r) => (
                     <tr key={r.studentId} className="border-b last:border-0">
-                      <td className="py-1.5 pr-2 font-medium">{r.studentName}</td>
+                      <td className="py-1.5 pr-2 font-medium">
+                        {r.studentName}
+                        {/* Says why "Apply all" will pass this pupil by. Their 0
+                            is what shows you who has not done the work; it is not
+                            a mark, and a bulk press must not file it as one. */}
+                        {!r.participated && (
+                          <span className="ml-2 rounded-full border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                            not attempted
+                          </span>
+                        )}
+                      </td>
                       <td className="px-2 tabular-nums">
                         {r.quizPossible > 0 ? `${round(r.quizEarned)}/${round(r.quizPossible)}` : "—"}
                       </td>
@@ -329,7 +339,8 @@ function PullPanel({
                 Apply all to report card
               </Button>
               <span className="text-xs text-muted-foreground">
-                Writes a draft assignment mark for every student with a score.
+                Writes a draft assignment mark for every student who did the work. Pupils marked “not attempted” are
+                skipped — use their own Apply button to record a zero deliberately.
               </span>
             </div>
           </div>

@@ -1778,6 +1778,10 @@ export class LmsContentService {
         let quizPossible = 0;
         let assignmentEarned = 0;
         let assignmentPossible = 0;
+        // Did they do ANY of it? A non-attempt is shown as 0-of-full below, which
+        // is what tells a teacher who has not done the work — but that zero is
+        // not a mark, and `applyLmsGrades` must not file it as one.
+        let participated = false;
         for (const c of contents) {
           const k = `${c.id}:${st.studentId}`;
           if (c.type === "QUIZ") {
@@ -1788,6 +1792,7 @@ export class LmsContentService {
               quizPossible += meta.fullTotal; // not attempted → 0 earned, full weight
               continue;
             }
+            participated = true;
             const chosen =
               meta.scoring === "LATEST" ? list[list.length - 1] : list.reduce((a, b) => (b.score > a.score ? b : a));
             quizEarned += chosen.score;
@@ -1797,6 +1802,7 @@ export class LmsContentService {
             if (max === undefined) continue; // ungradable (no points) → excluded
             assignmentPossible += max;
             assignmentEarned += gradeByKey.get(k) ?? 0;
+            if (gradeByKey.has(k)) participated = true;
           }
         }
         const earned = quizEarned + assignmentEarned;
@@ -1815,6 +1821,7 @@ export class LmsContentService {
           suggestedMark: scaleToComponent(percent, componentMax),
           appliedMark: st.result?.assignment ?? null,
           resultStatus: st.result?.status ?? null,
+          participated,
         };
       });
     });
@@ -1842,7 +1849,32 @@ export class LmsContentService {
   ): Promise<LmsGradebookDto> {
     const gb = await this.lmsGradebook(p, classId, subjectId, termId);
     const targetSet = studentIds && studentIds.length ? new Set(studentIds) : null;
-    const toApply = gb.rows.filter((r) => r.suggestedMark !== null && (!targetSet || targetSet.has(r.studentId)));
+    // WHO A BULK PRESS MAY MARK.
+    //
+    // A pupil who attempted nothing scores 0 of full weight in the table — that
+    // is how a teacher sees who has not done the work. Writing that 0 onto the
+    // report card is a different act entirely, and this used to do it for the
+    // whole class from one press:
+    //
+    //   * it is an automated score penalty on a child (Golden Rule #8), decided
+    //     by a batch rather than by a person;
+    //   * "did not attempt" is indistinguishable here from absent, newly
+    //     arrived, or exempt;
+    //   * and it OVERWROTE marks the teacher had already entered by hand —
+    //     verified live, an assignment mark of 7 became 0 because the pupil had
+    //     never opened an LMS quiz.
+    //
+    // It also disagreed with the CBT push beside it, which writes only for the
+    // candidates who actually sat the paper.
+    //
+    // Naming pupils explicitly still applies to exactly those pupils, so a
+    // considered zero remains one press away — it is just somebody's decision
+    // now rather than a side effect.
+    const toApply = gb.rows.filter(
+      (r) =>
+        r.suggestedMark !== null &&
+        (targetSet ? targetSet.has(r.studentId) : r.participated),
+    );
     if (toApply.length === 0) {
       throw new BadRequestException(
         "No LMS scores to apply — students need at least one graded quiz or assignment first.",

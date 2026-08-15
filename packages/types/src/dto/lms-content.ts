@@ -184,6 +184,19 @@ export interface LmsGradeRowDto {
    *  nothing applied yet), and the row's publish status, so the UI shows drift. */
   appliedMark: number | null;
   resultStatus: string | null;
+  /**
+   * Did this pupil actually do any of the work — one attempt, or one graded
+   * submission?
+   *
+   * A non-attempt counts as 0 out of full weight in the TABLE, which is how a
+   * teacher sees who has not done it. It must not be written to a report card by
+   * a bulk press: that is an automated score penalty on a child (Golden Rule
+   * #8), it cannot be told apart from "absent" or "joined late", and it
+   * OVERWROTE marks the teacher had entered by hand. Applying to a pupil with no
+   * work is still possible — by naming them explicitly, which makes the zero a
+   * decision somebody took.
+   */
+  participated: boolean;
 }
 
 /** The teacher's "pull LMS scores into the report card" table for one
