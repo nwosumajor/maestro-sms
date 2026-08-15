@@ -213,3 +213,60 @@ describe("a job running far too often", () => {
     expect(s.overrunning).toBe(false);
   });
 });
+
+// =============================================================================
+// A sweep whose result was thrown away
+// =============================================================================
+// `record()` files whatever the callback returns as the run's summary. Twelve of
+// the thirteen processors returned their result. One logged it and returned
+// nothing — so `{}` was filed on every run, and the console's "What it did"
+// column read "nothing to report" for ever.
+//
+// It was `hostel.exeatOverdue`: the sweep that exists to notice a boarder who
+// has not come back. "Swept, none overdue" and "found three and alerted nobody"
+// looked identical on the page — which is precisely the failure that console was
+// built to prevent, on the job where it matters most.
+//
+// Checked by DECLARED RETURN TYPE rather than by grepping for `return`, because
+// the first version of this scan matched `return this.runs.record(...)` itself
+// and reported every processor as healthy including the broken one.
+// =============================================================================
+describe("every scheduled processor reports what it did", () => {
+  const processors = () => {
+    const { readdirSync, readFileSync, statSync } = require("node:fs") as typeof import("node:fs");
+    const { join } = require("node:path") as typeof import("node:path");
+    const SRC = join(__dirname, "../../src");
+    const out: Array<{ key: string; returns: string }> = [];
+    const walk = (d: string) => {
+      for (const e of readdirSync(d)) {
+        const f = join(d, e);
+        if (statSync(f).isDirectory()) walk(f);
+        else if (f.endsWith(".processor.ts")) {
+          const src = readFileSync(f, "utf8");
+          const key = /record\("([a-zA-Z.]+)"/.exec(src)?.[1];
+          if (!key) continue;
+          const sig = /async process\([^)]*\):\s*Promise<([\s\S]*?)>\s*\{/.exec(src)?.[1] ?? "";
+          out.push({ key, returns: sig.trim() });
+        }
+      }
+    };
+    walk(SRC);
+    return out;
+  };
+
+  it("finds all thirteen", () => {
+    expect(processors().length).toBe(SCHEDULED_JOBS.length);
+  });
+
+  it("none declares Promise<void> — a void processor files an empty summary", () => {
+    const voids = processors().filter((p) => p.returns === "void").map((p) => p.key);
+    expect(voids).toEqual([]);
+  });
+
+  it("the boarder sweep in particular reports its counts", () => {
+    // Named because this is the one that was broken, and the one whose silence
+    // matters most.
+    const exeat = processors().find((p) => p.key === "hostel.exeatOverdue");
+    expect(exeat?.returns).toBe("OverdueSweepResult");
+  });
+});
