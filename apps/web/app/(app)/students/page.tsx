@@ -8,6 +8,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { PageHeader } from "@/components/shell/PageHeader";
+import { ProfileReviewQueue } from "@/components/sis/ProfileReviewQueue";
 import { StudentSearch } from "@/components/people/StudentSearch";
 
 export const dynamic = "force-dynamic";
@@ -46,6 +47,12 @@ export default async function StudentsPage({
       <div className="space-y-6">
         <PageHeader title={<>Students</>} subtitle={<>Students you can see — your own record, your children, or those you
             teach. Open one for their profile, contacts, and (if permitted) medical record.</>} />
+
+        {/* Whose turn it is. The endpoint decides the stage and the scope, so a
+            supervisor sees their classes and the school office sees what has
+            already been checked; it renders nothing when there is nothing
+            waiting. */}
+        <ProfileReviewQueue />
 
         <div className="flex flex-wrap items-center justify-between gap-2">
           <StudentSearch initial={q ?? ""} />

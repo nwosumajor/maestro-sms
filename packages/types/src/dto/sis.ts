@@ -87,3 +87,24 @@ export interface SisCompletionDto {
   submittedAt: Date | null;
   approvedAt: Date | null;
 }
+
+// -----------------------------------------------------------------------------
+// The profile review queue
+// -----------------------------------------------------------------------------
+// The chain is: the pupil (or their parent) SUBMITS, the class SUPERVISOR checks
+// it, then a school admin APPROVES. Each of those endpoints acts on one named
+// pupil — which is fine once you know which pupil, and useless before. Nothing
+// listed what was waiting, so the two review stages had no way in at all.
+//
+// One row per pupil awaiting the CALLER's action, with the stage stated so a
+// single screen can serve both reviewers without asking them which they are.
+export interface ProfileReviewRowDto {
+  studentId: string;
+  studentName: string;
+  className: string | null;
+  /** SUPERVISOR — waiting on the class supervisor's check.
+   *  ADMIN — checked, waiting on a school admin's approval. */
+  stage: "SUPERVISOR" | "ADMIN";
+  submittedAt: Date | null;
+  supervisorReviewedAt: Date | null;
+}

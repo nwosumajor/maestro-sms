@@ -1334,8 +1334,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /students/:p/profile/completion": {
-      "kind": "gap",
-      "note": "BACKEND ONLY: the pupil profile review chain (completion/submit/supervisor-review/approve) has no screen. The comment calls this the first-sign-in prompt; that prompt does not exist."
+      "kind": "ui",
+      "note": "components/sis/ProfileReviewChain.tsx \u2014 status, missing fields and the reviewer's note"
     },
     "GET /students/:p/virtual-account": {
       "kind": "ui",
@@ -1348,6 +1348,10 @@
     "GET /students/exited": {
       "kind": "ui",
       "note": "Leavers register on /admin/students \u2014 who has left and when. Paged; the list only ever grows."
+    },
+    "GET /students/profile-reviews": {
+      "kind": "ui",
+      "note": "components/sis/ProfileReviewQueue.tsx \u2014 the reviewer's queue"
     },
     "GET /subject-selections": {
       "kind": "ui",
@@ -2798,16 +2802,16 @@
       "note": "reviewed: a call in components/attendance/StudentPicker.tsx builds this path"
     },
     "POST /students/:p/profile/approve": {
-      "kind": "gap",
-      "note": "BACKEND ONLY: no screen for the school-admin approval \u2014 see profile/completion."
+      "kind": "ui",
+      "note": "components/sis/ProfileReviewChain.tsx \u2014 the school office's approve"
     },
     "POST /students/:p/profile/submit": {
-      "kind": "gap",
-      "note": "BACKEND ONLY: no screen submits a pupil profile for review \u2014 see profile/completion."
+      "kind": "ui",
+      "note": "components/sis/ProfileReviewChain.tsx \u2014 the pupil/parent submit button"
     },
     "POST /students/:p/profile/supervisor-review": {
-      "kind": "gap",
-      "note": "BACKEND ONLY: no screen for the class supervisor's check \u2014 see profile/completion."
+      "kind": "ui",
+      "note": "components/sis/ProfileReviewChain.tsx \u2014 the supervisor's pass / ask-for-changes"
     },
     "POST /students/:p/readmit": {
       "kind": "ui",

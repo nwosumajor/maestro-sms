@@ -88,16 +88,30 @@ describe("a prefix is not evidence of a screen", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("the routes found unreachable are recorded as gaps, not as UI", () => {
-    // Named individually: a regression here is somebody quietly re-classifying a
-    // missing screen as present.
+  it("the pupil-profile chain is UI now, and every note names its file", () => {
+    // These four were `gap` when this test was written — a four-endpoint chain
+    // with no screen. The screens exist now, so the assertion moves UP rather
+    // than away: `ui` is only accepted with a named file, which is the evidence
+    // a prefix could never give. Re-marking one `ui` with a hand-wave note fails
+    // here, which is the point.
     for (const route of [
       "GET /students/:p/profile/completion",
       "POST /students/:p/profile/submit",
       "POST /students/:p/profile/supervisor-review",
       "POST /students/:p/profile/approve",
+      "GET /students/profile-reviews",
     ]) {
+      const entry = REGISTRY.routes[route];
+      expect(entry?.kind).toBe("ui");
+      expect(entry?.note).toMatch(/components\/sis\/ProfileReview(Chain|Queue)\.tsx/);
+    }
+  });
+
+  it("the endpoints still tracked as gaps say so plainly", () => {
+    // What is left unreachable stays visible rather than drifting back to `ui`.
+    for (const route of ["POST /classes/:p/enrollments/bulk", "POST /classes/:p/subjects/bulk"]) {
       expect(REGISTRY.routes[route]?.kind).toBe("gap");
+      expect(REGISTRY.routes[route]?.note).toMatch(/BACKEND ONLY/);
     }
   });
 

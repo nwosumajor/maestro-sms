@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Put } from "@nestjs/common";
 import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
-import type { ContactDto, MedicalRecordDto, StudentProfileDto, SisCompletionDto } from "@sms/types";
+import type { ContactDto, MedicalRecordDto, ProfileReviewRowDto, StudentProfileDto, SisCompletionDto } from "@sms/types";
 import { z } from "zod";
 import { SIS_PERMISSIONS, ADMIN_PERMISSIONS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -162,5 +162,32 @@ export class SisController {
     @Body(new ZodValidationPipe(medicalSchema)) body: z.infer<typeof medicalSchema>,
   ) {
     return this.sis.upsertMedical(p, studentId, body);
+  }
+}
+
+/**
+ * Collection-level SIS routes.
+ *
+ * Separate from `students/:studentId` because a queue is not about one pupil —
+ * and the review chain had no collection route at all, which is why neither
+ * review stage could be reached.
+ */
+@RequireModule(MODULES.SIS)
+@Controller("students")
+export class SisQueueController {
+  constructor(private readonly sis: SisService) {}
+
+  /**
+   * Profiles waiting on THIS reviewer, with the stage decided server-side.
+   *
+   * Gated on the read permission, like `supervisor-review` itself: the
+   * authorisation that matters is the RELATIONSHIP (supervising the pupil's
+   * class) or `rbac.manage` for the approval stage, and the service applies
+   * both. A caller with neither simply sees an empty queue.
+   */
+  @Get("profile-reviews")
+  @RequirePermission(SIS_PERMISSIONS.STUDENT_PROFILE_READ)
+  profileReviews(@CurrentPrincipal() p: Principal): Promise<ProfileReviewRowDto[]> {
+    return this.sis.profileReviewQueue(p);
   }
 }

@@ -15,6 +15,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { shortDate } from "@/lib/format";
 import { StudentAdmin } from "@/components/sis/StudentAdmin";
+import { ProfileReviewChain } from "@/components/sis/ProfileReviewChain";
 import { ExemptionPanel } from "@/components/assessment/ExemptionPanel";
 import { PrivacyPanel } from "@/components/privacy/PrivacyPanel";
 import { ReportCardButton } from "@/components/reportcards/ReportCardButton";
@@ -128,6 +129,17 @@ export default async function StudentProfilePage({ params }: { params: { id: str
             </CardContent>
           </Card>
         )}
+
+        {/* Submit → supervisor check → office approval. Every control is offered
+            on the permission its own endpoint requires; the server stays the
+            authority (the supervisor stage is relationship-scoped and 404s a
+            non-supervisor, and approval is refused until the check is done). */}
+        <ProfileReviewChain
+          studentId={params.id}
+          canSubmit={hasPermission(user.permissions, "student.profile.write")}
+          canReview={hasPermission(user.permissions, "student.profile.read")}
+          canApprove={hasPermission(user.permissions, "rbac.manage")}
+        />
 
         <StudentAdmin
           studentId={params.id}

@@ -6,14 +6,14 @@ import { SisNudgeService } from "./sis-nudge.service";
 import { SisNudgeScheduler } from "./sis-nudge.scheduler";
 import { SisNudgeProcessor } from "./sis-nudge.processor";
 import { NotificationModule } from "../notifications/notification.module";
-import { SisController } from "./sis.controller";
+import { SisController, SisQueueController } from "./sis.controller";
 import { SisService } from "./sis.service";
 
 // Depends on the global FoundationModule (TENANT_DATABASE, AUDIT_LOG_SERVICE,
 // auth guard) — no re-import needed.
 @Module({
   imports: [NotificationModule, BullModule.registerQueue({ name: SIS_NUDGE_QUEUE })],
-  controllers: [SisController],
+  controllers: [SisController, SisQueueController],
   providers: [
     SisService,
     // Daily profile-completion nudge (mirrors the HR reminder / billing dunning

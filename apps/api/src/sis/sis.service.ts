@@ -22,7 +22,7 @@ import { allocateAdmissionNumber, loadUsedAdmissionNumbers } from "../foundation
 import { Prisma } from "@sms/db";
 import type { MedicalRecordDto } from "@sms/types";
 import { missingProfileFields } from "@sms/types";
-import type { SisCompletionDto } from "@sms/types";
+import type { ProfileReviewRowDto, SisCompletionDto } from "@sms/types";
 import { decryptField, encryptField } from "../foundation/field-crypto";
 import {
   AUDIT_LOG_SERVICE,
@@ -90,6 +90,76 @@ export class SisService {
   }
   private isSchoolWide(p: Principal): boolean {
     return p.roles.some((r) => SCHOOL_WIDE_ROLES.has(r));
+  }
+
+  /**
+   * What is waiting for THIS reviewer.
+   *
+   * The three chain endpoints each act on one named pupil, which is useless
+   * until you know which pupil — so both review stages had no way in. This is
+   * the way in, and it decides the stage rather than asking the reader which
+   * they are:
+   *
+   *   SUPERVISOR — submitted, not yet checked, in a class this caller supervises.
+   *   ADMIN      — checked by the supervisor, waiting on `rbac.manage`.
+   *
+   * A school-wide role sees both, because they can act on both. One indexed
+   * query over submitted profiles, then names; the roster is never walked.
+   */
+  async profileReviewQueue(p: Principal): Promise<ProfileReviewRowDto[]> {
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      const wide = this.isSchoolWide(p);
+      const canApprove = wide || p.permissions.includes("rbac.manage");
+      const rows = (await tx.studentProfile.findMany({
+        where: { profileStatus: "SUBMITTED" },
+        select: { studentId: true, submittedAt: true, supervisorReviewedAt: true },
+        orderBy: { submittedAt: "asc" },
+        take: 500,
+      })) as Array<{ studentId: string; submittedAt: Date | null; supervisorReviewedAt: Date | null }>;
+      if (rows.length === 0) return [];
+
+      // The classes this caller supervises — the same relationship
+      // `supervisorReview` enforces, so the queue can never offer a row the
+      // action would refuse.
+      const supervised = wide
+        ? null
+        : new Set(
+            (
+              (await tx.enrollment.findMany({
+                where: { status: "ACTIVE", studentId: { in: rows.map((r) => r.studentId) }, class: { supervisorId: p.userId } },
+                select: { studentId: true },
+              })) as Array<{ studentId: string }>
+            ).map((e) => e.studentId),
+          );
+
+      const visible = rows.filter((r) => {
+        const stageIsAdmin = !!r.supervisorReviewedAt;
+        if (stageIsAdmin) return canApprove;
+        return supervised === null || supervised.has(r.studentId);
+      });
+      if (visible.length === 0) return [];
+
+      const ids = visible.map((r) => r.studentId);
+      const [users, enrolments] = await Promise.all([
+        tx.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }),
+        tx.enrollment.findMany({
+          where: { studentId: { in: ids }, status: "ACTIVE" },
+          select: { studentId: true, class: { select: { name: true } } },
+        }),
+      ]);
+      const nameOf = new Map((users as Array<{ id: string; name: string }>).map((u) => [u.id, u.name]));
+      const classOf = new Map(
+        (enrolments as Array<{ studentId: string; class: { name: string } | null }>).map((e) => [e.studentId, e.class?.name ?? null]),
+      );
+      return visible.map((r) => ({
+        studentId: r.studentId,
+        studentName: nameOf.get(r.studentId) ?? "Pupil",
+        className: classOf.get(r.studentId) ?? null,
+        stage: (r.supervisorReviewedAt ? "ADMIN" : "SUPERVISOR") as "ADMIN" | "SUPERVISOR",
+        submittedAt: r.submittedAt,
+        supervisorReviewedAt: r.supervisorReviewedAt,
+      }));
+    });
   }
 
   // --- profile completion + two-stage review ---------------------------------
