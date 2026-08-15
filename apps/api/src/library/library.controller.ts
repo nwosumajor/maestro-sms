@@ -85,8 +85,9 @@ export class LibraryController {
   renew(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<BookLoanDto> {
     return this.library.renew(p, id);
   }
+  /** Library staff only: a return records that the book is physically back. */
   @Post("loans/:id/return")
-  @RequirePermission(LIBRARY_PERMISSIONS.LIBRARY_BORROW)
+  @RequirePermission(LIBRARY_PERMISSIONS.LIBRARY_MANAGE)
   returnLoan(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<BookLoanDto> {
     return this.library.returnLoan(p, id);
   }

@@ -94,9 +94,16 @@ describe("LibraryService", () => {
     expect(dto.fineMinor).toBe(25000);
   });
 
-  it("a student cannot return another borrower's loan (404)", async () => {
+  it("a student cannot return a loan at all — theirs or anyone's", async () => {
+    // Stronger than the rule this replaces. A return records that the book is
+    // physically back on the shelf, so it is the library's to record; a pupil
+    // could otherwise stop their own fine and keep the book. See
+    // return-is-a-physical-fact.spec.ts. The refusal is identical whichever loan
+    // id is passed, so it still discloses nothing about what exists.
     const { tx } = makeTx({ loan: { id: "l1", bookId: "b1", borrowerId: "someone-else", status: "ISSUED", dueAt: new Date() } });
-    await expect(svc(tx).returnLoan(student, "l1")).rejects.toThrow(/not found/i);
+    await expect(svc(tx).returnLoan(student, "l1")).rejects.toThrow(/library desk/i);
+    const own = makeTx({ loan: { id: "l1", bookId: "b1", borrowerId: student.userId, status: "ISSUED", dueAt: new Date() } });
+    await expect(svc(own.tx).returnLoan(student, "l1")).rejects.toThrow(/library desk/i);
   });
 
   it("listLoans batches book + borrower lookups (no per-loan N+1) and maps them", async () => {

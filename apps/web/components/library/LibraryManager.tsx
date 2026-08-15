@@ -126,7 +126,12 @@ export function LibraryManager({
                       {l.status === "ISSUED" && (
                         <span className="flex gap-1">
                           <Button variant="outline" size="sm" disabled={busy || l.renewedCount >= 2} onClick={() => run(() => postSms(`library/loans/${l.id}/renew`, {}), "Renewed.")}>Renew</Button>
-                          <Button variant="outline" size="sm" disabled={busy} onClick={() => run(() => postSms(`library/loans/${l.id}/return`, {}), "Returned.")}>Return</Button>
+                          {/* Library staff only: a return records that the book
+                              is physically back on the shelf. A borrower can
+                              renew from here, but hands the book in at the desk. */}
+                          {canManage && (
+                            <Button variant="outline" size="sm" disabled={busy} onClick={() => run(() => postSms(`library/loans/${l.id}/return`, {}), "Returned.")}>Return</Button>
+                          )}
                         </span>
                       )}
                       {canManage && l.fineMinor > 0 && !l.finePaid && (

@@ -190,12 +190,33 @@ export class LibraryService {
     });
   }
 
-  /** Return a book; compute any overdue fine. Librarian or the borrower. */
+  /**
+   * Return a book; compute any overdue fine. LIBRARY STAFF ONLY.
+   *
+   * A return record asserts a physical fact: the book is back on the shelf. It
+   * used to accept the borrower too, and every consequence followed from that
+   * one assertion — the copy went back into `availableCopies`, the fine stopped
+   * accruing at that instant, and the loan left the overdue list. So a pupil
+   * could mark a book returned and keep it: the shelf count says the library has
+   * a copy it does not have, the next borrower is issued a phantom, the fine is
+   * frozen at whatever it had reached, and no overdue report ever names them
+   * again. Nothing here is malicious-only — a pupil who has simply LOST a book
+   * can close their own liability with one button.
+   *
+   * The platform already draws this line for the same reason: who may take an
+   * attendance register is restricted because the register records who
+   * physically looked at the room. Renewal stays self-service — extending a due
+   * date asserts nothing about where the book is.
+   */
   async returnLoan(p: Principal, loanId: string): Promise<BookLoanDto> {
+    if (!this.isLibrarian(p)) {
+      throw new ForbiddenException(
+        "A return is recorded by the library when the book is handed in. Take it to the library desk.",
+      );
+    }
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const loan = await tx.bookLoan.findFirst({ where: { id: loanId } });
       if (!loan) throw new NotFoundException("Loan not found");
-      if (!this.isLibrarian(p) && loan.borrowerId !== p.userId) throw new NotFoundException("Loan not found");
       if (loan.status !== "ISSUED") throw new BadRequestException("Loan already returned");
       const now = new Date();
       const daysLate = Math.max(0, Math.floor((now.getTime() - loan.dueAt.getTime()) / DAY_MS));
