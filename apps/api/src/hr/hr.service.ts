@@ -41,6 +41,26 @@ export interface SelfProfileInput {
   bankAccount?: string | null;
 }
 
+/** Every key except the ciphertext ones — enforced in the type, not by hand. */
+type WithoutCiphertext<T> = { [K in keyof T as K extends `${string}Enc` ? never : K]: T[K] };
+
+/**
+ * Drop every `*Enc` column from a row on its way out.
+ *
+ * The naming convention IS the marker for "this is ciphertext", so it is also
+ * the safest thing to key the rule on: a column added later is covered without
+ * anyone editing this file. See `decorate` for what went wrong without it.
+ */
+function withoutCiphertext<T extends object>(row: T): WithoutCiphertext<T> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(row)) {
+    if (!k.endsWith("Enc")) out[k] = v;
+  }
+  // reason: the mapped type above expresses exactly this filter, which the
+  // compiler cannot verify through Object.entries.
+  return out as WithoutCiphertext<T>;
+}
+
 @Injectable()
 export class HrService {
   constructor(
@@ -289,6 +309,23 @@ export class HrService {
 
   /** Replace the encrypted salary/statutory ids with decrypted values for the
    *  (audited, hr.read-gated) reader. */
+  /**
+   * Employment row → what an HR reader is allowed to see.
+   *
+   * SECURITY: no ciphertext column leaves this mapper, as a RULE rather than a
+   * list. It used to name the three it knew about — salary, TIN, RSA PIN — and
+   * spread everything else. The six field-encrypted self-service columns
+   * (phone/address/next of kin ×2/bank name/bank account) were added to the
+   * model in a later batch, and rode straight out to every `hr.read` holder as
+   * raw ciphertext: unusable to the client, unnecessary on the wire, and a blob
+   * whose length still tells you something about the plaintext. Those fields
+   * belong to `GET /hr/me`, which decrypts them for the one person they concern.
+   *
+   * The list was the bug, so the fix is not a longer list: any column added
+   * later whose name ends in `Enc` is dropped without anyone remembering to come
+   * back here. The staff member's own view and the payroll bank export read
+   * those columns directly and decrypt what they need.
+   */
   private decorate<T extends { salaryEnc: string | null; tinEnc?: string | null; rsaPinEnc?: string | null }>(
     e: T,
     schoolId: string,
@@ -296,7 +333,7 @@ export class HrService {
     const { salaryEnc, tinEnc, rsaPinEnc, ...rest } = e;
     const dec = salaryEnc ? decryptField(salaryEnc, schoolId) : null;
     return {
-      ...rest,
+      ...withoutCiphertext(rest),
       salaryMinor: dec ? Number(dec) : null,
       tin: tinEnc ? decryptField(tinEnc, schoolId) : null,
       rsaPin: rsaPinEnc ? decryptField(rsaPinEnc, schoolId) : null,
