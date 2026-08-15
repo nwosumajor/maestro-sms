@@ -58,7 +58,7 @@ describe("the push classifies why it skipped somebody", () => {
   });
 
   it("returns the reasons to the caller", () => {
-    expect(SRC).toMatch(/return \{ recorded, skipped, examMax, reasons \};/);
+    expect(SRC).toMatch(/return \{ recorded, skipped, examMax, reasons, termId: plan\.termId, termName: plan\.termName \};/);
   });
 
   it("audits them too", () => {
@@ -113,7 +113,7 @@ describe("driving the push", () => {
       cbtSitting: { findMany: jest.fn(async () => sittings), updateMany: jest.fn(async () => ({ count: 0 })) },
       cbtTheoryAnswer: { findMany: jest.fn(async () => []) },
       cbtQuestion: { findMany: jest.fn(async () => [{ id: "q1", type: "OBJECTIVE", maxMarks: 1 }, { id: "q2", type: "OBJECTIVE", maxMarks: 1 }]) },
-      term: { findFirst: jest.fn(async () => ({ id: "term-1", sessionId: "sess-1" })) },
+      term: { findFirst: jest.fn(async () => ({ id: "term-1", name: "First Term", sessionId: "sess-1" })) },
       auditLog: { create: jest.fn(async () => ({})) },
     } as unknown as Record<string, unknown>;
     const db = {
@@ -179,6 +179,20 @@ describe("driving the push", () => {
     expect(out.reasons.failed).toBe(1);
   });
 
+  it("says WHICH TERM the marks landed in", async () => {
+    // A paper with no term of its own uses the school's CURRENT term, so
+    // pressing this in Second Term for a First Term paper writes to Second Term.
+    // The fallback is right; being silent about it was not — it confused the
+    // author of this code during the live check.
+    const { service } = makeService(async () => ({}));
+    const out = (await service.recordExamGrades(staff, "exam-1")) as unknown as {
+      termId: string;
+      termName: string;
+    };
+    expect(out.termId).toBe("term-1");
+    expect(out.termName).toBe("First Term");
+  });
+
   it("scales to the school's own exam maximum and never exceeds it", async () => {
     // 8 of 2 marks is above full; the clamp is what keeps a /60 component at 60.
     const { service, termResults } = makeService(async () => ({}));
@@ -202,7 +216,7 @@ describe("the screen reports the outcome", () => {
 
   it("says plainly when nothing was recorded", () => {
     // The case that used to read as success.
-    expect(PANEL).toMatch(/recorded === 0\s*\?\s*`Nothing was recorded\./);
+    expect(PANEL).toMatch(/recorded === 0\s*\?\s*`Nothing was recorded\$\{where\}\./);
   });
 
   it("names the review hold, which is the actionable one", () => {

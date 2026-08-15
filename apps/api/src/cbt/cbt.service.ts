@@ -1356,6 +1356,10 @@ export class CbtService {
     examMax: number;
     /** Why each skipped candidate was skipped — see the loop below. */
     reasons: { awaitingApproval: number; notInClass: number; unmarked: number; failed: number };
+    /** WHICH gradesheet was written — a paper with no term of its own uses the
+     *  school's current term, and the caller could not previously tell. */
+    termId: string;
+    termName: string;
   }> {
     const plan = await this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       const exam = await tx.cbtExam.findFirst({ where: { id: examId } });
@@ -1366,7 +1370,16 @@ export class CbtService {
       }
       if (!exam.classId) throw new BadRequestException("This paper is not aimed at a class, so it has no gradesheet to write to");
       if (!bank.subjectId) throw new BadRequestException("This paper's bank has no subject, so it has no gradesheet column");
-      const termId = exam.termId ?? (await tx.term.findFirst({ where: { isCurrent: true }, select: { id: true } }))?.id;
+      // WHICH TERM these marks land in. A paper that carries no term of its own
+      // falls back to the school's CURRENT term — so pressing this in Second
+      // Term for a First Term paper files the marks against Second Term. The
+      // fallback is right (most papers are set and marked in the same term), but
+      // it was silent: nothing in the response or the screen said which
+      // gradesheet had just been written. It is reported now.
+      const term = exam.termId
+        ? await tx.term.findFirst({ where: { id: exam.termId }, select: { id: true, name: true } })
+        : await tx.term.findFirst({ where: { isCurrent: true }, select: { id: true, name: true } });
+      const termId = term?.id;
       if (!termId) throw new BadRequestException("No term is set for this paper and no current term is configured");
 
       // Only finished scripts are gradeable — so finish the ones that are over
@@ -1411,7 +1424,7 @@ export class CbtService {
       const examMax =
         (await this.region.academicInTx(tx, p.schoolId)).grading.components.find((c: { key: string; max: number }) => c.key === "exam")
           ?.max ?? gradeComponentMax("exam");
-      return { classId: exam.classId, subjectId: bank.subjectId, termId, rows, examMax };
+      return { classId: exam.classId, subjectId: bank.subjectId, termId, termName: term?.name ?? "", rows, examMax };
     });
 
     // Scale to the gradesheet's exam component and write through the merge-aware
@@ -1462,7 +1475,7 @@ export class CbtService {
     await this.db.runAsTenant(this.ctx(p), (tx) =>
       this.log(tx, p, "cbt.exam.grades.record", examId, { recorded, skipped, examMax, reasons }),
     );
-    return { recorded, skipped, examMax, reasons };
+    return { recorded, skipped, examMax, reasons, termId: plan.termId, termName: plan.termName };
   }
 
   // --- exam integrity ------------------------------------------------------------

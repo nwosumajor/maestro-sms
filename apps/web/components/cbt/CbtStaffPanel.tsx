@@ -179,6 +179,7 @@ export function CbtStaffPanel({
       recorded?: number;
       skipped?: number;
       reasons?: { awaitingApproval?: number; notInClass?: number; unmarked?: number; failed?: number };
+      termName?: string;
     } | null;
     const recorded = r?.recorded ?? 0;
     const skipped = r?.skipped ?? 0;
@@ -188,10 +189,14 @@ export function CbtStaffPanel({
     if (r?.reasons?.unmarked) why.push(`${r.reasons.unmarked} with no marks to record`);
     if (r?.reasons?.failed) why.push(`${r.reasons.failed} failed`);
     const tail = why.length ? ` Skipped ${skipped}: ${why.join("; ")}.` : "";
+    // Name the TERM. A paper with no term of its own writes to the school's
+    // current term, and a teacher pressing this for last term's paper has no
+    // other way to see which gradesheet they just filled.
+    const where = r?.termName ? ` (${r.termName})` : "";
     setMsg(
       recorded === 0
-        ? `Nothing was recorded.${tail || ` Skipped ${skipped}.`}`
-        : `Recorded ${recorded} to the gradesheet.${tail}`,
+        ? `Nothing was recorded${where}.${tail || ` Skipped ${skipped}.`}`
+        : `Recorded ${recorded} to the gradesheet${where}.${tail}`,
     );
   };
 
