@@ -597,3 +597,53 @@ export interface ClassBroadsheetDto {
 export function sessionAverageScope(counted: number, total: number): string {
   return total > 0 && counted < total ? `${counted} of ${total} terms recorded` : `all ${counted} terms`;
 }
+
+// -----------------------------------------------------------------------------
+// Subject performance analytics — one row per class-subject
+// -----------------------------------------------------------------------------
+// The question a teacher actually asks after entering marks is not "what did
+// each pupil get" (the roster answers that) but "how did the class do, and where
+// did they lose it". So the row carries the COMPONENT averages alongside the
+// overall one: a class averaging 58 with an exam mean of 31/60 and an assignment
+// mean of 9/10 has an exam problem, not a coursework problem, and that is
+// actionable in a way a single number is not.
+//
+// `published` is reported next to `entered` on purpose. Staff analytics counts
+// marks that are still DRAFT — refusing to show a teacher their own unpublished
+// class average would make the view useless exactly when it is most wanted,
+// before results go out — but a reader deserves to know how firm the figure is.
+export interface SubjectAnalyticsRowDto {
+  classId: string;
+  className: string;
+  subjectId: string;
+  subjectName: string;
+  /** Marks recorded for this class-subject in the term (any status). */
+  entered: number;
+  /** How many of those are PUBLISHED — the rest are still provisional. */
+  published: number;
+  /** Weighted total, averaged. Null when nothing is recorded yet. */
+  averageTotal: number | null;
+  highest: number | null;
+  lowest: number | null;
+  /** Component averages, each on ITS OWN scale (exam /60, midterm /20, …). */
+  components: {
+    exam: number | null;
+    midterm: number | null;
+    assignment: number | null;
+    classNote: number | null;
+  };
+  /** Distribution over the SCHOOL'S OWN grade scale, in its own order. */
+  bands: Array<{ grade: string; count: number }>;
+}
+
+export interface SubjectAnalyticsDto {
+  termId: string;
+  /**
+   * "school" — every class-subject in the school (leadership).
+   * "teaching" — only the class-subjects this caller teaches.
+   * Stated in the payload so a screen can say which it is showing rather than
+   * leaving a teacher to wonder whether the school really has three subjects.
+   */
+  scope: "school" | "teaching";
+  rows: SubjectAnalyticsRowDto[];
+}

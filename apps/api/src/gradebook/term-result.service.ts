@@ -24,6 +24,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
+import { Prisma } from "@sms/db";
 import PDFDocument from "pdfkit";
 import {
   computeTermSubjectGrade,
@@ -40,6 +41,7 @@ import {
   type SubjectSessionSummaryDto,
   type TermSubjectRowDto,
   type ClassBroadsheetDto,
+  type SubjectAnalyticsDto,
   resolveGradeBands,
   gradeLetter,
 } from "@sms/types";
@@ -1166,6 +1168,129 @@ export class TermResultService {
    *  is the working sheet for staff-of-class, so it shows ALL statuses (DRAFT
    *  included) — it is NOT the family view. Caller must supervise/teach the class
    *  (else 404). */
+  /**
+   * How each class-subject performed this term.
+   *
+   * TWO AUDIENCES, ONE QUERY. A subject teacher gets the class-subjects THEY
+   * teach; leadership gets the school's. The split reuses what already exists
+   * rather than introducing a parallel idea of who-may-see-what:
+   *
+   *   * `classSubjectTeacher` is the definition of "the subjects I teach" — it
+   *     already decides who may GRADE a class-subject, so what a teacher can
+   *     analyse can never drift from what they can mark;
+   *   * `READ_WIDE_ROLES` is already this service's answer to "who may read any
+   *     class's marks" (principal, head_teacher, school_admin, board,
+   *     junior_admin), so leadership needs no new permission and no seed change.
+   *
+   * Anyone else — a parent or pupil, who both hold `grade.read` — resolves to an
+   * empty offering set and therefore an empty result. That falls out of the
+   * scoping rather than needing a special case, and discloses nothing.
+   *
+   * ONE aggregate, computed in Postgres. The alternative is reading every mark
+   * in the term into Node to average them, which grows with the school and with
+   * every year it stays on the platform; `subject_result` is already indexed on
+   * (schoolId, classId, subjectId, termId), which is exactly this GROUP BY.
+   */
+  async subjectAnalytics(
+    p: Principal,
+    args: { termId: string; classId?: string; subjectId?: string },
+  ): Promise<SubjectAnalyticsDto> {
+    const { termId } = args;
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      const schoolWide = this.isReadWide(p);
+      const bands = resolveGradeBands((await this.region.academicInTx(tx, p.schoolId)).grading);
+
+      // The class-subjects this caller may look at.
+      let pairs: Array<{ classId: string; subjectId: string }> | null = null; // null = everything
+      if (!schoolWide) {
+        const mine = await tx.classSubjectTeacher.findMany({
+          where: { teacherId: p.userId },
+          select: { classId: true, subjectId: true },
+        });
+        pairs = mine.map((o) => ({ classId: o.classId, subjectId: o.subjectId }));
+        if (pairs.length === 0) return { termId, scope: "teaching", rows: [] };
+      }
+
+      const filters = [Prisma.sql`sr."termId" = ${termId}::uuid`];
+      if (args.classId) filters.push(Prisma.sql`sr."classId" = ${args.classId}::uuid`);
+      if (args.subjectId) filters.push(Prisma.sql`sr."subjectId" = ${args.subjectId}::uuid`);
+      if (pairs) {
+        // The caller's own offerings, as pairs — never "any of my classes" x "any
+        // of my subjects", which would show a teacher a colleague's subject in a
+        // class they happen to share.
+        const tuples = pairs.map((o) => Prisma.sql`(${o.classId}::uuid, ${o.subjectId}::uuid)`);
+        filters.push(Prisma.sql`(sr."classId", sr."subjectId") IN (${Prisma.join(tuples, ", ")})`);
+      }
+
+      // Band counts over the school's own scale, in its own order — the same
+      // resolveGradeBands the report card grades on, so a WAEC school sees its
+      // nine bands here too.
+      const bandCols = bands.map((b, i) => {
+        const upper = i === 0 ? null : bands[i - 1].min;
+        const cond =
+          upper === null
+            ? Prisma.sql`sr.total >= ${b.min}`
+            : Prisma.sql`sr.total >= ${b.min} AND sr.total < ${upper}`;
+        return Prisma.sql`count(*) FILTER (WHERE sr.total IS NOT NULL AND ${cond})::int AS ${Prisma.raw(
+          `"band_${b.grade.replace(/[^\w]/g, "")}"`,
+        )}`;
+      });
+
+      const rows = await tx.$queryRaw<
+        Array<Record<string, string | number | null>>
+      >(Prisma.sql`
+        SELECT sr."classId"::text          AS "classId",
+               sr."subjectId"::text        AS "subjectId",
+               c.name                      AS "className",
+               s.name                      AS "subjectName",
+               count(*)::int               AS entered,
+               count(*) FILTER (WHERE sr.status = 'PUBLISHED')::int AS published,
+               ROUND(AVG(sr.total)::numeric, 1)::float8      AS "averageTotal",
+               MAX(sr.total)::float8       AS highest,
+               MIN(sr.total)::float8       AS lowest,
+               ROUND(AVG(sr.exam)::numeric, 1)::float8       AS "avgExam",
+               ROUND(AVG(sr.midterm)::numeric, 1)::float8    AS "avgMidterm",
+               ROUND(AVG(sr.assignment)::numeric, 1)::float8 AS "avgAssignment",
+               ROUND(AVG(sr."classNote")::numeric, 1)::float8 AS "avgClassNote"
+               ${bandCols.length ? Prisma.sql`, ${Prisma.join(bandCols, ", ")}` : Prisma.empty}
+        FROM subject_result sr
+        JOIN class c   ON c.id = sr."classId"
+        JOIN subject s ON s.id = sr."subjectId"
+        WHERE ${Prisma.join(filters, " AND ")}
+        GROUP BY sr."classId", sr."subjectId", c.name, s.name
+        ORDER BY c.name, s.name`);
+
+      const num = (v: string | number | null | undefined): number | null =>
+        v === null || v === undefined ? null : Number(v);
+
+      return {
+        termId,
+        scope: schoolWide ? "school" : "teaching",
+        rows: rows.map((r) => ({
+          classId: String(r.classId),
+          className: String(r.className ?? ""),
+          subjectId: String(r.subjectId),
+          subjectName: String(r.subjectName ?? ""),
+          entered: Number(r.entered ?? 0),
+          published: Number(r.published ?? 0),
+          averageTotal: num(r.averageTotal),
+          highest: num(r.highest),
+          lowest: num(r.lowest),
+          components: {
+            exam: num(r.avgExam),
+            midterm: num(r.avgMidterm),
+            assignment: num(r.avgAssignment),
+            classNote: num(r.avgClassNote),
+          },
+          bands: bands.map((b) => ({
+            grade: b.grade,
+            count: Number(r[`band_${b.grade.replace(/[^\w]/g, "")}`] ?? 0),
+          })),
+        })),
+      };
+    });
+  }
+
   async getClassBroadsheet(
     p: Principal,
     args: { classId: string; termId: string },

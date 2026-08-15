@@ -8,6 +8,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { GradingConsole } from "@/components/gradebook/GradingConsole";
 import { ClassBroadsheet } from "@/components/gradebook/ClassBroadsheet";
+import { SubjectAnalytics } from "@/components/gradebook/SubjectAnalytics";
 import { ReportCard } from "@/components/gradebook/ReportCard";
 import { SubjectPicker } from "@/components/gradebook/SubjectPicker";
 import { SelectionReview } from "@/components/gradebook/SelectionReview";
@@ -75,6 +76,10 @@ export default async function GradebookPage() {
 
         {canGrade && <GradingConsole classes={classes} sessions={sessions} />}
         {canViewBroadsheet && <ClassBroadsheet classes={classes} sessions={sessions} />}
+        {/* Subject performance. Same staff gate as the score sheet — the SERVER
+            decides whether that means "the subjects I teach" or "the school's",
+            so this does not need to know the caller's role. */}
+        {canViewBroadsheet && <SubjectAnalytics sessions={sessions} />}
 
         {/* Student / parent report cards (their own / children's). */}
         {!canGrade && reports.length > 0 && (

@@ -4,6 +4,7 @@ import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
 import { z } from "zod";
 import { GRADEBOOK_PERMISSIONS, GRADE_TOTAL_MAX } from "@sms/types";
+import type { SubjectAnalyticsDto } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
@@ -45,6 +46,8 @@ const upsertResultSchema = z.object({
 });
 const publishSchema = z.object({ classId: uuid, subjectId: uuid, termId: uuid });
 const broadsheetQuerySchema = z.object({ classId: uuid, termId: uuid });
+// classId/subjectId narrow the view; omitted = every class-subject in scope.
+const analyticsQuerySchema = z.object({ termId: uuid, classId: uuid.optional(), subjectId: uuid.optional() });
 const selectionSubmitSchema = z.object({
   termId: uuid,
   subjectIds: z.array(uuid).min(1).max(30),
@@ -141,6 +144,26 @@ export class GradebookController {
     q: { classId: string; termId: string },
   ) {
     return this.termResults.getClassBroadsheet(p, q);
+  }
+
+  /**
+   * How each class-subject performed this term.
+   *
+   * Coarse gate only. `grade.read` is held by teachers, leadership, parents and
+   * pupils alike, so it cannot express who may see WHICH subjects — the service
+   * resolves that from the caller's own teaching offerings, and leadership from
+   * READ_WIDE_ROLES. A caller with no offerings (a parent, a pupil) gets an
+   * empty result rather than a refusal, because there is nothing to refuse:
+   * their scope is genuinely empty.
+   */
+  @Get("term-results/analytics")
+  @RequirePermission(GRADEBOOK_PERMISSIONS.GRADE_READ)
+  subjectAnalytics(
+    @CurrentPrincipal() p: Principal,
+    @Query(new ZodValidationPipe(analyticsQuerySchema))
+    q: { termId: string; classId?: string; subjectId?: string },
+  ): Promise<SubjectAnalyticsDto> {
+    return this.termResults.subjectAnalytics(p, q);
   }
 
   // --- per-term subject selection (student pick -> supervisor -> admin) -----
