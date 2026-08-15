@@ -10,6 +10,7 @@
 
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { AppraisalDto, DisciplinaryCaseDto, DisciplinaryEntryDto } from "@sms/types";
+import { NotificationService } from "../notifications/notification.service";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -33,6 +34,7 @@ export class HrReviewsService {
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
+    private readonly notifications: NotificationService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -88,8 +90,37 @@ export class HrReviewsService {
     });
   }
 
+  /**
+   * The reviewer finishes the appraisal and it becomes the appraisee's to
+   * acknowledge.
+   *
+   * TELL THEM. The chain is DRAFT → SUBMITTED by the reviewer → ACKNOWLEDGED by
+   * the APPRAISEE, so its final step is an action only that person can take —
+   * and nothing in this service told them there was anything to take. The
+   * appraisal simply appeared on a page they had no reason to open that week.
+   * A chain whose last step waits on somebody who was never asked does not
+   * complete; it stalls, and the stall looks like the staff member ignoring it.
+   *
+   * The notification carries NO rating and no comments. It says an appraisal is
+   * ready and where to read it — the record itself is behind the usual scoping,
+   * and a score is not something to put in an inbox line.
+   */
   async submitAppraisal(p: Principal, id: string): Promise<AppraisalDto> {
-    return this.transitionAppraisal(p, id, "SUBMITTED", "DRAFT", "hr.appraisal.submit");
+    const dto = await this.transitionAppraisal(p, id, "SUBMITTED", "DRAFT", "hr.appraisal.submit");
+    // After the transition commits: a notification failure must not undo a
+    // submitted appraisal.
+    try {
+      await this.notifications.enqueue(this.ctx(p), {
+        recipientId: dto.userId,
+        type: "GENERIC",
+        title: "Your appraisal is ready to read",
+        body: "Your reviewer has completed your performance appraisal. Open Leave & HR to read it and acknowledge it.",
+        data: { appraisalId: dto.id },
+      });
+    } catch {
+      /* non-fatal — the appraisal is the durable record, the notice is not */
+    }
+    return dto;
   }
 
   /** The appraisee acknowledges their OWN submitted appraisal. */

@@ -28,7 +28,15 @@ function make(over: { appraisal?: Record<string, unknown> | null; disciplinaryCa
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
-  return { service: new HrReviewsService(db as never, audit as never), appraisalUpdate, entryCreate };
+  // Submitting an appraisal now TELLS the appraisee — the chain's last step is
+  // theirs, and nothing used to ask them for it.
+  const notifications = { enqueue: jest.fn().mockResolvedValue(undefined), enqueueMany: jest.fn().mockResolvedValue(undefined) };
+  return {
+    service: new HrReviewsService(db as never, audit as never, notifications as never),
+    appraisalUpdate,
+    entryCreate,
+    notifications,
+  };
 }
 
 const p = (userId = "hr1"): Principal => ({ schoolId: "A", userId, roles: [], permissions: [] });
