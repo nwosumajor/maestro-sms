@@ -1749,6 +1749,75 @@ const meetingCohostA = randomUUID();
     expect(rows.length).toBeGreaterThan(150);
   });
 
+  /**
+   * LEAST PRIVILEGE, AS A TEST RATHER THAN A PROMISE.
+   *
+   * Golden Rule #4 and half a dozen module notes state what the app role may not
+   * do: an audit entry cannot be edited or removed, telemetry about minors can
+   * only be deleted by the retention job's own role, a financial record is never
+   * hard-deleted, a commission ledger is unreachable entirely. Every one of those
+   * guarantees rested on a GRANT in an `rls/*.sql` file and on nobody later
+   * adding a broader one.
+   *
+   * These were verified by hand against the running database and all held. This
+   * pins them, because the failure mode is silent: a table whose privileges drift
+   * still passes every functional test — the code simply becomes able to do
+   * something the design says it cannot, and nothing says so until someone
+   * deletes an audit row.
+   *
+   * Deliberately a small, explicit table: the point is the DOCUMENTED posture,
+   * not whatever the database currently happens to have.
+   */
+  it("the app role's privileges match the documented posture (least privilege)", async () => {
+    // APPEND_ONLY: written once, never changed or removed.
+    const APPEND_ONLY = [
+      "audit_log", // an audit trail that can be edited is not one
+      "workflow_audit_log",
+      "integrity_signal", // minors' telemetry — deletion belongs to the retention role
+      "submission_draft",
+      "submission_telemetry",
+      "disciplinary_entry", // the history of a staff case is tamper-evident
+      "scan_event",
+      "student_credit_entry", // ledgers are summed, never amended
+      "message_credit_entry",
+      "school_referral_conversion",
+      "gateway_event",
+    ];
+    // NO_DELETE: a financial record may be corrected, never made to disappear.
+    const NO_DELETE = ["payment", "invoice", "payment_dispute", "platform_subscription_payment"];
+    // READ_ONLY: operator-owned; writes go through the privileged client.
+    const READ_ONLY = ["plan_price"];
+    // DENY_ALL: the app role holds nothing at all.
+    const DENY_ALL = ["agent_commission"];
+
+    const { rows } = await adminPool.query<{ table_name: string; privs: string }>(`
+      SELECT table_name, string_agg(privilege_type, ',' ORDER BY privilege_type) AS privs
+      FROM information_schema.role_table_grants
+      WHERE grantee = 'major_user' AND table_schema = 'public'
+      GROUP BY table_name`);
+    const privsOf = new Map(rows.map((r) => [r.table_name, r.privs]));
+
+    const offenders: string[] = [];
+    const check = (table: string, want: string) => {
+      const got = privsOf.get(table);
+      // An absent table is reported, not skipped: silently passing on a table
+      // that no longer exists is how this kind of test rots.
+      if (got === undefined && want !== "") return offenders.push(`${table}: no grants found (renamed or not applied?)`);
+      if ((got ?? "") !== want) offenders.push(`${table}: '${got ?? "(none)"}', expected '${want || "(none)"}'`);
+    };
+    for (const t of APPEND_ONLY) check(t, "INSERT,SELECT");
+    for (const t of NO_DELETE) check(t, "INSERT,SELECT,UPDATE");
+    for (const t of READ_ONLY) check(t, "SELECT");
+    for (const t of DENY_ALL) {
+      if (privsOf.has(t)) offenders.push(`${t}: '${privsOf.get(t)}', expected NO grants at all`);
+    }
+
+    // A failure names the table and both sides. If a NEW grant is genuinely
+    // intended, change the list here in the same commit as the rls/*.sql file —
+    // that is the point of the test, not an obstacle to it.
+    expect(offenders).toEqual([]);
+  });
+
   it("gateway_event: the app role can INSERT with NO tenant GUC (webhook context), null-school rows are invisible to tenants, and UPDATE is denied", async () => {
     const id = randomUUID();
     // System-context INSERT (no GUC set) — the webhook writes before tenant resolution.
