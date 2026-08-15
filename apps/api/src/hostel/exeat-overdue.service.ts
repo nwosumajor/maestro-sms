@@ -32,7 +32,10 @@ import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
 
 /** Who is told. The warden of that hostel is the first responder; the seniors
  *  are told too, because a late boarder is not a matter for one person. */
-const ALERT_ROLES = ["warden", "head_warden", "school_admin", "principal"];
+// Roles that are school-wide by design and get EVERY overdue alert. The
+// hostel's own warden is added per exeat (see below) — a warden's authority is
+// their own hostel, and this sweep used to tell all of them about every child.
+const SCHOOL_WIDE_ALERT_ROLES = ["head_warden", "school_admin", "principal"];
 
 export interface OverdueSweepResult {
   scanned: number;
@@ -85,9 +88,9 @@ export class ExeatOverdueService {
 
     for (const [schoolId, exeats] of bySchool) {
       try {
-        const [staff, students] = await Promise.all([
+        const [staff, students, hostels] = await Promise.all([
           client.userRole.findMany({
-            where: { schoolId, role: { name: { in: ALERT_ROLES } } },
+            where: { schoolId, role: { name: { in: SCHOOL_WIDE_ALERT_ROLES } } },
             select: { userId: true },
             distinct: ["userId"],
           }),
@@ -95,18 +98,49 @@ export class ExeatOverdueService {
             where: { id: { in: [...new Set(exeats.map((e) => e.studentId))] } },
             select: { id: true, name: true },
           }),
+          // THE WARDEN OF THAT HOSTEL, not every warden in the school.
+          //
+          // A warden's authority is their own hostel — `assertHostelInScope`
+          // enforces exactly that on every other hostel read and write, 404 for
+          // anything else. This sweep was the one place that ignored it, so a
+          // warden of Hostel B learned that a named child from Hostel A was
+          // missing and where they had gone. Head wardens and the school office
+          // are school-wide by design and still get every alert.
+          client.hostel.findMany({
+            where: { id: { in: [...new Set(exeats.map((e) => e.hostelId))] } },
+            select: { id: true, wardenId: true },
+          }),
         ]);
         const nameOf = new Map(students.map((s) => [s.id, s.name]));
-        const recipients = staff.map((s) => s.userId);
-        if (recipients.length === 0) {
+        const wardenOf = new Map(
+          (hostels as Array<{ id: string; wardenId: string | null }>).map((h) => [h.id, h.wardenId]),
+        );
+        const schoolWide = staff.map((s) => s.userId);
+        if (schoolWide.length === 0 && hostels.every((h: { wardenId: string | null }) => !h.wardenId)) {
           // Said out loud. A school with nobody in these roles gets no alert,
           // and silently dropping it would look identical to "nobody is late".
-          this.logger.warn(`school=${schoolId}: ${exeats.length} overdue boarder(s) but no warden or admin to tell`);
+          this.logger.warn(
+            `school=${schoolId}: ${exeats.length} overdue boarder(s) but no head warden, administrator or hostel warden to tell`,
+          );
           continue;
         }
 
         for (const e of exeats) {
           const name = nameOf.get(e.studentId) ?? "A boarder";
+          // This hostel's own warden, plus everyone school-wide. Deduped: a head
+          // warden who also wardens this hostel must not be told twice.
+          const warden = wardenOf.get(e.hostelId);
+          const recipients = [...new Set([...schoolWide, ...(warden ? [warden] : [])])];
+          if (recipients.length === 0) {
+            // Say it rather than skipping quietly: this hostel has no warden and
+            // the school has nobody school-wide, so a child is late back and
+            // there is literally nobody to tell. Left unmarked so the next hour
+            // tries again.
+            this.logger.warn(
+              `school=${schoolId} hostel=${e.hostelId}: boarder overdue but no warden or administrator to alert`,
+            );
+            continue;
+          }
           const dueAt = e.expectedReturnAt.toISOString().slice(0, 16).replace("T", " ");
           await this.notifications.enqueueMany(
             { schoolId, userId: SYSTEM_ACTOR_ID },

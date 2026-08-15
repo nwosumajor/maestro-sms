@@ -19,13 +19,22 @@ import { DEFAULT_EXEAT_OVERDUE_CRON } from "../../src/hostel/hostel.constants";
 const NOW = new Date("2026-08-13T20:00:00Z");
 const SCHOOL = "11111111-1111-1111-1111-111111111111";
 
-function makeService(exeats: Array<Record<string, unknown>>, staff = [{ userId: "warden-1" }]) {
+// `staff` is now the SCHOOL-WIDE set (head warden / office). The hostel's own
+// warden is resolved from the hostel itself, because a warden's authority is
+// their own hostel — the sweep used to tell every warden in the school about
+// every child.
+function makeService(
+  exeats: Array<Record<string, unknown>>,
+  staff = [{ userId: "head-warden-1" }],
+  hostels: Array<{ id: string; wardenId: string | null }> = [{ id: "h-1", wardenId: "warden-1" }],
+) {
   const updateMany = jest.fn().mockResolvedValue({ count: exeats.length });
   const enqueueMany = jest.fn().mockResolvedValue(undefined);
   const client = {
     hostelExeat: { findMany: jest.fn().mockResolvedValue(exeats), updateMany },
     userRole: { findMany: jest.fn().mockResolvedValue(staff) },
     user: { findMany: jest.fn().mockResolvedValue([{ id: "kid-1", name: "Ada Obi" }]) },
+    hostel: { findMany: jest.fn().mockResolvedValue(hostels) },
   };
   const svc = Object.create(ExeatOverdueService.prototype) as ExeatOverdueService;
   Object.assign(svc, {
@@ -62,7 +71,8 @@ describe("the overdue sweep", () => {
     const r = await svc.sweep(NOW);
     expect(r).toMatchObject({ scanned: 1, alerted: 1 });
     const [, recipients, payload] = enqueueMany.mock.calls[0];
-    expect(recipients).toEqual(["warden-1"]);
+    // School-wide staff PLUS this hostel's own warden — and nobody else's.
+    expect(recipients.sort()).toEqual(["head-warden-1", "warden-1"]);
     expect(payload.title).toMatch(/Ada Obi is late back/);
     // The alert has to say what to DO, not just that something is wrong.
     expect(payload.body).toMatch(/due back at 2026-08-13 18:00/);
@@ -87,6 +97,19 @@ describe("the overdue sweep", () => {
     expect(updateMany.mock.calls[0][0].data).toEqual({ overdueNotifiedAt: NOW });
   });
 
+  it("does NOT tell the warden of a different hostel", async () => {
+    // The defect this scoping fixes: a warden of Hostel B used to learn that a
+    // named child from Hostel A was missing, and which address they went to.
+    const { svc, enqueueMany } = makeService([overdueExeat], [], [
+      { id: "h-1", wardenId: "warden-1" },
+      { id: "h-2", wardenId: "warden-2" },
+    ]);
+    await svc.sweep(NOW);
+    const [, recipients] = enqueueMany.mock.calls[0];
+    expect(recipients).toEqual(["warden-1"]);
+    expect(recipients).not.toContain("warden-2");
+  });
+
   it("marks only AFTER alerting, so a failure retries next hour", async () => {
     const { svc, enqueueMany, updateMany } = makeService([overdueExeat]);
     enqueueMany.mockRejectedValueOnce(new Error("notify down"));
@@ -99,7 +122,9 @@ describe("the overdue sweep", () => {
 
   it("says so when a school has nobody to tell", async () => {
     // Silently dropping the alert would look identical to "nobody is late".
-    const { svc, enqueueMany, updateMany } = makeService([overdueExeat], []);
+    // Nobody school-wide AND the hostel has no warden: there is genuinely
+    // nobody to tell.
+    const { svc, enqueueMany, updateMany } = makeService([overdueExeat], [], [{ id: "h-1", wardenId: null }]);
     const r = await svc.sweep(NOW);
     expect(enqueueMany).not.toHaveBeenCalled();
     expect(updateMany).not.toHaveBeenCalled();
