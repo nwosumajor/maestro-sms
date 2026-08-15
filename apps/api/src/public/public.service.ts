@@ -13,8 +13,11 @@ import bcrypt from "bcryptjs";
 import { Prisma, prisma } from "@sms/db";
 import { LEGAL_DOCS_VERSION, isModuleKey, isPlan, type PublicSchoolDto } from "@sms/types";
 import {
+  AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
+  type AuditLogService,
   type TenantDatabase,
+  type TenantTx,
 } from "../integrity/integrity.foundation";
 import { NotificationService } from "../notifications/notification.service";
 import { EmailService } from "../notifications/email.service";
@@ -54,10 +57,35 @@ export class PublicService {
 
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
+    @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly notifications: NotificationService,
     private readonly email: EmailService,
     private readonly privileged: PrivilegedDatabaseService,
   ) {}
+
+  /**
+   * Record a credential event on a PUBLIC path.
+   *
+   * These routes are unauthenticated, but they are not anonymous: the token
+   * names the user, so the audit row has a real actor and lands in that user's
+   * own school. Never the token, never the password, never the address — only
+   * that the account's credentials were set, and when.
+   *
+   * The audit log is where a school answers "how did somebody get into this
+   * account", and an emailed reset link is the likeliest way in. Before this,
+   * login, failed login, lockout, the in-app change and the operator's forced
+   * reset were all recorded — while the three ways a password is actually set
+   * from outside the app were not. An investigator saw failed logins, then
+   * successful ones, and nothing in between to explain the change.
+   */
+  private async auditCredentialEvent(
+    schoolId: string,
+    userId: string,
+    action: "auth.password.reset.requested" | "auth.password.reset.completed" | "auth.invite.accepted",
+    tx?: TenantTx,
+  ): Promise<void> {
+    await this.audit.record({ actorId: userId, action, entity: "user", entityId: userId, schoolId }, tx);
+  }
 
   /** PUBLIC: list onboarded (ACTIVE) schools for the parent directory. The
    *  admission-form fee is deliberately public — applicants must see the cost
@@ -169,6 +197,8 @@ export class PublicService {
           // staleness check is not left watching a password that no longer exists.
           data: { passwordHash, passwordChangedAt: new Date(), tempPasswordSetAt: null },
         });
+        // The first password an account ever has, set from outside the app.
+        await this.auditCredentialEvent(invite.schoolId, user.id, "auth.invite.accepted", tx);
         const school = await tx.school.findFirst({ where: { id: invite.schoolId }, select: { slug: true } });
         return { email: user.email, schoolSlug: school?.slug ?? "" };
       },
@@ -214,6 +244,11 @@ export class PublicService {
       const detail = await this.db.runAsTenant({ schoolId: user.school_id, userId: user.id }, async (tx) => {
         const u = await tx.user.findFirst({ where: { id: user.id }, select: { passwordChangedAt: true } });
         const school = await tx.school.findFirst({ where: { id: user.school_id }, select: { slug: true } });
+        // Recorded for a REAL account only — an unknown address has no actor to
+        // attribute it to, and inventing one would put attacker-supplied text in
+        // the log. This is also the row that shows somebody probing an account:
+        // a run of requests nobody completed is a story worth being able to read.
+        await this.auditCredentialEvent(user.school_id, user.id, "auth.password.reset.requested", tx);
         return { passwordChangedAt: u?.passwordChangedAt ?? null, slug: school?.slug ?? "" };
       });
       const base = process.env.PUBLIC_WEB_URL ?? "http://localhost:3000";
@@ -250,6 +285,10 @@ export class PublicService {
         where: { id: user.id },
         data: { passwordHash, passwordChangedAt: new Date(), tempPasswordSetAt: null },
       });
+      // In the SAME transaction as the password: a credential change that is
+      // recorded only sometimes is worse than one recorded never, because the
+      // gaps look like nothing happened.
+      await this.auditCredentialEvent(reset.schoolId, user.id, "auth.password.reset.completed", tx);
       const school = await tx.school.findFirst({ where: { id: reset.schoolId }, select: { slug: true } });
       return { email: user.email, schoolSlug: school?.slug ?? "" };
     });
