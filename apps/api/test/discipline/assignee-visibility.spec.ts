@@ -28,9 +28,27 @@ const stranger = { schoolId: "S", userId: "teach-2", roles: ["teacher"], permiss
 function makeService(opts: { assignedTo?: string[]; complainantId?: string } = {}) {
   const assigned = (opts.assignedTo ?? []).map((id) => ({ complaintId: COMPLAINT, assigneeId: id, id: "a1" }));
   const enqueue = jest.fn().mockResolvedValue(undefined);
+  // The row this school has. `get` now relies on the SCOPE to decide, rather
+  // than re-deriving a rule inline, so the fixture has to honour the where —
+  // returning the row unconditionally would make every scope test vacuous.
+  const row: Record<string, unknown> = {
+    id: COMPLAINT,
+    complainantId: opts.complainantId ?? "someone-else",
+    againstId: "pupil-9",
+    againstType: "STUDENT",
+    status: "OPEN",
+  };
+  const matches = (w: Record<string, unknown>): boolean =>
+    Object.entries(w).every(([k, v]) => {
+      if (k === "AND") return (v as Record<string, unknown>[]).every(matches);
+      if (k === "OR") return (v as Record<string, unknown>[]).some(matches);
+      if (k === "NOT") return !matches(v as Record<string, unknown>);
+      if (v && typeof v === "object") return ((v as { in: string[] }).in ?? []).includes(row[k] as string);
+      return row[k] === v;
+    });
   const tx = {
     disciplineComplaint: {
-      findFirst: jest.fn().mockResolvedValue({ id: COMPLAINT, complainantId: opts.complainantId ?? "someone-else" }),
+      findFirst: jest.fn(async (a: { where: Record<string, unknown> }) => (matches(a.where) ? row : null)),
       findFirstOrThrow: jest.fn().mockResolvedValue({ id: COMPLAINT, complainantId: opts.complainantId ?? "someone-else", status: "OPEN" }),
       findMany: jest.fn().mockResolvedValue([]),
     },
@@ -61,33 +79,46 @@ function makeService(opts: { assignedTo?: string[]; complainantId?: string } = {
   return { svc, tx, scope, enqueue };
 }
 
+// The clause is now `{ AND: [ {NOT: about-me}, {OR: buckets} ] }` — see
+// case-confidentiality.spec.ts for why the NOT exists. These tests are about the
+// buckets, so they read them out of that envelope.
+const bucketsOf = (where: Record<string, unknown>): Array<Record<string, unknown>> => {
+  const and = where.AND as Array<Record<string, unknown>>;
+  expect(and[0]).toEqual({ NOT: { againstId: expect.any(String) } });
+  return and[1].OR as Array<Record<string, unknown>>;
+};
+
 describe("who can see a complaint", () => {
   it("a manager sees the school's", async () => {
     const { scope, tx } = makeService();
-    expect(await scope(tx, manager)).toEqual({});
+    // Leadership: everything EXCEPT a case about themselves. No bucket list and
+    // no assignee lookup — there is nothing left for either to add.
+    expect(await scope(tx, manager)).toEqual({ NOT: { againstId: "mgr-1" } });
+    expect(tx.disciplineAssignee.findMany).not.toHaveBeenCalled();
   });
 
   it("somebody with no involvement sees only what they filed", async () => {
     const { scope, tx } = makeService();
-    expect(await scope(tx, stranger)).toEqual({ complainantId: "teach-2" });
+    expect(bucketsOf(await scope(tx, stranger))).toEqual([{ complainantId: "teach-2" }]);
   });
 
   it("AN ASSIGNEE SEES THE CASE THEY WERE GIVEN", async () => {
     // The gap. Before this the clause was `{ complainantId }` and nothing else,
     // so the assignment was invisible to the person holding it.
     const { scope, tx } = makeService({ assignedTo: ["teach-1"] });
-    expect(await scope(tx, assignee)).toEqual({
-      OR: [{ complainantId: "teach-1" }, { id: { in: [COMPLAINT] } }],
-    });
+    expect(bucketsOf(await scope(tx, assignee))).toEqual([
+      { complainantId: "teach-1" },
+      { id: { in: [COMPLAINT] } },
+    ]);
   });
 
   it("and NOTHING ELSE — the default stays closed", async () => {
     // These are records about children. Being assigned one case must not widen
     // sight of any other.
     const { scope, tx } = makeService({ assignedTo: ["teach-1"] });
-    const where = (await scope(tx, assignee)) as { OR: Array<Record<string, unknown>> };
-    expect(where.OR).toHaveLength(2);
-    expect(where.OR[1]).toEqual({ id: { in: [COMPLAINT] } });
+    const buckets = bucketsOf(await scope(tx, assignee));
+    expect(buckets).toHaveLength(2);
+    expect(buckets[1]).toEqual({ id: { in: [COMPLAINT] } });
   });
 });
 

@@ -14,7 +14,20 @@ function makeTx(over: Record<string, unknown> = {}) {
   const tx = {
     disciplineComplaint: {
       create: jest.fn(() => { calls.create++; return Promise.resolve({ id: "c1" }); }),
-      findFirst: jest.fn().mockResolvedValue(over.complaint ?? { id: "c1", complainantId: "stu1", againstId: "stu2", againstType: "STUDENT", status: "OPEN", resolution: null }),
+      // Honours the where: the scope is what decides who may open a case, so a
+      // fixture that returns the row regardless makes every access test vacuous.
+      findFirst: jest.fn(async (a: { where: Record<string, unknown> }) => {
+        const row = (over.complaint ?? { id: "c1", complainantId: "stu1", againstId: "stu2", againstType: "STUDENT", status: "OPEN", resolution: null }) as Record<string, unknown>;
+        const m = (w: Record<string, unknown>): boolean =>
+          Object.entries(w).every(([k, v]) => {
+            if (k === "AND") return (v as Record<string, unknown>[]).every(m);
+            if (k === "OR") return (v as Record<string, unknown>[]).some(m);
+            if (k === "NOT") return !m(v as Record<string, unknown>);
+            if (v && typeof v === "object") return ((v as { in: string[] }).in ?? []).includes(row[k] as string);
+            return row[k] === v;
+          });
+        return m(a.where) ? row : null;
+      }),
       findFirstOrThrow: jest.fn().mockResolvedValue({ id: "c1", subject: "S", details: null, complainantId: "stu1", againstId: "stu2", againstType: "STUDENT", status: "OPEN", resolution: null, createdAt: new Date() }),
       findMany: jest.fn().mockResolvedValue([]),
       update: jest.fn(() => { calls.resolveUpdate++; return Promise.resolve({}); }),
@@ -138,7 +151,11 @@ describe("DisciplineService", () => {
     expect(c2?.evidence[0]?.fileName).toBe("photo.jpg");
     expect(c2?.againstName).toBe("Teacher");
     // ONE query per child table + ONE user lookup; no per-complaint re-fetch.
-    expect(assigneeFindMany).toHaveBeenCalledTimes(1);
+    // The assignee table is hit twice: once to BUILD the scope (a teacher who
+    // manages sees staff-conduct cases only where they are the assignee) and
+    // once to batch the page's assignees. Both are O(1) in the page size, which
+    // is what this test is really guarding.
+    expect(assigneeFindMany).toHaveBeenCalledTimes(2);
     expect(evidenceFindMany).toHaveBeenCalledTimes(1);
     expect(entryFindMany).toHaveBeenCalledTimes(1);
     expect(userFindMany).toHaveBeenCalledTimes(1);

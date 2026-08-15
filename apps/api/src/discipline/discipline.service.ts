@@ -28,6 +28,9 @@ const STATUSES = ["OPEN", "IN_REVIEW", "RESOLVED", "DISMISSED"];
 // Picker/typeahead cap — a target list never ships a whole large-school roster.
 const TARGET_CAP = 500;
 
+/** Roles that may see the school's STAFF-conduct cases. See canHandleStaffCase. */
+const STAFF_CASE_ROLES = new Set(["principal", "school_admin"]);
+
 @Injectable()
 export class DisciplineService {
   constructor(
@@ -42,6 +45,19 @@ export class DisciplineService {
   }
   private canManage(p: Principal): boolean {
     return p.permissions.includes("discipline.manage");
+  }
+
+  /**
+   * Who may handle a complaint about a MEMBER OF STAFF.
+   *
+   * `discipline.manage` is held by every classroom teacher, which is right for
+   * cases about pupils and wrong for cases about colleagues: a pupil reporting a
+   * teacher's conduct expects that to reach leadership, not the staffroom. A
+   * staff-conduct case is therefore school-wide-visible only to these roles.
+   * Anyone else still sees such a case if they FILED it or were ASSIGNED it.
+   */
+  private canHandleStaffCase(p: Principal): boolean {
+    return p.roles.some((r) => STAFF_CASE_ROLES.has(r));
   }
 
   /**
@@ -62,13 +78,50 @@ export class DisciplineService {
    * stays closed.
    */
   private async visibleComplaintWhere(tx: TenantTx, p: Principal): Promise<Record<string, unknown>> {
-    if (this.canManage(p)) return {};
+    // SECURITY: a complaint is never visible to the person it is ABOUT (see
+    // below). Leadership sees everything else, so it needs no further lookup.
+    const notAboutMe = { NOT: { againstId: p.userId } };
+    if (this.canManage(p) && this.canHandleStaffCase(p)) return notAboutMe;
+
+    const buckets: Record<string, unknown>[] = [{ complainantId: p.userId }];
     const mine = await tx.disciplineAssignee.findMany({
       where: { assigneeId: p.userId },
       select: { complaintId: true },
     });
-    if (mine.length === 0) return { complainantId: p.userId };
-    return { OR: [{ complainantId: p.userId }, { id: { in: mine.map((a) => a.complaintId) } }] };
+    if (mine.length > 0) buckets.push({ id: { in: mine.map((a) => a.complaintId) } });
+    if (this.canManage(p)) {
+      buckets.push(this.canHandleStaffCase(p) ? {} : { againstType: "STUDENT" });
+    }
+    // Without the NOT, `discipline.manage` — which every teacher has — let an
+    // accused teacher read the case against them, see the pupil who filed it BY
+    // NAME, and dismiss it themselves. The accused being told is a deliberate
+    // act by whoever handles the case, not a side effect of a permission they
+    // happen to carry.
+    return { AND: [notAboutMe, { OR: buckets }] };
+  }
+
+  /**
+   * Load a complaint this caller is allowed to SEE, or 404.
+   *
+   * Every door — read, assign, entry, resolve, evidence — goes through this one
+   * predicate. They used to disagree: `list` filtered by scope, `get` re-derived
+   * a similar rule inline, and every mutation used a bare lookup by id that
+   * applied no scope whatsoever.
+   */
+  private async requireVisible(
+    tx: TenantTx,
+    p: Principal,
+    complaintId: string,
+  ): Promise<{ id: string; againstId: string; againstType: string }> {
+    const where = await this.visibleComplaintWhere(tx, p);
+    const c = await tx.disciplineComplaint.findFirst({
+      where: { AND: [{ id: complaintId }, where] },
+      select: { id: true, againstId: true, againstType: true },
+    });
+    // 404-not-403 throughout: whether a complaint exists about somebody is
+    // itself something a caller outside the case should not learn.
+    if (!c) throw new NotFoundException("Complaint not found");
+    return c;
   }
 
   // --- file (anyone) --------------------------------------------------------
@@ -80,6 +133,9 @@ export class DisciplineService {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const against = await tx.user.findFirst({ where: { id: input.againstId }, select: { id: true } });
       if (!against) throw new NotFoundException("The named person is not in this school");
+      // A complaint about yourself is either a mistake or an attempt to create a
+      // case the scope below then hides from you.
+      if (input.againstId === p.userId) throw new BadRequestException("You cannot file a complaint against yourself");
       // SECURITY: a non-manager may only file against someone in their own
       // relationship scope (a classmate, or a teacher who teaches them / their
       // child). This is the server-side backstop for the scoped picker — a filer
@@ -109,7 +165,7 @@ export class DisciplineService {
   async assign(p: Principal, complaintId: string, assigneeId: string): Promise<DisciplineComplaintDto> {
     this.requireManage(p);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      await this.requireComplaint(tx, complaintId);
+      await this.requireVisible(tx, p, complaintId);
       const u = await tx.user.findFirst({ where: { id: assigneeId }, select: { id: true } });
       if (!u) throw new NotFoundException("Assignee not found in this school");
       const dup = await tx.disciplineAssignee.findFirst({ where: { complaintId, assigneeId }, select: { id: true } });
@@ -137,7 +193,7 @@ export class DisciplineService {
   async addEntry(p: Principal, complaintId: string, body: string): Promise<DisciplineComplaintDto> {
     this.requireManage(p);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      await this.requireComplaint(tx, complaintId);
+      await this.requireVisible(tx, p, complaintId);
       await tx.disciplineEntry.create({ data: { schoolId: p.schoolId, complaintId, authorId: p.userId, body } });
       await this.log(tx, p, "discipline.entry", complaintId, {});
       return this.complaintDto(tx, complaintId);
@@ -169,6 +225,7 @@ export class DisciplineService {
     this.requireManage(p);
     if (!STATUSES.includes(input.status)) throw new BadRequestException("invalid status");
     const outcome = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      await this.requireVisible(tx, p, complaintId);
       const before = (await tx.disciplineComplaint.findFirst({
         where: { id: complaintId },
         select: { status: true, resolution: true, againstId: true, againstType: true, subject: true },
@@ -246,7 +303,7 @@ export class DisciplineService {
   async presignEvidence(p: Principal, complaintId: string, input: { fileName: string; contentType: string }): Promise<DisciplineEvidencePresignDto> {
     this.requireManage(p);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      await this.requireComplaint(tx, complaintId);
+      await this.requireVisible(tx, p, complaintId);
       const safe = input.fileName.replace(/[^A-Za-z0-9._-]/g, "_");
       const key = `discipline/${p.schoolId}/${complaintId}/${Date.now()}_${safe}`;
       const { url } = await this.storage.presignUpload({ key, contentType: input.contentType });
@@ -257,7 +314,7 @@ export class DisciplineService {
   async confirmEvidence(p: Principal, complaintId: string, input: { key: string; fileName: string }): Promise<DisciplineComplaintDto> {
     this.requireManage(p);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      await this.requireComplaint(tx, complaintId);
+      await this.requireVisible(tx, p, complaintId);
       const prefix = `discipline/${p.schoolId}/${complaintId}/`;
       if (!input.key.startsWith(prefix)) throw new BadRequestException("key does not match this complaint");
       await tx.disciplineEvidence.create({ data: { schoolId: p.schoolId, complaintId, uploadedById: p.userId, fileKey: input.key, fileName: input.fileName } });
@@ -266,9 +323,38 @@ export class DisciplineService {
     });
   }
 
+  /**
+   * Open a piece of evidence.
+   *
+   * MANAGERS and the case's ASSIGNEES. It used to be managers alone, while the
+   * case detail already LISTED the evidence — filename and uploader — to anyone
+   * who could see the case. So the person made responsible for resolving a
+   * disciplinary matter about a child was shown "photo-of-incident.jpg" and then
+   * refused it, and had to go and ask somebody else to look at the thing they
+   * had been assigned. `assigneeId` was added to the complaint's read scope in
+   * an earlier fix; this door was left on manage-only.
+   *
+   * Deliberately NOT the filer, even though they can see the case they raised.
+   * Investigative material may concern people other than the person who
+   * complained, and being the complainant is not a reason to receive it. They
+   * still see that evidence exists, which is what tells them the case is being
+   * worked.
+   */
   async downloadEvidence(p: Principal, complaintId: string, evidenceId: string): Promise<{ url: string }> {
-    this.requireManage(p);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      // Must be able to see the case at all — this is what keeps the coarse
+      // `discipline.file` route gate safe, and what keeps the subject of a case
+      // out of its evidence.
+      await this.requireVisible(tx, p, complaintId);
+      if (!this.canManage(p)) {
+        const assigned = await tx.disciplineAssignee.findFirst({
+          where: { complaintId, assigneeId: p.userId },
+          select: { id: true },
+        });
+        // 404, not 403: whether a piece of evidence exists on a case you cannot
+        // see is itself something you should not learn.
+        if (!assigned) throw new NotFoundException("Evidence not found");
+      }
       const ev = await tx.disciplineEvidence.findFirst({ where: { id: evidenceId, complaintId } });
       if (!ev) throw new NotFoundException("Evidence not found");
       await this.log(tx, p, "discipline.evidence.read", complaintId, { evidenceId });
@@ -374,17 +460,7 @@ export class DisciplineService {
 
   async get(p: Principal, complaintId: string): Promise<DisciplineComplaintDto> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const c = await tx.disciplineComplaint.findFirst({ where: { id: complaintId } });
-      if (!c) throw new NotFoundException("Complaint not found");
-      if (!this.canManage(p) && c.complainantId !== p.userId) {
-        // …unless it is assigned to them. 404-not-403 either way: a 403 would
-        // confirm that a complaint exists about somebody.
-        const assigned = await tx.disciplineAssignee.findFirst({
-          where: { complaintId, assigneeId: p.userId },
-          select: { id: true },
-        });
-        if (!assigned) throw new NotFoundException("Complaint not found");
-      }
+      await this.requireVisible(tx, p, complaintId);
       await this.log(tx, p, "discipline.read", complaintId, {});
       return this.complaintDto(tx, complaintId);
     });
@@ -438,10 +514,9 @@ export class DisciplineService {
     const en = await tx.enrollment.findFirst({ where: { status: "ACTIVE", classId: { in: classIds }, studentId: againstId }, select: { id: true } });
     return Boolean(en);
   }
-  private async requireComplaint(tx: TenantTx, id: string): Promise<void> {
-    const c = await tx.disciplineComplaint.findFirst({ where: { id }, select: { id: true } });
-    if (!c) throw new NotFoundException("Complaint not found");
-  }
+  // requireComplaint(tx, id) — REMOVED. It looked a complaint up by id and
+  // applied no scope at all, which is how every mutation door came to accept a
+  // case the caller could not see. Use requireVisible(tx, p, id).
 
   private async complaintDto(tx: TenantTx, id: string): Promise<DisciplineComplaintDto> {
     const c = (await tx.disciplineComplaint.findFirstOrThrow({ where: { id } })) as ComplaintRow;

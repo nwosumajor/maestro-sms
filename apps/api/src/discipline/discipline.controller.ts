@@ -89,8 +89,11 @@ export class DisciplineController {
     return this.discipline.confirmEvidence(p, id, b);
   }
 
+  // Coarse gate + narrowing in the service, exactly like `GET complaints/:id`
+  // which LISTS these attachments. The service admits managers and the case's
+  // own assignees, and refuses everyone else with a 404.
   @Get("complaints/:id/evidence/:evidenceId")
-  @RequirePermission(DISCIPLINE_PERMISSIONS.DISCIPLINE_MANAGE)
+  @RequirePermission(DISCIPLINE_PERMISSIONS.DISCIPLINE_FILE)
   download(@CurrentPrincipal() p: Principal, @Param("id") id: string, @Param("evidenceId") evidenceId: string): Promise<{ url: string }> {
     return this.discipline.downloadEvidence(p, id, evidenceId);
   }
