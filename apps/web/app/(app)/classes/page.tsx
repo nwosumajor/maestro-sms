@@ -8,6 +8,8 @@ import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
 import { ClassAdmin } from "@/components/lms/ClassAdmin";
+import { BulkEnrol } from "@/components/lms/BulkEnrol";
+import { BulkClassSubjects } from "@/components/lms/BulkClassSubjects";
 import { ClassGrid } from "@/components/lms/ClassGrid";
 import { ClassSubjectsAdmin } from "@/components/lms/ClassSubjectsAdmin";
 import { PromotionManager } from "@/components/lms/PromotionManager";
@@ -88,6 +90,11 @@ export default async function ClassesPage() {
           <ClassAdmin classes={classes} students={students} users={staff} />
         )}
 
+        {/* The bulk form sits beside its single-row sibling rather than
+            replacing it: enrolling one pupil is still one control, and a class
+            of thirty is no longer thirty round trips. */}
+        {canWrite && classes && <BulkEnrol classes={classes} students={students ?? []} />}
+
         {/* The catalogue sits ABOVE the per-class assignment: you pick the
             school's subjects first, then attach them to classes. Ordering the
             page the other way round is why people typed them by hand. */}
@@ -97,6 +104,11 @@ export default async function ClassesPage() {
         {canManageSubjects && <GradingPolicyCard canManage={canManageAcademic} />}
         {canManageSubjects && classes && staff && subjects && (
           <ClassSubjectsAdmin classes={classes} subjects={subjects} users={staff} rooms={rooms ?? []} />
+        )}
+        {/* Setting a class up: nine subjects in one all-or-nothing write rather
+            than nine submissions of the form above. */}
+        {canManageSubjects && classes && staff && subjects && (
+          <BulkClassSubjects classes={classes} subjects={subjects} users={staff} rooms={rooms ?? []} />
         )}
 
         {canManageAcademic && <CalendarHealth findings={calendarFindings ?? []} />}

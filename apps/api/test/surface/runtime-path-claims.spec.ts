@@ -107,12 +107,27 @@ describe("a prefix is not evidence of a screen", () => {
     }
   });
 
-  it("the endpoints still tracked as gaps say so plainly", () => {
-    // What is left unreachable stays visible rather than drifting back to `ui`.
-    for (const route of ["POST /classes/:p/enrollments/bulk", "POST /classes/:p/subjects/bulk"]) {
-      expect(REGISTRY.routes[route]?.kind).toBe("gap");
-      expect(REGISTRY.routes[route]?.note).toMatch(/BACKEND ONLY/);
+  it("the bulk class endpoints are UI now, each naming its file", () => {
+    // These were the last two `gap`s: endpoints built and never wired, so the
+    // admin enrolled a class one pupil at a time. Like the profile chain, the
+    // assertion moves UP rather than away — `ui` only counts with a named file.
+    for (const [route, file] of [
+      ["POST /classes/:p/enrollments/bulk", /BulkEnrol\.tsx/],
+      ["POST /classes/:p/subjects/bulk", /BulkClassSubjects\.tsx/],
+    ] as const) {
+      expect(REGISTRY.routes[route]?.kind).toBe("ui");
+      expect(REGISTRY.routes[route]?.note).toMatch(file);
     }
+  });
+
+  it("every route has a decided kind — nothing unclassified", () => {
+    // The registry is currently gap-free, which is only worth anything if the
+    // OTHER kinds are still real answers. A route with no kind at all is the
+    // thing this file exists to prevent.
+    const undecided = Object.entries(REGISTRY.routes)
+      .filter(([, v]) => !["ui", "system", "gap", "public", "internal"].includes(v.kind))
+      .map(([k]) => k);
+    expect(undecided).toEqual([]);
   });
 
   it("the cover-duty list is UI now, and its note names the file", () => {

@@ -1838,8 +1838,8 @@
       "note": "reached via a runtime-built path (web builds \"/classes/:p\")"
     },
     "POST /classes/:p/enrollments/bulk": {
-      "kind": "gap",
-      "note": "BACKEND ONLY: the class admin enrols one pupil at a time; nothing calls the bulk form."
+      "kind": "ui",
+      "note": "components/lms/BulkEnrol.tsx \u2014 stage pupils, then enrol in one write"
     },
     "POST /classes/:p/live": {
       "kind": "ui",
@@ -1858,8 +1858,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "POST /classes/:p/subjects/bulk": {
-      "kind": "gap",
-      "note": "BACKEND ONLY: nothing calls the bulk form."
+      "kind": "ui",
+      "note": "components/lms/BulkClassSubjects.tsx \u2014 attach several subjects at once"
     },
     "POST /classes/:p/subjects/copy-to-arms": {
       "kind": "ui",
