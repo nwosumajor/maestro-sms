@@ -122,6 +122,15 @@ model NotificationDelivery {
   error   String?
   sentAt  DateTime?
 
+  /// How many times a worker has HANDED this row to a gateway, and when it last
+  /// did. Nothing recorded either, and without them a PENDING row is ambiguous
+  /// in the one way that matters: it may be a delivery no worker ever picked up
+  /// (safe to send), or one that was sent and whose outcome was lost before it
+  /// could be written down (sending again duplicates a message and spends a
+  /// second credit). The recovery sweep can only act on the first kind.
+  attempts      Int       @default(0)
+  lastAttemptAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -139,6 +148,9 @@ model NotificationDelivery {
   // 5,000 notifications took 69ms against 63 delivery rows and 15,555ms against
   // 45,063 — 225x slower for 715x the child rows, and it grows with the square.
   @@index([notificationId])
+  /// The recovery sweep's own index: it asks for PENDING rows across EVERY
+  /// tenant, oldest first, so it cannot lead with schoolId like the others.
+  @@index([status, createdAt])
   @@map("notification_delivery")
 }
 

@@ -65,6 +65,21 @@ const principal = (roles: string[], userId = "u-1"): Principal => ({
   permissions: [],
 });
 
+
+/**
+ * The update that RECORDS AN OUTCOME, not the one that stamps the attempt.
+ *
+ * Every attempt is now stamped before the gateway is told anything — that stamp
+ * is what lets the recovery sweep tell a delivery nobody picked up from one
+ * whose result was lost. It also means `calls[0]` is no longer the outcome, and
+ * asking for the outcome by position was only ever right by accident.
+ */
+function outcomeWrite(tx: { notificationDelivery: { update: unknown } }) {
+  const calls = (tx.notificationDelivery.update as jest.Mock).mock.calls;
+  const hit = calls.map((c) => c[0].data).filter((d: { status?: string }) => d.status !== undefined);
+  return hit[hit.length - 1];
+}
+
 describe("NotificationService", () => {
   it("listMine is scoped to the caller", async () => {
     const { service, tx } = makeService({});
@@ -136,7 +151,7 @@ describe("NotificationService", () => {
     expect(provider.deliver).toHaveBeenCalledWith(
       expect.objectContaining({ channel: "EMAIL", target: "kid.parent@demo.school" }),
     );
-    expect((tx.notificationDelivery.update as jest.Mock).mock.calls[0][0].data).toMatchObject({
+    expect(outcomeWrite(tx)).toMatchObject({
       status: "SENT",
     });
     expect(res).toEqual({ sent: 1, failed: 0 });
@@ -176,7 +191,7 @@ describe("NotificationService", () => {
     );
     const res = await service.runDeliveries({ schoolId: "school-A", userId: "sys", notificationId: "notif-1" });
     expect(credits.debitInTx).not.toHaveBeenCalled();
-    expect((tx.notificationDelivery.update as jest.Mock).mock.calls[0][0].data).toMatchObject({
+    expect(outcomeWrite(tx)).toMatchObject({
       status: "FAILED",
       error: "twilio 500",
     });
@@ -198,7 +213,7 @@ describe("NotificationService", () => {
     const res = await service.runDeliveries({ schoolId: "school-A", userId: "sys", notificationId: "notif-1" });
     expect(provider.deliver).not.toHaveBeenCalled(); // never attempted — never billed by the gateway either
     expect(credits.debitInTx).not.toHaveBeenCalled();
-    expect((tx.notificationDelivery.update as jest.Mock).mock.calls[0][0].data).toMatchObject({
+    expect(outcomeWrite(tx)).toMatchObject({
       status: "FAILED",
       error: expect.stringMatching(/no message credits/i),
     });

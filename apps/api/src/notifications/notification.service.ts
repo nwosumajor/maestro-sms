@@ -19,7 +19,7 @@ import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundEx
 import { MessageCreditsService } from "./message-credits.service";
 import { Prisma } from "@sms/db";
 import type { Queue } from "bullmq";
-import type { NotificationChannelValue, NotificationTypeValue, NotificationPreferenceDto, MessageLanguage } from "@sms/types";
+import type { NotificationChannelValue, NotificationTypeValue, NotificationPreferenceDto, MessageLanguage, DeliveryProblemsDto } from "@sms/types";
 import { MESSAGE_LANGUAGES, messageLanguage, renderNotification } from "@sms/types";
 import { SchoolRegionService } from "../foundation/school-region.service";
 import { allowedChannels, deliverableEmail } from "@sms/types";
@@ -400,6 +400,18 @@ export class NotificationService {
           continue;
         }
         if (metered) allowance = (await remaining()) - 1;
+        // STAMP IT BEFORE THE GATEWAY IS TOLD ANYTHING. This is what makes a
+        // PENDING row afterwards mean something: with the stamp, a row still
+        // PENDING and never attempted is one no worker ever picked up and is
+        // safe to send; a row PENDING WITH an attempt was handed to a gateway
+        // and its outcome was lost, so sending again would duplicate the
+        // message and spend a second credit. Written first, and deliberately
+        // in the planning transaction rather than the recording one, because
+        // the recording transaction is exactly the thing that may not happen.
+        await tx.notificationDelivery.update({
+          where: { id: d.id },
+          data: { attempts: { increment: 1 }, lastAttemptAt: new Date() },
+        });
         attempts.push({ id: d.id, channel: d.channel, target, metered });
       }
       return { notification, attempts, failed };
@@ -445,6 +457,81 @@ export class NotificationService {
       }
     });
     return { sent, failed };
+  }
+
+  /**
+   * What did NOT arrive, for the staff who send.
+   *
+   * Every external failure was already being recorded and nothing ever read it,
+   * so a school could not learn that a fee notice bounced or that a parent's
+   * number was rejected — the alert simply did not happen and every count said
+   * it had. This is the reader.
+   *
+   * Names the recipient and the channel, never the resolved target: a failure
+   * report is not a route to a phone book, and the address is on the SIS record
+   * for anyone entitled to it. Scoped by RLS to the caller's own school, and the
+   * `notification.send` gate keeps it to staff.
+   */
+  async deliveryProblems(p: Principal, opts?: { days?: number; limit?: number }): Promise<DeliveryProblemsDto> {
+    const windowDays = Math.min(Math.max(opts?.days ?? 7, 1), 90);
+    const limit = Math.min(Math.max(opts?.limit ?? 50, 1), 200);
+    const since = new Date(Date.now() - windowDays * 86_400_000);
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      const [rows, total, pending] = await Promise.all([
+        tx.notificationDelivery.findMany({
+          where: { status: "FAILED", createdAt: { gte: since } },
+          orderBy: { createdAt: "desc" },
+          take: limit,
+          select: {
+            id: true,
+            notificationId: true,
+            channel: true,
+            error: true,
+            attempts: true,
+            createdAt: true,
+            notification: { select: { title: true, type: true, recipientId: true } },
+          },
+        }),
+        tx.notificationDelivery.count({ where: { status: "FAILED", createdAt: { gte: since } } }),
+        tx.notificationDelivery.count({ where: { status: "PENDING", createdAt: { gte: since } } }),
+      ]);
+      type Row = {
+        id: string;
+        notificationId: string;
+        channel: string;
+        error: string | null;
+        attempts: number;
+        createdAt: Date;
+        notification: { title: string; type: string; recipientId: string } | null;
+      };
+      const list = rows as Row[];
+      const ids = [...new Set(list.map((r) => r.notification?.recipientId).filter((v): v is string => !!v))];
+      const people = ids.length
+        ? ((await tx.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } })) as Array<{
+            id: string;
+            name: string;
+          }>)
+        : [];
+      const nameOf = new Map(people.map((u) => [u.id, u.name]));
+      return {
+        windowDays,
+        total,
+        pending,
+        failures: list.map((r) => ({
+          id: r.id,
+          notificationId: r.notificationId,
+          // A deleted account still had a message fail; say so rather than
+          // dropping the row and under-reporting.
+          recipientName: (r.notification?.recipientId ? nameOf.get(r.notification.recipientId) : null) ?? "Unknown",
+          title: r.notification?.title ?? "",
+          type: r.notification?.type ?? "",
+          channel: r.channel,
+          error: r.error,
+          attempts: r.attempts,
+          createdAt: r.createdAt,
+        })),
+      };
+    });
   }
 
   // --- helpers ---------------------------------------------------------------
