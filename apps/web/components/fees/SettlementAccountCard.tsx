@@ -36,6 +36,9 @@ export function SettlementAccountCard({ initial }: { initial: SettlementAccountD
   const [resolved, setResolved] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
+  // What this country calls its account number, from the server. The card used
+  // to say "NUBAN" to every school on the platform.
+  const acctLabel = initial.accountLabel ?? "account number";
 
   // The real bank list, not ten hard-coded ones. A school banking with Kuda,
   // Opay or Moniepoint could not previously find itself here at all — and a
@@ -63,7 +66,10 @@ export function SettlementAccountCard({ initial }: { initial: SettlementAccountD
   };
 
   const check = async () => {
-    if (!/^\d{10}$/.test(accountNumber)) return setMsg("Enter the 10-digit NUBAN account number.");
+    // The COUNTRY's rule, not Nigeria's. This was a hard `/^\d{10}$/`, so a
+    // school in Accra could not get past its own form. The server states the
+    // rule; the client only echoes it.
+    if (!/^\d+$/.test(accountNumber)) return setMsg(`Enter the school's ${acctLabel} — digits only.`);
     setBusy(true);
     setMsg(null);
     const res = await fetch("/api/sms/fees/settlement/resolve", {
@@ -112,6 +118,31 @@ export function SettlementAccountCard({ initial }: { initial: SettlementAccountD
         </CardDescription>
       </CardHeader>
       <CardContent>
+        {/* WHY THIS CANNOT BE SET UP, when it cannot. Said before the form
+            rather than discovered halfway through it: every school used to see
+            the same picker of NIGERIAN banks and a box that only took a Nigerian
+            NUBAN, so a school in Accra could work through the whole thing and
+            never succeed, with nothing on screen explaining why. */}
+        {initial.blockedReason && (
+          <div className="mb-4 rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
+            <p className="text-sm font-medium">Settlement to a bank is not available for your country</p>
+            <p className="mt-1 text-sm text-muted-foreground">{initial.blockedReason}</p>
+          </div>
+        )}
+        {/* The account can take card payments, but not in the currency this
+            school charges in — a condition somebody can fix in a dashboard, and
+            which otherwise reaches parents as an unexplained failure at
+            checkout. */}
+        {initial.merchantCanChargeCurrency === false && initial.feeCurrency && (
+          <div className="mb-4 rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
+            <p className="text-sm font-medium">Card payments in {initial.feeCurrency} are not enabled</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Your school charges fees in {initial.feeCurrency}, and the platform&apos;s payment account is not enabled
+              for it — parents would be turned away at checkout. Ask your administrator to enable {initial.feeCurrency}{" "}
+              on the payment provider, or collect fees by mobile money.
+            </p>
+          </div>
+        )}
         {/* MONEY THE SCHOOL IS OWED. Loud and first, because the failure this
             replaces was silent: parents paid, invoices went PAID, and the cash
             sat in the platform's balance with nothing anywhere recording it. */}
@@ -158,11 +189,11 @@ export function SettlementAccountCard({ initial }: { initial: SettlementAccountD
             </select>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="st-acct">Account number (NUBAN)</Label>
+            <Label htmlFor="st-acct">Account number ({acctLabel})</Label>
             <Input
               id="st-acct"
               inputMode="numeric"
-              maxLength={10}
+              maxLength={20}
               value={accountNumber}
               onChange={(e) => {
                 setAccountNumber(e.target.value.replace(/\D/g, ""));

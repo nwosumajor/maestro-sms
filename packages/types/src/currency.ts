@@ -145,3 +145,85 @@ export function stripeAmountFor(amountMinor: number, currency: string): number {
     ? toMajor(amountMinor, currency)
     : amountMinor;
 }
+
+// =============================================================================
+// Paystack SETTLEMENT — which schools can be paid into their own bank
+// =============================================================================
+// Splitting a fee charge to a school's own account needs a Paystack subaccount,
+// and creating one needs three country-specific things: the right bank list, an
+// account number in that country's format, and — the part that actually keeps
+// the money safe — the ability to resolve that account to a NAME the school
+// reads back.
+//
+// The platform had none of them. `listBanks(country = "nigeria")` was called
+// with no argument from the one place that matters, so a school in Accra was
+// offered 279 NIGERIAN banks (verified live), and the account number was
+// validated against `/^\d{10}$/` — a Nigerian NUBAN — in two places. A Ghanaian
+// school, squarely inside Paystack's coverage, could not configure settlement at
+// all; meanwhile its parents' fees were collected and held in the platform's own
+// account, flagged `settledToPlatform`.
+//
+// A DATA TABLE, so adding a country is a row. Each entry says what was actually
+// verified against the live API rather than what the docs imply.
+export interface PaystackCountry {
+  /** ISO 3166-1 alpha-2, matching `CountryProfile.code`. */
+  code: string;
+  /** The `country=` slug Paystack's /bank endpoint expects. */
+  slug: string;
+  /** What a school in this country is asked for. */
+  accountLabel: string;
+  /** Permissive bounds on the account number's digits. */
+  minDigits: number;
+  maxDigits: number;
+  /**
+   * Can `/bank/resolve` return the account holder's NAME here?
+   *
+   * This is not a detail. Creating a subaccount proves an account EXISTS, never
+   * whose it is, and a transposed digit that lands on another valid account at
+   * the same bank settles every parent's fee to a stranger — permanently, with
+   * the invoice marked PAID at both ends. Reading the name back is the only
+   * thing that catches it, so a country that cannot be verified is not offered
+   * rather than offered unsafely.
+   *
+   * Verified against the live API: Nigeria, Ghana and Kenya all answer 422
+   * "could not resolve account name" for a made-up number, which is the
+   * endpoint working. South Africa answers 400 "Please supply one of the
+   * following valid currencies: NGN, USD, GHS, KES" — ZAR is not one of them,
+   * so the check cannot be performed there.
+   */
+  canResolveAccountName: boolean;
+}
+
+export const PAYSTACK_COUNTRIES: readonly PaystackCountry[] = [
+  { code: "NG", slug: "nigeria", accountLabel: "10-digit NUBAN", minDigits: 10, maxDigits: 10, canResolveAccountName: true },
+  { code: "GH", slug: "ghana", accountLabel: "bank account number", minDigits: 8, maxDigits: 20, canResolveAccountName: true },
+  { code: "KE", slug: "kenya", accountLabel: "bank account number", minDigits: 6, maxDigits: 20, canResolveAccountName: true },
+  // Listed deliberately, and NOT settleable: Paystack serves a South African
+  // bank list but refuses to resolve an account name without one of NGN/USD/GHS/
+  // KES. Offering the picker would let a school create a subaccount nobody had
+  // verified, which is the one failure this whole flow exists to prevent.
+  { code: "ZA", slug: "south africa", accountLabel: "bank account number", minDigits: 6, maxDigits: 20, canResolveAccountName: false },
+] as const;
+
+export function paystackCountry(code: string | null | undefined): PaystackCountry | null {
+  if (!code) return null;
+  return PAYSTACK_COUNTRIES.find((c) => c.code === code.toUpperCase()) ?? null;
+}
+
+/** Can a school in this country be paid into its own bank through Paystack? */
+export function paystackCanSettleCountry(code: string | null | undefined): boolean {
+  return paystackCountry(code)?.canResolveAccountName ?? false;
+}
+
+/** Why not, in words a school can act on. Null when it can. */
+export function paystackSettlementBlocker(code: string | null | undefined): string | null {
+  const c = paystackCountry(code);
+  if (!c) return "Paystack does not settle to banks in this country. Collect fees by mobile money instead.";
+  if (!c.canResolveAccountName) {
+    return (
+      "Paystack cannot confirm the account holder's name for accounts in this country, and this platform will not " +
+      "route parents' fees to an account nobody has verified. Collect fees by mobile money instead."
+    );
+  }
+  return null;
+}

@@ -142,6 +142,9 @@ d("Online settlement, verify-on-return and reconciliation (real Postgres)", () =
       {} as never, // virtual accounts (unused here)
       {} as never, // payment plans (unused here)
       { isConfigured: () => false } as never, // stripe (NGN invoice in this test)
+      // Region: decides which country's bank list and account-number rule a
+      // school gets. Nigeria here, which is what these NGN fixtures are.
+      { forSchool: async () => ({ country: "NG" }) } as never,
     );
 
     const ok = await gateway.confirmInvoicePayment(parent(), invoiceId, "REC-REF-2");
@@ -192,6 +195,8 @@ d("Online settlement, verify-on-return and reconciliation (real Postgres)", () =
       {} as never,
       {} as never,
       stripeStub as never,
+      // Region: which country's bank list / account rule the school gets.
+      { forSchool: async () => ({ country: "NG" }) } as never,
     );
     const out = await gateway.initInvoicePayment(parent(), usdInvoice);
     expect(out.authorizationUrl).toContain("stripe.com");
@@ -225,6 +230,7 @@ d("Online settlement, verify-on-return and reconciliation (real Postgres)", () =
       tenant, new AuditLogService(), { isConfigured: () => false } as never, {} as never, { client: null } as never,
       notifications, { effective: jest.fn().mockResolvedValue({ bearer: "PARENT" }) } as never,
       {} as never, {} as never, {} as never, { record: jest.fn() } as never, settlement, {} as never, {} as never, stripeStub as never,
+      { forSchool: async () => ({ country: "NG" }) } as never, // region
     );
     const ok = await gateway.confirmInvoicePayment(parent(), usdInvoice, "cs_test_session_id");
     expect(ok.status).toBe("posted");
