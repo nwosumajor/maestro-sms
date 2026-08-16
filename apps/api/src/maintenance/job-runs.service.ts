@@ -74,6 +74,20 @@ export const SCHEDULED_JOBS = [
     },
   },
   {
+    key: "notifications.deliveryRecovery",
+    label: "Stranded notification deliveries",
+    // HOURLY (`DEFAULT_NOTIFICATION_RECOVERY_CRON` = "7 * * * *"). A delivery row
+    // is only ever read by the job that performs it, so one whose job was never
+    // queued is invisible for ever — an alert a school believes it sent and
+    // never did. An hour, not a day: the commonest case is an absence alert.
+    everyMinutes: 60,
+    manual: {
+      path: "notifications/deliveries/recovery/run",
+      permission: "notification.send",
+      scope: "PLATFORM",
+    },
+  },
+  {
     key: "payments.health",
     label: "Payment rail health",
     // DAILY at 06:15 (`DEFAULT_PAYMENT_HEALTH_CRON` = "15 6 * * *"). Declared

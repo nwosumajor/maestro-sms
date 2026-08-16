@@ -6,6 +6,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { NotificationInbox, type InboxData } from "@/components/notifications/NotificationInbox";
 import { SendAnnouncement } from "@/components/notifications/SendAnnouncement";
+import { DeliveryProblems } from "@/components/notifications/DeliveryProblems";
 import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
@@ -32,6 +33,8 @@ export default async function NotificationsPage() {
           </Alert>
         ) : (
           <>
+            {/* Staff only, and silent unless something actually failed. */}
+            {canSend && <DeliveryProblems />}
             {canSend && users && <SendAnnouncement users={users} />}
             <NotificationInbox initial={data} />
           </>

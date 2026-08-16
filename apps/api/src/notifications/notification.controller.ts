@@ -11,6 +11,7 @@ import {
 } from "@nestjs/common";
 import type {
   NotificationInboxDto,
+  DeliveryProblemsDto,
   NotificationPreferenceDto,
 } from "@sms/types";
 import { z } from "zod";
@@ -26,6 +27,8 @@ import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { NotificationService } from "./notification.service";
+import { NotificationRecoveryService, type NotificationRecoveryResult } from "./notification-recovery.service";
+import { JobRunsService } from "../maintenance/job-runs.service";
 import { MessageCreditReconciliationService } from "./message-credit-reconciliation.service";
 import { Public } from "../auth/public.decorator";
 import { MessageCreditsService } from "./message-credits.service";
@@ -68,7 +71,45 @@ export class NotificationController {
     private readonly credits: MessageCreditsService,
     private readonly creditReconcile: MessageCreditReconciliationService,
     private readonly notifications: NotificationService,
+    private readonly recovery: NotificationRecoveryService,
+    private readonly jobRuns: JobRunsService,
   ) {}
+
+  /**
+   * What did NOT reach a family, and why.
+   *
+   * Every external failure has always been recorded and nothing ever read it, so
+   * a school could not learn that a fee notice bounced or a parent's number was
+   * rejected. Gated on `notification.send` — whoever may send is who needs to
+   * know what did not arrive.
+   */
+  @Get("deliveries/problems")
+  @RequirePermission(NOTIFICATION_PERMISSIONS.NOTIFICATION_SEND)
+  deliveryProblems(
+    @CurrentPrincipal() p: Principal,
+    @Query("days") days?: string,
+    @Query("limit") limit?: string,
+  ): Promise<DeliveryProblemsDto> {
+    return this.notifications.deliveryProblems(p, {
+      days: days ? Number(days) : undefined,
+      limit: limit ? Number(limit) : undefined,
+    });
+  }
+
+  /**
+   * Run the stranded-delivery sweep now (it also runs hourly).
+   *
+   * Recorded as a MANUAL run like every other hand-runnable job, so the
+   * maintenance console shows it alongside the scheduled ones — a sweep whose
+   * manual runs are invisible is exactly the thing this whole area was about.
+   */
+  @Post("deliveries/recovery/run")
+  @RequirePermission(NOTIFICATION_PERMISSIONS.NOTIFICATION_SEND)
+  runRecovery(): Promise<NotificationRecoveryResult> {
+    return this.jobRuns.record("notifications.deliveryRecovery", "MANUAL", () =>
+      this.recovery.recoverStranded("MANUAL"),
+    );
+  }
 
   /** The caller's own inbox (self-scoped). `?unread=1` for unread only. */
   @Get()

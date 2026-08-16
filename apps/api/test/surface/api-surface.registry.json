@@ -997,6 +997,10 @@
       "kind": "ui",
       "note": "MessageCreditsCard on /billing \u2014 the school's own credit history; previously only the operator could see where credits went"
     },
+    "GET /notifications/deliveries/problems": {
+      "kind": "ui",
+      "note": "reviewed: components/notifications/DeliveryProblems.tsx lists what did not reach a family"
+    },
     "GET /notifications/me/language": {
       "kind": "ui",
       "note": "reviewed: components/account/LanguageCard.tsx loads the caller's writing language on /account"
@@ -2428,6 +2432,10 @@
     "POST /notifications/credits/verify": {
       "kind": "ui",
       "note": "Settles a credit bundle on return from the gateway \u2014 /billing?verifyCredits=. Without it the purchase depended entirely on a webhook arriving."
+    },
+    "POST /notifications/deliveries/recovery/run": {
+      "kind": "ui",
+      "note": "reviewed: the 'Check for stuck messages' button in components/notifications/DeliveryProblems.tsx; also runs hourly"
     },
     "POST /notifications/read-all": {
       "kind": "ui",

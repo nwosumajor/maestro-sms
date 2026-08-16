@@ -11,6 +11,9 @@ import { LoggingChannelProvider } from "./logging-channel.provider";
 import { TwilioChannelProvider } from "./twilio-channel.provider";
 import { EmailService } from "./email.service";
 import { EmailChannelProvider } from "./email-channel.provider";
+import { NotificationRecoveryService, NOTIFICATION_RECOVERY_QUEUE } from "./notification-recovery.service";
+import { NotificationRecoveryProcessor } from "./notification-recovery.processor";
+import { NotificationRecoveryScheduler } from "./notification-recovery.scheduler";
 
 // Depends on the global FoundationModule (TENANT_DATABASE, AUDIT_LOG_SERVICE,
 // auth guard). Exports NotificationService so producer modules (e.g. Attendance)
@@ -22,12 +25,22 @@ import { EmailChannelProvider } from "./email-channel.provider";
 // never affects SMS and vice versa.
 @Module({
   // PaymentsModule: message-credit bundle purchases (Paystack) — one-way dep.
-  imports: [BullModule.registerQueue({ name: NOTIFICATION_QUEUE }), PaymentsModule],
+  imports: [
+    BullModule.registerQueue({ name: NOTIFICATION_QUEUE }),
+    // The stranded-delivery sweep's own queue. Separate from the delivery queue
+    // so a backlog of deliveries can never delay the sweep that exists to find
+    // deliveries nothing is working through.
+    BullModule.registerQueue({ name: NOTIFICATION_RECOVERY_QUEUE }),
+    PaymentsModule,
+  ],
   controllers: [NotificationController],
   providers: [
     MessageCreditReconciliationService,
     NotificationService,
     NotificationProcessor,
+    NotificationRecoveryService,
+    NotificationRecoveryProcessor,
+    NotificationRecoveryScheduler,
     EmailService,
     MessageCreditsService,
     {
@@ -40,6 +53,6 @@ import { EmailChannelProvider } from "./email-channel.provider";
       },
     },
   ],
-  exports: [MessageCreditReconciliationService, NotificationService, EmailService, MessageCreditsService],
+  exports: [MessageCreditReconciliationService, NotificationService, NotificationRecoveryService, EmailService, MessageCreditsService],
 })
 export class NotificationModule {}
