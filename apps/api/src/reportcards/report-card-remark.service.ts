@@ -46,12 +46,38 @@ export class ReportCardRemarkService {
     return { schoolId: p.schoolId, userId: p.userId };
   }
 
-  private toDto(studentId: string, termId: string, r: RemarkRow | null): ReportCardRemarkDto {
+  /**
+   * Names for the two stored author ids — the same lookup `remarksForPdf` does,
+   * so a screen and the printed card can never disagree about who said what.
+   * One query for both; null for an author whose account is gone, which leaves
+   * the remark standing and only the name missing.
+   */
+  private async authorNames(
+    tx: TenantTx,
+    r: RemarkRow | null,
+  ): Promise<{ classTeacherName: string | null; headName: string | null }> {
+    const ids = [r?.classTeacherRemark ? r.classTeacherId : null, r?.headRemark ? r.headId : null].filter(
+      (v): v is string => !!v,
+    );
+    if (ids.length === 0) return { classTeacherName: null, headName: null };
+    const people = (await tx.user.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, name: true },
+    })) as Array<{ id: string; name: string }>;
+    const byId = new Map(people.map((u) => [u.id, u.name]));
+    return {
+      classTeacherName: (r?.classTeacherRemark && r.classTeacherId ? byId.get(r.classTeacherId) : null) ?? null,
+      headName: (r?.headRemark && r.headId ? byId.get(r.headId) : null) ?? null,
+    };
+  }
+
+  private async toDto(tx: TenantTx, studentId: string, termId: string, r: RemarkRow | null): Promise<ReportCardRemarkDto> {
     return {
       studentId,
       termId,
       classTeacherRemark: r?.classTeacherRemark ?? null,
       headRemark: r?.headRemark ?? null,
+      ...(await this.authorNames(tx, r)),
       updatedAt: r?.updatedAt ?? null,
     };
   }
@@ -81,7 +107,7 @@ export class ReportCardRemarkService {
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       await this.assertCanRead(tx, p, studentId);
       const row = await tx.reportCardRemark.findFirst({ where: { studentId, termId } });
-      return this.toDto(studentId, termId, row as RemarkRow | null);
+      return this.toDto(tx, studentId, termId, row as RemarkRow | null);
     });
   }
 
@@ -108,7 +134,7 @@ export class ReportCardRemarkService {
         { actorId: p.userId, action: "reportcard.remark.class_teacher", entity: "user", entityId: studentId, schoolId: p.schoolId, metadata: { termId } },
         tx,
       );
-      return this.toDto(studentId, termId, row as RemarkRow);
+      return this.toDto(tx, studentId, termId, row as RemarkRow);
     });
   }
 
@@ -128,7 +154,7 @@ export class ReportCardRemarkService {
         { actorId: p.userId, action: "reportcard.remark.head", entity: "user", entityId: studentId, schoolId: p.schoolId, metadata: { termId } },
         tx,
       );
-      return this.toDto(studentId, termId, row as RemarkRow);
+      return this.toDto(tx, studentId, termId, row as RemarkRow);
     });
   }
 
@@ -139,8 +165,62 @@ export class ReportCardRemarkService {
 
   /** In-tx read for the PDF generator (no extra scope check — the generator
    *  already asserted access to the student). */
-  async remarksForPdf(tx: TenantTx, studentId: string, termId: string): Promise<{ classTeacher: string | null; head: string | null }> {
-    const row = await tx.reportCardRemark.findFirst({ where: { studentId, termId } });
-    return { classTeacher: row?.classTeacherRemark ?? null, head: row?.headRemark ?? null };
+  /**
+   * The two remarks AND WHO MADE THEM, for the printed card.
+   *
+   * `classTeacherId` / `headId` have been stamped since this table was created —
+   * the model comment says so — and every reader threw them away, so a printed
+   * card carried "Class teacher: ..." with no name against it. On a real report
+   * card that block is the signed part: a comment about a child is somebody's
+   * judgement, and an unattributed one is the school saying it collectively,
+   * which is not what happened and not what a parent can reply to.
+   *
+   * The head's remark is staff-wide, so the person who wrote it may be the
+   * principal or a school administrator. The LABEL follows the writer rather
+   * than being fixed, because printing "Principal's comments" over a school
+   * administrator's words is a small lie on a document families keep.
+   */
+  async remarksForPdf(
+    tx: TenantTx,
+    studentId: string,
+    termId: string,
+  ): Promise<{
+    classTeacher: { text: string; byName: string | null } | null;
+    head: { text: string; byName: string | null; label: string } | null;
+  }> {
+    const row = (await tx.reportCardRemark.findFirst({ where: { studentId, termId } })) as RemarkRow | null;
+    if (!row) return { classTeacher: null, head: null };
+
+    const ids = [row.classTeacherRemark ? row.classTeacherId : null, row.headRemark ? row.headId : null].filter(
+      (v): v is string => !!v,
+    );
+    const people = ids.length
+      ? ((await tx.user.findMany({
+          where: { id: { in: ids } },
+          select: { id: true, name: true, roles: { select: { role: { select: { name: true } } } } },
+        })) as Array<{ id: string; name: string; roles: Array<{ role: { name: string } }> }>)
+      : [];
+    const byId = new Map(people.map((u) => [u.id, u]));
+
+    const headAuthor = row.headId ? byId.get(row.headId) : undefined;
+    const headIsPrincipal = headAuthor?.roles.some((r) => r.role.name === "principal") ?? false;
+
+    return {
+      classTeacher: row.classTeacherRemark
+        ? {
+            text: row.classTeacherRemark,
+            byName: (row.classTeacherId ? byId.get(row.classTeacherId)?.name : null) ?? null,
+          }
+        : null,
+      head: row.headRemark
+        ? {
+            text: row.headRemark,
+            byName: headAuthor?.name ?? null,
+            // Named for whoever actually signed it. With no recorded author the
+            // generic label is the honest one.
+            label: headAuthor ? (headIsPrincipal ? "Principal's comments" : "Head teacher's comments") : "Head teacher's comments",
+          }
+        : null,
+    };
   }
 }
