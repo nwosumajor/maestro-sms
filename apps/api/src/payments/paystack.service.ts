@@ -80,6 +80,8 @@ function assertMinorInteger(amountMinor: number, rail: string): number {
 export class PaystackService {
   private readonly logger = new Logger("Paystack");
   private readonly bankCache = new Map<string, { at: number; banks: Array<{ code: string; name: string }> }>();
+  /** What THIS merchant account can actually charge — see `merchantCurrencies`. */
+  private currencyCache: { at: number; currencies: string[] } | null = null;
 
   isConfigured(): boolean {
     return !!process.env.PAYSTACK_SECRET_KEY;
@@ -182,8 +184,29 @@ export class PaystackService {
       }),
     });
     if (!res.ok) {
-      this.logger.error(`Paystack init failed: ${res.status}`);
-      throw new ServiceUnavailableException("Payment provider error");
+      // NAME THE REASON WHEN THE RAIL GIVES ONE. "Payment provider error" sends
+      // a parent to the school and the school to support, for a condition
+      // somebody can fix in a dashboard in a minute. The one that actually
+      // happens: the platform's static currency list says Paystack handles GHS,
+      // and this particular MERCHANT ACCOUNT does not.
+      //
+      //     GHS -> 403 {"message":"Currency not supported by merchant"}
+      //
+      // Verified live. Nothing else in the flow could tell the difference
+      // between that and the gateway being down.
+      const detail = await res
+        .clone()
+        .json()
+        .then((j) => (j as { message?: string })?.message ?? "")
+        .catch(() => "");
+      this.logger.error(`Paystack init failed: ${res.status} ${detail}`);
+      if (/currency not supported by merchant/i.test(detail)) {
+        throw new ServiceUnavailableException(
+          `This Paystack account cannot charge in ${input.currency.toUpperCase()}. Enable that currency on the ` +
+            "Paystack dashboard, or collect this payment by mobile money.",
+        );
+      }
+      throw new ServiceUnavailableException(detail ? `Payment provider error: ${detail}` : "Payment provider error");
     }
     const json = (await res.json()) as { data: { authorization_url: string } };
     return { authorizationUrl: json.data.authorization_url };
@@ -285,6 +308,53 @@ export class PaystackService {
     const json = (await res.json()) as { data?: { account_name?: string } };
     const accountName = json.data?.account_name?.trim();
     return accountName ? { accountName } : null;
+  }
+
+  /**
+   * The currencies THIS Paystack account is enabled for.
+   *
+   * `PAYSTACK_CURRENCIES` says what Paystack the company supports. That is a
+   * different question from what a given merchant account may charge, and the
+   * platform was using the first as though it answered the second. Verified live
+   * against a real key:
+   *
+   *     NGN  200 accepted
+   *     GHS  403 Currency not supported by merchant
+   *     KES  403 Currency not supported by merchant
+   *     ZAR  403 Currency not supported by merchant
+   *     USD  403 Currency not supported by merchant
+   *
+   * So a Ghanaian school's GHS invoice passed `paystackCanSettle`, was routed
+   * here, and the parent met a raw gateway refusal at checkout — while the
+   * "use mobile money instead" message, which exists for exactly this, never
+   * fired because GHS is in the static list.
+   *
+   * `/balance` reports one row per enabled currency and is the account's own
+   * answer. Cached, because it changes when somebody edits a dashboard, not per
+   * request. Returns null when it cannot be determined — the caller then falls
+   * back to the static list, which is today's behaviour and cannot regress a
+   * working school.
+   */
+  async merchantCurrencies(): Promise<string[] | null> {
+    if (this.currencyCache && Date.now() - this.currencyCache.at < BANK_CACHE_MS) {
+      return this.currencyCache.currencies;
+    }
+    if (!this.isConfigured()) return null;
+    try {
+      const res = await fetch(`${PAYSTACK}/balance`, { headers: { Authorization: `Bearer ${this.secret()}` } });
+      if (!res.ok) {
+        this.logger.warn(`Paystack balance read failed: ${res.status}`);
+        return this.currencyCache?.currencies ?? null;
+      }
+      const json = (await res.json()) as { data?: Array<{ currency?: string }> };
+      const currencies = [...new Set((json.data ?? []).map((b) => b.currency?.toUpperCase()).filter((c): c is string => !!c))];
+      if (currencies.length === 0) return this.currencyCache?.currencies ?? null;
+      this.currencyCache = { at: Date.now(), currencies };
+      return currencies;
+    } catch (err) {
+      this.logger.warn(`Paystack balance read failed: ${String(err)}`);
+      return this.currencyCache?.currencies ?? null;
+    }
   }
 
   /**

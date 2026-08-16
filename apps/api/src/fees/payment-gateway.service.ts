@@ -16,6 +16,8 @@ import { BadRequestException, ForbiddenException, Inject, Injectable, ServiceUna
 import { PLATFORM_FEE_BEARERS, computePlatformFeeMinor, isPlatformFeeBearer,
   PAYMENT_CHANNELS,
   pickCardRail,
+  paystackCountry,
+  paystackSettlementBlocker,
 } from "@sms/types";
 import type { InvoicePayInitDto, PlatformFeeBearer, SettlementAccountDto } from "@sms/types";
 import {
@@ -30,6 +32,7 @@ import { BillingService } from "../billing/billing.service";
 import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
 import { PaystackService, type PaystackEvent } from "../payments/paystack.service";
 import { StripeService } from "../payments/stripe.service";
+import { SchoolRegionService } from "../foundation/school-region.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import { NotificationService } from "../notifications/notification.service";
 import { PlatformFeeService } from "../billing/platform-fee.service";
@@ -67,6 +70,9 @@ export class PaymentGatewayService {
     private readonly virtualAccounts: VirtualAccountsService,
     private readonly paymentPlans: PaymentPlansService,
     private readonly stripe: StripeService,
+    // The school's country decides which bank list it sees and what shape its
+    // account number is — see `settlementCountry`. @Global, so no module change.
+    private readonly region: SchoolRegionService,
     // LAST and @Optional deliberately. DI always provides it in the running
     // app; being optional keeps every existing unit wiring compiling, and
     // absent it FAILS OPEN — a missing switchboard must never be the reason a
@@ -245,6 +251,19 @@ export class PaymentGatewayService {
   /** The school's fee-settlement posture (never the full account number). */
   async getSettlement(p: Principal): Promise<SettlementAccountDto> {
     const cfg = await this.platformFees.effective();
+    // What this school can actually do, worked out BEFORE the form is drawn.
+    const region = await this.region.forSchool(p.schoolId);
+    const country = paystackCountry(region.country);
+    const blockedReason = paystackSettlementBlocker(region.country);
+    // Ask the account what it can charge rather than trusting the static list.
+    // Null (unknown) is reported as such and never as "no": an unreachable
+    // /balance must not tell a working school its currency is unsupported.
+    const merchantCurrencies = await this.paystack.merchantCurrencies();
+    const feeCurrency = region.currency ?? null;
+    const merchantCanChargeCurrency =
+      merchantCurrencies === null || !feeCurrency
+        ? null
+        : merchantCurrencies.includes(feeCurrency.toUpperCase());
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const school = await tx.school.findFirst({
         where: { id: p.schoolId },
@@ -268,6 +287,11 @@ export class PaymentGatewayService {
         heldByPlatformMinor: held._sum.amountMinor ?? 0,
         heldPaymentCount: held._count._all,
         configured: !!school?.paystackSubaccountCode,
+        countryName: country ? region.country : null,
+        accountLabel: country?.accountLabel ?? null,
+        blockedReason,
+        feeCurrency,
+        merchantCanChargeCurrency,
         bankCode: school?.settlementBankCode ?? null,
         bankName: school?.settlementBankName ?? null,
         accountLast4: school?.settlementAccountLast4 ?? null,
@@ -280,12 +304,52 @@ export class PaymentGatewayService {
     });
   }
 
-  /** Every bank the gateway can settle to, for the settlement picker. */
-  async listSettlementBanks(): Promise<Array<{ code: string; name: string }>> {
+  /**
+   * The banks THIS SCHOOL can settle to.
+   *
+   * `listBanks` has always taken a country and defaulted to Nigeria, and this —
+   * the only caller that matters — passed nothing. Verified live: a school set
+   * to Ghana was offered 279 Nigerian banks, "9jaPay Microfinance Bank" among
+   * them, and not one Ghanaian bank. Paystack serves the right list per country
+   * and was simply never asked (ghana 57, kenya 99, south africa 33).
+   */
+  async listSettlementBanks(p: Principal): Promise<Array<{ code: string; name: string }>> {
     if (!this.paystack.isConfigured()) {
       throw new ServiceUnavailableException("Online payments are not configured");
     }
-    return this.paystack.listBanks();
+    const country = await this.settlementCountry(p);
+    const blocked = paystackSettlementBlocker(country?.code ?? null);
+    if (blocked) throw new BadRequestException(blocked);
+    return this.paystack.listBanks(country!.slug);
+  }
+
+  /** The school's own country, as the settlement rules understand it. */
+  private async settlementCountry(p: Principal) {
+    const region = await this.region.forSchool(p.schoolId);
+    return paystackCountry(region.country);
+  }
+
+  /**
+   * The account number's shape is the COUNTRY's, not Nigeria's.
+   *
+   * This was `/^\d{10}$/` — a NUBAN — in both places that take an account
+   * number, so a Ghanaian or Kenyan school could not save an account even once
+   * it had found its bank. The bounds are deliberately permissive: what actually
+   * protects the money is resolving the account to a name the school reads back,
+   * and a length rule invented here would only refuse valid accounts.
+   */
+  private async assertAccountNumberShape(p: Principal, accountNumber: string) {
+    const country = await this.settlementCountry(p);
+    const blocked = paystackSettlementBlocker(country?.code ?? null);
+    if (blocked) throw new BadRequestException(blocked);
+    const digits = accountNumber.trim();
+    if (!/^\d+$/.test(digits) || digits.length < country!.minDigits || digits.length > country!.maxDigits) {
+      throw new BadRequestException(
+        `Enter the school's ${country!.accountLabel} — digits only` +
+          (country!.minDigits === country!.maxDigits ? `, ${country!.minDigits} of them.` : "."),
+      );
+    }
+    return country!;
   }
 
   /**
@@ -303,9 +367,7 @@ export class PaymentGatewayService {
     if (!this.paystack.isConfigured()) {
       throw new ServiceUnavailableException("Online payments are not configured");
     }
-    if (!/^\d{10}$/.test(input.accountNumber)) {
-      throw new BadRequestException("accountNumber must be a 10-digit NUBAN");
-    }
+    await this.assertAccountNumberShape(p, input.accountNumber);
     const resolved = await this.paystack.resolveAccount(input.bankCode, input.accountNumber);
     if (!resolved) {
       throw new BadRequestException(
@@ -363,9 +425,7 @@ export class PaymentGatewayService {
     if (!client) {
       throw new ServiceUnavailableException("Settlement management requires the privileged database configuration");
     }
-    if (!/^\d{10}$/.test(input.accountNumber)) {
-      throw new BadRequestException("accountNumber must be a 10-digit NUBAN");
-    }
+    await this.assertAccountNumberShape(p, input.accountNumber);
     const school = await client.school.findFirst({ where: { id: p.schoolId }, select: { name: true } });
     if (!school) throw new ServiceUnavailableException("School not found");
 

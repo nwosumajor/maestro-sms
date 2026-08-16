@@ -97,6 +97,33 @@ export interface FeeReportDto {
 export interface SettlementAccountDto {
   /** True once a subaccount exists — fee charges then split to the school's bank. */
   configured: boolean;
+  /**
+   * Whether this school can be set up at all, and if not, why — in words a
+   * school can act on.
+   *
+   * Every school used to be shown the same picker, filled with NIGERIAN banks
+   * whatever country it was in, and an account-number box that only accepted a
+   * Nigerian NUBAN. A school in Accra could work through the whole form and
+   * never succeed, with nothing on screen explaining why. Saying it up front is
+   * the difference between a form and a dead end.
+   */
+  countryName: string | null;
+  /** What to type: "10-digit NUBAN", "bank account number". */
+  accountLabel: string | null;
+  /** Null when settlement is available here. */
+  blockedReason: string | null;
+  /**
+   * The school's own fee currency, and whether the platform's Paystack account
+   * can actually charge it.
+   *
+   * A different question from whether Paystack supports the currency: verified
+   * live, an account enabled only for NGN answers `403 Currency not supported
+   * by merchant` for GHS, KES, ZAR and USD alike. The platform's static list
+   * said otherwise, so those charges were routed here and the parent met a raw
+   * gateway refusal at checkout. Null when it could not be determined.
+   */
+  feeCurrency: string | null;
+  merchantCanChargeCurrency: boolean | null;
   bankCode: string | null;
   bankName: string | null;
   accountLast4: string | null;

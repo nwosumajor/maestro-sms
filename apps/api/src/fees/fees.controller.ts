@@ -321,8 +321,8 @@ export class FeesController {
   /** Banks the gateway can settle to, for the settlement picker. Read-only. */
   @Get("fees/settlement/banks")
   @RequirePermission(FEES_PERMISSIONS.FEE_MANAGE)
-  settlementBanks() {
-    return this.gateway.listSettlementBanks();
+  settlementBanks(@CurrentPrincipal() p: Principal) {
+    return this.gateway.listSettlementBanks(p);
   }
 
   /** Read back whose account a bank + NUBAN actually is, BEFORE saving it.
