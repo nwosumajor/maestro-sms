@@ -29,6 +29,10 @@ export function RemarksEditor({
   const [head, setHead] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
+  // WHO wrote each remark. Stored since the table was created and shown nowhere
+  // — so two people could overwrite each other's words about a child with no
+  // sign of it, and nobody reading the box knew whose judgement it was.
+  const [by, setBy] = React.useState<{ ct: string | null; head: string | null }>({ ct: null, head: null });
 
   const load = React.useCallback(async () => {
     if (!termId) return;
@@ -37,9 +41,11 @@ export function RemarksEditor({
       const data = (await res.json()) as Serialized<ReportCardRemarkDto>;
       setCt(data.classTeacherRemark ?? "");
       setHead(data.headRemark ?? "");
+      setBy({ ct: data.classTeacherName ?? null, head: data.headName ?? null });
     } else {
       setCt("");
       setHead("");
+      setBy({ ct: null, head: null });
     }
   }, [termId, studentId]);
 
@@ -87,7 +93,10 @@ export function RemarksEditor({
     <Card>
       <CardHeader>
         <CardTitle className="text-base">Report card &amp; remarks</CardTitle>
-        <CardDescription>Pick a term, add remarks, then generate the PDF (remarks print on it).</CardDescription>
+        <CardDescription>
+          Pick a term, add remarks, then generate the PDF. Both print on the card over a signature line, under the
+          name of whoever wrote them.
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
@@ -111,7 +120,10 @@ export function RemarksEditor({
 
         {canWrite && (
           <div className="space-y-1.5">
-            <label className="text-sm font-medium">Class teacher's remark</label>
+            <label className="text-sm font-medium">
+              Class teacher's remark
+              {by.ct && <span className="ml-2 font-normal text-xs text-muted-foreground">last written by {by.ct}</span>}
+            </label>
             <textarea
               className="w-full rounded-md border bg-background p-2 text-sm"
               rows={2}
@@ -127,7 +139,10 @@ export function RemarksEditor({
 
         {canHead && (
           <div className="space-y-1.5">
-            <label className="text-sm font-medium">Head's remark</label>
+            <label className="text-sm font-medium">
+              Head's remark
+              {by.head && <span className="ml-2 font-normal text-xs text-muted-foreground">last written by {by.head}</span>}
+            </label>
             <textarea
               className="w-full rounded-md border bg-background p-2 text-sm"
               rows={2}

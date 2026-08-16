@@ -58,15 +58,26 @@ export function gradeComponentMax(key: GradeComponentKey): number {
 
 /** Letter bands, highest threshold first. Total >= min → that grade. */
 export const GRADE_BANDS = [
-  { min: 70, grade: "A" },
-  { min: 60, grade: "B" },
-  { min: 50, grade: "C" },
-  { min: 45, grade: "D" },
-  { min: 40, grade: "E" },
-  { min: 0, grade: "F" },
+  { min: 70, grade: "A", label: "Excellent" },
+  { min: 60, grade: "B", label: "Very good" },
+  { min: 50, grade: "C", label: "Good" },
+  { min: 45, grade: "D", label: "Pass" },
+  { min: 40, grade: "E", label: "Pass" },
+  { min: 0, grade: "F", label: "Fail" },
 ] as const;
 
-export type GradeBand = { min: number; grade: string };
+/**
+ * A band carries its floor, its name, and optionally the WORD a report card
+ * prints for it.
+ *
+ * The word is not decoration. A printed card states the key ("A1 75-100
+ * EXCELLENT") and repeats the word beside each subject, because "B3" tells a
+ * parent nothing on its own and a letter a family cannot read is a mark that
+ * has not really been reported. It is optional so a custom scale that only
+ * types floors still works — the card then prints the letter alone rather than
+ * inventing a description of a child's work.
+ */
+export type GradeBand = { min: number; grade: string; label?: string };
 
 // =============================================================================
 // Grade SCALES — what a school picks instead of typing boundaries
@@ -94,65 +105,65 @@ export const GRADE_SCALES: Record<string, { label: string; note: string; bands: 
     label: "WAEC / NECO (A–F, pass at 40)",
     note: "The West African standard: A1–F9 collapsed to letters, credit at 50, pass at 40.",
     bands: [
-      { min: 75, grade: "A1" },
-      { min: 70, grade: "B2" },
-      { min: 65, grade: "B3" },
-      { min: 60, grade: "C4" },
-      { min: 55, grade: "C5" },
-      { min: 50, grade: "C6" },
-      { min: 45, grade: "D7" },
-      { min: 40, grade: "E8" },
-      { min: 0, grade: "F9" },
+      { min: 75, grade: "A1", label: "Excellent" },
+      { min: 70, grade: "B2", label: "Very good" },
+      { min: 65, grade: "B3", label: "Good" },
+      { min: 60, grade: "C4", label: "Credit" },
+      { min: 55, grade: "C5", label: "Credit" },
+      { min: 50, grade: "C6", label: "Credit" },
+      { min: 45, grade: "D7", label: "Pass" },
+      { min: 40, grade: "E8", label: "Pass" },
+      { min: 0, grade: "F9", label: "Fail" },
     ],
   },
   SIMPLE_LETTER: {
     label: "Simple letters (A–F, pass at 40)",
     note: "The platform default. A at 70, credit at 50, pass at 40.",
     bands: [
-      { min: 70, grade: "A" },
-      { min: 60, grade: "B" },
-      { min: 50, grade: "C" },
-      { min: 45, grade: "D" },
-      { min: 40, grade: "E" },
-      { min: 0, grade: "F" },
+      { min: 70, grade: "A", label: "Excellent" },
+      { min: 60, grade: "B", label: "Very good" },
+      { min: 50, grade: "C", label: "Good" },
+      { min: 45, grade: "D", label: "Pass" },
+      { min: 40, grade: "E", label: "Pass" },
+      { min: 0, grade: "F", label: "Fail" },
     ],
   },
   PLUS_MINUS: {
     label: "With plus grades (A+ from 85)",
     note: "A+ 85, A 70, B 60, C 50, D 45, E 40 — the scale in the example most schools describe.",
     bands: [
-      { min: 85, grade: "A+" },
-      { min: 70, grade: "A" },
-      { min: 60, grade: "B" },
-      { min: 50, grade: "C" },
-      { min: 45, grade: "D" },
-      { min: 40, grade: "E" },
-      { min: 0, grade: "F" },
+      { min: 85, grade: "A+", label: "Outstanding" },
+      { min: 70, grade: "A", label: "Excellent" },
+      { min: 60, grade: "B", label: "Very good" },
+      { min: 50, grade: "C", label: "Good" },
+      { min: 45, grade: "D", label: "Pass" },
+      { min: 40, grade: "E", label: "Pass" },
+      { min: 0, grade: "F", label: "Fail" },
     ],
   },
   CAMBRIDGE: {
     label: "Cambridge / IGCSE style (A*–G)",
     note: "A* at 90, A at 80, then ten-point steps.",
     bands: [
-      { min: 90, grade: "A*" },
-      { min: 80, grade: "A" },
-      { min: 70, grade: "B" },
-      { min: 60, grade: "C" },
-      { min: 50, grade: "D" },
-      { min: 40, grade: "E" },
-      { min: 30, grade: "F" },
-      { min: 0, grade: "G" },
+      { min: 90, grade: "A*", label: "Outstanding" },
+      { min: 80, grade: "A", label: "Excellent" },
+      { min: 70, grade: "B", label: "Very good" },
+      { min: 60, grade: "C", label: "Good" },
+      { min: 50, grade: "D", label: "Pass" },
+      { min: 40, grade: "E", label: "Pass" },
+      { min: 30, grade: "F", label: "Weak" },
+      { min: 0, grade: "G", label: "Weak" },
     ],
   },
   US_LETTER: {
     label: "United States (A–F, pass at 60)",
     note: "Ten-point scale; anything under 60 fails.",
     bands: [
-      { min: 90, grade: "A" },
-      { min: 80, grade: "B" },
-      { min: 70, grade: "C" },
-      { min: 60, grade: "D" },
-      { min: 0, grade: "F" },
+      { min: 90, grade: "A", label: "Excellent" },
+      { min: 80, grade: "B", label: "Good" },
+      { min: 70, grade: "C", label: "Satisfactory" },
+      { min: 60, grade: "D", label: "Pass" },
+      { min: 0, grade: "F", label: "Fail" },
     ],
   },
 };
@@ -193,7 +204,23 @@ export function gradeScaleProblem(bands: readonly GradeBand[]): string | null {
 /** The bands a school actually grades on: its own, else its named scale, else
  *  the platform default. Never returns an unusable set. */
 export function resolveGradeBands(policy?: GradingPolicy | null): readonly GradeBand[] {
-  if (policy?.bands && !gradeScaleProblem(policy.bands)) return policy.bands;
+  if (policy?.bands && !gradeScaleProblem(policy.bands)) {
+    // A school that PICKS a named scale gets that scale's floors COPIED into its
+    // own policy — so the stored copy is missing anything the source gains
+    // later, which is exactly what happened when bands learned to carry a word.
+    // Every school that had ever saved a policy would have printed a wordless
+    // grade key and an empty remark column, because the copy said "A" and the
+    // scale that "A" came from is where "Excellent" lives.
+    //
+    // So a band with no word of its own borrows one from the scale it was copied
+    // from, matched on the grade name. A band the school genuinely typed itself
+    // matches nothing and stays wordless, which is right: the platform should
+    // not invent a description of a child's work that the school never chose.
+    const source = policy.scale ? GRADE_SCALES[policy.scale] : undefined;
+    if (!source || policy.bands.every((b) => b.label)) return policy.bands;
+    const words = new Map(source.bands.map((b) => [b.grade, b.label]));
+    return policy.bands.map((b) => (b.label ? b : { ...b, label: words.get(b.grade) }));
+  }
   const preset = GRADE_SCALES[policy?.scale ?? DEFAULT_GRADE_SCALE] ?? GRADE_SCALES[DEFAULT_GRADE_SCALE];
   return preset.bands;
 }
@@ -215,6 +242,20 @@ export function gradeLetter(total: number, bands?: readonly GradeBand[]): string
   // Only reachable if a caller passes bands whose lowest floor is above 0 —
   // gradeScaleProblem refuses those, so this is a belt-and-braces last resort.
   return (bands ?? GRADE_BANDS)[(bands ?? GRADE_BANDS).length - 1]?.grade ?? "F";
+}
+
+/**
+ * The WORD for a mark — "Excellent", "Credit", "Fail" — or null when the
+ * school's scale does not name its bands.
+ *
+ * Deliberately null rather than a guess: describing a child's work in a word
+ * the school never chose is worse than printing the letter on its own.
+ */
+export function gradeDescriptor(total: number, bands?: readonly GradeBand[]): string | null {
+  for (const band of bands ?? GRADE_BANDS) {
+    if (total >= band.min) return band.label ?? null;
+  }
+  return null;
 }
 
 /**

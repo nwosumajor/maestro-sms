@@ -34,5 +34,14 @@ export interface ReportCardRemarkDto {
   termId: string;
   classTeacherRemark: string | null;
   headRemark: string | null;
+  /**
+   * WHO wrote each remark. The ids have been stored since this table was
+   * created and every reader dropped them, so a screen could show a comment
+   * about a child with nobody's name against it — the same gap the printed card
+   * had. A judgement about a pupil is answerable or it is not a judgement.
+   * Null when the author's account is gone; the remark itself still stands.
+   */
+  classTeacherName: string | null;
+  headName: string | null;
   updatedAt: Date | null;
 }

@@ -18,6 +18,7 @@
 import {
   DEFAULT_GRADE_SCALE,
   GRADE_SCALES,
+  gradeDescriptor,
   computeTermSubjectGrade,
   gradeLetter,
   gradeScaleProblem,
@@ -142,5 +143,68 @@ describe("the scale reaches the computed grade", () => {
     expect(plus.total).toBe(86);
     expect(us.grade).toBe("B");
     expect(plus.grade).toBe("A+");
+  });
+});
+
+// =============================================================================
+// The WORD a grade means
+// =============================================================================
+// A report card states "A1 75-100 EXCELLENT" in its key and repeats the word
+// beside each subject, because a letter on its own is a code: a parent handed
+// "B3" cannot tell whether their child did well, and a card a family cannot read
+// has not really reported anything.
+//
+// The trap is that a school which PICKS a named scale gets that scale's floors
+// COPIED into its own grading policy. The copy is a snapshot — so the moment
+// bands learned to carry a word, every school that had ever saved a policy would
+// have printed a wordless key and an empty remark column, while the scale those
+// bands came from had the words all along. Same shape as the subject catalogue:
+// shared reference data is a template that gets copied, and copies go stale.
+
+describe("grade descriptors", () => {
+  it("names every band of every scale the platform ships", () => {
+    for (const [key, scale] of Object.entries(GRADE_SCALES)) {
+      for (const band of scale.bands) {
+        expect([key, band.grade, band.label]).toEqual([key, band.grade, expect.any(String)]);
+      }
+    }
+  });
+
+  it("reads the word for a mark", () => {
+    const waec = GRADE_SCALES.WAEC.bands;
+    expect(gradeDescriptor(88, waec)).toBe("Excellent");
+    expect(gradeDescriptor(66, waec)).toBe("Good");
+    expect(gradeDescriptor(12, waec)).toBe("Fail");
+  });
+
+  it("borrows the word for a school whose policy copied a named scale without one", () => {
+    // The real stored shape: scale named, bands copied, no labels anywhere.
+    const stored = {
+      scale: "SIMPLE_LETTER",
+      bands: GRADE_SCALES.SIMPLE_LETTER.bands.map(({ min, grade }) => ({ min, grade })),
+    };
+    const resolved = resolveGradeBands(stored as never);
+    expect(resolved.every((b) => b.label)).toBe(true);
+    expect(gradeDescriptor(75, resolved)).toBe("Excellent");
+  });
+
+  it("leaves a band the school genuinely invented wordless", () => {
+    // Describing a child's work in a word the school never chose is worse than
+    // printing the letter alone.
+    const stored = { scale: "SIMPLE_LETTER", bands: [{ min: 50, grade: "MERIT" }, { min: 0, grade: "REFER" }] };
+    const resolved = resolveGradeBands(stored as never);
+    expect(gradeDescriptor(60, resolved)).toBeNull();
+  });
+
+  it("keeps a word the school DID type, rather than overwriting it from the scale", () => {
+    const stored = {
+      scale: "SIMPLE_LETTER",
+      bands: [{ min: 70, grade: "A", label: "Distinction" }, { min: 0, grade: "F", label: "Refer" }],
+    };
+    expect(gradeDescriptor(80, resolveGradeBands(stored as never))).toBe("Distinction");
+  });
+
+  it("gives a policy-less school the default scale's words", () => {
+    expect(gradeDescriptor(95, resolveGradeBands(null))).toBe("Excellent");
   });
 });

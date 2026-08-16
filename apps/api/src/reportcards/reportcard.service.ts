@@ -29,7 +29,9 @@ import { BrandingService } from "../branding/branding.service";
 import { DocumentsService } from "../documents/documents.service";
 import { ReportCardRemarkService } from "./report-card-remark.service";
 import { TermResultService } from "../gradebook/term-result.service";
-import { TRAIT_GROUPS, TRAIT_SCALE, computeTermSubjectGrade, averageOf, sessionAverageScope } from "@sms/types";
+import { TRAIT_GROUPS, TRAIT_SCALE, computeTermSubjectGrade, averageOf, sessionAverageScope, resolveGradeBands, gradeLetter, gradeDescriptor } from "@sms/types";
+import { GRADE_COMPONENTS, gradeComponentMax } from "@sms/types";
+import type { GradeBand } from "@sms/types";
 import { SchoolRegionService } from "../foundation/school-region.service";
 import type { TermSubjectRowDto } from "@sms/types";
 
@@ -95,6 +97,7 @@ export class ReportCardService {
     // It costs NOTHING extra: `getStudentSessionReport` already returns every
     // term, and the code below was throwing all but one of them away.
     let annualTermNames: string[] = [];
+    let annualTermIds: string[] = [];
     let annualBySubject = new Map<string, Array<number | null>>();
     if (term) {
       const report = await this.termResults.getStudentSessionReport(p, { studentId, sessionId: term.sessionId });
@@ -107,6 +110,7 @@ export class ReportCardService {
       sessionTermsCounted = report.terms.filter((t) => t.average !== null).length;
 
       annualTermNames = report.terms.map((t) => t.termName);
+      annualTermIds = report.terms.map((t) => t.termId);
       for (const row of subjectRows) {
         annualBySubject.set(
           row.subjectId,
@@ -120,7 +124,25 @@ export class ReportCardService {
       const student = await tx.user.findFirst({ where: { id: studentId }, select: { name: true } });
       if (!student) throw new NotFoundException("Student not found");
       const school = await tx.school.findFirst({ where: { id: p.schoolId }, select: { name: true } });
-      const profile = await tx.studentProfile.findFirst({ where: { studentId }, select: { admissionNumber: true } });
+      const profile = await tx.studentProfile.findFirst({
+        where: { studentId },
+        select: { admissionNumber: true, gender: true },
+      });
+      // The guardians the printed format names at the foot of the card. Names
+      // only — the card already goes to these families, and their contact
+      // details belong on the SIS record, not on a document pupils carry home
+      // in a bag.
+      const guardianLinks = (await tx.parentChild.findMany({
+        where: { studentId },
+        select: { parentId: true },
+      })) as Array<{ parentId: string }>;
+      const guardianNames = guardianLinks.length
+        ? ((await tx.user.findMany({
+            where: { id: { in: guardianLinks.map((g) => g.parentId) } },
+            select: { name: true },
+            orderBy: { name: "asc" },
+          })) as Array<{ name: string }>).map((u) => u.name)
+        : [];
       const enrolment = await tx.enrollment.findFirst({
         where: { studentId, status: "ACTIVE" },
         select: { classId: true, class: { select: { name: true } } },
@@ -132,12 +154,17 @@ export class ReportCardService {
       // are shown), from PUBLISHED results, via the same pure functions.
       let position: number | null = null;
       let classSize: number | null = null;
+      const annualPosition = new Map<string, { position: number; of: number }>();
+      // Resolved ONCE for the whole card. Rank on the SCHOOL's weighting, the
+      // same one the printed average uses — ranking on platform defaults while
+      // printing a school-weighted average put the two numbers on different
+      // scales, so a pupil could show the higher average and the lower position
+      // on the same page. The BANDS come from here too, so the grade key printed
+      // at the foot of the card is the scale the letters above it were actually
+      // computed on.
+      const grading = (await this.region.academicInTx(tx, p.schoolId)).grading;
+      const bands = resolveGradeBands(grading);
       if (term && enrolment) {
-        // Rank on the SCHOOL's weighting, the same one the printed average uses.
-        // Ranking on platform defaults while printing a school-weighted average
-        // put the two numbers on different scales: a pupil could show the higher
-        // average and the lower position, on the same page.
-        const grading = (await this.region.academicInTx(tx, p.schoolId)).grading;
         const classResults = await tx.subjectResult.findMany({
           where: { classId: enrolment.classId, termId: term.id, status: "PUBLISHED" },
           // subjectId rides along so the PER-SUBJECT class average, lowest and
@@ -171,6 +198,57 @@ export class ReportCardService {
           row.classLowest = Math.min(...totals);
           row.classHighest = Math.max(...totals);
         }
+        // ANNUAL POSITION PER SUBJECT — where this pupil stands in the subject
+        // across the WHOLE year, which is the column the printed format sets
+        // beside the annual grade. It needs every classmate's marks in every
+        // term, so it is a second read; one query for the class's whole session
+        // rather than one per subject or per term, and it is only run when there
+        // is more than one term of marks to rank on. Like every other position
+        // on this card it yields a number about THIS pupil — no other child's
+        // marks or name is read out.
+        if (annualTermNames.length > 1) {
+          const sessionResults = (await tx.subjectResult.findMany({
+            // `termId` is a scalar with a DB-level FK and no Prisma relation (the
+            // documented pattern that keeps the models lean), so the session is
+            // expressed as the ids the session report already resolved.
+            where: { classId: enrolment.classId, termId: { in: annualTermIds }, status: "PUBLISHED" },
+            select: { studentId: true, subjectId: true, exam: true, midterm: true, assignment: true, classNote: true },
+          })) as Array<{
+            studentId: string;
+            subjectId: string;
+            exam: number | null;
+            midterm: number | null;
+            assignment: number | null;
+            classNote: number | null;
+          }>;
+          const perSubject = new Map<string, Map<string, number[]>>();
+          for (const r of sessionResults) {
+            const { total } = computeTermSubjectGrade(
+              { exam: r.exam, midterm: r.midterm, assignment: r.assignment, classNote: r.classNote },
+              grading?.components,
+            );
+            const forSubject = perSubject.get(r.subjectId) ?? new Map<string, number[]>();
+            forSubject.set(r.studentId, [...(forSubject.get(r.studentId) ?? []), total]);
+            perSubject.set(r.subjectId, forSubject);
+          }
+          for (const [subjectId, forSubject] of perSubject) {
+            const ranked = [...forSubject.entries()]
+              .map(([sid, totals]) => ({ sid, avg: averageOf(totals) }))
+              .filter((x): x is { sid: string; avg: number } => x.avg !== null)
+              .sort((a, b) => b.avg - a.avg);
+            if (!ranked.some((x) => x.sid === studentId)) continue;
+            // Standard competition ranking, the same rule as every other
+            // position on the card: ties share a place.
+            let pos = 0, seen = 0, prev: number | null = null;
+            for (const x of ranked) {
+              seen += 1;
+              if (prev === null || x.avg !== prev) { pos = seen; prev = x.avg; }
+              if (x.sid === studentId) break;
+            }
+            annualPosition.set(subjectId, { position: pos, of: ranked.length });
+          }
+        }
+
         const averages = [...byStudent.entries()]
           .map(([sid, totals]) => ({ sid, avg: averageOf(totals) }))
           .filter((x): x is { sid: string; avg: number } => x.avg !== null)
@@ -301,6 +379,15 @@ export class ReportCardService {
         promotionLine,
         annualTermNames,
         annualBySubject: Object.fromEntries(annualBySubject),
+        annualPosition: Object.fromEntries(annualPosition),
+        bands,
+        // THE CUMULATIVE SCORE — every term's marks added together, which is the
+        // figure the printed format sets beside the cumulative position. The
+        // card already showed a cumulative AVERAGE; a school that reads the
+        // total off the page was doing the arithmetic itself.
+        cumulativeScore: [...annualBySubject.values()]
+          .flat()
+          .reduce<number>((n, v) => n + (v ?? 0), 0),
         studentName: student.name,
         schoolName: school?.name ?? "",
         termBegins,
@@ -310,6 +397,8 @@ export class ReportCardService {
         traitRatings,
         totalTermScore,
         admissionNumber: profile?.admissionNumber ?? null,
+        gender: profile?.gender ?? null,
+        guardianNames,
         className: enrolment?.class?.name ?? null,
         termName: term?.name ?? null,
         subjects: subjectRows,
@@ -367,7 +456,14 @@ export class ReportCardService {
       sessionTermsCounted: number;
       sessionTermsTotal: number;
       att: Record<string, number>;
-      remarks: { classTeacher: string | null; head: string | null };
+      /** Each remark with the name of whoever signed it — see the render block. */
+      remarks: {
+        classTeacher: { text: string; byName: string | null } | null;
+        head: { text: string; byName: string | null; label: string } | null;
+      };
+      /** Named on the card the way the printed format names them. */
+      guardianNames: string[];
+      gender: string | null;
       /** The term frame the printed format carries. */
       termBegins: Date | null;
       termEnds: Date | null;
@@ -381,8 +477,14 @@ export class ReportCardService {
       annualTermNames: string[];
       /** subjectId → that subject's total in each of those terms (null = no marks). */
       annualBySubject: Record<string, Array<number | null>>;
+      /** subjectId → the pupil's place in that subject across the whole year. */
+      annualPosition: Record<string, { position: number; of: number }>;
       /** The recorded promotion decision, or null when nobody has taken one. */
       promotionLine: string | null;
+      /** The school's own grade scale — what the key at the foot of the card states. */
+      bands: readonly GradeBand[];
+      /** Every term's marks added together — the printed format's cumulative score. */
+      cumulativeScore: number;
     },
     logo?: Buffer | null,
   ): Promise<Buffer> {
@@ -408,9 +510,16 @@ export class ReportCardService {
         .text(d.termName ? `Report Card — ${d.termName}` : "Student Report Card", { align: "center" });
       doc.fillColor("#000").moveDown(0.8);
 
+      // PERSONAL DATA — the identifying block. Sex is on it because the printed
+      // format carries it and because two pupils in a year group share a name
+      // more often than schools expect.
       doc.fontSize(11).text(`Student: ${d.studentName}`, startX);
-      if (d.admissionNumber) doc.text(`Admission no.: ${d.admissionNumber}`, startX);
-      if (d.className) doc.text(`Class: ${d.className}`, startX);
+      const idLine = [
+        d.admissionNumber ? `Admission no.: ${d.admissionNumber}` : null,
+        d.gender ? `Sex: ${d.gender}` : null,
+        d.className ? `Class: ${d.className}` : null,
+      ].filter(Boolean);
+      if (idLine.length) doc.text(idLine.join("    "), startX);
       doc.text(`Generated: ${new Date().toLocaleString()}`, startX);
       doc.moveDown(0.8);
 
@@ -418,7 +527,7 @@ export class ReportCardService {
       // Eight columns now (Pos added). Re-spaced rather than squeezed on the
       // end: the last column runs to 545, so appending without re-spacing would
       // have pushed Grade off the page edge.
-      const colX = [startX, 195, 250, 305, 358, 411, 464, 508];
+      const colX = [startX, 168, 210, 252, 296, 336, 386, 432, 486];
       const drawRow = (cells: string[], bold = false) => {
         const y = doc.y;
         doc.fontSize(10).font(bold ? "Helvetica-Bold" : "Helvetica");
@@ -433,9 +542,21 @@ export class ReportCardService {
       // C.A. is the school's three continuous-assessment components added up —
       // the printed format shows "C.A. /40 + Exam /60", which is the same marks
       // this platform already holds as four. Derived, never stored twice.
-      drawRow(["Subject", "C.A.", "Exam", "Total", "Grade", "Pos", "Class avg", "Low/High"], true);
+      // The REMARK column is the grade in a word. The printed format carries
+      // both because a letter is a code and a family reading "B3" cannot tell
+      // whether their child did well; the word is the school's own, from its own
+      // scale, never invented here.
+      drawRow(["Subject", "C.A.", "Exam", "Total", "Grade", "Pos", "Class avg", "Low/High", "Remark"], true);
       doc.moveTo(startX, doc.y).lineTo(545, doc.y).strokeColor("#ccc").stroke();
       doc.moveDown(0.3);
+      // WHAT EACH COLUMN IS OUT OF, stated in the table rather than only as a
+      // sentence at the foot. A mark means nothing without its denominator, and
+      // a parent reading "37" under Exam should not have to find a note three
+      // inches below to learn it was out of 60.
+      const caMax = GRADE_COMPONENTS.filter((c) => c.key !== "exam").reduce((n, c) => n + c.max, 0);
+      doc.fillColor("#666");
+      drawRow(["Maximum mark", String(caMax), String(gradeComponentMax("exam")), "100", "", "", "", "", ""], false);
+      doc.fillColor("#000");
       if (d.subjects.length === 0) {
         doc.fontSize(10).fillColor("#888").text("No published grades for this term yet.", startX).fillColor("#000");
       } else {
@@ -462,6 +583,7 @@ export class ReportCardService {
             pos,
             fmt(sub.classAverage ?? null),
             lowHigh,
+            sub.total === null ? "" : (gradeDescriptor(sub.total, d.bands) ?? ""),
           ]);
         }
       }
@@ -549,45 +671,165 @@ export class ReportCardService {
       // on a first-term card it would be the same column twice.
       const annualTerms = d.annualTermNames;
       const annualRows = d.subjects
-        .map((s) => ({ name: s.subjectName, totals: d.annualBySubject[s.subjectId] ?? [] }))
+        .map((s) => ({
+          name: s.subjectName,
+          totals: d.annualBySubject[s.subjectId] ?? [],
+          rank: d.annualPosition[s.subjectId] ?? null,
+        }))
         .filter((r) => r.totals.filter((t) => t !== null).length > 1);
       if (annualTerms.length > 1 && annualRows.length > 0) {
         doc.moveDown(0.8).fontSize(14).font("Helvetica-Bold").text("The year so far", startX);
         doc.moveDown(0.2).fontSize(9);
-        const aw = [150, ...annualTerms.map(() => 62), 62];
+        // Annual average, its GRADE and the word for it — the same three things
+        // the term columns above carry, so a parent can read the year the way
+        // they just read the term rather than being handed a bare number.
+        // Widths are DERIVED from how many terms there are, not fixed: a school
+        // on a four-quarter calendar has four columns, and a fixed width sized
+        // for three silently clipped the headings — "Second Term" printed as
+        // "Second Te". The names are also shortened to fit rather than being cut
+        // off mid-word by the renderer.
+        const tailW = [58, 34, 42, 62];
+        const subjectW = 112;
+        const termW = Math.max(
+          38,
+          Math.floor((545 - startX - subjectW - tailW.reduce((a, b) => a + b, 0)) / Math.max(1, annualTerms.length)),
+        );
+        const fit = (label: string, width: number) => {
+          doc.fontSize(9).font("Helvetica-Bold");
+          if (doc.widthOfString(label) <= width - 4) return label;
+          let out = label;
+          while (out.length > 1 && doc.widthOfString(out + "\u2026") > width - 4) out = out.slice(0, -1);
+          return out + "\u2026";
+        };
+        const aw = [subjectW, ...annualTerms.map(() => termW), ...tailW];
         const ax = aw.map((_, i) => startX + aw.slice(0, i).reduce((a, b) => a + b, 0));
         const arow = (cells: string[], bold: boolean) => {
           doc.font(bold ? "Helvetica-Bold" : "Helvetica");
           const y = doc.y;
-          cells.forEach((c, i) => doc.text(c, ax[i], y, { width: aw[i] - 4 }));
+          cells.forEach((c, i) => doc.text(c, ax[i], y, { width: aw[i] - 4, lineBreak: false }));
           doc.y = y + 13;
         };
-        arow(["Subject", ...annualTerms, "Average"], true);
+        // EVERY heading is fitted, not just the term names: a heading silently
+        // cut to "Annual av" is the same defect as a clipped term, and the next
+        // person to re-balance these columns should not have to remember which
+        // ones were protected.
+        const aHead = ["Subject", ...annualTerms, "Annual avg", "Grade", "Pos", "Remark"];
+        arow(aHead.map((h, i) => fit(h, aw[i])), true);
         for (const r of annualRows) {
           const present = r.totals.filter((t): t is number => t !== null);
           // The average counts the terms that HAVE marks — a missing term is an
           // absent measurement, and treating it as a zero would print a failure
           // the pupil never earned.
           const avg = present.length > 0 ? Math.round(present.reduce((a, b) => a + b, 0) / present.length) : null;
-          arow([r.name, ...r.totals.map((t) => (t === null ? "—" : String(t))), fmt(avg)], false);
+          arow(
+            [
+              r.name,
+              ...r.totals.map((t) => (t === null ? "—" : String(t))),
+              fmt(avg),
+              avg === null ? "—" : gradeLetter(avg, d.bands),
+              r.rank ? `${r.rank.position}/${r.rank.of}` : "—",
+              avg === null ? "" : (gradeDescriptor(avg, d.bands) ?? ""),
+            ],
+            false,
+          );
+        }
+        if (d.cumulativeScore > 0) {
+          doc.moveDown(0.3).fontSize(10).font("Helvetica-Bold")
+            .text(`Cumulative score: ${d.cumulativeScore}`, startX);
+          doc.font("Helvetica");
         }
       }
 
-      // The promotion decision — printed only when a person has taken one.
-      if (d.promotionLine) {
-        doc.moveDown(0.6).fontSize(12).font("Helvetica-Bold").text(d.promotionLine, startX);
-        doc.font("Helvetica").fontSize(10);
+      // THE GRADE KEY. Without it every letter above is unreadable: a parent
+      // handed "B3" has no way to know whether it is good, and a card that
+      // cannot be read has not really reported anything. Printed from the
+      // SCHOOL's own scale, which is the same one the letters were computed on.
+      if (d.bands.length > 0) {
+        doc.moveDown(0.7).fontSize(10).font("Helvetica-Bold").text("Grades", startX);
+        doc.moveDown(0.15).fontSize(8).font("Helvetica").fillColor("#555");
+        const key = d.bands.map((b, i) => {
+          const ceiling = i === 0 ? 100 : d.bands[i - 1].min - 1;
+          return `${b.grade} ${b.min}\u2013${ceiling}${b.label ? ` ${b.label.toLowerCase()}` : ""}`;
+        });
+        doc.text(key.join("   |   "), startX, undefined, { width: 545 - startX });
+        doc.fillColor("#000").fontSize(10);
       }
 
-      if (d.remarks.classTeacher || d.remarks.head) {
-        doc.moveDown(0.8).fontSize(14).font("Helvetica-Bold").text("Remarks", startX);
-        doc.moveDown(0.2).font("Helvetica").fontSize(11);
+      // =======================================================================
+      // REMARKS AND CONCLUSION — the signed half of the document
+      // =======================================================================
+      // Everything above is arithmetic the system performed. Everything here is
+      // a judgement a PERSON made, and the printed format treats the two
+      // differently: each comment sits over a signature rule and the name of
+      // whoever wrote it, and the promotion decision is stamped beside the
+      // principal's words rather than floating on its own.
+      //
+      // The names come from `classTeacherId` / `headId`, which this table has
+      // stamped since it was created and which no reader had ever looked at —
+      // so the card used to print a comment about a child with nobody's name
+      // against it. An unattributed remark reads as the school speaking
+      // collectively, which is not what happened and not something a parent can
+      // reply to.
+      const rule = (x: number, width: number) => {
+        doc.moveTo(x, doc.y).lineTo(x + width, doc.y).strokeColor("#999").lineWidth(0.5).stroke().strokeColor("#000");
+      };
+      if (d.remarks.classTeacher || d.remarks.head || d.promotionLine) {
+        doc.moveDown(0.9).fontSize(13).font("Helvetica-Bold").text("Remarks and conclusion", startX);
+
         if (d.remarks.classTeacher) {
-          doc.font("Helvetica-Bold").text("Class teacher: ", startX, doc.y, { continued: true }).font("Helvetica").text(d.remarks.classTeacher);
+          doc.moveDown(0.35).fontSize(9).font("Helvetica-Bold").fillColor("#555").text("CLASS TEACHER'S COMMENTS", startX);
+          doc.fillColor("#000").fontSize(11).font("Helvetica-Oblique")
+            .text(d.remarks.classTeacher.text, startX, undefined, { width: 495 - startX });
+          doc.moveDown(0.9);
+          rule(startX, 240);
+          doc.moveDown(0.15).fontSize(8).font("Helvetica").fillColor("#666")
+            .text(d.remarks.classTeacher.byName ?? "Class teacher", startX);
+          doc.fillColor("#000");
         }
+
         if (d.remarks.head) {
-          doc.moveDown(0.2).font("Helvetica-Bold").text("Head: ", startX, doc.y, { continued: true }).font("Helvetica").text(d.remarks.head);
+          doc.moveDown(0.5).fontSize(9).font("Helvetica-Bold").fillColor("#555")
+            .text(d.remarks.head.label.toUpperCase(), startX);
+          doc.fillColor("#000");
+          // The decision is stamped BESIDE the words, as the printed format has
+          // it — the comment and the outcome are one statement, and separating
+          // them lets a card be read as praising a child it is holding back.
+          const y = doc.y + 2;
+          let textX = startX;
+          if (d.promotionLine) {
+            const w = doc.fontSize(10).font("Helvetica-Bold").widthOfString(d.promotionLine) + 12;
+            doc.rect(startX, y, w, 16).lineWidth(0.8).strokeColor("#000").stroke();
+            doc.text(d.promotionLine, startX + 6, y + 4);
+            textX = startX + w + 10;
+          }
+          doc.fontSize(11).font("Helvetica-Oblique")
+            .text(d.remarks.head.text, textX, y + 3, { width: 495 - textX });
+          doc.moveDown(0.9);
+          rule(startX, 240);
+          doc.moveDown(0.15).fontSize(8).font("Helvetica").fillColor("#666")
+            .text(d.remarks.head.byName ?? "Head teacher", startX);
+          doc.fillColor("#000");
         }
+
+        // A decision with no comment beside it still has to appear.
+        if (d.promotionLine && !d.remarks.head) {
+          doc.moveDown(0.5).fontSize(11).font("Helvetica-Bold").text(d.promotionLine, startX);
+          doc.font("Helvetica").fontSize(10);
+        }
+
+        // School stamp and date — the block a school physically signs.
+        doc.moveDown(1.1);
+        const stampX = 320;
+        rule(stampX, 225);
+        doc.moveDown(0.15).fontSize(8).font("Helvetica").fillColor("#666")
+          .text("Signature, school stamp and date", stampX);
+        doc.fillColor("#000");
+      }
+
+      if (d.guardianNames.length > 0) {
+        doc.moveDown(0.5).fontSize(9).font("Helvetica").fillColor("#666")
+          .text(`Parent / guardian: ${d.guardianNames.join(", ")}`, startX)
+          .fillColor("#000");
       }
 
       doc.font("Helvetica").fontSize(8).fillColor("#999").moveDown(1)
