@@ -216,10 +216,32 @@ function PullPanel({
     const r = await req("POST", `/classes/${classId}/lms-grades/apply`, { subjectId, termId, studentIds });
     setBusy(false);
     if (r.ok) {
-      setGb(r.data as Gradebook);
-      setMsg(
-        "Applied as draft CA marks. Go to the Gradebook to submit them for approval (head-teacher → principal).",
-      );
+      const data = r.data as Gradebook;
+      setGb(data);
+      // SAY WHAT HAPPENED, not that something happened. A press that wrote
+      // nothing used to read the same as one that wrote thirty marks, and a
+      // press that sent published results back to draft — withdrawing that
+      // subject from live report cards until it is approved again — said
+      // nothing at all about it.
+      const o = data.outcome;
+      const why: string[] = [];
+      if (o?.reasons.awaitingApproval) why.push(`${o.reasons.awaitingApproval} awaiting head-teacher/principal approval`);
+      if (o?.reasons.notInClass) why.push(`${o.reasons.notInClass} no longer in the class or not offering the subject`);
+      if (o?.reasons.unmarked) why.push(`${o.reasons.unmarked} with no marks to record`);
+      if (o?.reasons.failed) why.push(`${o.reasons.failed} failed`);
+      const parts = [
+        o
+          ? o.recorded === 0
+            ? "No marks were recorded."
+            : `Recorded ${o.recorded} draft CA mark${o.recorded === 1 ? "" : "s"}.`
+          : "Applied as draft CA marks.",
+        why.length ? `Skipped ${o?.skipped}: ${why.join("; ")}.` : "",
+        o?.revertedFromPublished
+          ? `${o.revertedFromPublished} previously published result${o.revertedFromPublished === 1 ? " is" : "s are"} now back in draft and off report cards until re-approved.`
+          : "",
+        o && o.recorded > 0 ? "Submit them for approval in the Gradebook (head-teacher → principal)." : "",
+      ].filter(Boolean);
+      setMsg(parts.join(" "));
       onApplied();
     } else setErr(r.error);
   }
@@ -231,7 +253,8 @@ function PullPanel({
         <CardDescription>
           Aggregates each student’s tagged, published quiz + assignment scores into a suggested mark for the
           assignment (CA) component. Applying writes a draft — you still publish it through the gradebook’s
-          approval chain.
+          approval chain. Applying over marks that are already published sends that subject back to draft — it
+          comes off report cards until the head teacher and principal approve it again.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

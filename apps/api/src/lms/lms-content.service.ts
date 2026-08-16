@@ -26,6 +26,7 @@ import type {
   LmsAnalyticsDto,
   LmsAwardDto,
   LmsGradebookDto,
+  GradesheetPushOutcome,
   LmsGradeRowDto,
   LmsLiveAttendanceDto,
   LmsLiveSessionDto,
@@ -1882,16 +1883,43 @@ export class LmsContentService {
     }
     // Each write is individually scope-guarded, merged, and audited by the
     // gradebook service; a loop of small txs keeps each within the interactive cap.
+    //
+    // ONE PUPIL'S REFUSAL MUST NOT END THE PRESS. This loop had no guard, so the
+    // first pupil the grading service turned away — marks away at head-teacher
+    // review (409), or no longer in the class (404) — threw out of the whole
+    // press, AFTER writing everyone before them. The teacher saw a single
+    // pupil's error message and had no way to learn that eleven marks had
+    // already landed; a class whose grades were under review failed on pupil one
+    // and applied nothing at all, with an error that never said so.
+    //
+    // The CBT push beside it, writing to the SAME row through the SAME guards,
+    // had counted and explained its skips all along. Same shape here now, in the
+    // same words, so a teacher reads one sentence whichever button they pressed.
+    const outcome: GradesheetPushOutcome = {
+      recorded: 0,
+      skipped: 0,
+      revertedFromPublished: 0,
+      reasons: { awaitingApproval: 0, notInClass: 0, unmarked: 0, failed: 0 },
+    };
     for (const r of toApply) {
-      await this.termResults.applyAssignmentComponent(p, {
-        classId,
-        subjectId,
-        termId,
-        studentId: r.studentId,
-        assignment: r.suggestedMark as number,
-      });
+      try {
+        const { revertedFromPublished } = await this.termResults.applyAssignmentComponent(p, {
+          classId,
+          subjectId,
+          termId,
+          studentId: r.studentId,
+          assignment: r.suggestedMark as number,
+        });
+        outcome.recorded += 1;
+        if (revertedFromPublished) outcome.revertedFromPublished += 1;
+      } catch (err) {
+        outcome.skipped += 1;
+        if (err instanceof ConflictException) outcome.reasons.awaitingApproval += 1;
+        else if (err instanceof NotFoundException) outcome.reasons.notInClass += 1;
+        else outcome.reasons.failed += 1;
+      }
     }
-    return this.lmsGradebook(p, classId, subjectId, termId);
+    return { ...(await this.lmsGradebook(p, classId, subjectId, termId)), outcome };
   }
 
   // --- forum (published thread; enrolled students + staff reply) ------------

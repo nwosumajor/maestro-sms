@@ -178,6 +178,7 @@ export function CbtStaffPanel({
     const r = (await res.json().catch(() => null)) as {
       recorded?: number;
       skipped?: number;
+      revertedFromPublished?: number;
       reasons?: { awaitingApproval?: number; notInClass?: number; unmarked?: number; failed?: number };
       termName?: string;
     } | null;
@@ -193,10 +194,18 @@ export function CbtStaffPanel({
     // current term, and a teacher pressing this for last term's paper has no
     // other way to see which gradesheet they just filled.
     const where = r?.termName ? ` (${r.termName})` : "";
+    // Recording over an ALREADY-PUBLISHED result sends it back to draft, which
+    // takes that subject off every live report card until the head teacher and
+    // principal pass it again. Correct, and the part a parent notices — so it is
+    // said out loud rather than left for someone to discover.
+    const reverted = r?.revertedFromPublished ?? 0;
+    const back = reverted
+      ? ` ${reverted} previously published result${reverted === 1 ? " is" : "s are"} now back in draft and off report cards until re-approved.`
+      : "";
     setMsg(
       recorded === 0
         ? `Nothing was recorded${where}.${tail || ` Skipped ${skipped}.`}`
-        : `Recorded ${recorded} to the gradesheet${where}.${tail}`,
+        : `Recorded ${recorded} to the gradesheet${where}.${tail}${back}`,
     );
   };
 
@@ -480,6 +489,8 @@ export function CbtStaffPanel({
             Each sitting samples the chosen number of questions from the bank in a fresh order; the timer and the
             marking are enforced by the server. Publishing needs a second approver, and correct answers reach
             students only after you request release and the principal approves.
+            {" "}Recording over marks that are already published sends that subject back to draft — it comes off
+            report cards until the head teacher and principal approve it again.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

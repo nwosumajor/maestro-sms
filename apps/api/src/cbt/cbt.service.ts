@@ -1353,6 +1353,8 @@ export class CbtService {
   ): Promise<{
     recorded: number;
     skipped: number;
+    /** Results this push sent back to DRAFT — see the loop below. */
+    revertedFromPublished: number;
     examMax: number;
     /** Why each skipped candidate was skipped — see the loop below. */
     reasons: { awaitingApproval: number; notInClass: number; unmarked: number; failed: number };
@@ -1448,6 +1450,11 @@ export class CbtService {
     // — and, believing the marks were filed, they would never look again until
     // the exam column came out empty on the report cards.
     const reasons = { awaitingApproval: 0, notInClass: 0, unmarked: 0, failed: 0 };
+    // Results this push knocked back to DRAFT. Correct behaviour — changed marks
+    // must be re-approved — and invisible: that subject comes OFF every live
+    // report card until the head teacher and principal pass it again. The push
+    // said "recorded" and nobody said the rest.
+    let revertedFromPublished = 0;
     for (const r of plan.rows) {
       if (r.paperMax <= 0) {
         // Nothing to scale: the paper carries no marks for this candidate.
@@ -1457,7 +1464,7 @@ export class CbtService {
       }
       const scaled = Math.round((r.raw / r.paperMax) * examMax * 100) / 100;
       try {
-        await this.termResults.applyExamComponent(p, {
+        const applied = await this.termResults.applyExamComponent(p, {
           classId: plan.classId,
           subjectId: plan.subjectId,
           termId: plan.termId,
@@ -1465,6 +1472,7 @@ export class CbtService {
           exam: Math.min(scaled, examMax),
         });
         recorded += 1;
+        if (applied.revertedFromPublished) revertedFromPublished += 1;
       } catch (err) {
         skipped += 1;
         if (err instanceof ConflictException) reasons.awaitingApproval += 1;
@@ -1473,9 +1481,9 @@ export class CbtService {
       }
     }
     await this.db.runAsTenant(this.ctx(p), (tx) =>
-      this.log(tx, p, "cbt.exam.grades.record", examId, { recorded, skipped, examMax, reasons }),
+      this.log(tx, p, "cbt.exam.grades.record", examId, { recorded, skipped, examMax, reasons, revertedFromPublished }),
     );
-    return { recorded, skipped, examMax, reasons, termId: plan.termId, termName: plan.termName };
+    return { recorded, skipped, revertedFromPublished, examMax, reasons, termId: plan.termId, termName: plan.termName };
   }
 
   // --- exam integrity ------------------------------------------------------------

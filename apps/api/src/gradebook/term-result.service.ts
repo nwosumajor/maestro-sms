@@ -173,6 +173,41 @@ export class TermResultService {
     return !!offering;
   }
 
+  /**
+   * Serialise every write to ONE (session, term, subject, student) result row.
+   *
+   * Three code paths write that row — a CBT paper's exam total, an LMS/assessment
+   * aggregate, and a teacher typing marks — and each does a READ-MODIFY-WRITE:
+   * it reads the three components it is NOT setting so it can merge them back.
+   * Two of them running at once therefore lose one of the two marks. Proven at
+   * the DB layer with the real statements the service issues:
+   *
+   *     before: exam 46, assignment 8
+   *     CBT push reads assignment=8, LMS push reads exam=46
+   *     LMS commits (exam 46, assignment 10) -> CBT commits (exam 55, assignment 8)
+   *     after:  exam 55, assignment 8      <- the LMS mark is gone
+   *
+   * and both presses reported success. It is the lost-update shape the hostel,
+   * meeting and library claims already guard against, on the one table where the
+   * consequence is a mark missing from a child's report card.
+   *
+   * An ADVISORY lock rather than SELECT ... FOR UPDATE, because the row often
+   * does not exist yet: the first press of the term CREATES it, and two
+   * concurrent creates race through the unique index into ON CONFLICT DO UPDATE,
+   * where the loser writes its own all-null view of the other components. There
+   * is nothing to lock until it is too late. The advisory lock is keyed on the
+   * identity of the row rather than on the row, is transaction-scoped so it
+   * releases on commit or rollback, and costs a hash — a collision merely makes
+   * two unrelated writes take turns.
+   */
+  private async lockResultRow(
+    tx: TenantTx,
+    key: { sessionId: string; termId: string; subjectId: string; studentId: string },
+  ): Promise<void> {
+    const id = `${key.sessionId}:${key.termId}:${key.subjectId}:${key.studentId}`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${id}))`;
+  }
+
   /** Recompute total/grade from components; validate each mark against ITS OWN
    *  maximum so a teacher can't award more than a component is worth.
    *
@@ -432,6 +467,11 @@ export class TermResultService {
       const student = await tx.user.findFirst({ where: { id: studentId }, select: { id: true, name: true } });
       if (!student) throw new NotFoundException("Not found");
 
+      // The manual path writes the SAME row the two automatic pushes do, and
+      // reads it first for the same reason, so it takes the same lock. A teacher
+      // typing a class note while a CBT push lands otherwise loses one of them.
+      await this.lockResultRow(tx, { sessionId: term.sessionId, termId, subjectId, studentId });
+
       // Publish is maker-checker (head teacher → principal), so the batch must
       // stay stable while under review, and an already-published grade can't be
       // silently changed behind the approvers' backs.
@@ -446,7 +486,9 @@ export class TermResultService {
       }
       // SECURITY: editing a PUBLISHED grade reverts it to DRAFT — the change is
       // hidden from families again until it goes back through the publish chain.
-      const unpublished = existing?.status === "PUBLISHED";
+      // Named for what it means: `unpublished` read as "was not published",
+      // which is the opposite.
+      const revertedFromPublished = existing?.status === "PUBLISHED";
 
       const grading = (await this.region.academicInTx(tx, p.schoolId)).grading;
       const scored = this.applyComponents(input, grading);
@@ -460,7 +502,7 @@ export class TermResultService {
         where: { sessionId_termId_subjectId_studentId: { sessionId: term.sessionId, termId, subjectId, studentId } },
         create: { schoolId: p.schoolId, sessionId: term.sessionId, termId, classId, subjectId, studentId, ...data },
         // classId can change if the student moved classes mid-term — keep it current.
-        update: { classId, ...data, ...(unpublished ? { status: "DRAFT" } : {}) },
+        update: { classId, ...data, ...(revertedFromPublished ? { status: "DRAFT" } : {}) },
       });
       await this.audit.record(
         {
@@ -469,7 +511,7 @@ export class TermResultService {
           entity: "subject_result",
           entityId: row.id,
           schoolId: p.schoolId,
-          metadata: { termId, subjectId, studentId, total: row.total, status: row.status, unpublished },
+          metadata: { termId, subjectId, studentId, total: row.total, status: row.status, revertedFromPublished },
         },
         tx,
       );
@@ -503,7 +545,7 @@ export class TermResultService {
   async applyExamComponent(
     p: Principal,
     input: { classId: string; subjectId: string; termId: string; studentId: string; exam: number },
-  ): Promise<SubjectResultDto> {
+  ): Promise<{ result: SubjectResultDto; revertedFromPublished: boolean }> {
     const { classId, subjectId, termId, studentId, exam } = input;
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const term = await tx.term.findFirst({ where: { id: termId }, select: { id: true, sessionId: true } });
@@ -521,6 +563,7 @@ export class TermResultService {
       }
       const student = await tx.user.findFirst({ where: { id: studentId }, select: { id: true, name: true } });
       if (!student) throw new NotFoundException("Not found");
+      await this.lockResultRow(tx, { sessionId: term.sessionId, termId, subjectId, studentId });
       const existing = await tx.subjectResult.findFirst({
         where: { sessionId: term.sessionId, termId, subjectId, studentId },
         select: { status: true, midterm: true, assignment: true, classNote: true },
@@ -530,7 +573,13 @@ export class TermResultService {
           "These grades are awaiting head-teacher/principal approval and can't be edited until the review completes.",
         );
       }
-      const unpublished = existing?.status === "PUBLISHED";
+      // Changing a mark on a PUBLISHED result sends it back to DRAFT for
+      // re-approval — correct, and invisible: that subject comes off every live
+      // report card until the head teacher and principal pass it again. The old
+      // name for this said `unpublished`, which reads as "was not published" and
+      // is the opposite of what it means. It is now reported to the caller so
+      // whoever pressed the button can be told.
+      const revertedFromPublished = existing?.status === "PUBLISHED";
       // MERGE: keep the other three components; only the exam slice changes.
       const grading = (await this.region.academicInTx(tx, p.schoolId)).grading;
       const scored = this.applyComponents(
@@ -551,7 +600,7 @@ export class TermResultService {
       const row = await tx.subjectResult.upsert({
         where: { sessionId_termId_subjectId_studentId: { sessionId: term.sessionId, termId, subjectId, studentId } },
         create: { schoolId: p.schoolId, sessionId: term.sessionId, termId, classId, subjectId, studentId, ...data },
-        update: { classId, ...data, ...(unpublished ? { status: "DRAFT" } : {}) },
+        update: { classId, ...data, ...(revertedFromPublished ? { status: "DRAFT" } : {}) },
       });
       await this.audit.record(
         {
@@ -560,18 +609,20 @@ export class TermResultService {
           entity: "subject_result",
           entityId: row.id,
           schoolId: p.schoolId,
-          metadata: { subjectId, studentId, termId, exam },
+          // The same facts the LMS push records. They diverged, and the one
+          // missing them was the one that can withdraw a published result.
+          metadata: { subjectId, studentId, termId, exam, total: row.total, status: row.status, revertedFromPublished },
         },
         tx,
       );
-      return this.toResultDto(grading, row, subject.name, student.name);
+      return { result: this.toResultDto(grading, row, subject.name, student.name), revertedFromPublished };
     });
   }
 
   async applyAssignmentComponent(
     p: Principal,
     input: { classId: string; subjectId: string; termId: string; studentId: string; assignment: number },
-  ): Promise<SubjectResultDto> {
+  ): Promise<{ result: SubjectResultDto; revertedFromPublished: boolean }> {
     const { classId, subjectId, termId, studentId, assignment } = input;
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const term = await tx.term.findFirst({ where: { id: termId }, select: { id: true, sessionId: true } });
@@ -590,6 +641,7 @@ export class TermResultService {
       const student = await tx.user.findFirst({ where: { id: studentId }, select: { id: true, name: true } });
       if (!student) throw new NotFoundException("Not found");
 
+      await this.lockResultRow(tx, { sessionId: term.sessionId, termId, subjectId, studentId });
       const existing = await tx.subjectResult.findFirst({
         where: { sessionId: term.sessionId, termId, subjectId, studentId },
         select: { status: true, exam: true, midterm: true, classNote: true },
@@ -599,7 +651,7 @@ export class TermResultService {
           "These grades are awaiting head-teacher/principal approval and can't be edited until the review completes.",
         );
       }
-      const unpublished = existing?.status === "PUBLISHED";
+      const revertedFromPublished = existing?.status === "PUBLISHED";
       // MERGE: keep the other three components; only the assignment slice changes.
       const grading = (await this.region.academicInTx(tx, p.schoolId)).grading;
       const scored = this.applyComponents(
@@ -620,7 +672,7 @@ export class TermResultService {
       const row = await tx.subjectResult.upsert({
         where: { sessionId_termId_subjectId_studentId: { sessionId: term.sessionId, termId, subjectId, studentId } },
         create: { schoolId: p.schoolId, sessionId: term.sessionId, termId, classId, subjectId, studentId, ...data },
-        update: { classId, ...data, ...(unpublished ? { status: "DRAFT" } : {}) },
+        update: { classId, ...data, ...(revertedFromPublished ? { status: "DRAFT" } : {}) },
       });
       await this.audit.record(
         {
@@ -629,11 +681,11 @@ export class TermResultService {
           entity: "subject_result",
           entityId: row.id,
           schoolId: p.schoolId,
-          metadata: { termId, subjectId, studentId, assignment, total: row.total, status: row.status, unpublished },
+          metadata: { termId, subjectId, studentId, assignment, total: row.total, status: row.status, revertedFromPublished },
         },
         tx,
       );
-      return this.toResultDto(grading, row, subject.name, student.name);
+      return { result: this.toResultDto(grading, row, subject.name, student.name), revertedFromPublished };
     });
   }
 

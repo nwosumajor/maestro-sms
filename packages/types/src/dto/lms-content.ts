@@ -210,6 +210,8 @@ export interface LmsGradebookDto {
   /** The assignment component's maximum (the CA slice LMS scores map onto). */
   componentMax: number;
   rows: LmsGradeRowDto[];
+  /** Present on the response to an APPLY; absent when simply reading the table. */
+  outcome?: GradesheetPushOutcome;
 }
 
 /** One entry in an LMS content item's version history (staff-only). The body
@@ -399,4 +401,46 @@ export interface ForumPostDto {
   authorName: string;
   body: string;
   createdAt: Date;
+}
+
+// =============================================================================
+// What a push to the gradesheet actually did
+// =============================================================================
+// Marks reach a report card from three places — a CBT paper's exam total, an
+// LMS/assessment aggregate, and a teacher typing them — and the two automatic
+// ones must answer for themselves in the SAME words. They did not:
+//
+//   * the CBT push counted every candidate it recorded and skipped, and said
+//     WHY it skipped each one;
+//   * the LMS push looped with no guard at all, so the first pupil the grading
+//     service refused — one whose marks were away at head-teacher review, or who
+//     had left the class — aborted the whole press AFTER writing everyone before
+//     them. The teacher saw one pupil's error and had no way to learn that
+//     eleven marks had already landed.
+//
+// And neither reported the consequence that actually reaches a family: applying
+// a mark to an ALREADY-PUBLISHED result reverts it to DRAFT, which withdraws
+// that subject from live report cards until it goes through head-teacher →
+// principal approval again. The push said "recorded"; nobody said "and this
+// subject has come off the report cards until it is re-approved".
+//
+// One shape, used by both, so the two buttons can never drift again.
+export interface GradesheetPushOutcome {
+  /** Candidates whose mark was written. */
+  recorded: number;
+  /** Candidates deliberately or unavoidably passed over. */
+  skipped: number;
+  /**
+   * Results that were PUBLISHED and are now DRAFT again because this push
+   * changed their marks. Reported because it is invisible otherwise and it is
+   * the part a parent notices.
+   */
+  revertedFromPublished: number;
+  /** Why the skipped ones were skipped — never just how many. */
+  reasons: {
+    awaitingApproval: number;
+    notInClass: number;
+    unmarked: number;
+    failed: number;
+  };
 }

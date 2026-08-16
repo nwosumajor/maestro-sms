@@ -31,6 +31,10 @@ function makeService(over: {
   );
   const updateMany = jest.fn().mockResolvedValue({ count: over.updateManyCount ?? 0 });
   const tx = {
+    // Every write to a result row takes a transaction-scoped advisory lock
+    // first, so three writers cannot lose each other's marks. The mock needs to
+    // answer the call; what it PROVES lives in three-writers-one-row.spec.ts.
+    $executeRaw: jest.fn().mockResolvedValue(1),
     term: { findFirst: jest.fn().mockResolvedValue(over.term ?? null), findMany: jest.fn().mockResolvedValue([]) },
     class: {
       findFirst: jest
