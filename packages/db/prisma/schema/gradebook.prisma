@@ -152,3 +152,43 @@ model ReportCardRemark {
   @@index([schoolId, termId])
   @@map("report_card_remark")
 }
+
+/// A behavioural / psychomotor trait rating for one pupil, one term.
+///
+/// ONE ROW PER TRAIT rather than twenty columns: the catalogue lives in
+/// `@sms/types` (TRAIT_GROUPS) because schools disagree about the list, and a
+/// school that adds "Leadership" must not need a migration. A retired trait's
+/// historical ratings still print — `traitLabel` falls back to the key.
+///
+/// Not a mark. These are never averaged with academic scores, and they carry the
+/// rater's id because a judgement about a child is somebody's (Golden Rule #8:
+/// a human decision, recorded, never computed).
+model StudentTraitRating {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  /// DB FK to user; no Prisma relation (lean User model).
+  studentId String @db.Uuid
+  termId    String @db.Uuid
+
+  /// A key from TRAIT_GROUPS in @sms/types — validated in the service, not by an
+  /// enum, so the catalogue can change without a migration.
+  traitKey String
+  /// 1..5 on the TRAIT_SCALE, bounds enforced in the service.
+  score    Int
+
+  /// Who recorded it. Null only for rows predating the column.
+  ratedById String?  @db.Uuid
+  ratedAt   DateTime @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+  term   Term   @relation(fields: [termId], references: [id])
+
+  @@unique([studentId, termId, traitKey])
+  @@index([schoolId])
+  @@index([schoolId, termId])
+  @@map("student_trait_rating")
+}

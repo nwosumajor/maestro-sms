@@ -367,6 +367,19 @@ export interface TermSubjectRowDto {
    *  from one whose exam has simply not been marked yet. */
   complete: boolean;
   /**
+   * How the CLASS did in this subject — average, lowest and highest of the
+   * published totals.
+   *
+   * A mark alone does not say much: 65 means one thing when the class averaged
+   * 49 and quite another when it averaged 82, and every Nigerian report card
+   * carries these three columns for exactly that reason. Filled only where the
+   * subject has published marks; absent on the family-facing session report,
+   * which is about one pupil.
+   */
+  classAverage?: number | null;
+  classLowest?: number | null;
+  classHighest?: number | null;
+  /**
    * This student's rank in THIS subject among classmates, and how many were
    * ranked. Null when they have no total for it — an ungraded pupil is unranked
    * rather than last.
@@ -658,4 +671,115 @@ export interface SubjectAnalyticsDto {
    */
   scope: "school" | "teaching";
   rows: SubjectAnalyticsRowDto[];
+}
+
+// -----------------------------------------------------------------------------
+// Skills and behavioural attributes — the affective and psychomotor domains
+// -----------------------------------------------------------------------------
+// A Nigerian report card carries these beside the marks: twenty traits in four
+// groups, each rated 1–5 by the class teacher. They are not academic scores and
+// must never be averaged into one — "obedience 4" and "mathematics 81" are
+// different kinds of statement about a child.
+//
+// A DATA TABLE, deliberately, not columns and not an enum. Schools disagree
+// about this list: one drops "Dexterity", another adds "Leadership", a primary
+// school words them differently from a senior school. Adding or renaming a trait
+// is a row here — the same treatment PAYROLL_PACKS and MOBILE_MONEY_COVERAGE get
+// — rather than a migration and a deploy.
+export const TRAIT_GROUPS = [
+  {
+    key: "PERSONAL",
+    label: "Personal development",
+    traits: [
+      { key: "obedience", label: "Obedience" },
+      { key: "honesty", label: "Honesty" },
+      { key: "selfControl", label: "Self-control" },
+      { key: "selfReliance", label: "Self-reliance" },
+      { key: "initiative", label: "Use of initiative" },
+    ],
+  },
+  {
+    key: "RESPONSIBILITY",
+    label: "Sense of responsibility",
+    traits: [
+      { key: "punctuality", label: "Punctuality" },
+      { key: "neatness", label: "Neatness" },
+      { key: "perseverance", label: "Perseverance" },
+      { key: "attendance", label: "Attendance" },
+      { key: "attentiveness", label: "Attentiveness" },
+    ],
+  },
+  {
+    key: "SOCIAL",
+    label: "Social development",
+    traits: [
+      { key: "courtesy", label: "Courtesy / politeness" },
+      { key: "consideration", label: "Consideration for others" },
+      { key: "sociability", label: "Sociability / team player" },
+      { key: "promptness", label: "Promptness in completing work" },
+      { key: "responsibility", label: "Accepts responsibility" },
+    ],
+  },
+  {
+    key: "PSYCHOMOTOR",
+    label: "Psychomotor (skills) development",
+    traits: [
+      { key: "readingWriting", label: "Reading and writing skills" },
+      { key: "verbalCommunication", label: "Verbal communication" },
+      { key: "sport", label: "Sport and games" },
+      { key: "inquisitiveness", label: "Inquisitiveness" },
+      { key: "dexterity", label: "Dexterity (musical & art materials)" },
+    ],
+  },
+] as const;
+
+export type TraitGroupKey = (typeof TRAIT_GROUPS)[number]["key"];
+
+/** Every trait key the catalogue defines, flattened. */
+export const TRAIT_KEYS: string[] = TRAIT_GROUPS.flatMap((g) => g.traits.map((t) => t.key));
+
+export function isTraitKey(key: string): boolean {
+  return TRAIT_KEYS.includes(key);
+}
+
+/** The label for a trait key, or the key itself if the catalogue has moved on —
+ *  a rating recorded last year must still print, even under a retired trait. */
+export function traitLabel(key: string): string {
+  for (const g of TRAIT_GROUPS) {
+    for (const t of g.traits) if (t.key === key) return t.label;
+  }
+  return key;
+}
+
+/**
+ * The rating scale, in the school's own words.
+ *
+ * Printed on the report card as a key, because "3" means nothing to a parent
+ * without it — and because a number a family cannot interpret is how a
+ * behavioural rating turns into an argument at a parents' evening.
+ */
+export const TRAIT_SCALE = [
+  { score: 5, label: "Maintains an excellent degree of observable traits" },
+  { score: 4, label: "Maintains a high level of observable traits" },
+  { score: 3, label: "Acceptable level of observable traits" },
+  { score: 2, label: "Shows minimal regard for observable traits" },
+  { score: 1, label: "Has no regard for observable traits" },
+] as const;
+
+export const TRAIT_SCORE_MIN = 1;
+export const TRAIT_SCORE_MAX = 5;
+
+export interface TraitRatingDto {
+  traitKey: string;
+  score: number;
+}
+
+export interface StudentTraitsDto {
+  studentId: string;
+  termId: string;
+  ratings: TraitRatingDto[];
+  /** Who last recorded them, and when — a judgement about a child is somebody's,
+   *  never the system's. */
+  ratedByName: string | null;
+  ratedAt: Date | null;
 }

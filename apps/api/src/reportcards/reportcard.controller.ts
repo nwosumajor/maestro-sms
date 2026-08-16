@@ -6,6 +6,8 @@ import { z } from "zod";
 import { GRADEBOOK_PERMISSIONS } from "@sms/types";
 import type { ReportCardRemarkDto } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
+import { StudentTraitService } from "./student-trait.service";
+import { TRAIT_SCORE_MAX, TRAIT_SCORE_MIN, type StudentTraitsDto } from "@sms/types";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
@@ -14,12 +16,24 @@ import { ReportCardRemarkService } from "./report-card-remark.service";
 
 const remarkSchema = z.object({ termId: z.string().uuid(), remark: z.string().min(1).max(2000) });
 
+// The whole set in one submission: twenty separate requests would be twenty
+// audit rows for one act, and a half-saved set reads as a judgement rather than
+// an interruption. Keys are validated against the catalogue in the service.
+const traitsSchema = z.object({
+  termId: z.string().uuid(),
+  ratings: z
+    .array(z.object({ traitKey: z.string().min(1).max(60), score: z.number().int().min(TRAIT_SCORE_MIN).max(TRAIT_SCORE_MAX) }))
+    .min(1)
+    .max(60),
+});
+
 @RequireModule(MODULES.DOCUMENTS)
 @Controller("reportcards")
 export class ReportCardController {
   constructor(
     private readonly reportcards: ReportCardService,
     private readonly remarks: ReportCardRemarkService,
+    private readonly traits: StudentTraitService,
   ) {}
 
   /** Generate + download a student's report card PDF (optionally for a term,
@@ -71,5 +85,44 @@ export class ReportCardController {
     @Body(new ZodValidationPipe(remarkSchema)) body: z.infer<typeof remarkSchema>,
   ): Promise<ReportCardRemarkDto> {
     return this.remarks.setHeadRemark(p, studentId, body.termId, body.remark);
+  }
+
+  /**
+   * A pupil's behavioural / psychomotor ratings for a term.
+   *
+   * Gated on the coarse grade.read, like the remarks beside it; the SERVICE
+   * decides who may actually see them — the pupil, their guardians, the staff
+   * who teach them — and 404s everyone else.
+   */
+  @Get(":studentId/traits")
+  @RequirePermission(GRADEBOOK_PERMISSIONS.GRADE_READ)
+  getTraits(
+    @CurrentPrincipal() p: Principal,
+    @Param("studentId") studentId: string,
+    @Query("termId") termId: string,
+  ): Promise<StudentTraitsDto> {
+    return this.traits.getTraits(p, studentId, termId);
+  }
+
+  /** The class teacher (or staff-wide) records the whole set in one act. */
+  @Put(":studentId/traits")
+  @RequirePermission(GRADEBOOK_PERMISSIONS.GRADE_WRITE)
+  setTraits(
+    @CurrentPrincipal() p: Principal,
+    @Param("studentId") studentId: string,
+    @Body(new ZodValidationPipe(traitsSchema)) body: z.infer<typeof traitsSchema>,
+  ): Promise<StudentTraitsDto> {
+    return this.traits.setTraits(p, studentId, body.termId, body.ratings);
+  }
+
+  /** Every pupil in a class with their ratings — what the entry grid reads. */
+  @Get("classes/:classId/traits")
+  @RequirePermission(GRADEBOOK_PERMISSIONS.GRADE_WRITE)
+  classTraits(
+    @CurrentPrincipal() p: Principal,
+    @Param("classId") classId: string,
+    @Query("termId") termId: string,
+  ) {
+    return this.traits.classTraits(p, classId, termId);
   }
 }

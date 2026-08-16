@@ -77,7 +77,14 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     "student.profile.read", "student.profile.write", "student.contact.read",
     "student.contact.write", "student.medical.read", "student.medical.write",
     "attendance.read", "attendance.write",
-    "class.read", "class.write", "enrollment.read", "enrollment.write", "guardian.write", "subject.manage", "student.import", "parent.import", "class.promote", "academic.manage",
+    // `class.promote.approve` sits here as well as on school_admin, and it has to.
+    // Both roles may STAGE a promotion, but only school_admin could approve one —
+    // so in a school with a single school_admin, a batch that admin staged could
+    // never be approved by anyone. The engine enforces requester ≠ approver
+    // correctly; there was simply nobody left to be the approver. The same fix the
+    // salary chain needed (`hr.salary.approve` on principal + school_admin): a
+    // two-person rule needs a second person who actually exists.
+    "class.read", "class.write", "enrollment.read", "enrollment.write", "guardian.write", "subject.manage", "student.import", "parent.import", "class.promote", "class.promote.approve", "academic.manage",
     "grade.read", "grade.write",
     "workflow.create", "workflow.read", "workflow.review", "workflow.review.principal",
     "notification.read", "notification.send",
@@ -127,6 +134,7 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     "privacy.erasure.review", "privacy.compliance.manage", "privacy.archive.manage", "message.read", "message.send", "event.read", "announcement.read", "event.write",
     "hr.read", "hr.self", "hr.write", "hr.salary.approve", "hr.appraisal.manage", "hr.disciplinary.manage", "hr.recruit.manage", "school.branding.manage", "rbac.manage", "admission.review", "directory.search", "announcement.manage", "announcement.read",
     // School admin approves end-of-session promotions (maker-checker checker).
+    // The PRINCIPAL holds it too — see the note beside their `class.promote`.
     "class.promote.approve",
     "game.league.create", "game.leaderboard.read",
     "game.race.open", "game.race.tournament", "game.match.moderate", "game.quiz.host", "game.hangman.host", "game.typing.host",

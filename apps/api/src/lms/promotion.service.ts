@@ -99,6 +99,22 @@ export class PromotionService {
 
       const decisions = await this.normaliseDecisions(tx, input, studentIds, targetClassId ?? null);
 
+      // WHEN the decision was taken. The column has always existed and nothing
+      // ever wrote it, so every batch carried a null term — which was harmless
+      // while nothing read it, and became a bug the moment the report card tried
+      // to print "PROMOTED TO JSS2" beside the final term's marks: the lookup
+      // matched no batch, ever, and the line silently never appeared.
+      //
+      // A promotion is decided at the end of a session, so the term that is
+      // current when it is staged IS the term whose report card should carry it.
+      // Null when a school has not set a current term — the card then prints no
+      // promotion line at all, which is the right way to fail for a claim about
+      // a child's year.
+      const currentTerm = (await tx.term.findFirst({
+        where: { isCurrent: true },
+        select: { id: true },
+      })) as { id: string } | null;
+
       const batch = await tx.promotionBatch.create({
         data: {
           schoolId: p.schoolId,
@@ -107,6 +123,7 @@ export class PromotionService {
           studentIds: studentIds as unknown as Prisma.InputJsonValue,
           decisions: decisions as unknown as Prisma.InputJsonValue,
           status: "PENDING",
+          termId: currentTerm?.id ?? null,
           initiatedById: p.userId,
         },
       });

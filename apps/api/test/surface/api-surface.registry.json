@@ -1249,6 +1249,14 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "GET /reportcards/:p/traits": {
+      "kind": "ui",
+      "note": "reviewed: components/gradebook/TraitRatings.tsx reads a pupil's behavioural ratings"
+    },
+    "GET /reportcards/classes/:p/traits": {
+      "kind": "ui",
+      "note": "reviewed: components/gradebook/TraitProgress.tsx lists who in a class still needs rating"
+    },
     "GET /rings/:p": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
@@ -3212,6 +3220,10 @@
     "PUT /reportcards/:p/remarks/head": {
       "kind": "ui",
       "note": "reviewed: a call in components/reportcards/RemarksEditor.tsx builds this path"
+    },
+    "PUT /reportcards/:p/traits": {
+      "kind": "ui",
+      "note": "reviewed: components/gradebook/TraitRatings.tsx saves the whole set in one act"
     },
     "PUT /scholarships/applications/:p": {
       "kind": "ui",

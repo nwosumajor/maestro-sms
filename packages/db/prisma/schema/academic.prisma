@@ -41,6 +41,7 @@ model Term {
   school            School                 @relation(fields: [schoolId], references: [id])
   session           AcademicSession        @relation(fields: [sessionId], references: [id])
   reportCardRemarks ReportCardRemark[]
+  studentTraitRatings StudentTraitRating[]
   assessments       Assessment[]
   cbtExams          CbtExam[]
   attendanceRollups AttendanceTermRollup[]

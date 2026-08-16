@@ -9,6 +9,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { GradingConsole } from "@/components/gradebook/GradingConsole";
 import { ClassBroadsheet } from "@/components/gradebook/ClassBroadsheet";
 import { SubjectAnalytics } from "@/components/gradebook/SubjectAnalytics";
+import { TraitProgress } from "@/components/gradebook/TraitProgress";
 import { ReportCard } from "@/components/gradebook/ReportCard";
 import { SubjectPicker } from "@/components/gradebook/SubjectPicker";
 import { SelectionReview } from "@/components/gradebook/SelectionReview";
@@ -75,6 +76,7 @@ export default async function GradebookPage() {
         {showReviewPanel && <SelectionReview userId={user.id} canApproveFinal={canApproveSelections} />}
 
         {canGrade && <GradingConsole classes={classes} sessions={sessions} />}
+        {canGrade && <TraitProgress classes={classes} sessions={sessions} />}
         {canViewBroadsheet && <ClassBroadsheet classes={classes} sessions={sessions} />}
         {/* Subject performance. Same staff gate as the score sheet — the SERVER
             decides whether that means "the subjects I teach" or "the school's",

@@ -20,6 +20,8 @@ function makeService(opts: {
   activeEnrollments?: string[];
   batch?: Row | null;
   existingTargetEnrollments?: string[];
+  /** The school's current term, or null when none is set. */
+  currentTerm?: { id: string } | null;
 }) {
   const state: { batch: Row | null } = { batch: opts.batch ?? null };
   const enrollUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
@@ -51,6 +53,9 @@ function makeService(opts: {
       updateMany: enrollUpdateMany,
       createMany: enrollCreateMany,
     },
+    term: {
+      findFirst: jest.fn(() => Promise.resolve(opts.currentTerm === undefined ? { id: "t3" } : opts.currentTerm)),
+    },
     promotionBatch: {
       create: jest.fn((a: { data: Row }) => Promise.resolve({ id: "pb1", ...a.data })),
       findFirst: jest.fn(() => Promise.resolve(state.batch)),
@@ -62,7 +67,8 @@ function makeService(opts: {
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
-  return { service: new PromotionService(db as never, audit as never), enrollUpdateMany, enrollCreateMany };
+  const created = tx.promotionBatch.create as jest.Mock;
+  return { service: new PromotionService(db as never, audit as never), enrollUpdateMany, enrollCreateMany, created };
 }
 
 const p = (userId: string): Principal => ({ schoolId: "A", userId, roles: ["school_admin"], permissions: [] });
@@ -265,5 +271,39 @@ describe("PromotionService per-student outcomes", () => {
     expect(enrollUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: { status: "PROMOTED" } }),
     );
+  });
+});
+
+// =============================================================================
+// WHEN the decision was taken
+// =============================================================================
+// `promotion_batch.termId` had existed since the table was created and nothing
+// had ever written it. That was invisible while nothing read it — and became a
+// defect the moment the report card tried to print "PROMOTED TO JSS2" beside the
+// final term's marks: the lookup is by term, no batch carried one, and the line
+// silently never appeared on any card. A column nobody writes is not a feature.
+describe("the term a promotion belongs to", () => {
+  it("is stamped with the term that is current when it is staged", async () => {
+    const { service, created } = makeService({
+      source: { id: "c1", nextClassId: "c2" },
+      target: { id: "c2" },
+      activeEnrollments: ["s1"],
+      currentTerm: { id: "t3" },
+    });
+    await service.stage(p("maker"), { sourceClassId: "c1" });
+    expect(created).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ termId: "t3" }) }));
+  });
+
+  it("is null when the school has set no current term", async () => {
+    // The report card then prints no promotion line at all — the right way to
+    // fail for a claim about a child's year.
+    const { service, created } = makeService({
+      source: { id: "c1", nextClassId: "c2" },
+      target: { id: "c2" },
+      activeEnrollments: ["s1"],
+      currentTerm: null,
+    });
+    await service.stage(p("maker"), { sourceClassId: "c1" });
+    expect(created).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ termId: null }) }));
   });
 });
