@@ -58,13 +58,26 @@ describe("the push classifies why it skipped somebody", () => {
   });
 
   it("returns the reasons to the caller", () => {
-    expect(SRC).toMatch(/return \{ recorded, skipped, examMax, reasons, termId: plan\.termId, termName: plan\.termName \};/);
+    // Asserted FIELD BY FIELD rather than as one literal line: the old exact
+    // match broke the moment the push learned to report how many published
+    // results it had sent back to draft, which is a thing being ADDED to the
+    // answer, not the answer changing. A test that fails on a superset is
+    // testing the punctuation.
+    const ret = SRC.slice(SRC.indexOf("return { recorded,"), SRC.indexOf("return { recorded,") + 200);
+    for (const field of ["recorded", "skipped", "revertedFromPublished", "examMax", "reasons", "termId", "termName"]) {
+      expect([field, ret.includes(field)]).toEqual([field, true]);
+    }
   });
 
   it("audits them too", () => {
     // The audit row is what answers "why is this pupil's exam column empty"
     // weeks later, when nobody remembers pressing the button.
-    expect(SRC).toMatch(/"cbt\.exam\.grades\.record", examId, \{ recorded, skipped, examMax, reasons \}/);
+    const at = SRC.indexOf('"cbt.exam.grades.record"');
+    expect(at).toBeGreaterThan(-1);
+    const call = SRC.slice(at, at + 200);
+    for (const field of ["recorded", "skipped", "examMax", "reasons", "revertedFromPublished"]) {
+      expect([field, call.includes(field)]).toEqual([field, true]);
+    }
   });
 
   it("the exceptions it classifies are the ones applyExamComponent throws", () => {
