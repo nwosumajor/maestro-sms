@@ -308,7 +308,14 @@ export class TransportService {
         if (!stop) throw new BadRequestException("Stop does not belong to this route");
       }
       // Seat availability: vehicle capacity minus active assignments on the route.
+      //
+      // Locked first, like a hostel room: these are physical seats on a bus, and
+      // a count-then-insert lets two racers take the last one. The route is the
+      // thing being contended, so it is the row to hold.
       const capacity = await this.routeCapacity(tx, route.vehicleId);
+      if (capacity > 0) {
+        await tx.$executeRaw`SELECT id FROM "transport_route" WHERE id = ${input.routeId}::uuid FOR UPDATE`;
+      }
       const used = await tx.transportAssignment.count({ where: { routeId: input.routeId, status: "ACTIVE" } });
       if (capacity > 0 && used >= capacity) throw new BadRequestException("Route is at full seat capacity");
       // A passenger holds at most one ACTIVE assignment.

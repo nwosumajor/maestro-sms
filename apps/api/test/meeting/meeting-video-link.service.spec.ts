@@ -28,6 +28,11 @@ function makeService() {
     }),
   );
   const tx = {
+  // Capacity checks lock the contended row first (the class / route / slot),
+  // so the count and the insert are atomic — the same guard hostel allocation
+  // uses for a bed. The mock just has to answer.
+  $executeRaw: jest.fn().mockResolvedValue(1),
+
     meetingSlot: { create, findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([]), update: jest.fn() },
     meetingBooking: { count: jest.fn().mockResolvedValue(0), findMany: jest.fn().mockResolvedValue([]) },
     user: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn() },

@@ -39,6 +39,11 @@ function makeService(tables: FakeTables) {
     return Promise.resolve(tables.enrollment ?? []);
   });
   const tx = {
+  // Capacity checks lock the contended row first (the class / route / slot),
+  // so the count and the insert are atomic — the same guard hostel allocation
+  // uses for a bed. The mock just has to answer.
+  $executeRaw: jest.fn().mockResolvedValue(1),
+
     class: { findMany: classFindMany, findFirst: jest.fn().mockResolvedValue(null) },
     classTeacher: {
       findMany: jest.fn().mockResolvedValue(tables.classTeacher ?? []),
@@ -214,6 +219,11 @@ describe("LmsService roster", () => {
     // listStudents. Falling to the relationship path returned zero rows, so the
     // tier that imports pupils and links guardians had nobody to link.
     const tx = {
+  // Capacity checks lock the contended row first (the class / route / slot),
+  // so the count and the insert are atomic — the same guard hostel allocation
+  // uses for a bed. The mock just has to answer.
+  $executeRaw: jest.fn().mockResolvedValue(1),
+
       user: { count: jest.fn().mockResolvedValue(901), findMany: jest.fn().mockResolvedValue([{ id: "s1" }]) },
       classTeacher: { findMany: jest.fn() },
       enrollment: { findMany: jest.fn() },

@@ -11,6 +11,9 @@ import type { Principal, TenantContext, TenantTx } from "../../src/integrity/int
 
 function svc(over: Record<string, unknown>) {
   const tx = {
+    // The capacity check locks the class row first, so the count and the insert
+    // are atomic — the same guard hostel allocation uses for a bed.
+    $executeRaw: jest.fn().mockResolvedValue(1),
     class: { findFirst: jest.fn().mockResolvedValue(over.cls ?? null) },
     enrollment: {
       count: jest.fn().mockResolvedValue(over.activeCount ?? 0),

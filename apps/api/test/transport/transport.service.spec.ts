@@ -11,6 +11,11 @@ const staff: Principal = { schoolId: "A", userId: "admin", roles: ["school_admin
 function makeTx(over: Record<string, unknown> = {}) {
   const calls = { assignCreate: 0, invoiceCreate: 0, lineCreate: 0 };
   const tx = {
+  // Capacity checks lock the contended row first (the class / route / slot),
+  // so the count and the insert are atomic — the same guard hostel allocation
+  // uses for a bed. The mock just has to answer.
+  $executeRaw: jest.fn().mockResolvedValue(1),
+
     vehicle: { findFirst: jest.fn().mockResolvedValue(over.vehicle ?? { id: "v1", capacity: 2 }) },
     transportRoute: {
       findFirst: jest.fn().mockResolvedValue(over.route ?? { id: "r1", vehicleId: "v1", status: "ACTIVE", fareMode: "FLAT", flatFareMinor: 30000, name: "Route 1" }),
@@ -136,6 +141,11 @@ describe("TransportService", () => {
     ]);
     const assignmentFindFirstOrThrow = jest.fn(); // must NOT be called
     const tx = {
+  // Capacity checks lock the contended row first (the class / route / slot),
+  // so the count and the insert are atomic — the same guard hostel allocation
+  // uses for a bed. The mock just has to answer.
+  $executeRaw: jest.fn().mockResolvedValue(1),
+
       transportAssignment: { findMany: jest.fn().mockResolvedValue(rows), findFirstOrThrow: assignmentFindFirstOrThrow },
       transportRoute: { findMany: routeFindMany },
       routeStop: { findMany: stopFindMany },

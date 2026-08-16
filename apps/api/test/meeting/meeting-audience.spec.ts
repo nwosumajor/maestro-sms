@@ -81,6 +81,11 @@ function harness(opts: {
   const created: Array<Record<string, unknown>> = [];
   let slotWhere: Record<string, unknown> | null = null;
   const tx = {
+  // Capacity checks lock the contended row first (the class / route / slot),
+  // so the count and the insert are atomic — the same guard hostel allocation
+  // uses for a bed. The mock just has to answer.
+  $executeRaw: jest.fn().mockResolvedValue(1),
+
     class: {
       findFirst: jest.fn(({ where }: { where: Record<string, unknown> }) =>
         Promise.resolve(where.supervisorId ? (opts.ownsClass ? { id: "c1" } : null) : { id: "c1" }),
@@ -250,6 +255,11 @@ describe("a parent sees only what their family is invited to", () => {
 function announceHarness(guardians: string[], opts: { stageClasses?: string[] } = {}) {
   const calls: string[][] = [];
   const tx = {
+  // Capacity checks lock the contended row first (the class / route / slot),
+  // so the count and the insert are atomic — the same guard hostel allocation
+  // uses for a bed. The mock just has to answer.
+  $executeRaw: jest.fn().mockResolvedValue(1),
+
     class: {
       findFirst: jest.fn().mockResolvedValue({ id: "c1", name: "JSS2" }),
       findMany: jest.fn().mockResolvedValue((opts.stageClasses ?? ["c1"]).map((id) => ({ id, stage: "SENIOR_SECONDARY" }))),
@@ -492,6 +502,9 @@ describe("book() — the capacity claim itself", () => {
   function bookHarness(kind: string) {
     const counted: string[] = [];
     const tx = {
+      // The appointment branch locks the slot row before counting, so the claim
+      // is atomic — a briefing deliberately skips both.
+      $executeRaw: jest.fn().mockResolvedValue(1),
       parentChild: { findFirst: jest.fn().mockResolvedValue({ id: "link" }) },
       meetingSlot: {
         findFirst: jest.fn().mockResolvedValue({

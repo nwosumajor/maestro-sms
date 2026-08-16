@@ -2,10 +2,13 @@
 // MeetingService — parent-teacher appointment slots + bookings
 // =============================================================================
 // A teacher (or staff) opens time slots; a parent books one for one of their
-// OWN children (relationship-checked). The slot is claimed atomically — an
-// optimistic capacity check under updateMany semantics prevents two parents
-// over-booking a single-capacity slot. Both parties are notified on book and
-// cancel. Reads are scoped: a teacher sees their own slots + bookings; a parent
+// OWN children (relationship-checked). An APPOINTMENT slot is claimed atomically:
+// the slot row is locked FOR UPDATE before the capacity count, so two parents
+// pressing Book on the last half-hour cannot both get it. (This comment used to
+// describe an optimistic updateMany claim that was not in the code — the check
+// was a plain count-then-insert, and saying otherwise is part of why nobody
+// looked.) A BRIEFING deliberately claims nothing; see `book`. Both parties are
+// notified on book and cancel. Reads are scoped: a teacher sees their own slots + bookings; a parent
 // sees open slots and their own bookings.
 // =============================================================================
 
@@ -666,6 +669,13 @@ export class MeetingService {
       // that is not a per-parent transaction — so attendance is recorded by the
       // INSERT alone, with the unique index doing the duplicate check.
       if ((slot.kind ?? "APPOINTMENT") === "APPOINTMENT") {
+        // Locked for the rest of the transaction so the count and the insert are
+        // atomic: an appointment slot holds a handful of places, and two parents
+        // pressing Book on the last one both read `booked < capacity` and both
+        // get it. Contention is trivial here precisely because the slot is
+        // small — which is exactly why the BRIEFING path above skips this, where
+        // two thousand parents on one slot would serialise into a queue.
+        await tx.$executeRaw`SELECT id FROM "meeting_slot" WHERE id = ${slotId}::uuid FOR UPDATE`;
         const booked = await tx.meetingBooking.count({ where: { slotId, status: "BOOKED" } });
         if (booked >= slot.capacity) throw new ConflictException("That slot is fully booked");
       }

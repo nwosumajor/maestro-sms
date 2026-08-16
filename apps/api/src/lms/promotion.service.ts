@@ -326,6 +326,11 @@ export class PromotionService {
 
     const cls = await tx.class.findFirst({ where: { id: classId }, select: { capacity: true, name: true } });
     if (cls?.capacity != null) {
+      // Lock the class for the rest of the transaction so the count and the
+      // insert below are atomic — the same guard hostel allocation uses for a
+      // room. Two promotion batches landing on one class would otherwise both
+      // read the old occupancy and both fit.
+      await tx.$executeRaw`SELECT id FROM "class" WHERE id = ${classId}::uuid FOR UPDATE`;
       const activeNow = await tx.enrollment.count({ where: { classId, status: "ACTIVE" } });
       if (activeNow + incoming.length > cls.capacity) {
         throw new ConflictException(`${cls.name} is at capacity (${cls.capacity})`);
