@@ -1097,6 +1097,10 @@
       "kind": "ui",
       "note": "payment-rail switchboard \u2014 PaymentChannels card on /operator/pricing"
     },
+    "GET /operator/payment-channels/currency-coverage": {
+      "kind": "ui",
+      "note": "reviewed: components/operator/CurrencyCoverage.tsx on /operator/pricing"
+    },
     "GET /operator/payments": {
       "kind": "ui",
       "note": "/operator/payments \u2014 cross-tenant subscription revenue ledger, period-filtered, totals per currency"
@@ -1144,6 +1148,10 @@
     "GET /operator/tenants": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
+    },
+    "GET /operator/tenants/:p/settlement-holding": {
+      "kind": "ui",
+      "note": "reviewed: components/operator/SettlementHolding.tsx on the tenants list"
     },
     "GET /operator/tenants/:p/students": {
       "kind": "ui",
@@ -2520,6 +2528,10 @@
     "POST /operator/tenants/:p/admins": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
+    },
+    "POST /operator/tenants/:p/settlement-release": {
+      "kind": "ui",
+      "note": "reviewed: the 'Record a payout' control in components/operator/SettlementHolding.tsx"
     },
     "POST /operator/tenants/:p/students/export": {
       "kind": "ui",

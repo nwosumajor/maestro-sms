@@ -248,3 +248,38 @@ export interface LateFeeConfigDto {
   lateFeeFlatMinor: number;
   lateFeeGraceDays: number;
 }
+
+// =============================================================================
+// The platform paying a school what it collected on its behalf
+// =============================================================================
+// A payment made before the school registered a settlement bank lands in the
+// PLATFORM's gateway account. The invoice is correctly PAID and the cash is the
+// platform's to hand over — and the only instruction the product could offer was
+// "contact support to have this released", so the balance could only ever go up.
+//
+// A release does NOT move money; a person does that at a bank. It RECORDS the
+// transfer — amount, the bank's own reference, date — and stamps the held
+// payments it covers, so the balance falls because specific payments were
+// discharged rather than because a total was edited.
+export interface SettlementReleaseDto {
+  id: string;
+  amountMinor: number;
+  currency: string;
+  /** How many held payments this discharged. */
+  paymentCount: number;
+  /** The bank's reference for the transfer. */
+  reference: string;
+  note: string | null;
+  releasedAt: Date;
+}
+
+export interface SettlementHoldingDto {
+  schoolId: string;
+  /** Still owed: platform-settled payments not yet covered by a release. */
+  heldMinor: number;
+  heldPaymentCount: number;
+  /** Null when the held payments span more than one currency. */
+  currency: string | null;
+  /** Most recent first. */
+  releases: SettlementReleaseDto[];
+}

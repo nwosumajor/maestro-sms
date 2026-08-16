@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { shortDate } from "@/lib/format";
 import { SubscriptionManager } from "@/components/operator/SubscriptionManager";
+import { SettlementHolding } from "@/components/operator/SettlementHolding";
 import { SchoolStatusToggle } from "@/components/operator/SchoolStatusToggle";
 import { OperatorUsers } from "@/components/operator/OperatorUsers";
 import { OperatorStudents } from "@/components/operator/OperatorStudents";
@@ -125,6 +126,9 @@ export default async function OperatorTenantsPage({
                   {canSetStatus && <SchoolStatusToggle schoolId={t.id} status={t.status} />}
                 </div>
                 {canManageSubscription && <SubscriptionManager schoolId={t.id} plan={t.plan} />}
+                {/* Fee money the platform is holding for this school. Silent
+                    unless there is some, or some has been paid over. */}
+                <SettlementHolding schoolId={t.id} canRelease={canManageSubscription} />
                 {canManageGrace && <GraceEditor schoolId={t.id} initial={t.graceDays} />}
                 {canReadUsers && (
                   <OperatorUsers schoolId={t.id} schoolName={t.name} canCredentials={canCredentials} canImpersonate={canImpersonate} />

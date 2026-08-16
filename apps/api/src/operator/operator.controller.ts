@@ -56,6 +56,8 @@ import { PlatformFeeService } from "../billing/platform-fee.service";
 import { GrowthService } from "../billing/growth.service";
 import { GroupService } from "../group/group.service";
 import { OperatorCreditsService } from "./operator-credits.service";
+import { SettlementReleaseService, CurrencyCoverageService } from "./settlement-release.service";
+import type { SettlementHoldingDto, CurrencyCoverageDto } from "@sms/types";
 import { OperatorPaymentsService, type PaymentFilters } from "./operator-payments.service";
 import { PaymentChannelService } from "../payments/payment-channel.service";
 import { PaymentHealthService } from "../payments/payment-health.service";
@@ -93,6 +95,14 @@ const staffStatusSchema = z.object({ status: z.enum(["ACTIVE", "DISABLED"]) });
 // goodwill); null resets to the platform default. Unbounded comping stays with
 // the owner via the subscription PUT.
 const graceSchema = z.object({ graceDays: z.number().int().min(0).max(GRACE_DAYS_MAX).nullable() });
+const settlementReleaseSchema = z.object({
+  /** The bank's own reference for the transfer. Required — see the service. */
+  reference: z.string().min(3).max(120),
+  note: z.string().max(500).nullish(),
+  /** Only needed when a school holds money in more than one currency. */
+  currency: z.string().length(3).nullish(),
+});
+
 const adjustCreditsSchema = z.object({
   // Positive = comp credits, negative = debit (e.g. correcting a gateway error).
   delta: z.number().int().refine((v) => v !== 0, "delta must be non-zero"),
@@ -247,6 +257,8 @@ export class OperatorController {
     private readonly growth: GrowthService,
     private readonly groups: GroupService,
     private readonly credits: OperatorCreditsService,
+    private readonly settlementRelease: SettlementReleaseService,
+    private readonly currencyCoverageService: CurrencyCoverageService,
     private readonly payments: OperatorPaymentsService,
     private readonly jobRuns: JobRunsService,
   ) {}
@@ -680,6 +692,20 @@ export class OperatorController {
     return this.channels.update(p, { ...body, enabled: body.enabled as PaymentChannel[] });
   }
 
+  /**
+   * Which currencies the platform's card account can charge, and which schools
+   * are waiting on each.
+   *
+   * Read-only bookkeeping, so it sits with the other posture reads. Enabling a
+   * currency happens on the provider's dashboard; this says which ones to
+   * enable and who is stuck behind each, which is the part nobody could see.
+   */
+  @Get("payment-channels/currency-coverage")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
+  currencyCoverage(): Promise<CurrencyCoverageDto> {
+    return this.currencyCoverageService.coverage();
+  }
+
   /** Run the daily health check now (it also runs on a schedule). */
   @Post("payment-channels/health/run")
   @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_PRICING_MANAGE)
@@ -800,6 +826,40 @@ export class OperatorController {
     @Body(new ZodValidationPipe(adjustCreditsSchema)) body: z.infer<typeof adjustCreditsSchema>,
   ) {
     return this.credits.adjust(p, schoolId, body.delta, body.note);
+  }
+
+  /**
+   * What the platform is holding for a school, and what it has already paid over.
+   *
+   * Read-only, so it sits on the ordinary tenant-read permission: knowing what is
+   * owed is bookkeeping, and the lever that discharges it is separately gated.
+   */
+  @Get("tenants/:schoolId/settlement-holding")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
+  settlementHolding(
+    @CurrentPrincipal() p: Principal,
+    @Param("schoolId") schoolId: string,
+  ): Promise<SettlementHoldingDto> {
+    return this.settlementRelease.holding(p, schoolId);
+  }
+
+  /**
+   * Record that the platform has PAID a school what it was holding.
+   *
+   * Does not move money — a person does that at a bank. It records the transfer
+   * and stamps the held payments it covers, so the balance falls because those
+   * payments were discharged rather than because a total was edited. Same
+   * posture as the other money levers here: step-up, audited, append-only.
+   */
+  @Post("tenants/:schoolId/settlement-release")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_SUBSCRIPTION_MANAGE)
+  @RequireStepUp()
+  releaseSettlement(
+    @CurrentPrincipal() p: Principal,
+    @Param("schoolId") schoolId: string,
+    @Body(new ZodValidationPipe(settlementReleaseSchema)) body: z.infer<typeof settlementReleaseSchema>,
+  ): Promise<SettlementHoldingDto> {
+    return this.settlementRelease.release(p, schoolId, body);
   }
 
   /** Set the take-rate. Same posture as pricing: owner-only, step-up, audited. */

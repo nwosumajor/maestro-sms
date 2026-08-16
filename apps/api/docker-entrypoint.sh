@@ -179,6 +179,7 @@ apply_rls 105_meeting_cohost_rls.sql meeting_cohost_delete
 apply_rls 106_meeting_request_rls.sql meeting_request_update
 apply_rls 89_payment_channel_rls.sql payment_channel_config_select
 apply_rls 107_student_trait_rating_rls.sql student_trait_rating_delete
+apply_rls 108_platform_settlement_release_rls.sql platform_settlement_release_insert
 
 # Seed on first provision (compose: SEED_ON_START=true; cloud migrate task: always).
 if [ "${SEED_ON_START}" = "true" ] || [ "$MODE" = "migrate" ]; then

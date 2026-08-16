@@ -34,6 +34,7 @@ import { PlatformFeeManager } from "@/components/operator/PlatformFeeManager";
 import { GrowthManager } from "@/components/operator/GrowthManager";
 import { PageHeader } from "@/components/shell/PageHeader";
 import { PaymentChannels } from "@/components/operator/PaymentChannels";
+import { CurrencyCoverage } from "@/components/operator/CurrencyCoverage";
 
 export const dynamic = "force-dynamic";
 
@@ -97,6 +98,10 @@ export default async function OperatorPricingPage() {
 
         {/* Which rails the platform will charge on at all — above the take-rate,
             because it decides whether there is anything to take a rate FROM. */}
+        {/* What the card account can actually charge, against what schools bill
+            in. Above the channel switchboard, because a rail being ON is no use
+            if the account cannot take the currency. */}
+        <CurrencyCoverage />
         {channels && (
           <PaymentChannels
             initialEnabled={channels.enabled}
