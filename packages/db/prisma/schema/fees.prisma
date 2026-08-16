@@ -173,6 +173,12 @@ model Payment {
   /// Only ever true for gateway payments. Cash/manual payments never touched
   /// the platform.
   settledToPlatform Boolean      @default(false)
+  /// Which release discharged this payment, once the platform has paid it over.
+  /// Scalar ref to platform_settlement_release(id); the DB FK is in the
+  /// migration. Null while the money is still owed, which is what makes the
+  /// held balance a SUM over unreleased rows rather than a number somebody
+  /// maintains by hand.
+  platformReleaseId String?      @db.Uuid
   note             String?
   paidAt           DateTime      @default(now())
   /// Staff who recorded it (DB FK to user; audit field, no Prisma relation).
@@ -434,4 +440,45 @@ model MobileMoneyIntent {
   // checker, which supplies no schoolId.
   @@index([invoiceId])
   @@map("mobile_money_intent")
+}
+
+
+/// The platform paying a school the fee money it collected on its behalf.
+///
+/// A payment made before the school registered a settlement bank lands in the
+/// PLATFORM's gateway account: the invoice is correctly PAID, and the cash is
+/// the platform's to hand over. That debt was visible on the school's fees page
+/// and dischargeable only by email — "contact support to have this released" —
+/// so the balance had no way to ever go down, and nothing recorded that a
+/// transfer had happened.
+///
+/// APPEND-ONLY, like every other financial record here. A release is a
+/// statement that money left the platform's bank on a date with a reference;
+/// editing one afterwards would make the ledger disagree with the bank. A
+/// mistake is corrected by a further release, never by rewriting this one.
+model PlatformSettlementRelease {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  /// The total handed over, in minor units of `currency`.
+  amountMinor Int
+  currency    String
+  /// How many held payments this discharged — the count at the moment it ran.
+  paymentCount Int
+  /// The bank's own reference for the transfer. Required: a release with no
+  /// evidence outside this system is an assertion, not a record.
+  reference String
+  note      String?
+
+  /// The platform user who released it (DB FK to user; audit field).
+  releasedById String   @db.Uuid
+  releasedAt   DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, releasedAt])
+  @@map("platform_settlement_release")
 }

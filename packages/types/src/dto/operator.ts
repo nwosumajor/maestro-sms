@@ -493,3 +493,34 @@ export interface MisplacedPlatformRoleDto {
   platformRoles: string[];
   grantedAt: Date;
 }
+
+// =============================================================================
+// What the platform's card account can actually charge, and who needs it
+// =============================================================================
+// `PAYSTACK_CURRENCIES` describes what PAYSTACK supports. Whether a given
+// MERCHANT ACCOUNT may charge a currency is a different question, and the
+// platform was using the first as an answer to the second — so a school billing
+// in GHS was routed to a rail that answers `403 Currency not supported by
+// merchant`, and its parents met an unexplained refusal at checkout.
+//
+// This is the operator's view of the gap: what the account is enabled for,
+// against what the schools on it actually bill in. Enabling a currency is a
+// dashboard action nobody can take from here; knowing WHICH ones to enable, and
+// who is waiting on each, is what this replaces guessing with.
+export interface CurrencyCoverageDto {
+  /** Currencies this Paystack account is enabled for, from its own /balance. */
+  merchantCurrencies: string[];
+  /** Null when the account could not be asked — reported as unknown, never as "none". */
+  known: boolean;
+  rows: Array<{
+    currency: string;
+    /** Schools billing in it. */
+    schoolCount: number;
+    /** A few names, so the operator knows who is affected without a second screen. */
+    sample: string[];
+    /** Can the account charge it today? */
+    covered: boolean;
+    /** Can Paystack settle it to a bank in principle? */
+    railSupports: boolean;
+  }>;
+}

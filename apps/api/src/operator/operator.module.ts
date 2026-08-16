@@ -14,6 +14,7 @@ import { OperatorDirectoryService } from "./operator-directory.service";
 import { PlatformAnalyticsService } from "./platform-analytics.service";
 import { PlatformAuditService } from "./platform-audit.service";
 import { OperatorCreditsService } from "./operator-credits.service";
+import { SettlementReleaseService, CurrencyCoverageService } from "./settlement-release.service";
 import { OperatorPaymentsService } from "./operator-payments.service";
 import { PaymentsModule } from "../payments/payments.module";
 import { PaymentHealthModule } from "../payments/payment-health.module";
@@ -29,7 +30,7 @@ import { PaymentHealthModule } from "../payments/payment-health.module";
   imports: [BillingModule, NotificationModule, PrivacyModule, GroupModule, PaymentsModule, PaymentHealthModule],
   controllers: [OperatorController],
   providers: [OperatorService, OperatorProvisioningService, OperatorUserService, OperatorExportService, OperatorDirectoryService,
-    OperatorAttentionService, PlatformDelegationService, PlatformAnalyticsService, PlatformAuditService, OperatorCreditsService, OperatorPaymentsService],
+    OperatorAttentionService, PlatformDelegationService, PlatformAnalyticsService, PlatformAuditService, OperatorCreditsService, OperatorPaymentsService, SettlementReleaseService, CurrencyCoverageService],
   exports: [OperatorService, OperatorProvisioningService, OperatorUserService],
 })
 export class OperatorModule {}

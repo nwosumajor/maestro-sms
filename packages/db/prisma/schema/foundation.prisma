@@ -134,6 +134,7 @@ model School {
   grades                  Grade[]
   reportCardRemarks       ReportCardRemark[]
   studentTraitRatings     StudentTraitRating[]
+  platformSettlementReleases PlatformSettlementRelease[]
   subjectResults          SubjectResult[]
   subjectSelections       SubjectSelection[]
   scholarshipApplications ScholarshipApplication[]

@@ -182,6 +182,7 @@ const meetingCohostA = randomUUID();
   const subjectResultA = randomUUID();
   const reportCardRemarkA = randomUUID();
 const studentTraitRatingA = randomUUID();
+const settlementReleaseA = randomUUID();
   const subjectSelectionA = randomUUID();
   const scholarshipApplicationA = randomUUID();
   const announcementA = randomUUID();
@@ -800,6 +801,13 @@ const studentTraitRatingA = randomUUID();
        VALUES ($1,$2,$3,$4,'obedience',4,now())`,
       [studentTraitRatingA, A, userA, termA],
     );
+    // The platform recording that it paid school A the fee money it held — rls/108.
+    await a.query(
+      `INSERT INTO platform_settlement_release
+         (id,"schoolId","amountMinor",currency,"paymentCount",reference,"releasedById","updatedAt")
+       VALUES ($1,$2,50000,'NGN',2,'BANK-REF-1',$3,now())`,
+      [settlementReleaseA, A, userA],
+    );
     // Per-term subject selection (student userA picking subjectA).
     await a.query(
       `INSERT INTO subject_selection (id,"schoolId","sessionId","termId","classId","studentId","subjectIds","updatedAt")
@@ -1221,6 +1229,7 @@ const studentTraitRatingA = randomUUID();
       "report_card_remark",
       // FKs to term -> purge before term.
       "student_trait_rating",
+      "platform_settlement_release",
       // Syllabus before term: subject_syllabus FKs to term, so deleting term
       // first leaves the plan behind and the next run collides on it.
       "subject_syllabus_item",
@@ -1569,6 +1578,7 @@ const studentTraitRatingA = randomUUID();
     ["term", termA],
     ["report_card_remark", reportCardRemarkA],
     ["student_trait_rating", studentTraitRatingA],
+    ["platform_settlement_release", settlementReleaseA],
     ["announcement", announcementA],
   ];
 

@@ -284,8 +284,17 @@ export class PaystackService {
   /**
    * Resolve a bank account to the NAME it is held in.
    *
-   * THE POINT: creating a subaccount proves the account EXISTS, never that it
-   * belongs to the school. A transposed digit that still lands on a valid
+   * THE POINT: creating a subaccount does not prove the account belongs to the
+   * school — and in Kenya it does not even prove the account EXISTS. Probed
+   * against the live API with the obviously-invalid number 0000000000:
+   *
+   *     NG  400 "Account details are invalid"
+   *     GH  400 "Account details are invalid"
+   *     KE  201 "Subaccount created"        <- no validation at all
+   *
+   * So for a Kenyan school this resolve step is not belt-and-braces over the
+   * gateway's own checking; it is the ONLY thing between a typed digit and a
+   * subaccount that settles every parent's fee into nowhere. A transposed digit that still lands on a valid
    * account at the same bank is accepted silently, and from that moment every
    * parent's fee settles into a stranger's account — permanently, and with the
    * invoice correctly marked PAID at both ends, so nothing in this system ever
@@ -359,6 +368,13 @@ export class PaystackService {
 
   /**
    * Create a settlement SUBACCOUNT (the school's own bank) for split payments.
+   *
+   * DOES NOT VALIDATE THE ACCOUNT. Nigeria and Ghana reject an invalid number;
+   * Kenya accepts one and returns 201 (probed live). Callers must have resolved
+   * the account to a name and had a human confirm it FIRST — see
+   * `resolveAccount`. No `currency` is sent: probed with and without for Ghana,
+   * the response is identical, so it buys nothing and an unproven parameter on
+   * a money path is worse than none.
    * `percentageCharge` is the PLATFORM's share of each split transaction
    * (PLATFORM_FEES_COMMISSION_PERCENT env, default 0). Returns the subaccount
    * code to stamp on future fee charges.

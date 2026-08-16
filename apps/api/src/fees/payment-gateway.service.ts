@@ -278,8 +278,17 @@ export class PaymentGatewayService {
       // What the platform is holding for this school. An aggregate, not a
       // hydrate: the count of these rows is unbounded over a school's lifetime
       // and nothing here needs the rows themselves.
+      // UNRELEASED only. The platform can now record having paid this over, and
+      // a balance that still counted discharged payments would tell a school it
+      // was owed money it had already received.
       const held = await tx.payment.aggregate({
-        where: { schoolId: p.schoolId, settledToPlatform: true, status: "POSTED", kind: "PAYMENT" },
+        where: {
+          schoolId: p.schoolId,
+          settledToPlatform: true,
+          status: "POSTED",
+          kind: "PAYMENT",
+          platformReleaseId: null,
+        },
         _sum: { amountMinor: true },
         _count: { _all: true },
       });
