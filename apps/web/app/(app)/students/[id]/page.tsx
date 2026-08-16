@@ -20,6 +20,7 @@ import { ExemptionPanel } from "@/components/assessment/ExemptionPanel";
 import { PrivacyPanel } from "@/components/privacy/PrivacyPanel";
 import { ReportCardButton } from "@/components/reportcards/ReportCardButton";
 import { RemarksEditor } from "@/components/reportcards/RemarksEditor";
+import { TraitRatings } from "@/components/gradebook/TraitRatings";
 import type { AcademicSessionDto } from "@sms/types";
 
 export const dynamic = "force-dynamic";
@@ -150,6 +151,18 @@ export default async function StudentProfilePage({ params }: { params: { id: str
           contacts={contacts}
           medical={medical}
         />
+
+        {/* Skills and behaviour for the CURRENT term, beside the remarks that
+            print next to them. Read scope is the report card's own; only the
+            class teacher or a school administrator may record them. */}
+        {canReadGrades && (
+          <TraitRatings
+            studentId={params.id}
+            termId={sessions?.flatMap((s) => s.terms).find((t) => t.isCurrent)?.id ?? null}
+            termName={sessions?.flatMap((s) => s.terms).find((t) => t.isCurrent)?.name ?? null}
+            canEdit={hasPermission(user.permissions, "grade.write")}
+          />
+        )}
 
         {canReadGrades &&
           (sessions && sessions.length > 0 ? (

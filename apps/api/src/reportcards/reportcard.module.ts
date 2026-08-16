@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { ReportCardController } from "./reportcard.controller";
 import { ReportCardService } from "./reportcard.service";
 import { ReportCardRemarkService } from "./report-card-remark.service";
+import { StudentTraitService } from "./student-trait.service";
 import { BrandingModule } from "../branding/branding.module";
 import { DocumentsModule } from "../documents/documents.module";
 import { GradebookModule } from "../gradebook/gradebook.module";
@@ -13,7 +14,7 @@ import { GradebookModule } from "../gradebook/gradebook.module";
 @Module({
   imports: [BrandingModule, DocumentsModule, GradebookModule],
   controllers: [ReportCardController],
-  providers: [ReportCardService, ReportCardRemarkService],
+  providers: [ReportCardService, ReportCardRemarkService, StudentTraitService],
   exports: [ReportCardService],
 })
 export class ReportCardModule {}

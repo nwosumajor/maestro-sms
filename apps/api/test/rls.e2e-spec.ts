@@ -181,6 +181,7 @@ const meetingCohostA = randomUUID();
   const termA = randomUUID();
   const subjectResultA = randomUUID();
   const reportCardRemarkA = randomUUID();
+const studentTraitRatingA = randomUUID();
   const subjectSelectionA = randomUUID();
   const scholarshipApplicationA = randomUUID();
   const announcementA = randomUUID();
@@ -793,6 +794,12 @@ const meetingCohostA = randomUUID();
        VALUES ($1,$2,$3,$4,'Good progress.',now())`,
       [reportCardRemarkA, A, userA, termA],
     );
+    // Behavioural trait rating (student userA, termA) — rls/107.
+    await a.query(
+      `INSERT INTO student_trait_rating (id,"schoolId","studentId","termId","traitKey",score,"updatedAt")
+       VALUES ($1,$2,$3,$4,'obedience',4,now())`,
+      [studentTraitRatingA, A, userA, termA],
+    );
     // Per-term subject selection (student userA picking subjectA).
     await a.query(
       `INSERT INTO subject_selection (id,"schoolId","sessionId","termId","classId","studentId","subjectIds","updatedAt")
@@ -1212,6 +1219,8 @@ const meetingCohostA = randomUUID();
       // both; term references academic_session -> term before session.
       "promotion_batch",
       "report_card_remark",
+      // FKs to term -> purge before term.
+      "student_trait_rating",
       // Syllabus before term: subject_syllabus FKs to term, so deleting term
       // first leaves the plan behind and the next run collides on it.
       "subject_syllabus_item",
@@ -1559,6 +1568,7 @@ const meetingCohostA = randomUUID();
     ["academic_session", sessionA],
     ["term", termA],
     ["report_card_remark", reportCardRemarkA],
+    ["student_trait_rating", studentTraitRatingA],
     ["announcement", announcementA],
   ];
 
