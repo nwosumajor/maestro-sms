@@ -20,13 +20,32 @@ type Row = Serialized<ProfileReviewRowDto>;
 
 export function ProfileReviewQueue() {
   const [rows, setRows] = React.useState<Row[] | null>(null);
+  const [failed, setFailed] = React.useState(false);
 
   React.useEffect(() => {
     void (async () => {
       const res = await fetch("/api/sms/students/profile-reviews", { cache: "no-store" });
-      setRows(res.ok ? ((await res.json()) as Row[]) : []);
+      // A failed read stays null. `[]` hides the card, which reads to a reviewer
+      // as "nothing is waiting for you" — the one thing a queue must never say
+      // when it does not know.
+      if (res.ok) setRows((await res.json()) as Row[]);
+      else setFailed(true);
     })();
   }, []);
+
+  if (failed) {
+    return (
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Profiles waiting for you</CardTitle>
+          <CardDescription>
+            Couldn&rsquo;t load the review queue. Reload to try again — this does not mean it is
+            empty.
+          </CardDescription>
+        </CardHeader>
+      </Card>
+    );
+  }
 
   if (!rows || rows.length === 0) return null;
 

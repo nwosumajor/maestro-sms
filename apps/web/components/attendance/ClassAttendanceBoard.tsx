@@ -73,17 +73,26 @@ export function ClassAttendanceBoard() {
   // re-acquire the table every time. The previous figures stay on screen, dimmed
   // and marked busy, and are replaced in place when the new ones land.
   const [busy, setBusy] = React.useState(false);
+  // Set when a refresh fails. The figures on screen stay — they were true when
+  // they were fetched — but they must not be presented as current.
+  const [failed, setFailed] = React.useState(false);
   React.useEffect(() => {
     let live = true;
     setBusy(true);
     (async () => {
       const res = await fetch(`/api/sms/attendance/by-class${termId ? `?termId=${encodeURIComponent(termId)}` : ""}`);
       if (!live) return;
-      setData(
-        res.ok
-          ? await res.json()
-          : { from: "", to: "", termId: null, termName: null, source: "live", classes: [] },
-      );
+      if (res.ok) {
+        setData(await res.json());
+        setFailed(false);
+      } else {
+        // A failed refresh used to be replaced with
+        // `{ source: "live", classes: [] }` — a fabricated reading that renders
+        // as every class at zero attendance and LABELS it live. The figures
+        // already on screen are kept (which is this component's own design
+        // while busy) and the failure is stated instead.
+        setFailed(true);
+      }
       setBusy(false);
     })();
     return () => {
@@ -125,9 +134,10 @@ export function ClassAttendanceBoard() {
                       version of "why was that instant". */}
                   {data.source === "rollup" ? " Figures for this ended term are precomputed." : ""}
                   {busy ? " Updating…" : ""}
+                  {failed ? " Couldn\u2019t refresh — these figures may be out of date." : ""}
                 </>
               ) : (
-                "Loading…"
+                failed ? "Couldn\u2019t load attendance." : "Loading…"
               )}
             </CardDescription>
           </div>

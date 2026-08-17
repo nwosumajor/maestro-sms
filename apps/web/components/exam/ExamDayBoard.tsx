@@ -1,6 +1,8 @@
 "use client";
 
 import * as React from "react";
+import { useRegion } from "@/components/shell/RegionProvider";
+import { todayIn } from "@/lib/format";
 import { useRouter } from "next/navigation";
 import type { ExamDayDto, Serialized } from "@sms/types";
 import { postSms } from "@/components/game/play-ui";
@@ -27,7 +29,10 @@ const REFRESH_MS = 20_000;
  */
 export function ExamDayBoard({ canRelease }: { canRelease: boolean }) {
   const router = useRouter();
-  const [date, setDate] = React.useState(() => new Date().toISOString().slice(0, 10));
+  // The SCHOOL's day: an exam board prefilled with the UTC date shows the
+  // wrong day's sittings for every school away from UTC.
+  const { timezone } = useRegion();
+  const [date, setDate] = React.useState(() => todayIn(timezone));
   const [board, setBoard] = React.useState<Board | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);

@@ -108,12 +108,36 @@ export function dateTime(value: string | Date | null | undefined, region: Partia
 
 /** Formatters bound to one school's region — what a page or component uses once
  *  it knows where the school is. */
+/**
+ * TODAY, AS THE SCHOOL'S CALENDAR DAY — `YYYY-MM-DD`, ready for a date input.
+ *
+ * `new Date().toISOString().slice(0, 10)` is the UTC date, and every screen that
+ * prefills a date with it disagrees with the server about what day it is. East
+ * of UTC that opens a register on YESTERDAY in the early morning; west of UTC it
+ * opens TOMORROW all evening — and nobody looks, because the field is prefilled
+ * and looks right.
+ *
+ * The API already decides the term lock, the 7-day stale rule and the register's
+ * own filing date in the school's zone (`schoolToday(tz)`), so this is the web
+ * side of one rule, not a second opinion.
+ *
+ * The zone must come from the SESSION, never from the runtime: a Node-vs-browser
+ * default is a hydration mismatch, which a user sees as a blank page.
+ *
+ * en-CA formats as YYYY-MM-DD, which is exactly what `<input type="date">` wants.
+ */
+export function todayIn(timezone: string): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(new Date());
+}
+
 export function formattersFor(region: DisplayRegion) {
   return {
     region,
     money: (minor: number, currency?: string) => money(minor, currency || region.currency, region.locale),
     shortDate: (v: string | Date | null | undefined) => shortDate(v, region),
     dateTime: (v: string | Date | null | undefined) => dateTime(v, region),
+    /** Today, as the school reckons it — see `todayIn`. */
+    today: () => todayIn(region.timezone),
   };
 }
 

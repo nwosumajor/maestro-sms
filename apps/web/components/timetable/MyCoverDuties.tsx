@@ -1,5 +1,3 @@
-"use client";
-
 // The cover duties assigned TO ME.
 //
 // Assigning a reliever already notifies them — "you are covering 2B Chemistry on
@@ -13,35 +11,30 @@
 // have it.
 
 import type { MyCoverDutyDto, Serialized } from "@sms/types";
-import * as React from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 type Duty = Serialized<MyCoverDutyDto>;
 
-const iso = (d: Date) => d.toISOString().slice(0, 10);
-
-export function MyCoverDuties() {
-  const [duties, setDuties] = React.useState<Duty[] | null>(null);
-  const [msg, setMsg] = React.useState<string | null>(null);
-
-  React.useEffect(() => {
-    const from = iso(new Date());
-    // The window the server already bounds at 62 days; four weeks is what a
-    // teacher plans around.
-    const to = iso(new Date(Date.now() + 28 * 86_400_000));
-    void (async () => {
-      const res = await fetch(`/api/sms/timetable/cover/mine?from=${from}&to=${to}`, { cache: "no-store" });
-      if (!res.ok) {
-        setMsg(`Couldn't load your cover duties (${res.status}).`);
-        setDuties([]);
-        return;
-      }
-      setDuties((await res.json()) as Duty[]);
-    })();
-  }, []);
+/**
+ * A SERVER component. It only displays, so being a client island bought nothing
+ * and cost a round trip after hydration.
+ *
+ * // GOTCHA: it also used to date its own request — `new Date().toISOString()`,
+ * the UTC day on the USER's clock. "Today" is the school's calendar day here as
+ * everywhere else, and west of UTC the browser's UTC day is already tomorrow
+ * for the last hours of every evening: a teacher in Toronto at 20:00 on Monday
+ * asked for Tuesday onward and could not see the duty they were about to cover.
+ * The window is now the server's to decide, in the school's timezone.
+ *
+ * `duties === null` means the read did not happen. Said plainly rather than
+ * rendered as an empty list, because "you have nothing to cover" is exactly the
+ * wrong thing to tell someone who does.
+ */
+export function MyCoverDuties({ duties }: { duties: Duty[] | null }) {
+  const msg = duties === null ? "Couldn't load your cover duties." : null;
 
   // Nothing to cover is the normal case — don't take up the page saying so.
-  if (duties !== null && duties.length === 0 && !msg) return null;
+  if (duties !== null && duties.length === 0) return null;
 
   return (
     <Card>
@@ -51,7 +44,6 @@ export function MyCoverDuties() {
       </CardHeader>
       <CardContent>
         {msg && <p className="text-sm text-muted-foreground">{msg}</p>}
-        {duties === null && !msg && <p className="text-sm text-muted-foreground">Loading…</p>}
         {duties && duties.length > 0 && (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">

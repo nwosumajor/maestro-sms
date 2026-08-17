@@ -12,6 +12,7 @@
 
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { CoverLessonDto, MyCoverDutyDto } from "@sms/types";
+import { schoolToday } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -21,9 +22,12 @@ import {
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
 import { NotificationService } from "../notifications/notification.service";
+import { SchoolRegionService } from "../foundation/school-region.service";
 
 const DOW = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"] as const;
 const MAX_WINDOW_DAYS = 62;
+// What "the next few weeks" means when the caller does not say.
+const DEFAULT_COVER_WINDOW_DAYS = 28;
 
 @Injectable()
 export class LessonCoverService {
@@ -31,10 +35,26 @@ export class LessonCoverService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly notifications: NotificationService,
+    private readonly region: SchoolRegionService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
     return { schoolId: p.schoolId, userId: p.userId };
+  }
+
+  /**
+   * `YYYY-MM-DD` → that day at UTC midnight, or undefined if it is absent or
+   * not a date. Anything unparseable is treated as "not given" rather than
+   * flowing on as an Invalid Date: a hand-edited query string must not be a
+   * 500. A malformed value is rejected outright, since silently answering for
+   * a different window than the caller asked for is worse than refusing.
+   */
+  private parseDay(v: string | undefined): Date | undefined {
+    if (v === undefined || v === "") return undefined;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) throw new BadRequestException("Date must be YYYY-MM-DD");
+    const d = new Date(`${v}T00:00:00.000Z`);
+    if (Number.isNaN(d.getTime())) throw new BadRequestException("Date must be YYYY-MM-DD");
+    return d;
   }
 
   private dateOnly(d: Date): string {
@@ -233,9 +253,30 @@ export class LessonCoverService {
   }
 
   /** A teacher's own upcoming cover duties. Self-scoped. */
-  async myDuties(p: Principal, from: string, to: string): Promise<MyCoverDutyDto[]> {
-    const start = new Date(`${from}T00:00:00.000Z`);
-    const end = new Date(`${to}T00:00:00.000Z`);
+  /**
+   * A teacher's own cover duties.
+   *
+   * The window is OPTIONAL and defaults on the server, in the SCHOOL's
+   * timezone. It used to be required, and the only caller computed it in the
+   * browser as `new Date().toISOString()` — the UTC day on the user's own
+   * clock. West of UTC that is tomorrow for the last hours of every evening, so
+   * a teacher in Toronto checking at 20:00 on Monday asked for Tuesday onward
+   * and could not see the duty they were about to cover. "Today" is the
+   * school's calendar day here as everywhere else.
+   *
+   * Omitting them also used to build `new Date("undefinedT00:00:00.000Z")` — an
+   * Invalid Date, which Prisma rejects with a 500.
+   */
+  async myDuties(p: Principal, from?: string, to?: string): Promise<MyCoverDutyDto[]> {
+    const { timezone } = await this.region.forSchool(p.schoolId);
+    // Already a Date at UTC midnight of the school's calendar day.
+    const start = this.parseDay(from) ?? schoolToday(timezone);
+    const end =
+      this.parseDay(to) ?? new Date(start.getTime() + DEFAULT_COVER_WINDOW_DAYS * 86_400_000);
+    if (end < start) throw new BadRequestException("'to' is before 'from'");
+    if (end.getTime() - start.getTime() > MAX_WINDOW_DAYS * 86_400_000) {
+      throw new BadRequestException(`Window cannot exceed ${MAX_WINDOW_DAYS} days`);
+    }
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       const rows = await tx.lessonCover.findMany({
         where: { coveringTeacherId: p.userId, date: { gte: start, lte: end } },

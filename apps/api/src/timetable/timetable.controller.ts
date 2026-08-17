@@ -99,8 +99,9 @@ export class TimetableController {
   @RequirePermission(TIMETABLE_PERMISSIONS.TIMETABLE_READ)
   myCover(
     @CurrentPrincipal() p: Principal,
-    @Query("from") from: string,
-    @Query("to") to: string,
+    // Optional: the server defaults the window in the SCHOOL's timezone.
+    @Query("from") from?: string,
+    @Query("to") to?: string,
   ): Promise<MyCoverDutyDto[]> {
     return this.cover.myDuties(p, from, to);
   }

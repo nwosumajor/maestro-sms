@@ -1,6 +1,8 @@
 "use client";
 
 import * as React from "react";
+import { useRegion } from "@/components/shell/RegionProvider";
+import { todayIn } from "@/lib/format";
 import type { ExamScheduleDto, ExamSittingDto, MyExamDto, Serialized } from "@sms/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -49,7 +51,8 @@ export function ExamsClient({
 }) {
   // Default to EXAM DAY when something is actually on today — on exam morning that
   // is the screen you want, and on any other day planning is.
-  const today = new Date().toISOString().slice(0, 10);
+  const { timezone } = useRegion();
+  const today = todayIn(timezone);
   const [mode, setMode] = React.useState<"plan" | "day">(() =>
     sittings.some((s) => s.date === today) ? "day" : "plan",
   );

@@ -10,6 +10,8 @@
 
 import type { Serialized, StaffAttendanceDto } from "@sms/types";
 import * as React from "react";
+import { useRegion } from "@/components/shell/RegionProvider";
+import { todayIn } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -30,7 +32,8 @@ export function MyAttendance({ initial }: { initial: Mark[] }) {
   const [err, setErr] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
 
-  const today = new Date().toISOString().slice(0, 10);
+  const { timezone } = useRegion();
+  const today = todayIn(timezone);
   const todayMark = history.find((m) => String(m.date).slice(0, 10) === today);
 
   async function clockIn() {

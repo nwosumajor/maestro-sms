@@ -3,6 +3,8 @@
 import type { HostelDto, HostelExeatDto, HostelIncidentDto, HostelAttendanceDto, HostelAllocationDto, Serialized } from "@sms/types";
 import { StudentPicker } from "@/components/people/StudentPicker";
 import * as React from "react";
+import { useRegion } from "@/components/shell/RegionProvider";
+import { todayIn } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,7 +16,11 @@ import { shortDate } from "@/lib/format";
 type Hostel = Serialized<HostelDto>;
 type Alloc = Serialized<HostelAllocationDto>;
 const sel = "h-9 rounded-md border border-input bg-background px-3 text-sm";
-const today = () => new Date().toISOString().slice(0, 10);
+// The SCHOOL's day. This is both the DEFAULT and the `max` of the date input,
+// so the UTC version did not merely prefill the wrong day — east of UTC it
+// capped the input at YESTERDAY in the early morning, and today could not be
+// recorded at all.
+const today = (timezone: string) => todayIn(timezone);
 
 async function send(method: string, path: string, body?: unknown) {
   const res = await fetch(`/api/sms${path}`, {
@@ -81,7 +87,8 @@ function TransferPanel({ boarders, rooms, onMsg }: { boarders: Alloc[]; rooms: {
 
 function RollCallPanel({ hostels, onMsg }: { hostels: Hostel[]; onMsg: (s: string) => void }) {
   const [hostelId, setHostelId] = React.useState(hostels[0]?.id ?? "");
-  const [date, setDate] = React.useState(today());
+  const { timezone } = useRegion();
+  const [date, setDate] = React.useState(() => today(timezone));
   const [rows, setRows] = React.useState<Serialized<HostelAttendanceDto>[] | null>(null);
   const [boarders, setBoarders] = React.useState<{ studentId: string; studentName: string }[]>([]);
   const [marks, setMarks] = React.useState<Record<string, string>>({});
@@ -113,7 +120,7 @@ function RollCallPanel({ hostels, onMsg }: { hostels: Hostel[]; onMsg: (s: strin
       <CardContent className="space-y-3">
         <div className="flex flex-wrap items-end gap-2">
           <select className={sel} value={hostelId} onChange={(e) => setHostelId(e.target.value)}>{hostels.map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}</select>
-          <Input type="date" max={today()} value={date} onChange={(e) => setDate(e.target.value)} className="w-40" />
+          <Input type="date" max={today(timezone)} value={date} onChange={(e) => setDate(e.target.value)} className="w-40" />
         </div>
         <div className="max-h-56 space-y-1 overflow-y-auto">
           {boarders.length === 0 && <p className="text-sm text-muted-foreground">No active boarders.</p>}

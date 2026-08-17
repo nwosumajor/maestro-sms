@@ -4,6 +4,7 @@ import { hasPermission } from "@/lib/permissions";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
+import { regionOf, todayIn } from "@/lib/format";
 import { AppShell } from "@/components/shell/AppShell";
 import { AttendanceAdmin, BiometricAdmin } from "@/components/hr/AttendanceAdmin";
 import { DutyRoster } from "@/components/hr/DutyRoster";
@@ -20,7 +21,10 @@ export default async function StaffAttendancePage() {
   if (!hasPermission(user.permissions, "hr.read")) redirect("/dashboard");
   const canWrite = hasPermission(user.permissions, "hr.write");
 
-  const today = new Date().toISOString().slice(0, 10);
+  // The SCHOOL's day, not the server's UTC one — this drives which register is
+  // fetched and shown, so getting it wrong files a day of staff attendance
+  // against the wrong date.
+  const today = todayIn(regionOf(user).timezone);
   const now = new Date();
   const [register, kiosk, summary] = await Promise.all([
     apiGet<Serialized<AttendanceRegisterDto>>(`/hr/attendance/register/${today}`),

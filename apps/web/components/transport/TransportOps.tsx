@@ -4,6 +4,8 @@ import { useFormat } from "@/components/shell/RegionProvider";
 
 import type { TransportRouteDto, TransportTripDto, TransportBoardingDto, VehicleMaintenanceDto, VehicleLocationDto, VehicleDto, TransportAssignmentDto, Serialized } from "@sms/types";
 import * as React from "react";
+import { useRegion } from "@/components/shell/RegionProvider";
+import { todayIn } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -15,7 +17,11 @@ type Route = Serialized<TransportRouteDto>;
 type Vehicle = Serialized<VehicleDto>;
 type Assignment = Serialized<TransportAssignmentDto>;
 const sel = "h-9 rounded-md border border-input bg-background px-3 text-sm";
-const today = () => new Date().toISOString().slice(0, 10);
+// The SCHOOL's day. This is both the DEFAULT and the `max` of the date input,
+// so the UTC version did not merely prefill the wrong day — east of UTC it
+// capped the input at YESTERDAY in the early morning, and today could not be
+// recorded at all.
+const today = (timezone: string) => todayIn(timezone);
 
 async function send(method: string, path: string, body?: unknown) {
   const res = await fetch(`/api/sms${path}`, {
@@ -53,7 +59,8 @@ export function TransportOps({ routes, vehicles, assignments, canManage }: {
 
 function BoardingPanel({ routes, assignments, onMsg }: { routes: Route[]; assignments: Assignment[]; onMsg: (s: string) => void }) {
   const [routeId, setRouteId] = React.useState(routes[0]?.id ?? "");
-  const [date, setDate] = React.useState(today());
+  const { timezone } = useRegion();
+  const [date, setDate] = React.useState(() => today(timezone));
   const [direction, setDirection] = React.useState("PICKUP");
   const [rows, setRows] = React.useState<Serialized<TransportBoardingDto>[]>([]);
   const routePassengers = assignments.filter((a) => a.routeId === routeId && a.status === "ACTIVE");
@@ -75,7 +82,7 @@ function BoardingPanel({ routes, assignments, onMsg }: { routes: Route[]; assign
       <CardContent className="space-y-3">
         <div className="flex flex-wrap items-end gap-2">
           <select className={sel} value={routeId} onChange={(e) => setRouteId(e.target.value)}>{routes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select>
-          <Input type="date" max={today()} value={date} onChange={(e) => setDate(e.target.value)} className="w-40" />
+          <Input type="date" max={today(timezone)} value={date} onChange={(e) => setDate(e.target.value)} className="w-40" />
           <select className={sel} value={direction} onChange={(e) => setDirection(e.target.value)}><option value="PICKUP">Pickup</option><option value="DROPOFF">Drop-off</option></select>
         </div>
         <div className="max-h-56 space-y-1 overflow-y-auto">
@@ -207,7 +214,8 @@ function MaintenancePanel({ vehicles, onMsg }: { vehicles: Vehicle[]; onMsg: (s:
   const [list, setList] = React.useState<Serialized<VehicleMaintenanceDto>[]>([]);
   const [vehicleId, setVehicleId] = React.useState(vehicles[0]?.id ?? "");
   const [type, setType] = React.useState("SERVICE");
-  const [date, setDate] = React.useState(today());
+  const { timezone } = useRegion();
+  const [date, setDate] = React.useState(() => today(timezone));
   const [cost, setCost] = React.useState("");
   const [litres, setLitres] = React.useState("");
   const load = React.useCallback(async () => {

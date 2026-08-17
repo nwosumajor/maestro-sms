@@ -1,4 +1,4 @@
-import type { IdNameDto, PeriodDto, TimetableEntryDto, UnstaffedLessonDto, Serialized } from "@sms/types";
+import type { IdNameDto, MyCoverDutyDto, PeriodDto, TimetableEntryDto, UnstaffedLessonDto, Serialized } from "@sms/types";
 import { hasPermission } from "@/lib/permissions";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
@@ -32,7 +32,7 @@ export default async function TimetablePage({
   // cannot be reached by URL by someone the nav hides it from.
   if (!hasPermission(user.permissions, "timetable.read")) redirect("/dashboard");
   const canWrite = hasPermission(user.permissions, "timetable.write");
-  const [periods, classes, rooms, allTeachers, unstaffed] = await Promise.all([
+  const [periods, classes, rooms, allTeachers, unstaffed, coverDuties] = await Promise.all([
     apiGet<Period[]>("/timetable/periods"),
     apiGet<ClassRow[]>("/classes/mine"),
     // Rooms are needed by the ROOM view too, not just the admin editor, so this is
@@ -45,6 +45,10 @@ export default async function TimetablePage({
     // and fetched with the rest rather than after them — it is a small joined
     // query and this page already waits on four.
     canWrite ? apiGet<Unstaffed[]>("/timetable/unstaffed") : Promise.resolve(null),
+    // The caller's OWN cover duties. Server-side with the rest: the card only
+    // displays, and the window is the server's to choose in the school's
+    // timezone rather than the browser's in UTC.
+    apiGet<Serialized<MyCoverDutyDto>[]>("/timetable/cover/mine"),
   ]);
 
   const list = classes ?? [];
@@ -93,7 +97,7 @@ export default async function TimetablePage({
             that is the permission of the person who ASSIGNS cover, and the whole
             point is the teacher receiving it, who does not hold it. Renders
             nothing when there is nothing to cover. */}
-        <MyCoverDuties />
+        <MyCoverDuties duties={coverDuties} />
 
         {list.length === 0 ? (
           <Alert variant="info">

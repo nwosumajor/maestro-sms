@@ -79,7 +79,10 @@ d("LessonCoverService (real Postgres)", () => {
     const audit = new AuditLogService();
     const queue = { add: jest.fn().mockResolvedValue(undefined) };
     const notifications = new NotificationService(tenant, audit, queue as never);
-    svc = new LessonCoverService(tenant, audit, notifications);
+    // The window now defaults in the school's timezone rather than being
+    // required, so the service resolves the school's region.
+    const region = { forSchool: jest.fn().mockResolvedValue({ timezone: "Africa/Lagos" }) };
+    svc = new LessonCoverService(tenant, audit, notifications, region as never);
   });
 
   afterAll(async () => {

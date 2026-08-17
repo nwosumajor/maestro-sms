@@ -1,5 +1,3 @@
-"use client";
-
 // Who this pupil's parent actually is.
 //
 // `parent_child` has always decided the things that matter — who receives the
@@ -14,28 +12,24 @@
 // thing to check.
 
 import type { StudentGuardianDto, Serialized } from "@sms/types";
-import * as React from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 type Guardian = Serialized<StudentGuardianDto>;
 
-export function GuardianLinks({ studentId }: { studentId: string }) {
-  const [rows, setRows] = React.useState<Guardian[] | null>(null);
-  const [denied, setDenied] = React.useState(false);
-
-  React.useEffect(() => {
-    void (async () => {
-      const res = await fetch(`/api/sms/students/${studentId}/guardians`, { cache: "no-store" });
-      if (!res.ok) {
-        setDenied(true);
-        return;
-      }
-      setRows((await res.json()) as Guardian[]);
-    })();
-  }, [studentId]);
-
-  if (denied || rows === null) return null;
+/**
+ * A SERVER component, deliberately: it displays and does nothing else, so there
+ * is nothing for a client island to buy. As one it cost an extra BFF round trip
+ * per pupil view and made the card pop in after hydration, below content that
+ * was already painted.
+ *
+ * `rows === null` means the read did not happen — refused, or it failed. The
+ * card hides. It must NOT fall back to an empty array: `[]` renders "no parent
+ * account is linked", which is a statement about this family that a failed read
+ * has no standing to make.
+ */
+export function GuardianLinks({ rows }: { rows: Guardian[] | null }) {
+  if (rows === null) return null;
 
   return (
     <Card>

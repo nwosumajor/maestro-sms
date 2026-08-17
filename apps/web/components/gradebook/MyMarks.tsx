@@ -21,17 +21,44 @@ type Mark = {
 
 export function MyMarks() {
   const [rows, setRows] = useState<Mark[] | null>(null);
+  // A FAILED read is not an empty one. `res.ok ? json : []` rendered "Nothing
+  // has been marked yet this term" — a statement about this pupil's academic
+  // record — whenever the request itself failed. A student or parent reading
+  // that has no way to tell it apart from the truth, and no reason to retry.
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let live = true;
     void (async () => {
-      const r = await fetch("/api/sms/grades/mine");
-      if (live) setRows(r.ok ? ((await r.json()) as Mark[]) : []);
+      try {
+        const r = await fetch("/api/sms/grades/mine");
+        if (!live) return;
+        if (r.ok) setRows((await r.json()) as Mark[]);
+        else setFailed(true);
+      } catch {
+        if (live) setFailed(true);
+      }
     })();
     return () => {
       live = false;
     };
   }, []);
+
+  if (failed) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Marks so far</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">
+            Couldn&rsquo;t load your marks just now. Reload the page to try again — this does not
+            mean nothing has been marked.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
 
   // Nothing marked yet is the normal state early in a term — say so rather than
   // rendering an empty box that looks broken.

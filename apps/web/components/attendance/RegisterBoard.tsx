@@ -1,6 +1,8 @@
 "use client";
 
 import * as React from "react";
+import { useRegion } from "@/components/shell/RegionProvider";
+import { todayIn } from "@/lib/format";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,8 +22,11 @@ type Row = { classId: string; className: string; taken: boolean; marked: number;
  * Scoped by the API: a teacher sees their own classes, whole-school staff see all.
  */
 export function RegisterBoard() {
-  const [date, setDate] = React.useState(() => new Date().toISOString().slice(0, 10));
+  // The SCHOOL's day — the UTC one prefills yesterday's or tomorrow's board.
+  const { timezone } = useRegion();
+  const [date, setDate] = React.useState(() => todayIn(timezone));
   const [rows, setRows] = React.useState<Row[] | null>(null);
+  const [failed, setFailed] = React.useState(false);
 
   React.useEffect(() => {
     let live = true;
@@ -29,7 +34,16 @@ export function RegisterBoard() {
     (async () => {
       const res = await fetch(`/api/sms/attendance/registers?date=${date}`);
       if (!live) return;
-      setRows(res.ok ? ((await res.json()) as { classes: Row[] }).classes : []);
+      // A failed read used to become `[]`, and `[]` drives `missing` and
+      // `partial` — so this board reported that NO class was missing a register
+      // on the one page whose job is naming the classes that are. A false all
+      // clear is the worst answer it can give.
+      if (res.ok) {
+        setRows(((await res.json()) as { classes: Row[] }).classes);
+        setFailed(false);
+      } else {
+        setFailed(true);
+      }
     })();
     return () => {
       live = false;
@@ -61,7 +75,12 @@ export function RegisterBoard() {
         </div>
       </CardHeader>
       <CardContent>
-        {rows === null ? (
+        {failed ? (
+          <p className="text-sm text-destructive">
+            Couldn&rsquo;t load the registers for this day. Reload to try again — this does not mean
+            every register has been taken.
+          </p>
+        ) : rows === null ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
         ) : rows.length === 0 ? (
           <p className="text-sm text-muted-foreground">No classes to show.</p>

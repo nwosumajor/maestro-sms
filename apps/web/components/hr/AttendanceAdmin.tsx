@@ -11,6 +11,8 @@
 
 import type { AttendanceRegisterDto, AttendanceSummaryDto, KioskConfigDto, Serialized } from "@sms/types";
 import * as React from "react";
+import { useRegion } from "@/components/shell/RegionProvider";
+import { todayIn } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -51,7 +53,8 @@ export function AttendanceAdmin({
   initialSummary: Summary | null;
   canWrite: boolean;
 }) {
-  const today = new Date().toISOString().slice(0, 10);
+  const { timezone } = useRegion();
+  const today = todayIn(timezone);
   const [date, setDate] = React.useState(today);
   const [register, setRegister] = React.useState<Register | null>(initialRegister);
   const [err, setErr] = React.useState<string | null>(null);

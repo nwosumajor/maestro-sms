@@ -22,7 +22,7 @@ import { PrivacyPanel } from "@/components/privacy/PrivacyPanel";
 import { ReportCardButton } from "@/components/reportcards/ReportCardButton";
 import { RemarksEditor } from "@/components/reportcards/RemarksEditor";
 import { TraitRatings } from "@/components/gradebook/TraitRatings";
-import type { AcademicSessionDto } from "@sms/types";
+import type { AcademicSessionDto, StudentGuardianDto } from "@sms/types";
 
 export const dynamic = "force-dynamic";
 
@@ -49,10 +49,13 @@ export default async function StudentProfilePage({ params }: { params: { id: str
   // the section rather than fail the page.
   const canReadGrades = hasPermission(user.permissions, "grade.read");
   const canReadExemptions = hasPermission(user.permissions, "integrity.exemption.read");
-  const [profile, contacts, medical, sessions, exemptions] = await Promise.all([
+  const [profile, contacts, medical, guardians, sessions, exemptions] = await Promise.all([
     apiGet<Profile>(`/students/${params.id}/profile`),
     apiGet<Contact[]>(`/students/${params.id}/contacts`),
     apiGet<Medical>(`/students/${params.id}/medical`),
+    // Server-side, alongside the rest: the card only displays, so fetching it
+    // from the browser bought nothing and cost a round trip plus a pop-in.
+    apiGet<Serialized<StudentGuardianDto>[]>(`/students/${params.id}/guardians`),
     canReadGrades ? apiGet<Serialized<AcademicSessionDto>[]>("/academic/sessions") : Promise.resolve(null),
     canReadExemptions
       ? apiGet<Serialized<IntegrityExemptionDto>[]>(`/integrity/exemptions?studentId=${params.id}`)
@@ -155,7 +158,7 @@ export default async function StudentProfilePage({ params }: { params: { id: str
 
         {/* Who the school is actually sending things to. Above the academic
             cards because it is the answer to "why did the family not know". */}
-        <GuardianLinks studentId={params.id} />
+        <GuardianLinks rows={guardians} />
 
         {/* Skills and behaviour for the CURRENT term, beside the remarks that
             print next to them. Read scope is the report card's own; only the

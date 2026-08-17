@@ -49,38 +49,111 @@ interface RefreshedClaims {
   passwordChangedAtMs: number;
 }
 
+/** The claims the refresh bearer is minted from — everything that can change the
+ *  ANSWER. Two `auth()` calls carrying identical values must get identical
+ *  claims, which is what makes the per-request memo below sound. */
+interface RefreshInput {
+  userId: string;
+  schoolId: string;
+  roles: string[];
+  pwdAt?: number;
+  impersonatedBy?: string;
+}
+
+// --- The burst memo ----------------------------------------------------------
+// ONE revalidation per render, however many times `auth()` is called.
+//
+// // GOTCHA: the throttle above (`claimsAt` / `claimsTriedAt`) stamps the TOKEN,
+// and a server-component render CANNOT persist the session cookie — Next.js only
+// writes it back from a route handler, server action or middleware. So inside a
+// render every `auth()` call read the same stale stamp, decided a refresh was
+// due, and made its own round trip. `lib/apiToken.ts` calls `auth()`, so that
+// was once per server-side API call: one pupil record issued TEN
+// `GET /auth/refresh` calls in a single load — three DB queries each, more
+// traffic than the page's own six reads — against an interval that asks for one
+// every ten minutes.
+//
+// Keyed on the CLAIMS, not the token object, which is deserialised afresh per
+// call and would never hit a reference-keyed memo. The in-flight PROMISE is what
+// is stored, so the five parallel `apiGet`s of a `Promise.all` share one round
+// trip rather than each starting their own before any has finished.
+//
+// // GOTCHA: React's `cache()` — the obvious per-request answer — is not
+// available here. React exports it only under the `react-server` condition, and
+// this module is also bundled for the middleware and the Auth.js route handler;
+// there it resolves to undefined and every render 500s with "cache is not a
+// function". A plain TTL map is runtime-agnostic, which this file has to be.
+//
+// The TTL costs at most BURST_MS of extra revocation latency on a 600s interval.
+const BURST_MS = 3_000;
+const burst = new Map<string, { at: number; p: Promise<RefreshedClaims | "revoked" | null> }>();
+
+/** Drop expired entries so a long-lived server doesn't accumulate one per
+ *  session that ever signed in. O(size), and size is the users active within
+ *  the last few seconds. */
+function sweepBurst(now: number) {
+  for (const [k, v] of burst) if (now - v.at >= BURST_MS) burst.delete(k);
+}
+
+const refreshClaimsOnce = (key: string): Promise<RefreshedClaims | "revoked" | null> => {
+  const now = Date.now();
+  const hit = burst.get(key);
+  if (hit && now - hit.at < BURST_MS) return hit.p;
+  sweepBurst(now);
+  const p = doRefresh(key);
+  burst.set(key, { at: now, p });
+  // A rejected promise must not be served to the next caller for BURST_MS.
+  // (doRefresh never rejects — it returns null on failure — but the memo must
+  //  not be the reason that stays true.)
+  void p.catch(() => burst.delete(key));
+  return p;
+};
+
+const doRefresh = async (key: string): Promise<RefreshedClaims | "revoked" | null> => {
+    const input = JSON.parse(key) as RefreshInput;
+    const secret = process.env.AUTH_SECRET;
+    if (!secret) return null;
+    const bearer = jwt.sign(
+      {
+        userId: input.userId,
+        school_id: input.schoolId,
+        // Roles only — the API guard expands roles → permissions server-side.
+        roles: input.roles,
+        // The password this session was issued under. The API revokes a session
+        // older than the stored password, which is what makes changing a
+        // password actually eject whoever else was signed in as you.
+        ...(typeof input.pwdAt === "number" ? { pwd_at: input.pwdAt } : {}),
+        ...(input.impersonatedBy ? { imp: { by: input.impersonatedBy } } : {}),
+      },
+      secret,
+      { algorithm: "HS256", expiresIn: "5m" },
+    );
+    try {
+      const res = await fetch(`${API_BASE}/auth/refresh`, {
+        headers: { Authorization: `Bearer ${bearer}` },
+        cache: "no-store",
+      });
+      if (res.status === 401 || res.status === 403) return "revoked";
+      if (!res.ok) return null;
+      return (await res.json()) as RefreshedClaims;
+    } catch {
+      return null; // network blip — fail open on availability
+    }
+};
+
 /** Re-fetch the caller's claims. "revoked" ⇒ kill the session; null ⇒ transient
  *  failure, keep what we have. The bearer is minted from the token's own claims
  *  (same shape apiToken.ts mints from the session — auth() is unavailable here). */
 async function fetchRefreshedClaims(token: JWT): Promise<RefreshedClaims | "revoked" | null> {
-  const secret = process.env.AUTH_SECRET;
-  if (!secret || !token.userId || !token.schoolId) return null;
-  const bearer = jwt.sign(
-    {
-      userId: token.userId,
-      school_id: token.schoolId,
-      // Roles only — the API guard expands roles → permissions server-side.
-      roles: token.roles ?? [],
-      // The password this session was issued under. The API revokes a session
-      // older than the stored password, which is what makes changing a password
-      // actually eject whoever else was signed in as you.
-      ...(typeof token.passwordChangedAtMs === "number" ? { pwd_at: token.passwordChangedAtMs } : {}),
-      ...(token.impersonatedBy ? { imp: { by: token.impersonatedBy } } : {}),
-    },
-    secret,
-    { algorithm: "HS256", expiresIn: "5m" },
-  );
-  try {
-    const res = await fetch(`${API_BASE}/auth/refresh`, {
-      headers: { Authorization: `Bearer ${bearer}` },
-      cache: "no-store",
-    });
-    if (res.status === 401 || res.status === 403) return "revoked";
-    if (!res.ok) return null;
-    return (await res.json()) as RefreshedClaims;
-  } catch {
-    return null; // network blip — fail open on availability
-  }
+  if (!process.env.AUTH_SECRET || !token.userId || !token.schoolId) return null;
+  const input: RefreshInput = {
+    userId: token.userId as string,
+    schoolId: token.schoolId as string,
+    roles: (token.roles as string[]) ?? [],
+    ...(typeof token.passwordChangedAtMs === "number" ? { pwdAt: token.passwordChangedAtMs } : {}),
+    ...(token.impersonatedBy ? { impersonatedBy: token.impersonatedBy as string } : {}),
+  };
+  return refreshClaimsOnce(JSON.stringify(input));
 }
 
 /** Claims the API stamps into an impersonation token (POST /operator/impersonate). */
