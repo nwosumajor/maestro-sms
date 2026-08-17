@@ -1,5 +1,5 @@
 import { RequireModule } from "../auth/require-module.decorator";
-import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Query } from "@nestjs/common";
 import { DISCIPLINE_PERMISSIONS, MODULES } from "@sms/types";
 import type { DisciplineComplaintDto, DisciplineEvidencePresignDto, IdNameDto, PageDto } from "@sms/types";
 import { z } from "zod";
@@ -63,6 +63,18 @@ export class DisciplineController {
   @RequirePermission(DISCIPLINE_PERMISSIONS.DISCIPLINE_MANAGE)
   assign(@CurrentPrincipal() p: Principal, @Param("id") id: string, @Body(new ZodValidationPipe(assignSchema)) b: z.infer<typeof assignSchema>): Promise<DisciplineComplaintDto> {
     return this.discipline.assign(p, id, b.assigneeId);
+  }
+
+  /** Take the case back off somebody. Assignment grants access to the case's
+   *  evidence, so it has to be revocable. */
+  @Delete("complaints/:id/assign/:assigneeId")
+  @RequirePermission(DISCIPLINE_PERMISSIONS.DISCIPLINE_MANAGE)
+  unassign(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Param("assigneeId", new ZodValidationPipe(z.string().uuid())) assigneeId: string,
+  ): Promise<DisciplineComplaintDto> {
+    return this.discipline.unassign(p, id, assigneeId);
   }
 
   @Post("complaints/:id/entries")

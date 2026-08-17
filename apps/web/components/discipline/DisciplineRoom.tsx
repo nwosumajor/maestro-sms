@@ -8,7 +8,7 @@
 import type { DisciplineComplaintDto, Serialized } from "@sms/types";
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { postSms } from "@/components/game/play-ui";
+import { postSms, sendSms } from "@/components/game/play-ui";
 import { usePaged, type Paged } from "@/lib/paged";
 import { LoadMore } from "@/components/shell/LoadMore";
 import { Button } from "@/components/ui/button";
@@ -96,7 +96,35 @@ export function DisciplineRoom({
           </CardHeader>
           <CardContent className="space-y-3">
             {c.details && <p className="text-sm">{c.details}</p>}
-            {c.assignees.length > 0 && <div className="flex flex-wrap gap-2">{c.assignees.map((a) => <Badge key={a.id} variant="outline" className="font-normal">resolver: {a.assigneeName}</Badge>)}</div>}
+            {c.assignees.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2">
+                {c.assignees.map((a) => (
+                  <Badge key={a.id} variant="outline" className="font-normal">
+                    resolver: {a.assigneeName}
+                    {/* Being a resolver is what lets a non-manager open this
+                        case's EVIDENCE, so the wrong name here has to be
+                        removable — it was not. */}
+                    {canManage && (
+                      <button
+                        type="button"
+                        aria-label={`Remove ${a.assigneeName} as resolver`}
+                        title={`Remove ${a.assigneeName} as resolver`}
+                        disabled={busy}
+                        className="ml-1.5 text-muted-foreground hover:text-destructive disabled:opacity-50"
+                        onClick={() =>
+                          run(
+                            () => sendSms("DELETE", `discipline/complaints/${c.id}/assign/${a.assigneeId}`),
+                            "Resolver removed.",
+                          )
+                        }
+                      >
+                        ×
+                      </button>
+                    )}
+                  </Badge>
+                ))}
+              </div>
+            )}
             {c.evidence.length > 0 && <p className="text-xs text-muted-foreground">Evidence: {c.evidence.map((e) => e.fileName).join(", ")}</p>}
             {c.entries.map((e) => <p key={e.id} className="text-sm"><span className="font-medium">{e.authorName}:</span> {e.body}</p>)}
             {c.resolution && <p className="text-sm rounded-md border border-border p-2"><span className="font-medium">Resolution:</span> {c.resolution}</p>}

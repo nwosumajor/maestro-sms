@@ -190,6 +190,50 @@ export class DisciplineService {
     });
   }
 
+  /**
+   * Take a case back off somebody.
+   *
+   * Assignment is an ACCESS GRANT, not a label: `downloadEvidence` lets a
+   * non-manager through purely because they are an assignee, so assigning the
+   * wrong person hands them the evidence files on a case about a child. There
+   * was an assign endpoint and nothing to undo it — the row had no status, no
+   * update path and no delete anywhere in the codebase, so a mis-typed name in a
+   * picker was permanent.
+   *
+   * // SECURITY: audited, like the assignment. `requireVisible` first, so this
+   * cannot be used to probe for cases the caller cannot see, and an assignment
+   * that is not there is a 404 rather than a silent success — "already
+   * unassigned" and "no such case" must not be distinguishable from outside.
+   *
+   * The person losing the case IS told, unlike a guardian being unlinked: they
+   * were told when they got it, they may be part-way through working it, and a
+   * case that silently vanishes from someone's list is how a case gets dropped.
+   */
+  async unassign(p: Principal, complaintId: string, assigneeId: string): Promise<DisciplineComplaintDto> {
+    this.requireManage(p);
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      await this.requireVisible(tx, p, complaintId);
+      const row = await tx.disciplineAssignee.findFirst({
+        where: { complaintId, assigneeId },
+        select: { id: true },
+      });
+      if (!row) throw new NotFoundException("Assignment not found");
+      await tx.disciplineAssignee.delete({ where: { id: row.id } });
+      await this.log(tx, p, "discipline.unassign", complaintId, { assigneeId });
+      await this.notifications.enqueue(
+        { schoolId: p.schoolId, userId: p.userId },
+        {
+          recipientId: assigneeId,
+          type: "WORKFLOW_UPDATE",
+          title: "A discipline case is no longer assigned to you",
+          body: "You are no longer responsible for a discipline case you had been given.",
+          data: { complaintId },
+        },
+      );
+      return this.complaintDto(tx, complaintId);
+    });
+  }
+
   async addEntry(p: Principal, complaintId: string, body: string): Promise<DisciplineComplaintDto> {
     this.requireManage(p);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {

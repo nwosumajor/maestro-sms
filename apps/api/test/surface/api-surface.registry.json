@@ -41,6 +41,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "DELETE /discipline/complaints/:p/assign/:p": {
+      "kind": "ui",
+      "note": "reviewed: components/discipline/DisciplineRoom.tsx — the × on each resolver badge, since being a resolver is what grants access to the case's evidence"
+    },
     "DELETE /discussion/comments/:p": {
       "kind": "ui",
       "note": "reviewed: reached from components/discussion/DiscussionHub.tsx"
