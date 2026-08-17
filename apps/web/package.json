@@ -11,6 +11,7 @@
     "test": "jest",
     "smoke:routes": "node scripts/route-smoke.mjs",
     "build:manual": "node scripts/build-manual.mjs",
+    "build:runbooks": "node scripts/build-runbooks.mjs",
     "isolation:probe": "node scripts/isolation-probe.mjs"
   },
   "dependencies": {
