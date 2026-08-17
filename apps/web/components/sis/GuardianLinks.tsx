@@ -14,6 +14,7 @@
 import type { StudentGuardianDto, Serialized } from "@sms/types";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { UnlinkGuardian } from "./UnlinkGuardian";
 
 type Guardian = Serialized<StudentGuardianDto>;
 
@@ -28,7 +29,16 @@ type Guardian = Serialized<StudentGuardianDto>;
  * account is linked", which is a statement about this family that a failed read
  * has no standing to make.
  */
-export function GuardianLinks({ rows }: { rows: Guardian[] | null }) {
+export function GuardianLinks({
+  rows,
+  studentId,
+  canManage,
+}: {
+  rows: Guardian[] | null;
+  studentId: string;
+  /** `guardian.write` — the same permission that attaches an adult to a child. */
+  canManage: boolean;
+}) {
   if (rows === null) return null;
 
   return (
@@ -55,7 +65,8 @@ export function GuardianLinks({ rows }: { rows: Guardian[] | null }) {
                 <th className="py-1 pr-3 font-medium">Name</th>
                 <th className="py-1 pr-3 font-medium">Email</th>
                 <th className="py-1 pr-3 font-medium">Phone</th>
-                <th className="py-1 font-medium">Reachable</th>
+                <th className="py-1 pr-3 font-medium">Reachable</th>
+                {canManage && <th className="py-1 font-medium sr-only">Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -64,7 +75,7 @@ export function GuardianLinks({ rows }: { rows: Guardian[] | null }) {
                   <td className="py-1 pr-3">{g.name}</td>
                   <td className="py-1 pr-3 text-muted-foreground">{g.email ?? "—"}</td>
                   <td className="py-1 pr-3 text-muted-foreground">{g.phone ?? "—"}</td>
-                  <td className="py-1">
+                  <td className="py-1 pr-3">
                     {g.reachableByEmail ? (
                       <Badge variant="secondary">Email</Badge>
                     ) : (
@@ -74,6 +85,11 @@ export function GuardianLinks({ rows }: { rows: Guardian[] | null }) {
                       <Badge variant="destructive">No mailbox</Badge>
                     )}
                   </td>
+                  {canManage && (
+                    <td className="py-1 text-right">
+                      <UnlinkGuardian studentId={studentId} parentId={g.id} guardianName={g.name} />
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

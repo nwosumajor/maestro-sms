@@ -896,6 +896,47 @@ export class LmsService {
     });
   }
 
+  /**
+   * Remove a guardian link.
+   *
+   * There was no way to do this. A link could be created — by this service or by
+   * the bulk parent import — and never removed by anything: no endpoint, no raw
+   * SQL, nothing. Proven against the running system: a principal linked an
+   * unrelated adult to a pupil in one call, that adult immediately reached the
+   * child's profile, invoices and documents, and both plausible DELETE routes
+   * answered 404 because neither existed. The only remedy was somebody running
+   * DELETE against the production database.
+   *
+   * That is not an edge case. A picker mis-click, a bad row in an import, a
+   * step-parent no longer in the child's life, a custody order, a safeguarding
+   * direction — all of them need this, and the last two need it TODAY.
+   *
+   * // SECURITY: this decides who can see a minor's records, so it is audited
+   * like the link. It is deliberately NOT maker-checker and sends the removed
+   * guardian NO notification: linking takes one person, so unlinking must not
+   * take two and wait, and telling somebody they have just been removed from a
+   * child's record is precisely the wrong thing to do in the case this exists
+   * for. The remaining guardians are not told either — the school knows, and the
+   * audit log records who did it.
+   *
+   * Removing the LAST guardian is allowed. A wrong sole link has to be
+   * removable, and the pupil record already says plainly when nobody is linked.
+   */
+  async unlinkGuardian(p: Principal, parentId: string, studentId: string) {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      // RLS confines this to the caller's school, so a foreign link is simply
+      // not found — 404, never 403, and never a hint that it exists elsewhere.
+      const link = await tx.parentChild.findFirst({
+        where: { parentId, studentId },
+        select: { id: true },
+      });
+      if (!link) throw new NotFoundException("Guardian link not found");
+      await tx.parentChild.delete({ where: { id: link.id } });
+      await this.log(tx, p, "lms.guardian.unlink", "user", studentId, { parentId });
+      return { removed: true as const };
+    });
+  }
+
   // --- relationship-scoped reads --------------------------------------------
   /** Classes the caller may see, narrowed by their role + memberships. */
   async listMyClasses(p: Principal) {

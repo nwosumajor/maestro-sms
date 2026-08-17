@@ -158,7 +158,11 @@ export default async function StudentProfilePage({ params }: { params: { id: str
 
         {/* Who the school is actually sending things to. Above the academic
             cards because it is the answer to "why did the family not know". */}
-        <GuardianLinks rows={guardians} />
+        <GuardianLinks
+          rows={guardians}
+          studentId={params.id}
+          canManage={hasPermission(user.permissions, "guardian.write")}
+        />
 
         {/* Skills and behaviour for the CURRENT term, beside the remarks that
             print next to them. Read scope is the report card's own; only the

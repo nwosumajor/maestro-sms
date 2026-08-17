@@ -410,6 +410,18 @@ export class LmsController {
     return this.lms.linkGuardian(p, body.parentId, body.studentId);
   }
 
+  /** Remove a guardian link. Same permission as creating one: a school that may
+   *  attach an adult to a child's record must be able to detach them again. */
+  @Delete("guardians/:parentId/:studentId")
+  @RequirePermission(LMS_PERMISSIONS.GUARDIAN_WRITE)
+  unlinkGuardian(
+    @CurrentPrincipal() p: Principal,
+    @Param("parentId", new ZodValidationPipe(z.string().uuid())) parentId: string,
+    @Param("studentId", new ZodValidationPipe(z.string().uuid())) studentId: string,
+  ) {
+    return this.lms.unlinkGuardian(p, parentId, studentId);
+  }
+
   /** Relationship-scoped: returns only classes the caller may see. */
   @Get("classes/mine")
   @RequirePermission(LMS_PERMISSIONS.CLASS_READ)
