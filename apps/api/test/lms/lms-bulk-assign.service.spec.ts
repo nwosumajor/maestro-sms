@@ -28,6 +28,8 @@ function makeService(over: {
   const tx = {
     class: { findFirst: jest.fn().mockResolvedValue(over.cls === undefined ? { id: "c1", capacity: null } : over.cls) },
     subject: { findMany: jest.fn().mockResolvedValue(over.subjects ?? []) },
+    // enrollStudentsBulk now verifies every id is a pupil on roll in this
+    // school before it writes anything (#248), so both reads answer the same.
     user: { findMany: jest.fn().mockResolvedValue(over.users ?? []) },
     room: { findMany: jest.fn().mockResolvedValue(over.rooms ?? []) },
     classSubjectTeacher: { upsert },

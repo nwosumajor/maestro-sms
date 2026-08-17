@@ -781,8 +781,8 @@ export class LmsService {
     if (ids.length === 0) throw new BadRequestException("Nothing to enrol");
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.requireClass(tx, classId);
-      const found = await tx.user.findMany({ where: { id: { in: ids } }, select: { id: true } });
-      if (found.length !== ids.length) throw new NotFoundException("Student not found");
+      // Same rule as the single enrol: in this school, and actually a student.
+      await this.requireStudents(tx, ids);
       // Already-enrolled students are a no-op, not a failure — re-running a roster
       // import must be safe.
       const existing = await tx.enrollment.findMany({ where: { classId, studentId: { in: ids } }, select: { studentId: true } });
@@ -799,9 +799,74 @@ export class LmsService {
     });
   }
 
+  /**
+   * The ids must name PUPILS OF THIS SCHOOL.
+   *
+   * `enrollStudent` checked the class and took the student id on trust. Against
+   * the running system that meant:
+   *
+   *   201  a TEACHER as a pupil
+   *   201  a pupil from ANOTHER school
+   *   201  the platform SYSTEM account
+   *
+   * An enrolment is not a label either: it puts that account on the class
+   * register to be marked present or absent, on the roster, in the report-card
+   * run and in the capacity count — and it grants every teacher of the class
+   * relationship-scoped access to them.
+   *
+   * // SECURITY: the read goes through the tenant client, so RLS confines it and
+   * a user from another school is NOT FOUND rather than refused (Golden Rule
+   * #3 — ids from a request body are never trusted).
+   *
+   * Returns the names so callers can put them in an error a person can act on.
+   */
+  private async requireStudents(tx: TenantTx, ids: string[]): Promise<Map<string, string>> {
+    const users = (await tx.user.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, name: true },
+    })) as Array<{ id: string; name: string }>;
+    const byId = new Map(users.map((u) => [u.id, u.name]));
+    const missing = ids.filter((id) => !byId.has(id));
+    if (missing.length) throw new NotFoundException("Student not found in this school");
+
+    // ON ROLL, via the shared definition — never a hand-rolled role filter.
+    // Enrolling somebody into a class is a decision about the PRESENT, so this
+    // also refuses a pupil who has left the school, which a bare role check
+    // would have let back onto a register.
+    const onRoll = (await tx.user.findMany({
+      where: { id: { in: ids }, ...ON_ROLL_STUDENT },
+      select: { id: true },
+    })) as Array<{ id: string }>;
+    const eligible = new Set(onRoll.map((u) => u.id));
+    const notStudents = ids.filter((id) => !eligible.has(id));
+    if (notStudents.length) {
+      const names = notStudents.map((id) => byId.get(id) ?? id).join(", ");
+      throw new BadRequestException(
+        `Cannot enrol ${names} — only pupils on roll can be put in a class.`,
+      );
+    }
+    return byId;
+  }
+
   async enrollStudent(p: Principal, classId: string, studentId: string) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.requireClass(tx, classId);
+      const names = await this.requireStudents(tx, [studentId]);
+      // Enrolling somebody twice used to hit the (classId, studentId) unique
+      // index and reach the client as a 500. It is the ordinary mistake when two
+      // people are working a roster.
+      const dup = await tx.enrollment.findFirst({
+        where: { classId, studentId },
+        select: { id: true, status: true },
+      });
+      if (dup) {
+        const who = names.get(studentId) ?? "That pupil";
+        throw new ConflictException(
+          dup.status === "ACTIVE"
+            ? `${who} is already in this class`
+            : `${who} has a ${dup.status.toLowerCase()} enrolment in this class — reactivate it instead of adding a second one`,
+        );
+      }
       await this.assertCapacity(tx, classId, 1);
       const row = await tx.enrollment.create({
         data: { schoolId: p.schoolId, classId, studentId },

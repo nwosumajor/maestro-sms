@@ -27,7 +27,12 @@ function svc(over: Record<string, unknown>) {
     parentChild: { findMany: jest.fn().mockResolvedValue([]) },
     grade: { findMany: jest.fn().mockResolvedValue(over.grades ?? []) },
     attendanceRecord: { findMany: jest.fn().mockResolvedValue(over.attendance ?? []) },
-    user: { findFirst: jest.fn().mockResolvedValue(over.supervisor ?? null) },
+    user: {
+      findFirst: jest.fn().mockResolvedValue(over.supervisor ?? null),
+      // enrollStudent now verifies the pupil is on roll in THIS school before
+      // it writes anything (#248). Both reads answer with the pupil under test.
+      findMany: jest.fn().mockResolvedValue(over.students ?? [{ id: "s1", name: "A Pupil" }]),
+    },
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
