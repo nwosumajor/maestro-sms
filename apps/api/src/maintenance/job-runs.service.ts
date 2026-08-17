@@ -88,6 +88,20 @@ export const SCHEDULED_JOBS = [
     },
   },
   {
+    key: "maintenance.indexBloat",
+    label: "Index space reclaim",
+    // WEEKLY (`DEFAULT_INDEX_BLOAT_CRON` = "10 2 * * 0"). VACUUM reclaims the
+    // heap and never shrinks a btree, so every retention sweep and every
+    // invoice status change leaves index pages that are kept for ever. Measured
+    // on a real database: one attendance index held 409MB for 8.4MB of data.
+    everyMinutes: 10080,
+    manual: {
+      path: "operator/maintenance/index-bloat/run",
+      permission: "platform.operate",
+      scope: "PLATFORM",
+    },
+  },
+  {
     key: "payments.health",
     label: "Payment rail health",
     // DAILY at 06:15 (`DEFAULT_PAYMENT_HEALTH_CRON` = "15 6 * * *"). Declared

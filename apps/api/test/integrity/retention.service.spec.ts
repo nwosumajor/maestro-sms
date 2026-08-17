@@ -118,6 +118,45 @@ describe("platform-wide purge of the unbounded growers", () => {
   it("does nothing at all without the privileged client", async () => {
     const svc = new IntegrityRetentionService({ client: null } as never);
     const out = (await (svc as unknown as { purgePlatformWide: () => Promise<Record<string, number>> })["purgePlatformWide"]()) as Record<string, number>;
-    expect(out).toEqual({ gatewayEvents: 0, contentRevisions: 0, gameGuesses: 0, readNotifications: 0 });
+    expect(out).toEqual({ gatewayEvents: 0, contentRevisions: 0, gameGuesses: 0, readNotifications: 0, jobRuns: 0 });
+  });
+});
+
+// =============================================================================
+// A scheduled job's own history is unbounded too
+// =============================================================================
+// Fifteen jobs, some hourly, and nothing ever pruned `job_run` — well over a
+// million rows in ten years, behind the operator console that reads them, for
+// no purpose: nobody diagnoses a sweep from a run eighteen months ago.
+describe("pruning job-run history", () => {
+  const SRC = require("node:fs").readFileSync(
+    require("node:path").join(__dirname, "../../src/integrity/retention/integrity-retention.service.ts"),
+    "utf8",
+  ) as string;
+  const stmt = SRC.slice(SRC.indexOf("DELETE FROM job_run"), SRC.indexOf("DELETE FROM job_run") + 700);
+
+  it("deletes by age", () => {
+    expect(stmt).toMatch(/jr\."startedAt" < \$\{jobCutoff\}/);
+  });
+
+  it("ALWAYS keeps the most recent run of each job, however old it is", () => {
+    // The subtlety the whole thing turns on. A plain age cutoff blanks the
+    // console for anything that runs rarely — a weekly sweep whose last run
+    // falls outside the window would read as "never run", which is precisely
+    // the alarm that screen exists to raise, on a job that is perfectly fine.
+    expect(stmt).toMatch(/jr\.id <> \(/);
+    expect(stmt).toMatch(/WHERE latest\.job = jr\.job/);
+    expect(stmt).toMatch(/ORDER BY latest\."startedAt" DESC/);
+  });
+
+  it("is batched like the other unbounded deletes", () => {
+    // A first run against ten years of history must not be one enormous
+    // statement.
+    expect(SRC).toMatch(/deleteInBatches\("job runs"/);
+    expect(stmt).toMatch(/LIMIT \$\{limit\}/);
+  });
+
+  it("counts what it removed, so the sweep can report it", () => {
+    expect(SRC).toMatch(/jobRuns=\$\{globalCounts\.jobRuns\}/);
   });
 });

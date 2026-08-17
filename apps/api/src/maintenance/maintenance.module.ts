@@ -13,10 +13,19 @@ import { AUDIT_PARTITION_QUEUE } from "./maintenance.constants";
 import { AuditPartitionService } from "./audit-partition.service";
 import { AuditPartitionScheduler } from "./audit-partition.scheduler";
 import { AuditPartitionProcessor } from "./audit-partition.processor";
+import { INDEX_BLOAT_QUEUE, IndexBloatService } from "./index-bloat.service";
+import { IndexBloatScheduler } from "./index-bloat.scheduler";
+import { IndexBloatProcessor } from "./index-bloat.processor";
 
 @Module({
-  imports: [PrivilegedDatabaseModule, BullModule.registerQueue({ name: AUDIT_PARTITION_QUEUE })],
-  providers: [AuditPartitionService, AuditPartitionScheduler, AuditPartitionProcessor],
-  exports: [AuditPartitionService],
+  imports: [
+    PrivilegedDatabaseModule,
+    BullModule.registerQueue({ name: AUDIT_PARTITION_QUEUE }),
+    // Its own queue: reclaiming index space is slow I/O and must never sit
+    // behind, or in front of, the partition roll.
+    BullModule.registerQueue({ name: INDEX_BLOAT_QUEUE }),
+  ],
+  providers: [AuditPartitionService, AuditPartitionScheduler, AuditPartitionProcessor, IndexBloatService, IndexBloatScheduler, IndexBloatProcessor],
+  exports: [AuditPartitionService, IndexBloatService],
 })
 export class MaintenanceModule {}

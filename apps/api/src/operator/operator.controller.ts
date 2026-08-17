@@ -57,6 +57,7 @@ import { GrowthService } from "../billing/growth.service";
 import { GroupService } from "../group/group.service";
 import { OperatorCreditsService } from "./operator-credits.service";
 import { SettlementReleaseService, CurrencyCoverageService } from "./settlement-release.service";
+import { IndexBloatService, type IndexBloatResult } from "../maintenance/index-bloat.service";
 import type { SettlementHoldingDto, CurrencyCoverageDto } from "@sms/types";
 import { OperatorPaymentsService, type PaymentFilters } from "./operator-payments.service";
 import { PaymentChannelService } from "../payments/payment-channel.service";
@@ -259,6 +260,7 @@ export class OperatorController {
     private readonly credits: OperatorCreditsService,
     private readonly settlementRelease: SettlementReleaseService,
     private readonly currencyCoverageService: CurrencyCoverageService,
+    private readonly indexBloat: IndexBloatService,
     private readonly payments: OperatorPaymentsService,
     private readonly jobRuns: JobRunsService,
   ) {}
@@ -704,6 +706,19 @@ export class OperatorController {
   @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
   currencyCoverage(): Promise<CurrencyCoverageDto> {
     return this.currencyCoverageService.coverage();
+  }
+
+  /**
+   * Reclaim index space now (it also runs weekly).
+   *
+   * VACUUM never shrinks a btree, so every retention delete and every invoice
+   * status change leaves index pages that are kept for ever. Owner-gated: it is
+   * heavy I/O against the whole database, not a per-tenant action.
+   */
+  @Post("maintenance/index-bloat/run")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_OPERATE)
+  runIndexBloat(): Promise<IndexBloatResult> {
+    return this.jobRuns.record("maintenance.indexBloat", "MANUAL", () => this.indexBloat.reclaim("MANUAL"));
   }
 
   /** Run the daily health check now (it also runs on a schedule). */
