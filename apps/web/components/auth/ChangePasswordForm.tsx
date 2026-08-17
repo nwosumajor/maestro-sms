@@ -50,7 +50,10 @@ export function ChangePasswordForm() {
   if (done) {
     return (
       <p className="text-sm text-muted-foreground">
-        Password changed. Signing you out — please log in again with your new password…
+        Password changed. Signing you out — please log in again with your new password.
+        <span className="mt-2 block">
+          Anyone else signed in as you has been signed out too.
+        </span>
       </p>
     );
   }

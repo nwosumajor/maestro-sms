@@ -46,6 +46,7 @@ interface RefreshedClaims {
   currency: string;
   mfaEnrollRequired: boolean;
   passwordExpired: boolean;
+  passwordChangedAtMs: number;
 }
 
 /** Re-fetch the caller's claims. "revoked" ⇒ kill the session; null ⇒ transient
@@ -60,6 +61,10 @@ async function fetchRefreshedClaims(token: JWT): Promise<RefreshedClaims | "revo
       school_id: token.schoolId,
       // Roles only — the API guard expands roles → permissions server-side.
       roles: token.roles ?? [],
+      // The password this session was issued under. The API revokes a session
+      // older than the stored password, which is what makes changing a password
+      // actually eject whoever else was signed in as you.
+      ...(typeof token.passwordChangedAtMs === "number" ? { pwd_at: token.passwordChangedAtMs } : {}),
       ...(token.impersonatedBy ? { imp: { by: token.impersonatedBy } } : {}),
     },
     secret,
@@ -108,6 +113,7 @@ interface LoginResult {
   currency?: string;
   mfaEnrollRequired?: boolean;
   passwordExpired?: boolean;
+  passwordChangedAtMs?: number;
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -167,6 +173,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           modules: u.modules ?? [],
           mfaEnrollRequired: u.mfaEnrollRequired ?? false,
           passwordExpired: u.passwordExpired ?? false,
+          passwordChangedAtMs: u.passwordChangedAtMs ?? 0,
         };
       },
     }),
@@ -217,6 +224,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           modules: claims.modules ?? [],
           mfaEnrollRequired: false, // already satisfied by the OPERATOR's own login
           passwordExpired: false,
+          // DELIBERATELY UNSET. An impersonation session is minted from the
+          // operator's own act, not from the target's password: it is short,
+          // audited, and step-up gated. Binding it to the target's password
+          // epoch would revoke it the moment that user changed their password
+          // mid-investigation, and stamping a 0 would revoke it immediately for
+          // anyone who has ever set one. The refresh still revokes it on lock,
+          // account status and school status like any other session.
           impersonatedBy: claims.imp.by,
         };
       },
@@ -242,6 +256,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           currency?: string;
           mfaEnrollRequired: boolean;
           passwordExpired: boolean;
+          passwordChangedAtMs?: number;
           impersonatedBy?: string;
         };
         token.userId = u.id;
@@ -266,6 +281,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.currency = u.currency;
         token.mfaEnrollRequired = u.mfaEnrollRequired;
         token.passwordExpired = u.passwordExpired;
+        // Absent for an impersonation session, which is exempt by design.
+        if (typeof u.passwordChangedAtMs === "number") token.passwordChangedAtMs = u.passwordChangedAtMs;
         // Present ONLY for a session minted by the impersonate provider. It must
         // survive into the API token (see apiToken.ts) or impersonated actions
         // become unattributable in the audit log again.
@@ -300,6 +317,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.modules = fresh.modules;
         token.mfaEnrollRequired = fresh.mfaEnrollRequired;
         token.passwordExpired = fresh.passwordExpired;
+        // Kept in step so the session that legitimately changed the password can
+        // be re-established by signing in again, rather than fighting its own
+        // stale claim.
+        token.passwordChangedAtMs = fresh.passwordChangedAtMs;
         token.claimsAt = now;
       }
       return token;

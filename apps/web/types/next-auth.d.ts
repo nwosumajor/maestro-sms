@@ -40,6 +40,9 @@ declare module "next-auth/jwt" {
     locale?: string;
     currency?: string;
     mfaEnrollRequired?: boolean;
+    /** Epoch ms of the password this session was issued under — the API revokes
+     *  a session older than the stored password. */
+    passwordChangedAtMs?: number;
     impersonatedBy?: string;
     passwordExpired?: boolean;
   }

@@ -41,6 +41,8 @@ export interface LoginResult {
   mfaEnrollRequired: boolean;
   /** Password is older than the max age (or admin-reset) — web forces a change. */
   passwordExpired: boolean;
+  /** Epoch ms of the password this session was issued under; 0 when never set. */
+  passwordChangedAtMs: number;
 }
 
 /** Fresh claims for an EXISTING session (GET /auth/refresh) — everything the
@@ -283,6 +285,15 @@ export class AuthService {
             ...regionClaims(school),
             mfaEnrollRequired,
             passwordExpired,
+            // WHICH PASSWORD THIS SESSION WAS ISSUED UNDER.
+            //
+            // Carried so the refresh can revoke a session that predates a
+            // password change. The reason someone changes their password is
+            // usually that they believe somebody else has it — and until now
+            // that action did nothing to the intruder, whose session simply went
+            // on refreshing. Verified before the fix: session A stayed valid
+            // through a password change and a full refresh cycle.
+            passwordChangedAtMs: sec?.passwordChangedAt?.getTime() ?? 0,
           },
         };
       },
@@ -325,7 +336,7 @@ export class AuthService {
    * verification; deliberately writes nothing (no counters, no audit spam at
    * one call per user per interval).
    */
-  async refreshClaims(p: { userId: string; schoolId: string }): Promise<RefreshedClaims> {
+  async refreshClaims(p: { userId: string; schoolId: string; passwordChangedAtMs?: number }): Promise<RefreshedClaims> {
     const outcome = await this.db.runAsTenant(
       { schoolId: p.schoolId, userId: p.userId },
       async (tx: TenantTx) => {
@@ -359,6 +370,23 @@ export class AuthService {
           if (!lockExpired) return { revoked: true as const };
         }
 
+        // A SESSION OLDER THAN THE CURRENT PASSWORD IS DEAD.
+        //
+        // `passwordChangedAtMs` rides the session from login. When the stored
+        // password has moved on, every session issued under the previous one —
+        // including an intruder's — is revoked on its next refresh, which is at
+        // most a minute away. The session that DID the change is revoked too:
+        // "you changed your password, sign in again" is the expected and honest
+        // outcome, and it is what makes the rule simple enough to trust.
+        //
+        // A session minted before this claim existed carries `undefined` and is
+        // left alone rather than logged out en masse on deploy; it ages out
+        // within the session lifetime anyway.
+        if (p.passwordChangedAtMs !== undefined) {
+          const current = u.passwordChangedAt?.getTime() ?? 0;
+          if (current !== p.passwordChangedAtMs) return { revoked: true as const };
+        }
+
         const school = await tx.school.findUnique({ where: { id: p.schoolId } });
         if (school?.status !== "ACTIVE" && !isSuperAdmin) return { revoked: true as const };
 
@@ -383,6 +411,7 @@ export class AuthService {
             ...regionClaims(school),
             mfaEnrollRequired: u.mfaRequired === true && !u.mfaEnabled,
             passwordExpired: isPasswordExpired(u.passwordChangedAt, isSuperAdmin),
+            passwordChangedAtMs: u.passwordChangedAt?.getTime() ?? 0,
           },
         };
       },
