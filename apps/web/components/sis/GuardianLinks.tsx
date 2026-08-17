@@ -12,6 +12,7 @@
 // thing to check.
 
 import type { StudentGuardianDto, Serialized } from "@sms/types";
+import { MAX_GUARDIANS_PER_STUDENT } from "@sms/types";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { UnlinkGuardian } from "./UnlinkGuardian";
@@ -49,6 +50,7 @@ export function GuardianLinks({
         <CardDescription>
           Where this pupil&apos;s absence alerts, invoices, receipts and report cards are sent. Separate from the
           emergency contacts — those are people to telephone; these are accounts that sign in.
+          {rows.length > 0 && ` ${rows.length} of ${MAX_GUARDIANS_PER_STUDENT} linked.`}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -100,7 +102,19 @@ export function GuardianLinks({
             could show that the wrong adult was attached and offered nothing to
             do about it, and attaching the right one meant going to another
             page and re-selecting the pupil you were already looking at. */}
-        {canManage && <LinkGuardian studentId={studentId} />}
+        {canManage &&
+          (rows.length >= MAX_GUARDIANS_PER_STUDENT ? (
+            // At the cap, say so instead of offering a form that will be
+            // refused — and say what to do, because the tempting move is to
+            // unlink somebody to make room, which silently stops their alerts.
+            <p className="mt-3 border-t border-border pt-3 text-sm text-muted-foreground">
+              This pupil has the maximum of {MAX_GUARDIANS_PER_STUDENT} linked guardians. To add
+              another, remove one above first — whoever you remove stops receiving this
+              child&rsquo;s alerts, invoices and reports.
+            </p>
+          ) : (
+            <LinkGuardian studentId={studentId} />
+          ))}
       </CardContent>
     </Card>
   );

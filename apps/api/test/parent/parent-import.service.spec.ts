@@ -56,8 +56,10 @@ function makeService(over: {
     userRole: { findFirst: jest.fn().mockResolvedValue(null), create: userRoleCreate },
     studentProfile: { findMany: jest.fn().mockResolvedValue(over.profiles ?? []) },
     parentChild: {
-      findFirst: jest.fn().mockImplementation(({ where }: { where: { parentId: string; studentId: string } }) =>
-        Promise.resolve(links.find((l) => l.parentId === where.parentId && l.studentId === where.studentId) ?? null),
+      // `link()` reads the pupil's WHOLE guardian list now: it needs the count
+      // for MAX_GUARDIANS_PER_STUDENT as well as the duplicate check.
+      findMany: jest.fn().mockImplementation(({ where }: { where: { studentId: string } }) =>
+        Promise.resolve(links.filter((l) => l.studentId === where.studentId)),
       ),
       create: jest.fn().mockImplementation(({ data }: { data: { parentId: string; studentId: string } }) => {
         links.push({ parentId: data.parentId, studentId: data.studentId });

@@ -194,10 +194,10 @@ function makeLinker(opts: {
       ),
     },
     parentChild: {
-      findFirst: jest.fn(async (a: { where: { parentId: string; studentId: string } }) =>
-        (opts.links ?? []).find(
-          (l) => l.parentId === a.where.parentId && l.studentId === a.where.studentId,
-        ) ?? null,
+      // The service reads THIS PUPIL's whole guardian list — it needs the count
+      // for the cap as well as the duplicate check.
+      findMany: jest.fn(async (a: { where: { studentId: string } }) =>
+        (opts.links ?? []).filter((l) => l.studentId === a.where.studentId),
       ),
       create: jest.fn(async (a: { data: { parentId: string; studentId: string } }) => {
         created.push(a.data);
@@ -285,5 +285,132 @@ describe("attaching a guardian to a pupil", () => {
     const { svc, created } = makeLinker({ users: [], roles: [] });
     await expect(svc.linkGuardian(admin, "p-1", "s-1")).rejects.toBeInstanceOf(NotFoundException);
     expect(created).toEqual([]);
+  });
+});
+
+// =============================================================================
+// How many adults may be attached to one child
+// =============================================================================
+// Asked whether the cap should be 2. It should not, and the reasoning is in
+// `packages/types/src/guardians.ts` — briefly: a boarding pupil normally has
+// parents PLUS a local guardian who is the person actually telephoned, which is
+// three before anything unusual; separated parents plus a step-parent is three.
+//
+// The failure mode decides the number. At the cap the office does the only
+// thing the software allows — unlink somebody to make room — and the mother
+// then stops receiving absence alerts and invoices silently, with nothing on
+// screen to say she was removed. A cap worked around by deleting an access
+// grant causes the harm it exists to prevent.
+//
+// So the cap is set to catch the RUNAWAY, which looks like forty (a repeated
+// admission number in an import, a column mapped to the wrong field), not five.
+// =============================================================================
+
+import { MAX_GUARDIANS_PER_STUDENT } from "@sms/types";
+
+function makeCapped(existing: Array<{ parentId: string }>, names: Record<string, string>) {
+  const created: Array<{ parentId: string }> = [];
+  const tx = {
+    user: {
+      findFirst: jest.fn(async (a: { where: { id: string } }) =>
+        names[a.where.id] ? { id: a.where.id, name: names[a.where.id] } : null,
+      ),
+      findMany: jest.fn(async (a: { where: { id: { in: string[] } } }) =>
+        a.where.id.in.filter((id) => names[id]).map((id) => ({ id, name: names[id] })),
+      ),
+    },
+    userRole: {
+      findMany: jest.fn(async (a: { where: { userId: { in: string[] } } }) =>
+        a.where.userId.in.map((userId) => ({
+          userId,
+          role: { name: userId.startsWith("s-") ? "student" : "parent" },
+        })),
+      ),
+    },
+    parentChild: {
+      findMany: jest.fn(async () => existing),
+      create: jest.fn(async (a: { data: { parentId: string } }) => {
+        created.push(a.data);
+        return { id: "new", ...a.data };
+      }),
+    },
+  } as unknown as TenantTx;
+  const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
+  return { svc: new LmsService(db as never, { record: jest.fn() } as never), created };
+}
+
+const NAMES: Record<string, string> = {
+  "s-1": "Chidi Obi",
+  "p-1": "Amaka Obi",
+  "p-2": "Emeka Obi",
+  "p-3": "Ngozi Eze",
+  "p-4": "Tunde Bello",
+  "p-5": "Aunty Grace",
+};
+
+describe("the cap on guardians per pupil", () => {
+  it("is not 2 — three is an ordinary family here, not an exception", () => {
+    // Parents plus the local guardian a boarding pupil is actually contacted
+    // through. If this ever becomes 2, that arrangement stops being expressible.
+    expect(MAX_GUARDIANS_PER_STUDENT).toBeGreaterThanOrEqual(3);
+  });
+
+  it("is small enough to catch a runaway import", () => {
+    expect(MAX_GUARDIANS_PER_STUDENT).toBeLessThanOrEqual(6);
+  });
+
+  it("allows a link while there is room", async () => {
+    const { svc, created } = makeCapped([{ parentId: "p-1" }], NAMES);
+    await svc.linkGuardian(admin, "p-2", "s-1");
+    expect(created).toHaveLength(1);
+  });
+
+  it("refuses the one past the cap", async () => {
+    const existing = ["p-1", "p-2", "p-3", "p-4"]
+      .slice(0, MAX_GUARDIANS_PER_STUDENT)
+      .map((parentId) => ({ parentId }));
+    const { svc, created } = makeCapped(existing, NAMES);
+    await expect(svc.linkGuardian(admin, "p-5", "s-1")).rejects.toBeInstanceOf(ConflictException);
+    expect(created).toEqual([]);
+  });
+
+  it("NAMES who is already attached, so the office is not swapping blind", async () => {
+    // The whole point. "Maximum reached" invites unlinking whoever is at the
+    // top of the list; the four names make it a decision about people.
+    const existing = ["p-1", "p-2", "p-3", "p-4"]
+      .slice(0, MAX_GUARDIANS_PER_STUDENT)
+      .map((parentId) => ({ parentId }));
+    const { svc } = makeCapped(existing, NAMES);
+    await expect(svc.linkGuardian(admin, "p-5", "s-1")).rejects.toThrow(/Amaka Obi/);
+    await expect(svc.linkGuardian(admin, "p-5", "s-1")).rejects.toThrow(/Remove one/i);
+  });
+
+  it("counts THIS pupil's guardians, not the parent's other children", async () => {
+    // The lookup is by studentId. A parent with four children is normal and
+    // must not be blocked from being linked to a fifth.
+    const { svc, created } = makeCapped([{ parentId: "p-1" }], NAMES);
+    await svc.linkGuardian(admin, "p-2", "s-1");
+    expect(created).toHaveLength(1);
+  });
+
+  it("still refuses a duplicate before it counts anything", async () => {
+    const { svc } = makeCapped([{ parentId: "p-1" }], NAMES);
+    await expect(svc.linkGuardian(admin, "p-1", "s-1")).rejects.toThrow(/already linked/i);
+  });
+});
+
+describe("the web agrees with the server about the number", () => {
+  const CARD = readFileSync(
+    join(__dirname, "../../../web/components/sis/GuardianLinks.tsx"),
+    "utf8",
+  );
+
+  it("reads the same constant rather than typing a number", () => {
+    expect(CARD).toMatch(/MAX_GUARDIANS_PER_STUDENT/);
+    expect(CARD).not.toMatch(/>= 4|of 4 linked/);
+  });
+
+  it("stops offering the form at the cap instead of letting it be refused", () => {
+    expect(CARD).toMatch(/rows\.length >= MAX_GUARDIANS_PER_STUDENT \?/);
   });
 });

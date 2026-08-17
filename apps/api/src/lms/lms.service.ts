@@ -18,6 +18,7 @@ import { Prisma } from "@sms/db";
 import { ON_ROLL_STUDENT } from "../common/student-scope";
 import {
   NON_STAFF_ROLE_NAMES,
+  MAX_GUARDIANS_PER_STUDENT,
   ROSTER_CAP,
   SEARCH_CAP,
   DEFAULT_CURRICULUM,
@@ -1005,11 +1006,34 @@ export class LmsService {
       // A duplicate is the ordinary mistake now that the link form sits beside
       // the list of existing guardians. It used to hit the unique index and
       // reach the client as a 500.
-      const dup = await tx.parentChild.findFirst({
-        where: { parentId, studentId },
-        select: { id: true },
-      });
-      if (dup) throw new ConflictException(`${parent.name} is already linked to ${student.name}`);
+      const existing = (await tx.parentChild.findMany({
+        where: { studentId },
+        select: { parentId: true },
+      })) as Array<{ parentId: string }>;
+      if (existing.some((l) => l.parentId === parentId)) {
+        throw new ConflictException(`${parent.name} is already linked to ${student.name}`);
+      }
+
+      // THE CAP. Each link is an access grant to a child's records, so the list
+      // is bounded — see MAX_GUARDIANS_PER_STUDENT for why the number is not 2.
+      //
+      // The refusal NAMES who is already attached. At the cap the office has to
+      // remove somebody, and the one thing that must not happen is a blind swap:
+      // unlinking the mother to make room silently stops her absence alerts and
+      // invoices, and the next person to look sees a tidy list with no sign
+      // anything was taken away. Showing the four names makes it a decision.
+      if (existing.length >= MAX_GUARDIANS_PER_STUDENT) {
+        const names = (
+          (await tx.user.findMany({
+            where: { id: { in: existing.map((l) => l.parentId) } },
+            select: { name: true },
+            orderBy: { name: "asc" },
+          })) as Array<{ name: string }>
+        ).map((u) => u.name);
+        throw new ConflictException(
+          `${student.name} already has the maximum of ${MAX_GUARDIANS_PER_STUDENT} linked guardians (${names.join(", ")}). Remove one before adding ${parent.name}.`,
+        );
+      }
 
       const row = await tx.parentChild.create({
         data: { schoolId: p.schoolId, parentId, studentId },

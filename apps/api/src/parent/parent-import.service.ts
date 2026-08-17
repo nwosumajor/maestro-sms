@@ -30,6 +30,7 @@ import type {
   ParentImportRow,
   ParentImportSummary,
 } from "@sms/types";
+import { MAX_GUARDIANS_PER_STUDENT } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -120,7 +121,21 @@ export class ParentImportService {
     return { studentIds: [...ids], unmatched: totalRefs - matched };
   }
 
-  /** Idempotently create a ParentChild link (unique on parentId+studentId). */
+  /**
+   * Idempotently create a ParentChild link (unique on parentId+studentId).
+   *
+   * Bounded by MAX_GUARDIANS_PER_STUDENT like the manual link, and for this path
+   * above all: a spreadsheet with a repeated admission number, or a column
+   * mapped to the wrong field, is exactly how one pupil ends up with forty
+   * adults attached — each of them holding an access grant to that child's
+   * records. Nobody re-reads a 900-row import.
+   *
+   * Throws rather than returning false, because the caller already turns a
+   * ConflictException into a per-row error line and carries on with the rest of
+   * the file. A silent skip would land in the `linked` count as if nothing had
+   * happened, and the office would never learn the link it asked for was not
+   * made — which is the same silent-success failure this codebase keeps finding.
+   */
   private async link(
     tx: TenantTx,
     schoolId: string,
@@ -128,11 +143,20 @@ export class ParentImportService {
     studentId: string,
     relationship: string | null,
   ): Promise<boolean> {
-    const existing = await tx.parentChild.findFirst({
-      where: { parentId, studentId },
-      select: { id: true },
-    });
-    if (existing) return false;
+    const existing = (await tx.parentChild.findMany({
+      where: { studentId },
+      select: { parentId: true },
+    })) as Array<{ parentId: string }>;
+    if (existing.some((l) => l.parentId === parentId)) return false;
+    if (existing.length >= MAX_GUARDIANS_PER_STUDENT) {
+      const pupil = (await tx.user.findFirst({
+        where: { id: studentId },
+        select: { name: true },
+      })) as { name: string } | null;
+      throw new ConflictException(
+        `${pupil?.name ?? "that pupil"} already has the maximum of ${MAX_GUARDIANS_PER_STUDENT} linked guardians`,
+      );
+    }
     await tx.parentChild.create({ data: { schoolId, parentId, studentId, relationship } });
     return true;
   }

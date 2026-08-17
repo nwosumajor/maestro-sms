@@ -17,6 +17,7 @@ export * from "./class-stream";
 export * from "./meeting-audience";
 export * from "./meeting-request";
 export * from "./roles";
+export * from "./guardians";
 export * from "./school-email";
 export * from "./academic-progression";
 export * from "./academic-calendar";
