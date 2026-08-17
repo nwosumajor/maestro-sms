@@ -398,11 +398,28 @@ export class SisService {
   }
 
   // --- profile ---------------------------------------------------------------
+  /**
+   * A pupil's SIS record.
+   *
+   * // SECURITY: audited, and it was not. This returns a minor's date of birth,
+   * gender, telephone number, personal email, home address and admission
+   * number — the exact category Golden Rule #5 says every read of is logged —
+   * and it is the single most-opened PII read in the product, since it is what
+   * the pupil record page loads.
+   *
+   * The asymmetry is what gave it away: `getMedical` two hundred lines below
+   * audits, `listGuardians` immediately after it audits, and the profile
+   * between them did not. Verified against the running system before the fix —
+   * opening a pupil produced ONE audit row, `sis.medical.read`, and nothing for
+   * the profile. So "who looked at this child's record" could be answered for
+   * their allergies and not for their home address.
+   */
   async getProfile(p: Principal, studentId: string) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.assertCanAccessStudent(tx, p, studentId);
       const profile = await tx.studentProfile.findFirst({ where: { studentId } });
       if (!profile) throw new NotFoundException("Student profile not found");
+      await this.log(tx, p, "sis.profile.read", "student_profile", studentId);
       return profile;
     });
   }
@@ -433,7 +450,15 @@ export class SisService {
         where: { studentId },
         select: { parentId: true },
       })) as Array<{ parentId: string }>;
-      if (links.length === 0) return [];
+      if (links.length === 0) {
+        // Audited BEFORE the early return, not after it. The log answers "who
+        // looked at this child's record", which is a question about the ACCESS,
+        // not about what it happened to contain — and the same click was
+        // recorded for a pupil with guardians and silently not for a pupil
+        // without. Found by opening a pupil who had none.
+        await this.log(tx, p, "sis.guardians.read", "user", studentId, { guardians: 0 });
+        return [];
+      }
       const parents = (await tx.user.findMany({
         where: { id: { in: links.map((l) => l.parentId) } },
         // `loginEmailGenerated` is what deliverableEmail actually keys on.
