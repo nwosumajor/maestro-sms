@@ -75,18 +75,54 @@ export function renderRunbookPdf(doc) {
     const left = PAGE.margin;
     const width = pdf.page.width - PAGE.margin * 2;
 
-    /** Write inline runs on one flowing line, styling code and bold as it goes. */
+    /**
+     * Write inline runs as one flowing paragraph, changing font mid-line for
+     * bold, italic and code.
+     *
+     * `width` IS PASSED ONLY ON THE FIRST RUN. pdfkit remembers the wrap
+     * boundary for the rest of a `continued` chain; passing it again re-anchors
+     * the boundary to wherever the cursor now is, which silently CLIPS the run.
+     * Measured on the shipped runbook: six of forty-six paragraphs containing
+     * bold lost their ending mid-sentence — "the administrator config" and then
+     * nothing — in a document whose whole purpose is to be relied on.
+     */
     const writeRuns = (text, opts = {}) => {
       const runs = inlineRuns(text);
       const size = opts.size ?? SIZE.body;
+      if (runs.length === 0) {
+        pdf.text("");
+        return;
+      }
+      // THE FIRST RUN POSITIONS EXPLICITLY, at an x this function chose.
+      //
+      // pdfkit leaves `x` wherever the last write finished, and a table finishes
+      // in its RIGHTMOST cell. So a paragraph following a table began at that
+      // column and wrapped inside the sliver of page left over — rendering as
+      // "the administrator config" and then jumping, with the middle of the
+      // sentence simply gone. Every paragraph that lost text followed a table,
+      // which is what pointed at the cursor rather than at the wrapping.
+      //
+      // The width goes on the first call ONLY: pdfkit remembers the wrap
+      // boundary for the rest of a `continued` chain, and passing it again
+      // re-anchors it to the new cursor and clips the run.
+      const startX = opts.x ?? left;
+      const runWidth = opts.width ?? width - (startX - left);
       runs.forEach((r, n) => {
         const last = n === runs.length - 1;
         pdf.fontSize(r.code ? size - 0.5 : size)
-          .font(r.code ? "Courier" : r.bold ? "Helvetica-Bold" : opts.font ?? "Helvetica")
+          .font(r.code ? "Courier" : r.bold ? "Helvetica-Bold" : r.italic ? "Helvetica-Oblique" : opts.font ?? "Helvetica")
           .fillColor(r.href ? "#1d4ed8" : opts.color ?? INK);
-        pdf.text(winAnsi(r.text), { continued: !last, width: opts.width ?? width, link: r.href, underline: !!r.href });
+        if (n === 0) {
+          pdf.text(winAnsi(r.text), startX, pdf.y, {
+            continued: !last,
+            width: runWidth,
+            link: r.href,
+            underline: !!r.href,
+          });
+        } else {
+          pdf.text(winAnsi(r.text), { continued: !last, link: r.href, underline: !!r.href });
+        }
       });
-      if (runs.length === 0) pdf.text("");
       pdf.fillColor(INK).font("Helvetica");
     };
 
@@ -162,8 +198,7 @@ export function renderRunbookPdf(doc) {
             });
             const y = pdf.y;
             pdf.y = y - (SIZE.body + 3);
-            pdf.x = left + 22;
-            writeRuns(b.items[n], { width: width - 22 });
+            writeRuns(b.items[n], { x: left + 22 });
             pdf.x = left;
             pdf.moveDown(0.12);
           }
@@ -219,9 +254,8 @@ export function renderRunbookPdf(doc) {
         case "quote": {
           need(30);
           const top = pdf.y;
-          pdf.x = left + 12;
           pdf.fillColor(MUTED);
-          writeRuns(b.text, { width: width - 12, color: MUTED });
+          writeRuns(b.text, { x: left + 12, color: MUTED });
           pdf.x = left;
           pdf.moveTo(left + 3, top).lineTo(left + 3, pdf.y).strokeColor(RULE).lineWidth(2).stroke();
           pdf.fillColor(INK).moveDown(0.45);

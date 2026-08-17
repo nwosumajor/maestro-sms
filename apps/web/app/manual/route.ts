@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { MANUAL_HTML } from "./manual-html";
+import { MANUAL_HTML, MANUAL_PDF_BASE64 } from "./manual-html";
 
 // The School Leader's Manual, served ONLY to signed-in users.
 //
@@ -19,6 +19,22 @@ export async function GET(req: Request) {
   const session = await auth();
   if (!session?.user) {
     return NextResponse.redirect(new URL("/login?next=/manual", req.url));
+  }
+
+  // `?format=pdf` serves the generated file, built from the same parse of this
+  // document as the page below. One handler, so the two can never be reachable
+  // under different rules.
+  if (new URL(req.url).searchParams.get("format") === "pdf") {
+    const bytes = Buffer.from(MANUAL_PDF_BASE64, "base64");
+    return new NextResponse(new Uint8Array(bytes), {
+      headers: {
+        "content-type": "application/pdf",
+        "content-disposition": 'attachment; filename="school-leaders-manual.pdf"',
+        "content-length": String(bytes.length),
+        "cache-control": "private, no-store",
+        "x-robots-tag": "noindex, nofollow",
+      },
+    });
   }
 
   // No explicit <head>: MANUAL_HTML opens with <title>/<style> (head content) and
