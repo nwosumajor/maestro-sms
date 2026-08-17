@@ -16,6 +16,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { shortDate } from "@/lib/format";
 import { StudentAdmin } from "@/components/sis/StudentAdmin";
 import { ProfileReviewChain } from "@/components/sis/ProfileReviewChain";
+import { GuardianLinks } from "@/components/sis/GuardianLinks";
 import { ExemptionPanel } from "@/components/assessment/ExemptionPanel";
 import { PrivacyPanel } from "@/components/privacy/PrivacyPanel";
 import { ReportCardButton } from "@/components/reportcards/ReportCardButton";
@@ -151,6 +152,10 @@ export default async function StudentProfilePage({ params }: { params: { id: str
           contacts={contacts}
           medical={medical}
         />
+
+        {/* Who the school is actually sending things to. Above the academic
+            cards because it is the answer to "why did the family not know". */}
+        <GuardianLinks studentId={params.id} />
 
         {/* Skills and behaviour for the CURRENT term, beside the remarks that
             print next to them. Read scope is the report card's own; only the

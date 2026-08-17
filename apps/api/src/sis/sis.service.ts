@@ -20,8 +20,8 @@ import {
   BadRequestException, Inject, Injectable, NotFoundException, ConflictException } from "@nestjs/common";
 import { allocateAdmissionNumber, loadUsedAdmissionNumbers } from "../foundation/admission-number";
 import { Prisma } from "@sms/db";
-import type { MedicalRecordDto } from "@sms/types";
-import { missingProfileFields } from "@sms/types";
+import type { MedicalRecordDto, StudentGuardianDto } from "@sms/types";
+import { missingProfileFields, deliverableEmail } from "@sms/types";
 import type { ProfileReviewRowDto, SisCompletionDto } from "@sms/types";
 import { decryptField, encryptField } from "../foundation/field-crypto";
 import {
@@ -404,6 +404,63 @@ export class SisService {
       const profile = await tx.studentProfile.findFirst({ where: { studentId } });
       if (!profile) throw new NotFoundException("Student profile not found");
       return profile;
+    });
+  }
+
+  /**
+   * The parent accounts linked to a pupil.
+   *
+   * `parent_child` drove everything that mattered — who is notified, whose
+   * /family page shows this child, which invoices a parent may open — and could
+   * not be READ anywhere. So a teacher or a principal looking at a pupil could
+   * not see which parent account was attached, nor how to reach it, and "we
+   * never received the invoice" had no answer in the product.
+   *
+   * Scoped exactly like the profile above (staff-wide, a teacher of the pupil's
+   * class, the pupil, or a linked guardian), and AUDITED: this is contact data
+   * about a family, which Golden Rule #5 puts in the same category as the rest
+   * of a minor's record.
+   *
+   * `reachableByEmail` is the useful half. A provisioned account can carry a
+   * GENERATED login identifier rather than a mailbox, and every notice sent to
+   * it disappears — the same defect the delivery path guards against. Saying so
+   * here is what lets somebody fix it before the next fee run.
+   */
+  async listGuardians(p: Principal, studentId: string): Promise<StudentGuardianDto[]> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      await this.assertCanAccessStudent(tx, p, studentId);
+      const links = (await tx.parentChild.findMany({
+        where: { studentId },
+        select: { parentId: true },
+      })) as Array<{ parentId: string }>;
+      if (links.length === 0) return [];
+      const parents = (await tx.user.findMany({
+        where: { id: { in: links.map((l) => l.parentId) } },
+        // `loginEmailGenerated` is what deliverableEmail actually keys on.
+        // Without it in the select, a generated identifier reads as a perfectly
+        // good mailbox and `reachableByEmail` is true for everybody — the
+        // opposite of what this field exists to say.
+        select: { id: true, name: true, email: true, contactEmail: true, phone: true, loginEmailGenerated: true },
+        orderBy: { name: "asc" },
+      })) as Array<{
+        id: string;
+        name: string;
+        email: string;
+        contactEmail: string | null;
+        phone: string | null;
+        loginEmailGenerated: boolean | null;
+      }>;
+      await this.log(tx, p, "sis.guardians.read", "user", studentId, { guardians: parents.length });
+      return parents.map((u) => {
+        const deliverable = deliverableEmail(u);
+        return {
+          id: u.id,
+          name: u.name,
+          email: deliverable,
+          phone: u.phone,
+          reachableByEmail: deliverable !== null,
+        };
+      });
     });
   }
 

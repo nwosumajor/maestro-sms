@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Put } from "@nestjs/common";
 import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
-import type { ContactDto, MedicalRecordDto, ProfileReviewRowDto, StudentProfileDto, SisCompletionDto } from "@sms/types";
+import type { ContactDto, MedicalRecordDto, ProfileReviewRowDto, StudentProfileDto, SisCompletionDto, StudentGuardianDto } from "@sms/types";
 import { z } from "zod";
 import { SIS_PERMISSIONS, ADMIN_PERMISSIONS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -104,6 +104,19 @@ export class SisController {
   @RequirePermission(ADMIN_PERMISSIONS.RBAC_MANAGE)
   approveProfile(@CurrentPrincipal() p: Principal, @Param("studentId") studentId: string) {
     return this.sis.approveProfile(p, studentId);
+  }
+
+  /**
+   * The parent accounts linked to this pupil, and whether notices can reach
+   * them. Same scope as the profile; audited like any read of a minor's record.
+   */
+  @Get("guardians")
+  @RequirePermission(SIS_PERMISSIONS.STUDENT_PROFILE_READ)
+  guardians(
+    @CurrentPrincipal() p: Principal,
+    @Param("studentId") studentId: string,
+  ): Promise<StudentGuardianDto[]> {
+    return this.sis.listGuardians(p, studentId);
   }
 
   @Get("contacts")

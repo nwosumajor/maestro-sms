@@ -128,10 +128,34 @@ export class StaffAttendanceService {
   }
 
   /** Per-staff monthly roll-up (register view + analytics feed). */
-  async summary(p: Principal, year: number, month: number): Promise<AttendanceSummaryDto> {
-    if (month < 1 || month > 12) throw new BadRequestException("month must be 1–12");
-    const from = new Date(Date.UTC(year, month - 1, 1));
-    const to = new Date(Date.UTC(year, month, 1));
+  /**
+   * The month's staff attendance, per person.
+   *
+   * TWO THINGS THIS GOT WRONG, and they compounded:
+   *
+   * `year` was never validated at all, and the month guard — `month < 1 ||
+   * month > 12` — DOES NOT CATCH NaN, because every comparison with NaN is
+   * false. So a guard that reads as complete waved through the one value that
+   * breaks everything downstream: `Date.UTC(NaN, NaN, 1)` is an Invalid Date,
+   * and Prisma answered with a 500. Calling the endpoint with no parameters at
+   * all — which is what any first look at it does — crashed it.
+   *
+   * Omitting them now means THIS MONTH rather than an error, because that is
+   * what someone asking for "the attendance summary" wants. It is the school's
+   * month: a report generated at 9pm in Lagos on the 1st must not be January's
+   * because the server is still in December.
+   */
+  async summary(p: Principal, year?: number, month?: number): Promise<AttendanceSummaryDto> {
+    const { timezone } = await this.region.forSchool(p.schoolId);
+    const today = schoolToday(timezone);
+    const y = year === undefined || Number.isNaN(year) ? today.getUTCFullYear() : year;
+    const m = month === undefined || Number.isNaN(month) ? today.getUTCMonth() + 1 : month;
+    // Number.isInteger is false for NaN, so this catches what the range check
+    // could not.
+    if (!Number.isInteger(m) || m < 1 || m > 12) throw new BadRequestException("month must be a whole number from 1 to 12");
+    if (!Number.isInteger(y) || y < 2000 || y > 2200) throw new BadRequestException("year must be a whole number");
+    const from = new Date(Date.UTC(y, m - 1, 1));
+    const to = new Date(Date.UTC(y, m, 1));
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const marks = await tx.staffAttendance.findMany({ where: { date: { gte: from, lt: to } } });
       const users = await tx.user.findMany({
@@ -149,8 +173,8 @@ export class StaffAttendanceService {
         byUser.set(m.userId, r);
       }
       return {
-        year,
-        month,
+        year: y,
+        month: m,
         rows: [...byUser.entries()]
           .map(([userId, r]) => ({ userId, userName: nameById.get(userId) ?? "Staff", ...r }))
           .sort((a, b) => a.userName.localeCompare(b.userName)),

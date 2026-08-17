@@ -1345,6 +1345,10 @@
       "kind": "ui",
       "note": "StudentExitDialog \u2014 classes and money owed shown to the approver BEFORE the exit is raised"
     },
+    "GET /students/:p/guardians": {
+      "kind": "ui",
+      "note": "reviewed: components/sis/GuardianLinks.tsx on the pupil's record \u2014 which parent ACCOUNT receives their notices"
+    },
     "GET /students/:p/medical": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"

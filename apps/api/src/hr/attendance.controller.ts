@@ -73,12 +73,20 @@ export class StaffAttendanceController {
 
   @Get("summary")
   @RequirePermission(HR_PERMISSIONS.HR_READ)
+  /** Both optional — omitted means the school's current month. */
   summary(
     @CurrentPrincipal() p: Principal,
-    @Query("year") year: string,
-    @Query("month") month: string,
+    @Query("year") year?: string,
+    @Query("month") month?: string,
   ): Promise<AttendanceSummaryDto> {
-    return this.attendance.summary(p, Number(year), Number(month));
+    // `Number(undefined)` is NaN, which the service treats as "not given". Left
+    // as a bare Number() this endpoint answered 500 to a call with no
+    // parameters — the first thing anyone tries.
+    return this.attendance.summary(
+      p,
+      year === undefined ? undefined : Number(year),
+      month === undefined ? undefined : Number(month),
+    );
   }
 
   @Get("me")

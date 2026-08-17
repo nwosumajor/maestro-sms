@@ -108,3 +108,27 @@ export interface ProfileReviewRowDto {
   submittedAt: Date | null;
   supervisorReviewedAt: Date | null;
 }
+
+// =============================================================================
+// Who a pupil's parent actually is
+// =============================================================================
+// `parent_child` has always driven the things that MATTER — who receives the
+// absence alert, the fee notice, the report card; whose /family page shows this
+// child; which invoices a parent may open. The class page can create a link.
+//
+// Nothing could read one back. A teacher, a principal or an HR clerk looking at
+// a pupil could not see which parent account was attached, or how to reach them.
+// The emergency contacts on the SIS record are a different thing: those are
+// people to telephone, entered as free text. This is the ACCOUNT the system is
+// actually sending things to, and when a family says "we never got the invoice"
+// it is the first question anyone asks.
+export interface StudentGuardianDto {
+  /** The parent's user id — the account, not a contact card. */
+  id: string;
+  name: string;
+  /** The address notices really go to (a generated login identifier is not one). */
+  email: string | null;
+  phone: string | null;
+  /** False when the account cannot receive email — the usual cause of "we were never told". */
+  reachableByEmail: boolean;
+}
