@@ -303,6 +303,27 @@
     * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
   }
 </style>
+<style>
+  .printbar {
+    position: sticky; top: 0; z-index: 20; display: flex; gap: .6rem; align-items: center;
+    padding: .5rem .9rem; font-size: .8rem;
+    background: var(--rule-soft, #f4f4f5); border-bottom: 1px solid var(--rule, #e4e4e7);
+  }
+  .printbar button {
+    font: inherit; cursor: pointer; padding: .25rem .7rem; border-radius: .4rem;
+    border: 1px solid var(--rule, #d4d4d8); background: #fff;
+  }
+</style>
+<div class="printbar">
+  <button type="button" onclick="window.print()">Download PDF / print</button>
+  <span>Choose &ldquo;Save as PDF&rdquo; as the destination.</span>
+</div>
+<script>
+  // Opened from the Runbooks page's download button.
+  if (new URLSearchParams(location.search).get("print") === "1") {
+    window.addEventListener("load", function () { window.print(); });
+  }
+</script>
 
 <header class="masthead">
   <div class="masthead-inner">

@@ -3,6 +3,7 @@ import { signOut } from "@/lib/auth";
 import {
   LayoutDashboardIcon,
   UsersIcon,
+  BookMarkedIcon,
   BookOpenIcon,
   ClipboardCheckIcon,
   BellIcon,
@@ -77,6 +78,7 @@ import {
 
 type NavKey =
   | "dashboard"
+  | "runbooks"
   | "notifications"
   | "students"
   | "family"
@@ -161,6 +163,11 @@ const NAV: {
   { key: "operatorjobs", label: "Background jobs", icon: ClockIcon, href: "/operator/jobs", perm: "platform.tenants.read" },
   { key: "operatorscholarships", label: "Scholarship admin", icon: AwardIcon, href: "/operator/scholarships", perm: "scholarship.admin" },
   { key: "operatoraudit", label: "Platform audit", icon: ScrollTextIcon, href: "/operator/audit", perm: "platform.audit.read" },
+  // The operations documents. Sits with the platform group because that is who
+  // reads them: the incident playbook is a map of where the load-bearing parts
+  // are, and the school-facing manual is here so the owner can open the exact
+  // page a principal is asking about.
+  { key: "runbooks", label: "Runbooks", icon: BookMarkedIcon, href: "/runbooks", perm: "platform.tenants.read" },
   { key: "directory", label: "Directory", icon: SearchIcon, href: "/directory", perm: "directory.search" },
   { key: "admin", label: "Admin", icon: SettingsIcon, href: "/admin", perm: "fee.manage" },
   { key: "announcements", label: "Announcements", icon: MegaphoneIcon, href: "/announcements", perm: "announcement.read" },
@@ -272,6 +279,7 @@ const PLATFORM_OWNER_NAV = new Set<NavKey>([
   "operatorpricing",
   "operatorgroups",
   "operatortenants",
+  "runbooks",
   // Background jobs. Omitted when the page was added, so the one role that runs
   // the platform's sweeps was the one role the link was hidden from — the page
   // and its permission were right, only this allow-list was not.
@@ -312,7 +320,7 @@ const NAV_GROUP: Record<NavKey, string> = {
   discussion: "community", polls: "community", forms: "community", discipline: "community",
   games: "community", ultimate: "community",
   operator: "platform", operatorattention: "platform", operatorpricing: "platform", operatorgroups: "platform", operatortenants: "platform", operatorjobs: "platform", operatorscholarships: "platform",
-  operatoraudit: "platform", directory: "platform", admin: "platform", account: "platform",
+  operatoraudit: "platform", runbooks: "platform", directory: "platform", admin: "platform", account: "platform",
   feedback: "platform", operatorfeedback: "platform",
   help: "platform",
 };
