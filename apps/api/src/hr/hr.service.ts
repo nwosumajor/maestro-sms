@@ -74,10 +74,18 @@ export class HrService {
 
   async listEmployees(p: Principal) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const employees = await tx.employee.findMany({ orderBy: { createdAt: "desc" } });
+      // Most-recently-hired first is the order a register is BUILT in, not the
+      // order it is READ in. Nobody opens the staff list to see who joined last;
+      // they open it to find one person among all of them, and there was no way
+      // to do that except by eye. Sorted by name below, once the names are known
+      // — `employee` has no name of its own, it hangs off `user`.
+      const employees = await tx.employee.findMany();
       const ids = employees.map((e) => e.userId);
       const users = await tx.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, email: true } });
       const byId = new Map(users.map((u) => [u.id, u]));
+      employees.sort((a, b) =>
+        (byId.get(a.userId)?.name ?? "").localeCompare(byId.get(b.userId)?.name ?? ""),
+      );
       // GR#5: the list view DECRYPTS every salary, so the read must be audited
       // exactly like the single-record read. entityId scopes to the school.
       await this.audit.record(

@@ -1248,14 +1248,22 @@ export class LmsService {
         if (!teachesSubject) throw new NotFoundException("Class not found");
       }
 
+      // BY NAME. A roster with no `orderBy` comes back in whatever order the
+      // rows happen to sit in, which for a class of thirty is thirty names in
+      // no order at all — and this is the list a teacher scans to find one
+      // pupil. Ordering a relation by a field of the related row is what
+      // `orderBy: { student: { name } }` is for; sorting after the fact would
+      // be wrong the moment this list is capped.
       const [teachers, students] = await Promise.all([
         tx.classTeacher.findMany({
           where: { classId },
           include: { teacher: { select: { id: true, name: true, email: true } } },
+          orderBy: { teacher: { name: "asc" } },
         }),
         tx.enrollment.findMany({
           where: { classId, status: "ACTIVE" },
           include: { student: { select: { id: true, name: true, email: true } } },
+          orderBy: { student: { name: "asc" } },
         }),
       ]);
       // Golden Rule #5: a roster is minors' PII — the read is audit-logged.
