@@ -176,6 +176,32 @@ export class FeeOpsService {
         );
         return this.toAdjustmentDto(updated);
       }
+      // CLAIM THE APPROVAL BEFORE POSTING ANYTHING.
+      //
+      // The `status !== "PENDING_APPROVAL"` check above is a read, and at READ
+      // COMMITTED (no isolationLevel is set anywhere) two approvals of the SAME
+      // adjustment both pass it before either commits. Both then post a negative
+      // line item, while `newTotal` is computed from the SAME stale
+      // `inv.totalMinor` — so both write the same header total. Proven by
+      // interleaving these statements in two sessions, on a ₦100,000 invoice
+      // with one ₦50,000 waiver:
+      //
+      //     header_says_owed | line_items_say | waiver_lines
+      //              5000000 |              0 |            2
+      //
+      // The invoice's own lines say the family owes nothing; the header — what
+      // the balance, the receivables ageing and the journal export read — says
+      // ₦50,000. The books disagree with themselves, and nothing recomputes a
+      // total from its lines, so it stays that way.
+      //
+      // Everything below is inside the same transaction, so a later refusal
+      // rolls the claim back with it.
+      const claimed = await tx.invoiceAdjustment.updateMany({
+        where: { id: adjustmentId, status: "PENDING_APPROVAL" },
+        data: { status: "APPROVED", approvedById: p.userId },
+      });
+      if (claimed.count === 0) throw new BadRequestException("Already decided");
+
       const inv = await tx.invoice.findFirst({
         where: { id: row.invoiceId },
         select: { totalMinor: true, studentId: true, reference: true, currency: true },
@@ -194,15 +220,22 @@ export class FeeOpsService {
           quantity: 1,
         },
       });
-      const newTotal = inv.totalMinor - row.amountMinor;
+      // DECREMENT, never assign a total computed from an earlier read. The claim
+      // above serialises two approvals of THIS adjustment; it does nothing about
+      // two DIFFERENT adjustments on the same invoice, which would both compute
+      // `inv.totalMinor - amount` from the same starting figure and one would be
+      // lost. The database does the arithmetic, so neither can be.
+      const afterAdjustment = await tx.invoice.update({
+        where: { id: row.invoiceId },
+        data: { totalMinor: { decrement: row.amountMinor } },
+        select: { totalMinor: true },
+      });
+      const newTotal = afterAdjustment.totalMinor;
       await tx.invoice.update({
         where: { id: row.invoiceId },
-        data: { totalMinor: newTotal, status: paid >= newTotal ? "PAID" : paid > 0 ? "PARTIALLY_PAID" : "ISSUED" },
+        data: { status: paid >= newTotal ? "PAID" : paid > 0 ? "PARTIALLY_PAID" : "ISSUED" },
       });
-      const updated = await tx.invoiceAdjustment.update({
-        where: { id: adjustmentId },
-        data: { status: "APPROVED", approvedById: p.userId },
-      });
+      const updated = await tx.invoiceAdjustment.findFirstOrThrow({ where: { id: adjustmentId } });
       await this.audit.record(
         {
           actorId: p.userId,
