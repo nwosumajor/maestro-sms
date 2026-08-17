@@ -8,6 +8,7 @@
 // =============================================================================
 
 import { Inject, Injectable , Optional } from "@nestjs/common";
+import { csvCell } from "../common/csv";
 import type { AnalyticsOverviewDto } from "@sms/types";
 import { normalizeGender,
   resolveGradeBands,
@@ -134,11 +135,6 @@ export class AnalyticsService {
   ): Promise<{ csv: string; filename: string }> {
     const o = await this.overview(p, range);
     // Formula-injection guard + quoting, same as every other export here (OWASP).
-    const esc = (v: string | number | null): string => {
-      let s = String(v ?? "");
-      if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
-      return `"${s.replace(/"/g, '""')}"`;
-    };
     const rows: Array<[string, string, string | number | null]> = [];
     rows.push(["Period", "Label", o.period?.label ?? ""]);
     rows.push(["Period", "From", o.period?.from ?? ""]);
@@ -169,7 +165,7 @@ export class AnalyticsService {
       for (const [k, v] of Object.entries(o.operations)) rows.push(["Operations", k, v as number]);
     }
 
-    const csv = ["Section,Metric,Value", ...rows.map((r) => r.map(esc).join(","))].join("\n");
+    const csv = ["Section,Metric,Value", ...rows.map((r) => r.map(csvCell).join(","))].join("\n");
     const stamp = o.period?.from ?? new Date().toISOString().slice(0, 10);
     return { csv, filename: `analytics-${stamp}.csv` };
   }

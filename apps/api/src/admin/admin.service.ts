@@ -7,6 +7,7 @@
 // =============================================================================
 
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
+import { csvCell } from "../common/csv";
 import bcrypt from "bcryptjs";
 import { Prisma } from "@sms/db";
 import { allocateLoginEmail, asNameTakenConflict, schoolSlugOf } from "../foundation/login-email";
@@ -112,11 +113,6 @@ export class AdminService {
    * CSV cells are quoted AND formula-neutralised (OWASP CSV injection) so a name
    * like "=cmd" can't execute when the file is opened in a spreadsheet.
    */
-  private csvCell(value: string): string {
-    let v = String(value ?? "");
-    if (/^[=+\-@\t\r]/.test(v)) v = `'${v}`;
-    return `"${v.replace(/"/g, '""')}"`;
-  }
 
   /** Every staff member with their role(s). */
   async staffRosterCsv(p: Principal): Promise<string> {
@@ -137,7 +133,7 @@ export class AdminService {
           .filter((n: string) => !(NON_STAFF_ROLE_NAMES as readonly string[]).includes(n))
           .sort()
           .join(", ");
-        lines.push([this.csvCell(String(i + 1)), this.csvCell(u.name), this.csvCell(roles), this.csvCell(u.email), this.csvCell(u.status)].join(","));
+        lines.push([csvCell(String(i + 1)), csvCell(u.name), csvCell(roles), csvCell(u.email), csvCell(u.status)].join(","));
       });
       return `${lines.join("\n")}\n`;
     });
@@ -170,10 +166,10 @@ export class AdminService {
       students.forEach((u, i) => {
         lines.push(
           [
-            this.csvCell(String(i + 1)),
-            this.csvCell(u.name),
-            this.csvCell(classOf.get(u.id) ?? "Not enrolled"),
-            this.csvCell(u.status),
+            csvCell(String(i + 1)),
+            csvCell(u.name),
+            csvCell(classOf.get(u.id) ?? "Not enrolled"),
+            csvCell(u.status),
           ].join(","),
         );
       });

@@ -9,6 +9,7 @@
 // The overview carries AGGREGATES ONLY (counts and sums) — never student PII.
 
 import { Inject, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
+import { csvCell } from "../common/csv";
 import type {
   GroupFlag,
   GroupMoneyDto,
@@ -547,10 +548,3 @@ export class GroupService {
   }
 }
 
-/** Formula-injection guard: a leading =, +, -, @ or control character makes a
- *  spreadsheet execute the cell. Same helper as the fees and audit exports. */
-function csvCell(v: unknown): string {
-  let s = v == null ? "" : String(v);
-  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
-  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}

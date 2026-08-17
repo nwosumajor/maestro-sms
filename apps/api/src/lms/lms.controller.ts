@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, Header, Param, Post, Put, Query } from "@nestjs/common";
+import { csvDocument } from "../common/csv";
 import { MODULES, USER_KINDS, type UserKind , SUBJECT_STAGES, CLASS_STREAMS, CLASS_ARMS, WORKFLOW_PERMISSIONS } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
 import type { AcademicSessionDto, ClassDto, ClassEligibilityDto, ClassInfoDto, ClassOverviewDto, ClassSubjectDto, IdNameDto, PromotionBatchDto, SchoolHolidayDto, SubjectDto, UserWithEmailDto } from "@sms/types";
@@ -494,10 +495,15 @@ export class LmsController {
   @Header("Content-Disposition", 'attachment; filename="class-roster.csv"')
   async rosterCsv(@CurrentPrincipal() p: Principal, @Param("classId") classId: string): Promise<string> {
     const roster = await this.lms.getClassRoster(p, classId);
-    const rows = (roster.students as Array<{ name: string; email: string }>).map(
-      (s, i) => `${i + 1},"${s.name.replace(/"/g, '""')}",${s.email}`,
+    // Built with the SHARED cell writer, like every other export. This one used
+    // to quote the name by hand and interpolate the email raw — quoting alone
+    // does not stop a spreadsheet evaluating a leading `=`, so a pupil's name
+    // could arrive as a live formula in the register a teacher downloads.
+    const students = roster.students as Array<{ name: string; email: string }>;
+    return csvDocument(
+      ["#", "name", "email"],
+      students.map((s, i) => [i + 1, s.name, s.email]),
     );
-    return `#,name,email\n${rows.join("\n")}\n`;
   }
 
   // --- student exit: leaving the SCHOOL (two-stage, principal finalises) -----

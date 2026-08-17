@@ -20,6 +20,7 @@
 // =============================================================================
 
 import { Inject, Injectable, ServiceUnavailableException } from "@nestjs/common";
+import { csvCell } from "../common/csv";
 import type {
   BillingCycle,
   Currency,
@@ -221,7 +222,7 @@ export class OperatorPaymentsService {
       "Date", "School", "Reference", "Plan", "Cycle", "Kind",
       "Seats", "Amount (minor)", "Currency", "Status", "Period start", "Period end", "Paid at",
     ];
-    const lines = [header.map((h) => this.cell(h)).join(",")];
+    const lines = [header.map((h) => csvCell(h)).join(",")];
     for (const raw of rows) {
       const r = this.toRow(raw as Record<string, unknown>, names);
       lines.push(
@@ -243,7 +244,7 @@ export class OperatorPaymentsService {
           r.periodEnd?.toISOString().slice(0, 10) ?? "",
           r.paidAt?.toISOString() ?? "",
         ]
-          .map((c) => this.cell(c))
+          .map((c) => csvCell(c))
           .join(","),
       );
     }
@@ -273,11 +274,6 @@ export class OperatorPaymentsService {
   }
 
   /** Quote + neutralise spreadsheet formula injection (OWASP CSV injection). */
-  private cell(value: string): string {
-    const v = value ?? "";
-    const guarded = /^[=+\-@\t\r]/.test(v) ? `'${v}` : v;
-    return `"${guarded.replace(/"/g, '""')}"`;
-  }
 
   /** Every cross-tenant revenue read is audited in the operator's own tenant. */
   private async record(p: Principal, action: string, metadata: Record<string, unknown>): Promise<void> {

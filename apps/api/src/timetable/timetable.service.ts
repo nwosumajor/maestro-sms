@@ -25,6 +25,7 @@ import {
 // VALUE import — Prisma.PrismaClientKnownRequestError is a class, so `import
 // type` would compile and then fail every instanceof at runtime.
 import { Prisma } from "@sms/db";
+import { csvCell } from "../common/csv";
 import type {
   DayOfWeekValue,
   UnstaffedLessonDto,
@@ -700,7 +701,7 @@ export class TimetableService {
     const order = new Map(WEEKDAYS.map((d, i) => [d, i]));
 
     const header = ["Day", "Period", "Start", "End", "Class", "Subject", "Teacher", "Room"];
-    const lines = [header.map((h) => this.csvCell(h)).join(",")];
+    const lines = [header.map((h) => csvCell(h)).join(",")];
     for (const r of [...rows].sort(
       (a, b) =>
         (order.get(a.dayOfWeek as DayOfWeekValue) ?? 99) - (order.get(b.dayOfWeek as DayOfWeekValue) ?? 99) ||
@@ -719,7 +720,7 @@ export class TimetableService {
           r.teacherName,
           r.room?.name ?? "",
         ]
-          .map((v) => this.csvCell(String(v)))
+          .map((v) => csvCell(String(v)))
           .join(","),
       );
     }
@@ -729,11 +730,6 @@ export class TimetableService {
 
   /** Quoted AND formula-neutralised (OWASP CSV injection): a subject or room
    *  typed as "=cmd" must not execute when the file is opened in a spreadsheet. */
-  private csvCell(value: string): string {
-    let v = String(value ?? "");
-    if (/^[=+\-@\t\r]/.test(v)) v = `'${v}`;
-    return `"${v.replace(/"/g, '""')}"`;
-  }
 
   /**
    * Standing teaching load per teacher: periods assigned vs periods they are

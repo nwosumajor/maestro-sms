@@ -10,6 +10,7 @@
 // view/export is itself audited (meta-audit). 503 when no privileged URL.
 
 import { Inject, Injectable, Logger, ServiceUnavailableException } from "@nestjs/common";
+import { csvCell } from "../common/csv";
 import type { PlatformAuditEntryDto, PlatformAuditPageDto } from "@sms/types";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import { decodeAuditCursor, encodeAuditCursor } from "../common/audit-cursor";
@@ -184,11 +185,3 @@ export class PlatformAuditService {
   }
 }
 
-/** RFC-4180 CSV escaping + formula-injection defence. A cell beginning with a
- *  spreadsheet formula trigger (= + - @ tab CR) is prefixed with a single quote so
- *  Excel/Sheets treats it as text, not an executable formula (OWASP CSV injection). */
-function csvCell(v: unknown): string {
-  let s = v == null ? "" : String(v);
-  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
-  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}

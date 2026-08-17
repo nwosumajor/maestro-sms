@@ -9,6 +9,7 @@
 // =============================================================================
 
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { csvCell } from "../common/csv";
 import PDFDocument from "pdfkit";
 import {
   computeBonusPayslip,
@@ -359,11 +360,6 @@ export class PayrollService {
     });
     const dec = (v: string | null | undefined) => (v ? decryptField(v, p.schoolId) : "");
     // Quote + neutralise spreadsheet formula injection (OWASP CSV injection).
-    const esc = (s: string) => {
-      let v = String(s);
-      if (/^[=+\-@\t\r]/.test(v)) v = `'${v}`;
-      return `"${v.replace(/"/g, '""')}"`;
-    };
     const lines = [`"Employee","Bank","Account","Net (${region.currency})"`];
     for (const s of rows.slips) {
       const emp = rows.empByUser.get(s.userId);
@@ -371,9 +367,9 @@ export class PayrollService {
       // assuming two.
       const net = s.netEnc ? toMajor(Number(decryptField(s.netEnc, p.schoolId)), region.currency) : 0;
       lines.push([
-        esc(rows.nameById.get(s.userId) ?? ""),
-        esc(dec(emp?.bankNameEnc)),
-        esc(dec(emp?.bankAccountEnc)),
+        csvCell(rows.nameById.get(s.userId) ?? ""),
+        csvCell(dec(emp?.bankNameEnc)),
+        csvCell(dec(emp?.bankAccountEnc)),
         net.toFixed(currencyDecimals(region.currency)),
       ].join(","));
     }
@@ -413,11 +409,6 @@ export class PayrollService {
       return { run, slips, nameById: new Map(users.map((u) => [u.id, u.name])), empByUser: new Map(emps.map((e) => [e.userId, e])) };
     });
     // Quote + neutralise spreadsheet formula injection (OWASP CSV injection).
-    const esc = (s: string) => {
-      let v = String(s);
-      if (/^[=+\-@\t\r]/.test(v)) v = `'${v}`;
-      return `"${v.replace(/"/g, '""')}"`;
-    };
     const dec = (v: string | null | undefined) => (v ? decryptField(v, p.schoolId) : "");
     const money = (m: number) => (m / 100).toFixed(2);
     const period = `${data.run.periodYear}-${String(data.run.periodMonth).padStart(2, "0")}`;
@@ -429,12 +420,12 @@ export class PayrollService {
       const name = data.nameById.get(s.userId) ?? "";
       const emp = data.empByUser.get(s.userId);
       if (type === "paye") {
-        lines.push([esc(name), esc(dec(emp?.tinEnc)), money(bd.grossMinor), money(bd.payeMinor)].join(","));
+        lines.push([csvCell(name), csvCell(dec(emp?.tinEnc)), money(bd.grossMinor), money(bd.payeMinor)].join(","));
       } else if (type === "pension") {
         if (bd.pensionMinor <= 0) continue; // bonus runs carry no pension
         lines.push([
-          esc(name),
-          esc(dec(emp?.rsaPinEnc)),
+          csvCell(name),
+          csvCell(dec(emp?.rsaPinEnc)),
           money(bd.grossMinor),
           money(bd.pensionMinor),
           money(employerPensionMinor(bd.grossMinor)),
@@ -444,7 +435,7 @@ export class PayrollService {
         const nhf = bd.otherDeductions.filter((d) => d.name.trim().toUpperCase() === "NHF");
         const total = nhf.reduce((sum, d) => sum + d.amountMinor, 0);
         if (total <= 0) continue; // only staff with an NHF deduction component
-        lines.push([esc(name), money(bd.grossMinor), money(total)].join(","));
+        lines.push([csvCell(name), money(bd.grossMinor), money(total)].join(","));
       }
     }
     const header =

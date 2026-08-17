@@ -23,6 +23,7 @@
 // =============================================================================
 
 import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, Optional, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
+import { csvCell } from "../common/csv";
 import PDFDocument from "pdfkit";
 import type { InvoiceAdjustmentDto, LateFeeConfigDto } from "@sms/types";
 import {
@@ -574,10 +575,3 @@ export class FeeOpsService {
   }
 }
 
-/** RFC-4180 CSV escaping + formula-injection defence (OWASP; mirrors the
- *  platform-audit exporter). */
-function csvCell(v: unknown): string {
-  let s = v == null ? "" : String(v);
-  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
-  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}

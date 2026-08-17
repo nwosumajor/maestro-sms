@@ -9,6 +9,7 @@
 // =============================================================================
 
 import {ConflictException, BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException} from "@nestjs/common";
+import { csvCell } from "../common/csv";
 import { Prisma } from "@sms/db";
 import type { BookLoanDto, FineReceiptDto, LibraryBookDto, LibraryReportDto } from "@sms/types";
 import {
@@ -546,14 +547,9 @@ export class LibraryService {
     const truncated = rowsRaw.length > CATALOGUE_EXPORT_MAX;
     const books = (truncated ? rowsRaw.slice(0, CATALOGUE_EXPORT_MAX) : rowsRaw).map((b) => this.bookDto(b));
     // Quote + neutralise spreadsheet formula injection (OWASP CSV injection).
-    const esc = (v: string | number | null) => {
-      let s = String(v ?? "");
-      if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
-      return `"${s.replace(/"/g, '""')}"`;
-    };
     const header = "Title,Author,ISBN,Barcode,Category,TotalCopies,AvailableCopies";
     const rows = books.map((b) =>
-      [b.title, b.author, b.isbn, b.barcode, b.category, b.totalCopies, b.availableCopies].map(esc).join(","),
+      [b.title, b.author, b.isbn, b.barcode, b.category, b.totalCopies, b.availableCopies].map(csvCell).join(","),
     );
     // A truncated export announces itself IN THE FILE. A librarian reconciling
     // stock will not read an HTTP header, but they will see the last line.
