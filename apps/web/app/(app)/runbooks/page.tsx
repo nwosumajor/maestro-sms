@@ -80,10 +80,9 @@ const DOCS: Doc[] = [
       "The academic core, HR, and communication",
     ],
     source: "docs/ONBOARDING-MANUAL.html",
-    // This one is authored as HTML, not markdown, so there is no block model to
-    // render from — it prints through the browser instead. Said plainly rather
-    // than made to look like the other two.
-    pdf: { href: "/manual?print=1", label: "Print / save as PDF ↗", note: "Prints from the browser." },
+    // Authored as HTML rather than markdown, and parsed into the SAME block
+    // model so it renders through the same emitter as the runbooks.
+    pdf: { href: "/manual?format=pdf", label: "Download PDF ↓", note: "A generated file — 14 pages." },
   },
 ];
 

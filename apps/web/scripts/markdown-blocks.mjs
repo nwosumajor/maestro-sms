@@ -156,7 +156,7 @@ export function parseMarkdown(md) {
  * read as formatting — these documents are full of commands meant to be copied
  * exactly, and a mangled one is worse than an unstyled one.
  *
- * @returns {{text:string, bold?:boolean, code?:boolean, href?:string}[]}
+ * @returns {{text:string, bold?:boolean, italic?:boolean, code?:boolean, href?:string}[]}
  */
 export function inlineRuns(src) {
   const runs = [];

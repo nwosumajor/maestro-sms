@@ -10,6 +10,8 @@
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseManualHtml } from "./html-blocks.mjs";
+import { renderRunbookPdf } from "./runbook-pdf.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..", "..");
@@ -18,14 +20,32 @@ const out = join(here, "..", "app", "manual", "manual-html.ts");
 
 const html = readFileSync(src, "utf8");
 
+// A REAL PDF, through the same emitter the runbooks use.
+//
+// The manual is authored as HTML rather than markdown, which is why it was the
+// last document still relying on the browser's print export. Parsing it into the
+// same block model means all three render through ONE piece of layout code — so
+// a fix to how a table breaks across a page fixes it everywhere, and no document
+// can quietly diverge from its own page.
+const { blocks } = parseManualHtml(html);
+const pdf = await renderRunbookPdf({
+  title: "School Leader's Manual",
+  subtitle: "Running your school on MAESTRO-SMS — from first login to a school that runs itself.",
+  source: "docs/ONBOARDING-MANUAL.html",
+  blocks,
+});
+
 const banner = `// GENERATED FILE — do not edit by hand.
 // Source: docs/ONBOARDING-MANUAL.html
 // Regenerate: pnpm --filter @sms/web build:manual
 /* eslint-disable */
 
 export const MANUAL_HTML = ${JSON.stringify(html)};
+
+/** The same document as a generated PDF — see build-manual.mjs. */
+export const MANUAL_PDF_BASE64 = ${JSON.stringify(pdf.toString("base64"))};
 `;
 
 mkdirSync(dirname(out), { recursive: true });
 writeFileSync(out, banner, "utf8");
-console.log(`build-manual: ${html.length} chars -> app/manual/manual-html.ts`);
+console.log(`build-manual: ${html.length} chars / ${Math.round(pdf.length / 1024)}KB pdf -> app/manual/manual-html.ts`);

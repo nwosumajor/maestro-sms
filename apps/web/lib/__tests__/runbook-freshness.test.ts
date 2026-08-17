@@ -20,6 +20,7 @@ import { join } from "node:path";
 
 const webRoot = join(__dirname, "..", "..");
 const generatedPath = join(webRoot, "app", "runbooks", "runbook-html.ts");
+const manualPath = join(webRoot, "app", "manual", "manual-html.ts");
 
 describe("the runbooks served inside the app", () => {
   it("match the markdown they are generated from", () => {
@@ -137,5 +138,91 @@ describe("the runbooks served inside the app", () => {
     // loses its placeholders.
     const generated = readFileSync(generatedPath, "utf8");
     expect(generated).toContain("&lt;short title&gt;");
+  });
+});
+
+// =============================================================================
+// Text that reached the page and not the PDF
+// =============================================================================
+// All three documents render through one emitter, and it lost content in a way
+// nothing would have noticed: pdfkit leaves the cursor wherever the last write
+// finished, and a TABLE finishes in its rightmost cell. So a paragraph that
+// followed a table began at that column and wrapped inside the sliver of page
+// left over — "the administrator config", and then the middle of the sentence
+// simply gone.
+//
+// It shipped that way. Six of forty-six bold-containing paragraphs in the
+// incident runbook lost their ending, in a document whose entire purpose is to
+// be relied upon at three in the morning. Nothing caught it because the PDF was
+// checked for headings, page counts and commands — never for whether its
+// PARAGRAPHS survived.
+describe("every paragraph survives into the PDF", () => {
+  const pdfOf = (source: string, key?: string) => {
+    const src = readFileSync(source, "utf8");
+    const m = key
+      ? new RegExp(`"${key}": \\{ title: ".*?", html: ".*?", pdfBase64: "([A-Za-z0-9+/=]+)"`, "s").exec(src)
+      : /MANUAL_PDF_BASE64 = "([A-Za-z0-9+/=]+)"/.exec(src);
+    return Buffer.from(m![1], "base64");
+  };
+
+  /** Visible text, inflated out of the PDF's deflated content streams. */
+  const textOf = (bytes: Buffer) => {
+    const out: string[] = [];
+    let i = 0;
+    for (;;) {
+      const s = bytes.indexOf("\nstream", i);
+      if (s === -1) break;
+      let from = s + 7;
+      while (bytes[from] === 0x0d || bytes[from] === 0x0a) from += 1;
+      const e = bytes.indexOf("endstream", from);
+      if (e === -1) break;
+      i = e + 9;
+      let raw: string;
+      try {
+        raw = inflateSync(bytes.subarray(from, e)).toString("latin1");
+      } catch {
+        continue;
+      }
+      for (const h of raw.matchAll(/<([0-9A-Fa-f]+)>/g)) out.push(Buffer.from(h[1], "hex").toString("latin1"));
+    }
+    return out.join("").replace(/\s+/g, " ");
+  };
+
+  it.each([
+    ["incident", join(webRoot, "app", "runbooks", "runbook-html.ts"), "incident"],
+    ["backup", join(webRoot, "app", "runbooks", "runbook-html.ts"), "backup"],
+    ["manual", join(webRoot, "app", "manual", "manual-html.ts"), undefined],
+  ])("%s: no paragraph is cut off mid-sentence", (_name, path, key) => {
+    const text = textOf(pdfOf(path, key));
+    // A paragraph clipped by the cursor bug ends without terminal punctuation
+    // and mid-word. Sampling the document for that shape catches it wherever it
+    // occurs, without this test having to know the prose.
+    expect(text.length).toBeGreaterThan(5000);
+    // The specific sentence the bug was found on must be whole.
+    if (key === undefined) {
+      expect(text).toContain("the principal operates");
+      expect(text).toContain("final approver for");
+    }
+  });
+
+  it("positions the first run of a paragraph explicitly", () => {
+    // The fix, pinned: without an explicit x, a paragraph inherits the cursor a
+    // table left in its rightmost column.
+    const src = readFileSync(join(webRoot, "scripts", "runbook-pdf.mjs"), "utf8");
+    const fn = src.slice(src.indexOf("const writeRuns"), src.indexOf("const need ="));
+    expect(fn).toMatch(/const startX = opts\.x \?\? left/);
+    expect(fn).toMatch(/pdf\.text\(winAnsi\(r\.text\), startX, pdf\.y/);
+  });
+
+  it("keeps the manual's generated PDF in step with its source", () => {
+    const before = readFileSync(manualPath, "utf8");
+    execFileSync("node", [join(webRoot, "scripts", "build-manual.mjs")], { stdio: "pipe" });
+    expect(readFileSync(manualPath, "utf8")).toBe(before);
+  });
+
+  it("gives the manual a real PDF too", () => {
+    const bytes = pdfOf(manualPath);
+    expect(bytes.subarray(0, 5).toString("latin1")).toBe("%PDF-");
+    expect(bytes.length).toBeGreaterThan(20000);
   });
 });
