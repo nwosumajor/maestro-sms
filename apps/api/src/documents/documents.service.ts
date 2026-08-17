@@ -130,6 +130,23 @@ export class DocumentsService {
       if (existing.studentId) await this.assertCanAccessStudent(tx, p, existing.studentId);
       else if (!this.isStaffWide(p)) throw new NotFoundException("Document not found");
 
+      // THE BYTES MUST ACTUALLY BE THERE.
+      //
+      // This confirms a presigned PUT, which happens between the browser and the
+      // bucket where the API cannot see it. It took the client's word for it —
+      // flipped the document to UPLOADED and, for a report card or certificate,
+      // notified the guardians. So an upload that silently failed produced a
+      // family told their child's document was ready and a download that 404s,
+      // with the record asserting otherwise.
+      //
+      // The other upload path writes the bytes itself and so has always been
+      // safe; this one is the door that could not tell.
+      if (!(await this.storage.exists(existing.storageKey))) {
+        throw new BadRequestException(
+          "The file has not arrived in storage — the upload did not complete. Try uploading it again.",
+        );
+      }
+
       const updated = await tx.document.update({
         where: { id },
         data: { status: "UPLOADED", sizeBytes: sizeBytes ?? existing.sizeBytes ?? null },

@@ -30,6 +30,16 @@ export interface StorageProvider {
   upload(args: { key: string; body: Buffer; contentType: string }): Promise<void>;
   /** Server-side download of raw bytes (null if the object is absent). */
   download(key: string): Promise<Buffer | null>;
+  /**
+   * Is there actually an object at this key?
+   *
+   * Needed because a presigned PUT happens between the browser and the bucket,
+   * where the API cannot see it. Confirming an upload without asking this means
+   * telling a family their child's report card is ready when the bytes may
+   * never have arrived. A HEAD, not a GET: the answer is one bit and these can
+   * be large.
+   */
+  exists(key: string): Promise<boolean>;
   /** Remove the stored object (best-effort cleanup on document delete). */
   delete(key: string): Promise<void>;
 }
@@ -76,6 +86,19 @@ export class StubStorageProvider implements StorageProvider {
       return await fs.readFile(this.pathFor(key));
     } catch {
       return null;
+    }
+  }
+
+  async exists(key: string): Promise<boolean> {
+    // The stub never receives a presigned PUT — nothing writes to
+    // storage.local — so a document uploaded "through" the stub's presigned URL
+    // genuinely has no bytes, and saying so is the honest answer rather than an
+    // inconvenient one.
+    try {
+      const st = await fs.stat(this.pathFor(key));
+      return st.isFile() && st.size > 0;
+    } catch {
+      return false;
     }
   }
 
