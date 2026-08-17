@@ -181,10 +181,23 @@ export class LibraryService {
       const loan = await tx.bookLoan.findFirst({ where: { id: loanId } });
       if (!loan) throw new NotFoundException("Loan not found");
       if (!this.isLibrarian(p) && loan.borrowerId !== p.userId) throw new NotFoundException("Loan not found");
+      // Read for the MESSAGE, claim for the RULE. The two checks below tell a
+      // borrower exactly why they were refused; the conditional update is what
+      // actually enforces it, because both of them are reads and two concurrent
+      // renewals at READ COMMITTED both pass them before either commits — and
+      // the cap is then exceeded by whoever commits second.
       if (loan.status !== "ISSUED") throw new BadRequestException("Loan is not active");
       if (loan.renewedCount >= MAX_RENEWALS) throw new BadRequestException("Maximum renewals reached");
       const dueAt = new Date(Math.max(loan.dueAt.getTime(), Date.now()) + RENEW_DAYS * DAY_MS);
-      await tx.bookLoan.update({ where: { id: loanId }, data: { dueAt, renewedCount: { increment: 1 } } });
+      const claimed = await tx.bookLoan.updateMany({
+        where: { id: loanId, status: "ISSUED", renewedCount: { lt: MAX_RENEWALS } },
+        data: { dueAt, renewedCount: { increment: 1 } },
+      });
+      if (claimed.count === 0) {
+        // The row moved between the read and the write — another renewal or a
+        // return landed first.
+        throw new BadRequestException("This loan changed while you were renewing it — reload and try again");
+      }
       await this.log(tx, p, "library.renew", loanId, { renewedCount: loan.renewedCount + 1 });
       return this.loanDto(tx, loanId);
     });
@@ -232,8 +245,31 @@ export class LibraryService {
       //
       // It also made "what does this leaver owe" a lie: the exit preview reads
       // the invoice ledger, so a pupil with unpaid fines showed as owing nothing.
+      // CLAIM THE RETURN BEFORE ACTING ON IT.
+      //
+      // The `status !== "ISSUED"` check above is a read, and issuing was made
+      // atomic against exactly this while returning was not. At READ COMMITTED
+      // two returns of the same loan both read ISSUED before either commits,
+      // both pass, and both do everything below. Proven against the database by
+      // interleaving the service's own statements in two sessions: a book with
+      // THREE copies finished with FOUR available — stock the library does not
+      // own, and it never comes back, because nothing ever recounts.
+      //
+      // (Six concurrent HTTP returns did NOT reproduce it — the window is
+      // narrow. That is a reason to close it cheaply, not a reason to call it
+      // safe: a double-clicked button, a retried request or a slower database
+      // widens it, and the same read-then-write shape was worth hardening on
+      // the issue side.)
+      //
+      // The conditional update is the serialisation point: exactly one caller
+      // gets count 1, so exactly one bills the fine and exactly one puts the
+      // copy back. Everything with a consequence happens after it.
+      const claimed = await tx.bookLoan.updateMany({
+        where: { id: loanId, status: "ISSUED" },
+        data: { status: "RETURNED", returnedAt: now, fineMinor },
+      });
+      if (claimed.count === 0) throw new BadRequestException("Loan already returned");
       if (fineMinor > 0) await this.billFine(tx, p, loan, fineMinor, daysLate);
-      await tx.bookLoan.update({ where: { id: loanId }, data: { status: "RETURNED", returnedAt: now, fineMinor } });
       await tx.libraryBook.update({ where: { id: loan.bookId }, data: { availableCopies: { increment: 1 } } });
       await this.log(tx, p, "library.return", loanId, { daysLate, fineMinor });
       return this.loanDto(tx, loanId);

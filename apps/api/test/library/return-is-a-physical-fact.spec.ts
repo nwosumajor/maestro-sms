@@ -59,6 +59,9 @@ function makeService() {
     bookLoan: {
       findFirst: jest.fn(async () => loan),
       update: jest.fn(async () => ({})),
+      // returnLoan/renew CLAIM the row with a conditional updateMany now (#250),
+      // so the write only lands while the loan is still ISSUED.
+      updateMany: jest.fn(async () => ({ count: 1 })),
       findMany: jest.fn(async () => []),
     },
     libraryBook: {

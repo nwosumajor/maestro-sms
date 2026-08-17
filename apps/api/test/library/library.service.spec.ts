@@ -45,6 +45,9 @@ function makeTx(over: Record<string, unknown> = {}) {
       findFirstOrThrow: jest.fn().mockResolvedValue(over.loanRow ?? { id: "l1", bookId: "b1", borrowerId: "stu1", status: "ISSUED", issuedAt: new Date(), dueAt: new Date(Date.now() + 14 * DAY), returnedAt: null, renewedCount: 0, fineMinor: 0, finePaid: false }),
       create: jest.fn(() => { calls.loanCreate++; return Promise.resolve({ id: "l1" }); }),
       update: jest.fn().mockResolvedValue({}),
+      // returnLoan/renew CLAIM the row with a conditional updateMany now (#250),
+      // so the write only lands while the loan is still ISSUED.
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     user: { findFirst: jest.fn().mockResolvedValue({ id: "stu1", name: "Stu" }) },
     // An overdue fine is now a CHARGE on the ledger, not just a number on the
