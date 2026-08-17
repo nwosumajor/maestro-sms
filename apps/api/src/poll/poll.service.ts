@@ -16,6 +16,7 @@
 // =============================================================================
 
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { Prisma } from "@sms/db";
 import type { PageDto, PollDto } from "@sms/types";
 import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
 import { decodeCursor, pageLimit, seekWhere, toPage } from "../common/keyset-cursor";
@@ -103,7 +104,20 @@ export class PollService {
       if (!option) throw new BadRequestException("Invalid option for this poll");
       const already = await tx.pollVote.findFirst({ where: { pollId, voterId: p.userId }, select: { id: true } });
       if (already) throw new BadRequestException("You have already voted in this poll");
-      await tx.pollVote.create({ data: { schoolId: p.schoolId, pollId, optionId, voterId: p.userId } });
+      // The read above cannot enforce one-vote-per-member — at READ COMMITTED
+      // two clicks both see no vote. The BALLOT IS SAFE regardless, because
+      // `@@unique([pollId, voterId])` really exists in the database (checked,
+      // not assumed): the second insert is refused by Postgres. What it is not
+      // is a 500, which is what an unhandled P2002 reaching the client looks
+      // like to somebody who simply double-clicked.
+      try {
+        await tx.pollVote.create({ data: { schoolId: p.schoolId, pollId, optionId, voterId: p.userId } });
+      } catch (e) {
+        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+          throw new BadRequestException("You have already voted in this poll");
+        }
+        throw e;
+      }
       // Audit records ONLY that this member voted — never which option.
       // SYSTEM actor: a vote must not be attributable — see logAs.
       await this.logAs(tx, SYSTEM_ACTOR_ID, p.schoolId, "poll.vote", pollId, {});

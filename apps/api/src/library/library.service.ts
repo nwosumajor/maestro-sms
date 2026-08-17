@@ -334,7 +334,21 @@ export class LibraryService {
       if (loan.fineMinor <= 0) throw new BadRequestException("No fine to pay");
       if (loan.finePaid) throw new BadRequestException("Fine already paid");
       const paidAt = new Date();
-      await tx.bookLoan.update({ where: { id: loanId }, data: { finePaid: true, finePaidAt: paidAt } });
+      // CLAIM THE SETTLEMENT. `finePaid` is read above and the Payment is
+      // written below, so at READ COMMITTED two callers both see false, both
+      // set it true — which is idempotent and looks harmless — and both POST A
+      // PAYMENT. Nothing on `payment` prevents it: the table has no unique
+      // constraint that a duplicate fine would violate, so the invoice is
+      // credited twice for one fine and can tip into PAID or an overpayment
+      // credit off the back of money that was handed over once.
+      //
+      // The two reads above stay because they say WHICH refusal it is; this is
+      // what enforces it.
+      const claimed = await tx.bookLoan.updateMany({
+        where: { id: loanId, finePaid: false, fineMinor: { gt: 0 } },
+        data: { finePaid: true, finePaidAt: paidAt },
+      });
+      if (claimed.count === 0) throw new BadRequestException("Fine already paid");
 
       // POST THE MONEY, do not just tick a box.
       //

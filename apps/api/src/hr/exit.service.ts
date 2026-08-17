@@ -109,6 +109,23 @@ export class ExitService {
       if (row.initiatedById === p.userId) {
         throw new ForbiddenException("An exit must be decided by a different person (separation of duties)");
       }
+      // CLAIM THE DECISION BEFORE SETTLING ANYTHING.
+      //
+      // The PENDING check above is a read, and everything below WRITES: it
+      // posts `loan_repayment` rows against the departing member's outstanding
+      // loans and decrements each balance. At READ COMMITTED two approvals both
+      // pass the read and both recover the loans — and the unique index does
+      // NOT save it, because these repayments carry `payrollRunId: null` and
+      // Postgres treats NULLs as distinct, so a second identical row is
+      // perfectly legal. The balance is written as `balance - take` from a
+      // figure read earlier, so it is a lost update on top.
+      //
+      // Same transaction, so a refusal further down rolls the claim back.
+      const claimed = await tx.staffExit.updateMany({
+        where: { id, status: "PENDING" },
+        data: { status: approve ? "APPROVED" : "REJECTED" },
+      });
+      if (claimed.count === 0) throw new BadRequestException("This exit has already been decided");
       if (approve) {
         const emp = await tx.employee.findFirst({ where: { userId: row.userId }, select: { id: true } });
         if (!emp) throw new NotFoundException("Employee record not found");

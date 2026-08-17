@@ -25,9 +25,16 @@ const other = { schoolId: "S", userId: "kid-2", roles: ["student"], permissions:
 
 function makeService(loan: Record<string, unknown> | null, line: { invoiceId: string } | null = { invoiceId: "inv-1" }) {
   const update = jest.fn().mockResolvedValue({});
+  const updateMany = jest.fn().mockResolvedValue({ count: 1 });
   const paymentCreate = jest.fn().mockResolvedValue({});
   const tx = {
-    bookLoan: { findFirst: jest.fn().mockResolvedValue(loan), update },
+    // payFine CLAIMS the settlement with a conditional updateMany now (#252),
+    // so the Payment is posted only by the caller that wins it.
+    bookLoan: {
+      findFirst: jest.fn().mockResolvedValue(loan),
+      update,
+      updateMany,
+    },
     libraryBook: { findFirstOrThrow: jest.fn().mockResolvedValue({ title: "Things Fall Apart" }) },
     user: { findFirst: jest.fn().mockResolvedValue({ name: "Ada Obi" }) },
     // A fine is a charge on the ledger now, so paying one settles a real
@@ -47,7 +54,7 @@ function makeService(loan: Record<string, unknown> | null, line: { invoiceId: st
   };
   const svc = Object.create(LibraryService.prototype) as LibraryService;
   Object.assign(svc, { db, audit: { record: jest.fn() } });
-  return { svc, tx, update, paymentCreate };
+  return { svc, tx, update, paymentCreate , updateMany };
 }
 
 const paidLoan = {
@@ -62,13 +69,18 @@ const paidLoan = {
 
 describe("paying a fine", () => {
   it("records WHEN the money was taken", async () => {
-    const { svc, update } = makeService({ ...paidLoan, finePaid: false, finePaidAt: null });
+    // The flag and the timestamp are written by the CLAIM now (#252) — the
+    // conditional update that decides which caller gets to post the payment —
+    // so that is where this reads them from. The property being asserted is
+    // unchanged: what was stored is what the receipt states.
+    const { svc, updateMany } = makeService({ ...paidLoan, finePaid: false, finePaidAt: null });
     const receipt = await svc.payFine(librarian as never, LOAN);
-    expect(update.mock.calls[0][0].data.finePaid).toBe(true);
-    expect(update.mock.calls[0][0].data.finePaidAt).toBeInstanceOf(Date);
+    const claim = updateMany.mock.calls[0][0];
+    expect(claim.data.finePaid).toBe(true);
+    expect(claim.data.finePaidAt).toBeInstanceOf(Date);
     // The receipt states the SAME instant that was stored, not a second one
     // computed on the way out.
-    expect(receipt.paidAt).toEqual(update.mock.calls[0][0].data.finePaidAt);
+    expect(receipt.paidAt).toEqual(claim.data.finePaidAt);
   });
 
   it("POSTS the money to the ledger, not just a boolean", async () => {
