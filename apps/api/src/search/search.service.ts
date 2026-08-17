@@ -61,7 +61,20 @@ export class SearchService {
       const hits: SearchHitDto[] = [];
 
       // --- students (relationship-scoped) ---
-      if (this.has(p, "student.profile.read") || this.has(p, "grade.read") || this.has(p, "class.read")) {
+      //
+      // GATED ON WHAT THE DESTINATION REQUIRES, not on anything that implies an
+      // interest in pupils. This read `student.profile.read || grade.read ||
+      // class.read` and then linked to /students/:id, which requires
+      // `student.profile.read` alone — so board, head_teacher, hr_clerk and
+      // hr_manager were all offered pupils they could not open. Verified live
+      // before the fix: a board member searching "Volume" got six pupils back
+      // and the first one answered 403.
+      //
+      // This is the same defect the class category below was fixed for, and the
+      // header of this file claims the whole scoping exists to prevent it. A
+      // result that cannot be opened is worse than no result: it tells a user
+      // the record exists and that they are being refused it.
+      if (this.has(p, "student.profile.read")) {
         const studentIds = await this.visibleStudentIds(tx, p);
         const where = studentIds === "all"
           ? { ...ON_ROLL_STUDENT, name: like }
@@ -73,7 +86,16 @@ export class SearchService {
       }
 
       // --- staff (staff-wide only) ---
-      if (p.roles.some((r) => STAFF_WIDE.has(r)) || this.has(p, "rbac.manage") || this.has(p, "hr.read")) {
+      //
+      // The link follows the caller. Every hit pointed at /admin/roles, which
+      // requires `rbac.manage` — so an HR clerk, who searches staff as their
+      // actual job, was handed results that bounced them to the dashboard.
+      // Sending them to the HR record instead keeps the capability rather than
+      // removing it, which is the right trade when the person has a legitimate
+      // reason to look and somewhere legitimate to look at.
+      const canManageRoles = p.roles.some((r) => STAFF_WIDE.has(r)) || this.has(p, "rbac.manage");
+      const canReadHr = this.has(p, "hr.read");
+      if (canManageRoles || canReadHr) {
         const staff = await tx.user.findMany({
           where: { name: like, roles: { some: { role: { name: { notIn: ["student", "parent"] } } } } },
           select: { id: true, name: true, email: true, roles: { select: { role: { select: { name: true } } } } },
@@ -81,7 +103,13 @@ export class SearchService {
         });
         for (const u of staff) {
           const roleNames = u.roles.map((r: { role: { name: string } }) => r.role.name).join(", ");
-          hits.push({ kind: "staff", id: u.id, title: u.name, subtitle: roleNames || u.email, href: `/admin/roles` });
+          hits.push({
+            kind: "staff",
+            id: u.id,
+            title: u.name,
+            subtitle: roleNames || u.email,
+            href: canManageRoles ? "/admin/roles" : `/hr/staff/${u.id}`,
+          });
         }
       }
 
@@ -92,13 +120,26 @@ export class SearchService {
       // rows behind them were safe (getClassInfo 404s a non-member, the roster
       // needs enrollment.read), which made it worse rather than better: search
       // offered six results whose links open a page that silently shows nothing.
+      //
+      // The link follows the caller here too. A class hit pointed at
+      // /timetable, which requires `timetable.read` — and head_teacher,
+      // hr_clerk and hr_manager hold `class.read` WITHOUT it, so the narrowing
+      // was right and the destination was still shut. /classes takes exactly
+      // `class.read`, which is the permission that let them see the row at all.
       if (this.has(p, "class.read")) {
+        const canOpenTimetable = this.has(p, "timetable.read");
         const classIds = await this.visibleClassIds(tx, p);
         if (classIds === "all" || classIds.length > 0) {
           const where = classIds === "all" ? { name: like } : { name: like, id: { in: classIds } };
           const classes = await tx.class.findMany({ where, select: { id: true, name: true }, take: PER_CATEGORY });
           for (const c of classes) {
-            hits.push({ kind: "class", id: c.id, title: c.name, subtitle: null, href: `/timetable?classId=${c.id}` });
+            hits.push({
+              kind: "class",
+              id: c.id,
+              title: c.name,
+              subtitle: null,
+              href: canOpenTimetable ? `/timetable?classId=${c.id}` : "/classes",
+            });
           }
         }
       }
