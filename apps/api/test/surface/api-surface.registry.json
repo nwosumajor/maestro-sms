@@ -2481,6 +2481,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "POST /operator/maintenance/index-bloat/run": {
+      "kind": "ui",
+      "note": "reviewed: the maintenance/jobs console runs it by hand; also runs weekly"
+    },
     "POST /operator/message-credits/:p/adjust": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"

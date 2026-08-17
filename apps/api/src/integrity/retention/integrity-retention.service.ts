@@ -40,6 +40,14 @@ const GAME_GUESS_RETENTION_DAYS = Number(process.env.GAME_GUESS_RETENTION_DAYS ?
  */
 const READ_NOTIFICATION_RETENTION_DAYS = Number(process.env.READ_NOTIFICATION_RETENTION_DAYS ?? 550);
 /**
+ * How long a scheduled job's run history is kept.
+ *
+ * Nothing pruned it. Fifteen jobs, some hourly, is well over a million rows in
+ * ten years — behind the operator console that reads them, and for no purpose:
+ * nobody diagnoses a sweep from a run eighteen months ago.
+ */
+const JOB_RUN_RETENTION_DAYS = Number(process.env.JOB_RUN_RETENTION_DAYS ?? 90);
+/**
  * Rows removed per statement, and the ceiling on statements per sweep.
  *
  * These windows are new, so the FIRST sweep on a mature database deletes
@@ -72,12 +80,12 @@ const LMS_REVISIONS_KEPT = Number(process.env.LMS_REVISIONS_KEPT ?? 50);
 export interface RetentionSweepResult {
   schools: SchoolRetentionResult[];
   purged: number;
-  platformWide: { gatewayEvents: number; contentRevisions: number; gameGuesses: number; readNotifications: number };
+  platformWide: { gatewayEvents: number; contentRevisions: number; gameGuesses: number; readNotifications: number; jobRuns: number };
   /** True when no privileged DB was configured — NOT the same as "nothing to purge". */
   skipped: boolean;
 }
 
-const EMPTY_PLATFORM_COUNTS = { gatewayEvents: 0, contentRevisions: 0, gameGuesses: 0, readNotifications: 0 };
+const EMPTY_PLATFORM_COUNTS = { gatewayEvents: 0, contentRevisions: 0, gameGuesses: 0, readNotifications: 0, jobRuns: 0 };
 
 export interface SchoolRetentionResult {
   schoolId: string;
@@ -154,12 +162,12 @@ export class IntegrityRetentionService {
       0,
     );
     const platformTotal =
-      globalCounts.gatewayEvents + globalCounts.contentRevisions + globalCounts.gameGuesses + globalCounts.readNotifications;
+      globalCounts.gatewayEvents + globalCounts.contentRevisions + globalCounts.gameGuesses + globalCounts.readNotifications + globalCounts.jobRuns;
     this.logger.log(
       `Retention sweep (${trigger}) complete: ${schools.length} schools, ${purged + platformTotal} rows purged ` +
         `(${purged} tenant-scoped + ${platformTotal} platform-wide). ` +
         `Platform-wide: gatewayEvents=${globalCounts.gatewayEvents} contentRevisions=${globalCounts.contentRevisions} ` +
-          `gameGuesses=${globalCounts.gameGuesses} readNotifications=${globalCounts.readNotifications}.`,
+          `gameGuesses=${globalCounts.gameGuesses} readNotifications=${globalCounts.readNotifications} jobRuns=${globalCounts.jobRuns}.`,
     );
     return { schools: results, purged: purged + platformTotal, platformWide: globalCounts, skipped: false };
   }
@@ -294,9 +302,10 @@ export class IntegrityRetentionService {
     contentRevisions: number;
     gameGuesses: number;
     readNotifications: number;
+    jobRuns: number;
   }> {
     const client = this.db.client;
-    if (!client) return { gatewayEvents: 0, contentRevisions: 0, gameGuesses: 0, readNotifications: 0 };
+    if (!client) return { gatewayEvents: 0, contentRevisions: 0, gameGuesses: 0, readNotifications: 0, jobRuns: 0 };
 
     const cutoff = new Date(Date.now() - GATEWAY_EVENT_RETENTION_DAYS * 86_400_000);
     // Every event past the window, INCLUDING the school-less ones.
@@ -345,11 +354,34 @@ export class IntegrityRetentionService {
       )
     `);
 
+    // Old job runs — but ALWAYS keeping the most recent run of each job.
+    //
+    // A plain age cutoff would blank the operator console for anything that
+    // runs rarely: a weekly sweep that last ran outside the window would show
+    // "never run", which is exactly the alarm that screen exists to raise, on a
+    // job that is perfectly healthy.
+    const jobCutoff = new Date(Date.now() - JOB_RUN_RETENTION_DAYS * 86_400_000);
+    const jobRuns = await this.deleteInBatches("job runs", (limit) => client.$executeRaw`
+      DELETE FROM job_run
+      WHERE id IN (
+        SELECT jr.id FROM job_run jr
+        WHERE jr."startedAt" < ${jobCutoff}
+          AND jr.id <> (
+            SELECT latest.id FROM job_run latest
+            WHERE latest.job = jr.job
+            ORDER BY latest."startedAt" DESC
+            LIMIT 1
+          )
+        LIMIT ${limit}
+      )
+    `);
+
     return {
       gatewayEvents: events.count,
       contentRevisions: Number(revisions),
       gameGuesses: guesses,
       readNotifications: readNotes,
+      jobRuns,
     };
   }
 }
