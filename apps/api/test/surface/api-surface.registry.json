@@ -1986,8 +1986,8 @@
       "note": "referenced by a literal path in apps/web"
     },
     "POST /documents/:p/confirm": {
-      "kind": "ui",
-      "note": "reviewed: a call in components/documents/DocumentUpload.tsx builds this path"
+      "kind": "system",
+      "note": "reviewed: completes a PRESIGNED-PUT upload. The web does NOT call it \u2014 DocumentUpload.tsx uses create -> upload-bytes \u2014 and the previous note claiming a call in that file was simply wrong. Kept for large files that should not stream through the API; it now HEADs the object before confirming, so it cannot mark a document available that never arrived."
     },
     "POST /documents/:p/upload-bytes": {
       "kind": "ui",

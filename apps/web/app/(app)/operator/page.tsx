@@ -123,7 +123,17 @@ export default async function OperatorPage({
           <a href="/runbooks/backup" target="_blank" rel="noopener noreferrer">
             <Button variant="outline" size="sm">Backup &amp; restore ↗</Button>
           </a>
-          <span className="text-xs text-muted-foreground">Read them before you need them.</span>
+          {/* The SCHOOL LEADER'S manual, labelled as such. The owner answers
+              questions about it all day — being able to open the exact document
+              a principal is looking at beats reconstructing it from memory. It
+              needs no permission beyond a session; it is here for convenience,
+              not access. */}
+          <a href="/manual" target="_blank" rel="noopener noreferrer">
+            <Button variant="outline" size="sm">School leader&apos;s manual ↗</Button>
+          </a>
+          <span className="text-xs text-muted-foreground">
+            The first two are yours; the third is what schools read.
+          </span>
         </div>
 
         {/* The alarm stays on the page opened daily — but as ONE line, not a

@@ -41,6 +41,10 @@ function makeService(f: Fakes) {
     presignUpload: jest.fn().mockResolvedValue({ url: "https://up", expiresInSeconds: 900 }),
     presignDownload: jest.fn().mockResolvedValue({ url: "https://down", expiresInSeconds: 900 }),
     delete: jest.fn().mockResolvedValue(undefined),
+    // Confirming a presigned upload now HEADs the object first — a document
+    // cannot be marked available, nor its guardians told, on the client's word
+    // alone. These fixtures are the happy path, so the bytes are there.
+    exists: jest.fn().mockResolvedValue(true),
   };
   const notifications = { enqueue: jest.fn().mockResolvedValue({ id: "n-1" }) };
   const service = new DocumentsService(db as never, audit as never, storage as never, notifications as never);

@@ -15,6 +15,7 @@ import {
   PutObjectCommand,
   GetObjectCommand,
   DeleteObjectCommand,
+  HeadObjectCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import type { PresignResult, StorageProvider } from "./storage.provider";
@@ -97,6 +98,29 @@ export class S3StorageProvider implements StorageProvider {
       return bytes ? Buffer.from(bytes) : null;
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * HEAD the object. A presigned PUT goes straight from the browser to the
+   * bucket, so this is the only way the API can know whether the bytes an upload
+   * claims to have written are really there.
+   *
+   * A missing object answers 404/NotFound; anything else — a permissions problem,
+   * a network fault — is re-raised rather than reported as "absent", because
+   * "the bucket would not answer" and "the file is not there" call for different
+   * responses and only one of them is the uploader's fault.
+   */
+  async exists(key: string): Promise<boolean> {
+    try {
+      await this.client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key }));
+      return true;
+    } catch (err) {
+      const status = (err as { $metadata?: { httpStatusCode?: number } })?.$metadata?.httpStatusCode;
+      const name = (err as { name?: string })?.name;
+      if (status === 404 || name === "NotFound" || name === "NoSuchKey") return false;
+      this.logger.error(`HEAD ${key} failed: ${String(err)}`);
+      throw err;
     }
   }
 
