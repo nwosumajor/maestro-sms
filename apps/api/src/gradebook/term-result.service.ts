@@ -790,8 +790,13 @@ export class TermResultService {
     if (this.isReadWide(p)) return true;
     if (p.userId === studentId) return true;
     // The student's supervisor or any teacher of a class they're enrolled in.
+    // SECURITY: ACTIVE only — see the note in documents.service. This is the
+    // same check written backwards (collect the pupil's classes, then ask
+    // whether the caller supervises or teaches one), so without the filter a
+    // teacher kept access to the reports of a pupil who had left their class.
+    // The pupil's OWN access returns above, so this narrows nobody's history.
     const enrollments = await tx.enrollment.findMany({
-      where: { studentId },
+      where: { studentId, status: "ACTIVE" },
       select: { classId: true },
     });
     const classIds = enrollments.map((e) => e.classId);

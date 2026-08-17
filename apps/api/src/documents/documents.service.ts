@@ -334,8 +334,15 @@ export class DocumentsService {
       select: { classId: true },
     });
     if (taught.length > 0) {
+      // SECURITY: ACTIVE only. Without the status filter this asked "was this
+      // pupil EVER in a class I teach", so a teacher kept access to a pupil who
+      // had since withdrawn, transferred or been promoted out — indefinitely,
+      // and to their records rather than merely their name. Proven live: a
+      // pupil was set to WITHDRAWN and their old teacher still fetched a signed
+      // download URL for their report card. Whole-school staff are unaffected,
+      // so the school can still produce a departed pupil's paperwork.
       const enrolled = await tx.enrollment.findMany({
-        where: { classId: { in: taught.map((t: { classId: string }) => t.classId) } },
+        where: { status: "ACTIVE", classId: { in: taught.map((t: { classId: string }) => t.classId) } },
         select: { studentId: true },
       });
       enrolled.forEach((e: { studentId: string }) => ids.add(e.studentId));
@@ -356,8 +363,15 @@ export class DocumentsService {
       select: { classId: true },
     });
     if (taught.length > 0) {
+      // SECURITY: ACTIVE only. Without the status filter this asked "was this
+      // pupil EVER in a class I teach", so a teacher kept access to a pupil who
+      // had since withdrawn, transferred or been promoted out — indefinitely,
+      // and to their records rather than merely their name. Proven live: a
+      // pupil was set to WITHDRAWN and their old teacher still fetched a signed
+      // download URL for their report card. Whole-school staff are unaffected,
+      // so the school can still produce a departed pupil's paperwork.
       const enrolled = await tx.enrollment.findFirst({
-        where: { studentId, classId: { in: taught.map((t: { classId: string }) => t.classId) } },
+        where: { studentId, status: "ACTIVE", classId: { in: taught.map((t: { classId: string }) => t.classId) } },
         select: { id: true },
       });
       if (enrolled) return;
