@@ -780,12 +780,28 @@
       <p>&ldquo;Today&rdquo; means today at <em>your</em> school, not on the server, so a register taken in the evening still files against the correct local date.</p>
 
       <h3>Keeping records complete</h3>
-      <p>Each student profile carries a completion figure showing what is still missing — contacts, medical information, a linked guardian. A daily reminder goes out until the profile is submitted, after which a supervisor and an administrator review it. It is the least interesting screen in the system and the one that decides whether you can reach a parent in an emergency.</p>
+      <p>Each student profile carries a completion figure showing what is still missing — contacts, medical information, a linked guardian. A daily reminder goes out until the profile is submitted, after which it passes through a short review chain on the pupil's own record: the family or your office <strong>submits</strong> it, the class supervisor <strong>checks</strong> it, and an administrator <strong>approves</strong> it. The panel shows where it has got to &mdash; not submitted, waiting for review, changes requested, or approved &mdash; and a reviewer asking for changes writes a note saying what is wrong, so it comes back corrected rather than merely returned. It is the least interesting screen in the system and the one that decides whether you can reach a parent in an emergency.</p>
       <p>When a term ends, roll the school on to the next one from Classes. It moves the <em>current</em> pointer only: past terms, their registers and their results are untouched. If you forget, a daily sweep does it for you.</p>
 
       <h3>Grades and report cards</h3>
       <p>Teachers enter marks for their own classes. Results are weighted per term, and <strong>publishing them requires approval</strong> — a teacher cannot release results to parents alone.</p>
-      <p>Report cards are generated as PDFs from actual grades and attendance, carry your branding, and include two written remarks: one from the class supervisor and one from the head. Each generated card is filed automatically into the student's document vault, so families can retrieve it later regardless of who produced it.</p>
+      <p>Report cards are generated as PDFs from actual grades and attendance and carry your branding. Each generated card is filed automatically into the student's document vault, so families can retrieve it later regardless of who produced it &mdash; and guardians are told only once the file genuinely exists.</p>
+
+      <p>A card is assembled from four separate acts by three different people, and it is worth knowing which is which:</p>
+      <ol>
+        <li><strong>The marks.</strong> Each subject carries four components &mdash; exam, mid-term test, assignment and class note. The card prints them as C.A. (the three continuous-assessment parts added together) and Exam, with the total, the grade, the pupil's position in that subject, and what each column is out of. Beside the pupil's own mark it shows the class average and the lowest and highest scored, because &ldquo;65&rdquo; means something different when the class average is 49 than when it is 82.</li>
+        <li><strong>Skills and behaviour.</strong> Twenty traits in four groups &mdash; personal development, sense of responsibility, social development and psychomotor skills &mdash; each rated 1 to 5 by the class teacher or supervisor, or by an administrator. Every rating records who gave it and can be corrected. They print beside the marks and are <em>never</em> averaged into them: a behaviour rating and a mathematics score are different kinds of statement about a child. The Grades screen lists, per class, who still needs rating &mdash; as &ldquo;17 of 20&rdquo; rather than a tick, so a half-finished set is visible.</li>
+        <li><strong>The two remarks.</strong> The class teacher writes one, the principal or a school administrator the other. Both print over a signature line <em>under the name of whoever wrote them</em>. A comment about a child is a person's judgement and a family should be able to see whose it is.</li>
+        <li><strong>The promotion decision</strong>, if one has been taken for that term &mdash; stamped beside the principal's comment. It is never derived from the averages printed above it. See <em>The end of the year</em> below.</li>
+      </ol>
+
+      <p>The card also reports the <strong>year</strong>, not just the term: each subject's total in every term of the session, its annual average, grade and position, and the cumulative score. A third-term card showing only third-term marks would say nothing about the year the promotion decision actually turns on.</p>
+
+      <p>Two things are printed rather than assumed. The 1&ndash;5 behaviour scale is spelled out in words, and the grade key states every band with its range and its meaning &mdash; <em>A1 75&ndash;100 excellent</em>, and so on, taken from your school's own grading scale. A letter a family cannot interpret has not really reported anything. Attendance is term-scoped and leads with the number of times the school actually opened, because &ldquo;present: 46&rdquo; means nothing without its denominator.</p>
+
+      <h3>The end of the year</h3>
+      <p>Promotion runs from <strong>Classes &rarr; Promotion</strong>, and it moves nothing on the say-so of one person. You stage a batch for a class; a different senior approves it. Within a batch each pupil can be set individually &mdash; promoted, <em>retained</em> in the present class, or moved down into a class you name explicitly.</p>
+      <p>Every outcome is a decision somebody recorded, never one the system computed from marks. Once approved, that decision prints on the term's report cards. If nobody has decided, the line simply does not appear &mdash; which is the honest result, and better than a document asserting a year the school has not awarded.</p>
 
       <h3>Examinations</h3>
       <p>Two separate things share the word "exam":</p>
@@ -829,6 +845,10 @@
         <li><strong>Notifications</strong> — automatic alerts: absence, invoices, receipts, approvals waiting on you.</li>
       </ul>
       <p>Email and in-app messages are unlimited. <strong>SMS and WhatsApp consume message credits</strong>, purchased in bundles under Billing. A credit is only spent once the message is confirmed sent — a failed delivery costs you nothing. Everyone can control which external channels they receive under their own Account page; essential notices such as receipts and invoices always get through.</p>
+
+      <p><strong>When something does not arrive.</strong> An email can bounce, a phone number can be rejected by the network, and a message can be skipped because the school has run out of credits. Every one of those is listed for your staff on the Notifications page, with the reason and the person it was meant for &mdash; so you find out that a fee notice never reached a family from your own screen rather than from the family. Everyone listed still has the message in their in-app inbox; it is the email, SMS or WhatsApp copy that failed. The panel stays hidden when there is nothing wrong, so seeing it at all means something needs attention.</p>
+
+      <p>Separately, the system re-attempts anything that was queued but never sent &mdash; a message whose delivery was interrupted is picked up automatically within the hour. Where a message was handed to the provider and the outcome was lost, it is closed and reported rather than sent a second time: a duplicate fee notice costs a family's trust, and it cannot be known whether the first one arrived.</p>
     </section>
 
     <!-- ================================================================= -->
@@ -964,6 +984,13 @@
             <tr><td>Your plan and renewal</td><td>Billing</td></tr>
             <tr><td>Buy SMS credits</td><td>Billing</td></tr>
             <tr><td>Cover an absent teacher</td><td>Timetable → Teacher cover</td></tr>
+            <tr><td>Build the timetable automatically</td><td>Timetable &rarr; Auto-generate</td></tr>
+            <tr><td>Rate skills and behaviour</td><td>A pupil&rsquo;s record; outstanding list on Grades</td></tr>
+            <tr><td>Write a report-card remark</td><td>A pupil&rsquo;s record &rarr; Report card &amp; remarks</td></tr>
+            <tr><td>Promote a class at year end</td><td>Classes &rarr; Promotion</td></tr>
+            <tr><td>Approve a pupil&rsquo;s profile</td><td>The pupil&rsquo;s record</td></tr>
+            <tr><td>See messages that did not arrive</td><td>Notifications</td></tr>
+            <tr><td>Register your settlement bank</td><td>Fees &rarr; Reports</td></tr>
             <tr><td>Your own 2FA and password</td><td>Account</td></tr>
           </tbody>
         </table>
