@@ -245,6 +245,9 @@ importers:
       jest-environment-jsdom:
         specifier: ^29.7.0
         version: 29.7.0
+      pdfkit:
+        specifier: ^0.19.1
+        version: 0.19.1
       postcss:
         specifier: ^8.4.47
         version: 8.5.15

@@ -28,8 +28,28 @@ export async function GET(req: Request, ctx: { params: Promise<{ doc: string }> 
     return new NextResponse("Not found", { status: 404 });
   }
 
-  const book = RUNBOOKS[doc];
+  // `/runbooks/incident.pdf` serves the generated file; `/runbooks/incident`
+  // serves the page. One handler, because they are the same document and the
+  // access rules must not be able to differ between them.
+  const wantsPdf = doc.endsWith(".pdf");
+  const key = wantsPdf ? doc.slice(0, -4) : doc;
+  const book = RUNBOOKS[key];
   if (!book) return new NextResponse("Not found", { status: 404 });
+
+  if (wantsPdf) {
+    const bytes = Buffer.from(book.pdfBase64, "base64");
+    return new NextResponse(new Uint8Array(bytes), {
+      headers: {
+        "content-type": "application/pdf",
+        // ATTACHMENT, not inline: this route exists because somebody wanted a
+        // file to keep or send. The page is one click away for reading.
+        "content-disposition": `attachment; filename="${key}-runbook.pdf"`,
+        "content-length": String(bytes.length),
+        "cache-control": "private, no-store",
+        "x-robots-tag": "noindex, nofollow",
+      },
+    });
+  }
 
   // No explicit <head>: the generated HTML opens with <title>/<style> and then
   // <header>, and HTML5 closes the implied head at the first body element. The

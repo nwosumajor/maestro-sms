@@ -29,6 +29,8 @@ type Doc = {
   description: string;
   contents: string[];
   source: string;
+  /** A generated PDF file, or the browser's own print export. */
+  pdf: { href: string; label: string; note: string };
 };
 
 const DOCS: Doc[] = [
@@ -46,6 +48,7 @@ const DOCS: Doc[] = [
       "Verifying recovery, and the blameless post-mortem template",
     ],
     source: "docs/RUNBOOK-INCIDENT-RESPONSE.md",
+    pdf: { href: "/runbooks/incident.pdf", label: "Download PDF ↓", note: "A generated file — 12 pages." },
   },
   {
     href: "/runbooks/backup",
@@ -61,6 +64,7 @@ const DOCS: Doc[] = [
       "The version trap that makes a healthy-looking dump unrestorable",
     ],
     source: "docs/RUNBOOK-BACKUP-RESTORE.md",
+    pdf: { href: "/runbooks/backup.pdf", label: "Download PDF ↓", note: "A generated file — 3 pages." },
   },
   {
     href: "/manual",
@@ -76,6 +80,10 @@ const DOCS: Doc[] = [
       "The academic core, HR, and communication",
     ],
     source: "docs/ONBOARDING-MANUAL.html",
+    // This one is authored as HTML, not markdown, so there is no block model to
+    // render from — it prints through the browser instead. Said plainly rather
+    // than made to look like the other two.
+    pdf: { href: "/manual?print=1", label: "Print / save as PDF ↗", note: "Prints from the browser." },
   },
 ];
 
@@ -125,19 +133,18 @@ export default async function RunbooksPage() {
                     <a href={d.href} target="_blank" rel="noopener noreferrer">
                       <Button size="sm">Open ↗</Button>
                     </a>
-                    {/* `?print=1` opens the document and raises the browser's own
-                        print dialogue, where "Save as PDF" is a destination. It
-                        is the one route that renders EXACTLY what is on screen —
-                        a second, server-side PDF renderer would be a second
-                        layout to maintain and the one that quietly drifted. */}
-                    <a href={`${d.href}?print=1`} target="_blank" rel="noopener noreferrer">
+                    {/* The two runbooks serve a real generated file, built from
+                        the same parse of the markdown as the page. The manual is
+                        authored as HTML and prints through the browser — the
+                        label says which, rather than implying they are alike. */}
+                    <a href={d.pdf.href} target="_blank" rel="noopener noreferrer">
                       <Button variant="outline" size="sm">
-                        Download PDF ↓
+                        {d.pdf.label}
                       </Button>
                     </a>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Source: <code>{d.source}</code>
+                    {d.pdf.note} Source: <code>{d.source}</code>
                   </p>
                 </div>
               </CardContent>
