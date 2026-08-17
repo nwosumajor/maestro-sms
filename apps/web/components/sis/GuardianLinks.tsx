@@ -15,6 +15,7 @@ import type { StudentGuardianDto, Serialized } from "@sms/types";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { UnlinkGuardian } from "./UnlinkGuardian";
+import { LinkGuardian } from "./LinkGuardian";
 
 type Guardian = Serialized<StudentGuardianDto>;
 
@@ -95,6 +96,11 @@ export function GuardianLinks({
             </tbody>
           </table>
         )}
+        {/* Both halves of the same job, beside the list they change: this card
+            could show that the wrong adult was attached and offered nothing to
+            do about it, and attaching the right one meant going to another
+            page and re-selecting the pupil you were already looking at. */}
+        {canManage && <LinkGuardian studentId={studentId} />}
       </CardContent>
     </Card>
   );

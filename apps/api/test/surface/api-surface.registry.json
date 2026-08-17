@@ -2111,7 +2111,7 @@
     },
     "POST /guardians": {
       "kind": "ui",
-      "note": "reviewed: reached from components/admin/CreateUserForm.tsx"
+      "note": "reviewed: components/sis/LinkGuardian.tsx on the pupil's record (one picker, pupil known from context) and the bulk two-picker form in components/lms/ClassAdmin.tsx"
     },
     "POST /hangman": {
       "kind": "ui",

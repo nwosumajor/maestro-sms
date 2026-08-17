@@ -886,8 +886,66 @@ export class LmsService {
     }
   }
 
+  /**
+   * Attach a guardian ACCOUNT to a pupil.
+   *
+   * This decides who receives the child's absence alerts, invoices, receipts and
+   * report cards, and who may open their fees, grades, attendance and documents.
+   * It used to be a bare `create` on two ids taken from the request body, with
+   * nothing checked at all. Every one of these was accepted with a 201:
+   *
+   *   201  a TEACHER as the guardian
+   *   201  the pupil as their OWN guardian
+   *   201  the platform SYSTEM account, which is in another org entirely
+   *   500  the SAME pair twice   <- unique violation, straight to the client
+   *
+   * // SECURITY: ids in a request body are never trusted (Golden Rule #3). Both
+   * users are re-read through the tenant client, so RLS confines them to the
+   * caller's school and anyone else is simply NOT FOUND — 404, never a 403 that
+   * would confirm the id belongs to somebody.
+   *
+   * The role checks make the API agree with the picker the UI already uses
+   * (`UserPicker kind="parent"`). A member of staff who is also a parent at the
+   * school is a normal thing and is supported — roles are additive, so give
+   * that account the parent role; the refusal says so rather than leaving the
+   * office guessing.
+   */
   async linkGuardian(p: Principal, parentId: string, studentId: string) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      if (parentId === studentId) {
+        throw new BadRequestException("A pupil cannot be their own guardian");
+      }
+      const [parent, student] = await Promise.all([
+        tx.user.findFirst({ where: { id: parentId }, select: { id: true, name: true } }),
+        tx.user.findFirst({ where: { id: studentId }, select: { id: true, name: true } }),
+      ]);
+      if (!parent) throw new NotFoundException("Guardian account not found in this school");
+      if (!student) throw new NotFoundException("Student not found in this school");
+
+      const roles = (await tx.userRole.findMany({
+        where: { userId: { in: [parentId, studentId] }, role: { name: { in: ["parent", "student"] } } },
+        select: { userId: true, role: { select: { name: true } } },
+      })) as Array<{ userId: string; role: { name: string } }>;
+      const has = (userId: string, name: string) =>
+        roles.some((r) => r.userId === userId && r.role.name === name);
+      if (!has(studentId, "student")) {
+        throw new BadRequestException(`${student.name} is not a student`);
+      }
+      if (!has(parentId, "parent")) {
+        throw new BadRequestException(
+          `${parent.name} does not have the parent role. Give them that role first — an account can hold it alongside a staff role.`,
+        );
+      }
+
+      // A duplicate is the ordinary mistake now that the link form sits beside
+      // the list of existing guardians. It used to hit the unique index and
+      // reach the client as a 500.
+      const dup = await tx.parentChild.findFirst({
+        where: { parentId, studentId },
+        select: { id: true },
+      });
+      if (dup) throw new ConflictException(`${parent.name} is already linked to ${student.name}`);
+
       const row = await tx.parentChild.create({
         data: { schoolId: p.schoolId, parentId, studentId },
       });
