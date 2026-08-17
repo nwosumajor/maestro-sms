@@ -25,9 +25,13 @@ export function verifyToken(token: string): Principal {
   // audit log can say "the owner did this, as them" instead of silently
   // attributing the action to the target (Golden Rule #5).
   const imp = payload.imp as { by?: string } | undefined;
+  // Carried through so the refresh can revoke a session issued under a password
+  // that has since been changed. It grants nothing and is only ever compared.
+  const pwdAt = payload.pwd_at;
   return {
     userId,
     schoolId,
+    ...(typeof pwdAt === "number" ? { passwordChangedAtMs: pwdAt } : {}),
     roles: Array.isArray(payload.roles) ? (payload.roles as string[]) : [],
     permissions: Array.isArray(payload.permissions) ? (payload.permissions as string[]) : [],
     ...(imp?.by ? { impersonatedBy: String(imp.by) } : {}),
