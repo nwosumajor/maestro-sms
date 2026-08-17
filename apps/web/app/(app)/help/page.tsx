@@ -158,7 +158,8 @@ export default async function HelpPage() {
               { title: "Author CBT exams", body: mod("cbt") ? "CBT exams: build question banks, then schedule timed exams that sample questions per sitting. Auto-marked scores are numbers for YOUR review — you decide what they mean." : "When your school enables the CBT module you can author question banks and timed exams under CBT exams." },
               { title: "Decide scholarship requests", body: "Scholarships: requests from students in the class you supervise wait under “Awaiting your decision” — you are the FIRST stage of the approval chain (then guardian, then principal). You can also apply on behalf of any student you teach. Approve or reject with a note; everyone involved is notified." },
               { title: "Run class games", body: "Games: host a Live Quiz, Hangman or Typing Race for your class, or open a Class Race. Games only ever produce points and practice — never a grade or a record." },
-              { title: "Write report-card remarks", body: "Open a student you teach → Report card & remarks: pick the term and write the class teacher's remark. It prints on the report card under Remarks. The head's remark is written by the principal or a school administrator." },
+              { title: "Write report-card remarks", body: "Open a student you teach → Report card & remarks: pick the term and write the class teacher's remark. It prints on the report card over a signature line under YOUR name — the head's remark is written by the principal or a school administrator, under theirs." },
+              { title: "Rate skills and behaviour", body: "On the same pupil's record: twenty traits in four groups, each 1 to 5, entered in one go. Grades shows a per-class list of who still needs rating (“17 of 20”, not a tick) so a half-finished set is visible. They print beside the marks and are NEVER averaged into them." },
               { title: "Offer parent meeting slots", body: "Meetings: open time slots and parents book them for a chat about their child. You're notified on every booking and cancellation; withdraw a slot any time before it's booked." },
               { title: "See your week", body: "Timetable: switch between the class grid, BY TEACHER (your own week end to end) and BY ROOM. Your standing teaching load is shown alongside, and the grid prints." },
               { title: "Cover and invigilation duties", body: "If you're asked to cover a colleague's lesson while they're on leave, or to invigilate an exam, you're notified and it appears under Timetable and Exams respectively." },
@@ -176,13 +177,17 @@ export default async function HelpPage() {
               { title: "Import your students", body: "Admin → Bulk import: upload a CSV of students (idempotent on email). Approval generates login slips with one-time passwords per student, and parent links can be imported too." },
               { title: "Build classes & subjects", body: "Classes: create classes, assign teachers, set the class supervisor (form teacher), enrol students and link guardians. Set up the academic session and terms so grading has the right periods." },
               { title: "Set up the timetable", body: "Timetable: define periods and rooms, then place lessons — double-bookings are rejected automatically." },
+              { title: "Or let it build the timetable for you", body: "Timetable → Auto-generate: set how many lessons a week each subject offering needs, mark when teachers are unavailable, and fix a room to an offering if it must have one. The solver builds a conflict-free grid from those constraints and SHOWS ITS WORKING — how many lessons it placed, and for anything it could not, which constraint blocked it. Review the result and hand-tweak as usual; tick “replace existing lessons” only if you mean to start over." },
               { title: "Configure fees", body: "Fees: build your fee catalog and issue invoices. Parents pay online by card \u2014 and by mobile money where your country has it (M-Pesa, MTN MoMo, Airtel Money). Money settles to the bank account you register; large manual postings and all refunds need a second approver." },
               { title: "Review admissions", body: "Admin → Admissions: public applications arrive quarantined from student data until you review them. If you charge an admission-form fee, paid/unpaid status shows on each application." },
               { title: "Brand your portal", body: "Admin → Branding: upload your school logo (square, 128–2048px) and pick your brand colour and font — it appears for every member and on generated documents." },
               { title: "Cover for absent teachers", body: "Timetable → Teacher cover: pick a date range and the system lists every lesson whose teacher is on approved leave, so nothing is left unattended. Assign a reliever — it refuses anyone already teaching that period and notifies whoever you pick." },
               { title: "Run exams", body: "Exams: schedule a sitting (hall, date, time, seats), seat a whole class in one click, and roster invigilators. Editing a sitting is non-destructive, clashes are detected before you commit, and you can print a hall pack (seating chart + attendance sheet). Students and parents see only their own hall, time and seat; invigilators see their duties." },
+              { title: "Promote the school at year end", body: "Classes → Promotion: stage a batch for a class and it moves NOTHING until a different senior approves it. Each pupil can be set individually — promoted, RETAINED in the present class, or moved down to a class you name. Every outcome is somebody's decision recorded, never computed from marks, and the approved decision prints on that term's report cards." },
+              { title: "Messages that did not arrive", body: "Notifications: if an email bounced, a phone number was rejected, or a message was skipped because the school had run out of credits, it is listed there with the reason. Everyone listed still has the message in their in-app inbox — it is the email or SMS copy that failed. The panel stays hidden when there is nothing wrong." },
               { title: "Move the school on a term", body: "Classes: when a term ends, roll the school on to the next one. It moves the CURRENT pointer only \u2014 past terms, their registers and their results stay exactly as they were. A daily sweep does it automatically if you forget." },
-              { title: "Chase incomplete student profiles", body: "Students: a profile-completion figure shows what is still missing (contacts, medical, guardian). A daily nudge goes out until it is submitted, then a supervisor and an administrator review it." },
+              { title: "Chase incomplete student profiles", body: "Students: a completion figure shows what is still missing (contacts, medical, guardian), and a daily nudge goes out until it is submitted." },
+              { title: "The profile review chain", body: "On a pupil's record: the family or office SUBMITS the completed profile, the class supervisor CHECKS it, then an administrator APPROVES it — each stage on the same panel, showing the current state (Not submitted / Waiting for review / Changes requested / Approved). A reviewer asking for changes writes a note saying what, and it goes back to be resubmitted." },
               { title: "Run the desk with ID cards", body: "Scan: point a handheld scanner at a student or staff ID card and it resolves to that member \u2014 for the library desk, the gate, or an exam hall. Checking a student IN also marks them present in today\u2019s register. A card from another school returns nothing at all."},
               { title: "Correct an old register", body: "You hold the approval for attendance amendments, so registers older than 7 days you can edit directly \u2014 and you are who a teacher\u2019s correction comes to. Approvals: look for attendance amendments alongside the other chains." },
               { title: "Require 2FA for staff", body: "Admin → Roles → Require two-factor authentication for staff: when on, every staff member must set up an authenticator app before they can use the app. Students and parents are unaffected." },
@@ -212,7 +217,12 @@ export default async function HelpPage() {
           />
         )}
 
-        {can("admission.review") && !can("rbac.manage") && (
+        {/* The ROLE, not a permission set. `admission.review && !rbac.manage`
+            also caught the HR MANAGER, who was being shown a guide to records,
+            attendance, timetable and fee RECORDING — work that is not theirs and,
+            for fees, not even permitted to them. A guide named after a role is
+            gated on that role. */}
+        {is("junior_admin") && (
           <Guide
             title="Junior administrators — day-to-day operations"
             description="The operational tier: you run the desk; approvals stay with your seniors."
@@ -234,7 +244,13 @@ export default async function HelpPage() {
               { title: "Attendance amendments", body: "A teacher correcting a register more than 7 days old raises a request here. Registers in a term that has ENDED cannot be amended at all \u2014 not by you, not with approval \u2014 so if one is wrong the answer is a note on the record, not an edit." },
               { title: "One person, one stage", body: "You cannot act twice on the same request, and you cannot approve something you initiated — the engine enforces separation of duties." },
               { title: "Approve or reject with a note", body: "Your decision advances the request to the next stage (or ends it). The requester is notified automatically at the end." },
-              { title: "Sign off report cards", body: "Open a student → Report card & remarks: the head's remark is yours to write (the class teacher writes theirs). Both print on the generated card." },
+              // The head's remark is refused to anyone who is not a principal or
+              // school administrator — a HEAD TEACHER holds only grade.read. This
+              // step used to tell every approver it was theirs to write, sending
+              // the one role it names most directly at a button that refuses them.
+              ...(isLeadership
+                ? [{ title: "Sign off report cards", body: "Open a student → Report card & remarks: the head's remark is yours to write (the class teacher writes theirs). Both print over a signature line under the name of whoever wrote them, and any approved promotion decision is stamped beside yours." }]
+                : [{ title: "Report-card remarks are not yours", body: "The head's remark is written by the principal or a school administrator, and the class teacher writes the other — if you teach or supervise a class you write that one on your own pupils. Your sign-off on results is the grade-publishing approval, not a remark." }]),
               ...(can("workflow.review.principal")
                 ? [{ title: "Principal: scholarship requests too", body: "Scholarships → “Awaiting your decision”: you are the FINAL school stage for a student's scholarship request (after the class supervisor and the guardian). Your approval forwards it to the platform sponsor." }]
                 : []),
@@ -262,6 +278,28 @@ export default async function HelpPage() {
           />
         )}
 
+        {/* The report card is assembled from four separate acts by three
+            different people — marks, behaviour, remarks, promotion — and nobody
+            could see the whole shape of it anywhere. */}
+        {can("grade.write") && (
+          <Guide
+            title="Report cards — what goes on one, and who puts it there"
+            description="Four separate acts by three different people, assembled into one document."
+            steps={[
+              { title: "The marks", body: "Grades: each subject carries four components — exam, mid-term test, assignment and class note. The card prints them as C.A. (the three continuous-assessment parts added together) and Exam, with the total, the grade letter and the pupil's position in that subject. What each column is out of is printed in the table itself." },
+              { title: "How the class did", body: "Beside each pupil's mark the card shows the class average and the lowest/highest scored. A parent reading \u201c65\u201d learns something quite different when the class average is 49 than when it is 82." },
+              { title: "Skills and behaviour", body: "Twenty traits in four groups — personal development, sense of responsibility, social development and psychomotor skills — each rated 1 to 5. Open a pupil's record to enter them; Grades shows a per-class list of who still needs rating, as \u201c17 of 20\u201d rather than a tick, so nothing is quietly half-done. These are never averaged into any mark: a behaviour rating and a mathematics score are different kinds of statement about a child." },
+              { title: "Who may rate them", body: "The pupil's class teacher or supervisor, or a school administrator. Every rating records who gave it and when, and can be corrected — a mis-click on a child's honesty must be fixable." },
+              { title: "The scale is printed, not assumed", body: "The card states what 1 to 5 mean in words, and the grade key states every band with its range and its word (\u201cA1 75\u2013100 excellent\u201d). A letter a family cannot read has not really reported anything." },
+              { title: "The two remarks", body: "Open a pupil \u2192 Report card & remarks. The class teacher writes theirs; the principal or a school administrator writes the head's. Both print over a signature line UNDER THE NAME of whoever wrote them — a comment about a child is somebody's judgement, not the building's." },
+              { title: "The year, not just the term", body: "Beneath the term's marks the card shows each subject across every term of the session: each term's total, the annual average, its grade and word, and the pupil's place in that subject for the year — plus the cumulative score. A third-term card that showed only third-term marks would say nothing about the year." },
+              { title: "The promotion line", body: "If a promotion has been decided and approved for that term, it is stamped beside the principal's comment — PROMOTED TO …, TO REPEAT THE CLASS, or GRADUATED. It is never derived from the averages above it: the system does not award a year, a person does, and if nobody has decided the line simply does not appear." },
+              { title: "Generate and share", body: "Generating a card also files a copy in the pupil's Documents, so the family can retrieve it themselves rather than relying on the copy you downloaded. Guardians are notified only once the file really exists." },
+              { title: "Attendance on the card", body: "Term-scoped, and it leads with how many times the school actually opened — \u201cpresent: 46\u201d means nothing without the denominator. Term start, term end and next term's start print alongside." },
+            ]}
+          />
+        )}
+
         {can("hr.read") && (
           <Guide
             title="HR — staff records, leave & payroll"
@@ -277,16 +315,55 @@ export default async function HelpPage() {
           />
         )}
 
-        {/* transport.read (not .manage) so a plain DRIVER — who confirms boarding
-            and shares GPS — also sees this guide, not just the head driver. */}
-        {(can("hostel.manage") || can("transport.read") || can("library.manage")) && (
+        {/* Three guides, not one. A librarian was being shown hostel roll-call
+            and fleet scheduling because all three shared a gate — and none of
+            these roles can act on the other two: a warden holds hostel.manage
+            only, a driver transport.read only, a librarian library.manage only.
+            A guide that describes work you cannot do teaches people to skim. */}
+        {can("hostel.manage") && (
           <Guide
-            title="Facilities — hostel, transport & library"
-            description="For wardens, drivers/fleet heads and librarians."
+            title="Hostel — wardens"
+            description="Your house: who sleeps where, who is signed out, and what needs fixing."
             steps={[
-              { title: "Hostel (wardens)", body: "Hostel: rooms, bed availability and student allocation for your house — head wardens see every hostel. Transfer a boarder between rooms, take the roll-call, approve exeat passes (a DIFFERENT warden must approve each, and the guardian is notified), and log maintenance or incidents. Hostel fee runs route through an approval before they bill." },
-              { title: "Transport (drivers & fleet)", body: "Transport: your vehicle, route and passenger list. Every driver confirms each child aboard at pickup — the guardian is alerted automatically — and shares the bus's live location. The head driver manages the whole fleet: scheduling AM/PM trips, logging fuel and maintenance, and changing routes (which automatically alerts affected parents). Transport fee runs need an approval before they bill." },
-              { title: "Library (librarians)", body: "Library: the barcode catalogue, loans and fines. A copy must be available to issue; books with loan history can't be deleted." },
+              { title: "Know your house", body: "Hostel: rooms, bed availability and current allocations. A warden sees their OWN hostel; a head warden sees every hostel in the school." },
+              { title: "Allocate and transfer", body: "Give a boarder a bed, or move them between rooms. A room at capacity is refused rather than overfilled — two wardens allocating the last bed at the same moment cannot both succeed." },
+              { title: "Take the roll-call", body: "Record who is present in the house. It is a hostel record and separate from the classroom register." },
+              { title: "Exeat passes need a second warden", body: "You raise an exeat; a DIFFERENT warden approves it, and the guardian is notified when it is granted. An exeat still out past its return time is flagged to you by a daily sweep." },
+              { title: "Log maintenance and incidents", body: "Faults and incidents are recorded against the room, so a recurring problem is visible rather than remembered." },
+              { title: "Hostel fees go through approval", body: "A hostel fee run does not bill on your say-so: it raises a fee-schedule request that someone with fee approval confirms first." },
+            ]}
+          />
+        )}
+
+        {can("transport.read") && (
+          <Guide
+            title="Transport — drivers and the fleet"
+            description={can("transport.manage") ? "Your fleet: vehicles, routes, trips and costs." : "Your vehicle, your route and the children aboard."}
+            steps={[
+              { title: "Your vehicle and route", body: "Transport: the vehicle assigned to you, its route and today's passenger list." },
+              { title: "Confirm every child aboard", body: "Mark each child on at pickup and off at drop-off. Their guardian is alerted automatically — this is the record that answers \u201cdid my child get on the bus\u201d." },
+              { title: "Share the bus location", body: "Start sharing when you set off so families can see where the bus is. It stops when the trip ends." },
+              ...(can("transport.manage")
+                ? [
+                    { title: "Run the fleet", body: "Vehicles, drivers, routes and stops are yours to manage, along with AM/PM trip scheduling." },
+                    { title: "Changing a route alerts families", body: "Editing a route notifies the parents of every child on it automatically — you do not have to tell them separately." },
+                    { title: "Log fuel and maintenance", body: "Costs recorded against a vehicle build the running-cost picture in analytics." },
+                    { title: "Transport fees go through approval", body: "A transport fee run raises a fee-schedule request that someone with fee approval confirms before anything bills." },
+                  ]
+                : []),
+            ]}
+          />
+        )}
+
+        {can("library.manage") && (
+          <Guide
+            title="Library — librarians"
+            description="The catalogue, loans and fines."
+            steps={[
+              { title: "Keep the catalogue", body: "Library: add titles and copies. A book with loan history cannot be deleted — the borrowing record outlives the stock decision." },
+              { title: "Issue and return", body: "A copy must actually be available to issue, and the claim is atomic: two desks issuing the last copy at the same moment cannot both succeed. Returning restores availability." },
+              { title: "Fines", body: "Overdue loans accrue the fine your school configures; settle them from the loan." },
+              { title: "Use the scanner", body: "Scan: point a handheld reader at a student or staff ID card to pull up the member at the desk instead of typing a name." },
             ]}
           />
         )}
