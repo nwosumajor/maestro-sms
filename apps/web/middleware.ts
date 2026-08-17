@@ -71,5 +71,8 @@ export const config = {
     "/scholarships/:path*",
     "/help/:path*",
     "/manual",
+    // The operations runbooks. The route handler ALSO checks the platform
+    // permission — neither layer is trusted to be the only one.
+    "/runbooks/:path*",
   ],
 };

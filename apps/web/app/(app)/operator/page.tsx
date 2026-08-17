@@ -108,6 +108,24 @@ export default async function OperatorPage({
           )}
         </div>
 
+        {/* THE RUNBOOKS, one click from the console.
+            They were markdown in the repository, which is the right place to
+            MAINTAIN them and the wrong place to READ them: the moment they are
+            needed it is the middle of the night and whoever is on call may not
+            have a checkout to hand. Rendered from the same files, so there is no
+            second copy to go stale — the discipline of updating the runbook in
+            the same PR as the behaviour it describes still points at the .md. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted-foreground">Runbooks:</span>
+          <a href="/runbooks/incident" target="_blank" rel="noopener noreferrer">
+            <Button variant="outline" size="sm">Incident response ↗</Button>
+          </a>
+          <a href="/runbooks/backup" target="_blank" rel="noopener noreferrer">
+            <Button variant="outline" size="sm">Backup &amp; restore ↗</Button>
+          </a>
+          <span className="text-xs text-muted-foreground">Read them before you need them.</span>
+        </div>
+
         {/* The alarm stays on the page opened daily — but as ONE line, not a
             restatement of the queue. It costs a single indexed query (past-due
             subscriptions), never the fleet scan, and the DETAIL now lives in one
