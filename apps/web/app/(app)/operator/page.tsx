@@ -108,31 +108,15 @@ export default async function OperatorPage({
           )}
         </div>
 
-        {/* THE RUNBOOKS, one click from the console.
-            They were markdown in the repository, which is the right place to
-            MAINTAIN them and the wrong place to READ them: the moment they are
-            needed it is the middle of the night and whoever is on call may not
-            have a checkout to hand. Rendered from the same files, so there is no
-            second copy to go stale — the discipline of updating the runbook in
-            the same PR as the behaviour it describes still points at the .md. */}
+        {/* One link, not three. The documents now have a page of their own —
+            duplicating the list here would be a second place to remember when a
+            fourth is added, and the one that goes stale. */}
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-muted-foreground">Runbooks:</span>
-          <a href="/runbooks/incident" target="_blank" rel="noopener noreferrer">
-            <Button variant="outline" size="sm">Incident response ↗</Button>
-          </a>
-          <a href="/runbooks/backup" target="_blank" rel="noopener noreferrer">
-            <Button variant="outline" size="sm">Backup &amp; restore ↗</Button>
-          </a>
-          {/* The SCHOOL LEADER'S manual, labelled as such. The owner answers
-              questions about it all day — being able to open the exact document
-              a principal is looking at beats reconstructing it from memory. It
-              needs no permission beyond a session; it is here for convenience,
-              not access. */}
-          <a href="/manual" target="_blank" rel="noopener noreferrer">
-            <Button variant="outline" size="sm">School leader&apos;s manual ↗</Button>
-          </a>
+          <Link href="/runbooks">
+            <Button variant="outline" size="sm">Runbooks &amp; manuals →</Button>
+          </Link>
           <span className="text-xs text-muted-foreground">
-            The first two are yours; the third is what schools read.
+            Incident response, backup &amp; restore, and the manual schools read.
           </span>
         </div>
 
