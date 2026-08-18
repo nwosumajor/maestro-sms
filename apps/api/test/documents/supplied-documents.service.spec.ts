@@ -68,7 +68,15 @@ function build(opts: { submissions?: Row[]; requirements?: Row[]; bytes?: Buffer
   const deleted: string[] = [];
   const audits: string[] = [];
 
+  const documents: Row[] = [];
+  const staffDocuments: Row[] = [];
   const tx = {
+    admissionApplication: {
+      findFirst: ({ where }: { where: { id: string } }) =>
+        Promise.resolve(where.id === "app-1" ? { id: "app-1", childName: "Chidi" } : null),
+    },
+    document: { create: ({ data }: { data: Row }) => { documents.push(data); return Promise.resolve(data); } },
+    staffDocument: { create: ({ data }: { data: Row }) => { staffDocuments.push(data); return Promise.resolve(data); } },
     documentRequirement: {
       findMany: ({ where }: { where: Record<string, unknown> }) =>
         Promise.resolve(requirements.filter((r) => (where.appliesTo ? r.appliesTo === where.appliesTo : true) && (where.active === undefined || r.active === where.active))),
@@ -99,8 +107,17 @@ function build(opts: { submissions?: Row[]; requirements?: Row[]; bytes?: Buffer
         Object.assign(row, data);
         return Promise.resolve(row);
       },
+      updateMany: ({ where, data }: { where: Record<string, unknown>; data: Row }) => {
+        const hit = submissions.filter((s) => s.subjectKind === where.subjectKind && s.subjectId === where.subjectId);
+        hit.forEach((r) => Object.assign(r, data));
+        return Promise.resolve({ count: hit.length });
+      },
     },
-    user: { findMany: () => Promise.resolve([]) },
+    user: {
+      findMany: () => Promise.resolve([]),
+      findFirst: ({ where }: { where: { id: string } }) =>
+        Promise.resolve(where.id === "stu-1" ? { id: "stu-1" } : null),
+    },
   };
 
   const db = {
@@ -125,7 +142,7 @@ function build(opts: { submissions?: Row[]; requirements?: Row[]; bytes?: Buffer
   };
 
   const svc = new SuppliedDocumentsService(db as never, audit as never, storage as never);
-  return { svc, submissions, requirements, deleted, audits };
+  return { svc, submissions, requirements, deleted, audits, documents, staffDocuments };
 }
 
 describe("who may handle whose paperwork", () => {
@@ -409,5 +426,91 @@ describe("reading the bytes back", () => {
       bytes: PDF,
     });
     await expect(svc.file(hr, "sub-1")).rejects.toBeInstanceOf(ForbiddenException);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// Following a person from applicant to pupil, or candidate to colleague
+// -----------------------------------------------------------------------------
+// A promotion changes who a file BELONGS to. The storage key is reused, so a
+// child's birth certificate exists once in the bucket however many records
+// point at it — copying bytes would mean two objects to protect, two to purge
+// and two chances to keep one after the other was deleted.
+// -----------------------------------------------------------------------------
+
+describe("promoting an application onto a pupil", () => {
+  const arrived = (status: string, id = "s-1") => ({
+    id, subjectKind: "ADMISSION_APPLICATION", subjectId: "app-1", requirementId: "req-1",
+    storageKey: `schools/x/${id}`, contentType: "application/pdf", originalName: "cert.pdf",
+    sizeBytes: 1234, status, createdAt: new Date(),
+  } as Row);
+
+  it("puts what arrived into the pupil's vault, reusing the same object", async () => {
+    const { svc, documents } = build({ submissions: [arrived("VERIFIED")] });
+    await expect(svc.promoteApplication(registrar, "app-1", "stu-1")).resolves.toEqual({ promoted: 1 });
+    expect(documents).toHaveLength(1);
+    expect(documents[0]).toMatchObject({ studentId: "stu-1", storageKey: "schools/x/s-1", status: "UPLOADED" });
+  });
+
+  it("moves the submissions to the pupil, so the history follows too", async () => {
+    const { svc, submissions } = build({ submissions: [arrived("VERIFIED")] });
+    await svc.promoteApplication(registrar, "app-1", "stu-1");
+    expect(submissions[0]).toMatchObject({ subjectKind: "STUDENT", subjectId: "stu-1" });
+  });
+
+  it("carries neither a PENDING upload nor a REJECTED one into the vault", async () => {
+    // A PENDING upload never completed and a REJECTED one was refused. Putting
+    // either on a pupil's permanent record would say something untrue about it.
+    const { svc, documents } = build({
+      submissions: [arrived("PENDING", "s-1"), arrived("REJECTED", "s-2"), arrived("UPLOADED", "s-3")],
+    });
+    await expect(svc.promoteApplication(registrar, "app-1", "stu-1")).resolves.toEqual({ promoted: 1 });
+    expect(documents.map((d) => d.storageKey)).toEqual(["schools/x/s-3"]);
+  });
+
+  it("404s an application or a pupil that is not this school's", async () => {
+    const { svc } = build({ submissions: [] });
+    await expect(svc.promoteApplication(registrar, "someone-elses", "stu-1")).rejects.toBeInstanceOf(NotFoundException);
+    await expect(svc.promoteApplication(registrar, "app-1", "not-a-pupil")).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it("is refused to somebody from the staff side of the school", async () => {
+    const { svc } = build({ submissions: [] });
+    await expect(svc.promoteApplication(hr, "app-1", "stu-1")).rejects.toBeInstanceOf(ForbiddenException);
+  });
+});
+
+describe("promoting a candidate into a member of staff", () => {
+  it("carries the CV that convert() used to orphan", async () => {
+    const { svc, submissions, staffDocuments } = build({ submissions: [] });
+    const tx = (await (svc as unknown as { db: { runAsTenant: (c: unknown, f: (t: unknown) => Promise<unknown>) => Promise<unknown> } }).db.runAsTenant({}, async (t) => t)) as never;
+    const out = await svc.promoteApplicantInTx(tx, {
+      schoolId: "school-1", actorId: "hr-1", applicantId: "cand-1", userId: "u-9",
+      cvKey: "careers/school-1/abc.pdf", cvName: "ada-cv.pdf",
+    });
+    expect(out.cvCarried).toBe(true);
+    // Visible to the checklist...
+    expect(submissions[0]).toMatchObject({ subjectKind: "STAFF", subjectId: "u-9", storageKey: "careers/school-1/abc.pdf", status: "UPLOADED", uploadedByUserId: null });
+    // ...and to HR's own document list.
+    expect(staffDocuments).toHaveLength(1);
+  });
+
+  it("moves anything else the candidate sent onto the member of staff", async () => {
+    const { svc, submissions } = build({
+      submissions: [{ id: "s-1", subjectKind: "APPLICANT", subjectId: "cand-1", requirementId: null, storageKey: "k", status: "UPLOADED", createdAt: new Date() } as Row],
+    });
+    const tx = (await (svc as unknown as { db: { runAsTenant: (c: unknown, f: (t: unknown) => Promise<unknown>) => Promise<unknown> } }).db.runAsTenant({}, async (t) => t)) as never;
+    const out = await svc.promoteApplicantInTx(tx, { schoolId: "school-1", actorId: "hr-1", applicantId: "cand-1", userId: "u-9", cvKey: null });
+    expect(out).toMatchObject({ promoted: 1, cvCarried: false });
+    expect(submissions[0]).toMatchObject({ subjectKind: "STAFF", subjectId: "u-9" });
+  });
+
+  it("is a no-op for a candidate who sent nothing", async () => {
+    const { svc, staffDocuments } = build({ submissions: [] });
+    const tx = (await (svc as unknown as { db: { runAsTenant: (c: unknown, f: (t: unknown) => Promise<unknown>) => Promise<unknown> } }).db.runAsTenant({}, async (t) => t)) as never;
+    await expect(
+      svc.promoteApplicantInTx(tx, { schoolId: "school-1", actorId: "hr-1", applicantId: "cand-1", userId: "u-9", cvKey: null }),
+    ).resolves.toEqual({ promoted: 0, cvCarried: false });
+    expect(staffDocuments).toHaveLength(0);
   });
 });

@@ -17,6 +17,7 @@ import {
   type Principal,
   type TenantContext,
   type TenantDatabase,
+  type TenantTx,
 } from "../integrity/integrity.foundation";
 import { NotificationService } from "../notifications/notification.service";
 
@@ -61,22 +62,42 @@ export class StaffLifecycleService {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const user = await tx.user.findFirst({ where: { id: userId }, select: { id: true, name: true } });
       if (!user) throw new NotFoundException("User not found");
-      const checklist = await tx.staffChecklist.create({
-        data: { schoolId: p.schoolId, userId, type, status: "OPEN", createdById: p.userId },
-      });
-      const labels = DEFAULT_ITEMS[type] ?? [];
-      await Promise.all(
-        labels.map((label, i) =>
-          tx.staffChecklistItem.create({ data: { schoolId: p.schoolId, checklistId: checklist.id, label, sequence: i } }),
-        ),
-      );
-      await this.audit.record(
-        { actorId: p.userId, action: "hr.checklist.create", entity: "staff_checklist", entityId: checklist.id, schoolId: p.schoolId, metadata: { userId, type } },
-        tx,
-      );
-      const items = await tx.staffChecklistItem.findMany({ where: { checklistId: checklist.id }, orderBy: { sequence: "asc" } });
+      const { checklist, items } = await this.createChecklistInTx(tx, p.schoolId, p.userId, userId, type);
       return this.checklistDto(checklist, items, user.name);
     });
+  }
+
+  /**
+   * The same creation, inside a transaction the CALLER owns.
+   *
+   * Hiring somebody is one decision: the account, the employment record and the
+   * onboarding list either all happen or none do. Calling `createChecklist`
+   * from inside the hire's transaction would open a SECOND one — a nested
+   * transaction that commits independently, so a hire that then failed would
+   * leave a checklist for a member of staff who does not exist.
+   */
+  async createChecklistInTx(
+    tx: TenantTx,
+    schoolId: string,
+    actorId: string,
+    userId: string,
+    type: "ONBOARDING" | "OFFBOARDING",
+  ): Promise<{ checklist: { id: string; userId: string; type: string; status: string; createdAt: Date }; items: Array<{ id: string; label: string; sequence: number; done: boolean; doneAt: Date | null }> }> {
+    const checklist = await tx.staffChecklist.create({
+      data: { schoolId, userId, type, status: "OPEN", createdById: actorId },
+    });
+    const labels = DEFAULT_ITEMS[type] ?? [];
+    await Promise.all(
+      labels.map((label, i) =>
+        tx.staffChecklistItem.create({ data: { schoolId, checklistId: checklist.id, label, sequence: i } }),
+      ),
+    );
+    await this.audit.record(
+      { actorId, action: "hr.checklist.create", entity: "staff_checklist", entityId: checklist.id, schoolId, metadata: { userId, type } },
+      tx,
+    );
+    const items = await tx.staffChecklistItem.findMany({ where: { checklistId: checklist.id }, orderBy: { sequence: "asc" } });
+    return { checklist, items };
   }
 
   async listChecklists(p: Principal, userId?: string): Promise<StaffChecklistDto[]> {

@@ -50,6 +50,11 @@ const decideSchema = z.object({
   expiresAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 });
 
+const promoteSchema = z.object({
+  applicationId: z.string().uuid(),
+  studentId: z.string().uuid(),
+});
+
 const waiveSchema = z.object({
   subjectKind: z.enum(SUBMISSION_SUBJECTS),
   subjectId: z.string().uuid(),
@@ -118,6 +123,23 @@ export class SuppliedDocumentsController {
     @Query("scope") scope: string,
   ): Promise<{ created: number; existing: number }> {
     return this.supplied.seedDefaults(p, scope);
+  }
+
+  /**
+   * An accepted applicant has become a pupil — move their family's documents on
+   * to them.
+   *
+   * EXPLICIT, because nothing in this codebase turns an accepted application
+   * into an enrolled pupil: a member of staff creates the record, and this is
+   * where they say which pupil it was. It is also the only link there has ever
+   * been between an application and the child it was for.
+   */
+  @Post("promote")
+  promote(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(promoteSchema)) body: z.infer<typeof promoteSchema>,
+  ): Promise<{ promoted: number }> {
+    return this.supplied.promoteApplication(p, body.applicationId, body.studentId);
   }
 
   // --- submissions -----------------------------------------------------------

@@ -3380,6 +3380,10 @@
     "POST /public/documents/:p/confirm": {
       "kind": "gap",
       "note": "supplied-documents step 4: the family's upload link. Public by design — the signed token is the credential; the /apply-side page that uses it lands with the web work in step 6"
+    },
+    "POST /documents/promote": {
+      "kind": "gap",
+      "note": "supplied-documents step 5: moves an accepted application's documents onto the enrolled pupil. Explicit because no application->pupil conversion exists in this codebase; the registrar screen that calls it lands in step 6"
     }
   }
 }

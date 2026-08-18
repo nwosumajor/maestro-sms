@@ -38,9 +38,10 @@ import { PrivilegedDatabaseService } from "../common/privileged-database.service
 import { StaffReminderService } from "./staff-reminder.service";
 import { StaffReminderScheduler } from "./staff-reminder.scheduler";
 import { StaffReminderProcessor } from "./staff-reminder.processor";
+import { DocumentsModule } from "../documents/documents.module";
 
 @Module({
-  imports: [WorkflowModule, NotificationModule, BrandingModule, BullModule.registerQueue({ name: HR_REMINDER_QUEUE })],
+  imports: [WorkflowModule, NotificationModule, BrandingModule, DocumentsModule, BullModule.registerQueue({ name: HR_REMINDER_QUEUE })],
   controllers: [
     HrController,
     LeaveController,

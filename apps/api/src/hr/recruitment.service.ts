@@ -22,6 +22,8 @@ import {
   type TenantContext,
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
+import { SuppliedDocumentsService } from "../documents/supplied-documents.service";
+import { StaffLifecycleService } from "./staff-lifecycle.service";
 
 const STAGES = ["APPLIED", "SCREENING", "INTERVIEW", "OFFER", "HIRED", "REJECTED"];
 const ZERO = "00000000-0000-0000-0000-000000000000"; // system actor for public intake
@@ -32,6 +34,11 @@ export class RecruitmentService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     @Inject(STORAGE_PROVIDER) private readonly storage: StorageProvider,
+    // REQUIRED, not @Optional. A hire that silently skipped the paperwork is
+    // the defect this fixes; making these optional would let the same thing
+    // happen again the moment a wiring was forgotten, and nothing would say so.
+    private readonly supplied: SuppliedDocumentsService,
+    private readonly lifecycle: StaffLifecycleService,
     // Cross-tenant COUNTS for the public careers index only. @Optional so every
     // existing unit wiring keeps working, and null when no privileged URL is
     // configured — the index degrades to "unknown", never to a wrong answer.
@@ -162,8 +169,36 @@ export class RecruitmentService {
         data: { schoolId: p.schoolId, userId: user.id, jobTitle: input.jobTitle ?? req?.title ?? "Staff", startDate: new Date(), status: "ACTIVE" },
       });
       await tx.applicant.update({ where: { id: applicantId }, data: { stage: "HIRED", convertedUserId: user.id } });
+
+      // THE PAPERWORK FOLLOWS THEM, in this same transaction — hiring somebody
+      // is one decision, so the account, the employment record, their documents
+      // and the onboarding list either all happen or none do.
+      //
+      // Until now the CV a candidate uploaded at application time went nowhere:
+      // convert() created the user and the employee and never looked at
+      // `cvKey`, so the one document the school had actually collected was
+      // orphaned the moment they were hired. And the onboarding checklist —
+      // built for exactly this, with default tasks per type — was never created
+      // by the one event that should create it.
+      const promoted = await this.supplied.promoteApplicantInTx(tx, {
+        schoolId: p.schoolId,
+        actorId: p.userId,
+        applicantId,
+        userId: user.id,
+        cvKey: a.cvKey,
+        cvName: a.cvName,
+      });
+      await this.lifecycle.createChecklistInTx(tx, p.schoolId, p.userId, user.id, "ONBOARDING");
+
       await this.audit.record(
-        { actorId: p.userId, action: "hr.recruit.convert", entity: "applicant", entityId: applicantId, schoolId: p.schoolId, metadata: { userId: user.id } },
+        {
+          actorId: p.userId,
+          action: "hr.recruit.convert",
+          entity: "applicant",
+          entityId: applicantId,
+          schoolId: p.schoolId,
+          metadata: { userId: user.id, documentsCarried: promoted.promoted + (promoted.cvCarried ? 1 : 0) },
+        },
         tx,
       );
       return { userId: user.id, email: a.email, tempPassword };

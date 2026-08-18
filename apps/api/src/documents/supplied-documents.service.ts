@@ -574,6 +574,157 @@ export class SuppliedDocumentsService {
     };
   }
 
+  /**
+   * A candidate becomes a member of staff: their paperwork follows them.
+   *
+   * Runs inside the HIRE's own transaction, so the account, the employment
+   * record and the documents either all happen or none do. Two jobs:
+   *
+   *   1. THE CV. It was uploaded to `Applicant.cvKey` at application time and
+   *      then went nowhere — `convert()` created the user and the employee and
+   *      never looked at it, so the file a candidate sent was orphaned the
+   *      moment they were hired. It becomes a submission (so the checklist can
+   *      see it) and a staff_document (so HR's own list can).
+   *   2. ANYTHING ELSE THEY SENT. Submissions filed against the APPLICANT move
+   *      to the STAFF member they now are, keeping their verification history.
+   *
+   * The bytes are not copied. The storage key is reused, so a promotion is a
+   * change of who a file belongs to, not a second copy of a passport.
+   */
+  async promoteApplicantInTx(
+    tx: TenantTx,
+    args: { schoolId: string; actorId: string; applicantId: string; userId: string; cvKey?: string | null; cvName?: string | null },
+  ): Promise<{ promoted: number; cvCarried: boolean }> {
+    const requirements = await this.requirementsInTx(tx, "STAFF_ONBOARDING");
+    const cvRequirement = requirements.find((r) => r.key === "cv") ?? null;
+
+    let cvCarried = false;
+    if (args.cvKey) {
+      // The candidate had no account when they sent it, which is exactly what
+      // the nullable uploader column is for.
+      const submission = (await tx.documentSubmission.create({
+        data: {
+          schoolId: args.schoolId,
+          subjectKind: "STAFF",
+          subjectId: args.userId,
+          requirementId: cvRequirement?.id ?? null,
+          storageKey: args.cvKey,
+          contentType: "application/pdf",
+          originalName: args.cvName ?? "cv.pdf",
+          status: "UPLOADED",
+          uploadedByUserId: null,
+          uploadedAt: new Date(),
+        },
+      })) as SubmissionRow;
+      await tx.staffDocument.create({
+        data: {
+          schoolId: args.schoolId,
+          userId: args.userId,
+          kind: "OTHER",
+          name: args.cvName ?? "Curriculum vitae",
+          createdById: args.actorId,
+        },
+      });
+      cvCarried = true;
+      await this.audit.record(
+        {
+          actorId: args.actorId,
+          action: "document.submission.promote",
+          entity: "document_submission",
+          entityId: submission.id,
+          schoolId: args.schoolId,
+          metadata: { from: "APPLICANT_CV", applicantId: args.applicantId, userId: args.userId },
+        },
+        tx,
+      );
+    }
+
+    // Anything filed against the applicant now belongs to the member of staff.
+    const moved = await tx.documentSubmission.updateMany({
+      where: { subjectKind: "APPLICANT", subjectId: args.applicantId },
+      data: { subjectKind: "STAFF", subjectId: args.userId },
+    });
+    if (moved.count > 0) {
+      await this.audit.record(
+        {
+          actorId: args.actorId,
+          action: "document.submission.promote",
+          entity: "document_submission",
+          entityId: args.userId,
+          schoolId: args.schoolId,
+          metadata: { from: "APPLICANT", applicantId: args.applicantId, count: moved.count },
+        },
+        tx,
+      );
+    }
+    return { promoted: moved.count, cvCarried };
+  }
+
+  /**
+   * An accepted applicant becomes a pupil: their family's documents follow.
+   *
+   * Explicit rather than automatic, because nothing in this codebase turns an
+   * accepted application into an enrolled pupil — a member of staff creates the
+   * record, and this is the moment they say which pupil it was. It also creates
+   * the only link there has ever been between an application and the child it
+   * was for.
+   */
+  async promoteApplication(p: Principal, applicationId: string, studentId: string): Promise<{ promoted: number }> {
+    this.assertMayManage(p, "STUDENT_ADMISSION");
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const app = (await tx.admissionApplication.findFirst({
+        where: { id: applicationId },
+        select: { id: true, childName: true },
+      })) as { id: string; childName: string } | null;
+      if (!app) throw new NotFoundException("Application not found");
+      const student = await tx.user.findFirst({ where: { id: studentId }, select: { id: true } });
+      // Both 404 rather than 403: neither may be used to probe for the other.
+      if (!student) throw new NotFoundException("Pupil not found");
+
+      const submissions = (await tx.documentSubmission.findMany({
+        where: { subjectKind: "ADMISSION_APPLICATION", subjectId: applicationId },
+      })) as SubmissionRow[];
+      // Only what actually arrived. A PENDING upload never completed and a
+      // REJECTED one was refused; carrying either onto a pupil's permanent
+      // record would say something untrue about it.
+      const worth = submissions.filter((s) => s.status === "UPLOADED" || s.status === "VERIFIED");
+      for (const s of worth) {
+        if (!s.storageKey) continue;
+        await tx.document.create({
+          data: {
+            schoolId: p.schoolId,
+            studentId,
+            type: "OTHER",
+            title: s.originalName ?? "Supplied document",
+            // The SAME object. A promotion changes who a file belongs to; it
+            // does not make a second copy of a birth certificate.
+            storageKey: s.storageKey,
+            contentType: s.contentType ?? "application/octet-stream",
+            sizeBytes: s.sizeBytes,
+            status: "UPLOADED",
+            uploadedById: p.userId,
+          },
+        });
+      }
+      await tx.documentSubmission.updateMany({
+        where: { subjectKind: "ADMISSION_APPLICATION", subjectId: applicationId },
+        data: { subjectKind: "STUDENT", subjectId: studentId },
+      });
+      await this.audit.record(
+        {
+          actorId: p.userId,
+          action: "document.submission.promote",
+          entity: "document_submission",
+          entityId: studentId,
+          schoolId: p.schoolId,
+          metadata: { from: "ADMISSION_APPLICATION", applicationId, count: worth.length },
+        },
+        tx,
+      );
+      return { promoted: worth.length };
+    });
+  }
+
   // --- the family's own view, reached by a signed link and nothing else ------
   //
   // These take a SUBJECT resolved from the token rather than a Principal: the
