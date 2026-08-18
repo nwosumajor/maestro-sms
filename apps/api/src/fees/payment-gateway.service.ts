@@ -12,7 +12,7 @@
 // disabled path and signature verification are testable.
 // =============================================================================
 
-import { BadRequestException, ForbiddenException, Inject, Injectable, ServiceUnavailableException, Optional} from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException, ServiceUnavailableException, Optional} from "@nestjs/common";
 import { PLATFORM_FEE_BEARERS, computePlatformFeeMinor, isPlatformFeeBearer,
   PAYMENT_CHANNELS,
   pickCardRail,
@@ -117,10 +117,37 @@ export class PaymentGatewayService {
       this.ctx(p),
       async (tx) => {
         const inv = await tx.invoice.findFirst({ where: { id: invoiceId } });
-        if (!inv) throw new ForbiddenException("Invoice not found");
+        // 404, not 403 — the message already said "not found" while the status
+        // said otherwise, which is the one combination that confirms an invoice
+        // exists to somebody who may not see it.
+        if (!inv) throw new NotFoundException("Invoice not found");
         // Payer must be able to see this invoice (their child's / own).
         const visible = await this.canPay(tx, p, inv.studentId);
-        if (!visible) throw new ForbiddenException("Not your invoice");
+        if (!visible) throw new NotFoundException("Invoice not found");
+        // ONLY AN ISSUED BILL CAN BE PAID.
+        //
+        // There was no status check at all: existence, visibility and a balance
+        // above zero were the whole test. So a family could be handed a live
+        // checkout page for an invoice the school had NOT issued, or had
+        // explicitly VOIDED. Both proven against the running system — each
+        // returned 201 with a real Paystack authorization URL:
+        //
+        //   DRAFT      -> https://checkout.paystack.com/ttgat8m8wc9fimv
+        //   CANCELLED  -> https://checkout.paystack.com/nwagk4dqgejvcho
+        //
+        // A DRAFT is a bill still being written — the amount can change, lines
+        // can be added, it may never be sent at all. A CANCELLED one is a bill
+        // the school withdrew. Money taken against either settles through the
+        // ordinary webhook onto an invoice that was never owed.
+        if (inv.status !== "ISSUED" && inv.status !== "PARTIALLY_PAID") {
+          throw new BadRequestException(
+            inv.status === "DRAFT"
+              ? "This invoice has not been issued yet"
+              : inv.status === "CANCELLED"
+                ? "This invoice was cancelled"
+                : "This invoice is not open for payment",
+          );
+        }
         const posted = await tx.payment.findMany({ where: { invoiceId, status: "POSTED" }, select: { amountMinor: true, kind: true } });
         const paid = posted.reduce((n: number, x: { amountMinor: number; kind: string }) => n + (x.kind === "REFUND" ? -x.amountMinor : x.amountMinor), 0);
         const balance = inv.totalMinor - paid;

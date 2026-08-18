@@ -411,6 +411,21 @@ export class FeesService {
         where.studentId = opts?.studentId && ids.includes(opts.studentId)
           ? opts.studentId
           : { in: ids };
+        // A DRAFT IS NOT A BILL YET, so a family must not be shown one.
+        //
+        // There was no default status filter, so every status came back to
+        // whoever asked. Finance staff need that — a draft is one they are
+        // writing. A parent seeing it is being shown a charge the school has
+        // not issued: the amount can still change, lines can be added, and it
+        // may never be sent. Proven against the running system — a freshly
+        // created DRAFT appeared in the parent's own invoice list.
+        //
+        // CANCELLED stays visible on purpose. A withdrawn charge is part of the
+        // family's history and hiding it invites "what happened to that bill?";
+        // what it must not be is PAYABLE, which is guarded at pay/init.
+        // Applied UNCONDITIONALLY, not only when no status was asked for:
+        // `?status=DRAFT` would otherwise hand back exactly what this hides.
+        where.status = opts?.status && opts.status !== "DRAFT" ? opts.status : { not: "DRAFT" };
       }
 
       // Fetch one extra to learn whether another page exists without a second query.
