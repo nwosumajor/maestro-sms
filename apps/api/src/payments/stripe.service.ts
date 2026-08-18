@@ -12,6 +12,7 @@
 
 import { Injectable, Logger, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
 import crypto from "node:crypto";
+import { fetchWithTimeout } from "../common/http";
 
 const STRIPE = "https://api.stripe.com";
 /** Reject webhook timestamps older than this (replay protection). */
@@ -57,7 +58,7 @@ export class StripeService {
     if (!key) return { ok: false, detail: "STRIPE_SECRET_KEY is not set." };
     const mode = key.startsWith("sk_live") ? "live" : "test";
     try {
-      const res = await fetch("https://api.stripe.com/v1/balance", {
+      const res = await fetchWithTimeout("https://api.stripe.com/v1/balance", {
         headers: { Authorization: `Bearer ${key}` },
         signal: AbortSignal.timeout(10_000),
       });
@@ -121,7 +122,7 @@ export class StripeService {
     }
     params.set(`payment_intent_data[metadata][reference]`, input.reference);
 
-    const res = await fetch(`${STRIPE}/v1/checkout/sessions`, {
+    const res = await fetchWithTimeout(`${STRIPE}/v1/checkout/sessions`, {
       method: "POST",
       headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/x-www-form-urlencoded" },
       body: params.toString(),
@@ -146,7 +147,7 @@ export class StripeService {
     const secret = process.env.STRIPE_SECRET_KEY;
     if (!secret) return null;
     try {
-      const res = await fetch(`${STRIPE}/v1/charges/${encodeURIComponent(chargeId)}`, {
+      const res = await fetchWithTimeout(`${STRIPE}/v1/charges/${encodeURIComponent(chargeId)}`, {
         headers: { Authorization: `Bearer ${secret}` },
       });
       if (!res.ok) {
@@ -174,7 +175,7 @@ export class StripeService {
     const secret = process.env.STRIPE_SECRET_KEY;
     if (!secret) return null;
     try {
-      const res = await fetch(`${STRIPE}/v1/checkout/sessions/${encodeURIComponent(sessionId)}`, {
+      const res = await fetchWithTimeout(`${STRIPE}/v1/checkout/sessions/${encodeURIComponent(sessionId)}`, {
         headers: { Authorization: `Bearer ${secret}` },
       });
       if (!res.ok) {
@@ -213,7 +214,7 @@ export class StripeService {
       if (startingAfter) params.set("starting_after", startingAfter);
       let json: { data?: Array<{ id: string; payment_status?: string; client_reference_id?: string; amount_total?: number; currency?: string; metadata?: Record<string, string> }>; has_more?: boolean };
       try {
-        const res = await fetch(`${STRIPE}/v1/checkout/sessions?${params.toString()}`, {
+        const res = await fetchWithTimeout(`${STRIPE}/v1/checkout/sessions?${params.toString()}`, {
           headers: { Authorization: `Bearer ${secret}` },
         });
         if (!res.ok) {

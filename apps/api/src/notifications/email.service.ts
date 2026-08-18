@@ -15,6 +15,7 @@
 // =============================================================================
 
 import { Injectable, Logger } from "@nestjs/common";
+import { fetchWithTimeout } from "../common/http";
 
 const PROVIDERS = {
   resend: {
@@ -62,7 +63,7 @@ export class EmailService {
     const from = process.env.EMAIL_FROM ?? DEFAULT_FROM;
     const p = PROVIDERS[this.provider()];
     try {
-      const res = await fetch(p.url, { method: "POST", headers: p.headers(key), body: p.body(from, to, subject, text) });
+      const res = await fetchWithTimeout(p.url, { method: "POST", headers: p.headers(key), body: p.body(from, to, subject, text) });
       if (!res.ok) {
         this.logger.warn(`email send failed (${this.provider()}): ${res.status} -> ${to} (${subject})`);
         return { ok: false, error: `provider ${res.status}` };

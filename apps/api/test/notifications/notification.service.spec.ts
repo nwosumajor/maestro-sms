@@ -373,8 +373,13 @@ describe("the gateway call is bounded", () => {
     const { readFileSync } = await import("node:fs");
     const { join } = await import("node:path");
     const src = readFileSync(join(__dirname, "../../src/notifications/twilio-channel.provider.ts"), "utf8");
-    expect(src).toMatch(/const GATEWAY_TIMEOUT_MS = /);
+    // The deadline now comes from the SHARED helper — this provider was the
+    // only rail that had one, while the card gateways bounded /balance and left
+    // every money call unbounded. See common/http.ts and the drift guard in
+    // test/common/gateway-timeouts.spec.ts.
+    expect(src).toMatch(/from "\.\.\/common\/http"/);
     // Both calls out to Twilio: the send AND the delivery-status read.
-    expect(src.match(/signal: AbortSignal\.timeout\(GATEWAY_TIMEOUT_MS\)/g) ?? []).toHaveLength(2);
+    expect(src.match(/fetchWithTimeout\(/g) ?? []).toHaveLength(2);
+    expect(src).not.toMatch(/(?<![.\w])fetch\(/);
   });
 });

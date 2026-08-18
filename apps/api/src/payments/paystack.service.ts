@@ -12,6 +12,7 @@
 import { PAYSTACK_CURRENCIES, paystackCanSettle } from "@sms/types";
 import { Injectable, Logger, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
 import crypto from "node:crypto";
+import { fetchWithTimeout } from "../common/http";
 
 const PAYSTACK = "https://api.paystack.co";
 
@@ -113,7 +114,7 @@ export class PaystackService {
     if (!key) return { ok: false, detail: "PAYSTACK_SECRET_KEY is not set." };
     const mode = key.startsWith("sk_live") ? "live" : "test";
     try {
-      const res = await fetch(`${PAYSTACK}/balance`, {
+      const res = await fetchWithTimeout(`${PAYSTACK}/balance`, {
         headers: { Authorization: `Bearer ${key}` },
         signal: AbortSignal.timeout(10_000),
       });
@@ -163,7 +164,7 @@ export class PaystackService {
     callbackUrl?: string;
   }): Promise<{ authorizationUrl: string }> {
     const secret = this.secret();
-    const res = await fetch(`${PAYSTACK}/transaction/initialize`, {
+    const res = await fetchWithTimeout(`${PAYSTACK}/transaction/initialize`, {
       method: "POST",
       headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -226,7 +227,7 @@ export class PaystackService {
     currency: string;
   }): Promise<{ ok: boolean; status?: string }> {
     const secret = this.secret();
-    const res = await fetch(`${PAYSTACK}/transaction/charge_authorization`, {
+    const res = await fetchWithTimeout(`${PAYSTACK}/transaction/charge_authorization`, {
       method: "POST",
       headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -262,7 +263,7 @@ export class PaystackService {
     const hit = this.bankCache.get(country);
     if (hit && Date.now() - hit.at < BANK_CACHE_MS) return hit.banks;
 
-    const res = await fetch(`${PAYSTACK}/bank?country=${encodeURIComponent(country)}&perPage=200`, {
+    const res = await fetchWithTimeout(`${PAYSTACK}/bank?country=${encodeURIComponent(country)}&perPage=200`, {
       headers: { Authorization: `Bearer ${this.secret()}` },
     });
     if (!res.ok) {
@@ -306,7 +307,7 @@ export class PaystackService {
    */
   async resolveAccount(bankCode: string, accountNumber: string): Promise<{ accountName: string } | null> {
     const qs = `account_number=${encodeURIComponent(accountNumber)}&bank_code=${encodeURIComponent(bankCode)}`;
-    const res = await fetch(`${PAYSTACK}/bank/resolve?${qs}`, {
+    const res = await fetchWithTimeout(`${PAYSTACK}/bank/resolve?${qs}`, {
       headers: { Authorization: `Bearer ${this.secret()}` },
     });
     if (!res.ok) {
@@ -350,7 +351,7 @@ export class PaystackService {
     }
     if (!this.isConfigured()) return null;
     try {
-      const res = await fetch(`${PAYSTACK}/balance`, { headers: { Authorization: `Bearer ${this.secret()}` } });
+      const res = await fetchWithTimeout(`${PAYSTACK}/balance`, { headers: { Authorization: `Bearer ${this.secret()}` } });
       if (!res.ok) {
         this.logger.warn(`Paystack balance read failed: ${res.status}`);
         return this.currencyCache?.currencies ?? null;
@@ -386,7 +387,7 @@ export class PaystackService {
   }): Promise<{ subaccountCode: string; bankName: string }> {
     const secret = this.secret();
     const percentageCharge = Number(process.env.PLATFORM_FEES_COMMISSION_PERCENT ?? 0);
-    const res = await fetch(`${PAYSTACK}/subaccount`, {
+    const res = await fetchWithTimeout(`${PAYSTACK}/subaccount`, {
       method: "POST",
       headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -410,7 +411,7 @@ export class PaystackService {
    */
   async createCustomer(input: { email: string; firstName: string; lastName: string }): Promise<{ customerCode: string }> {
     const secret = this.secret();
-    const res = await fetch(`${PAYSTACK}/customer`, {
+    const res = await fetchWithTimeout(`${PAYSTACK}/customer`, {
       method: "POST",
       headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
       body: JSON.stringify({ email: input.email, first_name: input.firstName, last_name: input.lastName }),
@@ -431,7 +432,7 @@ export class PaystackService {
    */
   async createDedicatedAccount(customerCode: string): Promise<{ accountNumber: string; bankName: string }> {
     const secret = this.secret();
-    const res = await fetch(`${PAYSTACK}/dedicated_account`, {
+    const res = await fetchWithTimeout(`${PAYSTACK}/dedicated_account`, {
       method: "POST",
       headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -464,7 +465,7 @@ export class PaystackService {
     const secret = process.env.PAYSTACK_SECRET_KEY;
     if (!secret) return null;
     try {
-      const res = await fetch(`${PAYSTACK}/transaction/verify/${encodeURIComponent(reference)}`, {
+      const res = await fetchWithTimeout(`${PAYSTACK}/transaction/verify/${encodeURIComponent(reference)}`, {
         headers: { Authorization: `Bearer ${secret}` },
       });
       if (!res.ok) return null;
@@ -499,7 +500,7 @@ export class PaystackService {
     try {
       for (let page = 1; page <= maxPages; page++) {
         const url = `${PAYSTACK}/transaction?status=success&perPage=100&page=${page}&from=${encodeURIComponent(from.toISOString())}`;
-        const res = await fetch(url, { headers: { Authorization: `Bearer ${secret}` } });
+        const res = await fetchWithTimeout(url, { headers: { Authorization: `Bearer ${secret}` } });
         if (!res.ok) break;
         const json = (await res.json()) as {
           data?: Array<{ reference?: string; amount?: number; currency?: string; metadata?: Record<string, unknown> | null }>;
@@ -536,7 +537,7 @@ export class PaystackService {
     const secret = process.env.PAYSTACK_SECRET_KEY;
     if (!secret) return { ok: false, error: "gateway not configured" };
     try {
-      const res = await fetch(`${PAYSTACK}/refund`, {
+      const res = await fetchWithTimeout(`${PAYSTACK}/refund`, {
         method: "POST",
         headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
         body: JSON.stringify({ transaction: input.transactionReference, amount: input.amountMinor }),

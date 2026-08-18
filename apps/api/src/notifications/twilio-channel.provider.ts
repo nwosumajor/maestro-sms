@@ -1,11 +1,7 @@
 import crypto from "node:crypto";
 import { Injectable, Logger } from "@nestjs/common";
 import type { ChannelDeliveryRequest, NotificationChannelProvider } from "./notification.constants";
-
-/** How long to wait on the SMS gateway before giving up. Long enough for a slow
- *  but healthy Twilio response, short enough that a stalled socket cannot pin a
- *  delivery worker. */
-const GATEWAY_TIMEOUT_MS = 10_000;
+import { fetchWithTimeout, GATEWAY_TIMEOUT_MS } from "../common/http";
 
 /**
  * Production channel provider with a LIVE SMS gateway (Twilio) for SMS deliveries.
@@ -50,7 +46,7 @@ export class TwilioChannelProvider implements NotificationChannelProvider {
       // Timing out is also the honest answer: an unanswered request must be
       // treated as "unknown, do not spend a credit", which is what the FAILED
       // path below does.
-      const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
+      const res = await fetchWithTimeout(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
         method: "POST",
         headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/x-www-form-urlencoded" },
         body,
@@ -96,7 +92,7 @@ export class TwilioChannelProvider implements NotificationChannelProvider {
       `?DateSent%3E=${since.toISOString().slice(0, 10)}&PageSize=1000`;
 
     for (let page = 0; url && page < 20; page++) {
-      const res: Response = await fetch(url, {
+      const res: Response = await fetchWithTimeout(url, {
         headers: { Authorization: `Basic ${auth}` },
         signal: AbortSignal.timeout(GATEWAY_TIMEOUT_MS),
       });

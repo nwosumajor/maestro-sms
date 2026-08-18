@@ -14,6 +14,7 @@
 
 import { Injectable, Logger, ServiceUnavailableException } from "@nestjs/common";
 import { toMajor, type MobileMoneyProviderKey } from "@sms/types";
+import { fetchWithTimeout } from "../common/http";
 
 /** What a rail is asked to do. Provider-agnostic by construction. */
 export interface ChargeRequest {
@@ -129,7 +130,7 @@ export class MpesaProvider implements MobileMoneyProvider {
     const auth = Buffer.from(
       `${process.env.MPESA_CONSUMER_KEY}:${process.env.MPESA_CONSUMER_SECRET}`,
     ).toString("base64");
-    const res = await fetch(`${this.base()}/oauth/v1/generate?grant_type=client_credentials`, {
+    const res = await fetchWithTimeout(`${this.base()}/oauth/v1/generate?grant_type=client_credentials`, {
       headers: { Authorization: `Basic ${auth}` },
     });
     if (!res.ok) throw new ServiceUnavailableException("M-Pesa authentication failed");
@@ -154,7 +155,7 @@ export class MpesaProvider implements MobileMoneyProvider {
       throw new ServiceUnavailableException("M-Pesa accepts whole shillings only");
     }
 
-    const res = await fetch(`${this.base()}/mpesa/stkpush/v1/processrequest`, {
+    const res = await fetchWithTimeout(`${this.base()}/mpesa/stkpush/v1/processrequest`, {
       method: "POST",
       headers: { Authorization: `Bearer ${await this.token()}`, "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -193,7 +194,7 @@ export class MpesaProvider implements MobileMoneyProvider {
     const ts = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
     const password = Buffer.from(`${shortcode}${process.env.MPESA_PASSKEY}${ts}`).toString("base64");
     try {
-      const res = await fetch(`${this.base()}/mpesa/stkpushquery/v1/query`, {
+      const res = await fetchWithTimeout(`${this.base()}/mpesa/stkpushquery/v1/query`, {
         method: "POST",
         headers: { Authorization: `Bearer ${await this.token()}`, "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -308,7 +309,7 @@ export class MtnMomoProvider implements MobileMoneyProvider {
 
   private async token(): Promise<string> {
     const auth = Buffer.from(`${process.env.MTN_MOMO_API_USER}:${process.env.MTN_MOMO_API_KEY}`).toString("base64");
-    const res = await fetch(`${this.base()}/collection/token/`, {
+    const res = await fetchWithTimeout(`${this.base()}/collection/token/`, {
       method: "POST",
       headers: {
         Authorization: `Basic ${auth}`,
@@ -332,7 +333,7 @@ export class MtnMomoProvider implements MobileMoneyProvider {
     // being the sandbox. Production sends the actual currency.
     const currency = this.target() === "sandbox" ? "EUR" : req.currency;
 
-    const res = await fetch(`${this.base()}/collection/v1_0/requesttopay`, {
+    const res = await fetchWithTimeout(`${this.base()}/collection/v1_0/requesttopay`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${await this.token()}`,
@@ -369,7 +370,7 @@ export class MtnMomoProvider implements MobileMoneyProvider {
     // why that id had to be DERIVED from our reference and a well-formed UUID.
     const id = ref.providerRef ?? mtnReferenceId(ref.reference);
     try {
-      const res = await fetch(`${this.base()}/collection/v1_0/requesttopay/${encodeURIComponent(id)}`, {
+      const res = await fetchWithTimeout(`${this.base()}/collection/v1_0/requesttopay/${encodeURIComponent(id)}`, {
         headers: {
           Authorization: `Bearer ${await this.token()}`,
           "X-Target-Environment": this.target(),
@@ -448,7 +449,7 @@ export class AirtelProvider implements MobileMoneyProvider {
 
   private async token(): Promise<string> {
     // NOT Basic auth — Airtel takes the credentials as a JSON body.
-    const res = await fetch(`${this.base()}/auth/oauth2/token`, {
+    const res = await fetchWithTimeout(`${this.base()}/auth/oauth2/token`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "*/*" },
       body: JSON.stringify({
@@ -475,7 +476,7 @@ export class AirtelProvider implements MobileMoneyProvider {
     const country = req.country.toUpperCase();
     const msisdn = airtelNationalMsisdn(req.msisdn, req.dialCode);
 
-    const res = await fetch(`${this.base()}/merchant/v1/payments/`, {
+    const res = await fetchWithTimeout(`${this.base()}/merchant/v1/payments/`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${await this.token()}`,
@@ -515,7 +516,7 @@ export class AirtelProvider implements MobileMoneyProvider {
     // Airtel's enquiry is keyed on the transaction id WE sent, not on its own —
     // the opposite of M-Pesa, and the reason this takes both identifiers.
     try {
-      const res = await fetch(`${this.base()}/standard/v1/payments/${encodeURIComponent(ref.reference)}`, {
+      const res = await fetchWithTimeout(`${this.base()}/standard/v1/payments/${encodeURIComponent(ref.reference)}`, {
         headers: {
           Authorization: `Bearer ${await this.token()}`,
           Accept: "*/*",
