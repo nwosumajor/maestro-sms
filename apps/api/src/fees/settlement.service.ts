@@ -22,7 +22,13 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
+
 import { NotificationService } from "../notifications/notification.service";
+
+/** Who is told when money reached a gateway and we declined to post it. Same
+ *  set the dispute alerts use — whoever reconciles the bank. */
+const FINANCE_ROLES = ["accountant", "school_admin", "principal"];
+
 
 /**
  * Did this charge land in the PLATFORM's gateway account rather than the
@@ -78,7 +84,12 @@ export interface OnlinePaymentInput {
   method?: "CARD" | "BANK_TRANSFER";
 }
 
-export type SettlementOutcome = "posted" | "duplicate" | "invoice_missing" | "currency_mismatch";
+export type SettlementOutcome =
+  | "posted"
+  | "duplicate"
+  | "invoice_missing"
+  | "currency_mismatch"
+  | "invoice_not_open";
 
 @Injectable()
 export class InvoiceSettlementService {
@@ -106,6 +117,28 @@ export class InvoiceSettlementService {
       // invoice OPEN and the payment unposted, which is recoverable — posting it
       // silently is not, because nothing downstream ever revisits a settled invoice.
       if (inv.currency !== input.currency) return "currency_mismatch" as const;
+      // AND THE INVOICE MUST STILL BE OPEN.
+      //
+      // Look at what this method does with `status` at the end: it computes one
+      // from the payments and WRITES IT OVER whatever the invoice had. So
+      // settling a charge onto a CANCELLED invoice does not merely record money
+      // in an odd place — it RESURRECTS the invoice as PARTIALLY_PAID or PAID,
+      // silently undoing a cancellation the school made deliberately.
+      //
+      // The route is ordinary, not exotic: a parent opens a checkout while the
+      // invoice is ISSUED, the school then cancels it (wrong amount, duplicate
+      // bill, the pupil left), and the parent completes payment on the page
+      // still open in front of them. #255 stopped a checkout being STARTED
+      // against a cancelled invoice; it cannot stop one already in flight.
+      //
+      // Refused rather than posted, for the reason the currency check gives
+      // just above: refusing leaves the money unposted and recoverable by hand,
+      // while posting is not, because nothing downstream revisits a settled
+      // invoice. A DRAFT is refused for the same reason it can never be
+      // charged in the first place — it is not a bill yet.
+      if (inv.status !== "ISSUED" && inv.status !== "PARTIALLY_PAID") {
+        return { kind: "invoice_not_open" as const, status: inv.status };
+      }
       // IDEMPOTENCY: the gateway RETRIES a webhook on any non-2xx / timeout
       // (and can double-deliver), and verify-on-return / reconciliation can
       // race the webhook. Without this guard each path would insert ANOTHER
@@ -192,13 +225,24 @@ export class InvoiceSettlementService {
     if (receipt === "invoice_missing") return "invoice_missing";
     if (receipt === "duplicate") return "duplicate";
     if (receipt === "currency_mismatch") {
-      // Loud: money reached a gateway that we are declining to post. Someone must
-      // reconcile it by hand, so it cannot be a debug line.
-      this.logger.error(
-        `settlement REFUSED ${input.reference}: charge in ${input.currency} against ` +
-          `invoice ${input.invoiceId} — currency mismatch. Payment NOT posted.`,
+      await this.refuse(
+        input,
+        `charge in ${input.currency} against invoice ${input.invoiceId} — currency mismatch`,
+        "A payment could not be applied (currency mismatch)",
       );
       return "currency_mismatch";
+    }
+    if (typeof receipt === "object" && "kind" in receipt && receipt.kind === "invoice_not_open") {
+      await this.refuse(
+        input,
+        `invoice ${input.invoiceId} is ${String(receipt.status)}, not open for payment`,
+        // Defensive `String(...)`: this path must never be the thing that
+        // THROWS. A settlement that crashes leaves the gateway retrying and
+        // nobody told, which is strictly worse than the refusal it was trying
+        // to report.
+        `A payment arrived for an invoice that is ${String(receipt.status ?? "not open").toLowerCase()}`,
+      );
+      return "invoice_not_open";
     }
 
     // Receipt AFTER the committed write — a notification failure never undoes
@@ -250,4 +294,47 @@ export class InvoiceSettlementService {
     }
     return "posted";
   }
+
+  /**
+   * A settlement we are declining to post.
+   *
+   * Money reached a gateway and is not going onto the ledger, so somebody has
+   * to reconcile it by hand — refund the payer, or re-issue the bill and take
+   * it again. That was a `logger.error` and nothing else, which is the failure
+   * this codebase keeps finding: recorded faithfully somewhere nobody reads.
+   * Finance is TOLD, by name, on the same day.
+   *
+   * The alert says what arrived and what to do; it deliberately does not say
+   * the payer is out of pocket in so many words, because whether they are
+   * depends on the rail and finance is the one who can look.
+   */
+  private async refuse(input: OnlinePaymentInput, why: string, title: string): Promise<void> {
+    this.logger.error(`settlement REFUSED ${input.reference}: ${why}. Payment NOT posted.`);
+    try {
+      await this.db.runAsTenant({ schoolId: input.schoolId, userId: SYSTEM_ACTOR_ID }, async (tx) => {
+        const staff = (await tx.userRole.findMany({
+          where: { role: { name: { in: FINANCE_ROLES } } },
+          select: { userId: true },
+          distinct: ["userId"],
+        })) as Array<{ userId: string }>;
+        for (const s of staff) {
+          await this.notifications.enqueue(
+            { schoolId: input.schoolId, userId: SYSTEM_ACTOR_ID },
+            {
+              recipientId: s.userId,
+              type: "OPERATOR_ALERT",
+              title,
+              body: `Reference ${input.reference}: ${why}. The payment was NOT recorded — check the gateway and either refund it or re-issue the bill.`,
+              data: { invoiceId: input.invoiceId, reference: input.reference },
+            },
+          );
+        }
+      });
+    } catch (e) {
+      // An alert that fails must not turn a refusal into a crash — the log line
+      // above is still the record of last resort.
+      this.logger.error(`could not alert finance about ${input.reference}: ${String(e).slice(0, 120)}`);
+    }
+  }
+
 }

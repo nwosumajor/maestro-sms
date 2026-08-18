@@ -23,7 +23,7 @@ function makeService(invoiceCurrency = "GHS") {
   const created: Array<Record<string, unknown>> = [];
   const tx = {
     invoice: {
-      findFirst: jest.fn().mockResolvedValue({
+      findFirst: jest.fn().mockResolvedValue({ status: "ISSUED",
         id: "inv-1",
         currency: invoiceCurrency,
         totalMinor: 500_000,
