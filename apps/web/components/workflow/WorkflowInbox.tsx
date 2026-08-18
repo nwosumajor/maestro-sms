@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { WorkflowChain } from "./WorkflowChain";
 import { useRouter } from "next/navigation";
 import {
   WORKFLOW_PERMISSIONS,
@@ -292,6 +293,9 @@ export function WorkflowInbox({
                     {w.summary && (
                       <p className="mt-1 text-sm text-muted-foreground">{w.summary}</p>
                     )}
+                    {/* Who decided what, and whether under a temporary grant.
+                        The endpoint behind this existed and nothing called it. */}
+                    <WorkflowChain requestId={w.id} />
                   </div>
                   <div className="flex flex-col items-end gap-1">
                     <Badge variant={STATE_VARIANT[w.state] ?? "secondary"}>

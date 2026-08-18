@@ -1555,7 +1555,7 @@
     },
     "GET /workflows/:p": {
       "kind": "ui",
-      "note": "reviewed: a call in app/(app)/admin/page.tsx builds this path"
+      "note": "reviewed: components/workflow/WorkflowChain.tsx — the 'Approval history' disclosure on each row of the approvals inbox. The previous note claimed app/(app)/admin/page.tsx built this path; that page only calls GET /workflows (the list), so the route in fact had NO reader."
     },
     "GET /workflows/approvers": {
       "kind": "ui",

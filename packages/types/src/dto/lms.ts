@@ -160,6 +160,67 @@ export interface WorkflowInboxItemDto {
   summary: string | null;
 }
 
+
+/**
+ * ONE DECIDED STAGE of a multi-stage approval.
+ *
+ * `viaElevation` is the field this whole DTO exists for. The engine has always
+ * recorded it — "the trail should show that a stand-in decided it, not merely
+ * who", says the comment where it is written — into a JSON column that nothing
+ * read. A stage approved under a temporary grant looked exactly like one
+ * approved by the person who holds that authority every day.
+ */
+export interface WorkflowApprovalDto {
+  stageKey: string;
+  stageLabel: string;
+  approverId: string;
+  approverName: string;
+  at: Date;
+  /** The approver held this stage's permission through an elevation grant, not
+   *  their role. */
+  viaElevation: boolean;
+}
+
+/** One entry of the immutable WorkflowAuditLog. */
+export interface WorkflowTrailEntryDto {
+  at: Date;
+  actorName: string | null;
+  oldState: string;
+  newState: string;
+  comments: string | null;
+}
+
+/**
+ * The whole story of one approval request.
+ *
+ * `GET /workflows/:id` has always returned the request and its immutable trail,
+ * and NO PAGE CALLED IT. So a school could see that a leave request, a salary
+ * change, a fee run or an admin appointment was pending, and act on it, but
+ * could never afterwards see WHO approved WHICH stage or WHEN. The maker-checker
+ * record existed and was unreadable, which is most of the way to not having one.
+ */
+export interface WorkflowDetailDto {
+  id: string;
+  type: string;
+  state: string;
+  initiatorId: string;
+  initiatorName: string;
+  createdAt: Date;
+  summary: string | null;
+  currentStage: number;
+  stageCount: number;
+  /** The chain as designed: every stage, in order, decided or not. */
+  stages: Array<{
+    key: string;
+    label: string;
+    /** Named when the initiator routed this stage to one person. */
+    routedToName: string | null;
+    /** Filled once the stage has been decided. */
+    decidedBy: WorkflowApprovalDto | null;
+  }>;
+  trail: WorkflowTrailEntryDto[];
+}
+
 /** A senior staff member the initiator can route an approval stage to
  *  (a holder of workflow.review — principal / school_admin / head_teacher /
  *  head_admin / hr_manager). */

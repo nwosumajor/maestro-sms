@@ -1,7 +1,7 @@
 import { Body, Controller, ForbiddenException, Get, Param, Post } from "@nestjs/common";
 import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
-import type { WorkflowApproverOptionDto, WorkflowInboxItemDto } from "@sms/types";
+import type { WorkflowApproverOptionDto, WorkflowInboxItemDto, WorkflowDetailDto } from "@sms/types";
 import { z } from "zod";
 import { canInitiateWorkflowType, WORKFLOW_PERMISSIONS, WORKFLOW_TYPES } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -96,9 +96,12 @@ export class WorkflowController {
     return this.workflow.listEligibleApprovers(p);
   }
 
+  /** The whole story of one request — the chain as designed, who decided each
+   *  stage (and whether under an elevation grant), and the immutable trail.
+   *  Reviewer or initiator only; 404 for anyone else. */
   @Get(":id")
   @RequirePermission(WORKFLOW_PERMISSIONS.READ)
-  get(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+  get(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<WorkflowDetailDto> {
     return this.workflow.getRequest(p, id);
   }
 }

@@ -34,6 +34,7 @@ import {
   type WorkflowAction,
   type WorkflowApproverOptionDto,
   type WorkflowInboxItemDto,
+  type WorkflowDetailDto,
   type WorkflowStage,
   type WorkflowState,
   type WorkflowType,
@@ -68,6 +69,7 @@ interface RequestRow {
   stages: unknown;
   currentStage: number;
   approvals: unknown;
+  createdAt: Date;
 }
 
 @Injectable()
@@ -285,18 +287,103 @@ export class WorkflowService {
     });
   }
 
-  async getRequest(p: Principal, id: string) {
+  /**
+   * The whole story of one request: the chain as designed, who decided each
+   * stage, and the immutable trail.
+   *
+   * It used to return the raw row and the raw trail, and NO PAGE CALLED IT — so
+   * a school could see a request was pending and act on it, but could never
+   * afterwards see who approved which stage. A maker-checker record that cannot
+   * be read is most of the way to not having one.
+   *
+   * The field this was really missing is `viaElevation`. The engine records it
+   * on every approval — "the trail should show that a stand-in decided it, not
+   * merely who", says the comment where it is written — into a JSON column
+   * nothing read, so a stage approved under a temporary grant looked identical
+   * to one approved by the person who holds that authority every day.
+   *
+   * Same scope as before: a reviewer, or the initiator of this request. 404 for
+   * anyone else, never 403.
+   */
+  async getRequest(p: Principal, id: string): Promise<WorkflowDetailDto> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const req = (await tx.workflowRequest.findFirst({ where: { id } })) as RequestRow | null;
       if (!req) throw new NotFoundException("Request not found");
       if (!this.isReviewer(p) && req.initiatorId !== p.userId) {
         throw new NotFoundException("Request not found"); // 404, not 403
       }
-      const trail = await tx.workflowAuditLog.findMany({
+      const trail = (await tx.workflowAuditLog.findMany({
         where: { requestId: id },
         orderBy: { timestamp: "asc" },
-      });
-      return { request: req, auditTrail: trail };
+      })) as Array<{
+        timestamp: Date;
+        approverId: string | null;
+        initiatorId: string;
+        oldState: string;
+        newState: string;
+        comments: string | null;
+      }>;
+
+      const stages = (req.stages as WorkflowStage[] | null) ?? [];
+      const approvals = (req.approvals as StageApproval[] | null) ?? [];
+      // One lookup for every person named anywhere in the story.
+      const ids = [
+        ...new Set(
+          [
+            req.initiatorId,
+            ...approvals.map((a) => a.approverId),
+            ...stages.map((st) => st.approverId).filter(Boolean),
+            ...trail.map((t) => t.approverId).filter(Boolean),
+          ].filter((v): v is string => !!v),
+        ),
+      ];
+      const people = (await tx.user.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, name: true },
+      })) as Array<{ id: string; name: string }>;
+      const nameOf = new Map(people.map((u) => [u.id, u.name]));
+
+      const approvalByStage = new Map(approvals.map((a) => [a.stageKey, a]));
+      return {
+        id: req.id,
+        type: req.type,
+        state: req.state,
+        initiatorId: req.initiatorId,
+        initiatorName: nameOf.get(req.initiatorId) ?? "Unknown",
+        createdAt: req.createdAt,
+        // Same rule as the inbox list: only a summary a SERVICE wrote, never
+        // the raw payload, whatever a future type puts in there.
+        summary: (req.payload as { summary?: unknown } | null)?.summary
+          ? String((req.payload as { summary: unknown }).summary).slice(0, 300)
+          : null,
+        currentStage: req.currentStage,
+        stageCount: stages.length,
+        stages: stages.map((st) => {
+          const decided = approvalByStage.get(st.key);
+          return {
+            key: st.key,
+            label: st.label,
+            routedToName: st.approverId ? nameOf.get(st.approverId) ?? st.approverName ?? null : null,
+            decidedBy: decided
+              ? {
+                  stageKey: decided.stageKey,
+                  stageLabel: st.label,
+                  approverId: decided.approverId,
+                  approverName: nameOf.get(decided.approverId) ?? "Unknown",
+                  at: new Date(decided.at),
+                  viaElevation: decided.viaElevation === true,
+                }
+              : null,
+          };
+        }),
+        trail: trail.map((t) => ({
+          at: t.timestamp,
+          actorName: t.approverId ? nameOf.get(t.approverId) ?? null : null,
+          oldState: t.oldState,
+          newState: t.newState,
+          comments: t.comments,
+        })),
+      };
     });
   }
 
@@ -444,7 +531,14 @@ export class WorkflowService {
         newState: nextState,
         comments:
           comments ??
-          ([stageNote, routedApproverGone && `routed approver ${routedApproverGone} has left the school`]
+          ([
+            stageNote,
+            // The immutable trail says so too, not only the approvals JSON. The
+            // detail view can be changed; this row cannot.
+            p.elevated?.includes(stages[req.currentStage]?.permission ?? "") &&
+              "decided under a temporary elevation grant",
+            routedApproverGone && `routed approver ${routedApproverGone} has left the school`,
+          ]
             .filter(Boolean)
             .join("; ") ||
             null),
