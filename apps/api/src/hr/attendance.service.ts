@@ -15,6 +15,7 @@
 // =============================================================================
 
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { Prisma } from "@sms/db";
 import { schoolToday } from "@sms/types";
 import type {
   AttendanceRegisterDto,
@@ -460,18 +461,38 @@ export class StaffAttendanceService {
           alreadyMarked++;
           continue;
         }
-        await tx.staffAttendance.create({
-          data: {
-            schoolId: school.id,
-            userId,
-            date,
-            status: deriveClockInStatus(lateAfter, at, timezone),
-            source: "BIOMETRIC",
-            markedById: ZERO,
-            clockInAt: at,
-          },
-        });
-        accepted++;
+        try {
+          await tx.staffAttendance.create({
+            data: {
+              schoolId: school.id,
+              userId,
+              date,
+              status: deriveClockInStatus(lateAfter, at, timezone),
+              source: "BIOMETRIC",
+              markedById: ZERO,
+              clockInAt: at,
+            },
+          });
+          accepted++;
+        } catch (e) {
+          // ONE DUPLICATE MUST NOT DISCARD THE WHOLE BATCH.
+          //
+          // The `findFirst` above is a read and `(userId, date)` is UNIQUE, so
+          // two readers reporting the same person at once — a gate terminal and
+          // a staffroom one, or a device retrying while its first request is
+          // still in flight — both find nothing and both insert. The loser gets
+          // P2002.
+          //
+          // And the whole batch is ONE transaction, so that P2002 rolled back
+          // every OTHER event in it: a morning's clock-ins discarded because two
+          // terminals saw one person. A device that does not retry loses them
+          // silently.
+          //
+          // A duplicate is precisely the case the read above was checking for,
+          // so it is counted the same way and the batch continues.
+          if (!(e instanceof Prisma.PrismaClientKnownRequestError) || e.code !== "P2002") throw e;
+          alreadyMarked++;
+        }
       }
       await tx.attendanceDevice.update({ where: { id: device.id }, data: { lastSeenAt: new Date() } });
       return { accepted, alreadyMarked, unknown };
