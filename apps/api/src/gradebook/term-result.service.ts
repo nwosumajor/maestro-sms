@@ -400,8 +400,22 @@ export class TermResultService {
 
       // Rank within THIS subject by total (highest first); ties share a position
       // (standard competition ranking). Ungraded students stay unranked (null).
+      //
+      // PUBLISHED ONLY, which is the same population the REPORT CARD ranks over.
+      // The rank there carries a comment stating the requirement — "a position
+      // has to be the same number for the parent, the pupil and the teacher" —
+      // and this view broke it by ranking every entered mark, draft included.
+      // Mid-term that is not a rounding difference: with ten of thirty subject
+      // results published, the family's report card said 5th of 10 and this
+      // scoresheet said 15th of 30, and the teacher was the one who had to
+      // explain the gap.
+      //
+      // Draft marks are still SHOWN here — a teacher must see what they are
+      // entering. It is only the POSITION that waits for publication, which is
+      // also the honest answer: a rank over a half-entered set moves every time
+      // a colleague saves a mark.
       const ranked = roster
-        .filter((r) => r.result?.total != null)
+        .filter((r) => r.result?.total != null && r.result?.status === "PUBLISHED")
         .sort((a, b) => (b.result!.total as number) - (a.result!.total as number));
       let position = 0;
       let seen = 0;
