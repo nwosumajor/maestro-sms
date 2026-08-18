@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { DocumentsController } from "./documents.controller";
 import { DocumentsService } from "./documents.service";
+import { PublicDocumentsController } from "./public-documents.controller";
 import { SuppliedDocumentsController } from "./supplied-documents.controller";
 import { SuppliedDocumentsService } from "./supplied-documents.service";
 import { STORAGE_PROVIDER, StubStorageProvider } from "./storage.provider";
@@ -19,7 +20,7 @@ import { NotificationModule } from "../notifications/notification.module";
   // the literal routes must come FIRST or the Vault's wildcard swallows them
   // and answers 404 for a document id that was never an id. Exactly the shape
   // of `scan/today` being eaten by `scan/:code`. Pinned by a test.
-  controllers: [SuppliedDocumentsController, DocumentsController],
+  controllers: [PublicDocumentsController, SuppliedDocumentsController, DocumentsController],
   providers: [
     DocumentsService,
     SuppliedDocumentsService,

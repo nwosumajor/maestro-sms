@@ -67,6 +67,16 @@ export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
  *  a birth certificate may need a trip to a registry office. */
 export const UPLOAD_TOKEN_TTL_DAYS = 30;
 
+/**
+ * How many files one application or one person may have against it.
+ *
+ * The public upload link is a capability anybody holding it can use repeatedly,
+ * and every use costs a row and an object in the bucket. Rate limiting slows
+ * that down; this bounds it. Forty is far more than a family will ever send and
+ * far less than a nuisance needs.
+ */
+export const MAX_SUBMISSIONS_PER_SUBJECT = 40;
+
 /** How long a REJECTED application's supplied files are kept before the sweep
  *  removes them. They are a minor's identity documents belonging to a family
  *  the school turned down; keeping them indefinitely is the thing to avoid. */

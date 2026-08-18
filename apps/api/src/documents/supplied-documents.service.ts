@@ -22,6 +22,7 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import {
+  MAX_SUBMISSIONS_PER_SUBJECT,
   MAX_UPLOAD_BYTES,
   REQUIREMENT_SCOPES,
   SUBMISSION_SUBJECTS,
@@ -45,6 +46,7 @@ import {
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
+import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
 import { STORAGE_PROVIDER, type StorageProvider } from "./storage.provider";
 import { baseContentType, isAcceptedUploadType, sniffUploadType } from "./sniff-upload";
 
@@ -570,6 +572,162 @@ export class SuppliedDocumentsService {
       filename: row.originalName ?? "document",
       contentType: row.contentType ?? "application/octet-stream",
     };
+  }
+
+  // --- the family's own view, reached by a signed link and nothing else ------
+  //
+  // These take a SUBJECT resolved from the token rather than a Principal: the
+  // caller is a parent with no account. Everything they may touch is fixed by
+  // the signature, so nothing here reads an id out of the request.
+
+  /** What is still wanted, and what the school made of what has arrived. No
+   *  storage keys, no way to read a file back — see document-upload-token.ts. */
+  async publicChecklist(subject: { applicationId: string; schoolId: string }): Promise<{
+    childName: string;
+    requirements: DocumentRequirementDto[];
+    submitted: Array<{ requirementId: string | null; label: string | null; status: string; rejectedReason: string | null; at: Date }>;
+    outstanding: DocumentRequirementDto[];
+    complete: boolean;
+  }> {
+    return this.db.runAsTenantReadOnly({ schoolId: subject.schoolId, userId: SYSTEM_ACTOR_ID }, async (tx) => {
+      const application = await this.requireOpenApplication(tx, subject.applicationId);
+      const requirements = await this.requirementsInTx(tx, "STUDENT_ADMISSION");
+      const submissions = (await tx.documentSubmission.findMany({
+        where: { subjectKind: "ADMISSION_APPLICATION", subjectId: subject.applicationId },
+        orderBy: { createdAt: "asc" },
+      })) as SubmissionRow[];
+      const labelOf = new Map(requirements.map((r) => [r.id, r.label] as const));
+      const pairs = submissions.map((s) => ({ requirementId: s.requirementId, status: s.status as SubmissionStatus }));
+      return {
+        childName: application.childName,
+        requirements: requirements.map((r) => this.toRequirementDto(r)),
+        // Status and the school's reason ONLY. Enough for a family to know
+        // whether to send something again, and nothing they could not already
+        // have known.
+        submitted: submissions
+          .filter((s) => s.status !== "PENDING")
+          .map((s) => ({
+            requirementId: s.requirementId,
+            label: s.requirementId ? labelOf.get(s.requirementId) ?? null : null,
+            status: s.status,
+            rejectedReason: s.rejectedReason,
+            at: s.uploadedAt ?? s.createdAt,
+          })),
+        outstanding: outstandingRequirements(requirements, pairs).map((r) => this.toRequirementDto(r)),
+        complete: submissionProgress(requirements, pairs).complete,
+      };
+    });
+  }
+
+  async publicStartUpload(
+    subject: { applicationId: string; schoolId: string },
+    input: { requirementId?: string | null; filename: string; contentType: string },
+  ): Promise<UploadTicketDto> {
+    if (!isAcceptedUploadType(input.contentType)) {
+      throw new BadRequestException("Upload a PDF, JPEG or PNG");
+    }
+    const contentType = baseContentType(input.contentType);
+    return this.db.runAsTenant({ schoolId: subject.schoolId, userId: SYSTEM_ACTOR_ID }, async (tx) => {
+      await this.requireOpenApplication(tx, subject.applicationId);
+      // A capability anybody holding the link may use repeatedly. Rate limiting
+      // slows that; this bounds it.
+      const already = await tx.documentSubmission.count({
+        where: { subjectKind: "ADMISSION_APPLICATION", subjectId: subject.applicationId },
+      });
+      if (already >= MAX_SUBMISSIONS_PER_SUBJECT) {
+        throw new BadRequestException("This application already has as many documents as it can hold");
+      }
+      if (input.requirementId) await this.requireRequirement(tx, input.requirementId, "ADMISSION_APPLICATION");
+      const id = randomUUID();
+      const storageKey = `schools/${subject.schoolId}/submissions/${id}`;
+      await tx.documentSubmission.create({
+        data: {
+          id,
+          schoolId: subject.schoolId,
+          subjectKind: "ADMISSION_APPLICATION",
+          subjectId: subject.applicationId,
+          requirementId: input.requirementId ?? null,
+          storageKey,
+          contentType,
+          originalName: input.filename.slice(0, 200),
+          status: "PENDING",
+          // NULL: a parent has no account. That is what this column is for.
+          uploadedByUserId: null,
+        },
+      });
+      const presigned = await this.storage.presignUpload({ key: storageKey, contentType });
+      return { submissionId: id, uploadUrl: presigned.url, expiresInSeconds: presigned.expiresInSeconds, maxBytes: MAX_UPLOAD_BYTES };
+    });
+  }
+
+  /** The same three answers the staff path gives, with the row constrained to
+   *  the token's own application so a valid link cannot confirm somebody
+   *  else's upload. */
+  async publicConfirm(subject: { applicationId: string; schoolId: string }, submissionId: string): Promise<{ status: string }> {
+    const ctx = { schoolId: subject.schoolId, userId: SYSTEM_ACTOR_ID };
+    const row = await this.db.runAsTenantReadOnly(ctx, async (tx) =>
+      (await tx.documentSubmission.findFirst({
+        where: { id: submissionId, subjectKind: "ADMISSION_APPLICATION", subjectId: subject.applicationId },
+      })) as SubmissionRow | null,
+    );
+    if (!row) throw new NotFoundException("Not found");
+    if (row.status !== "PENDING") throw new BadRequestException("This upload has already been received");
+    if (!row.storageKey) throw new BadRequestException("There is nothing to confirm");
+
+    const bytes = await this.storage.download(row.storageKey);
+    if (!bytes) throw new BadRequestException("We have not received the file yet — please try again");
+    const tooBig = bytes.length > MAX_UPLOAD_BYTES;
+    const actual = tooBig ? null : sniffUploadType(bytes);
+    if (tooBig || !actual) {
+      await this.storage.delete(row.storageKey).catch(() => undefined);
+      await this.db.runAsTenant(ctx, (tx) =>
+        tx.documentSubmission.update({
+          where: { id: submissionId },
+          data: {
+            status: "REJECTED",
+            rejectedReason: tooBig ? "Refused on upload: larger than the limit." : "Refused on upload: not a PDF, JPEG or PNG.",
+            storageKey: null,
+          },
+        }),
+      );
+      throw new BadRequestException(tooBig ? "That file is larger than the 10MB limit" : "That file is not a PDF, JPEG or PNG");
+    }
+    await this.db.runAsTenant(ctx, async (tx) => {
+      await tx.documentSubmission.update({
+        where: { id: submissionId },
+        data: { status: "UPLOADED", contentType: actual, sizeBytes: bytes.length, uploadedAt: new Date() },
+      });
+      // Audited to the SYSTEM actor: there is no user to attribute it to, and a
+      // file arriving on a child's application is worth a record either way.
+      await this.audit.record(
+        {
+          actorId: SYSTEM_ACTOR_ID,
+          action: "document.submission.upload.public",
+          entity: "document_submission",
+          entityId: submissionId,
+          schoolId: subject.schoolId,
+          metadata: { applicationId: subject.applicationId, contentType: actual, sizeBytes: bytes.length },
+        },
+        tx,
+      );
+    });
+    return { status: "UPLOADED" };
+  }
+
+  /**
+   * The application must exist in THIS school and still be open to documents.
+   *
+   * A rejected application is closed: there is nothing for a family to send and
+   * no reason to keep accepting storage against it. 404 for both cases — a token
+   * holder must not be able to tell "wrong application" from "we said no".
+   */
+  private async requireOpenApplication(tx: TenantTx, applicationId: string): Promise<{ childName: string }> {
+    const app = (await tx.admissionApplication.findFirst({
+      where: { id: applicationId },
+      select: { childName: true, status: true },
+    })) as { childName: string; status: string } | null;
+    if (!app || app.status === "REJECTED") throw new NotFoundException("Not found");
+    return { childName: app.childName };
   }
 
   // --- helpers ---------------------------------------------------------------
