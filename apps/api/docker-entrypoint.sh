@@ -173,15 +173,15 @@ apply_rls packages/db/prisma/rls/100_data_breach_rls.sql data_breach_incident_up
 apply_rls packages/db/prisma/rls/101_mobile_money_rls.sql mobile_money_intent_update
 apply_rls packages/db/prisma/rls/102_job_run_rls.sql job_run_select
 apply_rls packages/db/prisma/rls/102_school_archive_rls.sql school_archive_insert
-apply_rls 103_subject_syllabus_rls.sql subject_syllabus_item_delete
-apply_rls 104_meeting_invitee_rls.sql meeting_invitee_delete
-apply_rls 105_meeting_cohost_rls.sql meeting_cohost_delete
-apply_rls 106_meeting_request_rls.sql meeting_request_update
-apply_rls 89_payment_channel_rls.sql payment_channel_config_select
-apply_rls 107_student_trait_rating_rls.sql student_trait_rating_delete
-apply_rls 108_platform_settlement_release_rls.sql platform_settlement_release_insert
-apply_rls 109_document_requirement_rls.sql document_requirement_delete
-apply_rls 110_document_submission_rls.sql document_submission_update
+apply_rls packages/db/prisma/rls/103_subject_syllabus_rls.sql subject_syllabus_item_delete
+apply_rls packages/db/prisma/rls/104_meeting_invitee_rls.sql meeting_invitee_delete
+apply_rls packages/db/prisma/rls/105_meeting_cohost_rls.sql meeting_cohost_delete
+apply_rls packages/db/prisma/rls/106_meeting_request_rls.sql meeting_request_update
+apply_rls packages/db/prisma/rls/89_payment_channel_rls.sql payment_channel_config_select
+apply_rls packages/db/prisma/rls/107_student_trait_rating_rls.sql student_trait_rating_delete
+apply_rls packages/db/prisma/rls/108_platform_settlement_release_rls.sql platform_settlement_release_insert
+apply_rls packages/db/prisma/rls/109_document_requirement_rls.sql document_requirement_delete
+apply_rls packages/db/prisma/rls/110_document_submission_rls.sql document_submission_update
 
 # Seed on first provision (compose: SEED_ON_START=true; cloud migrate task: always).
 if [ "${SEED_ON_START}" = "true" ] || [ "$MODE" = "migrate" ]; then

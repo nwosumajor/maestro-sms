@@ -3328,6 +3328,46 @@
     "PUT /ultimate/consent": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
+    },
+    "GET /documents/requirements": {
+      "kind": "gap",
+      "note": "supplied-documents module, step 2-3: service + endpoints landed; the registrar and HR screens that call them land in step 6"
+    },
+    "POST /documents/requirements": {
+      "kind": "gap",
+      "note": "supplied-documents module, step 2-3: service + endpoints landed; the registrar and HR screens that call them land in step 6"
+    },
+    "PUT /documents/requirements/:p": {
+      "kind": "gap",
+      "note": "supplied-documents module, step 2-3: service + endpoints landed; the registrar and HR screens that call them land in step 6"
+    },
+    "POST /documents/requirements/seed-defaults": {
+      "kind": "gap",
+      "note": "supplied-documents module, step 2-3: service + endpoints landed; the registrar and HR screens that call them land in step 6"
+    },
+    "GET /documents/checklist": {
+      "kind": "gap",
+      "note": "supplied-documents module, step 2-3: service + endpoints landed; the registrar and HR screens that call them land in step 6"
+    },
+    "POST /documents/submissions/upload-url": {
+      "kind": "gap",
+      "note": "supplied-documents module, step 2-3: service + endpoints landed; the registrar and HR screens that call them land in step 6"
+    },
+    "POST /documents/submissions/:p/confirm": {
+      "kind": "gap",
+      "note": "supplied-documents module, step 2-3: service + endpoints landed; the registrar and HR screens that call them land in step 6"
+    },
+    "POST /documents/submissions/:p/decide": {
+      "kind": "gap",
+      "note": "supplied-documents module, step 2-3: service + endpoints landed; the registrar and HR screens that call them land in step 6"
+    },
+    "POST /documents/submissions/waive": {
+      "kind": "gap",
+      "note": "supplied-documents module, step 2-3: service + endpoints landed; the registrar and HR screens that call them land in step 6"
+    },
+    "GET /documents/submissions/:p/file": {
+      "kind": "gap",
+      "note": "supplied-documents module, step 2-3: service + endpoints landed; the registrar and HR screens that call them land in step 6"
     }
   }
 }
