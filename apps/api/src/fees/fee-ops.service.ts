@@ -39,7 +39,7 @@ import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
 import { NotificationService } from "../notifications/notification.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import { FeesService } from "./fees.service";
-import { currencyDecimals, formatMoney, toMajor } from "@sms/types";
+import { currencyDecimals, formatMoney, resolveRegion, schoolToday, toMajor } from "@sms/types";
 import { BrandingService } from "../branding/branding.service";
 
 export const FEE_OPS_QUEUE = "fee-ops";
@@ -358,11 +358,24 @@ export class FeeOpsService {
     }
     const schools = await client.school.findMany({
       where: { isPlatform: false, lateFeeFlatMinor: { gt: 0 } },
-      select: { id: true, lateFeeFlatMinor: true, lateFeeGraceDays: true },
+      // The TIMEZONE comes along because grace is counted in the school's own
+      // days — see the cutoff below.
+      select: { id: true, lateFeeFlatMinor: true, lateFeeGraceDays: true, country: true, timezone: true },
     });
     let feesApplied = 0;
     for (const school of schools) {
-      const cutoff = new Date(Date.now() - school.lateFeeGraceDays * 86_400_000);
+      // GRACE IS COUNTED IN THE SCHOOL'S DAYS, from the school's today. This
+      // subtracted the grace from the instant the sweep happened to run, which
+      // silently tied the result to the cron HOUR: at 05:20 UTC no catalogued
+      // school is affected, but move FEE_LATE_FEE_CRON to 02:00 and a Toronto
+      // school's parents are charged a day into a grace period that has not
+      // expired. The installment OVERDUE state next door already measures from
+      // the school's day — this is the same rule, on the path that takes money.
+      // resolveRegion, not the raw column: a null timezone means the platform's
+      // home country rather than "unknown", which is how a school that predates
+      // the region model behaves everywhere else.
+      const today = schoolToday(resolveRegion(school).timezone);
+      const cutoff = new Date(today.getTime() - school.lateFeeGraceDays * 86_400_000);
       try {
         // ALREADY-DONE INVOICES ARE EXCLUDED IN THE QUERY, not skipped in Node
         // afterwards. That ordering is the whole bug: the marker check used to

@@ -34,6 +34,10 @@ function makeService(f: Fakes) {
     parentChild: { findFirst: jest.fn().mockResolvedValue(f.parentChild?.[0] ?? null) },
     classTeacher: { findMany: jest.fn().mockResolvedValue(f.classTeacher ?? []) },
     enrollment: { findFirst: jest.fn().mockResolvedValue(f.enrollment ?? null) },
+    // The registry row, because allocating an admission number now asks which
+    // year it is WHERE THE SCHOOL IS. The real transaction always has this; a
+    // stub without it was simply an incomplete model of one.
+    school: { findFirst: jest.fn().mockResolvedValue({ country: "NG", timezone: "Africa/Lagos" }) },
   } as unknown as TenantTx;
 
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };

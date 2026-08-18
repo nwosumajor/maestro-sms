@@ -3,8 +3,12 @@
 // =============================================================================
 // Recharts panels, themed to the design tokens (teal --primary, cool ink).
 // Client components — rendered inside server pages with serialisable props.
-// Money values are passed already in MAJOR units (naira); `money` toggles a ₦
-// prefix + thousands grouping in axes and tooltips.
+// Money values are passed already in MAJOR units — converted by the CALLER with
+// toMajor(), which knows that a CFA franc has no minor unit at all. `money`
+// toggles currency formatting, and the currency comes from the SCHOOL. Both
+// halves used to be wrong together: a bare `/100` and a hard-coded ₦, so a
+// Ghanaian school's fee chart was labelled in naira and a CFA school's showed a
+// hundredth of what it had actually invoiced.
 // =============================================================================
 
 import * as React from "react";
@@ -22,10 +26,8 @@ import {
   YAxis,
 } from "recharts";
 import { RC } from "./colors";
+import { fmtVal, nfCompact } from "./format-value";
 
-const nfCompact = (n: number) =>
-  Math.abs(n) >= 1000 ? `${(n / 1000).toFixed(n % 1000 === 0 ? 0 : 1)}k` : `${n}`;
-const fmtVal = (n: number, money?: boolean) => (money ? `₦${nfCompact(n)}` : n.toLocaleString());
 
 // Charts measure the DOM (client-only). Render a fixed-height placeholder until
 // mounted so the server HTML and first client render match exactly — no hydration
@@ -60,7 +62,20 @@ type Datum = Record<string, string | number>;
 export type Series = { key: string; label: string; color: string; money?: boolean };
 
 /** Multi-series area trend (growth + revenue over time). */
-export function RCArea({ data, series, height = 264 }: { data: Datum[]; series: Series[]; height?: number }) {
+export function RCArea({
+  data,
+  series,
+  currency,
+  locale,
+  height = 264,
+}: {
+  data: Datum[];
+  series: Series[];
+  /** The SCHOOL's currency/locale — never the platform's. */
+  currency?: string;
+  locale?: string;
+  height?: number;
+}) {
   return (
     <ChartFrame height={height}>
     <ResponsiveContainer width="100%" height={height}>
@@ -84,7 +99,7 @@ export function RCArea({ data, series, height = 264 }: { data: Datum[]; series: 
                   { label: String(label), value: "" },
                   ...payload.map((p) => {
                     const s = series.find((x) => x.key === p.dataKey);
-                    return { label: s?.label ?? String(p.dataKey), value: fmtVal(Number(p.value), s?.money), color: s?.color };
+                    return { label: s?.label ?? String(p.dataKey), value: fmtVal(Number(p.value), s?.money, currency, locale), color: s?.color };
                   }),
                 ]}
               />
@@ -115,11 +130,16 @@ export function RCBars({
   data,
   color = RC.primary,
   money,
+  currency,
+  locale,
   height = 264,
 }: {
   data: { label: string; value: number; color?: string }[];
   color?: string;
   money?: boolean;
+  /** The SCHOOL's currency/locale — never the platform's. */
+  currency?: string;
+  locale?: string;
   height?: number;
 }) {
   return (
@@ -139,7 +159,7 @@ export function RCBars({
           cursor={{ fill: "hsl(var(--muted) / 0.5)" }}
           content={({ active, payload }) =>
             active && payload && payload.length ? (
-              <TipBox rows={[{ label: String(payload[0].payload.label), value: fmtVal(Number(payload[0].value), money), color }]} />
+              <TipBox rows={[{ label: String(payload[0].payload.label), value: fmtVal(Number(payload[0].value), money, currency, locale), color }]} />
             ) : null
           }
         />
@@ -158,10 +178,14 @@ export function RCBars({
 export function RCColumns({
   data,
   money,
+  currency,
+  locale,
   height = 230,
 }: {
   data: { label: string; value: number; color?: string }[];
   money?: boolean;
+  currency?: string;
+  locale?: string;
   height?: number;
 }) {
   return (
@@ -174,7 +198,7 @@ export function RCColumns({
           cursor={{ fill: "hsl(var(--muted) / 0.5)" }}
           content={({ active, payload }) =>
             active && payload && payload.length ? (
-              <TipBox rows={[{ label: String(payload[0].payload.label), value: fmtVal(Number(payload[0].value), money), color: payload[0].payload.color }]} />
+              <TipBox rows={[{ label: String(payload[0].payload.label), value: fmtVal(Number(payload[0].value), money, currency, locale), color: payload[0].payload.color }]} />
             ) : null
           }
         />
@@ -194,10 +218,15 @@ export function RCDonut({
   data,
   height = 240,
   money,
+  currency,
+  locale,
 }: {
   data: { name: string; value: number; color: string }[];
   height?: number;
   money?: boolean;
+  /** The SCHOOL's currency/locale — never the platform's. */
+  currency?: string;
+  locale?: string;
 }) {
   const total = data.reduce((s, d) => s + d.value, 0);
   return (
@@ -214,7 +243,7 @@ export function RCDonut({
               <Tooltip
                 content={({ active, payload }) =>
                   active && payload && payload.length ? (
-                    <TipBox rows={[{ label: String(payload[0].name), value: fmtVal(Number(payload[0].value), money), color: (payload[0].payload as { color: string }).color }]} />
+                    <TipBox rows={[{ label: String(payload[0].name), value: fmtVal(Number(payload[0].value), money, currency, locale), color: (payload[0].payload as { color: string }).color }]} />
                   ) : null
                 }
               />
@@ -222,7 +251,7 @@ export function RCDonut({
           </ResponsiveContainer>
         </ChartFrame>
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-          <span className="tnum text-xl font-semibold tracking-tight">{money ? `₦${nfCompact(total)}` : total.toLocaleString()}</span>
+          <span className="tnum text-xl font-semibold tracking-tight">{fmtVal(total, money, currency, locale)}</span>
         </div>
       </div>
       <ul className="min-w-[8rem] flex-1 space-y-1.5 text-sm">
@@ -230,7 +259,7 @@ export function RCDonut({
           <li key={d.name} className="flex items-center gap-2">
             <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: d.color }} />
             <span className="text-muted-foreground">{d.name}</span>
-            <span className="tnum ml-auto pl-3 font-medium">{money ? `₦${nfCompact(d.value)}` : d.value.toLocaleString()}</span>
+            <span className="tnum ml-auto pl-3 font-medium">{fmtVal(d.value, money, currency, locale)}</span>
           </li>
         ))}
       </ul>

@@ -55,7 +55,7 @@ function invoices(markedCount: number, unmarkedCount: number): Inv[] {
   return out;
 }
 
-function build(rows: Inv[], opts: { failOn?: string } = {}) {
+function build(rows: Inv[], opts: { failOn?: string; country?: string; timezone?: string | null } = {}) {
   const events: string[] = [];
   const created: string[] = [];
   const notified: string[] = [];
@@ -123,7 +123,16 @@ function build(rows: Inv[], opts: { failOn?: string } = {}) {
     {
       client: {
         school: {
-          findMany: () => Promise.resolve([{ id: "school-1", lateFeeFlatMinor: 5_000, lateFeeGraceDays: 7 }]),
+          findMany: () =>
+            Promise.resolve([
+              {
+                id: "school-1",
+                lateFeeFlatMinor: 5_000,
+                lateFeeGraceDays: 7,
+                country: opts.country ?? "NG",
+                timezone: opts.timezone === undefined ? null : opts.timezone,
+              },
+            ]),
         },
       },
     } as never,
@@ -194,5 +203,65 @@ describe("the shape of the work", () => {
     const { svc } = build(invoices(0, 500));
     await svc.lateFeeSweep();
     expect(warned.join(" ")).toMatch(/hit its 500-invoice cap/);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// Grace is counted in the SCHOOL's days
+// -----------------------------------------------------------------------------
+// The cutoff subtracted the grace period from the instant the sweep happened to
+// run, which quietly tied the outcome to the cron HOUR. At the default 05:20 UTC
+// no catalogued school is affected — every one of them is UTC+0..+8, or Toronto
+// and New York at UTC-4, all still on the same calendar day at that hour. Move
+// FEE_LATE_FEE_CRON to 02:00 and a Toronto school's parents are charged a day
+// into a grace period that has not run out.
+//
+// The installment OVERDUE state next door already measures from the school's own
+// day, with a comment about a parent in Toronto seeing OVERDUE on the due date.
+// This is that same rule applied to the path that actually takes money.
+// -----------------------------------------------------------------------------
+
+describe("when the grace period runs out", () => {
+  beforeEach(() => {
+    jest.spyOn(Logger.prototype, "warn").mockImplementation(() => {});
+    jest.useFakeTimers();
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  /** The cutoff the sweep asked the database for. */
+  async function cutoffFor(opts: { at: string; timezone: string | null; country?: string }) {
+    jest.setSystemTime(new Date(opts.at));
+    const { svc } = build(invoices(0, 0), { timezone: opts.timezone, country: opts.country });
+    await svc.lateFeeSweep();
+    return (seen.lastArgs?.where as { dueDate: { lt: Date } }).dueDate.lt;
+  }
+
+  it("measures from the school's calendar day, not the moment of the run", async () => {
+    // 02:00 UTC on 20 August. In Toronto (UTC-4) it is still the 19th.
+    const toronto = await cutoffFor({ at: "2026-08-20T02:00:00.000Z", timezone: "America/Toronto" });
+    const lagos = await cutoffFor({ at: "2026-08-20T02:00:00.000Z", timezone: "Africa/Lagos" });
+    // Seven days before each school's own today: the 12th for Toronto, the 13th
+    // for Lagos. Both are UTC-midnight, like every @db.Date in this schema.
+    expect(toronto.toISOString()).toBe("2026-08-12T00:00:00.000Z");
+    expect(lagos.toISOString()).toBe("2026-08-13T00:00:00.000Z");
+  });
+
+  it("does not move when the sweep runs at a different hour", async () => {
+    // The property the old code lacked: same school day in, same cutoff out.
+    const early = await cutoffFor({ at: "2026-08-20T02:00:00.000Z", timezone: "Africa/Lagos" });
+    const late = await cutoffFor({ at: "2026-08-20T21:30:00.000Z", timezone: "Africa/Lagos" });
+    expect(early.toISOString()).toBe(late.toISOString());
+  });
+
+  it("treats a school with no region as the platform's home country", async () => {
+    // A null timezone means the platform's home country everywhere else in the
+    // codebase, not "unknown" — schools that predate the region model must keep
+    // behaving exactly as they did.
+    const nullRegion = await cutoffFor({ at: "2026-08-20T02:00:00.000Z", timezone: null });
+    const lagos = await cutoffFor({ at: "2026-08-20T02:00:00.000Z", timezone: "Africa/Lagos" });
+    expect(nullRegion.toISOString()).toBe(lagos.toISOString());
   });
 });

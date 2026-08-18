@@ -1,4 +1,4 @@
-import type { AcademicSessionDto, AnalyticsOverviewDto, Serialized } from "@sms/types";
+import { toMajor, type AcademicSessionDto, type AnalyticsOverviewDto, type Serialized } from "@sms/types";
 import { redirect } from "next/navigation";
 import { hasPermission } from "@/lib/permissions";
 import { auth } from "@/lib/auth";
@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Kpi } from "@/components/charts/charts";
 import { RCDonut, RCColumns, RCBars } from "@/components/charts/rc";
 import { RC } from "@/components/charts/colors";
-import { money } from "@/lib/format";
+import { money, regionOf } from "@/lib/format";
 import { PageHeader } from "@/components/shell/PageHeader";
 import { PeriodBar } from "@/components/analytics/PeriodBar";
 
@@ -23,6 +23,8 @@ export default async function AnalyticsPage({
 }) {
   const session = await auth();
   const user = session!.user;
+  // The SCHOOL's region, not the platform's — see lib/format.ts.
+  const region = regionOf(user);
   // Analytics serves fee.read holders only — school-wide staff + families. Other
   // roles (teacher, HR, warden…) get an empty family scope, so send them to the
   // dashboard instead of a page of zeros (matches the nav gate in AppShell).
@@ -150,13 +152,19 @@ export default async function AnalyticsPage({
                 <CardDescription>{fees.invoices.toLocaleString()} billable invoices.</CardDescription>
               </CardHeader>
               <CardContent>
+                {/* toMajor, never /100 — the CFA franc has no minor unit, so
+                    dividing showed a Senegalese school a hundredth of what it had
+                    invoiced. And the currency travels with the value: the chart
+                    used to label every school's money in naira. */}
                 <RCBars
                   money
+                  currency={region.currency}
+                  locale={region.locale}
                   height={180}
                   data={[
-                    { label: "Invoiced", value: fees.invoicedMinor / 100, color: RC.primaryFaint },
-                    { label: "Collected", value: fees.collectedMinor / 100, color: RC.primary },
-                    { label: "Outstanding", value: fees.outstandingMinor / 100, color: RC.amber },
+                    { label: "Invoiced", value: toMajor(fees.invoicedMinor, region.currency), color: RC.primaryFaint },
+                    { label: "Collected", value: toMajor(fees.collectedMinor, region.currency), color: RC.primary },
+                    { label: "Outstanding", value: toMajor(fees.outstandingMinor, region.currency), color: RC.amber },
                   ]}
                 />
               </CardContent>

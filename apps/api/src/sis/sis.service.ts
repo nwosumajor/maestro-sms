@@ -18,7 +18,7 @@
 
 import {
   BadRequestException, Inject, Injectable, NotFoundException, ConflictException } from "@nestjs/common";
-import { allocateAdmissionNumber, loadUsedAdmissionNumbers } from "../foundation/admission-number";
+import { allocateAdmissionNumber, loadUsedAdmissionNumbers, schoolAdmissionYear } from "../foundation/admission-number";
 import { Prisma } from "@sms/db";
 import type { MedicalRecordDto, StudentGuardianDto } from "@sms/types";
 import { missingProfileFields, deliverableEmail } from "@sms/types";
@@ -514,8 +514,10 @@ export class SisService {
       } else if (existing?.admissionNumber) {
         admissionNumber = existing.admissionNumber;
       } else {
-        const used = await loadUsedAdmissionNumbers(tx, new Date().getFullYear());
-        admissionNumber = allocateAdmissionNumber(used, new Date().getFullYear());
+        // The SCHOOL's year, not the server's — see schoolAdmissionYear.
+        const year = await schoolAdmissionYear(tx, p.schoolId);
+        const used = await loadUsedAdmissionNumbers(tx, year);
+        admissionNumber = allocateAdmissionNumber(used, year);
       }
       const data = {
         admissionNumber,
