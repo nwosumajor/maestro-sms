@@ -107,7 +107,18 @@ export function PayrollManager({ runs, canRun }: { runs: Run[]; canRun: boolean 
                     <td className="px-4 py-2.5 text-muted-foreground">{r.payslipCount}</td>
                     <td className="px-4 py-2.5">{money(r.totalGrossMinor)}</td>
                     <td className="px-4 py-2.5">{money(r.totalNetMinor)}</td>
-                    <td className="px-4 py-2.5"><Badge variant={r.status === "FINALIZED" ? "default" : "secondary"}>{r.status}</Badge></td>
+                    <td className="px-4 py-2.5">
+                      <Badge variant={r.status === "FINALIZED" ? "default" : "secondary"}>{r.status}</Badge>
+                      {/* THE TWO SIGNATURES. Finalising a run is maker-checker —
+                          the API refuses a finaliser who raised it — and both
+                          halves were recorded and neither was ever shown, so a
+                          school could see WHEN a run was signed off and never by
+                          whom. Every sibling control names both people. */}
+                      <span className="mt-0.5 block text-xs text-muted-foreground">
+                        raised by {r.runByName}
+                        {r.finalizedByName ? ` · finalised by ${r.finalizedByName}` : ""}
+                      </span>
+                    </td>
                     <td className="px-4 py-2.5">
                       <span className="flex items-center gap-3">
                         {canRun && r.status === "DRAFT" && (

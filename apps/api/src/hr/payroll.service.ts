@@ -33,6 +33,7 @@ import {
   type Principal,
   type TenantContext,
   type TenantDatabase,
+  type TenantTx,
 } from "../integrity/integrity.foundation";
 import { SchoolRegionService } from "../foundation/school-region.service";
 import { toMinor } from "../common/money";
@@ -206,7 +207,7 @@ export class PayrollService {
         { actorId: p.userId, action: "hr.payroll.run.create", entity: "payroll_run", entityId: run.id, schoolId: p.schoolId, metadata: { periodYear, periodMonth, employees: employees.length } },
         tx,
       );
-      return this.decorateRun(updated, employees.length, undefined);
+      return this.decorateRun(updated, employees.length, undefined, await this.signatories(tx, [updated]));
     });
   }
 
@@ -221,7 +222,9 @@ export class PayrollService {
         _count: { _all: true },
       });
       const byRun = new Map(counts.map((c) => [c.payrollRunId, c._count._all]));
-      return runs.map((r) => this.decorateRun(r, byRun.get(r.id) ?? 0, undefined));
+      // ONE lookup for the page, then map.
+      const nameOf = await this.signatories(tx, runs);
+      return runs.map((r) => this.decorateRun(r, byRun.get(r.id) ?? 0, undefined, nameOf));
     });
   }
 
@@ -244,7 +247,7 @@ export class PayrollService {
         { actorId: p.userId, action: "hr.payroll.run.read", entity: "payroll_run", entityId: id, schoolId: p.schoolId },
         tx,
       );
-      return this.decorateRun(run, slips.length, payslips);
+      return this.decorateRun(run, slips.length, payslips, await this.signatories(tx, [run]));
     });
   }
 
@@ -310,7 +313,7 @@ export class PayrollService {
         },
         tx,
       );
-      return this.decorateRun(updated, count, undefined);
+      return this.decorateRun(updated, count, undefined, await this.signatories(tx, [updated]));
     });
   }
 
@@ -557,10 +560,34 @@ export class PayrollService {
     });
   }
 
+  /**
+   * Names for the two signatures on a run. ONE lookup for a whole page of runs,
+   * not one per run.
+   *
+   * A payroll run is maker-checker and both halves were recorded and neither
+   * exposed — see the DTO. `finalizedById` in particular was written by
+   * `finalize()` and read by nothing at all.
+   */
+  private async signatories(
+    tx: TenantTx,
+    runs: Array<{ runById: string; finalizedById: string | null }>,
+  ): Promise<Map<string, string>> {
+    const ids = [
+      ...new Set(runs.flatMap((r) => [r.runById, r.finalizedById]).filter((v): v is string => !!v)),
+    ];
+    if (ids.length === 0) return new Map();
+    const people = (await tx.user.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, name: true },
+    })) as Array<{ id: string; name: string }>;
+    return new Map(people.map((u) => [u.id, u.name]));
+  }
+
   private decorateRun(
-    r: { id: string; periodYear: number; periodMonth: number; runType?: string; bonusPercent?: number | null; status: string; totalGrossMinor: bigint | number; totalNetMinor: bigint | number; createdAt: Date; finalizedAt: Date | null },
+    r: { id: string; periodYear: number; periodMonth: number; runType?: string; bonusPercent?: number | null; status: string; totalGrossMinor: bigint | number; totalNetMinor: bigint | number; createdAt: Date; finalizedAt: Date | null; runById: string; finalizedById: string | null },
     payslipCount: number,
     payslips: PayslipDto[] | undefined,
+    nameOf?: Map<string, string>,
   ): PayrollRunDto {
     return {
       id: r.id,
@@ -574,6 +601,10 @@ export class PayrollService {
       payslipCount,
       createdAt: r.createdAt,
       finalizedAt: r.finalizedAt,
+      runById: r.runById,
+      runByName: nameOf?.get(r.runById) ?? "Unknown",
+      finalizedById: r.finalizedById,
+      finalizedByName: r.finalizedById ? nameOf?.get(r.finalizedById) ?? "Unknown" : null,
       ...(payslips ? { payslips } : {}),
     };
   }

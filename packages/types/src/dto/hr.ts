@@ -242,6 +242,24 @@ export interface PayrollRunDto {
   payslipCount: number;
   createdAt: Date;
   finalizedAt: Date | null;
+  /**
+   * THE TWO SIGNATURES ON THE LARGEST MONEY MOVEMENT A SCHOOL MAKES.
+   *
+   * Finalising a payroll run is maker-checker — the service refuses
+   * `run.runById === p.userId` — and both halves were recorded and neither was
+   * ever exposed. The DTO carried `createdAt` and `finalizedAt`, so a school
+   * could see WHEN a run was raised and WHEN it was signed off, and never by
+   * whom. Every sibling control names both people (invoice adjustments:
+   * requestedById/approvedById; staff loans and exits: requestedById or
+   * initiatedById + decidedById) — payroll was the one that named neither.
+   *
+   * Names, not just ids: the sibling DTOs expose bare ids and no screen renders
+   * them, which is a record that exists and cannot be read.
+   */
+  runById: string;
+  runByName: string;
+  finalizedById: string | null;
+  finalizedByName: string | null;
   payslips?: PayslipDto[];
 }
 
