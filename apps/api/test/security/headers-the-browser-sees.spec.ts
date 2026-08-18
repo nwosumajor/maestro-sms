@@ -29,7 +29,7 @@
 // reporting something.
 // =============================================================================
 
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 const WEB = (p: string) => readFileSync(join(__dirname, "../../../web", p), "utf8");
@@ -66,6 +66,44 @@ describe("the baseline every response carries", () => {
 
   it("keeps nosniff at the tier that serves the browser", () => {
     expect(config).toContain("X-Content-Type-Options");
+  });
+});
+
+describe("pages that are PRERENDERED, and why they cannot be", () => {
+  // The regression this pins, and it shipped: a nonce is minted per REQUEST,
+  // while a prerendered page's HTML is built ONCE — so its script tags can
+  // never carry a matching nonce and every script on the page is refused. The
+  // page still serves, and does nothing at all.
+  //
+  // /for-owners was broken this way for two commits. It was missed because the
+  // CSP was verified against /login, /, /dashboard, /fees and /admin — every one
+  // of them dynamic. A browser check that never opens a static page cannot see
+  // this, which is why the rule is pinned here rather than left to the next
+  // person to rediscover.
+  //
+  // Route segment config is only honoured in a SERVER file, so a "use client"
+  // page needs a server shell to carry it — /apply/documents has one.
+  const walkPages = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+      e.isDirectory() ? walkPages(join(dir, e.name)) : e.name === "page.tsx" ? [join(dir, e.name)] : [],
+    );
+
+  it("every page outside the signed-in app renders per request", () => {
+    // Inside (app) the middleware's auth check already forces dynamic rendering.
+    // The public pages are the ones at risk, and the ones users meet first.
+    const appDir = join(__dirname, "../../../web/app");
+    const offenders = walkPages(appDir)
+      .filter((p) => !p.includes(`${"("}app${")"}`) && !p.includes("/api/"))
+      .filter((p) => {
+        const src = readFileSync(p, "utf8");
+        // Any of the ways Next is told not to prerender. The homepage and the
+        // legal pages reach it through a no-store fetch rather than the segment
+        // config, and are dynamic in the build output either way — what matters
+        // is that SOMETHING opts the page out, not which lever was used.
+        return !/export const dynamic\s*=\s*"force-dynamic"|no-store|noStore\(|export const revalidate|\bauth\(\)|headers\(\)|cookies\(\)|searchParams/.test(src);
+      })
+      .map((p) => p.slice(appDir.length + 1));
+    expect(offenders).toEqual([]);
   });
 });
 

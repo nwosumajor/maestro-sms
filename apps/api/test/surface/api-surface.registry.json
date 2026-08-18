@@ -3330,60 +3330,60 @@
       "note": "referenced by a literal path in apps/web"
     },
     "GET /documents/requirements": {
-      "kind": "gap",
-      "note": "supplied-documents module, step 2-3: service + endpoints landed; the registrar and HR screens that call them land in step 6"
+      "kind": "ui",
+      "note": "RequirementsEditor on /admin/admissions"
     },
     "POST /documents/requirements": {
-      "kind": "gap",
-      "note": "supplied-documents module, step 2-3: service + endpoints landed; the registrar and HR screens that call them land in step 6"
+      "kind": "ui",
+      "note": "RequirementsEditor on /admin/admissions"
     },
     "PUT /documents/requirements/:p": {
-      "kind": "gap",
-      "note": "supplied-documents module, step 2-3: service + endpoints landed; the registrar and HR screens that call them land in step 6"
+      "kind": "ui",
+      "note": "RequirementsEditor on /admin/admissions"
     },
     "POST /documents/requirements/seed-defaults": {
-      "kind": "gap",
-      "note": "supplied-documents module, step 2-3: service + endpoints landed; the registrar and HR screens that call them land in step 6"
+      "kind": "ui",
+      "note": "RequirementsEditor on /admin/admissions"
     },
     "GET /documents/checklist": {
-      "kind": "gap",
-      "note": "supplied-documents module, step 2-3: service + endpoints landed; the registrar and HR screens that call them land in step 6"
+      "kind": "ui",
+      "note": "DocumentChecklist on /hr/staff/[userId]"
     },
     "POST /documents/submissions/upload-url": {
       "kind": "gap",
-      "note": "supplied-documents module, step 2-3: service + endpoints landed; the registrar and HR screens that call them land in step 6"
+      "note": "staff-side upload; families use the public route. No staff picker yet — the registrar's own upload lands with the admissions per-application view"
     },
     "POST /documents/submissions/:p/confirm": {
       "kind": "gap",
-      "note": "supplied-documents module, step 2-3: service + endpoints landed; the registrar and HR screens that call them land in step 6"
+      "note": "the staff half of the same pair, unreached for the same reason"
     },
     "POST /documents/submissions/:p/decide": {
-      "kind": "gap",
-      "note": "supplied-documents module, step 2-3: service + endpoints landed; the registrar and HR screens that call them land in step 6"
+      "kind": "ui",
+      "note": "DocumentChecklist accept/refuse"
     },
     "POST /documents/submissions/waive": {
-      "kind": "gap",
-      "note": "supplied-documents module, step 2-3: service + endpoints landed; the registrar and HR screens that call them land in step 6"
+      "kind": "ui",
+      "note": "DocumentChecklist waive"
     },
     "GET /documents/submissions/:p/file": {
-      "kind": "gap",
-      "note": "supplied-documents module, step 2-3: service + endpoints landed; the registrar and HR screens that call them land in step 6"
+      "kind": "ui",
+      "note": "DocumentChecklist open link, through the binary-aware BFF"
     },
     "GET /public/documents/checklist": {
-      "kind": "gap",
-      "note": "supplied-documents step 4: the family's upload link. Public by design — the signed token is the credential; the /apply-side page that uses it lands with the web work in step 6"
+      "kind": "ui",
+      "note": "the family's page at /apply/documents"
     },
     "POST /public/documents/upload-url": {
-      "kind": "gap",
-      "note": "supplied-documents step 4: the family's upload link. Public by design — the signed token is the credential; the /apply-side page that uses it lands with the web work in step 6"
+      "kind": "ui",
+      "note": "the family's page at /apply/documents"
     },
     "POST /public/documents/:p/confirm": {
-      "kind": "gap",
-      "note": "supplied-documents step 4: the family's upload link. Public by design — the signed token is the credential; the /apply-side page that uses it lands with the web work in step 6"
+      "kind": "ui",
+      "note": "the family's page at /apply/documents"
     },
     "POST /documents/promote": {
       "kind": "gap",
-      "note": "supplied-documents step 5: moves an accepted application's documents onto the enrolled pupil. Explicit because no application->pupil conversion exists in this codebase; the registrar screen that calls it lands in step 6"
+      "note": "moves an accepted application's documents onto the enrolled pupil. Still unreached: there is no application-to-pupil conversion in this codebase for it to hang off"
     }
   }
 }

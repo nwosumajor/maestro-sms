@@ -1,3 +1,4 @@
+import type { DocumentRequirementDto, Serialized } from "@sms/types";
 import { hasPermission } from "@/lib/permissions";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -8,6 +9,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AdmissionsReview, type Application } from "@/components/admissions/AdmissionsReview";
 import { FormFeeCard } from "@/components/admissions/FormFeeCard";
 import { PageHeader } from "@/components/shell/PageHeader";
+import { RequirementsEditor } from "@/components/documents/RequirementsEditor";
 
 export const dynamic = "force-dynamic";
 
@@ -15,9 +17,16 @@ export default async function AdminAdmissionsPage() {
   const session = await auth();
   const user = session!.user;
   if (!hasPermission(user.permissions, "admission.review")) redirect("/dashboard");
-  const [apps, formFee] = await Promise.all([
+  // Only the registrar tier may shape the document list, so only ask when they
+  // can — a 403 read would render as "this school asks for nothing", which is
+  // the opposite of the truth.
+  const canManageDocs = hasPermission(user.permissions, "student.profile.write");
+  const [apps, formFee, requirements] = await Promise.all([
     apiGet<Application[]>("/admissions"),
     apiGet<{ formFeeMinor: number }>("/admissions/settings/form-fee"),
+    canManageDocs
+      ? apiGet<Serialized<DocumentRequirementDto>[]>("/documents/requirements?scope=STUDENT_ADMISSION")
+      : Promise.resolve(null),
   ]);
 
   return (
@@ -31,6 +40,15 @@ export default async function AdminAdmissionsPage() {
         </div>
         {formFee && (
           <FormFeeCard initialMinor={formFee.formFeeMinor} canManage={hasPermission(user.permissions, "fee.manage")} />
+        )}
+        {/* What families are asked to send. Editable, because schools differ and
+            adding one should be a row rather than a release. */}
+        {canManageDocs && requirements !== null && (
+          <RequirementsEditor
+            scope="STUDENT_ADMISSION"
+            initial={requirements}
+            title="Documents asked of families"
+          />
         )}
         {/* A failed read used to render "No applications — none recorded for
             this school", and an admissions officer who believes that stops

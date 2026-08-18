@@ -5,12 +5,17 @@ import { LEGAL_DOCS } from "@/content/legal";
 import { LegalMarkdown } from "@/components/legal/LegalMarkdown";
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
 
-// PUBLIC, statically generated legal pages rendered from the versioned pack
-// (single source of truth: docs/LEGAL.md → content/legal.ts). Clickwrap
-// acceptance elsewhere records LEGAL_DOCS_VERSION against these documents.
-export function generateStaticParams() {
-  return LEGAL_DOCS.map((d) => ({ slug: d.slug }));
-}
+// PUBLIC legal pages rendered from the versioned pack (single source of truth:
+// docs/LEGAL.md → content/legal.ts). Clickwrap acceptance elsewhere records
+// LEGAL_DOCS_VERSION against these documents.
+//
+// RENDERED PER REQUEST rather than prerendered, and it costs nothing: the
+// content is a constant. The CSP in middleware.ts carries a per-request nonce,
+// and a page built ONCE cannot carry a matching one — so every script on it is
+// refused. These pages still SHOWED their text, being static HTML, while the
+// theme script and all interactivity were dead. That is the quietest possible
+// failure, which is why the rule is now pinned by a test.
+export const dynamic = "force-dynamic";
 
 export default function LegalPage({ params }: { params: { slug: string } }) {
   const doc = LEGAL_DOCS.find((d) => d.slug === params.slug);

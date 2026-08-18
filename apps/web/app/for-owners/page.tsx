@@ -1,3 +1,10 @@
+// RENDERED PER REQUEST, and it has to be. The page policy in middleware.ts
+// carries a per-request nonce, and a prerendered page's HTML is built ONCE —
+// so its script tags can never match, and every script on the page is refused.
+// That broke this page silently: it served, and nothing ran. Marketing content
+// is cheap to render and a blank page is not.
+export const dynamic = "force-dynamic";
+
 import Link from "next/link";
 import type { Metadata } from "next";
 import { CYCLE_DISCOUNT_PERCENT, PLANS } from "@sms/types";
