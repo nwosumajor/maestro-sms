@@ -624,23 +624,46 @@ export class MeetingService {
         ...(streamRefs.length ? [{ audienceKind: "STREAM", audienceRef: { in: streamRefs } }] : []),
       ];
 
-      const slots = await tx.meetingSlot.findMany({
-        where: {
-          active: true,
-          startsAt: { gte: new Date() },
-          ...(teacherId ? { teacherId } : {}),
-          OR: audienceFilter,
-        },
-        orderBy: { startsAt: "asc" },
-        take: 200,
-      });
-      const counts = await this.bookingCounts(tx, slots.map((s: { id: string }) => s.id));
+      // FULL SLOTS ARE DROPPED AFTER THE FETCH — Prisma cannot filter on a
+      // relation count, and a slot's bookings are rows rather than a column. So
+      // the page is refilled until it holds 200 slots that can actually be
+      // booked, instead of 200 candidates of which the bookable ones are
+      // whatever survives. Reading the first 200 and then discarding the full
+      // ones showed a parent "no times available" while later slots stood open
+      // — and the earliest slots are exactly the ones that fill first, so the
+      // busier the evening, the more of the list was already gone.
+      const PAGE = 200;
+      const MAX_PAGES = 5;
+      const slots: Array<{ id: string; teacherId: string; capacity: number }> = [];
+      const counts = new Map<string, number>();
+      for (let page = 0; page < MAX_PAGES && slots.length < PAGE; page++) {
+        const batch = (await tx.meetingSlot.findMany({
+          where: {
+            active: true,
+            startsAt: { gte: new Date() },
+            ...(teacherId ? { teacherId } : {}),
+            OR: audienceFilter,
+          },
+          orderBy: { startsAt: "asc" },
+          take: PAGE,
+          skip: page * PAGE,
+        })) as Array<{ id: string; teacherId: string; capacity: number }>;
+        if (batch.length === 0) break;
+        const batchCounts = await this.bookingCounts(tx, batch.map((s) => s.id));
+        for (const [id, n] of batchCounts) counts.set(id, n);
+        slots.push(...batch.filter((s) => (batchCounts.get(s.id) ?? 0) < s.capacity));
+        // A short page means the source is exhausted; there is nothing further
+        // back to look at, however few open slots were found.
+        if (batch.length < PAGE) break;
+      }
+      slots.length = Math.min(slots.length, PAGE);
       const teacherNames = await this.userNames(tx, slots.map((s: { teacherId: string }) => s.teacherId));
       const namesFor = await this.audienceNamesFor(tx, slots as SlotRow[]);
       const cohosts = await this.cohostsFor(tx, slots as SlotRow[]);
-      return slots
-        .filter((s: SlotRow) => (counts.get(s.id) ?? 0) < s.capacity)
-        .map((s: SlotRow) => this.toSlotDto(s, counts.get(s.id) ?? 0, null, teacherNames.get(s.teacherId), namesFor(s), cohosts.get(s.id) ?? []));
+      // Already filtered to bookable slots above.
+      return (slots as SlotRow[]).map((s: SlotRow) =>
+        this.toSlotDto(s, counts.get(s.id) ?? 0, null, teacherNames.get(s.teacherId), namesFor(s), cohosts.get(s.id) ?? []),
+      );
     });
   }
 

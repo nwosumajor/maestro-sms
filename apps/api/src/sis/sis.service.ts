@@ -110,33 +110,40 @@ export class SisService {
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       const wide = this.isSchoolWide(p);
       const canApprove = wide || p.permissions.includes("rbac.manage");
-      const rows = (await tx.studentProfile.findMany({
-        where: { profileStatus: "SUBMITTED" },
+
+      // WHO THIS CALLER MAY REVIEW IS PART OF THE QUERY, not a filter applied
+      // afterwards. It used to read the 500 oldest SUBMITTED profiles in the
+      // school and then keep the ones belonging to classes this person
+      // supervises — so the cap was spent on other people's pupils. A
+      // supervisor whose class submitted after the first 500 saw an EMPTY
+      // queue while their reviews sat waiting, and nothing said why. At the
+      // start of a term a large school submits far more than 500 at once.
+      const supervised = wide
+        ? null
+        : (
+            (await tx.enrollment.findMany({
+              where: { status: "ACTIVE", class: { supervisorId: p.userId } },
+              select: { studentId: true },
+            })) as Array<{ studentId: string }>
+          ).map((e) => e.studentId);
+
+      // The same two-stage rule the Node filter expressed, and the same one
+      // `supervisorReview` enforces — so the queue still cannot offer a row the
+      // action would refuse. A row past supervisor review belongs to whoever
+      // may approve; a row before it belongs to that class's supervisor.
+      const mine = { supervisorReviewedAt: null, studentId: { in: supervised ?? [] } };
+      const where = wide
+        ? { profileStatus: "SUBMITTED" }
+        : canApprove
+          ? { profileStatus: "SUBMITTED", OR: [{ supervisorReviewedAt: { not: null } }, mine] }
+          : { profileStatus: "SUBMITTED", ...mine };
+
+      const visible = (await tx.studentProfile.findMany({
+        where,
         select: { studentId: true, submittedAt: true, supervisorReviewedAt: true },
         orderBy: { submittedAt: "asc" },
         take: 500,
       })) as Array<{ studentId: string; submittedAt: Date | null; supervisorReviewedAt: Date | null }>;
-      if (rows.length === 0) return [];
-
-      // The classes this caller supervises — the same relationship
-      // `supervisorReview` enforces, so the queue can never offer a row the
-      // action would refuse.
-      const supervised = wide
-        ? null
-        : new Set(
-            (
-              (await tx.enrollment.findMany({
-                where: { status: "ACTIVE", studentId: { in: rows.map((r) => r.studentId) }, class: { supervisorId: p.userId } },
-                select: { studentId: true },
-              })) as Array<{ studentId: string }>
-            ).map((e) => e.studentId),
-          );
-
-      const visible = rows.filter((r) => {
-        const stageIsAdmin = !!r.supervisorReviewedAt;
-        if (stageIsAdmin) return canApprove;
-        return supervised === null || supervised.has(r.studentId);
-      });
       if (visible.length === 0) return [];
 
       const ids = visible.map((r) => r.studentId);

@@ -120,12 +120,26 @@ export class SyllabusService {
   async listForTerm(p: Principal, termId: string) {
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       const visible = await this.visibleClassSubjects(tx, p);
-      const rows = (await tx.subjectSyllabus.findMany({
-        where: { termId },
+      // WHICH OFFERINGS THIS TEACHER TEACHES IS PART OF THE QUERY. This read the
+      // 500 most recently updated syllabuses in the whole school and then kept
+      // the caller's own — so a teacher whose plan had not been touched lately
+      // saw NOTHING, and the more active the school the emptier their screen.
+      // The cap has to bound the caller's own rows, not the school's.
+      const mine = (await tx.subjectSyllabus.findMany({
+        where: {
+          termId,
+          ...(visible
+            ? {
+                OR: [...visible].map((k) => {
+                  const [classId, subjectId] = k.split(":");
+                  return { classId, subjectId };
+                }),
+              }
+            : {}),
+        },
         orderBy: { updatedAt: "desc" },
         take: 500,
       })) as Array<{ id: string; classId: string; subjectId: string; ownerId: string; updatedAt: Date }>;
-      const mine = visible ? rows.filter((r) => visible.has(`${r.classId}:${r.subjectId}`)) : rows;
       if (mine.length === 0) return [];
       const counts = (await tx.subjectSyllabusItem.groupBy({
         by: ["syllabusId", "status"],

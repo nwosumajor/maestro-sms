@@ -36,15 +36,32 @@ const outsider: Principal = {
 
 const PROFILES = [
   // Waiting on a supervisor.
-  { studentId: "stu-1", submittedAt: new Date("2026-08-01"), supervisorReviewedAt: null },
+  { studentId: "stu-1", profileStatus: "SUBMITTED", submittedAt: new Date("2026-08-01"), supervisorReviewedAt: null },
   // Checked — waiting on the office.
-  { studentId: "stu-2", submittedAt: new Date("2026-08-02"), supervisorReviewedAt: new Date("2026-08-03") },
+  { studentId: "stu-2", profileStatus: "SUBMITTED", submittedAt: new Date("2026-08-02"), supervisorReviewedAt: new Date("2026-08-03") },
 ];
+
+/** The stub used to hand back every profile whatever was asked for, which made
+ *  it blind to WHERE the narrowing happens. That mattered the day the queue
+ *  stopped filtering in Node and started asking the database instead: the cap
+ *  was being spent on other people's pupils, so a supervisor whose class
+ *  submitted after the first 500 saw an empty screen. A stub that ignores the
+ *  where cannot tell the two implementations apart. */
+function matches(row: Record<string, unknown>, where: Record<string, unknown>): boolean {
+  return Object.entries(where ?? {}).every(([k, v]) => {
+    if (k === "OR") return (v as Array<Record<string, unknown>>).some((c) => matches(row, c));
+    if (v && typeof v === "object" && "in" in (v as object)) return ((v as { in: unknown[] }).in ?? []).includes(row[k]);
+    if (v && typeof v === "object" && "not" in (v as object)) return row[k] !== (v as { not: unknown }).not;
+    return row[k] === v;
+  });
+}
 
 function makeService(opts: { supervises?: string[] } = {}) {
   const { supervises = ["stu-1"] } = opts;
   const tx = {
-    studentProfile: { findMany: jest.fn(async () => PROFILES) },
+    studentProfile: {
+      findMany: jest.fn(async (a: { where: Record<string, unknown> }) => PROFILES.filter((r) => matches(r, a.where))),
+    },
     enrollment: {
       findMany: jest.fn(async (a: { where: Record<string, unknown> }) => {
         // Two different reads: the supervised-classes filter, and the class-name
