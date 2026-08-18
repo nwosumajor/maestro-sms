@@ -9,7 +9,7 @@
 // so all reads of a complaint are audited. 404 (not 403) for out-of-scope access.
 // =============================================================================
 
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import type { DisciplineComplaintDto, DisciplineEvidencePresignDto, IdNameDto, PageDto } from "@sms/types";
 import { decodeCursor, pageLimit, seekWhere, toPage } from "../common/keyset-cursor";
 import { STORAGE_PROVIDER, type StorageProvider } from "../documents/storage.provider";
@@ -33,6 +33,7 @@ const STAFF_CASE_ROLES = new Set(["principal", "school_admin"]);
 
 @Injectable()
 export class DisciplineService {
+  private readonly logger = new Logger("Discipline");
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
@@ -164,7 +165,7 @@ export class DisciplineService {
 
   async assign(p: Principal, complaintId: string, assigneeId: string): Promise<DisciplineComplaintDto> {
     this.requireManage(p);
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    const dto = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.requireVisible(tx, p, complaintId);
       const u = await tx.user.findFirst({ where: { id: assigneeId }, select: { id: true } });
       if (!u) throw new NotFoundException("Assignee not found in this school");
@@ -172,22 +173,48 @@ export class DisciplineService {
       if (dup) throw new BadRequestException("Already assigned");
       await tx.disciplineAssignee.create({ data: { schoolId: p.schoolId, complaintId, assigneeId } });
       await this.log(tx, p, "discipline.assign", complaintId, { assigneeId });
-      // TELL THEM. Handing a case to somebody who is never informed is not
-      // handing it on; the case simply sits. Deliberately says nothing about the
-      // substance — these are records about children, and the notification is a
-      // pointer, not a summary.
+      return this.complaintDto(tx, complaintId);
+    });
+    // TELL THEM. Handing a case to somebody who is never informed is not
+    // handing it on; the case simply sits. Deliberately says nothing about the
+    // substance — these are records about children, and the notification is a
+    // pointer, not a summary.
+    //
+    // AFTER the transaction, and never fatal. Enqueuing inside it got the
+    // ordering backwards twice over: the notification commits in a transaction
+    // of its own, so a later failure in this one told somebody they had been
+    // given a case that was never assigned — and a queue that was merely
+    // unreachable made the assignment itself impossible.
+    await this.tell(assigneeId, p, {
+      complaintId,
+      title: "A discipline case has been assigned to you",
+      body: "You are now responsible for a discipline case. Open Discipline to see the details.",
+    });
+    return dto;
+  }
+
+  /** Best-effort notice about a case. A failure here is logged, never raised:
+   *  the assignment is already real, and telling somebody about it must not be
+   *  able to undo it. */
+  private async tell(
+    recipientId: string,
+    p: Principal,
+    msg: { complaintId: string; title: string; body: string },
+  ): Promise<void> {
+    try {
       await this.notifications.enqueue(
         { schoolId: p.schoolId, userId: p.userId },
         {
-          recipientId: assigneeId,
+          recipientId,
           type: "WORKFLOW_UPDATE",
-          title: "A discipline case has been assigned to you",
-          body: "You are now responsible for a discipline case. Open Discipline to see the details.",
-          data: { complaintId },
+          title: msg.title,
+          body: msg.body,
+          data: { complaintId: msg.complaintId },
         },
       );
-      return this.complaintDto(tx, complaintId);
-    });
+    } catch (e) {
+      this.logger.warn(`discipline notice to ${recipientId} failed: ${(e as Error).message}`);
+    }
   }
 
   /**
@@ -211,7 +238,7 @@ export class DisciplineService {
    */
   async unassign(p: Principal, complaintId: string, assigneeId: string): Promise<DisciplineComplaintDto> {
     this.requireManage(p);
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    const dto = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.requireVisible(tx, p, complaintId);
       const row = await tx.disciplineAssignee.findFirst({
         where: { complaintId, assigneeId },
@@ -220,18 +247,14 @@ export class DisciplineService {
       if (!row) throw new NotFoundException("Assignment not found");
       await tx.disciplineAssignee.delete({ where: { id: row.id } });
       await this.log(tx, p, "discipline.unassign", complaintId, { assigneeId });
-      await this.notifications.enqueue(
-        { schoolId: p.schoolId, userId: p.userId },
-        {
-          recipientId: assigneeId,
-          type: "WORKFLOW_UPDATE",
-          title: "A discipline case is no longer assigned to you",
-          body: "You are no longer responsible for a discipline case you had been given.",
-          data: { complaintId },
-        },
-      );
       return this.complaintDto(tx, complaintId);
     });
+    await this.tell(assigneeId, p, {
+      complaintId,
+      title: "A discipline case is no longer assigned to you",
+      body: "You are no longer responsible for a discipline case you had been given.",
+    });
+    return dto;
   }
 
   async addEntry(p: Principal, complaintId: string, body: string): Promise<DisciplineComplaintDto> {

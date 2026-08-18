@@ -93,7 +93,7 @@ export class PaymentPlansService {
   ): Promise<PaymentPlanDto> {
     if (tranches.length < 1 || tranches.length > 24) throw new BadRequestException("1–24 tranches");
     const sorted = [...tranches].sort((a, b) => a.dueDate.localeCompare(b.dueDate));
-    await this.db.runAsTenant(this.ctx(p), async (tx) => {
+    const { guardians, reference } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const inv = await tx.invoice.findFirst({ where: { id: invoiceId }, select: { totalMinor: true, status: true, studentId: true, reference: true } });
       if (!inv) throw new NotFoundException("Invoice not found");
       if (inv.status !== "ISSUED" && inv.status !== "PARTIALLY_PAID") {
@@ -124,22 +124,31 @@ export class PaymentPlansService {
         },
         tx,
       );
-      const guardians = await tx.parentChild.findMany({ where: { studentId: inv.studentId }, select: { parentId: true } });
-      for (const g of guardians) {
-        try {
-          await this.notifications.enqueue(this.ctx(p), {
-            recipientId: g.parentId,
-            type: "BILLING",
-            title: "Payment plan set",
-            body: `Invoice ${inv.reference} now has a ${sorted.length}-part payment plan (first part due ${sorted[0].dueDate}). Pay each part like any normal payment — partials count toward the schedule.`,
-            data: { invoiceId },
-            channels: ["EMAIL"],
-          });
-        } catch {
-          // best-effort per guardian
-        }
-      }
+      // WHO to tell, inside; the telling itself, after. Each enqueue opens a
+      // transaction of its own, so doing it here nested one transaction inside
+      // another and announced a plan the outer transaction could still undo.
+      return {
+        guardians: (await tx.parentChild.findMany({
+          where: { studentId: inv.studentId },
+          select: { parentId: true },
+        })) as Array<{ parentId: string }>,
+        reference: inv.reference,
+      };
     });
+    for (const g of guardians) {
+      try {
+        await this.notifications.enqueue(this.ctx(p), {
+          recipientId: g.parentId,
+          type: "BILLING",
+          title: "Payment plan set",
+          body: `Invoice ${reference} now has a ${sorted.length}-part payment plan (first part due ${sorted[0].dueDate}). Pay each part like any normal payment — partials count toward the schedule.`,
+          data: { invoiceId },
+          channels: ["EMAIL"],
+        });
+      } catch {
+        // best-effort per guardian — the plan is set either way
+      }
+    }
     return this.getPlan(p, invoiceId);
   }
 

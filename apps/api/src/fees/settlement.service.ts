@@ -311,25 +311,32 @@ export class InvoiceSettlementService {
   private async refuse(input: OnlinePaymentInput, why: string, title: string): Promise<void> {
     this.logger.error(`settlement REFUSED ${input.reference}: ${why}. Payment NOT posted.`);
     try {
-      await this.db.runAsTenant({ schoolId: input.schoolId, userId: SYSTEM_ACTOR_ID }, async (tx) => {
-        const staff = (await tx.userRole.findMany({
-          where: { role: { name: { in: FINANCE_ROLES } } },
-          select: { userId: true },
-          distinct: ["userId"],
-        })) as Array<{ userId: string }>;
-        for (const s of staff) {
-          await this.notifications.enqueue(
-            { schoolId: input.schoolId, userId: SYSTEM_ACTOR_ID },
-            {
-              recipientId: s.userId,
-              type: "OPERATOR_ALERT",
-              title,
-              body: `Reference ${input.reference}: ${why}. The payment was NOT recorded — check the gateway and either refund it or re-issue the bill.`,
-              data: { invoiceId: input.invoiceId, reference: input.reference },
-            },
-          );
-        }
-      });
+      // WHO to tell is a read; TELLING them is not. Enqueuing inside the
+      // transaction held it open for one round-trip per recipient and nested a
+      // second transaction inside it — each enqueue opens its own — for no
+      // benefit, since a notification commits separately and cannot be rolled
+      // back with this one anyway.
+      const staff = (await this.db.runAsTenantReadOnly(
+        { schoolId: input.schoolId, userId: SYSTEM_ACTOR_ID },
+        (tx) =>
+          tx.userRole.findMany({
+            where: { role: { name: { in: FINANCE_ROLES } } },
+            select: { userId: true },
+            distinct: ["userId"],
+          }),
+      )) as Array<{ userId: string }>;
+      for (const s of staff) {
+        await this.notifications.enqueue(
+          { schoolId: input.schoolId, userId: SYSTEM_ACTOR_ID },
+          {
+            recipientId: s.userId,
+            type: "OPERATOR_ALERT",
+            title,
+            body: `Reference ${input.reference}: ${why}. The payment was NOT recorded — check the gateway and either refund it or re-issue the bill.`,
+            data: { invoiceId: input.invoiceId, reference: input.reference },
+          },
+        );
+      }
     } catch (e) {
       // An alert that fails must not turn a refusal into a crash — the log line
       // above is still the record of last resort.

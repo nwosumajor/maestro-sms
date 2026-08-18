@@ -52,6 +52,10 @@ export const DEFAULT_LATE_FEE_CRON = "20 5 * * *";
 export const DEFAULT_REMINDER_CRON = "0 6 * * 1";
 /** Marker prefix that makes the late-fee line item idempotent per invoice. */
 const LATE_FEE_MARKER = "Late payment fee";
+/** How many invoices one school's late-fee run will touch. A cap, not a
+ *  target: it exists so one enormous school cannot monopolise the nightly job,
+ *  and the run says so when it truncates rather than reporting a quiet night. */
+const LATE_FEE_SWEEP_LIMIT = 500;
 
 type AdjustmentRow = {
   id: string;
@@ -157,7 +161,7 @@ export class FeeOpsService {
   /** Approver must hold fee.approve AND differ from the requester. Approval
    *  posts the negative line item + reduces the total, atomically. */
   async decideAdjustment(p: Principal, adjustmentId: string, approve: boolean): Promise<InvoiceAdjustmentDto> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    const { dto, notice } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const row = await tx.invoiceAdjustment.findFirst({ where: { id: adjustmentId } });
       if (!row) throw new NotFoundException("Adjustment not found");
       if (row.status !== "PENDING_APPROVAL") throw new BadRequestException("Already decided");
@@ -175,7 +179,8 @@ export class FeeOpsService {
           { actorId: p.userId, action: "fee.adjustment.reject", entity: "invoice_adjustment", entityId: adjustmentId, schoolId: p.schoolId },
           tx,
         );
-        return this.toAdjustmentDto(updated);
+        // A rejection tells nobody: the family were never told it was coming.
+        return { dto: this.toAdjustmentDto(updated), notice: null };
       }
       // CLAIM THE APPROVAL BEFORE POSTING ANYTHING.
       //
@@ -248,23 +253,42 @@ export class FeeOpsService {
         },
         tx,
       );
-      const guardians = await tx.parentChild.findMany({ where: { studentId: inv.studentId }, select: { parentId: true } });
-      for (const g of guardians) {
+      // WHO to tell is gathered here; the telling happens after the commit.
+      // The claim above is deliberately inside this transaction so a later
+      // refusal rolls it back — but a notification commits in a transaction of
+      // its own and cannot be rolled back with it, so sending here told a
+      // family their bill had been reduced by a waiver that then vanished.
+      const guardians = (await tx.parentChild.findMany({
+        where: { studentId: inv.studentId },
+        select: { parentId: true },
+      })) as Array<{ parentId: string }>;
+      return {
+        dto: this.toAdjustmentDto(updated),
+        notice: {
+          guardians,
+          title: `${row.kind === "WAIVER" ? "Fee waiver" : "Discount"} applied`,
+          body: `Invoice ${inv.reference} was reduced by ${formatMoney(row.amountMinor, inv.currency)} (${row.reason}).`,
+          invoiceId: row.invoiceId,
+        },
+      };
+    });
+    if (notice) {
+      for (const g of notice.guardians) {
         try {
           await this.notifications.enqueue(this.ctx(p), {
             recipientId: g.parentId,
             type: "BILLING",
-            title: `${row.kind === "WAIVER" ? "Fee waiver" : "Discount"} applied`,
-            body: `Invoice ${inv.reference} was reduced by ${formatMoney(row.amountMinor, inv.currency)} (${row.reason}).`,
-            data: { invoiceId: row.invoiceId },
+            title: notice.title,
+            body: notice.body,
+            data: { invoiceId: notice.invoiceId },
             channels: ["EMAIL"],
           });
         } catch {
-          // best-effort per guardian
+          // best-effort per guardian — the decision stands either way
         }
       }
-      return this.toAdjustmentDto(updated);
-    });
+    }
+    return dto;
   }
 
   async listAdjustments(p: Principal, invoiceId: string): Promise<InvoiceAdjustmentDto[]> {
@@ -340,48 +364,110 @@ export class FeeOpsService {
     for (const school of schools) {
       const cutoff = new Date(Date.now() - school.lateFeeGraceDays * 86_400_000);
       try {
-        feesApplied += await this.db.runAsTenant({ schoolId: school.id, userId: SYSTEM_ACTOR_ID }, async (tx) => {
-          const overdue = await tx.invoice.findMany({
-            where: { status: { in: ["ISSUED", "PARTIALLY_PAID"] }, dueDate: { lt: cutoff } },
-            select: { id: true, totalMinor: true, studentId: true, reference: true, createdById: true, currency: true },
-            take: 500,
-          });
-          let applied = 0;
-          for (const inv of overdue) {
-            const marker = await tx.invoiceLineItem.findFirst({
-              where: { invoiceId: inv.id, description: { startsWith: LATE_FEE_MARKER } },
-              select: { id: true },
-            });
-            if (marker) continue; // once per invoice, ever
-            await tx.invoiceLineItem.create({
-              data: {
-                schoolId: school.id,
-                invoiceId: inv.id,
-                description: `${LATE_FEE_MARKER} (overdue past ${school.lateFeeGraceDays} days)`,
-                amountMinor: school.lateFeeFlatMinor,
-                quantity: 1,
+        // ALREADY-DONE INVOICES ARE EXCLUDED IN THE QUERY, not skipped in Node
+        // afterwards. That ordering is the whole bug: the marker check used to
+        // run over rows already fetched, so `take` capped the CANDIDATES rather
+        // than the WORK. Once a school had 500 marked invoices the sweep spent
+        // its entire budget re-reading them, applied nothing, and returned
+        // feesApplied: 0 — which reads exactly like "nothing was overdue".
+        // Found live: 900 invoices overdue, 500 marked, 400 unmarked, 0 applied.
+        // A school stopped charging late fees for ever and nothing said so.
+        const overdue = await this.db.runAsTenantReadOnly(
+          { schoolId: school.id, userId: SYSTEM_ACTOR_ID },
+          (tx) =>
+            tx.invoice.findMany({
+              where: {
+                status: { in: ["ISSUED", "PARTIALLY_PAID"] },
+                dueDate: { lt: cutoff },
+                lineItems: { none: { description: { startsWith: LATE_FEE_MARKER } } },
               },
-            });
-            await tx.invoice.update({
-              where: { id: inv.id },
-              data: { totalMinor: inv.totalMinor + school.lateFeeFlatMinor },
-            });
-            await this.audit.record(
-              {
-                actorId: inv.createdById,
-                action: "fee.late_fee.apply",
-                entity: "invoice",
-                entityId: inv.id,
-                schoolId: school.id,
-                metadata: { lateFeeMinor: school.lateFeeFlatMinor },
+              select: {
+                id: true,
+                totalMinor: true,
+                studentId: true,
+                reference: true,
+                createdById: true,
+                currency: true,
               },
-              tx,
+              // OLDEST FIRST. Unordered, "the first 500" is whatever Postgres
+              // hands back, so a capped sweep could return a different slice
+              // each night and starve the same invoices indefinitely.
+              orderBy: { dueDate: "asc" },
+              take: LATE_FEE_SWEEP_LIMIT,
+            }),
+        );
+        // NO SILENT CAP: a truncated sweep that looks complete is how a backlog
+        // hides — the same rule the mobile-money recovery sweep follows.
+        if (overdue.length === LATE_FEE_SWEEP_LIMIT) {
+          this.logger.warn(
+            `late-fee sweep hit its ${LATE_FEE_SWEEP_LIMIT}-invoice cap for school ${school.id}; more remain and will be picked up on the next run`,
+          );
+        }
+
+        for (const inv of overdue) {
+          // ONE TRANSACTION PER INVOICE. A late fee on one invoice is an
+          // independent fact, not part of a single decision, so the school's
+          // whole run must not roll back because the 400th invoice failed —
+          // and 500 invoices of work will not fit in Prisma's 5s interactive
+          // transaction cap in any case. Whatever was applied before a failure
+          // stays applied, and the marker makes the next run skip it.
+          let applied = false;
+          try {
+            applied = await this.db.runAsTenant(
+              { schoolId: school.id, userId: SYSTEM_ACTOR_ID },
+              async (tx) => {
+                // Re-check inside the writing transaction: the read above is a
+                // separate snapshot, so a fee added between the two would
+                // otherwise be added twice.
+                const marker = await tx.invoiceLineItem.findFirst({
+                  where: { invoiceId: inv.id, description: { startsWith: LATE_FEE_MARKER } },
+                  select: { id: true },
+                });
+                if (marker) return false;
+                await tx.invoiceLineItem.create({
+                  data: {
+                    schoolId: school.id,
+                    invoiceId: inv.id,
+                    description: `${LATE_FEE_MARKER} (overdue past ${school.lateFeeGraceDays} days)`,
+                    amountMinor: school.lateFeeFlatMinor,
+                    quantity: 1,
+                  },
+                });
+                await tx.invoice.update({
+                  where: { id: inv.id },
+                  data: { totalMinor: inv.totalMinor + school.lateFeeFlatMinor },
+                });
+                await this.audit.record(
+                  {
+                    actorId: inv.createdById,
+                    action: "fee.late_fee.apply",
+                    entity: "invoice",
+                    entityId: inv.id,
+                    schoolId: school.id,
+                    metadata: { lateFeeMinor: school.lateFeeFlatMinor },
+                  },
+                  tx,
+                );
+                return true;
+              },
             );
-            const guardians = await tx.parentChild.findMany({
-              where: { studentId: inv.studentId },
-              select: { parentId: true },
-            });
-            for (const g of guardians) {
+          } catch (e) {
+            this.logger.warn(`late fee failed for invoice ${inv.id}: ${(e as Error).message}`);
+            continue;
+          }
+          if (!applied) continue;
+          feesApplied++;
+
+          // TOLD ONLY AFTER IT IS TRUE. This ran inside the transaction, and a
+          // notification commits in its OWN transaction — so a rolled-back run
+          // still told every guardian their invoice had grown, nightly, while
+          // the charge never existed.
+          try {
+            const guardians = await this.db.runAsTenantReadOnly(
+              { schoolId: school.id, userId: SYSTEM_ACTOR_ID },
+              (tx) => tx.parentChild.findMany({ where: { studentId: inv.studentId }, select: { parentId: true } }),
+            );
+            for (const g of guardians as Array<{ parentId: string }>) {
               try {
                 await this.notifications.enqueue(
                   { schoolId: school.id, userId: g.parentId },
@@ -395,13 +481,13 @@ export class FeeOpsService {
                   },
                 );
               } catch {
-                // best-effort per guardian
+                // best-effort per guardian — the fee is applied either way
               }
             }
-            applied++;
+          } catch (e) {
+            this.logger.warn(`late-fee notice failed for invoice ${inv.id}: ${(e as Error).message}`);
           }
-          return applied;
-        });
+        }
       } catch (e) {
         this.logger.warn(`late-fee sweep failed for school ${school.id}: ${(e as Error).message}`);
       }
