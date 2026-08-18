@@ -22,11 +22,41 @@
 // generally — a corrupt enum or a bad column value raises it too, and turning
 // THAT into a quiet 404 would hide real data corruption behind a shrug. Those
 // still throw.
+//
+// -----------------------------------------------------------------------------
+// It now also translates P2002, a UNIQUE CONSTRAINT violation, into a 409.
+//
+// The same argument, on a bigger surface. This filter caught malformed UUIDs
+// and let everything else fall through to a 500 — so ANY duplicate a user could
+// create was an "Internal server error". Confirmed live, and not as a race:
+//
+//     POST /hr/leave/types {"name":"Study Leave Probe"}   201
+//     POST /hr/leave/types {"name":"Study Leave Probe"}   500
+//
+// An HR manager adding a leave type that already exists is told the server
+// broke. A sweep found EIGHT creates on uniquely-constrained models with no
+// duplicate check and no catch — leave types, an invoice REFERENCE the caller
+// supplies, a second current academic session, a biometric device, an
+// invigilator assigned twice, an agent code. Fixing eight call sites would
+// leave the ninth, so the translation lives here.
+//
+// It does not replace a per-site check. Where one exists — the library's "A
+// book with that barcode already exists" — it still runs first and still gives
+// the better message. This is the floor, not the ceiling.
+//
+// // GOTCHA: Prisma does NOT populate `meta.target` here. The raw error reads
+// "Unique constraint failed on the (not available)", so there is no field name
+// to quote — the same absent-meta trap a previous translator in this codebase
+// fell into. What the message DOES carry is the model, as
+// `Invalid \`prisma.leaveType.create()\` invocation`, so that is what is
+// parsed and humanised. When even that is missing the wording stays honest and
+// vague rather than inventing a field.
 // =============================================================================
 
 import {
   ArgumentsHost,
   Catch,
+  ConflictException,
   ExceptionFilter,
   HttpException,
   Logger,
@@ -37,6 +67,20 @@ import { Prisma } from "@sms/db";
 
 /** Prisma's marker for a value it could not coerce to the column's type. */
 const INCONSISTENT_COLUMN_DATA = "P2023";
+/** Prisma's marker for a unique constraint violation. */
+const UNIQUE_VIOLATION = "P2002";
+
+/**
+ * "leaveType" -> "leave type". Best effort: the model is the only thing the
+ * error reliably carries, and a caller reading "A leave type with those details
+ * already exists" can act, where "Internal server error" leaves them stuck.
+ */
+export function duplicateMessage(e: Prisma.PrismaClientKnownRequestError): string {
+  const model = /prisma\.(\w+)\.\w+\(\)/.exec(e.message)?.[1];
+  if (!model) return "That already exists.";
+  const words = model.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase();
+  return `A ${words} with those details already exists.`;
+}
 
 export function isMalformedUuidError(e: unknown): boolean {
   if (!(e instanceof Prisma.PrismaClientKnownRequestError)) return false;
@@ -54,7 +98,20 @@ export class MalformedIdFilter extends BaseExceptionFilter implements ExceptionF
   private readonly logger = new Logger("MalformedId");
 
   catch(exception: Prisma.PrismaClientKnownRequestError, host: ArgumentsHost) {
-    if (!isMalformedIdCandidate(host) || !isMalformedUuidError(exception)) {
+    if (!isMalformedIdCandidate(host)) {
+      super.catch(exception, host);
+      return;
+    }
+    if (exception.code === UNIQUE_VIOLATION) {
+      const req = host.switchToHttp().getRequest<{ method?: string; url?: string }>();
+      // Not debug: a duplicate reaching here means no call site checked for it,
+      // which is worth seeing when deciding where a per-site message would read
+      // better than the generic one.
+      this.logger.warn(`duplicate on ${req?.method} ${req?.url} -> 409`);
+      super.catch(new ConflictException(duplicateMessage(exception)), host);
+      return;
+    }
+    if (!isMalformedUuidError(exception)) {
       // Anything else keeps its existing behaviour — including a genuine
       // P2023 from corrupt data, which must stay a loud 500.
       super.catch(exception, host);
