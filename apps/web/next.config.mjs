@@ -17,18 +17,16 @@ const nextConfig = {
   transpilePackages: ["@sms/types", "@sms/tokens"],
 
   /**
-   * Baseline security headers for every response this tier serves.
+   * The floor, for responses the page policy does not reach.
    *
-   * Deliberately NOT a script-src. A full policy needs a per-request nonce for
-   * the inline bootstrap Next injects, which means running middleware on every
-   * route — and this app's middleware is the thing that redirects unauthenticated
-   * users, so widening its matcher risks either holding public pages hostage or
-   * opening a protected one. That is its own change, with its own verification.
+   * `middleware.ts` sets the real policy — including a per-request nonce and a
+   * `script-src` — on every PAGE. It deliberately does not run on /api or on
+   * static output, so these headers stay as the floor beneath it: the two API
+   * proxies add their own far stricter sandbox on top, and anything else served
+   * from this tier still gets the directives that need no nonce.
    *
-   * What is here needs no nonce and cannot break a page: no <object>/<embed> is
-   * used, nothing sets a <base>, forms are server actions posting to this same
-   * origin, and nothing legitimately frames the app. The live-classroom iframe
-   * is the app framing SOMEBODY ELSE, which frame-ancestors does not govern.
+   * Pages therefore carry both policies. That is safe and intended — multiple
+   * CSP headers are enforced as an intersection, so the stricter one wins.
    */
   async headers() {
     return [

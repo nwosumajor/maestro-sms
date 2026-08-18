@@ -56,15 +56,58 @@ describe("the baseline every response carries", () => {
     }
   });
 
-  it("does not pretend to have a script policy", () => {
-    // 'unsafe-inline' here would read as protection while allowing exactly the
-    // thing script-src exists to stop. Better to have no script-src than a
-    // decorative one — and the omission is deliberate, not forgotten.
+  it("leaves script-src to the page policy, and never fakes one", () => {
+    // The real script-src lives in middleware.ts, where a per-request nonce is
+    // available. What must never appear ANYWHERE is 'unsafe-inline', which reads
+    // as protection while allowing exactly the thing script-src exists to stop.
     expect(config).not.toMatch(/script-src/);
+    expect(config).not.toMatch(/unsafe-inline/);
   });
 
   it("keeps nosniff at the tier that serves the browser", () => {
     expect(config).toContain("X-Content-Type-Options");
+  });
+});
+
+describe("the page policy", () => {
+  const mw = stripComments(WEB("middleware.ts"));
+
+  it("carries a per-request nonce, not a static allowance", () => {
+    expect(mw).toMatch(/nonce-\$\{nonce\}/);
+    expect(mw).toMatch(/crypto\.randomUUID\(\)/);
+  });
+
+  it("sets the policy on the REQUEST as well as the response", () => {
+    // Next reads the nonce back out of the request's CSP header to stamp its own
+    // inline bootstrap. Set it only on the way out and every page loses its
+    // scripts — which is not a subtle failure, but is an invisible one to any
+    // check that does not use a browser.
+    // Anchored so `res.headers.set(...)` cannot satisfy the request half — the
+    // first version of this assertion matched both lines and stayed green when
+    // the request header was deleted.
+    expect(mw).toMatch(/\n\s*headers\.set\("Content-Security-Policy", csp\);/);
+    expect(mw).toMatch(/NextResponse\.next\(\{ request: \{ headers \} \}\)/);
+    expect(mw).toMatch(/res\.headers\.set\("Content-Security-Policy", csp\);/);
+  });
+
+  it("never allows inline script wholesale", () => {
+    expect(mw).not.toMatch(/'unsafe-inline'[^;]*script/);
+    expect(mw).not.toMatch(/script-src[^`]*'unsafe-inline'/);
+  });
+
+  it("still applies the auth rules to every prefix it used to", () => {
+    // The matcher now runs almost everywhere so the CSP can reach public pages,
+    // which means the protected list moved into code. Losing an entry here is
+    // an authentication hole, not a styling bug.
+    for (const p of ["/dashboard", "/admin", "/fees", "/hr", "/operator", "/scan", "/manual", "/runbooks", "/account"]) {
+      expect(mw).toContain(`"${p}"`);
+    }
+    expect(mw).toMatch(/isProtected\(pathname\)/);
+  });
+
+  it("matches a prefix only on a boundary", () => {
+    // `/feesomething` must not be treated as `/fees`.
+    expect(mw).toMatch(/pathname === p \|\| pathname\.startsWith\(`\$\{p\}\/`\)/);
   });
 });
 

@@ -6,29 +6,12 @@
 // while the preference is "system", and exposes `window.__getThemePref` /
 // `window.__setTheme` for the ThemeToggle control to reuse. No React here on
 // purpose: this must execute synchronously ahead of hydration.
-const SCRIPT = `(function(){
-  var KEY="theme";
-  var mq=window.matchMedia("(prefers-color-scheme: dark)");
-  function pref(){try{return localStorage.getItem(KEY)||"dark"}catch(e){return "dark"}}
-  function resolve(p){return p==="dark"||p==="light"?p:(mq.matches?"dark":"light")}
-  function apply(p){
-    var mode=resolve(p);
-    var r=document.documentElement;
-    r.classList.toggle("dark",mode==="dark");
-    r.setAttribute("data-theme",mode);
-    r.style.colorScheme=mode;
-  }
-  window.__getThemePref=function(){return pref()};
-  window.__setTheme=function(p){
-    try{localStorage.setItem(KEY,p)}catch(e){}
-    apply(p);
-    window.dispatchEvent(new CustomEvent("themechange",{detail:p}));
-  };
-  apply(pref());
-  try{mq.addEventListener("change",function(){if(pref()==="system")apply("system")})}catch(e){}
-})();`;
+//
+// The script itself lives in lib/theme-script.ts so that the CSP hash which
+// permits it sits beside the source it is taken from.
+import { THEME_SCRIPT } from "@/lib/theme-script";
 
 export function ThemeScript() {
   // eslint-disable-next-line react/no-danger -- reason: intentional pre-paint inline script; content is a fixed constant, no user input.
-  return <script dangerouslySetInnerHTML={{ __html: SCRIPT }} />;
+  return <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />;
 }
