@@ -13,16 +13,17 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { shortDate } from "@/lib/format";
+import { shortDate, formattersFor, regionOf } from "@/lib/format";
 import { StudentAdmin } from "@/components/sis/StudentAdmin";
 import { ProfileReviewChain } from "@/components/sis/ProfileReviewChain";
 import { GuardianLinks } from "@/components/sis/GuardianLinks";
+import { MovementLog } from "@/components/sis/MovementLog";
 import { ExemptionPanel } from "@/components/assessment/ExemptionPanel";
 import { PrivacyPanel } from "@/components/privacy/PrivacyPanel";
 import { ReportCardButton } from "@/components/reportcards/ReportCardButton";
 import { RemarksEditor } from "@/components/reportcards/RemarksEditor";
 import { TraitRatings } from "@/components/gradebook/TraitRatings";
-import type { AcademicSessionDto, StudentGuardianDto } from "@sms/types";
+import type { AcademicSessionDto, ScanEventDto, StudentGuardianDto } from "@sms/types";
 
 export const dynamic = "force-dynamic";
 
@@ -49,13 +50,17 @@ export default async function StudentProfilePage({ params }: { params: { id: str
   // the section rather than fail the page.
   const canReadGrades = hasPermission(user.permissions, "grade.read");
   const canReadExemptions = hasPermission(user.permissions, "integrity.exemption.read");
-  const [profile, contacts, medical, guardians, sessions, exemptions] = await Promise.all([
+  const [profile, contacts, medical, guardians, scans, sessions, exemptions] = await Promise.all([
     apiGet<Profile>(`/students/${params.id}/profile`),
     apiGet<Contact[]>(`/students/${params.id}/contacts`),
     apiGet<Medical>(`/students/${params.id}/medical`),
     // Server-side, alongside the rest: the card only displays, so fetching it
     // from the browser bought nothing and cost a round trip plus a pop-in.
     apiGet<Serialized<StudentGuardianDto>[]>(`/students/${params.id}/guardians`),
+    // The gate log. Written on every scan and read by nothing until now.
+    hasPermission(user.permissions, "member.scan")
+      ? apiGet<Serialized<ScanEventDto>[]>(`/members/scan/history/${params.id}?days=30`)
+      : Promise.resolve(null),
     canReadGrades ? apiGet<Serialized<AcademicSessionDto>[]>("/academic/sessions") : Promise.resolve(null),
     canReadExemptions
       ? apiGet<Serialized<IntegrityExemptionDto>[]>(`/integrity/exemptions?studentId=${params.id}`)
@@ -158,6 +163,10 @@ export default async function StudentProfilePage({ params }: { params: { id: str
 
         {/* Who the school is actually sending things to. Above the academic
             cards because it is the answer to "why did the family not know". */}
+        {/* Region from the SESSION, as every server-rendered date here must be
+            — a Node-vs-browser default is a hydration mismatch. */}
+        <MovementLog rows={scans} dateTime={formattersFor(regionOf(user)).dateTime} />
+
         <GuardianLinks
           rows={guardians}
           studentId={params.id}

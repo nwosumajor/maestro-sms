@@ -973,6 +973,14 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "GET /members/scan/history/:p": {
+      "kind": "ui",
+      "note": "reviewed: components/sis/MovementLog.tsx on the pupil record — the gate/library/exam scan log, which was written on every scan and read by nothing"
+    },
+    "GET /members/scan/today": {
+      "kind": "internal",
+      "note": "The desk's own day, for the /scan console. Same member.scan gate and audit as the history read; no UI yet — the pupil-record view answers the question that mattered first."
+    },
     "GET /messages/contacts": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"

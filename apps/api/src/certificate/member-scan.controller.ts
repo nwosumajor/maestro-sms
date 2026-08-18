@@ -1,5 +1,5 @@
-import { BadRequestException, Body, Controller, Get, Param, Post } from "@nestjs/common";
-import type { MemberScanDto, ScanRecordResultDto } from "@sms/types";
+import { BadRequestException, Body, Controller, Get, Param, Post , Query } from "@nestjs/common";
+import type { MemberScanDto, ScanRecordResultDto, ScanEventDto } from "@sms/types";
 import { isScanPurpose, SIS_PERMISSIONS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -15,6 +15,25 @@ export class MemberScanController {
    * `member.scan` gated; tenant-scoped (404 across tenants); audited in-service.
    * The code is a path param (opaque uniqueId, no PII), never a body.
    */
+  /** One member's movements — the answer to "when did they leave?", which the
+   *  product could not give because nothing read scan_event. */
+  @Get("scan/history/:memberId")
+  @RequirePermission(SIS_PERMISSIONS.MEMBER_SCAN)
+  history(
+    @CurrentPrincipal() p: Principal,
+    @Param("memberId") memberId: string,
+    @Query("days") days?: string,
+  ): Promise<ScanEventDto[]> {
+    return this.scan.history(p, memberId, days ? Number(days) : undefined);
+  }
+
+  /** The desk's own day. */
+  @Get("scan/today")
+  @RequirePermission(SIS_PERMISSIONS.MEMBER_SCAN)
+  today(@CurrentPrincipal() p: Principal): Promise<ScanEventDto[]> {
+    return this.scan.today(p);
+  }
+
   @Get("scan/:code")
   @RequirePermission(SIS_PERMISSIONS.MEMBER_SCAN)
   resolve(@CurrentPrincipal() p: Principal, @Param("code") code: string): Promise<MemberScanDto> {

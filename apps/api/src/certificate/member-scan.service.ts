@@ -18,7 +18,12 @@
 //  * PERMISSION-GATED at the controller with `member.scan`.
 // =============================================================================
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import type { MemberScanDto, ScanPurpose, ScanRecordResultDto } from "@sms/types";
+import type { MemberScanDto, ScanEventDto, ScanPurpose, ScanRecordResultDto } from "@sms/types";
+import { isScanPurpose, schoolToday } from "@sms/types";
+
+/** A movement log is read to answer a question, not to be scrolled. Bounded on
+ *  the largest table the platform stores. */
+const SCAN_HISTORY_CAP = 200;
 import { randomUUID } from "node:crypto";
 import {
   AUDIT_LOG_SERVICE,
@@ -190,4 +195,122 @@ export class MemberScanService {
       };
     }
   }
+
+  /**
+   * WHEN DID THIS PERSON COME AND GO.
+   *
+   * `scan_event` was written on every scan and read by nothing — no endpoint,
+   * no query, no export. A school could scan a child out at the gate and then
+   * had no way to ask when they left, which is the only question a gate log
+   * exists to answer. The table already carried the indexes such a reader
+   * needs, `(schoolId, memberId)` and `(schoolId, createdAt)`, so it was
+   * designed to be read and the readers were simply never written.
+   *
+   * // SECURITY: this is movement data about a minor, so the read is AUDITED
+   * like every other read of a pupil's record (Golden Rule #5). RLS scopes it
+   * to the caller's school; the `member.scan` permission — the one that already
+   * governs the desk — decides who may ask.
+   *
+   * Bounded by DAYS and by rows: on the largest table the platform stores,
+   * "everything for this pupil" is not a query anyone should be able to ask by
+   * accident.
+   */
+  async history(p: Principal, memberId: string, days = 30): Promise<ScanEventDto[]> {
+    const window = Math.min(Math.max(days, 1), 180);
+    const since = new Date(Date.now() - window * 86_400_000);
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const member = await tx.user.findFirst({ where: { id: memberId }, select: { id: true } });
+      // 404-not-403: whether a member of another school exists is not something
+      // this answers.
+      if (!member) throw new NotFoundException("Member not found");
+      const rows = (await tx.scanEvent.findMany({
+        where: { memberId, createdAt: { gte: since } },
+        orderBy: { createdAt: "desc" },
+        take: SCAN_HISTORY_CAP,
+      })) as Array<{
+        id: string;
+        memberId: string;
+        scannedById: string;
+        purpose: string;
+        note: string | null;
+        createdAt: Date;
+      }>;
+      await this.audit.record(
+        {
+          actorId: p.userId,
+          action: "member.scan.history",
+          entity: "scan_event",
+          entityId: memberId,
+          schoolId: p.schoolId,
+          metadata: { days: window, rows: rows.length },
+        },
+        tx,
+      );
+      return this.decorate(tx, rows);
+    });
+  }
+
+  /**
+   * The day at the desk — every scan, newest first.
+   *
+   * The other question a gate log answers: who is on the premises, and what has
+   * the desk been doing. Uses the `(schoolId, createdAt)` index.
+   */
+  async today(p: Principal): Promise<ScanEventDto[]> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const { timezone } = await this.region.forSchool(p.schoolId);
+      // The SCHOOL's day, not the server's UTC one — the same rule the register
+      // and the term lock use.
+      const start = schoolToday(timezone);
+      const rows = (await tx.scanEvent.findMany({
+        where: { createdAt: { gte: start } },
+        orderBy: { createdAt: "desc" },
+        take: SCAN_HISTORY_CAP,
+      })) as Array<{
+        id: string;
+        memberId: string;
+        scannedById: string;
+        purpose: string;
+        note: string | null;
+        createdAt: Date;
+      }>;
+      await this.audit.record(
+        {
+          actorId: p.userId,
+          action: "member.scan.today",
+          entity: "scan_event",
+          entityId: p.schoolId,
+          schoolId: p.schoolId,
+          metadata: { rows: rows.length },
+        },
+        tx,
+      );
+      return this.decorate(tx, rows);
+    });
+  }
+
+  /** Names for the two people on each row, in ONE lookup rather than per row. */
+  private async decorate(
+    tx: TenantTx,
+    rows: Array<{ id: string; memberId: string; scannedById: string; purpose: string; note: string | null; createdAt: Date }>,
+  ): Promise<ScanEventDto[]> {
+    if (rows.length === 0) return [];
+    const ids = [...new Set(rows.flatMap((r) => [r.memberId, r.scannedById]))];
+    const people = (await tx.user.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, name: true },
+    })) as Array<{ id: string; name: string }>;
+    const nameOf = new Map(people.map((u) => [u.id, u.name]));
+    return rows.map((r) => ({
+      id: r.id,
+      memberId: r.memberId,
+      memberName: nameOf.get(r.memberId) ?? "Unknown",
+      scannedById: r.scannedById,
+      scannedByName: nameOf.get(r.scannedById) ?? "Unknown",
+      purpose: (isScanPurpose(r.purpose) ? r.purpose : "CHECK_IN") as ScanPurpose,
+      note: r.note,
+      at: r.createdAt,
+    }));
+  }
+
 }
