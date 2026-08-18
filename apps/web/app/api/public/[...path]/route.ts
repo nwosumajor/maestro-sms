@@ -25,9 +25,16 @@ async function proxy(req: NextRequest, ctx: { params: { path: string[] } }) {
     body = Buffer.from(await req.arrayBuffer());
   }
   const res = await fetch(target, { method: req.method, headers, body });
+  // Same posture as the authenticated proxy: this returns data, never a page.
+  // No public route serves bytes today, which is exactly why it is worth
+  // pinning now rather than after one does.
   return new NextResponse(await res.text(), {
     status: res.status,
-    headers: { "Content-Type": res.headers.get("content-type") ?? "application/json" },
+    headers: {
+      "Content-Type": res.headers.get("content-type") ?? "application/json",
+      "X-Content-Type-Options": "nosniff",
+      "Content-Security-Policy": "default-src 'none'; sandbox",
+    },
   });
 }
 

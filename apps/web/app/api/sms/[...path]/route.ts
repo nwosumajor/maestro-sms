@@ -66,6 +66,13 @@ async function proxy(req: NextRequest, ctx: { params: { path: string[] } }) {
   // The API sets this too; repeated here because this is the response the
   // browser actually sees, and a proxy that rebuilds headers owns them.
   out["X-Content-Type-Options"] = "nosniff";
+  // NOTHING PROXIED FROM THE API IS A PAGE. Data and downloads have no reason
+  // to run script, load an image or be framed, so this response is sandboxed
+  // into an opaque origin with everything denied. It is the backstop for the
+  // hole above: even served as text/html with the disposition somehow lost
+  // again, the document cannot execute or reach anything of ours. The app's own
+  // pages are not served from here and are unaffected.
+  out["Content-Security-Policy"] = "default-src 'none'; sandbox";
 
   // Text/JSON pass through as text; binary (e.g. report-card PDFs) as bytes.
   if (ct.includes("json") || ct.includes("text") || ct.includes("html")) {
