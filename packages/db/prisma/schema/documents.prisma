@@ -54,3 +54,109 @@ model Document {
   @@index([schoolId, type])
   @@map("document")
 }
+
+// =============================================================================
+// Supplied documents — what a school ASKS somebody for, and what came back
+// =============================================================================
+// The admission and hire flows both collect files from people who do not yet
+// have an account: a parent sending a birth certificate, a candidate sending a
+// CV. Those cannot go straight into the Vault above — `Document.studentId` FKs
+// to a user that does not exist yet, and admissions is deliberately quarantined
+// from student data, so a file from a family the school may reject must not sit
+// among enrolled pupils' records.
+//
+// So they land here, are checked by a person, and are PROMOTED on acceptance:
+// the metadata is copied into `Document` (pupils) or `StaffDocument` (staff)
+// REUSING THE SAME STORAGE KEY — no second copy of the bytes — and the
+// submission row survives as the record of who supplied it and who accepted it.
+// =============================================================================
+
+model DocumentRequirement {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  /// STUDENT_ADMISSION | STAFF_ONBOARDING (RequirementScope in @sms/types).
+  appliesTo String
+  /// Stable slug — what code and the seed match on. The LABEL may be reworded
+  /// by the school without orphaning anything that refers to the requirement.
+  key         String
+  label       String
+  description String?
+  mandatory   Boolean @default(false)
+  /// The supplied file carries an expiry the school must chase (a licence, an
+  /// identity document) rather than being a one-off record.
+  needsExpiry Boolean @default(false)
+  sequence    Int     @default(0)
+  /// Switched off rather than deleted: submissions already made against it keep
+  /// their meaning, and it stops appearing as outstanding everywhere at once.
+  active      Boolean @default(true)
+
+  createdById String   @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@unique([schoolId, appliesTo, key])
+  @@index([schoolId])
+  @@index([schoolId, appliesTo, active])
+  @@map("document_requirement")
+}
+
+model DocumentSubmission {
+  id       String @id @default(uuid()) @db.Uuid
+  schoolId String @db.Uuid
+
+  /// ADMISSION_APPLICATION | APPLICANT | STUDENT | STAFF (SubmissionSubject).
+  subjectKind String
+  /// The application / applicant / user id. No Prisma relation: the subject
+  /// changes KIND on promotion, and three of the four targets live in tables
+  /// this model must not couple itself to.
+  subjectId   String @db.Uuid
+
+  /// Null for a file supplied outside the asked-for list ("anything else you
+  /// think we should see"), which schools do want.
+  requirementId String? @db.Uuid
+
+  /// Null while PENDING, and null for ever on a WAIVED row — a waiver is a
+  /// recorded decision that no file will arrive, not a file.
+  storageKey   String? @unique
+  contentType  String?
+  sizeBytes    Int?
+  originalName String?
+
+  /// PENDING | UPLOADED | VERIFIED | REJECTED | WAIVED (SubmissionStatus).
+  status String @default("PENDING")
+
+  /// Null when the uploader had no account — a parent or a candidate. That is
+  /// the normal case here, and why this column is nullable while the Vault's
+  /// `uploadedById` is not.
+  uploadedByUserId String? @db.Uuid
+  uploadedAt       DateTime?
+
+  /// The human check. A document nobody looked at is not evidence, so who and
+  /// when are recorded, and a refusal carries its reason back to the family.
+  verifiedById   String?   @db.Uuid
+  verifiedAt     DateTime?
+  rejectedReason String?
+
+  /// For a requirement with needsExpiry — drives the same reminder path
+  /// `staff_document.expiresAt` already uses.
+  expiresAt DateTime? @db.Date
+
+  /// Set once promoted into the Vault; the link back from the permanent record
+  /// to how it arrived.
+  documentId String? @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId])
+  @@index([schoolId, subjectKind, subjectId])
+  @@index([schoolId, status])
+  /// The retention sweep reads across tenants by status and age.
+  @@index([status, createdAt])
+  @@map("document_submission")
+}

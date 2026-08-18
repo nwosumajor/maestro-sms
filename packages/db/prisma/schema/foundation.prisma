@@ -181,6 +181,8 @@ model School {
 
   // Document Vault relations
   documents Document[]
+  documentRequirements DocumentRequirement[]
+  documentSubmissions  DocumentSubmission[]
 
   // Timetabling relations
   periods                 Period[]

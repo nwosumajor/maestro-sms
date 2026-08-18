@@ -183,6 +183,8 @@ const meetingCohostA = randomUUID();
   const reportCardRemarkA = randomUUID();
 const studentTraitRatingA = randomUUID();
 const settlementReleaseA = randomUUID();
+const documentRequirementA = randomUUID();
+const documentSubmissionA = randomUUID();
   const subjectSelectionA = randomUUID();
   const scholarshipApplicationA = randomUUID();
   const announcementA = randomUUID();
@@ -808,6 +810,22 @@ const settlementReleaseA = randomUUID();
        VALUES ($1,$2,50000,'NGN',2,'BANK-REF-1',$3,now())`,
       [settlementReleaseA, A, userA],
     );
+    // What school A asks an applicant's family for, and one birth certificate
+    // that arrived against it — rls/109, rls/110. The submission's subject is an
+    // ADMISSION_APPLICATION, i.e. somebody who is not yet a pupil: the whole
+    // reason these rows are not in the Vault.
+    await a.query(
+      `INSERT INTO document_requirement
+         (id,"schoolId","appliesTo",key,label,mandatory,"createdById","updatedAt")
+       VALUES ($1,$2,'STUDENT_ADMISSION','birth_certificate','Birth certificate',true,$3,now())`,
+      [documentRequirementA, A, userA],
+    );
+    await a.query(
+      `INSERT INTO document_submission
+         (id,"schoolId","subjectKind","subjectId","requirementId","storageKey","contentType",status,"updatedAt")
+       VALUES ($1,$2,'ADMISSION_APPLICATION',$3,$4,$5,'application/pdf','UPLOADED',now())`,
+      [documentSubmissionA, A, randomUUID(), documentRequirementA, `schools/${A}/submissions/${documentSubmissionA}.pdf`],
+    );
     // Per-term subject selection (student userA picking subjectA).
     await a.query(
       `INSERT INTO subject_selection (id,"schoolId","sessionId","termId","classId","studentId","subjectIds","updatedAt")
@@ -1227,6 +1245,9 @@ const settlementReleaseA = randomUUID();
       // both; term references academic_session -> term before session.
       "promotion_batch",
       "report_card_remark",
+      // document_submission FKs to document_requirement -> child first.
+      "document_submission",
+      "document_requirement",
       // FKs to term -> purge before term.
       "student_trait_rating",
       "platform_settlement_release",
@@ -1579,6 +1600,8 @@ const settlementReleaseA = randomUUID();
     ["report_card_remark", reportCardRemarkA],
     ["student_trait_rating", studentTraitRatingA],
     ["platform_settlement_release", settlementReleaseA],
+    ["document_requirement", documentRequirementA],
+    ["document_submission", documentSubmissionA],
     ["announcement", announcementA],
   ];
 
@@ -1860,6 +1883,30 @@ const settlementReleaseA = randomUUID();
       await expect(c.query(`UPDATE gateway_event SET gateway='tamper' WHERE id = $1`, [id])).rejects.toThrow();
     });
     await adminPool.query(`DELETE FROM gateway_event WHERE id = $1`, [id]);
+  });
+
+  it("a supplied document cannot be DELETED by the app role, only superseded", async () => {
+    // The distinctive posture of rls/110, and the coverage gate above cannot see
+    // it. These rows are identity documents about minors and job applicants: a
+    // rejected family's file must eventually go, but that is a scheduled
+    // retention sweep on the PRIVILEGED client, never something a request path
+    // can do. In the ordinary flow nothing deletes — a bad file is REJECTED with
+    // a reason and superseded, which keeps the trail of what was supplied and
+    // who judged it.
+    await asApp(A, async (c) => {
+      // Reading and correcting one's own school's rows is allowed...
+      const r = await c.query(`SELECT status FROM document_submission WHERE id = $1`, [documentSubmissionA]);
+      expect(r.rowCount).toBe(1);
+      await c.query(`UPDATE document_submission SET status = 'VERIFIED' WHERE id = $1`, [documentSubmissionA]);
+    });
+    // ...but removing one is not, even inside the school that owns it.
+    await asApp(A, async (c) => {
+      await expect(
+        c.query(`DELETE FROM document_submission WHERE id = $1`, [documentSubmissionA]),
+      ).rejects.toThrow();
+    });
+    // Put it back as the other cases expect to find it.
+    await adminPool.query(`UPDATE document_submission SET status = 'UPLOADED' WHERE id = $1`, [documentSubmissionA]);
   });
 
   it("audit_log is append-only: INSERT allowed, UPDATE denied", async () => {

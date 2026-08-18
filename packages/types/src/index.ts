@@ -42,6 +42,7 @@ export * from "./permissions/attendance";
 export * from "./permissions/notifications";
 export * from "./permissions/fees";
 export * from "./permissions/documents";
+export * from "./supplied-documents";
 export * from "./permissions/timetable";
 export * from "./permissions/security";
 export * from "./permissions/privacy";
