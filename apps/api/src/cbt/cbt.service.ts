@@ -821,16 +821,34 @@ export class CbtService {
         // SECTION B — theory (empty for an objective-only paper).
         const sectionB = await drawFrom("THEORY", exam.theoryCount);
         const sampled = [...sectionA, ...sectionB];
-        sitting = await tx.cbtSitting.create({
-          data: {
-            id: randomUUID(),
-            schoolId: p.schoolId,
-            examId,
-            studentId: p.userId,
-            questionIds: sampled as unknown as Prisma.InputJsonValue,
-          },
-        });
-        await this.log(tx, p, "cbt.sitting.start", sitting.id, { examId });
+        try {
+          sitting = await tx.cbtSitting.create({
+            data: {
+              id: randomUUID(),
+              schoolId: p.schoolId,
+              examId,
+              studentId: p.userId,
+              questionIds: sampled as unknown as Prisma.InputJsonValue,
+            },
+          });
+          await this.log(tx, p, "cbt.sitting.start", sitting.id, { examId });
+        } catch (e) {
+          // ONE SITTING PER PUPIL is a DATABASE rule — `@@unique([examId,
+          // studentId])`, and the index really is there — so the read above
+          // cannot enforce it: two clicks both find nothing and both insert.
+          // The ballot is safe; what was not safe was the ANSWER a pupil got.
+          // An unhandled P2002 falls through the global filter (which only
+          // translates malformed UUIDs) and reaches the client as a 500 — at
+          // the exact moment thirty pupils press Start on the same wifi, and
+          // the one moment an invigilator can least afford a server error.
+          //
+          // Not a 409 either: the pupil asked to sit their exam, and the right
+          // answer is their sitting. The other request created it a millisecond
+          // ago, so read it back and carry on.
+          if (!(e instanceof Prisma.PrismaClientKnownRequestError) || e.code !== "P2002") throw e;
+          sitting = await tx.cbtSitting.findFirst({ where: { examId, studentId: p.userId } });
+          if (!sitting) throw e;
+        }
       }
       return this.sittingView(tx, exam, sitting, p);
     });
