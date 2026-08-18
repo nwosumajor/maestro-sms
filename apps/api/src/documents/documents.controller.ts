@@ -10,6 +10,7 @@ import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { DocumentsService } from "./documents.service";
+import { safeDownloadType, safeFilename } from "./safe-content-type";
 
 const createSchema = z.object({
   studentId: z.string().uuid().nullish(),
@@ -76,8 +77,13 @@ export class DocumentsController {
   ): Promise<StreamableFile> {
     const { buffer, filename, contentType } = await this.documents.streamFile(p, id);
     res.set({
-      "Content-Type": contentType || "application/octet-stream",
-      "Content-Disposition": `attachment; filename="${filename.replace(/"/g, "")}"`,
+      // NOT the stored type verbatim — see safe-content-type.ts. Nothing
+      // validates what an uploader declares, and a document that can claim to
+      // be text/html is a script on this origin the moment any hop drops the
+      // disposition below.
+      "Content-Type": safeDownloadType(contentType),
+      "Content-Disposition": `attachment; filename="${safeFilename(filename)}"`,
+      "X-Content-Type-Options": "nosniff",
     });
     return new StreamableFile(buffer);
   }

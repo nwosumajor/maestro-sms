@@ -45,13 +45,32 @@ async function proxy(req: NextRequest, ctx: { params: { path: string[] } }) {
 
   const res = await fetch(target, { method: req.method, headers, body });
   const ct = res.headers.get("content-type") ?? "application/json";
-  // Text/JSON pass through as text; binary (e.g. report-card PDFs) as bytes.
-  if (ct.includes("json") || ct.includes("text") || ct.includes("html")) {
-    return new NextResponse(await res.text(), { status: res.status, headers: { "Content-Type": ct } });
-  }
+
+  // CONTENT-DISPOSITION IS FORWARDED WHATEVER THE TYPE.
+  //
+  // It used to be attached only on the binary branch, and that one omission was
+  // a stored-XSS hole: the document endpoint replays the content type given at
+  // upload, so a file declared `text/html` came back down the TEXT branch and
+  // arrived at the browser as text/html with the API's `attachment` stripped
+  // off — rendered, not downloaded, on this origin, with the reader's session.
+  // Demonstrated end to end before this fix: the API answered `text/html` +
+  // `Content-Disposition: attachment`, and the browser received `text/html`
+  // and no disposition at all. There is no CSP to fall back on.
+  //
+  // It also silently broke every CSV export — text/csv took the same branch, so
+  // the journal, payroll and library exports opened in a tab instead of saving
+  // under their own filename.
   const out: Record<string, string> = { "Content-Type": ct };
   const cd = res.headers.get("content-disposition");
   if (cd) out["Content-Disposition"] = cd;
+  // The API sets this too; repeated here because this is the response the
+  // browser actually sees, and a proxy that rebuilds headers owns them.
+  out["X-Content-Type-Options"] = "nosniff";
+
+  // Text/JSON pass through as text; binary (e.g. report-card PDFs) as bytes.
+  if (ct.includes("json") || ct.includes("text") || ct.includes("html")) {
+    return new NextResponse(await res.text(), { status: res.status, headers: out });
+  }
   return new NextResponse(await res.arrayBuffer(), { status: res.status, headers: out });
 }
 
