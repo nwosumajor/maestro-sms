@@ -15,7 +15,7 @@
 // =============================================================================
 
 import { InjectQueue } from "@nestjs/bullmq";
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, Optional } from "@nestjs/common";
 import { MessageCreditsService } from "./message-credits.service";
 import { Prisma } from "@sms/db";
 import type { Queue } from "bullmq";
@@ -70,6 +70,9 @@ export interface NotificationInput {
 
 @Injectable()
 export class NotificationService {
+  /** A send that happened but could not be written down has to be visible. */
+  private readonly logger = new Logger("Notification");
+
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
@@ -442,20 +445,51 @@ export class NotificationService {
     // --- 3. Record what happened, and spend a credit only for a CONFIRMED send.
     let sent = 0;
     let failed = plan.failed;
-    await this.db.runAsTenant(ctx, async (tx) => {
-      for (const o of outcomes) {
-        if (o.result.ok && o.metered) {
-          await this.credits!.debitInTx(tx, job.schoolId, o.channel, job.notificationId, o.result.providerRef);
-        }
-        await tx.notificationDelivery.update({
-          where: { id: o.id },
-          data: o.result.ok
-            ? { status: "SENT", target: o.target, sentAt: new Date(), error: null }
-            : { status: "FAILED", target: o.target, error: o.result.error ?? "delivery failed" },
+    // ONE ROW MUST NOT LOSE THE TRUTH ABOUT ALL THE OTHERS.
+    //
+    // The gateway calls have ALREADY happened by the time we get here — this
+    // transaction only writes down what they said. It used to be one
+    // transaction around the whole loop, so a single failure anywhere in it
+    // rolled back every OTHER outcome too: a fan-out of five hundred guardian
+    // alerts, all genuinely delivered, recorded as nothing.
+    //
+    // Those rows then stay PENDING with an attempt stamped, which the recovery
+    // sweep deliberately treats as "handed to a gateway, outcome lost — do NOT
+    // re-send". So the school is told five hundred messages failed when every
+    // one arrived, and no credit is spent for any of them.
+    //
+    // It is not hypothetical plumbing: `debitInTx` writes a ledger row and then
+    // `warnIfLow` READS staff and ENQUEUES a low-balance notification, so this
+    // loop does considerably more than one update per item.
+    //
+    // Each outcome is now its own transaction, which is what it actually is —
+    // an independent fact about a different message. The debit and the status
+    // stay together inside it, so a credit is never spent on a message we did
+    // not manage to mark sent. A failure degrades to exactly the case the
+    // recovery sweep already handles, for ONE message instead of the batch.
+    for (const o of outcomes) {
+      try {
+        await this.db.runAsTenant(ctx, async (tx) => {
+          if (o.result.ok && o.metered) {
+            await this.credits!.debitInTx(tx, job.schoolId, o.channel, job.notificationId, o.result.providerRef);
+          }
+          await tx.notificationDelivery.update({
+            where: { id: o.id },
+            data: o.result.ok
+              ? { status: "SENT", target: o.target, sentAt: new Date(), error: null }
+              : { status: "FAILED", target: o.target, error: o.result.error ?? "delivery failed" },
+          });
         });
         o.result.ok ? sent++ : failed++;
+      } catch (e) {
+        // Loud: the message went out and we could not write down that it did.
+        // The row stays PENDING with its attempt stamped, so nothing re-sends
+        // it and the delivery-problems reader will show it.
+        this.logger.error(
+          `delivery ${o.id} was sent on ${o.channel} but its outcome could not be recorded: ${String(e).slice(0, 160)}`,
+        );
       }
-    });
+    }
     return { sent, failed };
   }
 

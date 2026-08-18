@@ -177,6 +177,39 @@ describe("NotificationService", () => {
     expect(res).toEqual({ sent: 1, failed: 0 });
   });
 
+  it("records the OTHER outcomes when one of them cannot be written", async () => {
+    // The blast-radius fix (#264). Recording used to be ONE transaction around
+    // the whole loop, so a single failure rolled back every other outcome —
+    // and those rows stay PENDING with an attempt stamped, which the recovery
+    // sweep deliberately reads as "handed to a gateway, do NOT re-send". A
+    // fan-out of delivered messages recorded as nothing, and no credit spent.
+    const provider = { deliver: jest.fn().mockResolvedValue({ ok: true }) };
+    const credits = {
+      balanceInTx: jest.fn().mockResolvedValue(5),
+      // The first debit blows up; `debitInTx` really does more than one write —
+      // it appends a ledger row and then reads staff to warn about a low
+      // balance — so this is the plumbing failing, not a contrived throw.
+      debitInTx: jest.fn().mockRejectedValueOnce(new Error("ledger unavailable")).mockResolvedValue(undefined),
+    };
+    const { service } = makeService(
+      {
+        notificationRow: { id: "notif-1", recipientId: "r-1", title: "T", body: "B", data: null },
+        recipientUser: { id: "r-1", phone: "+2348000000000" } as never,
+        pendingDeliveries: [
+          { id: "del-1", channel: "SMS" },
+          { id: "del-2", channel: "SMS" },
+        ],
+      },
+      provider,
+      credits,
+    );
+    const res = await service.runDeliveries({ schoolId: "school-A", userId: "sys", notificationId: "notif-1" });
+    // Both were sent by the gateway; one could not be written down. The other
+    // is still counted, which is the whole point — it used to be neither.
+    expect(provider.deliver).toHaveBeenCalledTimes(2);
+    expect(res.sent).toBe(1);
+  });
+
   it("a FAILED SMS send (gateway error) never debits a credit — no charge for no delivery", async () => {
     const provider = { deliver: jest.fn().mockResolvedValue({ ok: false, error: "twilio 500" }) };
     const credits = { balanceInTx: jest.fn().mockResolvedValue(5), debitInTx: jest.fn().mockResolvedValue(undefined) };
