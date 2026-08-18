@@ -65,9 +65,18 @@ function makeService(over: Record<string, unknown> = {}) {
     isConfigured: () => over.mpesaConfigured !== false,
     charge,
     readCallback: (b: unknown) => (over.reading as never) ?? { reference: (b as { ref?: string })?.ref ?? null, outcome: "SUCCEEDED" },
+    // The callback is no longer taken at its word (#262): a public, UNSIGNED
+    // body cannot decide whether money moved, so the service asks the rail with
+    // the same `getStatus` the recovery sweep uses. Every real adapter
+    // implements it; this stub agrees with the callback so these cases still
+    // assert what they were written to assert. `over.railSays` makes them
+    // disagree.
+    getStatus: jest.fn(async () =>
+      (over.railSays as never) ??
+      (over.reading as never) ?? { reference: null, outcome: "SUCCEEDED" as const }),
   };
-  const mtn = { key: "MTN_MOMO" as const, wholeUnitsOnly: false, isConfigured: () => false, charge: jest.fn(), readCallback: () => ({ reference: null, outcome: "PENDING" as const }) };
-  const airtel = { key: "AIRTEL" as const, wholeUnitsOnly: false, isConfigured: () => false, charge: jest.fn(), readCallback: () => ({ reference: null, outcome: "PENDING" as const }) };
+  const mtn = { key: "MTN_MOMO" as const, wholeUnitsOnly: false, isConfigured: () => false, charge: jest.fn(), readCallback: () => ({ reference: null, outcome: "PENDING" as const }), getStatus: jest.fn(async () => ({ reference: null, outcome: "PENDING" as const })) };
+  const airtel = { key: "AIRTEL" as const, wholeUnitsOnly: false, isConfigured: () => false, charge: jest.fn(), readCallback: () => ({ reference: null, outcome: "PENDING" as const }), getStatus: jest.fn(async () => ({ reference: null, outcome: "PENDING" as const })) };
 
   const svc = new MobileMoneyService(
     db as never, region as never, settlement as never, events as never, privileged as never,
@@ -227,6 +236,45 @@ describe("callback — unsigned, so it is a doorbell and not a statement of fact
     expect(settlement.applyOnlinePayment).toHaveBeenCalledWith(
       expect.objectContaining({ reference: "MM-ABC123" }),
     );
+  });
+
+  it("REFUSES a forged success the rail does not confirm", async () => {
+    // The attack this closes. `charge()` returns the reference TO THE PAYER, so
+    // a parent could start a charge, decline the prompt, and POST a
+    // success-shaped body to the public unsigned callback carrying their own
+    // reference. The invoice settled for the full amount with no money moved,
+    // and nothing corrected it: applyReading skips a non-PENDING intent, so the
+    // recovery sweep never looked again.
+    const { svc, settlement } = makeService({
+      intent: INTENT,
+      reading: { reference: "MM-ABC123", outcome: "SUCCEEDED" },
+      railSays: { reference: "MM-ABC123", outcome: "PENDING" },
+    });
+    await svc.handleCallback("mpesa", {});
+    expect(settlement.applyOnlinePayment).not.toHaveBeenCalled();
+  });
+
+  it("does not FAIL an intent on a forged failure either", async () => {
+    // The mirror: a forged FAILED would bury a payment that did happen, because
+    // the sweep skips anything no longer PENDING.
+    const { svc, intentUpdate } = makeService({
+      intent: INTENT,
+      reading: { reference: "MM-ABC123", outcome: "FAILED", failureReason: "forged" },
+      railSays: { reference: "MM-ABC123", outcome: "PENDING" },
+    });
+    await svc.handleCallback("mpesa", {});
+    expect(intentUpdate).not.toHaveBeenCalled();
+  });
+
+  it("settles when the rail CONFIRMS the callback", async () => {
+    // The honest path still works, which is what makes the guard safe to keep.
+    const { svc, settlement } = makeService({
+      intent: INTENT,
+      reading: { reference: "MM-ABC123", outcome: "SUCCEEDED" },
+      railSays: { reference: "MM-ABC123", outcome: "SUCCEEDED" },
+    });
+    await svc.handleCallback("mpesa", {});
+    expect(settlement.applyOnlinePayment).toHaveBeenCalled();
   });
 
   it("is IDEMPOTENT — a re-notified charge posts nothing further", async () => {

@@ -293,7 +293,46 @@ export class MobileMoneyService {
       return { ok: true };
     }
 
-    await this.applyReading(intent, reading, body);
+    // THE CALLBACK SAYS SO. THAT IS NOT EVIDENCE.
+    //
+    // This endpoint is public, unauthenticated and UNSIGNED — M-Pesa and MTN
+    // sign nothing — and the file already reasons that amounts must come from
+    // the intent rather than the body. The OUTCOME is a statement of fact too,
+    // and it was taken on trust.
+    //
+    // The payer knows their own reference: `charge()` returns it to them. So a
+    // parent could start a charge, DECLINE the prompt, and POST a success-shaped
+    // body here carrying that reference — and the invoice settled for the full
+    // amount with no money moved. Nothing corrects it afterwards: applyReading
+    // returns early once the intent is no longer PENDING, so the recovery sweep
+    // never revisits it, and settlement is idempotent on the reference.
+    //
+    // So the callback is demoted to what the comment above already calls it — a
+    // doorbell. We go and ASK the rail, with the same `getStatus` the recovery
+    // sweep uses, and act on the answer. A forged body now buys an attacker one
+    // outbound status query.
+    let verified: CallbackReading;
+    try {
+      verified = await provider.getStatus({ reference: intent.reference, providerRef: intent.providerRef });
+    } catch (err) {
+      // Could not ask. Leave it PENDING so the sweep tries again — settling or
+      // failing on an unverified claim is exactly what this guard exists to
+      // stop, and 2xx keeps the rail from retrying forever.
+      this.logger.warn(
+        `${providerKey} callback for ${intent.reference}: could not verify with the rail (${(err as Error).message.slice(0, 120)}) — left PENDING`,
+      );
+      return { ok: true };
+    }
+    if (verified.outcome !== reading.outcome) {
+      // Worth seeing: either a rail that changed its mind between notifying and
+      // being asked, or somebody posting a body the rail does not agree with.
+      this.logger.warn(
+        `${providerKey} callback for ${intent.reference} claimed ${reading.outcome}, rail says ${verified.outcome}`,
+      );
+    }
+    // The recorded payload stays the CALLBACK's, so gateway_event still answers
+    // "what did a rail tell us, and when"; the verdict acted on is the rail's.
+    await this.applyReading(intent, verified, body);
     return { ok: true };
   }
 
