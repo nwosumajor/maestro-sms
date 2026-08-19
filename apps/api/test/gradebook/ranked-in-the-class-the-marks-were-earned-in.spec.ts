@@ -102,6 +102,18 @@ describe("the printed report card", () => {
     expect(src).toMatch(/where: \{ sourceClassId: enrolment\.classId, termId: term\.id, status: "APPROVED" \}/);
   });
 
+  it("counts register days from that class too, not the destination's", () => {
+    // "Times school opened" is the denominator a parent divides the attendance
+    // by, and it was counted over the pupil's class TODAY while the attendance
+    // beside it is their own for the term. After a move those describe different
+    // terms — and because the numerator spans every class the pupil sat in, the
+    // card could print more days present than days the school opened.
+    const src = read("reportcards/reportcard.service.ts");
+    const block = src.slice(src.indexOf("Days the register was actually taken"), src.indexOf("daysOpened = sessions.length"));
+    expect(block).toMatch(/classId: cohortClassId/);
+    expect(block).not.toMatch(/enrolment\.classId/);
+  });
+
   it("falls back to the current enrolment when the term has no marks", () => {
     // Nothing to rank and nothing to get wrong, but the card still needs a class
     // name on it.

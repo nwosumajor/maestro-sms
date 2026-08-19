@@ -354,10 +354,15 @@ export class ReportCardService {
         }
         // Days the register was actually taken for this pupil's class — the
         // school's own record of opening, not a count of weekdays.
-        if (enrolment) {
+        //
+        // The class the TERM was spent in, for the same reason the positions
+        // above use it: after a mid-session move, counting the destination
+        // class's register days gives a denominator from a term this pupil did
+        // not sit there, and the numerator below is their own attendance.
+        if (cohortClassId) {
           const sessions = await tx.attendanceSession.findMany({
             where: {
-              classId: enrolment.classId,
+              classId: cohortClassId,
               ...(termBegins && termEnds ? { date: { gte: termBegins, lte: termEnds } } : {}),
             },
             select: { id: true },
