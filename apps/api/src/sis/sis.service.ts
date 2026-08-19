@@ -554,14 +554,31 @@ export class SisService {
   }
 
   // --- emergency contacts ----------------------------------------------------
+  /**
+   * A child's emergency contacts: the names, relationships and PHONE NUMBERS of
+   * the adults responsible for them.
+   *
+   * AUDITED, per Golden Rule #5. This read was the only one in the file that was
+   * not — the profile, the guardians and the medical record all log, and so does
+   * every WRITE to these same rows, so adding a contact was recorded while
+   * reading the whole list was not. The live log made it plain: 193
+   * sis.guardians.read entries, 19 sis.medical.read, and no contact-read action
+   * in existence at all.
+   *
+   * The COUNT is recorded and never the numbers. An audit trail is read by
+   * people investigating access, who have no business being handed the contact
+   * details as a side effect of checking who looked at them.
+   */
   async listContacts(p: Principal, studentId: string) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.assertCanAccessStudent(tx, p, studentId);
       const profile = await this.requireProfile(tx, studentId);
-      return tx.emergencyContact.findMany({
+      const contacts = await tx.emergencyContact.findMany({
         where: { profileId: profile.id },
         orderBy: { priority: "asc" },
       });
+      await this.log(tx, p, "sis.contact.read", "user", studentId, { contacts: contacts.length });
+      return contacts;
     });
   }
 
