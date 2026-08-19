@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { DocumentsController } from "./documents.controller";
 import { DocumentsService } from "./documents.service";
 import { BullModule } from "@nestjs/bullmq";
+import { LocalStorageController } from "./local-storage.controller";
 import { PublicDocumentsController } from "./public-documents.controller";
 import { SubmissionRetentionService } from "./submission-retention.service";
 import { SubmissionRetentionProcessor } from "./submission-retention.processor";
@@ -29,7 +30,16 @@ import { NotificationModule } from "../notifications/notification.module";
   // the literal routes must come FIRST or the Vault's wildcard swallows them
   // and answers 404 for a document id that was never an id. Exactly the shape
   // of `scan/today` being eaten by `scan/:code`. Pinned by a test.
-  controllers: [PublicDocumentsController, SuppliedDocumentsController, DocumentsController],
+  // The local-storage route exists ONLY alongside the stub provider. With
+  // STORAGE_PROVIDER=s3 the presigned URLs go to the bucket and this is not
+  // registered at all — a development convenience must not be a production
+  // surface, and the surest way is for it not to be there.
+  controllers: [
+    ...(process.env.STORAGE_PROVIDER === "s3" ? [] : [LocalStorageController]),
+    PublicDocumentsController,
+    SuppliedDocumentsController,
+    DocumentsController,
+  ],
   providers: [
     DocumentsService,
     SuppliedDocumentsService,

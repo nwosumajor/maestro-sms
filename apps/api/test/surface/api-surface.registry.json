@@ -3388,6 +3388,14 @@
     "POST /documents/retention/run": {
       "kind": "system",
       "note": "the declined-applicant document purge, run on demand. Nightly by BullMQ; this exists for the day somebody asks whether their child's certificate has actually gone. Listed in the job-runs catalogue with its manual path"
+    },
+    "PUT /local-storage/*": {
+      "kind": "system",
+      "note": "LOCAL/CI ONLY, and not registered at all when STORAGE_PROVIDER=s3. The stub hands the browser a signed URL pointing back here so the browser-to-bucket upload can be exercised without a bucket"
+    },
+    "GET /local-storage/*": {
+      "kind": "system",
+      "note": "LOCAL/CI ONLY, and not registered at all when STORAGE_PROVIDER=s3. The stub hands the browser a signed URL pointing back here so the browser-to-bucket upload can be exercised without a bucket"
     }
   }
 }

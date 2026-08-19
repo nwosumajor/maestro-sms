@@ -11,6 +11,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { signStorageUrl } from "./local-storage-signing";
 
 /** Injection token for the storage backend (default: StubStorageProvider). */
 export const STORAGE_PROVIDER = Symbol("STORAGE_PROVIDER");
@@ -54,15 +55,35 @@ export class StubStorageProvider implements StorageProvider {
   private readonly logger = new Logger("Storage");
   private readonly ttl = 900;
 
+  /**
+   * A URL that actually RESOLVES.
+   *
+   * These used to point at `https://storage.local/...`, which goes nowhere — so
+   * the one path a parent actually walks, browser → bucket, could not be
+   * exercised outside production. They now point back at this API, where
+   * LocalStorageController serves them against the same temp directory the
+   * server-side upload/download below already use. Signed and expiring, because
+   * it is an unauthenticated write endpoint; see that file for the rest.
+   *
+   * LOCAL_STORAGE_BASE_URL lets a browser reach it when the API is not on the
+   * same origin. Behind the local nginx it is a same-origin path and needs no
+   * setting at all.
+   */
   async presignUpload({ key }: { key: string; contentType: string }): Promise<PresignResult> {
     this.logger.log(`[stub] presign PUT ${key}`);
-    return { url: `https://storage.local/${key}?op=put&sig=stub`, expiresInSeconds: this.ttl };
+    return { url: this.signedUrl(key, "put"), expiresInSeconds: this.ttl };
   }
 
   async presignDownload({ key, filename }: { key: string; filename?: string }): Promise<PresignResult> {
     this.logger.log(`[stub] presign GET ${key}`);
     const name = filename ? `&filename=${encodeURIComponent(filename)}` : "";
-    return { url: `https://storage.local/${key}?op=get&sig=stub${name}`, expiresInSeconds: this.ttl };
+    return { url: `${this.signedUrl(key, "get")}${name}`, expiresInSeconds: this.ttl };
+  }
+
+  private signedUrl(key: string, op: "put" | "get"): string {
+    const { sig, exp } = signStorageUrl(key, op, this.ttl);
+    const base = process.env.LOCAL_STORAGE_BASE_URL ?? "";
+    return `${base}/local-storage/${key}?exp=${exp}&sig=${sig}`;
   }
 
   // The stub is filesystem-backed under a temp dir so server-side upload/download
