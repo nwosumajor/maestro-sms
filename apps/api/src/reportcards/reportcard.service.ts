@@ -164,9 +164,35 @@ export class ReportCardService {
       // computed on.
       const grading = (await this.region.academicInTx(tx, p.schoolId)).grading;
       const bands = resolveGradeBands(grading);
-      if (term && enrolment) {
+
+      // THE COHORT IS THE CLASS THE TERM'S MARKS WERE EARNED IN, which is not
+      // the pupil's class today once they move mid-session — an ordinary thing
+      // for a school to do. Every result row records its own classId; ranking on
+      // current enrolment instead put an SS3 pupil's Term 1 mark against JSS1
+      // A's roster, and set the class average, lowest and highest printed beside
+      // their own mark to a different year group's figures.
+      //
+      // Falls back to the current enrolment when the pupil has no marks for the
+      // term, where there is nothing to rank and nothing to get wrong.
+      const ownTermRows = term
+        ? ((await tx.subjectResult.findMany({
+            where: { studentId, termId: term.id },
+            select: { classId: true },
+            take: 1,
+          })) as Array<{ classId: string }>)
+        : [];
+      const cohortClassId = ownTermRows[0]?.classId ?? enrolment?.classId ?? null;
+      // The card must also NAME that class. Printing the pupil's class today
+      // above a term's marks earned elsewhere states the wrong fact in the
+      // header — "JSS1 A" over a set of SS3 results.
+      const cohortClassName =
+        cohortClassId && cohortClassId !== enrolment?.classId
+          ? ((await tx.class.findFirst({ where: { id: cohortClassId }, select: { name: true } })) as { name: string } | null)?.name ?? null
+          : enrolment?.class?.name ?? null;
+
+      if (term && cohortClassId) {
         const classResults = await tx.subjectResult.findMany({
-          where: { classId: enrolment.classId, termId: term.id, status: "PUBLISHED" },
+          where: { classId: cohortClassId, termId: term.id, status: "PUBLISHED" },
           // subjectId rides along so the PER-SUBJECT class average, lowest and
           // highest cost nothing: the rows are already here for the overall
           // ranking, and a second pass over an array is free where a second
@@ -221,7 +247,7 @@ export class ReportCardService {
             // `termId` is a scalar with a DB-level FK and no Prisma relation (the
             // documented pattern that keeps the models lean), so the session is
             // expressed as the ids the session report already resolved.
-            where: { classId: enrolment.classId, termId: { in: annualTermIds }, status: "PUBLISHED" },
+            where: { classId: cohortClassId, termId: { in: annualTermIds }, status: "PUBLISHED" },
             select: {
               studentId: true, subjectId: true, exam: true, midterm: true, assignment: true, classNote: true,
               status: true, total: true, grade: true,
@@ -419,7 +445,7 @@ export class ReportCardService {
         admissionNumber: profile?.admissionNumber ?? null,
         gender: profile?.gender ?? null,
         guardianNames,
-        className: enrolment?.class?.name ?? null,
+        className: cohortClassName,
         termName: term?.name ?? null,
         subjects: subjectRows,
         termAverage,

@@ -157,7 +157,12 @@ describe("the rule both views now share", () => {
   ) as string;
 
   it("the report card still ranks published-only", () => {
-    expect(SRC).toMatch(/where: \{ studentId: \{ in: ids \}, sessionId, status: "PUBLISHED" \}/);
+    // The peer query moved from "this pupil's current classmates" to "everyone
+    // with a result in the class the marks were earned in" — a pupil who changes
+    // class mid-session was being ranked against the wrong year group. The
+    // published-only rule this file exists for is unchanged, and is what is
+    // pinned here rather than the shape of the where-clause around it.
+    expect(SRC).toMatch(/where: \{ classId: \{ in: cohortClassIds \}, sessionId, status: "PUBLISHED" \}/);
   });
 
   it("the scoresheet now does too", () => {

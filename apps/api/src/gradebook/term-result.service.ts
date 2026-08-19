@@ -937,9 +937,13 @@ export class TermResultService {
         select: { classId: true },
         orderBy: { enrolledAt: "desc" },
       });
+      // Named from the class the session's marks were recorded in, falling back
+      // to the current enrolment when there are none — the same rule the rank
+      // below uses, so the header and the positions agree.
+      const headerClassId = allResults[0]?.classId ?? enrollment?.classId ?? null;
       let className: string | null = null;
-      if (enrollment) {
-        const klass = await tx.class.findFirst({ where: { id: enrollment.classId }, select: { name: true } });
+      if (headerClassId) {
+        const klass = await tx.class.findFirst({ where: { id: headerClassId }, select: { name: true } });
         className = klass?.name ?? null;
       }
 
@@ -952,45 +956,55 @@ export class TermResultService {
       // would make a teacher's copy disagree with the family's, and would move
       // a pupil's rank every time an unrelated mark was published.
       //
-      // One extra query for classmates and one for their published totals. Both
-      // are bounded by the class: 30 pupils x 10 subjects x 3 terms is ~900 rows,
-      // and only the fields the total is computed from are selected.
+      // THE COHORT IS THE CLASS ON THE RESULT ROW, not the pupil's class today.
+      // Those differ the moment a pupil moves class mid-session, which is an
+      // ordinary thing for a school to do: their Term 1 mark was earned in the
+      // class they were in then, and every result row records it. Ranking by
+      // current enrolment put an SS3 pupil's Term 1 English mark against JSS1
+      // A's roster — a different year group, and measured live it ranked them
+      // "10 of 31" where 31 is the destination class plus themselves. Their
+      // actual classmates were not in the comparison at all, and their marks
+      // polluted the destination class's rankings in the other direction.
+      //
+      // The broadsheet has always keyed on the result's own classId; this makes
+      // the printed card agree with it.
+      //
+      // The cohort is everyone who has a published result for that class, term
+      // and subject — INCLUDING pupils who have since left. They sat the term;
+      // dropping them would move everyone else's position after the fact.
+      //
+      // One query, bounded by the classes this pupil actually studied in:
+      // ~30 pupils x 10 subjects x 3 terms is ~900 rows.
       const rankOf = new Map<string, { position: number; ranked: number }>();
-      if (enrollment) {
-        const classmates = (await tx.enrollment.findMany({
-          where: { classId: enrollment.classId, status: "ACTIVE" },
-          select: { studentId: true },
-        })) as Array<{ studentId: string }>;
-        const ids = classmates.map((c) => c.studentId);
-        if (ids.length > 0) {
-          const peerRows = (await tx.subjectResult.findMany({
-            where: { studentId: { in: ids }, sessionId, status: "PUBLISHED" },
-          })) as typeof results;
-          // Group by (term, subject), then rank each group.
-          const groups = new Map<string, Array<{ studentId: string; total: number }>>();
-          for (const r of peerRows) {
-            const { total } = this.recomputeTotal(r, policy);
-            if (total === null) continue; // ungraded is UNRANKED, never last
-            const key = `${r.termId}:${r.subjectId}`;
-            const arr = groups.get(key) ?? [];
-            arr.push({ studentId: r.studentId, total });
-            groups.set(key, arr);
-          }
-          for (const [key, arr] of groups) {
-            arr.sort((a, b) => b.total - a.total);
-            // Standard competition ranking: ties SHARE a position and the next
-            // rank skips (68, 68, 65 -> 1st, 1st, 3rd). Telling two pupils on
-            // the same mark they are 1st and 2nd is what makes a parent write in.
-            let position = 0;
-            let seen = 0;
-            let prev: number | null = null;
-            for (const row of arr) {
-              seen += 1;
-              if (prev === null || row.total < prev) position = seen;
-              prev = row.total;
-              if (row.studentId === studentId) {
-                rankOf.set(key, { position, ranked: arr.length });
-              }
+      const cohortClassIds = [...new Set(allResults.map((r) => r.classId))];
+      if (cohortClassIds.length > 0) {
+        const peerRows = (await tx.subjectResult.findMany({
+          where: { classId: { in: cohortClassIds }, sessionId, status: "PUBLISHED" },
+        })) as typeof results;
+        // Group by (class, term, subject), then rank each group.
+        const groups = new Map<string, Array<{ studentId: string; total: number }>>();
+        for (const r of peerRows) {
+          const { total } = this.recomputeTotal(r, policy);
+          if (total === null) continue; // ungraded is UNRANKED, never last
+          const key = `${r.classId}:${r.termId}:${r.subjectId}`;
+          const arr = groups.get(key) ?? [];
+          arr.push({ studentId: r.studentId, total });
+          groups.set(key, arr);
+        }
+        for (const [key, arr] of groups) {
+          arr.sort((a, b) => b.total - a.total);
+          // Standard competition ranking: ties SHARE a position and the next
+          // rank skips (68, 68, 65 -> 1st, 1st, 3rd). Telling two pupils on
+          // the same mark they are 1st and 2nd is what makes a parent write in.
+          let position = 0;
+          let seen = 0;
+          let prev: number | null = null;
+          for (const row of arr) {
+            seen += 1;
+            if (prev === null || row.total < prev) position = seen;
+            prev = row.total;
+            if (row.studentId === studentId) {
+              rankOf.set(key, { position, ranked: arr.length });
             }
           }
         }
@@ -1004,8 +1018,10 @@ export class TermResultService {
             return {
               subjectId: r.subjectId,
               subjectName: subjectName.get(r.subjectId) ?? "Unknown",
-              subjectPosition: rankOf.get(`${r.termId}:${r.subjectId}`)?.position ?? null,
-              subjectRanked: rankOf.get(`${r.termId}:${r.subjectId}`)?.ranked ?? null,
+              // Keyed on THIS row's class, so a pupil who moved is ranked in
+              // the class the mark was earned in.
+              subjectPosition: rankOf.get(`${r.classId}:${r.termId}:${r.subjectId}`)?.position ?? null,
+              subjectRanked: rankOf.get(`${r.classId}:${r.termId}:${r.subjectId}`)?.ranked ?? null,
               exam: r.exam,
               midterm: r.midterm,
               assignment: r.assignment,
