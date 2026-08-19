@@ -94,7 +94,7 @@ export class BrandingService {
         tx,
       );
       const school = await tx.school.findFirst({ where: { id: p.schoolId }, select: { slug: true } });
-      const logoUrl = (await this.storage.presignDownload({ key })).url;
+      const logoUrl = (await this.storage.presignDownload({ key, inline: true })).url;
       return this.dto(school?.slug ?? "", logoUrl, b);
     });
     this.invalidateBranding(p.schoolId, out.slug);
@@ -150,7 +150,7 @@ export class BrandingService {
       );
       const school = await tx.school.findFirst({ where: { id: p.schoolId }, select: { slug: true } });
       const b = await tx.schoolBranding.findFirst({ where: { schoolId: p.schoolId } });
-      const logoUrl = b?.logoKey ? (await this.storage.presignDownload({ key: b.logoKey })).url : null;
+      const logoUrl = b?.logoKey ? (await this.storage.presignDownload({ key: b.logoKey, inline: true })).url : null;
       return this.dto(school?.slug ?? "", logoUrl, b);
     });
     this.invalidateBranding(p.schoolId, out.slug);
@@ -161,7 +161,7 @@ export class BrandingService {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const school = await tx.school.findFirst({ where: { id: p.schoolId }, select: { slug: true } });
       const b = await tx.schoolBranding.findFirst({ where: { schoolId: p.schoolId } });
-      const logoUrl = b?.logoKey ? (await this.storage.presignDownload({ key: b.logoKey })).url : null;
+      const logoUrl = b?.logoKey ? (await this.storage.presignDownload({ key: b.logoKey, inline: true })).url : null;
       return this.dto(school?.slug ?? "", logoUrl, b);
     });
   }

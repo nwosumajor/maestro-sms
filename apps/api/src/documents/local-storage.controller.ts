@@ -32,7 +32,7 @@ import type { Request, Response } from "express";
 import crypto from "node:crypto";
 import { MAX_UPLOAD_BYTES } from "@sms/types";
 import { Public } from "../auth/public.decorator";
-import { signStorage } from "./local-storage-signing";
+import { signStorage, type StorageOp } from "./local-storage-signing";
 import { safeDownloadType, safeFilename } from "./safe-content-type";
 import { STORAGE_PROVIDER, StubStorageProvider } from "./storage.provider";
 import { Inject } from "@nestjs/common";
@@ -64,7 +64,7 @@ export class LocalStorageController {
 
   /** One answer for every failure — a wrong signature, an expired one and an
    *  unknown key are indistinguishable from outside. */
-  private check(key: string, op: "put" | "get", exp: string | undefined, sig: string | undefined): void {
+  private check(key: string, op: StorageOp, exp: string | undefined, sig: string | undefined): void {
     if (!(this.storage instanceof StubStorageProvider)) {
       // Belt and braces: the controller is only registered alongside the stub,
       // and refuses anyway if that ever stops being true.
@@ -80,6 +80,19 @@ export class LocalStorageController {
     const a = Buffer.from(sig);
     const b = Buffer.from(expected);
     if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) throw new BadRequestException("Not available");
+  }
+
+  /** Did this URL carry a signature for THIS operation? Returns the served type
+   *  for an inline grant, or null when it did not. */
+  private allows(key: string, op: "get-inline", exp: string | undefined, sig: string | undefined): { contentType: string } | null {
+    try {
+      this.check(key, op, exp, sig);
+      // The logo is the only inline case and is always an image; anything the
+      // allowlist does not recognise still degrades to a byte stream.
+      return { contentType: "image/png" };
+    } catch {
+      return null;
+    }
   }
 
   @Public()
@@ -112,14 +125,28 @@ export class LocalStorageController {
     @Query("sig") sig?: string,
     @Query("filename") filename?: string,
   ): Promise<Buffer> {
-    this.check(key, "get", exp, sig);
+    // Two DIFFERENT operations, and which one was granted is in the signature.
+    // A URL cannot be edited into serving a stored file as something a browser
+    // will render — that has to have been signed for.
+    const inline = this.allows(key, "get-inline", exp, sig);
+    if (!inline) this.check(key, "get", exp, sig);
     const bytes = await this.storage.download(key);
     if (!bytes) throw new BadRequestException("Not available");
-    res.set({
-      "Content-Type": safeDownloadType(null),
-      "Content-Disposition": `attachment; filename="${safeFilename(filename ?? "download")}"`,
-      "X-Content-Type-Options": "nosniff",
-    });
+    res.set(
+      inline
+        ? {
+            // Only for objects the server itself wrote with a validated type —
+            // the school logo, which has to render in an <img>.
+            "Content-Type": safeDownloadType(inline.contentType),
+            "Content-Disposition": "inline",
+            "X-Content-Type-Options": "nosniff",
+          }
+        : {
+            "Content-Type": safeDownloadType(null),
+            "Content-Disposition": `attachment; filename="${safeFilename(filename ?? "download")}"`,
+            "X-Content-Type-Options": "nosniff",
+          },
+    );
     return bytes;
   }
 }

@@ -36,6 +36,19 @@ export class S3StorageProvider implements StorageProvider {
     this.bucket = bucket;
     this.client = new S3Client({
       region: process.env.AWS_REGION,
+      // WITHOUT THIS, EVERY BROWSER UPLOAD FAILS.
+      //
+      // Since v3.729 the SDK computes a CRC32 for PutObject and, when
+      // PRESIGNING, puts it in the query string — where it is part of the
+      // signature. Presigning has no body, so the value it computes is the
+      // checksum of NOTHING (AAAAAA==). S3 then validates the file the browser
+      // actually sends against that and rejects it.
+      //
+      // Nothing local would ever show this: the stub provider does not presign
+      // against S3, and the signature is perfectly valid — the upload just
+      // always fails, in production, on the one path a parent walks. Found by
+      // reading the URL the SDK produces rather than by running it.
+      requestChecksumCalculation: "WHEN_REQUIRED",
       // Optional: set S3_ENDPOINT (+ S3_FORCE_PATH_STYLE=true) for Cloudflare R2
       // or a MinIO-compatible endpoint. Unset => real AWS S3.
       ...(process.env.S3_ENDPOINT
@@ -63,26 +76,47 @@ export class S3StorageProvider implements StorageProvider {
     return { url, expiresInSeconds: this.ttl };
   }
 
+  /**
+   * ATTACHMENT AND OCTET-STREAM BY DEFAULT, both forced by signed response
+   * overrides rather than left to whatever the object happens to carry.
+   *
+   * A presigned PUT does not sign the Content-Type — checked against the SDK
+   * itself, which puts only `host` in X-Amz-SignedHeaders — so the BROWSER
+   * decides what type an uploaded object is stored as. Left alone, S3 then
+   * serves it back with that type: a file uploaded as text/html comes back as a
+   * page on the bucket's domain, script and all. The disposition used to be
+   * attached only when a filename happened to be supplied, which made the
+   * protection depend on the caller remembering.
+   *
+   * `inline` exists for objects the SERVER wrote with a type it validated (the
+   * school logo, which must render in an <img>). It is never used for anything
+   * a member of the public uploaded.
+   */
   async presignDownload({
     key,
     filename,
+    inline,
   }: {
     key: string;
     filename?: string;
+    inline?: boolean;
   }): Promise<PresignResult> {
+    const safeName = (filename ?? "download").replace(/[\u0000-\u001f\u007f"\\]/g, "").slice(0, 150) || "download";
     const url = await getSignedUrl(
       this.client,
       new GetObjectCommand({
         Bucket: this.bucket,
         Key: key,
-        // Force a download with the original filename when we have one.
-        ...(filename
-          ? { ResponseContentDisposition: `attachment; filename="${filename.replace(/"/g, "")}"` }
-          : {}),
+        ...(inline
+          ? { ResponseContentDisposition: "inline" }
+          : {
+              ResponseContentDisposition: `attachment; filename="${safeName}"`,
+              ResponseContentType: "application/octet-stream",
+            }),
       }),
       { expiresIn: this.ttl },
     );
-    this.logger.log(`presign GET ${key}`);
+    this.logger.log(`presign GET ${key}${inline ? " (inline)" : ""}`);
     return { url, expiresInSeconds: this.ttl };
   }
 
