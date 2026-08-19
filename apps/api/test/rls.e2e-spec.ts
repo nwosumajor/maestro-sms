@@ -2005,4 +2005,134 @@ const documentSubmissionA = randomUUID();
     }
     expect(visible).toBe(false);
   });
+
+  /**
+   * Every write the TENANT client attempts must be a write the app role is
+   * granted.
+   *
+   * Least privilege is expressed twice and they can disagree. An RLS file says
+   * what `major_user` may do to a table; a service says what it tries to do. The
+   * grant wins, and the disagreement does not show up in a unit test — a stubbed
+   * `tx` cheerfully deletes anything. It shows up as a 500 the first time a
+   * member of staff clicks the button.
+   *
+   * That is not hypothetical. Deleting a poll was written to cascade through its
+   * votes, passed every stubbed test, and returned 500 against a real database:
+   * the app role holds SELECT and INSERT on poll_vote and nothing else. The
+   * service was corrected to match the grant rather than the grant widened to
+   * match the service.
+   *
+   * Reads are not checked — SELECT is granted wherever the app role has any
+   * access at all, and a missing one fails loudly on the first request rather
+   * than on an unlucky branch.
+   */
+  it("no service asks the app role for a write it has not been granted", async () => {
+    const { readdirSync, statSync, readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+
+    // Prisma model -> table. Read from the schema so a @@map rename cannot make
+    // this gate quietly stop covering a table.
+    const SCHEMA = join(__dirname, "../../../packages/db/prisma/schema");
+    const modelToTable = new Map<string, string>();
+    for (const f of readdirSync(SCHEMA).filter((x) => x.endsWith(".prisma"))) {
+      const src = readFileSync(join(SCHEMA, f), "utf8");
+      for (const m of src.matchAll(/model\s+(\w+)\s*\{([\s\S]*?)\n\}/g)) {
+        const mapped = /@@map\("([^"]+)"\)/.exec(m[2]);
+        const model = m[1];
+        modelToTable.set(model[0].toLowerCase() + model.slice(1), mapped ? mapped[1] : model);
+      }
+    }
+
+    const granted = new Map<string, Set<string>>();
+    const { rows: g } = await adminPool.query<{ table_name: string; privilege_type: string }>(
+      `SELECT table_name, privilege_type FROM information_schema.role_table_grants
+        WHERE grantee = 'major_user' AND table_schema = 'public'`,
+    );
+    for (const r of g) {
+      const s = granted.get(r.table_name) ?? new Set<string>();
+      s.add(r.privilege_type);
+      granted.set(r.table_name, s);
+    }
+    expect(granted.size).toBeGreaterThan(100); // the introspection actually found something
+
+    // Files that legitimately hold a PRIVILEGED, RLS-bypassing client and name
+    // its transaction `tx` — the retention sweep deletes telemetry the app role
+    // deliberately cannot touch. Every other file's `tx` is the tenant client.
+    const PRIVILEGED_TX = ["integrity/retention/integrity-retention.service.ts"];
+
+    const SRC = join(__dirname, "../src");
+    const walk = (dir: string): string[] =>
+      readdirSync(dir).flatMap((e) => {
+        const p2 = join(dir, e);
+        return statSync(p2).isDirectory() ? walk(p2) : p2.endsWith(".ts") ? [p2] : [];
+      });
+
+    const needed: Record<string, string> = {
+      delete: "DELETE",
+      deleteMany: "DELETE",
+      update: "UPDATE",
+      updateMany: "UPDATE",
+    };
+    const offenders: string[] = [];
+    for (const file of walk(SRC).filter((f) => !f.includes(".spec."))) {
+      const rel = file.slice(SRC.length + 1);
+      if (PRIVILEGED_TX.some((p2) => rel.endsWith(p2))) continue;
+      const src = readFileSync(file, "utf8").split("\n");
+      src.forEach((line, i) => {
+        // ONLY `tx.` — `client.`/`db.` are the privileged handles used for the
+        // global registry tables the app role is SELECT-only on.
+        for (const m of line.matchAll(/\btx\.(\w+)\.(delete|deleteMany|update|updateMany)\b/g)) {
+          const table = modelToTable.get(m[1]);
+          if (!table) return;
+          const privs = granted.get(table);
+          if (!privs) return; // no access at all: a deliberate deny-all table
+          if (!privs.has(needed[m[2]])) offenders.push(`${table} ${m[2]} — ${rel}:${i + 1}`);
+        }
+      });
+    }
+    expect(offenders.sort()).toEqual([]);
+  });
+
+  /**
+   * `upsert` is the exception, and the reason is worth writing down.
+   *
+   * user_role is granted DELETE, INSERT, SELECT and NOT update, yet AdminService
+   * upserts it on the ordinary role-assignment path — and it works. Prisma emits
+   * no UPDATE when the `update` clause is empty, so the grant is never exercised.
+   * Verified live: assigning a role a user already held returned 201.
+   *
+   * That makes `update: {}` load-bearing. Putting a field in it turns a working
+   * path into a 500 for a table this gate would otherwise never flag, so the
+   * emptiness is pinned here rather than left as a coincidence.
+   */
+  it("an upsert on a table with no UPDATE grant keeps its update clause empty", async () => {
+    const { readFileSync, readdirSync, statSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { rows } = await adminPool.query<{ privilege_type: string }>(
+      `SELECT privilege_type FROM information_schema.role_table_grants
+        WHERE grantee = 'major_user' AND table_schema = 'public' AND table_name = 'user_role'`,
+    );
+    const privs = rows.map((r) => r.privilege_type);
+    expect(privs).toContain("INSERT");
+    // If this ever gains UPDATE the constraint below stops being necessary — but
+    // it is a privilege widening, and should be a decision rather than a drift.
+    expect(privs).not.toContain("UPDATE");
+
+    const SRC = join(__dirname, "../src");
+    const walk = (dir: string): string[] =>
+      readdirSync(dir).flatMap((e) => {
+        const p2 = join(dir, e);
+        return statSync(p2).isDirectory() ? walk(p2) : p2.endsWith(".ts") ? [p2] : [];
+      });
+    let found = 0;
+    for (const file of walk(SRC).filter((f) => !f.includes(".spec."))) {
+      const src = readFileSync(file, "utf8");
+      for (const m of src.matchAll(/tx\.userRole\.upsert\(\{[\s\S]{0,400}?\}\)/g)) {
+        found += 1;
+        expect(m[0]).toMatch(/update:\s*\{\s*\}/);
+      }
+    }
+    expect(found).toBeGreaterThan(0); // the scan found the call sites at all
+  });
+
 });
