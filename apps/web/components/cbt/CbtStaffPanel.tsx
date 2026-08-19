@@ -11,6 +11,7 @@
 
 import type { CbtAuthoringOptionsDto, CbtBankDto, CbtExamDto, CbtExamResultsDto, Serialized } from "@sms/types";
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,6 +19,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { readApiError } from "@/lib/api-error";
 import { CbtMarkingConsole } from "@/components/cbt/CbtMarkingConsole";
+import { CbtBankEditor } from "@/components/cbt/CbtBankEditor";
 import { dateTime } from "@/lib/format";
 
 type Bank = Serialized<CbtBankDto>;
@@ -142,6 +144,10 @@ export function CbtStaffPanel({
     setQuestions((qs) => qs.map((q, j) => (j === i ? { ...q, ...patch } : q)));
   const setChoice = (i: number, k: number, v: string) =>
     setQuestions((qs) => qs.map((q, j) => (j === i ? { ...q, choices: q.choices.map((x, m) => (m === k ? v : x)) } : q)));
+
+  // A soft refresh for the question editor: it reloads its own list, and this
+  // updates the bank's question count without the full page reload `act` does.
+  const router = useRouter();
 
   const act = async (fn: () => Promise<Response>, okMsg: string, reload = true) => {
     setBusy(true);
@@ -272,12 +278,16 @@ export function CbtStaffPanel({
           {banks.length > 0 && (
             <ul className="space-y-1.5">
               {banks.map((b) => (
-                <li key={b.id} className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-sm">
-                  <span>
-                    <span className="font-medium">{b.name}</span>
-                    {b.subject && <span className="text-muted-foreground"> · {b.subject}</span>}
-                  </span>
-                  <Badge variant="secondary">{b.questionCount} questions</Badge>
+                <li key={b.id} className="rounded-md border border-border px-3 py-2 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span>
+                      <span className="font-medium">{b.name}</span>
+                      {b.subject && <span className="text-muted-foreground"> · {b.subject}</span>}
+                    </span>
+                    <Badge variant="secondary">{b.questionCount} questions</Badge>
+                  </div>
+                  {/* Read the bank back, correct a question, remove one. */}
+                  <CbtBankEditor bankId={b.id} bankName={b.name} onChanged={() => router.refresh()} />
                 </li>
               ))}
             </ul>

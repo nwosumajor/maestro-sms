@@ -15,7 +15,7 @@
 // the chosen option).
 // =============================================================================
 
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@sms/db";
 import type { PageDto, PollDto } from "@sms/types";
 import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
@@ -87,6 +87,117 @@ export class PollService {
       await tx.poll.update({ where: { id }, data: { status: "CLOSED" } });
       await this.log(tx, p, "poll.close", id, {});
       return this.pollDto(tx, id, p);
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Editing and removing a poll
+  // ---------------------------------------------------------------------------
+  // A poll could be created and closed and nothing else. A typo in the question,
+  // a missing option, a poll posted to the wrong audience — all permanent, so
+  // the only remedy was to post a second poll and leave the wrong one up.
+  //
+  // THE RULE, the same one the exam bank uses: while nobody has answered, it is
+  // a draft and everything is editable. Once somebody has voted, the thing they
+  // answered is fixed — changing the question under a tally makes the result a
+  // statement about a question nobody was asked, and renaming an option changes
+  // what a vote meant after the fact.
+  //
+  // `closesAt` is the exception and stays editable: extending or shortening a
+  // deadline does not change what was asked or what anyone answered.
+  //
+  // Deleting follows the SAME rule, and the database is what settles it: the app
+  // role holds SELECT and INSERT on poll_vote and nothing else (rls/40), so a
+  // cast vote cannot be removed by this application at all. A poll that people
+  // answered is closed, never deleted; an empty one can go.
+  //
+  // That was not the design I started with — I had deletion cascading through
+  // the votes, and it failed live with 42501 permission denied. The grant is the
+  // real policy and it is the stricter one, so the service now matches it rather
+  // than the privilege being widened to suit the feature.
+
+  /** Correct a poll. Refused once anyone has voted, except the deadline. */
+  async updatePoll(
+    p: Principal,
+    id: string,
+    input: { question?: string; audience?: "ALL" | "STUDENTS" | "STAFF"; closesAt?: string | null },
+  ): Promise<PollDto> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const poll = await tx.poll.findFirst({ where: { id } });
+      if (!poll) throw new NotFoundException("Poll not found");
+      if (poll.createdById !== p.userId && !this.canManage(p)) throw new ForbiddenException("Not allowed");
+
+      const changesTheQuestion = input.question !== undefined || input.audience !== undefined;
+      if (changesTheQuestion) {
+        const votes = await tx.pollVote.count({ where: { pollId: id } });
+        if (votes > 0) {
+          throw new ConflictException(
+            `${votes} ${votes === 1 ? "person has" : "people have"} already voted, so the question and audience are fixed — a tally has to stay attached to the question that was actually asked. You can still change the closing time, or close this poll and post a corrected one.`,
+          );
+        }
+      }
+      if (input.question !== undefined && !input.question.trim()) {
+        throw new BadRequestException("A poll needs a question");
+      }
+      const data: Record<string, unknown> = {};
+      if (input.question !== undefined) data.question = input.question.trim();
+      if (input.audience !== undefined) data.audience = input.audience;
+      if (input.closesAt !== undefined) data.closesAt = input.closesAt ? new Date(input.closesAt) : null;
+      if (Object.keys(data).length > 0) {
+        await tx.poll.update({ where: { id }, data });
+        await this.log(tx, p, "poll.update", id, { fields: Object.keys(data).sort() });
+      }
+      return this.pollDto(tx, id, p);
+    });
+  }
+
+  /** Replace the option list. Refused once anyone has voted.
+   *
+   *  A REPLACE rather than add/rename/remove endpoints: the options are one
+   *  thing a reader sees as a list, the screen edits them as a list, and three
+   *  separate endpoints would each need the same "has anyone voted" guard with
+   *  three chances to forget it. */
+  async setPollOptions(p: Principal, id: string, labels: string[]): Promise<PollDto> {
+    const opts = labels.map((o) => o.trim()).filter(Boolean);
+    if (opts.length < 2) throw new BadRequestException("a poll needs at least two options");
+    if (opts.length > 10) throw new BadRequestException("a poll takes at most 10 options");
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const poll = await tx.poll.findFirst({ where: { id } });
+      if (!poll) throw new NotFoundException("Poll not found");
+      if (poll.createdById !== p.userId && !this.canManage(p)) throw new ForbiddenException("Not allowed");
+      const votes = await tx.pollVote.count({ where: { pollId: id } });
+      if (votes > 0) {
+        throw new ConflictException(
+          `${votes} ${votes === 1 ? "person has" : "people have"} already voted, so the options are fixed — removing one would discard their answer and renaming one would change what they chose.`,
+        );
+      }
+      // No votes exist, so nothing references these rows.
+      await tx.pollOption.deleteMany({ where: { pollId: id } });
+      await tx.pollOption.createMany({
+        data: opts.map((label, i) => ({ schoolId: p.schoolId, pollId: id, label, sequence: i })),
+      });
+      await this.log(tx, p, "poll.options.set", id, { options: opts.length });
+      return this.pollDto(tx, id, p);
+    });
+  }
+
+  /** Remove a poll nobody has answered. */
+  async deletePoll(p: Principal, id: string): Promise<{ id: string; deleted: true }> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const poll = await tx.poll.findFirst({ where: { id } });
+      if (!poll) throw new NotFoundException("Poll not found");
+      if (poll.createdById !== p.userId && !this.canManage(p)) throw new ForbiddenException("Not allowed");
+      const votes = await tx.pollVote.count({ where: { pollId: id } });
+      if (votes > 0) {
+        throw new ConflictException(
+          `${votes} ${votes === 1 ? "person has" : "people have"} already voted, so this poll cannot be deleted — their answers are a record the school keeps. Close it instead; a closed poll stops taking votes and shows its result.`,
+        );
+      }
+      // No votes, so nothing references the options.
+      await tx.pollOption.deleteMany({ where: { pollId: id } });
+      await tx.poll.delete({ where: { id } });
+      await this.log(tx, p, "poll.delete", id, { question: poll.question });
+      return { id, deleted: true as const };
     });
   }
 

@@ -412,20 +412,52 @@ export class CbtService {
       const rows = await tx.cbtQuestion.findMany({
         where: { bankId },
         orderBy: { createdAt: "asc" },
-        select: { id: true, prompt: true, choices: true, answerIndex: true },
+        select: {
+          id: true, prompt: true, choices: true, answerIndex: true,
+          type: true, level: true, topic: true, maxMarks: true, markGuide: true,
+        },
       });
+      // Which of these has a candidate already sat, and is a window open?
+      //
+      // ONE query for the whole list rather than one per question — a bank of
+      // 300 questions would otherwise be 300 containment checks to draw a
+      // screen. Both sub-queries are bounded by this bank's own exams.
+      const [sat, openExams] = canEdit
+        ? await Promise.all([
+            tx.$queryRaw`
+              SELECT DISTINCT jsonb_array_elements_text(s."questionIds") AS id
+                FROM "cbt_sitting" s JOIN "cbt_exam" e ON e.id = s."examId"
+               WHERE e."bankId" = ${bankId}::uuid AND s."schoolId" = ${p.schoolId}::uuid
+            ` as Promise<Array<{ id: string }>>,
+            tx.$queryRaw`
+              SELECT count(*) AS n FROM "cbt_exam" e
+               WHERE e."bankId" = ${bankId}::uuid AND e."schoolId" = ${p.schoolId}::uuid
+                 AND e.status <> 'DRAFT' AND e."startAt" <= now() AND e."endAt" >= now()
+            ` as Promise<Array<{ n: bigint }>>,
+          ])
+        : [[] as Array<{ id: string }>, [{ n: BigInt(0) }]];
+      const satIds = new Set(sat.map((r) => r.id));
       await this.log(tx, p, "cbt.bank.questions_read", bankId, { count: rows.length, withAnswers: canEdit });
       return {
         bankId: bank.id,
         bankName: bank.name,
         subject: bank.subject,
         canEdit,
+        examOpen: Number(openExams[0]?.n ?? 0) > 0,
         questions: rows.map((q) => ({
           id: q.id,
           prompt: q.prompt,
           choices: q.choices as unknown as string[],
           // SECURITY: the key is withheld from read-only reviewers.
           answerIndex: canEdit ? q.answerIndex : null,
+          type: q.type,
+          level: q.level,
+          topic: q.topic,
+          maxMarks: q.maxMarks,
+          // SECURITY: the mark scheme is MARKER-ONLY, withheld exactly like the
+          // answer key.
+          markGuide: canEdit ? q.markGuide : null,
+          sat: satIds.has(q.id),
         })),
       };
     });
@@ -470,6 +502,167 @@ export class CbtService {
       });
       await this.log(tx, p, "cbt.bank.questions_add", bankId, { added: questions.length });
       return { added: questions.length };
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Editing and removing a question
+  // ---------------------------------------------------------------------------
+  // A bank was append-only: questions could be added and never corrected. A
+  // teacher who typed the wrong key, or a duplicate, had no way back — so the
+  // real fix was to stop using the bank. Both are now editable, under one rule.
+  //
+  // THE RULE: a question is fixed once a candidate has SAT it. Every sitting
+  // stores the exact paper it was served (`questionIds`), so "has anyone sat
+  // this" is an exact question, not a guess. Before that a question is just
+  // draft material and is fully editable; after it, it is part of somebody's
+  // exam record and changing it would rewrite a paper that has already been
+  // answered and marked.
+  //
+  // Two things stay editable even then, because neither changes what a candidate
+  // saw or how their answer was judged:
+  //   level, topic   sampling metadata — which future papers may draw it
+  //   markGuide      guidance to the human marking THEORY, refined as they mark
+  //
+  // AN OPEN EXAM WINDOW ALSO LOCKS THE BANK. Sampling happens when each
+  // candidate starts, so during a live window a question nobody holds yet can be
+  // handed out a millisecond after the check that said it was free. Refusing
+  // while any exam on the bank is open closes that race without locking rows,
+  // and matches what a school would expect anyway: you do not edit the paper
+  // during the exam.
+
+  /** Sittings that were served this question, and any live exam on its bank.
+   *
+   *  ONE query. The containment test is narrowed by bankId first, so it reads
+   *  the sittings of exams on this bank rather than every sitting in the school
+   *  — the difference between a few dozen rows and a whole year of them. */
+  private async questionUsage(
+    tx: TenantTx,
+    schoolId: string,
+    questionId: string,
+    bankId: string,
+  ): Promise<{ sittings: number; openExams: number }> {
+    const rows = (await tx.$queryRaw`
+      SELECT
+        (SELECT count(*) FROM "cbt_sitting" s
+           JOIN "cbt_exam" e ON e.id = s."examId"
+          WHERE e."bankId" = ${bankId}::uuid
+            AND s."schoolId" = ${schoolId}::uuid
+            AND s."questionIds" @> ${JSON.stringify([questionId])}::jsonb) AS sittings,
+        (SELECT count(*) FROM "cbt_exam" e
+          WHERE e."bankId" = ${bankId}::uuid
+            AND e."schoolId" = ${schoolId}::uuid
+            AND e.status <> 'DRAFT'
+            AND e."startAt" <= now() AND e."endAt" >= now()) AS "openExams"
+    `) as Array<{ sittings: bigint; openExams: bigint }>;
+    return { sittings: Number(rows[0]?.sittings ?? 0), openExams: Number(rows[0]?.openExams ?? 0) };
+  }
+
+  /** Correct a question. Marking-relevant fields are refused once it has been
+   *  sat; metadata stays editable. */
+  async updateQuestion(
+    p: Principal,
+    questionId: string,
+    input: {
+      prompt?: string;
+      choices?: string[];
+      answerIndex?: number;
+      level?: number | null;
+      topic?: string | null;
+      maxMarks?: number | null;
+      markGuide?: string | null;
+    },
+  ): Promise<{ id: string; updated: string[] }> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const q = (await tx.cbtQuestion.findFirst({ where: { id: questionId } })) as {
+        id: string;
+        bankId: string;
+        type: string;
+        choices: unknown;
+        answerIndex: number;
+      } | null;
+      if (!q) throw new NotFoundException("Question not found");
+      const bank = await tx.cbtQuestionBank.findFirst({ where: { id: q.bankId } });
+      // 404-not-403: a bank outside the teacher's subjects does not exist to them.
+      if (!bank || !(await this.canTouchBank(tx, p, bank))) throw new NotFoundException("Question not found");
+
+      const usage = await this.questionUsage(tx, p.schoolId, questionId, q.bankId);
+      const touchesThePaper =
+        input.prompt !== undefined ||
+        input.choices !== undefined ||
+        input.answerIndex !== undefined ||
+        input.maxMarks !== undefined;
+      if (touchesThePaper && usage.sittings > 0) {
+        throw new ConflictException(
+          `${usage.sittings} candidate${usage.sittings === 1 ? " has" : "s have"} already sat this question, so its wording, options and answer are fixed — changing them now would rewrite a paper that has been answered and marked. You can still change its level, topic and mark guide, or retire it by removing it from future papers.`,
+        );
+      }
+      if (touchesThePaper && usage.openExams > 0) {
+        throw new ConflictException(
+          "An exam drawing on this bank is open right now, and papers are built as each candidate starts. Wait until the window closes.",
+        );
+      }
+
+      // Validate the resulting question, not just the fields that arrived: an
+      // answerIndex is only meaningful against the choices it will end up with.
+      const choices = (input.choices ?? (q.choices as string[])) as string[];
+      const answerIndex = input.answerIndex ?? q.answerIndex;
+      if (q.type !== "THEORY") {
+        if (choices.length < 2 || choices.length > 6) throw new BadRequestException("A question needs 2–6 choices");
+        if (!Number.isInteger(answerIndex) || answerIndex < 0 || answerIndex >= choices.length) {
+          throw new BadRequestException("answerIndex must point at one of the choices");
+        }
+      }
+      if (input.prompt !== undefined && !input.prompt.trim()) throw new BadRequestException("A question needs a prompt");
+      if (input.maxMarks != null && (!Number.isInteger(input.maxMarks) || input.maxMarks < 1 || input.maxMarks > 100)) {
+        throw new BadRequestException("maxMarks must be 1–100");
+      }
+
+      const data: Record<string, unknown> = {};
+      if (input.prompt !== undefined) data.prompt = input.prompt.trim();
+      if (input.choices !== undefined) data.choices = input.choices as unknown as Prisma.InputJsonValue;
+      if (input.answerIndex !== undefined) data.answerIndex = input.answerIndex;
+      if (input.level !== undefined) data.level = input.level;
+      if (input.topic !== undefined) data.topic = input.topic?.trim() || null;
+      // Objective questions are always worth 1; only THEORY carries its own.
+      if (input.maxMarks !== undefined && q.type === "THEORY") data.maxMarks = input.maxMarks ?? 1;
+      if (input.markGuide !== undefined && q.type === "THEORY") data.markGuide = input.markGuide?.trim() || null;
+      if (Object.keys(data).length === 0) return { id: questionId, updated: [] };
+
+      await tx.cbtQuestion.update({ where: { id: questionId }, data });
+      // The audit says WHICH fields moved, never the new answer key — an audit
+      // reader is not always someone who may see the key.
+      await this.log(tx, p, "cbt.question.update", q.bankId, {
+        questionId,
+        fields: Object.keys(data).sort(),
+        sittings: usage.sittings,
+      });
+      return { id: questionId, updated: Object.keys(data).sort() };
+    });
+  }
+
+  /** Remove a question. Refused once it is part of somebody's sat paper. */
+  async deleteQuestion(p: Principal, questionId: string): Promise<{ id: string; deleted: true }> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const q = (await tx.cbtQuestion.findFirst({ where: { id: questionId } })) as { id: string; bankId: string } | null;
+      if (!q) throw new NotFoundException("Question not found");
+      const bank = await tx.cbtQuestionBank.findFirst({ where: { id: q.bankId } });
+      if (!bank || !(await this.canTouchBank(tx, p, bank))) throw new NotFoundException("Question not found");
+
+      const usage = await this.questionUsage(tx, p.schoolId, questionId, q.bankId);
+      if (usage.sittings > 0) {
+        throw new ConflictException(
+          `This question is part of ${usage.sittings} paper${usage.sittings === 1 ? "" : "s"} that ${usage.sittings === 1 ? "has" : "have"} already been sat, so it cannot be deleted — the sittings reference it and their scores were computed from it. Leave it in the bank; it is only ever served to a candidate if a future paper samples it.`,
+        );
+      }
+      if (usage.openExams > 0) {
+        throw new ConflictException(
+          "An exam drawing on this bank is open right now, and papers are built as each candidate starts. Wait until the window closes.",
+        );
+      }
+      await tx.cbtQuestion.delete({ where: { id: questionId } });
+      await this.log(tx, p, "cbt.question.delete", q.bankId, { questionId });
+      return { id: questionId, deleted: true as const };
     });
   }
 

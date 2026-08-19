@@ -2,7 +2,7 @@
 // and run exams; students (cbt.take) sit them. Every answer key stays
 // server-side until a sitting closes; the clock is server law.
 
-import { Body, Controller, Get, Param, Post, Put, Query, Res } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Put, Query, Res } from "@nestjs/common";
 import { CBT_PERMISSIONS, CBT_BLUEPRINT_MAX_ITEMS, CBT_QUESTION_TYPES, CBT_INTEGRITY_BATCH_MAX, MODULES } from "@sms/types";
 import type { CbtAuthoringOptionsDto, CbtBankDto, CbtExamDto, CbtExamResultsDto, CbtSittingViewDto, CbtBankQuestionsDto, CbtAvailabilityDto, CbtMarkingQueueDto, CbtMarkingProgressDto, CbtIntegritySummaryDto } from "@sms/types";
 import { z } from "zod";
@@ -18,6 +18,15 @@ const bankSchema = z.object({
   name: z.string().min(1).max(160),
   subject: z.string().max(80).nullish(),
   subjectId: z.string().uuid().nullish(),
+});
+const questionEditSchema = z.object({
+  prompt: z.string().min(1).max(2000).optional(),
+  choices: z.array(z.string().min(1).max(500)).min(2).max(6).optional(),
+  answerIndex: z.number().int().min(0).max(5).optional(),
+  level: z.number().int().min(1).max(20).nullish(),
+  topic: z.string().max(80).nullish(),
+  maxMarks: z.number().int().min(1).max(100).nullish(),
+  markGuide: z.string().max(4000).nullish(),
 });
 const questionsSchema = z.object({
   questions: z
@@ -140,6 +149,25 @@ export class CbtController {
     @Body(new ZodValidationPipe(questionsSchema)) body: z.infer<typeof questionsSchema>,
   ) {
     return this.cbt.addQuestions(p, id, body.questions);
+  }
+
+  /** Correct a question. Wording, options and answer are fixed once a candidate
+   *  has sat it; level, topic and mark guide stay editable. */
+  @Put("questions/:id")
+  @RequirePermission(CBT_PERMISSIONS.CBT_MANAGE)
+  updateQuestion(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(questionEditSchema)) body: z.infer<typeof questionEditSchema>,
+  ) {
+    return this.cbt.updateQuestion(p, id, body);
+  }
+
+  /** Remove a question that no candidate has been served. */
+  @Delete("questions/:id")
+  @RequirePermission(CBT_PERMISSIONS.CBT_MANAGE)
+  deleteQuestion(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.cbt.deleteQuestion(p, id);
   }
 
   @Post("exams")

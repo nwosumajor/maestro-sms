@@ -156,6 +156,11 @@ model CbtSitting {
 
   @@unique([examId, studentId])
   @@index([schoolId, examId])
+  /// GIN (jsonb_path_ops) on questionIds — created in migration
+  /// 20261226000000_cbt_sitting_question_gin. Prisma has no syntax for a jsonb
+  /// GIN index, so it lives in SQL only; declared here so it is not "missing".
+  /// It answers "has any candidate been served this question", which gates
+  /// editing and deleting one.
   @@map("cbt_sitting")
 }
 

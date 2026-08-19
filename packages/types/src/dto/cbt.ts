@@ -130,6 +130,17 @@ export interface CbtQuestionDto {
   choices: string[];
   /** Marked correct choice — null unless the caller may edit this bank. */
   answerIndex: number | null;
+  /** Type and metadata, so the edit form can render the right fields. */
+  type?: string;
+  level?: number | null;
+  topic?: string | null;
+  maxMarks?: number | null;
+  markGuide?: string | null;
+  /** A candidate has already SAT this question, so its wording, options and
+   *  answer are fixed and it cannot be deleted. Level, topic and mark guide
+   *  remain editable. The screen shows this rather than offering a button that
+   *  the server would refuse. */
+  sat?: boolean;
 }
 
 /** A bank plus its questions (staff review view). */
@@ -139,6 +150,9 @@ export interface CbtBankQuestionsDto {
   subject: string | null;
   /** True when the caller may edit — drives whether answers are shown/editable. */
   canEdit: boolean;
+  /** An exam on this bank is inside its window. Papers are sampled as each
+   *  candidate starts, so the whole bank is frozen until it closes. */
+  examOpen?: boolean;
   questions: CbtQuestionDto[];
 }
 

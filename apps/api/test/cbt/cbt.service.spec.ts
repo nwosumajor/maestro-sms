@@ -37,6 +37,10 @@ function makeService(over: {
       findMany: jest.fn().mockResolvedValue(over.banks ?? []),
       create: bankCreate,
     },
+    // getBankQuestions asks the database, in ONE query, which questions a
+    // candidate has already sat and whether an exam window is open — that is what
+    // decides which of them the screen offers to edit or delete.
+    $queryRaw: jest.fn().mockResolvedValue([]),
     cbtQuestion: {
       count: jest.fn().mockResolvedValue(over.questionCount ?? 5),
       createMany: jest.fn().mockResolvedValue({ count: 1 }),

@@ -1,5 +1,5 @@
 import { RequireModule } from "../auth/require-module.decorator";
-import { Body, Controller, Get, Param, Post , Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Put, Query } from "@nestjs/common";
 import { POLL_PERMISSIONS, MODULES } from "@sms/types";
 import type { PageDto, PollDto } from "@sms/types";
 import { z } from "zod";
@@ -15,6 +15,14 @@ const createSchema = z.object({
   options: z.array(z.string().min(1).max(200)).min(2).max(10),
   closesAt: z.string().nullish(),
 });
+// Same bounds as createSchema — an edit surface must not accept a poll that
+// could not have been created.
+const updateSchema = z.object({
+  question: z.string().min(1).max(300).optional(),
+  audience: z.enum(["ALL", "STUDENTS", "STAFF"]).optional(),
+  closesAt: z.string().nullish(),
+});
+const optionsSchema = z.object({ options: z.array(z.string().min(1).max(200)).min(2).max(10) });
 const voteSchema = z.object({ optionId: z.string().uuid() });
 
 @RequireModule(MODULES.POLL)
@@ -38,6 +46,35 @@ export class PollController {
   @RequirePermission(POLL_PERMISSIONS.POLL_MANAGE)
   close(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<PollDto> {
     return this.polls.closePoll(p, id);
+  }
+
+  /** Correct the question, audience or deadline. Fixed once anyone has voted,
+   *  except the deadline. */
+  @Put(":id")
+  @RequirePermission(POLL_PERMISSIONS.POLL_MANAGE)
+  update(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(updateSchema)) b: z.infer<typeof updateSchema>,
+  ): Promise<PollDto> {
+    return this.polls.updatePoll(p, id, b);
+  }
+
+  /** Replace the option list. Refused once anyone has voted. */
+  @Put(":id/options")
+  @RequirePermission(POLL_PERMISSIONS.POLL_MANAGE)
+  setOptions(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(optionsSchema)) b: z.infer<typeof optionsSchema>,
+  ): Promise<PollDto> {
+    return this.polls.setPollOptions(p, id, b.options);
+  }
+
+  @Delete(":id")
+  @RequirePermission(POLL_PERMISSIONS.POLL_MANAGE)
+  remove(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+    return this.polls.deletePoll(p, id);
   }
 
   @Post(":id/vote")
