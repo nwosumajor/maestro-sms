@@ -232,7 +232,27 @@ export class MobileMoneyService {
         country: cover.country,
         dialCode: cover.dialCode,
         narrative,
-        callbackUrl: `${process.env.PUBLIC_API_URL ?? ""}/payments/mobile-money/callback/${cover.provider.toLowerCase()}`,
+        // THE ADDRESS A RAIL CAN ACTUALLY REACH.
+        //
+        // This was built from PUBLIC_API_URL, which is set nowhere — not in
+        // compose, not in .env.example, not in the task definition — so the
+        // rails were handed `/payments/mobile-money/callback/mpesa`, a path with
+        // no host. And even set, it pointed at the API, which is not
+        // internet-facing: the ALB forwards only /ws/* to it and REST flows
+        // web→api over Cloud Map.
+        //
+        // The reachable route already exists — the web tier's webhook proxy
+        // allowlists /api/webhooks/mobile-money/<provider> and forwards it to
+        // exactly this controller — and PUBLIC_WEB_URL is set in the task
+        // definition, because the acceptance email depends on it too.
+        //
+        // What this cost: nothing is LOST, because these rails are unsigned and
+        // deliver once, so the hourly recovery sweep exists precisely to settle
+        // what no callback closed. But every mobile-money payment would have
+        // waited up to an hour for a sweep instead of settling on the callback,
+        // and the sweep would have been carrying the whole rail rather than
+        // catching its misses.
+        callbackUrl: this.callbackUrl(cover.provider),
       });
       await this.db.runAsTenant({ schoolId: p.schoolId, userId: p.userId }, (tx) =>
         tx.mobileMoneyIntent.update({ where: { id: intent.id }, data: { providerRef: ack.providerRef } }),
@@ -514,6 +534,24 @@ export class MobileMoneyService {
       }
     }
     return result;
+  }
+
+  /**
+   * Where a rail should call back, on a host it can resolve.
+   *
+   * Empty when PUBLIC_WEB_URL is unset rather than half a URL: a rail that
+   * validates the address fails the charge loudly, which is better than one
+   * that accepts nonsense and calls nobody.
+   */
+  private callbackUrl(provider: string): string {
+    const base = process.env.PUBLIC_WEB_URL;
+    if (!base) {
+      this.logger.warn(
+        "PUBLIC_WEB_URL is not set — mobile-money charges are going out with no callback address, so nothing will settle until the recovery sweep runs.",
+      );
+      return "";
+    }
+    return `${base}/api/webhooks/mobile-money/${provider.toLowerCase()}`;
   }
 
   /** A payer polling their own charge — mobile money is asynchronous, so the
