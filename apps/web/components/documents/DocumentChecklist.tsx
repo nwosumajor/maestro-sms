@@ -19,6 +19,7 @@ import { postSms } from "@/components/game/play-ui";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { shortDate } from "@/lib/format";
+import { uploadDocument } from "@/lib/upload-document";
 
 type Checklist = Serialized<SubmissionChecklistDto>;
 
@@ -70,6 +71,32 @@ export function DocumentChecklist({
     else router.refresh();
   }
 
+  /**
+   * The office's own copy of a document.
+   *
+   * A family sends most of these through their link, and then somebody walks
+   * into the office with a paper certificate. Without this the only way in was
+   * the emailed link — so a registrar holding the actual document had nowhere to
+   * put it, which is how paper ends up in a drawer instead of on the record.
+   *
+   * Same uploader, same three steps, same server checks. The only difference is
+   * who is asking, and the API records that: a file added here carries the
+   * member of staff who added it, where a family's carries nobody.
+   */
+  async function attach(requirementId: string | null, file: File) {
+    const id = requirementId ?? "other";
+    setBusy(id);
+    setError(null);
+    const out = await uploadDocument(file, {
+      ticketUrl: "/api/sms/documents/submissions/upload-url",
+      confirmUrl: (submissionId) => `/api/sms/documents/submissions/${submissionId}/confirm`,
+      body: { subjectKind, subjectId, requirementId },
+    });
+    setBusy(null);
+    if (out.ok) router.refresh();
+    else setError(out.error);
+  }
+
   async function waive(requirementId: string) {
     if (!reason.trim()) return;
     setBusy(requirementId);
@@ -119,6 +146,19 @@ export function DocumentChecklist({
                   )}
                 </div>
                 {r.description && <p className="mt-1 text-sm text-muted-foreground">{r.description}</p>}
+                {canDecide && (
+                  <input
+                    type="file"
+                    className="mt-2 block w-full text-sm"
+                    accept="application/pdf,image/jpeg,image/png"
+                    disabled={busy === r.id}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) void attach(r.id, file);
+                      e.target.value = "";
+                    }}
+                  />
+                )}
                 {waiving === r.id && (
                   <div className="mt-2 flex flex-wrap gap-2">
                     <input
@@ -183,6 +223,26 @@ export function DocumentChecklist({
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {canDecide && progress.required > 0 && (
+          <div className="rounded-md border border-dashed border-border p-3">
+            <p className="text-sm font-medium">Something else</p>
+            <p className="text-xs text-muted-foreground">
+              A document the school did not ask for but should keep. It satisfies nothing on the list.
+            </p>
+            <input
+              type="file"
+              className="mt-2 block w-full text-sm"
+              accept="application/pdf,image/jpeg,image/png"
+              disabled={busy === "other"}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void attach(null, file);
+                e.target.value = "";
+              }}
+            />
           </div>
         )}
 

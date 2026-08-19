@@ -3350,12 +3350,12 @@
       "note": "DocumentChecklist on /hr/staff/[userId]"
     },
     "POST /documents/submissions/upload-url": {
-      "kind": "gap",
-      "note": "staff-side upload; families use the public route. No staff picker yet — the registrar's own upload lands with the admissions per-application view"
+      "kind": "ui",
+      "note": "the office's own upload control in DocumentChecklist — for a certificate handed in at the desk rather than sent through the family's link"
     },
     "POST /documents/submissions/:p/confirm": {
-      "kind": "gap",
-      "note": "the staff half of the same pair, unreached for the same reason"
+      "kind": "ui",
+      "note": "the office's own upload control in DocumentChecklist — for a certificate handed in at the desk rather than sent through the family's link"
     },
     "POST /documents/submissions/:p/decide": {
       "kind": "ui",

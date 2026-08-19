@@ -18,6 +18,7 @@
 // =============================================================================
 
 import * as React from "react";
+import { uploadDocument } from "@/lib/upload-document";
 
 type Requirement = { id: string; label: string; description: string | null; mandatory: boolean };
 type Sent = { requirementId: string | null; label: string | null; status: string; rejectedReason: string | null };
@@ -71,45 +72,19 @@ export function FamilyDocuments() {
     setBusy(requirementId);
     setError(null);
     setDone(null);
-    try {
-      // 1. A place to put it.
-      const ticketRes = await fetch(`/api/public/documents/upload-url?token=${encodeURIComponent(token)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ requirementId, filename: file.name, contentType: file.type }),
-      });
-      if (!ticketRes.ok) {
-        setError(((await ticketRes.json().catch(() => ({}))) as { message?: string }).message ?? "That file could not be accepted.");
-        return;
-      }
-      const ticket = (await ticketRes.json()) as { submissionId: string; uploadUrl: string; maxBytes: number };
-      if (file.size > ticket.maxBytes) {
-        setError("That file is too large. The limit is 10MB.");
-        return;
-      }
-      // 2. The file itself, straight to storage — never through the school's
-      //    servers.
-      const put = await fetch(ticket.uploadUrl, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
-      if (!put.ok) {
-        setError("The upload did not finish. Please try again.");
-        return;
-      }
-      // 3. Tell the school it landed. Until this succeeds nothing counts as
-      //    received — the school cannot see the bucket.
-      const confirm = await fetch(`/api/public/documents/${ticket.submissionId}/confirm?token=${encodeURIComponent(token)}`, {
-        method: "POST",
-      });
-      if (!confirm.ok) {
-        setError(((await confirm.json().catch(() => ({}))) as { message?: string }).message ?? "We could not accept that file.");
-        return;
-      }
+    // The SAME uploader the office uses. Two copies would drift on exactly the
+    // details that matter — which failure leaves the ticket reusable, when the
+    // size is checked, what the person is told when nothing lands.
+    const out = await uploadDocument(file, {
+      ticketUrl: `/api/public/documents/upload-url?token=${encodeURIComponent(token)}`,
+      confirmUrl: (id) => `/api/public/documents/${id}/confirm?token=${encodeURIComponent(token)}`,
+      body: { requirementId },
+    });
+    setBusy(null);
+    if (out.ok) {
       setDone("Sent. The school will check it.");
       await refresh(token);
-    } catch {
-      setError("Something went wrong sending that file. Please try again.");
-    } finally {
-      setBusy(null);
-    }
+    } else setError(out.error);
   }
 
   if (loadError) {
