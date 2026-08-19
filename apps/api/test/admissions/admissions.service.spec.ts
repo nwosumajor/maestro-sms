@@ -67,7 +67,10 @@ function makeService(app: Row) {
   const platformFees = { effective: jest.fn().mockResolvedValue({ flatMinor: 0, percentBp: 0, capMinor: null, bearer: "PARENT" }) } as never;
   const privileged = { client: null } as never;
   const region = { forSchool: jest.fn().mockResolvedValue({ currency: "NGN" }) } as never;
-  const service = new AdmissionsService(db as never, audit as never, channel as never, paystack, platformFees, privileged, region);
+  const service = new AdmissionsService(db as never, audit as never, channel as never, paystack, platformFees, privileged, region,
+    // Documents follow an accepted family onto the roll; these suites do not
+    // exercise that, so it is stubbed rather than mocked in detail.
+    { promoteApplicationInTx: jest.fn().mockResolvedValue({ promoted: 0 }) } as never);
   return { service, update, audit, channel, state };
 }
 

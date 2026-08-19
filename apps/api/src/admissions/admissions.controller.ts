@@ -4,7 +4,7 @@ import { RequireModule } from "../auth/require-module.decorator";
 import { RateLimitGuard } from "../common/rate-limit.guard";
 import type { AdmissionApplicationDto } from "@sms/types";
 import { z } from "zod";
-import { ADMISSION_PERMISSIONS, FEES_PERMISSIONS } from "@sms/types";
+import { ADMISSION_PERMISSIONS, FEES_PERMISSIONS, LMS_PERMISSIONS } from "@sms/types";
 import { RequireStepUp } from "../auth/require-stepup.decorator";
 import { Public } from "../auth/public.decorator";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -37,6 +37,13 @@ const submitSchema = z.object({
   desiredClass: z.string().max(80).nullish(),
   notes: z.string().max(2000).nullish(),
   details: detailsSchema.nullish(),
+});
+
+const convertSchema = z.object({
+  classId: z.string().uuid().optional(),
+  /** Default true: the application already carries who applied and how to reach
+   *  them, and a guardian with no login is a name on a form. */
+  linkGuardian: z.boolean().optional(),
 });
 
 const reviewSchema = z.object({
@@ -112,6 +119,24 @@ export class AdmissionsController {
   }
 
   /** Decide the current maker-checker stage (Admin → HR → Principal). */
+  /**
+   * Enrol an accepted applicant.
+   *
+   * Gated on class.write — the same authority the bulk import needs to create a
+   * pupil, and deliberately NARROWER than admission.review, which hr_manager
+   * also holds. Deciding an application and creating a child on the roll are
+   * different powers.
+   */
+  @Post("admissions/:id/convert")
+  @RequirePermission(LMS_PERMISSIONS.CLASS_WRITE)
+  convert(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(convertSchema)) body: z.infer<typeof convertSchema>,
+  ) {
+    return this.admissions.convertToPupil(p, id, body);
+  }
+
   @Post("admissions/:id/review")
   @RequirePermission(ADMISSION_PERMISSIONS.ADMISSION_REVIEW)
   review(

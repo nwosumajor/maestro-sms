@@ -51,6 +51,11 @@ import { PaystackService, type PaystackEvent } from "../payments/paystack.servic
 import { PlatformFeeService } from "../billing/platform-fee.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import { PaymentChannelService } from "../payments/payment-channel.service";
+import bcrypt from "bcryptjs";
+import { randomBytes } from "node:crypto";
+import { allocateLoginEmail, schoolSlugOf } from "../foundation/login-email";
+import { allocateAdmissionNumber, loadUsedAdmissionNumbers, schoolAdmissionYear } from "../foundation/admission-number";
+import { SuppliedDocumentsService } from "../documents/supplied-documents.service";
 
 const ZERO = "00000000-0000-0000-0000-000000000000";
 
@@ -97,6 +102,9 @@ export class AdmissionsService {
     private readonly platformFees: PlatformFeeService,
     private readonly privileged: PrivilegedDatabaseService,
     private readonly region: SchoolRegionService,
+    // The documents an accepted family already sent, so they follow the child
+    // onto the roll in the SAME transaction that creates them.
+    private readonly supplied: SuppliedDocumentsService,
     // LAST and @Optional deliberately. DI always provides it in the running
     // app; being optional keeps every existing unit wiring compiling, and
     // absent it FAILS OPEN — a missing switchboard must never be the reason a
@@ -525,4 +533,173 @@ export class AdmissionsService {
       createdAt: r.createdAt,
     };
   }
+  /**
+   * The accepted family becomes a pupil on the roll.
+   *
+   * THIS DID NOT EXIST. An application could be reviewed, approved through the
+   * whole maker-checker chain, have its entrance exam scheduled and its
+   * documents collected — and then somebody typed the child into the system by
+   * hand, with nothing tying the two records together. The paperwork the family
+   * had already sent had nowhere to go, and no one could answer "which pupil is
+   * this application?".
+   *
+   * ONE TRANSACTION, because enrolling somebody is one decision: the account,
+   * the profile, the class place, the guardian's own login and the documents
+   * either all happen or none do.
+   *
+   * IDEMPOTENT on `convertedStudentId`, which is UNIQUE — a second click cannot
+   * produce a second child, and the answer to a repeat is the pupil already
+   * created rather than an error.
+   */
+  async convertToPupil(
+    p: Principal,
+    applicationId: string,
+    input: { classId?: string; linkGuardian?: boolean },
+  ): Promise<{ studentId: string; alreadyConverted: boolean; credentials?: { name: string; email: string; tempPassword: string }; guardianCredentials?: { name: string; email: string; tempPassword: string } }> {
+    // Read first, so an already-converted application costs no bcrypt at all.
+    const existing = await this.db.runAsTenantReadOnly(this.ctx(p), async (tx) =>
+      (await tx.admissionApplication.findFirst({
+        where: { id: applicationId },
+        select: { id: true, status: true, childName: true, applicantName: true, applicantEmail: true, convertedStudentId: true, details: true },
+      })) as {
+        id: string; status: string; childName: string; applicantName: string; applicantEmail: string;
+        convertedStudentId: string | null; details: unknown;
+      } | null,
+    );
+    if (!existing) throw new NotFoundException("Application not found");
+    if (existing.convertedStudentId) {
+      return { studentId: existing.convertedStudentId, alreadyConverted: true };
+    }
+    if (existing.status !== "ACCEPTED") {
+      // Enrolling somebody the school has not accepted is not a slip to
+      // tolerate — it is a child on the roll who was never admitted.
+      throw new BadRequestException("Only an accepted application can be enrolled");
+    }
+
+    // BCRYPT OUTSIDE THE TRANSACTION. Two hashes at ~100ms each is a fifth of
+    // Prisma's 5s interactive cap spent doing arithmetic; the bulk import learnt
+    // this the same way.
+    const pupilPassword = randomBytes(9).toString("base64url");
+    const guardianPassword = randomBytes(9).toString("base64url");
+    const [pupilHash, guardianHash] = await Promise.all([
+      bcrypt.hash(pupilPassword, 10),
+      bcrypt.hash(guardianPassword, 10),
+    ]);
+
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      // Re-read INSIDE the transaction and claim the conversion with a
+      // conditional update. Two registrars pressing the button at once would
+      // otherwise both pass the check above and both create a child.
+      const claimed = await tx.admissionApplication.updateMany({
+        where: { id: applicationId, convertedStudentId: null, status: "ACCEPTED" },
+        data: { convertedAt: new Date() },
+      });
+      if (claimed.count === 0) {
+        const now = (await tx.admissionApplication.findFirst({
+          where: { id: applicationId },
+          select: { convertedStudentId: true },
+        })) as { convertedStudentId: string | null } | null;
+        if (now?.convertedStudentId) return { studentId: now.convertedStudentId, alreadyConverted: true };
+        throw new BadRequestException("Only an accepted application can be enrolled");
+      }
+
+      const studentRole = await tx.role.findFirst({ where: { name: "student" }, select: { id: true } });
+      const parentRole = await tx.role.findFirst({ where: { name: "parent" }, select: { id: true } });
+      if (!studentRole) throw new NotFoundException("student role missing");
+
+      const slug = await schoolSlugOf(tx, p.schoolId);
+      // A child gets a generated sign-in identifier: the application carries the
+      // PARENT's address, and a pupil must not share a login with their guardian.
+      const pupilEmail = await allocateLoginEmail(tx, existing.childName, slug, { autoSuffix: true });
+      const year = await schoolAdmissionYear(tx, p.schoolId);
+      const used = await loadUsedAdmissionNumbers(tx, year);
+      const admissionNumber = allocateAdmissionNumber(used, year);
+
+      const pupil = await tx.user.create({
+        data: {
+          schoolId: p.schoolId,
+          email: pupilEmail,
+          loginEmailGenerated: true,
+          name: existing.childName,
+          passwordHash: pupilHash,
+          // null => the login flow treats it as expired and the child sets their
+          // own at first sign-in.
+          passwordChangedAt: null,
+        },
+      });
+      await tx.userRole.create({ data: { schoolId: p.schoolId, userId: pupil.id, roleId: studentRole.id } });
+      const details = (existing.details ?? {}) as { dateOfBirth?: string; gender?: string };
+      await tx.studentProfile.create({
+        data: {
+          schoolId: p.schoolId,
+          studentId: pupil.id,
+          admissionNumber,
+          dateOfBirth: details.dateOfBirth ? new Date(details.dateOfBirth) : null,
+          gender: details.gender ?? null,
+        },
+      });
+      if (input.classId) {
+        await tx.enrollment.create({ data: { schoolId: p.schoolId, classId: input.classId, studentId: pupil.id } });
+      }
+
+      // THE GUARDIAN. The application already carries who applied and how to
+      // reach them; without this they would be a name on a form with no way in,
+      // and somebody would key them a second time.
+      let guardianCredentials: { name: string; email: string; tempPassword: string } | undefined;
+      if (input.linkGuardian !== false && parentRole) {
+        const guardianEmail = existing.applicantEmail.trim().toLowerCase();
+        let guardian = await tx.user.findFirst({ where: { email: guardianEmail }, select: { id: true } });
+        if (!guardian) {
+          guardian = await tx.user.create({
+            data: {
+              schoolId: p.schoolId,
+              email: guardianEmail,
+              name: existing.applicantName,
+              passwordHash: guardianHash,
+              passwordChangedAt: null,
+            },
+          });
+          await tx.userRole.create({ data: { schoolId: p.schoolId, userId: guardian.id, roleId: parentRole.id } });
+          guardianCredentials = { name: existing.applicantName, email: guardianEmail, tempPassword: guardianPassword };
+        }
+        await tx.parentChild.create({
+          data: { schoolId: p.schoolId, parentId: guardian.id, studentId: pupil.id, relationship: "GUARDIAN" },
+        });
+      }
+
+      // The documents they sent follow them, in this same transaction.
+      await this.supplied.promoteApplicationInTx(tx, {
+        schoolId: p.schoolId,
+        actorId: p.userId,
+        applicationId,
+        studentId: pupil.id,
+      });
+
+      await tx.admissionApplication.update({
+        where: { id: applicationId },
+        data: { convertedStudentId: pupil.id },
+      });
+      await this.audit.record(
+        {
+          actorId: p.userId,
+          action: "admission.convert",
+          entity: "admission_application",
+          entityId: applicationId,
+          schoolId: p.schoolId,
+          metadata: { studentId: pupil.id, admissionNumber, classId: input.classId ?? null },
+        },
+        tx,
+      );
+
+      return {
+        studentId: pupil.id,
+        alreadyConverted: false,
+        // Returned ONCE, like the bulk import's login slips. Nothing stores a
+        // temporary password, and both accounts must change it at first sign-in.
+        credentials: { name: existing.childName, email: pupilEmail, tempPassword: pupilPassword },
+        guardianCredentials,
+      };
+    });
+  }
+
 }

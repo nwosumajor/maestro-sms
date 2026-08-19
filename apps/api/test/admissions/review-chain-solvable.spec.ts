@@ -109,6 +109,9 @@ function makeService(opts: {
     { effective: jest.fn().mockResolvedValue({}) } as never,
     {} as never,
     { forSchool: jest.fn().mockResolvedValue({ currency: "NGN" }) } as never,
+    // Documents follow an accepted family onto the roll; these suites do not
+    // exercise that, so it is stubbed rather than mocked in detail.
+    { promoteApplicationInTx: jest.fn().mockResolvedValue({ promoted: 0 }) } as never
   );
   return { service, tx, created };
 }

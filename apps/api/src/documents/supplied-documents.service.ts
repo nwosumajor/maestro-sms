@@ -680,7 +680,24 @@ export class SuppliedDocumentsService {
       const student = await tx.user.findFirst({ where: { id: studentId }, select: { id: true } });
       // Both 404 rather than 403: neither may be used to probe for the other.
       if (!student) throw new NotFoundException("Pupil not found");
+      return this.promoteApplicationInTx(tx, { schoolId: p.schoolId, actorId: p.userId, applicationId, studentId });
+    });
+  }
 
+  /**
+   * The same promotion, inside a transaction the CALLER owns.
+   *
+   * Enrolling an accepted applicant is ONE decision — the account, the profile,
+   * the class place, the guardian link and the documents either all happen or
+   * none do. Opening a second transaction here would let the paperwork commit
+   * against a pupil whose creation then failed.
+   */
+  async promoteApplicationInTx(
+    tx: TenantTx,
+    args: { schoolId: string; actorId: string; applicationId: string; studentId: string },
+  ): Promise<{ promoted: number }> {
+    const { schoolId, actorId, applicationId, studentId } = args;
+    {
       const submissions = (await tx.documentSubmission.findMany({
         where: { subjectKind: "ADMISSION_APPLICATION", subjectId: applicationId },
       })) as SubmissionRow[];
@@ -692,7 +709,7 @@ export class SuppliedDocumentsService {
         if (!s.storageKey) continue;
         await tx.document.create({
           data: {
-            schoolId: p.schoolId,
+            schoolId,
             studentId,
             type: "OTHER",
             title: s.originalName ?? "Supplied document",
@@ -702,7 +719,7 @@ export class SuppliedDocumentsService {
             contentType: s.contentType ?? "application/octet-stream",
             sizeBytes: s.sizeBytes,
             status: "UPLOADED",
-            uploadedById: p.userId,
+            uploadedById: actorId,
           },
         });
       }
@@ -712,17 +729,17 @@ export class SuppliedDocumentsService {
       });
       await this.audit.record(
         {
-          actorId: p.userId,
+          actorId,
           action: "document.submission.promote",
           entity: "document_submission",
           entityId: studentId,
-          schoolId: p.schoolId,
+          schoolId,
           metadata: { from: "ADMISSION_APPLICATION", applicationId, count: worth.length },
         },
         tx,
       );
       return { promoted: worth.length };
-    });
+    }
   }
 
   // --- the family's own view, reached by a signed link and nothing else ------

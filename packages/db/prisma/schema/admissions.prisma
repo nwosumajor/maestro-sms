@@ -54,6 +54,16 @@ model AdmissionApplication {
   examDate DateTime?
   examNote String?
 
+  /// The pupil this application became. THE ONE LINK between an application and
+  /// the child it was about — until this existed, an accepted family was
+  /// enrolled by hand and nothing tied the two records together, so the
+  /// documents they had sent had nowhere to go.
+  ///
+  /// UNIQUE, and that is the idempotency guard: converting twice cannot create a
+  /// second pupil, and two applications cannot claim the same child.
+  convertedStudentId String?   @unique @db.Uuid
+  convertedAt        DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

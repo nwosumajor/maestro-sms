@@ -5,11 +5,12 @@ import { NOTIFICATION_CHANNEL_PROVIDER } from "../notifications/notification.con
 import { LoggingChannelProvider } from "../notifications/logging-channel.provider";
 import { PaymentsModule } from "../payments/payments.module";
 import { BillingModule } from "../billing/billing.module";
+import { DocumentsModule } from "../documents/documents.module";
 
 @Module({
   // PaymentsModule: form-fee checkout (Paystack); BillingModule: the platform
   // take-rate on the fee. One-way deps — neither imports admissions.
-  imports: [PaymentsModule, BillingModule],
+  imports: [DocumentsModule, PaymentsModule, BillingModule],
   controllers: [AdmissionsController],
   providers: [
     AdmissionsService,

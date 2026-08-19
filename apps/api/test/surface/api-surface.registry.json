@@ -3382,8 +3382,8 @@
       "note": "the family's page at /apply/documents"
     },
     "POST /documents/promote": {
-      "kind": "gap",
-      "note": "moves an accepted application's documents onto the enrolled pupil. Still unreached: there is no application-to-pupil conversion in this codebase for it to hang off"
+      "kind": "system",
+      "note": "moves an accepted application's documents onto a pupil. Now called from admissions convert as well as being reachable on its own for a pupil enrolled before that existed"
     },
     "POST /documents/retention/run": {
       "kind": "system",
@@ -3396,6 +3396,10 @@
     "GET /local-storage/*": {
       "kind": "system",
       "note": "LOCAL/CI ONLY, and not registered at all when STORAGE_PROVIDER=s3. The stub hands the browser a signed URL pointing back here so the browser-to-bucket upload can be exercised without a bucket"
+    },
+    "POST /admissions/:p/convert": {
+      "kind": "gap",
+      "note": "enrols an accepted applicant as a pupil. The API is built, tested and idempotent; the button on /admin/admissions is the remaining piece"
     }
   }
 }
