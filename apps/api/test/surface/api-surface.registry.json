@@ -2033,6 +2033,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "POST /discussion/posts/:p/report": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
     "POST /documents": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"

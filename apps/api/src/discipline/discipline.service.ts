@@ -31,6 +31,27 @@ const TARGET_CAP = 500;
 /** Roles that may see the school's STAFF-conduct cases. See canHandleStaffCase. */
 const STAFF_CASE_ROLES = new Set(["principal", "school_admin"]);
 
+/**
+ * Who is TOLD when a case is filed.
+ *
+ * Filing wrote a row and alerted nobody. A pupil reporting that they are being
+ * bullied, or a parent reporting a member of staff, produced a record that was
+ * only ever seen if somebody happened to open the discipline list and look — and
+ * every other step of this pipeline already tells the person it depends on.
+ *
+ * Leadership, and deliberately NOT every discipline.manage holder. A teacher
+ * holds it too and may see STUDENT cases, but alerting all sixty of them on
+ * every complaint is noise that gets muted, and on a STAFF case it would be a
+ * disclosure to the accused's colleagues. Leadership triages and assigns, and
+ * assignment already notifies the individual.
+ *
+ * // SECURITY: the recipients are filtered against the case itself before
+ * // sending — a complaint is never visible to the person it is about
+ * // (visibleComplaintWhere), so it must never be announced to them either.
+ * // Filing a complaint about the principal must not notify the principal.
+ */
+const CASE_ALERT_ROLES = ["principal", "school_admin"];
+
 @Injectable()
 export class DisciplineService {
   private readonly logger = new Logger("Discipline");
@@ -131,7 +152,7 @@ export class DisciplineService {
     p: Principal,
     input: { subject: string; details?: string; againstId: string; againstType: "STUDENT" | "TEACHER" },
   ): Promise<DisciplineComplaintDto> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    const dto = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const against = await tx.user.findFirst({ where: { id: input.againstId }, select: { id: true } });
       if (!against) throw new NotFoundException("The named person is not in this school");
       // A complaint about yourself is either a mistake or an attempt to create a
@@ -159,6 +180,90 @@ export class DisciplineService {
       await this.log(tx, p, "discipline.file", c.id, { againstType: input.againstType });
       return this.complaintDto(tx, c.id);
     });
+    // TELL SOMEBODY. This wrote a row and alerted nobody, so a complaint was
+    // only ever seen if a member of staff happened to open the list — while
+    // every other step of the pipeline notifies the person it depends on.
+    await this.announceNewCase(p, dto.id, input.againstId);
+    return dto;
+  }
+
+  /**
+   * File a complaint about something the filer can SEE, rather than about
+   * somebody on their roster.
+   *
+   * `file` above requires the target to be inside the filer's relationship scope
+   * — a classmate, or a teacher who teaches them. That is the right rule when a
+   * person is NAMED, because it stops anyone reaching an arbitrary user by
+   * guessing an id. It is the wrong rule for reporting a forum post: discussion
+   * groups are audience-wide, so the pupil who most needs to report is the one
+   * looking at a post by somebody in another class.
+   *
+   * The connection is proven differently here, and more strongly: the reporter
+   * never supplies the target at all. The CALLER resolves it from content it has
+   * already checked the reporter may see, so there is nothing to guess. The
+   * method is named for that contract — anything calling it must have verified
+   * visibility first.
+   */
+  async fileAboutVisibleContent(
+    p: Principal,
+    input: { subject: string; details: string; againstId: string; againstType: "STUDENT" | "TEACHER" },
+  ): Promise<{ id: string; alreadyOpen: boolean }> {
+    const filed = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      // One open report per person per piece of content. Without this a pupil
+      // could file the same complaint repeatedly, which buries the real ones.
+      const existing = (await tx.disciplineComplaint.findFirst({
+        where: { complainantId: p.userId, againstId: input.againstId, subject: input.subject, status: "OPEN" },
+        select: { id: true },
+      })) as { id: string } | null;
+      if (existing) return { id: existing.id, alreadyOpen: true, againstId: input.againstId };
+      const c = await tx.disciplineComplaint.create({
+        data: {
+          schoolId: p.schoolId,
+          subject: input.subject,
+          details: input.details,
+          complainantId: p.userId,
+          againstId: input.againstId,
+          againstType: input.againstType,
+          status: "OPEN",
+        },
+      });
+      await this.log(tx, p, "discipline.file", c.id, { againstType: input.againstType, source: "content_report" });
+      return { id: c.id, alreadyOpen: false, againstId: input.againstId };
+    });
+    if (!filed.alreadyOpen) await this.announceNewCase(p, filed.id, filed.againstId);
+    return { id: filed.id, alreadyOpen: filed.alreadyOpen };
+  }
+
+  /**
+   * Tell leadership a case exists. AFTER the transaction and never fatal — the
+   * same ordering `assign` uses, and for the same reason: a notification commits
+   * in a transaction of its own, so sending it from inside this one would
+   * announce a case that a later failure rolled back.
+   *
+   * Says nothing about the substance. These are records about children, and the
+   * notice is a pointer to a case, not a summary of it.
+   */
+  private async announceNewCase(p: Principal, complaintId: string, againstId: string): Promise<void> {
+    try {
+      const recipients = await this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+        const rows = (await tx.userRole.findMany({
+          where: { role: { name: { in: CASE_ALERT_ROLES } } },
+          select: { userId: true },
+        })) as Array<{ userId: string }>;
+        return [...new Set(rows.map((r) => r.userId))];
+      });
+      // Never to the person the case is about, and not back to the filer.
+      const to = recipients.filter((id) => id !== againstId && id !== p.userId);
+      if (to.length === 0) return;
+      await this.notifications.enqueueMany(this.ctx(p), to, {
+        type: "DISCIPLINE_CASE",
+        title: "A new case has been filed",
+        body: "A discipline case is waiting for review.",
+        data: { complaintId },
+      });
+    } catch (e) {
+      this.logger.warn(`discipline filing notice failed: ${(e as Error).message}`);
+    }
   }
 
   // --- staff review ---------------------------------------------------------

@@ -7,9 +7,10 @@
 // with a tombstone in reads — never the original body. Audited.
 // =============================================================================
 
-import { ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { DiscussionGroupDto, DiscussionPostDto, PageDto } from "@sms/types";
 import { decodeCursor, pageLimit, seekWhere, toPage } from "../common/keyset-cursor";
+import { DisciplineService } from "../discipline/discipline.service";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -28,6 +29,10 @@ export class DiscussionService {
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
+    // Reporting files a DISCIPLINE COMPLAINT rather than inventing a parallel
+    // pipeline. One-way: Discipline knows nothing about Discussion, so there is
+    // no cycle (DisciplineModule imports only NotificationModule).
+    private readonly discipline: DisciplineService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -150,6 +155,85 @@ export class DiscussionService {
       await this.log(tx, p, "discussion.comment.create", postId, {});
       return this.postDto(tx, postId);
     });
+  }
+
+  // --- reporting -------------------------------------------------------------
+  //
+  // Moderation existed and discovery did not. A moderator could remove any post,
+  // but nothing let a reader say "look at this" — so in a school with hundreds of
+  // pupils posting, harmful content was removed only if a member of staff
+  // happened to be reading the thread at the time. That is not moderation, it is
+  // chance, and the person most likely to see it first is a child with no way to
+  // act.
+  //
+  // A report is a DISCIPLINE COMPLAINT, not a new parallel pipeline: it is a
+  // record that somebody objects to another person's conduct, which is exactly
+  // what that module already models, reviews, assigns and resolves. Reusing it
+  // means a forum report inherits staff review, the "never visible to the person
+  // it is about" rule, and the human-only outcome.
+  //
+  // SECURITY: the reporter never names the person. They name a POST, and the
+  // server resolves the author from a row it has already checked they may see —
+  // so there is no id to guess, which is what the roster check on the ordinary
+  // filing path exists to prevent.
+  //
+  // GOLDEN RULE #8: reporting does NOT hide the post. If it did, any pupil could
+  // silence any other by objecting to them. A report is a signal for a human.
+
+  /** Report a post, or a comment on one, to the school's discipline process. */
+  async reportPost(
+    p: Principal,
+    postId: string,
+    reason: string,
+    commentId?: string,
+  ): Promise<{ complaintId: string; alreadyReported: boolean }> {
+    const target = await this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      const post = (await tx.discussionPost.findFirst({ where: { id: postId } })) as
+        | { id: string; groupId: string; authorId: string }
+        | null;
+      if (!post) throw new NotFoundException("Post not found");
+      const group = (await tx.discussionGroup.findFirst({ where: { id: post.groupId } })) as
+        | { id: string; name: string; audience: string }
+        | null;
+      if (!group) throw new NotFoundException("Post not found");
+      // The same visibility rule reading the group uses. 404-not-403: a group
+      // outside the caller's audience does not exist to them.
+      if (!this.canModerate(p) && !this.audiences(p).includes(group.audience)) {
+        throw new NotFoundException("Post not found");
+      }
+      let authorId = post.authorId;
+      if (commentId) {
+        const comment = (await tx.discussionComment.findFirst({ where: { id: commentId, postId } })) as
+          | { id: string; authorId: string }
+          | null;
+        if (!comment) throw new NotFoundException("Comment not found");
+        authorId = comment.authorId;
+      }
+      const roles = (await tx.userRole.findMany({
+        where: { userId: authorId },
+        select: { role: { select: { name: true } } },
+      })) as Array<{ role: { name: string } }>;
+      const isStudent = roles.some((r) => r.role.name === "student");
+      return { authorId, groupName: group.name, isStudent };
+    });
+
+    if (target.authorId === p.userId) {
+      throw new BadRequestException("You cannot report your own post — ask a teacher to remove it.");
+    }
+
+    // The subject is STABLE for this reporter and this content, which is what
+    // makes a repeat report idempotent rather than a way to bury the real ones.
+    const ref = commentId ? `comment ${commentId}` : `post ${postId}`;
+    const filed = await this.discipline.fileAboutVisibleContent(p, {
+      subject: `Reported ${commentId ? "comment" : "post"} in "${target.groupName}"`,
+      details: `${reason}\n\n(Reported ${ref} in discussion group "${target.groupName}".)`,
+      againstId: target.authorId,
+      againstType: target.isStudent ? "STUDENT" : "TEACHER",
+    });
+    await this.db.runAsTenant(this.ctx(p), (tx) =>
+      this.log(tx, p, "discussion.report", postId, { commentId: commentId ?? null, complaintId: filed.id }),
+    );
+    return { complaintId: filed.id, alreadyReported: filed.alreadyOpen };
   }
 
   // --- moderation (soft-delete) ---------------------------------------------

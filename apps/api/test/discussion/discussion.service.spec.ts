@@ -32,10 +32,16 @@ function makeTx(over: Record<string, unknown> = {}) {
   return { tx, calls };
 }
 
-function svc(tx: TenantTx) {
-  const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
+function svc(tx: TenantTx, discipline?: { fileAboutVisibleContent: jest.Mock }) {
+  const db = {
+    runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
+    runAsTenantReadOnly: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
+  };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
-  return new DiscussionService(db as never, audit as never);
+  // Reporting a post files a discipline complaint; the rest of the service
+  // never touches it.
+  const disc = discipline ?? { fileAboutVisibleContent: jest.fn().mockResolvedValue({ id: "c1", alreadyOpen: false }) };
+  return new DiscussionService(db as never, audit as never, disc as never);
 }
 
 describe("DiscussionService", () => {

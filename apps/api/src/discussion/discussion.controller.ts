@@ -16,6 +16,12 @@ const groupSchema = z.object({
 });
 const bodySchema = z.object({ body: z.string().min(1).max(5000) });
 
+const reportSchema = z.object({
+  reason: z.string().min(1).max(1000),
+  /** Set when the objection is to a COMMENT rather than the post itself. */
+  commentId: z.string().uuid().nullish(),
+});
+
 @RequireModule(MODULES.DISCUSSION)
 @Controller("discussion")
 export class DiscussionController {
@@ -61,6 +67,19 @@ export class DiscussionController {
   @RequirePermission(DISCUSSION_PERMISSIONS.DISCUSSION_PARTICIPATE)
   comment(@CurrentPrincipal() p: Principal, @Param("id") id: string, @Body(new ZodValidationPipe(bodySchema)) b: z.infer<typeof bodySchema>): Promise<DiscussionPostDto> {
     return this.discussion.comment(p, id, b.body);
+  }
+
+  /** Report a post, or a comment on it, to the school's discipline process.
+   *  Participate-level: the people who see harmful content first are the ones
+   *  reading the group, and most of them are children. */
+  @Post("posts/:id/report")
+  @RequirePermission(DISCUSSION_PERMISSIONS.DISCUSSION_PARTICIPATE)
+  report(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(reportSchema)) body: z.infer<typeof reportSchema>,
+  ) {
+    return this.discussion.reportPost(p, id, body.reason, body.commentId ?? undefined);
   }
 
   @Delete("posts/:id")

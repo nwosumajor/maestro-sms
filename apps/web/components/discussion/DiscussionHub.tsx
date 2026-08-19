@@ -113,6 +113,29 @@ export function DiscussionHub({ groups, canModerate }: { groups: Group[]; canMod
                       <Input value={comment[post.id] ?? ""} onChange={(e) => setComment((m) => ({ ...m, [post.id]: e.target.value }))} placeholder="Reply…" className="h-8" />
                       <Button size="sm" variant="outline" disabled={busy || !(comment[post.id] ?? "").trim()} onClick={() => run(() => postSms(`discussion/posts/${post.id}/comments`, { body: comment[post.id] }), "Commented.", g.id).then(() => setComment((m) => ({ ...m, [post.id]: "" })))}>Reply</Button>
                       {canModerate && <Button size="sm" variant="outline" className="text-destructive" disabled={busy} onClick={() => run(() => deleteSms(`discussion/posts/${post.id}`), "Post removed.", g.id)}>Delete post</Button>}
+                      {/* Anyone reading may report. The people who see harmful
+                          content first are the ones in the group, and most of
+                          them are children — a moderator-only "delete" is not a
+                          way to raise anything. Reporting never removes the
+                          post; it opens a case a person reviews. */}
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-muted-foreground"
+                        disabled={busy}
+                        onClick={() => {
+                          const reason = window.prompt("What is wrong with this post? A member of staff will review it.");
+                          if (reason?.trim()) {
+                            void run(
+                              () => postSms(`discussion/posts/${post.id}/report`, { reason }),
+                              "Reported. A member of staff will look at this.",
+                              g.id,
+                            );
+                          }
+                        }}
+                      >
+                        Report
+                      </Button>
                     </div>
                   )}
                 </div>
