@@ -45,8 +45,8 @@ import {
   NOTIFICATION_CHANNEL_PROVIDER,
   type NotificationChannelProvider,
 } from "../notifications/notification.constants";
-import { BadRequestException, ServiceUnavailableException } from "@nestjs/common";
-import { computePlatformFeeMinor } from "@sms/types";
+import { BadRequestException, Logger, ServiceUnavailableException } from "@nestjs/common";
+import { computePlatformFeeMinor, UPLOAD_TOKEN_TTL_DAYS } from "@sms/types";
 import { PaystackService, type PaystackEvent } from "../payments/paystack.service";
 import { PlatformFeeService } from "../billing/platform-fee.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
@@ -56,6 +56,7 @@ import { randomBytes } from "node:crypto";
 import { allocateLoginEmail, schoolSlugOf } from "../foundation/login-email";
 import { allocateAdmissionNumber, loadUsedAdmissionNumbers, schoolAdmissionYear } from "../foundation/admission-number";
 import { SuppliedDocumentsService } from "../documents/supplied-documents.service";
+import { mintDocumentUploadToken } from "../documents/document-upload-token";
 
 const ZERO = "00000000-0000-0000-0000-000000000000";
 
@@ -95,6 +96,7 @@ interface AppRow {
 
 @Injectable()
 export class AdmissionsService {
+  private readonly logger = new Logger("Admissions");
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
@@ -403,7 +405,7 @@ export class AdmissionsService {
     });
 
     if (result.terminal) {
-      await this.notifyApplicant(result.app, result.status);
+      await this.notifyApplicant(result.app, result.status, p.schoolId);
     }
     return { id: result.id, status: result.status, currentStage: result.currentStage };
   }
@@ -485,7 +487,7 @@ export class AdmissionsService {
   }
 
   /** Best-effort email to the (non-user) applicant. Never throws into the request. */
-  private async notifyApplicant(app: AppRow, status: string): Promise<void> {
+  private async notifyApplicant(app: AppRow, status: string, schoolId: string): Promise<void> {
     const accepted = status === "ACCEPTED";
     const title = accepted
       ? `Admission update for ${app.childName}: accepted`
@@ -498,14 +500,48 @@ export class AdmissionsService {
         : accepted
           ? " We will contact you shortly with the entrance-exam date."
           : "";
+    // THE LINK THAT PUTS THE UPLOAD SURFACE IN A PARENT'S HANDS.
+    //
+    // Without it the whole thing is unreachable: the token, the public
+    // endpoints, the page at /apply/documents and every check around them were
+    // built, and nothing ever gave a family the URL. A capability nobody is
+    // handed is the same as one that does not exist.
+    //
+    // It goes in the ACCEPTANCE email rather than an email of its own — a family
+    // who has just been told yes will read one message, and the documents are
+    // the next thing the school needs from them.
+    const documentsLine = accepted ? this.documentsLine(app, schoolId) : "";
     const body = accepted
-      ? `Good news — the application for ${app.childName} has been accepted.${examLine}`
+      ? `Good news — the application for ${app.childName} has been accepted.${examLine}${documentsLine}`
       : `Thank you for your application for ${app.childName}. After review, it was not successful at this time.`;
     try {
       await this.channel.deliver({ channel: "EMAIL", target: app.applicantEmail, title, body });
     } catch {
       // Communication is best-effort; the decision itself is already committed.
     }
+  }
+
+  /**
+   * The line inviting the family to send their documents in.
+   *
+   * The token IS the credential, so the link is minted per application and
+   * carries nothing else — see document-upload-token.ts for what it can and
+   * cannot do. Thirty days, because a birth certificate may need a trip to a
+   * registry office.
+   *
+   * Silent when PUBLIC_WEB_URL is unset rather than sending a family a link to
+   * "undefined/apply/documents": half a URL is worse than no sentence.
+   */
+  private documentsLine(app: AppRow, schoolId: string): string {
+    const base = process.env.PUBLIC_WEB_URL;
+    if (!base) {
+      this.logger.warn(
+        `PUBLIC_WEB_URL is not set — the acceptance email for ${app.id} went out with no documents link, so the family has no way to send anything in.`,
+      );
+      return "";
+    }
+    const token = mintDocumentUploadToken(app.id, schoolId);
+    return ` Please send us the documents we still need for ${app.childName}: ${base}/apply/documents?token=${token} — the link is personal to this application and works for ${UPLOAD_TOKEN_TTL_DAYS} days.`;
   }
 
   private toDto(r: AppRow): AdmissionApplicationDto {
