@@ -25,6 +25,7 @@ function makeService(over: {
   existingResult?: Record<string, unknown> | null;
   approvedSelections?: { studentId: string; subjectIds: string[] }[];
   updateManyCount?: number;
+  grading?: { components: ReadonlyArray<{ key: "exam" | "midterm" | "assignment" | "classNote"; label: string; max: number }> };
 }) {
   const upsert = jest.fn(({ create, update }: { create: Record<string, unknown>; update: Record<string, unknown> }) =>
     Promise.resolve({ id: "sr1", gradedAt: new Date(), ...create, ...update }),
@@ -69,6 +70,7 @@ function makeService(over: {
     subjectResult: {
       upsert,
       updateMany,
+      update: jest.fn(),
       findMany: jest.fn().mockResolvedValue(over.results ?? []),
       // upsertResult consults the existing row's status for the edit guards.
       findFirst: jest.fn().mockResolvedValue(over.existingResult ?? null),
@@ -83,7 +85,7 @@ function makeService(over: {
   // Capture the finalized reactor so tests can invoke it directly.
   let finalized: FinalizedHandler | undefined;
   const hooks = { onFinalized: (h: FinalizedHandler) => { finalized = h; } };
-  const service = new TermResultService(db as never, audit as never, workflow as never, hooks as never, { academicInTx: async () => ({ calendarTemplate: "THREE_TERM", grading: { components: GRADE_COMPONENTS } }), academicForSchool: async () => ({ calendarTemplate: "THREE_TERM", grading: { components: GRADE_COMPONENTS } }) } as never);
+  const service = new TermResultService(db as never, audit as never, workflow as never, hooks as never, { academicInTx: async () => ({ calendarTemplate: "THREE_TERM", grading: over.grading ?? { components: GRADE_COMPONENTS } }), academicForSchool: async () => ({ calendarTemplate: "THREE_TERM", grading: over.grading ?? { components: GRADE_COMPONENTS } }) } as never);
   return { service, tx, upsert, updateMany, audit, workflow, finalized: finalized! };
 }
 
@@ -295,18 +297,43 @@ describe("TermResultService — GRADE_PUBLISH maker-checker", () => {
   });
 
   it("the finalized hook publishes on APPROVED and reverts to DRAFT on REJECTED — only PENDING rows", async () => {
-    const { tx, updateMany, finalized } = makeService({ updateManyCount: 3 });
+    // A school whose weighting is NOT the platform's, so the stamped figure
+    // proves whose policy was used. 57/9/8/7 is 81 on the default (exam /60) and
+    // 74 here, because the exam mark is clamped to the school's lower maximum —
+    // stamping on the platform default would silently hand this school back
+    // another school's arithmetic. (The letter stays A: this school sets its own
+    // weights but not its own scale, so the default bands apply. The TOTAL is
+    // what tells the two policies apart.)
+    const { tx, updateMany, finalized } = makeService({
+      updateManyCount: 3,
+      grading: {
+        components: [
+          { key: "exam", label: "Exam", max: 50 },
+          { key: "midterm", label: "Midterm test", max: 30 },
+          { key: "assignment", label: "Assignment", max: 10 },
+          { key: "classNote", label: "Class note", max: 10 },
+        ],
+      },
+    });
     const base = {
       id: "wf1", schoolId: "A", type: "GRADE_PUBLISH",
       payload: { classId: "c1", subjectId: "sub1", termId: "t1" }, initiatorId: "teacher-1",
     };
+    // APPROVED no longer flips status in one shot: it re-scores each row and
+    // STAMPS the figures it is publishing under, because from here they are
+    // frozen and every reader reports them back rather than recomputing on
+    // whatever the school's grading policy says later.
+    (tx.subjectResult.findMany as jest.Mock).mockResolvedValueOnce([
+      { id: "sr1", exam: 57, midterm: 9, assignment: 8, classNote: 7 },
+    ]);
     await finalized(tx, { ...base, state: "APPROVED" });
-    expect(updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ status: "PENDING_APPROVAL" }),
-        data: { status: "PUBLISHED" },
-      }),
+    expect(tx.subjectResult.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ status: "PENDING_APPROVAL" }) }),
     );
+    expect(tx.subjectResult.update).toHaveBeenCalledWith({
+      where: { id: "sr1" },
+      data: { status: "PUBLISHED", total: 74, grade: "A" },
+    });
     await finalized(tx, { ...base, state: "REJECTED" });
     expect(updateMany).toHaveBeenLastCalledWith(
       expect.objectContaining({

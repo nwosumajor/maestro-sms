@@ -283,6 +283,77 @@ export function computeTermSubjectGrade(
 }
 
 // =============================================================================
+// A PUBLISHED mark is a statement that was made, and statements do not move
+// =============================================================================
+// Everything above computes a mark from its components and the school's CURRENT
+// weighting and letter scale. That is right while a teacher is still entering
+// marks. It is wrong the moment the result has been published, because a school
+// can change its grading policy whenever it likes — that is a shipped feature,
+// with five named scales, four weight presets and an admin screen — and every
+// reader recomputing on today's policy means a card printed in December reads
+// back differently in March.
+//
+// Measured on real published rows, switching scale and weights together:
+//
+//     marks (e/m/a/n)   before        after
+//     41/15/4/10        70  A         70  B2
+//     54/20/5/4         83  A         79  A1
+//     57/9/8/7          81  A         74  B2
+//
+// The last row is the sharpest, and it is not a re-weighting at all: clampMark
+// caps each mark at its component maximum, so lowering the exam weight from 60
+// to 50 silently discards the 7 marks above the new ceiling that a teacher had
+// already awarded. A pupil reported as an A becomes a B, and nothing anywhere
+// records that the number changed.
+//
+// So the figures are FROZEN at publication and read back from the row. This is
+// the payslip rule (`breakdownEnc` is a snapshot, never recomputed) applied to
+// the other document a family keeps. Correcting a published mark is already a
+// real path — editing one reverts it to DRAFT, and it must be approved and
+// published again, which re-stamps it.
+// =============================================================================
+
+/** A stored result: its components, and the figures it was published with. */
+export interface StoredTermResult extends TermGradeComponents {
+  status?: string | null;
+  total?: number | null;
+  grade?: string | null;
+}
+
+export interface ReportedTermGrade extends TermGradeResult {
+  /** True when these figures were read from the row rather than recomputed. */
+  frozen: boolean;
+}
+
+/**
+ * The total and letter a result REPORTS — what it said, not what it would score
+ * if those marks were entered today.
+ *
+ * PUBLISHED with figures stored     -> the stored figures, unchanged.
+ * anything else                     -> computed live from the components.
+ *
+ * The live branch is what a teacher needs while a mark is DRAFT: they are still
+ * working, and the screen has to show the weighting the school uses now.
+ *
+ * FAILS OPEN. A published row with no stored total is computed rather than
+ * reported as blank — a mark that exists must never render as absent, and
+ * blank on a report card is a far worse answer than a recomputed number.
+ */
+export function reportedTermGrade(
+  row: StoredTermResult,
+  components?: ReadonlyArray<{ key: GradeComponentKey; max: number }>,
+  bands?: readonly GradeBand[],
+): ReportedTermGrade {
+  const live = computeTermSubjectGrade(row, components, bands);
+  const frozen =
+    row.status === "PUBLISHED" && typeof row.total === "number" && Number.isFinite(row.total) && !!row.grade;
+  if (!frozen) return { ...live, frozen: false };
+  // `complete` stays derived: it says whether all four marks are in, which is a
+  // fact about the components and does not move with the policy.
+  return { total: row.total as number, grade: row.grade as string, complete: live.complete, frozen: true };
+}
+
+// =============================================================================
 // Per-school grading weighting
 // =============================================================================
 // 60/20/10/10 is one country's convention. An IB, A-Level or GPA school weights

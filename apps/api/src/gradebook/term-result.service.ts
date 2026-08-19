@@ -28,6 +28,7 @@ import { Prisma } from "@sms/db";
 import PDFDocument from "pdfkit";
 import {
   computeTermSubjectGrade,
+  reportedTermGrade,
   type GradingPolicy,
   averageOf,
   gradeComponentMax,
@@ -103,10 +104,44 @@ export class TermResultService {
       if (req.type !== "GRADE_PUBLISH") return;
       const pl = req.payload as { classId?: string; subjectId?: string; termId?: string } | null;
       if (!pl?.classId || !pl.subjectId || !pl.termId) return;
-      await tx.subjectResult.updateMany({
-        where: { classId: pl.classId, subjectId: pl.subjectId, termId: pl.termId, status: "PENDING_APPROVAL" },
-        data: { status: req.state === "APPROVED" ? "PUBLISHED" : "DRAFT" },
-      });
+      if (req.state === "APPROVED") {
+        // STAMP THE FIGURES AT PUBLICATION, because from here they are frozen
+        // and every reader reports them back (reportedTermGrade). The stored
+        // total was last written when the teacher typed the mark; if the school
+        // changed its weighting or letter scale in between, that figure is not
+        // the one this batch is being published under. Re-scoring here — inside
+        // the same tx as the status flip — makes the frozen number the number
+        // that was true when the result went out.
+        const grading = (await this.region.academicInTx(tx, req.schoolId)).grading;
+        const bands = resolveGradeBands(grading);
+        const pending = (await tx.subjectResult.findMany({
+          where: { classId: pl.classId, subjectId: pl.subjectId, termId: pl.termId, status: "PENDING_APPROVAL" },
+          select: { id: true, exam: true, midterm: true, assignment: true, classNote: true },
+        })) as Array<{
+          id: string;
+          exam: number | null;
+          midterm: number | null;
+          assignment: number | null;
+          classNote: number | null;
+        }>;
+        // One batch = one class-subject-term, so this is a class's worth of rows
+        // (~30), not a table scan.
+        for (const row of pending) {
+          const anyEntered = [row.exam, row.midterm, row.assignment, row.classNote].some((v) => v !== null);
+          const scored = anyEntered
+            ? computeTermSubjectGrade(row, grading.components, bands)
+            : { total: null, grade: null };
+          await tx.subjectResult.update({
+            where: { id: row.id },
+            data: { status: "PUBLISHED", total: scored.total, grade: scored.grade },
+          });
+        }
+      } else {
+        await tx.subjectResult.updateMany({
+          where: { classId: pl.classId, subjectId: pl.subjectId, termId: pl.termId, status: "PENDING_APPROVAL" },
+          data: { status: "DRAFT" },
+        });
+      }
       await this.audit.record(
         {
           actorId: req.initiatorId,
@@ -265,6 +300,12 @@ export class TermResultService {
       midterm: number | null;
       assignment: number | null;
       classNote: number | null;
+      /** Present on every stored row. A PUBLISHED result reports the figures it
+       *  was published with — see reportedTermGrade. Absent (a row built for a
+       *  preview) simply computes. */
+      status?: string | null;
+      total?: number | null;
+      grade?: string | null;
     },
     /** The SCHOOL's weighting. Omitted = the platform default, which is what every
      *  school already live uses. */
@@ -272,12 +313,16 @@ export class TermResultService {
   ): { total: number | null; grade: string | null; complete: boolean } {
     const anyEntered = [row.exam, row.midterm, row.assignment, row.classNote].some((v) => v !== null);
     if (!anyEntered) return { total: null, grade: null, complete: false };
-    const { total, grade, complete } = computeTermSubjectGrade(
+    const { total, grade, complete } = reportedTermGrade(
       {
         exam: row.exam,
         midterm: row.midterm,
         assignment: row.assignment,
         classNote: row.classNote,
+        // The three that decide whether this is reported or recomputed.
+        status: row.status,
+        total: row.total,
+        grade: row.grade,
       },
       policy?.components,
       // The school's own letter scale. This is now TRUE of every subject grade a

@@ -29,7 +29,7 @@ import { BrandingService } from "../branding/branding.service";
 import { DocumentsService } from "../documents/documents.service";
 import { ReportCardRemarkService } from "./report-card-remark.service";
 import { TermResultService } from "../gradebook/term-result.service";
-import { TRAIT_GROUPS, TRAIT_SCALE, computeTermSubjectGrade, averageOf, sessionAverageScope, resolveGradeBands, gradeLetter, gradeDescriptor } from "@sms/types";
+import { TRAIT_GROUPS, TRAIT_SCALE, reportedTermGrade, averageOf, sessionAverageScope, resolveGradeBands, gradeLetter, gradeDescriptor } from "@sms/types";
 import { GRADE_COMPONENTS, gradeComponentMax } from "@sms/types";
 import type { GradeBand } from "@sms/types";
 import { SchoolRegionService } from "../foundation/school-region.service";
@@ -171,7 +171,13 @@ export class ReportCardService {
           // highest cost nothing: the rows are already here for the overall
           // ranking, and a second pass over an array is free where a second
           // query over a term's marks is not.
-          select: { studentId: true, subjectId: true, exam: true, midterm: true, assignment: true, classNote: true },
+          // status/total/grade ride along so a PUBLISHED mark reports the figure
+          // it was published with rather than being recomputed on whatever the
+          // school's policy says today (see reportedTermGrade).
+          select: {
+            studentId: true, subjectId: true, exam: true, midterm: true, assignment: true, classNote: true,
+            status: true, total: true, grade: true,
+          },
         });
         const byStudent = new Map<string, number[]>();
         // PER SUBJECT: what the class scored, so the row can carry the average,
@@ -180,9 +186,13 @@ export class ReportCardService {
         // 49 than when it is 82, and this is the same pass that ranks them.
         const bySubject = new Map<string, number[]>();
         for (const r of classResults) {
-          const { total } = computeTermSubjectGrade(
-            { exam: r.exam, midterm: r.midterm, assignment: r.assignment, classNote: r.classNote },
+          const { total } = reportedTermGrade(
+            {
+              exam: r.exam, midterm: r.midterm, assignment: r.assignment, classNote: r.classNote,
+              status: r.status, total: r.total, grade: r.grade,
+            },
             grading?.components,
+            bands,
           );
           const arr = byStudent.get(r.studentId) ?? [];
           arr.push(total);
@@ -212,7 +222,10 @@ export class ReportCardService {
             // documented pattern that keeps the models lean), so the session is
             // expressed as the ids the session report already resolved.
             where: { classId: enrolment.classId, termId: { in: annualTermIds }, status: "PUBLISHED" },
-            select: { studentId: true, subjectId: true, exam: true, midterm: true, assignment: true, classNote: true },
+            select: {
+              studentId: true, subjectId: true, exam: true, midterm: true, assignment: true, classNote: true,
+              status: true, total: true, grade: true,
+            },
           })) as Array<{
             studentId: string;
             subjectId: string;
@@ -220,12 +233,19 @@ export class ReportCardService {
             midterm: number | null;
             assignment: number | null;
             classNote: number | null;
+            status: string;
+            total: number | null;
+            grade: string | null;
           }>;
           const perSubject = new Map<string, Map<string, number[]>>();
           for (const r of sessionResults) {
-            const { total } = computeTermSubjectGrade(
-              { exam: r.exam, midterm: r.midterm, assignment: r.assignment, classNote: r.classNote },
+            const { total } = reportedTermGrade(
+              {
+                exam: r.exam, midterm: r.midterm, assignment: r.assignment, classNote: r.classNote,
+                status: r.status, total: r.total, grade: r.grade,
+              },
               grading?.components,
+              bands,
             );
             const forSubject = perSubject.get(r.subjectId) ?? new Map<string, number[]>();
             forSubject.set(r.studentId, [...(forSubject.get(r.studentId) ?? []), total]);

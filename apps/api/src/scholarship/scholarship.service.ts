@@ -11,7 +11,7 @@
 // =============================================================================
 
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { computeTermSubjectGrade, type ScholarshipPortalDto, type ScholarshipApplicationDto } from "@sms/types";
+import { reportedTermGrade, resolveGradeBands, type StoredTermResult, type ScholarshipPortalDto, type ScholarshipApplicationDto } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -410,12 +410,18 @@ export class ScholarshipService {
     const grading = (await this.region.academicInTx(tx, schoolId)).grading;
     const published = await tx.subjectResult.findMany({
       where: { studentId, status: "PUBLISHED" },
-      select: { exam: true, midterm: true, assignment: true, classNote: true },
+      // The figures each result was PUBLISHED with. A merit signal recomputed on
+      // today's weighting would not match the report card the family holds — and
+      // this number is read by a reviewer deciding whether to fund a child.
+      select: {
+        exam: true, midterm: true, assignment: true, classNote: true,
+        status: true, total: true, grade: true,
+      },
     });
     const totals = published
-      .map((r: { exam: number | null; midterm: number | null; assignment: number | null; classNote: number | null }) => {
+      .map((r: StoredTermResult) => {
         const any = [r.exam, r.midterm, r.assignment, r.classNote].some((v) => v !== null);
-        return any ? computeTermSubjectGrade(r, grading.components).total : null;
+        return any ? reportedTermGrade(r, grading.components, resolveGradeBands(grading)).total : null;
       })
       .filter((v): v is number => v !== null);
     const publishedSessionAverage = totals.length ? Math.round((totals.reduce((s, v) => s + v, 0) / totals.length) * 100) / 100 : null;
