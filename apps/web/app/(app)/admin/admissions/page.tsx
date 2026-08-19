@@ -21,12 +21,19 @@ export default async function AdminAdmissionsPage() {
   // can — a 403 read would render as "this school asks for nothing", which is
   // the opposite of the truth.
   const canManageDocs = hasPermission(user.permissions, "student.profile.write");
-  const [apps, formFee, requirements] = await Promise.all([
+  // Putting a child on the roll is a narrower authority than deciding their
+  // application — hr_manager holds admission.review and must not hold this.
+  const canEnrol = hasPermission(user.permissions, "class.write");
+  const [apps, formFee, requirements, classes] = await Promise.all([
     apiGet<Application[]>("/admissions"),
     apiGet<{ formFeeMinor: number }>("/admissions/settings/form-fee"),
     canManageDocs
       ? apiGet<Serialized<DocumentRequirementDto>[]>("/documents/requirements?scope=STUDENT_ADMISSION")
       : Promise.resolve(null),
+    // For the class picker when enrolling an accepted applicant. Only fetched
+    // for somebody who may actually enrol — an unauthorised read would render
+    // an empty picker rather than an error.
+    canEnrol ? apiGet<{ id: string; name: string }[]>("/classes/mine") : Promise.resolve(null),
   ]);
 
   return (
@@ -64,7 +71,7 @@ export default async function AdminAdmissionsPage() {
         ) : apps.length === 0 ? (
           <Alert variant="info"><AlertTitle>No applications</AlertTitle><AlertDescription>None recorded for this school.</AlertDescription></Alert>
         ) : (
-          <AdmissionsReview apps={apps} />
+          <AdmissionsReview apps={apps} classes={classes ?? []} canEnrol={canEnrol} />
         )}
       </div>
     </AppShell>

@@ -3398,8 +3398,8 @@
       "note": "LOCAL/CI ONLY, and not registered at all when STORAGE_PROVIDER=s3. The stub hands the browser a signed URL pointing back here so the browser-to-bucket upload can be exercised without a bucket"
     },
     "POST /admissions/:p/convert": {
-      "kind": "gap",
-      "note": "enrols an accepted applicant as a pupil. The API is built, tested and idempotent; the button on /admin/admissions is the remaining piece"
+      "kind": "ui",
+      "note": "the Enrol-as-pupil button on /admin/admissions, shown only on an ACCEPTED application to somebody holding class.write"
     }
   }
 }

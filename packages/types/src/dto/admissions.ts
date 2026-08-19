@@ -51,5 +51,8 @@ export interface AdmissionApplicationDto {
   formFeeMinor: number;
   /** When the form fee settled; null = unpaid (staff see an UNPAID chip). */
   formFeePaidAt: Date | null;
+  /** The pupil this application became, once enrolled. The screen needs it to
+   *  stop offering a button that would only answer "already done". */
+  convertedStudentId: string | null;
   createdAt: Date;
 }

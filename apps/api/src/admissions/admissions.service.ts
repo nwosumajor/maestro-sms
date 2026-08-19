@@ -89,6 +89,7 @@ interface AppRow {
   reviewNote: string | null;
   formFeeMinor: number;
   formFeePaidAt: Date | null;
+  convertedStudentId?: string | null;
   createdAt: Date;
 }
 
@@ -530,6 +531,7 @@ export class AdmissionsService {
       reviewNote: r.reviewNote,
       formFeeMinor: r.formFeeMinor,
       formFeePaidAt: r.formFeePaidAt,
+      convertedStudentId: r.convertedStudentId ?? null,
       createdAt: r.createdAt,
     };
   }

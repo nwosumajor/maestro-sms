@@ -9,6 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { dateTime, titleCase } from "@/lib/format";
 import { readApiError } from "@/lib/api-error";
+import { EnrolAccepted } from "./EnrolAccepted";
 
 export type Application = Serialized<AdmissionApplicationDto>;
 
@@ -19,7 +20,18 @@ const VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline
   REJECTED: "destructive",
 };
 
-export function AdmissionsReview({ apps }: { apps: Application[] }) {
+export function AdmissionsReview({
+  apps,
+  classes,
+  canEnrol,
+}: {
+  apps: Application[];
+  /** For the class picker on an accepted application. */
+  classes?: { id: string; name: string }[];
+  /** class.write — the authority to put a child on the roll, which is narrower
+   *  than the authority to decide their application. */
+  canEnrol?: boolean;
+}) {
   const router = useRouter();
   const [busy, setBusy] = React.useState<string | null>(null);
   const [note, setNote] = React.useState<string | null>(null);
@@ -55,7 +67,9 @@ export function AdmissionsReview({ apps }: { apps: Application[] }) {
     <div className="space-y-2">
       {note && <p className="rounded-md bg-muted px-3 py-2 text-sm">{note}</p>}
       {apps.map((a) => (
-        <AdmissionRow key={a.id} a={a} busy={busy === a.id} onReview={review} onSchedule={schedule} />
+        <AdmissionRow
+          classes={classes ?? []}
+          canEnrol={!!canEnrol} key={a.id} a={a} busy={busy === a.id} onReview={review} onSchedule={schedule} />
       ))}
     </div>
   );
@@ -66,11 +80,15 @@ function AdmissionRow({
   busy,
   onReview,
   onSchedule,
+  classes,
+  canEnrol,
 }: {
   a: Application;
   busy: boolean;
   onReview: (id: string, action: "APPROVE" | "REJECT") => void;
   onSchedule: (id: string, examDate: string, examNote: string) => void;
+  classes: { id: string; name: string }[];
+  canEnrol: boolean;
 }) {
   const [open, setOpen] = React.useState(false);
   const [examDate, setExamDate] = React.useState(a.examDate ? a.examDate.slice(0, 10) : "");
@@ -160,6 +178,19 @@ function AdmissionRow({
             <Button size="sm" variant="outline" disabled={busy} onClick={() => onSchedule(a.id, examDate, examNote)}>
               Save exam
             </Button>
+          </div>
+        )}
+
+        {/* The last hand-keyed step in admissions: everything above is already
+            in the system, and this stops somebody typing the child in again. */}
+        {a.status === "ACCEPTED" && canEnrol && (
+          <div className="border-t border-border pt-3">
+            <EnrolAccepted
+              applicationId={a.id}
+              childName={a.childName}
+              classes={classes}
+              alreadyEnrolled={!!a.convertedStudentId}
+            />
           </div>
         )}
 
