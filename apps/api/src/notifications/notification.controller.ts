@@ -19,6 +19,7 @@ import {
   NOTIFICATION_CHANNELS,
   NOTIFICATION_PERMISSIONS,
   NOTIFICATION_TYPES,
+  MUTABLE_NOTIFICATION_TYPES,
   FEES_PERMISSIONS,
   BILLING_PERMISSIONS,
 } from "@sms/types";
@@ -52,7 +53,12 @@ const preferencesSchema = z.object({
   emailEnabled: z.boolean(),
   smsEnabled: z.boolean(),
   whatsappEnabled: z.boolean(),
-  mutedTypes: z.array(z.string().max(64)).max(100),
+  // Only a type the school has decided is optional. An unconstrained string
+  // array made the curated list advisory — a request naming any non-essential
+  // type would mute it, including ones no screen ever offered.
+  mutedTypes: z
+    .array(z.enum(MUTABLE_NOTIFICATION_TYPES.map((m) => m.type) as [string, ...string[]]))
+    .max(MUTABLE_NOTIFICATION_TYPES.length),
 });
 
 const sendSchema = z.object({

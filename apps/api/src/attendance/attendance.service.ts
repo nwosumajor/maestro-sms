@@ -171,7 +171,10 @@ export class AttendanceService {
     for (const g of groups.values()) {
       try {
         await this.notifications.enqueueMany(this.ctx(p), g.guardianIds, {
-          type: "ATTENDANCE_ABSENCE",
+          // Two types, not one message with two keys: a guardian must be able to
+          // switch off "arrived late" without also switching off "did not
+          // arrive". ATTENDANCE_ABSENCE is essential and cannot be muted.
+          type: g.status === "LATE" ? "ATTENDANCE_LATE" : "ATTENDANCE_ABSENCE",
           // Written in each GUARDIAN's own language — enqueueMany renders per
           // recipient, so a class whose families do not share one still gets it
           // right. The title/body below stay as the English fallback for a

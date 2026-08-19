@@ -35,8 +35,19 @@ export type MessageCreditBundle = (typeof MESSAGE_CREDIT_BUNDLES)[number];
  */
 export const MESSAGE_CREDIT_LOW_THRESHOLD = 50;
 
+/**
+ * // NOTE: this registry is INCOMPLETE and does not gate anything. The platform
+ * // emits more than twenty types (SIS_PROFILE, HOSTEL, SCHOLARSHIP, BILLING and
+ * // others are all in the live table) and `NotificationInput.type` is
+ * // `NotificationTypeValue | string`, so the union imposes nothing. Completing
+ * // it and dropping the `| string` is a worthwhile separate change; it is not
+ * // done here because it touches every emitter. What makes the gap safe in the
+ * // meantime is that an unlisted type is now never mutable, so a typo fails
+ * // towards delivering rather than towards silence.
+ */
 export const NOTIFICATION_TYPES = [
   "ATTENDANCE_ABSENCE",
+  "ATTENDANCE_LATE",
   "GRADE_POSTED",
   "WORKFLOW_UPDATE",
   "INVOICE_ISSUED",

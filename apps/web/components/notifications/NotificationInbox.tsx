@@ -13,7 +13,10 @@ export type NotificationItem = Serialized<NotificationItemDto>;
 export type InboxData = Serialized<NotificationInboxDto>;
 
 const TYPE_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+  // Absence stays red — a child who did not arrive. Lateness is its own type
+  // now and is a nudge, not an alarm.
   ATTENDANCE_ABSENCE: "destructive",
+  ATTENDANCE_LATE: "secondary",
   INVOICE_ISSUED: "default",
   PAYMENT_RECEIVED: "secondary",
   DOCUMENT_AVAILABLE: "secondary",
