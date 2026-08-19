@@ -34,6 +34,9 @@ import { join } from "node:path";
 
 const SRC = readFileSync(join(__dirname, "../../src/communication/messaging.service.ts"), "utf8");
 
+import { MessagingService } from "../../src/communication/messaging.service";
+import type { Principal, TenantTx } from "../../src/integrity/integrity.foundation";
+
 describe("the sender tiers", () => {
   it("no longer decides 'staff' from a two-role set", () => {
     expect(SRC).not.toMatch(/const STAFF = new Set\(\["school_admin", "principal"\]\)/);
@@ -110,10 +113,50 @@ describe("what the teacher's set contains", () => {
 });
 
 describe("the refusal says which rule was missed", () => {
-  it("no longer tells a teacher they may only message staff and teachers", () => {
-    // That sentence was shown to a teacher writing to their own pupil, and named
-    // a reason that was not the reason.
-    expect(SRC).toMatch(/You can message staff, the pupils you teach, and their parents/);
-    expect(SRC).toMatch(/ask the school office to pass it on/);
+  // Asserted on the THROWN message rather than on the source text. The sentence
+  // is now assembled per role — a teacher and a warden miss different rules —
+  // and a regex over the file could no longer see it, while the behaviour it
+  // was protecting had not changed at all.
+  const refusalFor = async (roles: string[]) => {
+    const tx = {
+      user: { findFirst: jest.fn().mockResolvedValue({ id: "someone" }) },
+      hostelAllocation: { findMany: jest.fn().mockResolvedValue([]) },
+      classTeacher: { findMany: jest.fn().mockResolvedValue([]) },
+      class: { findMany: jest.fn().mockResolvedValue([]) },
+      classSubjectTeacher: { findMany: jest.fn().mockResolvedValue([]) },
+      enrollment: { findMany: jest.fn().mockResolvedValue([]) },
+    } as unknown as TenantTx;
+    // findFirst answers the existence check, then refuses the scope check.
+    (tx.user.findFirst as jest.Mock).mockResolvedValueOnce({ id: "someone" }).mockResolvedValueOnce(null);
+    const svc = Object.create(MessagingService.prototype) as MessagingService;
+    Object.assign(svc, { db: {}, audit: { record: jest.fn() }, notifications: {} });
+    const p: Principal = { schoolId: "A", userId: "u-1", roles, permissions: [] };
+    try {
+      await (svc as unknown as {
+        assertCanMessage: (t: TenantTx, pr: Principal, id: string) => Promise<void>;
+      }).assertCanMessage(tx, p, "someone");
+      return null;
+    } catch (e) {
+      return (e as Error).message;
+    }
+  };
+
+  it("tells a TEACHER about the pupils they teach", async () => {
+    // That sentence used to read "you can only message staff and teachers",
+    // shown to a teacher writing to their own pupil — a reason that was not the
+    // reason.
+    expect(await refusalFor(["teacher"])).toBe(
+      "You can message staff, the pupils you teach, and their parents. This person is none of those — ask the school office to pass it on.",
+    );
+  });
+
+  it("tells a WARDEN about their hostel instead", async () => {
+    expect(await refusalFor(["warden"])).toBe(
+      "You can message staff, the boarders in your hostel, and their parents. This person is none of those — ask the school office to pass it on.",
+    );
+  });
+
+  it("tells everyone else the plain rule", async () => {
+    expect(await refusalFor(["parent"])).toBe("You can only message school staff.");
   });
 });

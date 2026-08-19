@@ -49,7 +49,58 @@ const SCHOOL_WIDE_SENDERS = new Set(["school_admin", "principal"]);
 const GUARDIAN_WIDE_SENDERS = new Set(["accountant"]);
 /** Staff whose reach over pupils comes from the classes they actually teach. */
 const CLASS_SCOPED_SENDERS = new Set(["teacher", "head_teacher"]);
-const STAFF_OR_TEACHER = new Set(["teacher", "school_admin", "principal", "accountant", "hr_clerk", "board"]);
+/**
+ * Staff whose reach over pupils comes from the HOSTEL they run.
+ *
+ * The same argument the class scope is built on. A boarder's warden is the adult
+ * responsible for them overnight, and had no channel to that child or to their
+ * parents — nor they to the warden — so a boarding school's most immediate
+ * pastoral relationship was the one relationship the module did not model. A
+ * warden reaches their OWN hostels; head_warden reaches every hostel, which is
+ * exactly the scope that role already has everywhere else.
+ */
+const HOSTEL_SCOPED_SENDERS = new Set(["warden", "head_warden"]);
+
+/**
+ * Who a pupil or a parent may open a channel to.
+ *
+ * This was six roles, and it silently decided that a family could not write to
+ * the head teacher, the school office, the librarian or their child's warden —
+ * several of whom could write to THEM. A one-way pastoral relationship is the
+ * same defect this module was already fixed for once, on the teacher side.
+ *
+ * The set is deliberately about a PASTORAL OR OFFICE relationship with families,
+ * not about seniority: the test is whether a parent or pupil has ordinary
+ * business with that person.
+ */
+const REACHABLE_BY_ANYONE = new Set([
+  "teacher",
+  "head_teacher",
+  "school_admin",
+  "principal",
+  "head_admin",
+  "junior_admin",
+  "accountant",
+  "hr_clerk",
+  "board",
+  "librarian",
+  "warden",
+  "head_warden",
+]);
+
+/**
+ * Additionally reachable by GUARDIANS only.
+ *
+ * head_driver runs the fleet and is the right person to ask where a bus is —
+ * a real parent need. It is NOT in the set above, because that would hand every
+ * child in the school a private channel to transport staff, and a driver has no
+ * pastoral relationship with a pupil to justify one. `driver` itself is
+ * read-only over a single vehicle and is a contact point for nobody.
+ *
+ * // SECURITY: this is the one place the two audiences differ, and the reason
+ * // they are separate sets rather than one list with a comment.
+ */
+const REACHABLE_BY_GUARDIANS = new Set(["head_driver"]);
 /** Safety cap on messages returned for a single thread (most-recent-first). */
 const MESSAGE_PAGE = 500;
 // REMOVED: THREAD_SCAN_CAP (2000). It bounded a pre-fetch of the caller's
@@ -119,8 +170,12 @@ export class MessagingService {
   private async recipientScope(tx: TenantTx, p: Principal): Promise<Prisma.UserWhereInput | null> {
     if (p.roles.some((r) => SCHOOL_WIDE_SENDERS.has(r))) return null;
 
+    // A guardian may also reach transport; a pupil may not. Everyone gets the
+    // pastoral/office set.
+    const isGuardian = p.roles.includes("parent");
+    const reachable = [...REACHABLE_BY_ANYONE, ...(isGuardian ? REACHABLE_BY_GUARDIANS : [])];
     const staffOrTeacher: Prisma.UserWhereInput = {
-      roles: { some: { role: { name: { in: [...STAFF_OR_TEACHER] } } } },
+      roles: { some: { role: { name: { in: reachable } } } },
     };
     const anyOf: Prisma.UserWhereInput[] = [staffOrTeacher];
 
@@ -155,6 +210,28 @@ export class MessagingService {
           anyOf.push({ id: { in: studentIds } });
           anyOf.push({ parentLinks: { some: { studentId: { in: studentIds } } } });
         }
+      }
+    }
+
+    // A warden's own boarders, and those boarders' guardians.
+    if (p.roles.some((r) => HOSTEL_SCOPED_SENDERS.has(r))) {
+      // ONE query. The hostel is reached through the room rather than by loading
+      // hostels, then rooms, then allocations — three round trips to answer a
+      // question the database can answer in one. head_warden has every hostel,
+      // so their filter is on the school (which RLS already applies) rather than
+      // on wardenId.
+      const boarders = (await tx.hostelAllocation.findMany({
+        where: {
+          status: "ACTIVE",
+          ...(p.roles.includes("head_warden") ? {} : { room: { hostel: { wardenId: p.userId } } }),
+        },
+        select: { studentId: true },
+        distinct: ["studentId"],
+      })) as Array<{ studentId: string }>;
+      const boarderIds = boarders.map((b) => b.studentId);
+      if (boarderIds.length) {
+        anyOf.push({ id: { in: boarderIds } });
+        anyOf.push({ parentLinks: { some: { studentId: { in: boarderIds } } } });
       }
     }
 
@@ -367,11 +444,18 @@ export class MessagingService {
     const allowed = await tx.user.findFirst({ where: { id: recipientId, ...scope }, select: { id: true } });
     if (allowed) return;
     // Say which rule was missed. "You can only message staff and teachers" was
-    // shown to a teacher writing to their own pupil, and named the wrong reason.
+    // shown to a teacher writing to their own pupil, and named the wrong reason;
+    // it would now do the same to a warden writing to a boarder in a hostel that
+    // is not theirs.
+    const reach = p.roles.some((r) => CLASS_SCOPED_SENDERS.has(r))
+      ? "the pupils you teach, and their parents"
+      : p.roles.some((r) => HOSTEL_SCOPED_SENDERS.has(r))
+        ? "the boarders in your hostel, and their parents"
+        : null;
     throw new ForbiddenException(
-      p.roles.some((r) => CLASS_SCOPED_SENDERS.has(r))
-        ? "You can message staff, the pupils you teach, and their parents. This person is none of those — ask the school office to pass it on."
-        : "You can only message staff and teachers.",
+      reach
+        ? `You can message staff, ${reach}. This person is none of those — ask the school office to pass it on.`
+        : "You can only message school staff.",
     );
   }
 
