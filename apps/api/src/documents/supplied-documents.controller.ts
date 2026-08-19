@@ -3,6 +3,7 @@ import type { Response } from "express";
 import { z } from "zod";
 import {
   MODULES,
+  PRIVACY_PERMISSIONS,
   REQUIREMENT_SCOPES,
   SUBMISSION_SUBJECTS,
   type DocumentRequirementDto,
@@ -16,6 +17,9 @@ import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { safeDownloadType, safeFilename } from "./safe-content-type";
 import { SuppliedDocumentsService } from "./supplied-documents.service";
+import { JobRunsService } from "../maintenance/job-runs.service";
+import { SubmissionRetentionService, type SubmissionRetentionResult } from "./submission-retention.service";
+import { RequirePermission } from "../auth/require-permission.decorator";
 
 const requirementCreateSchema = z.object({
   appliesTo: z.enum(REQUIREMENT_SCOPES),
@@ -86,7 +90,11 @@ const waiveSchema = z.object({
 @RequireModule(MODULES.DOCUMENTS)
 @Controller("documents")
 export class SuppliedDocumentsController {
-  constructor(private readonly supplied: SuppliedDocumentsService) {}
+  constructor(
+    private readonly supplied: SuppliedDocumentsService,
+    private readonly retention: SubmissionRetentionService,
+    private readonly jobRuns: JobRunsService,
+  ) {}
 
   // --- requirements ----------------------------------------------------------
 
@@ -123,6 +131,22 @@ export class SuppliedDocumentsController {
     @Query("scope") scope: string,
   ): Promise<{ created: number; existing: number }> {
     return this.supplied.seedDefaults(p, scope);
+  }
+
+  /**
+   * Run the declined-applicant purge now.
+   *
+   * The sweep is nightly; this is for the day somebody asks "have you actually
+   * deleted my child's birth certificate?" and the answer needs to be yes
+   * rather than "tonight". Gated on the privacy officer's own permission,
+   * because that is whose obligation it is.
+   */
+  @Post("retention/run")
+  @RequirePermission(PRIVACY_PERMISSIONS.COMPLIANCE_MANAGE)
+  runRetention(): Promise<SubmissionRetentionResult> {
+    return this.jobRuns.record("documents.submissionRetention", "MANUAL", () =>
+      this.retention.purgeRejected("MANUAL"),
+    );
   }
 
   /**

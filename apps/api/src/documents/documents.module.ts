@@ -1,7 +1,16 @@
 import { Module } from "@nestjs/common";
 import { DocumentsController } from "./documents.controller";
 import { DocumentsService } from "./documents.service";
+import { BullModule } from "@nestjs/bullmq";
 import { PublicDocumentsController } from "./public-documents.controller";
+import { SubmissionRetentionService } from "./submission-retention.service";
+import { SubmissionRetentionProcessor } from "./submission-retention.processor";
+import { SubmissionRetentionScheduler } from "./submission-retention.scheduler";
+import { SUBMISSION_RETENTION_QUEUE } from "./submission-retention.constants";
+import { MaintenanceModule } from "../maintenance/maintenance.module";
+import { PrivilegedDatabaseModule } from "../common/privileged-database.module";
+import { PrivilegedDatabaseService } from "../common/privileged-database.service";
+import { RETENTION_DATABASE } from "../integrity/integrity.constants";
 import { SuppliedDocumentsController } from "./supplied-documents.controller";
 import { SuppliedDocumentsService } from "./supplied-documents.service";
 import { STORAGE_PROVIDER, StubStorageProvider } from "./storage.provider";
@@ -13,7 +22,7 @@ import { NotificationModule } from "../notifications/notification.module";
 // student document is uploaded. Storage backend is selected by env: STORAGE_PROVIDER=s3
 // binds the real S3/R2 presigner (cloud); anything else keeps the local stub.
 @Module({
-  imports: [NotificationModule],
+  imports: [NotificationModule, MaintenanceModule, PrivilegedDatabaseModule, BullModule.registerQueue({ name: SUBMISSION_RETENTION_QUEUE })],
   // ORDER MATTERS. DocumentsController serves `GET /documents/:id`, which
   // matches any single segment — including the literal `requirements` and
   // `checklist` this module also owns. Nest matches in REGISTRATION order, so
@@ -24,12 +33,21 @@ import { NotificationModule } from "../notifications/notification.module";
   providers: [
     DocumentsService,
     SuppliedDocumentsService,
+    // The same privileged client the integrity purge uses, bound here rather
+    // than imported from IntegrityModule — which provides the token but does
+    // not export it. Binding it locally keeps this module independent of that
+    // one, and the app failed to BOOT until it was: 3,069 unit tests passed on
+    // a wiring Nest could not resolve.
+    { provide: RETENTION_DATABASE, useExisting: PrivilegedDatabaseService },
+    SubmissionRetentionService,
+    SubmissionRetentionProcessor,
+    SubmissionRetentionScheduler,
     {
       provide: STORAGE_PROVIDER,
       useClass:
         process.env.STORAGE_PROVIDER === "s3" ? S3StorageProvider : StubStorageProvider,
     },
   ],
-  exports: [DocumentsService, SuppliedDocumentsService],
+  exports: [DocumentsService, SuppliedDocumentsService, SubmissionRetentionService],
 })
 export class DocumentsModule {}

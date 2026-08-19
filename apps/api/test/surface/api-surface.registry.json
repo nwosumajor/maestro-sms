@@ -3384,6 +3384,10 @@
     "POST /documents/promote": {
       "kind": "gap",
       "note": "moves an accepted application's documents onto the enrolled pupil. Still unreached: there is no application-to-pupil conversion in this codebase for it to hang off"
+    },
+    "POST /documents/retention/run": {
+      "kind": "system",
+      "note": "the declined-applicant document purge, run on demand. Nightly by BullMQ; this exists for the day somebody asks whether their child's certificate has actually gone. Listed in the job-runs catalogue with its manual path"
     }
   }
 }

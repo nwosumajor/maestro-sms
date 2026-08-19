@@ -175,6 +175,19 @@ export const SCHEDULED_JOBS = [
     everyMinutes: 1440,
   },
   {
+    key: "documents.submissionRetention",
+    label: "Declined-applicant documents",
+    // NIGHTLY. This is the platform letting go of a minor's identity documents
+    // once the school has said no — a sweep that stops running is a privacy
+    // obligation quietly going unmet, which is exactly the kind of silence this
+    // catalogue exists to break.
+    everyMinutes: 1440,
+    manual: {
+      path: "documents/retention/run",
+      permission: "privacy.compliance.manage",
+    },
+  },
+  {
     key: "operator.feedbackDigest",
     label: "Feedback digest",
     // HOURLY — `DEFAULT_FEEDBACK_DIGEST_CRON` is "0 * * * *". Declared as daily
