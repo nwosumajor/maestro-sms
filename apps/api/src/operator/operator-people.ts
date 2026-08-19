@@ -68,6 +68,17 @@ export async function headcountBySchool(
            count(DISTINCT ur."userId") FILTER (WHERE r.name = 'parent')::int  AS parents
     FROM user_role ur
     JOIN role r ON r.id = ur."roleId"
+    -- ON ROLL, not ever-enrolled. This counted people who had LEFT: exit a
+    -- pupil and the operator console said 901 while billing charged for 900,
+    -- which reads as a school being under-billed rather than as two questions
+    -- being asked. The Prisma call sites were fixed when common/student-scope.ts
+    -- was written; this raw SQL was missed, and the giveaway was that the
+    -- constant written for it — ON_ROLL_STUDENT_ROLE_ROW, "expressed against
+    -- user_role for the cross-tenant fleet sweep" — had no callers at all.
+    --
+    -- Applied to staff and parents too: a departed teacher is not headcount
+    -- either, and three figures on one screen must answer the same question.
+    JOIN "user" u ON u.id = ur."userId" AND u.status = 'ACTIVE'
     WHERE ur."schoolId" = ANY(ARRAY[${Prisma.join(schoolIds)}]::uuid[])
     GROUP BY ur."schoolId"
   `);

@@ -55,7 +55,14 @@ export const EVER_ENROLLED_STUDENT: Prisma.UserWhereInput = {
   roles: { some: { role: { name: STUDENT_ROLE } } },
 };
 
-/** ON ROLL, expressed against `user_role` for the cross-tenant fleet sweep. */
+/**
+ * ON ROLL, expressed against `user_role` — for a caller that starts from role
+ * rows rather than from users.
+ *
+ * The fleet headcount is raw SQL and cannot take a Prisma filter, so it carries
+ * the same rule inline with a note pointing here. That it went years with NO
+ * caller was the tell: the sweep was counting leavers.
+ */
 export const ON_ROLL_STUDENT_ROLE_ROW: Prisma.UserRoleWhereInput = {
   role: { name: STUDENT_ROLE },
   user: { status: "ACTIVE" },
