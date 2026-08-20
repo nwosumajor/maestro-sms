@@ -82,14 +82,35 @@ describe("disbursing an award", () => {
     expect(out).toEqual({ paymentId: "pay-old", amountMinor: 500_000 });
   });
 
-  it("is not fooled by a REVERSED payment carrying the same reference", async () => {
-    // Only a POSTED credit counts as already-paid. A reversed one means the
-    // money came back, and the award should be able to pay again.
+  it("credits again once the award has been TAKEN BACK", async () => {
+    // The case my first version got wrong. Revoking leaves the original payment
+    // POSTED and adds a REFUND beside it — there is no REVERSED payment status —
+    // so "a POSTED credit with this reference" says yes to an award that has
+    // already been reversed, and the re-award silently posts nothing. Found by
+    // running award -> revoke -> re-award against the database and reading the
+    // ledger: AWARDED on the application, net zero in the accounts.
     const { db, created, disburse } = make({
-      existingPayments: [{ id: "pay-old", reference: REF, status: "REVERSED", amountMinor: 500_000 }],
+      existingPayments: [
+        { id: "pay-old", reference: REF, status: "POSTED", amountMinor: 500_000, kind: "SCHOLARSHIP" },
+        { id: "pay-rev", reference: `SCHOLARSHIP-REVERSAL:${APP}`, status: "POSTED", amountMinor: 500_000, kind: "REFUND" },
+      ],
     });
     await disburse(db, "school-1", "pupil-1", 500_000, APP, "owner-1");
     expect(created).toHaveLength(1);
+  });
+
+  it("still refuses a second credit when only ONE reversal has happened", async () => {
+    // Two credits and one reversal means one is still live.
+    const { db, created, disburse } = make({
+      existingPayments: [
+        { id: "c1", reference: REF, status: "POSTED", amountMinor: 500_000, kind: "SCHOLARSHIP" },
+        { id: "c2", reference: REF, status: "POSTED", amountMinor: 500_000, kind: "SCHOLARSHIP" },
+        { id: "r1", reference: `SCHOLARSHIP-REVERSAL:${APP}`, status: "POSTED", amountMinor: 500_000, kind: "REFUND" },
+      ],
+    });
+    const out = await disburse(db, "school-1", "pupil-1", 500_000, APP, "owner-1");
+    expect(created).toHaveLength(0);
+    expect(out).toMatchObject({ paymentId: "c2" });
   });
 
   it("caps the credit at what is still owed", async () => {

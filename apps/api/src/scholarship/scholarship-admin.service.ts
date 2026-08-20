@@ -381,6 +381,94 @@ export class ScholarshipAdminService {
    *   PHYSICAL   → notify only (no on-platform surface).
    *  Idempotent: re-announcing reuses existing exams/competition (no duplicates).
    *  Every candidate + guardians are notified with the mode, date and how to sit. */
+  /**
+   * Take an award back.
+   *
+   * There was no way out of AWARDED. `decide` refuses anything already awarded
+   * as "finalised", the credit sits on the pupil's invoice as a POSTED payment,
+   * and the position stays consumed — so an award granted to the wrong candidate
+   * was permanent, and it cost one of only three places for the whole programme.
+   * The partial unique index that now holds Best Three makes that sharper still:
+   * the position cannot even be reassigned while the mistaken award holds it.
+   *
+   * The money is reversed by DOUBLE ENTRY, not by deleting anything: a REFUND
+   * payment for exactly what was credited, which is how this platform already
+   * moves an overpayment off an invoice. A financial record is never rewritten,
+   * and the pair reads as what happened — credited, then taken back.
+   *
+   * The application returns to QUALIFIED rather than to a REVOKED dead end. The
+   * mistake was the award, not the qualification: this candidate is still
+   * eligible, and the position is freed for whoever should have had it.
+   */
+  async revokeAward(p: Principal, id: string, reason: string): Promise<ScholarshipApplicationDto> {
+    const db = this.client();
+    const app = await db.scholarshipApplication.findFirst({ where: { id } });
+    if (!app) throw new NotFoundException("Application not found");
+    if (app.status !== "AWARDED") throw new BadRequestException("Only an awarded scholarship can be taken back");
+
+    // Claim it, for the same reason the award itself is claimed: two revocations
+    // both reading AWARDED would each post a refund.
+    const claimed = await db.scholarshipApplication.updateMany({
+      where: { id, status: "AWARDED" },
+      data: { status: "QUALIFIED" as never, awardPosition: null, awardMinor: null, disbursementPaymentId: null,
+              reviewedById: p.userId, reviewNote: reason },
+    });
+    if (claimed.count === 0) throw new BadRequestException("This award has already been taken back");
+
+    let refunded = 0;
+    if (app.disbursementPaymentId) {
+      const credit = await db.payment.findFirst({
+        where: { id: app.disbursementPaymentId, status: "POSTED" },
+        select: { id: true, invoiceId: true, amountMinor: true },
+      });
+      if (credit) {
+        await db.payment.create({
+          data: {
+            schoolId: app.schoolId,
+            invoiceId: credit.invoiceId,
+            amountMinor: credit.amountMinor,
+            method: "OTHER",
+            kind: "REFUND",
+            status: "POSTED",
+            // Points back at the award it reverses, so the pair is legible in
+            // the ledger without knowing this feature exists.
+            reference: `SCHOLARSHIP-REVERSAL:${id}`,
+            note: `Scholarship award taken back: ${reason}`,
+            recordedById: p.userId,
+          },
+        });
+        refunded = credit.amountMinor;
+        // The invoice owes again. Recomputed from the ledger rather than assumed,
+        // because other payments may have landed since the award.
+        const posted = (await db.payment.findMany({
+          where: { invoiceId: credit.invoiceId, status: "POSTED" },
+          select: { amountMinor: true, kind: true },
+        })) as Array<{ amountMinor: number; kind: string }>;
+        const invoice = await db.invoice.findFirst({ where: { id: credit.invoiceId }, select: { totalMinor: true } });
+        const net = posted.reduce((sum, x) => sum + (x.kind === "REFUND" ? -x.amountMinor : x.amountMinor), 0);
+        await db.invoice.update({
+          where: { id: credit.invoiceId },
+          data: { status: net >= (invoice?.totalMinor ?? 0) ? "PAID" : net > 0 ? "PARTIALLY_PAID" : "ISSUED" },
+        });
+      }
+    }
+
+    await this.auditOwn(p, "scholarship.award.revoke", id, {
+      targetSchoolId: app.schoolId, studentId: app.studentId, refunded, reason,
+    });
+    // The family was told they had won. They are told this too — silence after
+    // that message is the worse failure.
+    await this.notifyFamily(
+      p,
+      app.schoolId,
+      app.studentId,
+      "A scholarship award has been withdrawn",
+      `${reason} Any fee credit applied has been reversed. Please contact the school office.`,
+    );
+    const [row] = await this.listApplicationById(db, id);
+    return row;
+  }
+
   async announceExam(p: Principal, programId: string): Promise<{ notified: number; cbtExams: number; arena: boolean }> {
     const db = this.client();
     const program = await db.scholarshipProgram.findFirst({ where: { id: programId } });
@@ -717,10 +805,24 @@ export class ScholarshipAdminService {
     //
     // The reference already identified the award uniquely; nothing looked. This
     // is the check `billFine` makes a few files away for exactly this reason.
-    const already = invoice.payments.find(
+    // Is there an UNREVERSED credit for this award? Not merely "a credit".
+    //
+    // A revoked award leaves the original payment POSTED and adds a REFUND
+    // beside it — there is no REVERSED payment status, and a financial row is
+    // not rewritten. So a check for "a POSTED credit with this reference" says
+    // yes to an award that has already been taken back, and a re-award then
+    // posts nothing: the application reads AWARDED while the ledger nets to
+    // zero. Caught by running award -> revoke -> re-award against the database
+    // and reading the ledger, not by any test — the test I had written guarded a
+    // REVERSED status that does not exist.
+    const credited = invoice.payments.filter(
       (pay) => pay.reference === `SCHOLARSHIP:${applicationId}` && pay.status === "POSTED",
     );
-    if (already) return { paymentId: already.id, amountMinor: already.amountMinor };
+    const reversed = invoice.payments.filter(
+      (pay) => pay.reference === `SCHOLARSHIP-REVERSAL:${applicationId}` && pay.status === "POSTED",
+    );
+    const outstanding = credited[reversed.length];
+    if (outstanding) return { paymentId: outstanding.id, amountMinor: outstanding.amountMinor };
     const paid = invoice.payments
       .filter((pay) => pay.status === "POSTED")
       .reduce((s, pay) => s + (pay.kind === "REFUND" ? -pay.amountMinor : pay.amountMinor), 0);

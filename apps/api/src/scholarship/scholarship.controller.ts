@@ -55,6 +55,7 @@ const programUpdateSchema = programSchema.partial().extend({
 });
 const stageDecisionSchema = z.object({ decision: z.enum(["APPROVE", "REJECT"]), note: z.string().max(2000).optional() });
 const reviewSchema = z.object({ action: z.enum(["REVIEW", "SHORTLIST", "QUALIFY", "REJECT"]), note: z.string().max(2000).optional() });
+const revokeSchema = z.object({ reason: z.string().min(1).max(2000) });
 const awardSchema = z.object({
   awardMinor: z.number().int().positive().optional(),
   position: z.number().int().min(1).max(3).optional(),
@@ -196,6 +197,25 @@ export class ScholarshipController {
     @Body(new ZodValidationPipe(awardSchema)) body: z.infer<typeof awardSchema>,
   ) {
     return this.admin.decide(p, id, { action: "AWARD", ...body });
+  }
+
+  /**
+   * Take an award back — step-up, for the same reason the award needs it: money
+   * moves, in the other direction.
+   *
+   * A REASON IS REQUIRED. This reverses a decision a family was told about and
+   * puts a fee back on their account; the note is what the office repeats to
+   * them, and an unexplained reversal is the version that generates a complaint.
+   */
+  @Post("applications/:id/revoke")
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.ADMIN)
+  @RequireStepUp()
+  revoke(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(revokeSchema)) body: z.infer<typeof revokeSchema>,
+  ) {
+    return this.admin.revokeAward(p, id, body.reason);
   }
 
   /** Announce the qualification exam to every QUALIFIED candidate AND materialize

@@ -148,6 +148,26 @@ export function ScholarshipAdmin() {
     else setMsg({ ok: false, text: await readApiError(res) });
   };
 
+  /**
+   * Take an award back.
+   *
+   * There was no way out of AWARDED at all: an award to the wrong candidate was
+   * permanent and consumed one of only three positions for the programme. The
+   * reason is required because it is what the office repeats to a family who
+   * were already told they had won.
+   */
+  const revoke = async (a: Application) => {
+    const reason = window.prompt(
+      `Take back ${a.studentName}'s award? Their fee credit is reversed and the position is freed.\n\nWhy? (the family is told)`,
+    );
+    if (!reason?.trim()) return;
+    setBusy(`revoke-${a.id}`); setMsg(null);
+    const res = await sendWithStepUp("POST", `scholarships/applications/${a.id}/revoke`, { reason });
+    setBusy(null);
+    if (res.ok) { setMsg({ ok: true, text: `Award taken back — credit reversed and the position is free again.` }); void loadApps(); }
+    else setMsg({ ok: false, text: await readApiError(res) });
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -260,6 +280,23 @@ export function ScholarshipAdmin() {
                         {s.tasksCompleted != null && <> · tasks done: <strong>{s.tasksCompleted}</strong></>}
                         {" "}<span className="italic">(for judgement only, not a verdict)</span>
                       </p>
+                    )}
+                    {a.status === "AWARDED" && (
+                      <div className="mt-2 flex flex-wrap items-center gap-1">
+                        {/* The only way out of AWARDED. Without it a mistaken
+                            award is permanent and holds one of three positions
+                            for the whole programme. */}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-destructive"
+                          disabled={busy === `revoke-${a.id}`}
+                          onClick={() => revoke(a)}
+                        >
+                          Take award back
+                        </Button>
+                        <span className="text-xs text-muted-foreground">reverses the fee credit and frees the position</span>
+                      </div>
                     )}
                     {!finalised && (
                       <div className="mt-2 flex flex-wrap items-center gap-1">

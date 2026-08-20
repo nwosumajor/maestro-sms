@@ -2857,6 +2857,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "POST /scholarships/applications/:p/revoke": {
+      "kind": "ui",
+      "note": "referenced by a literal path in apps/web"
+    },
     "POST /scholarships/applications/:p/submit": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
