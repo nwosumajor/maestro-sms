@@ -25,6 +25,9 @@ function makeService(over: {
       findMany: jest.fn().mockResolvedValue([]),
       update: employeeUpdate,
     },
+    // A maker-checker request is refused when the requester is the only person
+    // who could approve it, so the stub has a second holder — the ordinary case.
+    userRole: { findMany: jest.fn().mockResolvedValue([{ userId: "me" }, { userId: "someone-else" }]) },
     salaryChangeRequest: {
       create: changeCreate,
       findFirst: jest.fn().mockResolvedValue(over.change ?? null),

@@ -8,6 +8,7 @@
 // permission miss (see hasActiveGrant equivalent in the guard).
 // =============================================================================
 
+import { holdersOf } from "../common/approvers";
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException, UnauthorizedException } from "@nestjs/common";
 import bcrypt from "bcryptjs";
 import { NON_STAFF_ROLE_NAMES, SECURITY_PERMISSIONS, isElevatable, type AuditLogPageDto } from "@sms/types";
@@ -47,6 +48,21 @@ export interface ElevationRequestInput {
   minutes?: number;
   breakGlass?: boolean;
 }
+
+/**
+ * The controls that require two different people, and the permission each
+ * checker must hold. Named rather than derived: a permission is not
+ * self-describing about whether it is one half of a two-person rule, and a
+ * guessed list would either miss one or report a permission that is simply
+ * scarce.
+ */
+const TWO_PERSON_CONTROLS: Array<{ label: string; permission: string }> = [
+  { label: "Fee discounts and waivers", permission: "fee.approve" },
+  { label: "Salary and employment changes", permission: "hr.salary.approve" },
+  { label: "Approval requests (leave, grade publishing, exits)", permission: "workflow.review" },
+  { label: "Privilege elevation", permission: "security.elevation.approve" },
+  { label: "Role changes touching the junior-admin tier", permission: "rbac.manage" },
+];
 
 @Injectable()
 export class SecurityService {
@@ -365,12 +381,33 @@ export class SecurityService {
         .sort((a, b) => b.count - a.count)
         .slice(0, 5);
 
+      // TWO-PERSON RULES THAT CANNOT COMPLETE.
+      //
+      // Every other signal here is BEHAVIOURAL — who used break-glass, who read
+      // a lot of medical records, who could not sign in. This one is
+      // STRUCTURAL, and it is the only one that reports a control which is not
+      // working rather than a person who might bear watching.
+      //
+      // A maker-checker rule needs two holders of the permission: one to raise
+      // and a different one to decide. With ONE, the request can be raised and
+      // decided by nobody. With NONE it cannot be decided at all. Neither state
+      // announces itself — a school that never appointed a school_admin, or
+      // deactivated one of two, simply finds that approvals stop.
+      const thin = await Promise.all(
+        TWO_PERSON_CONTROLS.map(async (c) => ({
+          ...c,
+          holders: (await holdersOf(tx, c.permission)).length,
+        })),
+      );
       return {
         breakGlassCount: breakGlass.length,
         breakGlassEvents: breakGlass,
         topMedicalReaders,
         lockedOutCount: [...failCounts.values()].filter((v) => v.locked).length,
         topFailedLogins,
+        // Only the broken ones. A list that also reports what is fine is a list
+        // whose length means nothing.
+        unstaffedControls: thin.filter((c) => c.holders < 2),
       };
     });
   }

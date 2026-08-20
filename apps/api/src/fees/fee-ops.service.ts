@@ -22,6 +22,7 @@
 //   date range as formula-guarded CSV for the school's accountant.
 // =============================================================================
 
+import { hasSecondApprover, noSecondApproverMessage } from "../common/approvers";
 import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, Optional, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { csvCell } from "../common/csv";
 import PDFDocument from "pdfkit";
@@ -132,6 +133,12 @@ export class FeeOpsService {
       const paid = await this.paidMinor(tx, invoiceId);
       if (input.amountMinor > inv.totalMinor - paid) {
         throw new BadRequestException("Adjustment exceeds the outstanding balance");
+      }
+      // A two-person rule with one person is not a control, it is a dead end: the
+      // request would be created and could never be decided. Refused here, with
+      // the fix named, rather than left to sit.
+      if (!(await hasSecondApprover(tx, FEES_PERMISSIONS.FEE_APPROVE, p.userId))) {
+        throw new BadRequestException(noSecondApproverMessage("A fee discount or waiver", FEES_PERMISSIONS.FEE_APPROVE));
       }
       const row = await tx.invoiceAdjustment.create({
         data: {

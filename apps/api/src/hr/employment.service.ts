@@ -8,6 +8,7 @@
 // salary maker-checker separately. Tenant-isolated (RLS); everything audited.
 // =============================================================================
 
+import { hasSecondApprover, noSecondApproverMessage } from "../common/approvers";
 import { NotificationService } from "../notifications/notification.service";
 import { HR_PERMISSIONS } from "@sms/types";
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
@@ -84,6 +85,12 @@ export class EmploymentService {
         select: { id: true },
       });
       if (dup) throw new BadRequestException("An identical request is already awaiting a decision");
+      // A two-person rule with one person is not a control, it is a dead end: the
+      // request would be created and could never be decided. Refused here, with
+      // the fix named, rather than left to sit.
+      if (!(await hasSecondApprover(tx, HR_PERMISSIONS.HR_SALARY_APPROVE, p.userId))) {
+        throw new BadRequestException(noSecondApproverMessage("An employment change", HR_PERMISSIONS.HR_SALARY_APPROVE));
+      }
       const row = await tx.employmentChangeRequest.create({
         data: {
           schoolId: p.schoolId,

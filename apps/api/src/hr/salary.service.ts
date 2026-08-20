@@ -9,6 +9,7 @@
 // Audit metadata never carries the plaintext salary (GR#5).
 // =============================================================================
 
+import { hasSecondApprover, noSecondApproverMessage } from "../common/approvers";
 import { NotificationService } from "../notifications/notification.service";
 import { HR_PERMISSIONS } from "@sms/types";
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
@@ -45,6 +46,12 @@ export class SalaryService {
     const dto = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const emp = await tx.employee.findFirst({ where: { id: employeeId } });
       if (!emp) throw new NotFoundException("Employee not found");
+      // A two-person rule with one person is not a control, it is a dead end: the
+      // request would be created and could never be decided. Refused here, with
+      // the fix named, rather than left to sit.
+      if (!(await hasSecondApprover(tx, HR_PERMISSIONS.HR_SALARY_APPROVE, p.userId))) {
+        throw new BadRequestException(noSecondApproverMessage("A salary change", HR_PERMISSIONS.HR_SALARY_APPROVE));
+      }
       const row = await tx.salaryChangeRequest.create({
         data: {
           schoolId: p.schoolId,
