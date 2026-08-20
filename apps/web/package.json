@@ -14,7 +14,8 @@
     "build:runbooks": "node scripts/build-runbooks.mjs",
     "isolation:probe": "node scripts/isolation-probe.mjs",
     "probe:family": "node scripts/family-scope-probe.mjs",
-    "probe:permissions": "node scripts/permission-matrix.mjs"
+    "probe:permissions": "node scripts/permission-matrix.mjs",
+    "seed:modules": "node scripts/seed-modules.mjs"
   },
   "dependencies": {
     "@sms/tokens": "workspace:*",
