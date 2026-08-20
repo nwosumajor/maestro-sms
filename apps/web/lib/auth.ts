@@ -13,7 +13,7 @@ import type { JWT } from "next-auth/jwt";
 import Credentials from "next-auth/providers/credentials";
 import jwt from "jsonwebtoken";
 import { PLATFORM_REGION } from "@/lib/format";
-import { permissionsForRoles } from "@sms/types";
+import { sessionPermissions } from "./permissions";
 
 const API_BASE = process.env.API_BASE_URL ?? "http://localhost:3001";
 
@@ -47,6 +47,8 @@ interface RefreshedClaims {
   mfaEnrollRequired: boolean;
   passwordExpired: boolean;
   passwordChangedAtMs: number;
+  /** Permissions held by an ACTIVE elevation grant rather than by a role. */
+  elevated?: string[];
 }
 
 /** The claims the refresh bearer is minted from — everything that can change the
@@ -178,6 +180,9 @@ interface LoginResult {
   name: string;
   roles: string[];
   permissions: string[];
+  /** Held by an ACTIVE elevation grant, not by a role. Optional so a web build
+   *  running against an older API still signs people in. */
+  elevated?: string[];
   modules: string[];
   /** The school's region — see the session augmentation. Optional so a web build
    *  running against an older API still signs people in. */
@@ -243,6 +248,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           currency: u.currency,
           roles: u.roles,
           permissions: u.permissions,
+          elevated: u.elevated ?? [],
           modules: u.modules ?? [],
           mfaEnrollRequired: u.mfaEnrollRequired ?? false,
           passwordExpired: u.passwordExpired ?? false,
@@ -294,6 +300,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           currency: claims.currency,
           roles: claims.roles ?? [],
           permissions: claims.permissions ?? [],
+          // An impersonation token carries the TARGET's roles and nothing on
+          // loan: the operator is standing in the user's shoes, not borrowing a
+          // permission. The refresh fills this in if the target has a grant.
+          elevated: [],
           modules: claims.modules ?? [],
           mfaEnrollRequired: false, // already satisfied by the OPERATOR's own login
           passwordExpired: false,
@@ -323,6 +333,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           schoolName: string;
           roles: string[];
           permissions: string[];
+          elevated?: string[];
           modules: string[];
           timezone?: string;
           locale?: string;
@@ -345,6 +356,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         // for authorization. `permissions: undefined` also scrubs the big array
         // out of PRE-EXISTING cookies on their first refresh.
         token.permissions = undefined;
+        // The exception to "roles only": an elevation grant is NOT derivable
+        // from a role, so the few strings it adds have to be carried. Bounded by
+        // the user's active grants — typically none, and the smoke test asserts
+        // the whole cookie stays under 3 KB.
+        token.elevated = u.elevated ?? [];
         token.modules = u.modules; // bounded by the module catalog (small)
         // Three short strings — the school's region. Needed on BOTH the server
         // render and the client hydration, and identical on each, or React throws
@@ -388,6 +404,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         // everywhere) — this also scrubs pre-slim cookies on their first refresh.
         token.permissions = undefined;
         token.modules = fresh.modules;
+        // Elevation, and its EXPIRY: a grant that has lapsed comes back absent,
+        // so the affordance disappears with the authority behind it.
+        token.elevated = fresh.elevated ?? [];
         token.mfaEnrollRequired = fresh.mfaEnrollRequired;
         token.passwordExpired = fresh.passwordExpired;
         // Kept in step so the session that legitimately changed the password can
@@ -408,7 +427,20 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       // matches the API's own role→permission resolution. Pure function — safe
       // in the Edge middleware. Pre-slim cookies that still carry permissions
       // are ignored in favour of the derivation (consistency over legacy).
-      session.user.permissions = permissionsForRoles((token.roles as string[]) ?? []);
+      //
+      // PLUS anything held by an ACTIVE elevation grant, which is not derivable
+      // from a role and so had to be carried. Without it the UI contradicted the
+      // API: the guard merges a grant and answers the request, while the nav,
+      // the dashboard tiles and every page gate here still said no — so an
+      // approved, audited elevation reached only somebody willing to call the
+      // API by hand. This is UI gating, not authorization; the API remains the
+      // gate, and `elevated` has already been filtered to elevatable
+      // permissions server-side.
+      const elevated = (token.elevated as string[] | undefined) ?? [];
+      session.user.permissions = sessionPermissions((token.roles as string[]) ?? [], elevated);
+      // Named separately so the UI can SAY that a screen is on loan rather than
+      // silently presenting borrowed authority as the user's own.
+      session.user.elevated = elevated;
       session.user.modules = (token.modules as string[]) ?? [];
       // Region: defaults keep an OLD session (minted before this existed) rendering
       // exactly as it did, rather than blank.

@@ -21,6 +21,10 @@ declare module "next-auth" {
       mfaEnrollRequired: boolean;
       /** Password older than 30 days (non-super_admin) — gate to /account/password. */
       passwordExpired: boolean;
+      /** Permissions the user holds only by an ACTIVE elevation grant — already
+       *  folded into `permissions`, listed separately so a screen can say it is
+       *  on loan rather than present borrowed authority as the user's own. */
+      elevated: string[];
       /** Set ONLY on an impersonated session: the operator's userId. Drives the
        *  banner AND rides into the API token so the audit log stays attributable. */
       impersonatedBy?: string;

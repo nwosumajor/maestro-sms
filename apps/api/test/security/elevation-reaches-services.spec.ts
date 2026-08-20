@@ -30,6 +30,7 @@
 // =============================================================================
 
 import { isElevatable, WORKFLOW_PERMISSIONS } from "@sms/types";
+import { activeGrantPermissions } from "../../src/auth/active-grants";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
@@ -56,16 +57,40 @@ describe("the guard makes elevation additive to the JWT", () => {
     );
   });
 
-  it("still filters out non-elevatable permissions", () => {
+  it("still filters out non-elevatable permissions — now provably, not textually", async () => {
     // The merge must not become a way around isElevatable: a tampered or legacy
     // ACTIVE row for platform.operate or a maker-checker permission would
     // otherwise be written straight into the principal.
-    const fn = GUARD.slice(
-      GUARD.indexOf("private async activeGrantPermissions"),
-      GUARD.indexOf("private async recordElevatedUse"),
-    );
-    expect(fn).toMatch(/isElevatable\(perm\)/);
-    expect(fn).toMatch(/\.filter\(/);
+    //
+    // The rule moved out of the guard when the LOGIN/REFRESH claims came to need
+    // the same answer, which is the whole reason it is one function now. That
+    // makes it testable by calling it rather than by reading it.
+    const rows = [
+      { permission: "hr.read" },
+      { permission: "platform.operate" },
+      { permission: "fee.approve" },
+      { permission: "rbac.manage" },
+      { permission: "security.elevation.approve" },
+      { permission: "attendance.write" },
+    ];
+    const tx = { privilegeGrant: { findMany: async () => rows } } as never;
+    await expect(activeGrantPermissions(tx, "u-1")).resolves.toEqual(["hr.read", "attendance.write"]);
+  });
+
+  it("asks only for ACTIVE, unexpired grants belonging to that user", async () => {
+    const findMany = jest.fn().mockResolvedValue([]);
+    await activeGrantPermissions({ privilegeGrant: { findMany } } as never, "u-1");
+    const where = findMany.mock.calls[0][0].where as { userId: string; status: string; expiresAt: { gt: Date } };
+    expect(where.userId).toBe("u-1");
+    expect(where.status).toBe("ACTIVE");
+    expect(where.expiresAt.gt.getTime()).toBeLessThanOrEqual(Date.now());
+  });
+
+  it("degrades to no grants when the tenant runner returns a wrong SHAPE", async () => {
+    // A `try` does not catch a wrong shape, and this runs in front of every
+    // request — it must answer "no grants", never throw.
+    await expect(activeGrantPermissions({ privilegeGrant: { findMany: async () => undefined } } as never, "u"))
+      .resolves.toEqual([]);
   });
 
   it("fails closed when the grant lookup errors", () => {

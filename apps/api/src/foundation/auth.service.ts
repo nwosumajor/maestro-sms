@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@sms/db";
 import { effectivePermissions, resolveRegion } from "@sms/types";
 import { verifyTotp } from "../auth/totp";
+import { activeGrantPermissions } from "../auth/active-grants";
 import { ModuleEntitlementService } from "./module-entitlement.service";
 import {
   AUDIT_LOG_SERVICE,
@@ -43,6 +44,14 @@ export interface LoginResult {
   passwordExpired: boolean;
   /** Epoch ms of the password this session was issued under; 0 when never set. */
   passwordChangedAtMs: number;
+  /** Permissions this user holds by an ACTIVE elevation grant rather than by a
+   *  role — so the WEB knows about one. The API has always honoured a grant (the
+   *  guard merges it), but the browser derived its permissions from roles alone,
+   *  so an approved, audited elevation lit up nothing: a teacher granted
+   *  `hr.read` could read /hr/employees through the API and was redirected off
+   *  the /hr page. Small and bounded (one string per active grant) — the session
+   *  cookie's budget is asserted by the web smoke test. */
+  elevated: string[];
 }
 
 /** Fresh claims for an EXISTING session (GET /auth/refresh) — everything the
@@ -259,6 +268,10 @@ export class AuthService {
         // rows, or a restored backup. AdminService blocks new grants; this
         // neutralises existing ones.
         const permissions = effectivePermissions(grantedPermissions, school?.isPlatform === true);
+        // What an ACTIVE elevation adds on top of the roles. Read here so the
+        // browser starts the session knowing about a grant instead of learning
+        // about it at the first refresh a minute later.
+        const elevated = (await activeGrantPermissions(tx, user.id)).filter((perm) => !permissions.includes(perm));
         // School policy: staff (any role but student/parent) must enrol MFA.
         // super_admin is exempt (the owner's lock/exempt posture elsewhere).
         const isStaff = roles.some((r) => r !== "student" && r !== "parent");
@@ -282,6 +295,7 @@ export class AuthService {
             name: user.name,
             roles,
             permissions,
+            elevated,
             ...regionClaims(school),
             mfaEnrollRequired,
             passwordExpired,
@@ -400,12 +414,18 @@ export class AuthService {
         // Same defence in depth as login: platform.* is inert outside the
         // platform org, so a stale grant cannot be re-acquired mid-session.
         const permissions = effectivePermissions(grantedPermissions, school?.isPlatform === true);
+        // Refreshed alongside the roles, so a grant issued mid-session reaches
+        // the UI within a refresh — and so does its EXPIRY, which matters more:
+        // an affordance that outlives the grant behind it is an error the user
+        // meets as a refusal they were invited to trigger.
+        const elevated = (await activeGrantPermissions(tx, p.userId)).filter((perm) => !permissions.includes(perm));
         return {
           revoked: false as const,
           claims: {
             schoolName: school?.name ?? "",
             roles,
             permissions,
+            elevated,
             // Refreshed too, so moving a school's region takes effect on the next
             // session refresh rather than only at the next sign-in.
             ...regionClaims(school),

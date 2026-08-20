@@ -51,6 +51,10 @@ function makeService(opts: { passwordChangedAt?: Date | null; locked?: boolean }
         { role: { name: "teacher", permissions: [{ permission: { key: "grade.read" } }] } },
       ]),
     },
+    // The refresh also reports what this user holds by an ACTIVE elevation
+    // grant, so the browser knows about one. None here — these tests are about
+    // the password epoch, and a teacher with no grant is the ordinary case.
+    privilegeGrant: { findMany: jest.fn(async () => []) },
     school: { findUnique: jest.fn(async () => ({ id: "S", name: "A School", status: "ACTIVE", isPlatform: false })) },
   } as unknown as TenantTx;
 

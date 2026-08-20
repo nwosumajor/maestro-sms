@@ -11,7 +11,8 @@ import {
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import type { Request, Response } from "express";
-import { isDelegatablePlatformPermission, isElevatable, type ModuleKey } from "@sms/types";
+import { isDelegatablePlatformPermission, type ModuleKey } from "@sms/types";
+import { activeGrantPermissions } from "./active-grants";
 import { PERMISSION_KEY } from "./require-permission.decorator";
 import { MODULE_KEY } from "./require-module.decorator";
 import { STEPUP_KEY } from "./require-stepup.decorator";
@@ -253,23 +254,7 @@ export class PermissionGuard implements CanActivate {
     try {
       return await this.db.runAsTenant(
         { schoolId: principal.schoolId, userId: principal.userId },
-        async (tx) => {
-          const grants = await tx.privilegeGrant.findMany({
-            where: {
-              userId: principal.userId,
-              status: "ACTIVE",
-              expiresAt: { gt: new Date() },
-            },
-            select: { permission: true },
-          });
-          // Array.isArray rather than a cast: a tenant runner that returns
-          // nothing must degrade to "no grants", not crash the gate for every
-          // request. A `try` does not catch a wrong SHAPE.
-          if (!Array.isArray(grants)) return [];
-          return (grants as Array<{ permission: string }>)
-            .map((g) => g.permission)
-            .filter((perm) => typeof perm === "string" && isElevatable(perm));
-        },
+        (tx) => activeGrantPermissions(tx, principal.userId),
       );
     } catch {
       // Fail closed: an error resolving elevation grants nothing.

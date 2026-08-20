@@ -1,3 +1,4 @@
+import { permissionsForRoles } from "@sms/types";
 import type { Permission } from "@sms/types";
 
 /**
@@ -32,6 +33,27 @@ export const REPORT_CENTER_PERMISSIONS: Permission[] = [
 /** True when the caller has at least one report the hub can actually show them. */
 export function canSeeReportCenter(permissions: string[]): boolean {
   return REPORT_CENTER_PERMISSIONS.some((p) => permissions.includes(p));
+}
+
+/**
+ * What the UI may offer this session: the role permissions, PLUS anything held
+ * by an ACTIVE elevation grant.
+ *
+ * The session cookie carries roles only — a principal's ~97 permission strings
+ * pushed it past nginx's header buffer — and roles expand through the same map
+ * the seed writes to the DB, so UI gating matches the API's role resolution. An
+ * elevation grant is the one thing that resolution cannot produce: it is not
+ * derivable from a role, so it has to be carried, and until it was, the UI
+ * contradicted the API. A teacher granted `hr.read` could read /hr/employees
+ * through the API and was redirected off the /hr page.
+ *
+ * This is UI gating, never authorization — the API remains the gate, and the
+ * `elevated` list has already been filtered server-side to permissions that may
+ * be elevated at all.
+ */
+export function sessionPermissions(roles: string[], elevated: string[] = []): string[] {
+  const rolePerms = permissionsForRoles(roles);
+  return elevated.length ? [...new Set([...rolePerms, ...elevated])] : rolePerms;
 }
 
 export type { Permission };
