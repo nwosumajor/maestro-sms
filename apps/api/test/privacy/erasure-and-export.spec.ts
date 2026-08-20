@@ -63,7 +63,7 @@ function makeService(opts: { failKeys?: string[] } = {}) {
       audited.push(e);
     }),
   };
-  const service = new PrivacyService(db as never, audit as never, storage as never);
+  const service = new PrivacyService(db as never, audit as never, storage as never, { notifyPermissionHolders: jest.fn().mockResolvedValue(0), enqueueMany: jest.fn().mockResolvedValue({ created: 0, failed: 0 }) } as never);
   return { service, audited, deleted, storage };
 }
 

@@ -21,6 +21,7 @@ import type {
   HostelRoomDto,
   HostelSummaryDto,
 } from "@sms/types";
+import { HOSTEL_PERMISSIONS } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -570,6 +571,20 @@ export class HostelService {
       await this.log(tx, p, "hostel.exeat.request", row.id, { studentId: input.studentId });
       return this.exeatDto(tx, row.id);
     });
+    // A boarder asking to leave site needs a warden to decide. Nobody was told
+    // one was waiting, so the request sat until somebody opened the page — on
+    // the one request where the delay is a child standing at a gate.
+    await this.notifications.notifyPermissionHolders(
+      this.ctx(p),
+      HOSTEL_PERMISSIONS.HOSTEL_MANAGE,
+      {
+        type: "HOSTEL",
+        title: "An exeat is waiting for a decision",
+        body: "A boarder has asked to leave site.",
+        data: { exeatId: dto.id },
+      },
+      { exclude: [p.userId] },
+    );
     return dto;
   }
 

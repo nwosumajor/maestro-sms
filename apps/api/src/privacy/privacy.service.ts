@@ -8,6 +8,8 @@
 // one-click deletion of a minor's record.
 // =============================================================================
 
+import { NotificationService } from "../notifications/notification.service";
+import { PRIVACY_PERMISSIONS } from "@sms/types";
 import { ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { decryptField } from "../foundation/field-crypto";
 import { STORAGE_PROVIDER, type StorageProvider } from "../documents/storage.provider";
@@ -32,6 +34,7 @@ export class PrivacyService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     @Inject(STORAGE_PROVIDER) private readonly storage: StorageProvider,
+    private readonly notifications: NotificationService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -192,7 +195,7 @@ export class PrivacyService {
 
   // --- erasure requests ------------------------------------------------------
   async requestErasure(p: Principal, input: { studentId: string; reason: string }) {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    const req = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.assertCanAccess(tx, p, input.studentId);
       const req = await tx.erasureRequest.create({
         data: {
@@ -205,6 +208,21 @@ export class PrivacyService {
       await this.log(tx, p, "privacy.erasure.request", req.id, { studentId: input.studentId });
       return req;
     });
+    // A right-to-erasure request is a STATUTORY obligation with a response
+    // deadline, and it was created silently — so the clock started on a record
+    // nobody had been told about. The controller who must answer it is told now.
+    await this.notifications.notifyPermissionHolders(
+      this.ctx(p),
+      PRIVACY_PERMISSIONS.ERASURE_REVIEW,
+      {
+        type: "WORKFLOW_UPDATE",
+        title: "An erasure request needs a decision",
+        body: "A data-erasure request has been made and is waiting for review.",
+        data: { erasureRequestId: req.id },
+      },
+      { exclude: [p.userId] },
+    );
+    return req;
   }
 
   async listErasureRequests(p: Principal) {

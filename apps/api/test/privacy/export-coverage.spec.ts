@@ -44,7 +44,10 @@ function makeTx(notificationCount: number) {
   };
 }
 
-const svc = () => new PrivacyService({} as never, { record: jest.fn() } as never, {} as never);
+const svc = () =>
+  new PrivacyService({} as never, { record: jest.fn() } as never, {} as never, {
+    notifyPermissionHolders: jest.fn().mockResolvedValue(0),
+  } as never);
 
 describe("collectStudentBundle coverage", () => {
   it("the right-of-access path is COMPLETE — no cap is applied at all", async () => {

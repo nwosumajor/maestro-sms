@@ -25,7 +25,7 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, Optional, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { csvCell } from "../common/csv";
 import PDFDocument from "pdfkit";
-import type { InvoiceAdjustmentDto, LateFeeConfigDto } from "@sms/types";
+import { FEES_PERMISSIONS, type InvoiceAdjustmentDto, type LateFeeConfigDto } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -123,7 +123,7 @@ export class FeeOpsService {
     invoiceId: string,
     input: { kind: "DISCOUNT" | "WAIVER"; amountMinor: number; reason: string },
   ): Promise<InvoiceAdjustmentDto> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    const dto = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const inv = await tx.invoice.findFirst({ where: { id: invoiceId }, select: { status: true, totalMinor: true } });
       if (!inv) throw new NotFoundException("Invoice not found");
       if (inv.status !== "ISSUED" && inv.status !== "PARTIALLY_PAID") {
@@ -156,6 +156,20 @@ export class FeeOpsService {
       );
       return this.toAdjustmentDto(row);
     });
+    // A waiver moves money and needs a DIFFERENT fee.approve holder. Nobody was
+    // told one was waiting. After the transaction and never fatal.
+    await this.notifications.notifyPermissionHolders(
+      this.ctx(p),
+      FEES_PERMISSIONS.FEE_APPROVE,
+      {
+        type: "WORKFLOW_UPDATE",
+        title: "A fee adjustment is waiting for approval",
+        body: "An invoice discount or waiver needs a second approver.",
+        data: { adjustmentId: dto.id },
+      },
+      { exclude: [p.userId] },
+    );
+    return dto;
   }
 
   /** Approver must hold fee.approve AND differ from the requester. Approval

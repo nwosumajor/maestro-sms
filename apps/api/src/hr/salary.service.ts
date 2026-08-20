@@ -9,6 +9,8 @@
 // Audit metadata never carries the plaintext salary (GR#5).
 // =============================================================================
 
+import { NotificationService } from "../notifications/notification.service";
+import { HR_PERMISSIONS } from "@sms/types";
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { SalaryChangeDto } from "@sms/types";
 import { decryptField, encryptField } from "../foundation/field-crypto";
@@ -26,6 +28,7 @@ export class SalaryService {
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
+    private readonly notifications: NotificationService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -39,7 +42,7 @@ export class SalaryService {
     input: { newSalaryMinor: number; reason?: string | null; effectiveDate?: string | null },
   ): Promise<SalaryChangeDto> {
     if (input.newSalaryMinor < 0) throw new BadRequestException("salary must be >= 0");
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    const dto = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const emp = await tx.employee.findFirst({ where: { id: employeeId } });
       if (!emp) throw new NotFoundException("Employee not found");
       const row = await tx.salaryChangeRequest.create({
@@ -60,6 +63,21 @@ export class SalaryService {
       );
       return this.decorate(row, p.schoolId, null);
     });
+    // Maker-checker on pay: a DIFFERENT hr.salary.approve holder must apply it,
+    // and none of them was told the request existed.
+    await this.notifications.notifyPermissionHolders(
+      this.ctx(p),
+      HR_PERMISSIONS.HR_SALARY_APPROVE,
+      {
+        type: "WORKFLOW_UPDATE",
+        title: "A salary change is waiting for approval",
+        body: "A pay change needs a second approver.",
+        data: { salaryChangeId: dto.id },
+      },
+      // SECURITY: never the requester. The service refuses their own approval.
+      { exclude: [p.userId] },
+    );
+    return dto;
   }
 
   /** Checker: approve/reject a pending change. Must differ from the requester. */

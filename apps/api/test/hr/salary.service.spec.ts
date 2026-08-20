@@ -35,7 +35,7 @@ function makeService(over: {
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
-  return { service: new SalaryService(db as never, audit as never), changeCreate, changeUpdate, employeeUpdate };
+  return { service: new SalaryService(db as never, audit as never, { notifyPermissionHolders: jest.fn().mockResolvedValue(0), enqueueMany: jest.fn().mockResolvedValue({ created: 0, failed: 0 }) } as never), changeCreate, changeUpdate, employeeUpdate };
 }
 
 const p = (userId = "hr1"): Principal => ({ schoolId: "A", userId, roles: [], permissions: [] });

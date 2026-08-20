@@ -8,6 +8,8 @@
 // salary maker-checker separately. Tenant-isolated (RLS); everything audited.
 // =============================================================================
 
+import { NotificationService } from "../notifications/notification.service";
+import { HR_PERMISSIONS } from "@sms/types";
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { EmploymentChangeDto } from "@sms/types";
 import {
@@ -39,6 +41,7 @@ export class EmploymentService {
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
+    private readonly notifications: NotificationService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -57,7 +60,7 @@ export class EmploymentService {
       reason?: string;
     },
   ): Promise<EmploymentChangeDto> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    const dto = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const emp = await tx.employee.findFirst({ where: { userId: input.userId } });
       if (!emp) throw new NotFoundException("Employee record not found");
       if (input.type === "CONFIRMATION" && emp.confirmationStatus !== "PROBATION") {
@@ -99,6 +102,20 @@ export class EmploymentService {
       );
       return this.toDto(row as ChangeRow, null);
     });
+    // Maker-checker: a DIFFERENT hr.salary.approve holder decides a confirmation,
+    // promotion or contract renewal, and none of them was told one was waiting.
+    await this.notifications.notifyPermissionHolders(
+      this.ctx(p),
+      HR_PERMISSIONS.HR_SALARY_APPROVE,
+      {
+        type: "WORKFLOW_UPDATE",
+        title: "An employment change is waiting for a decision",
+        body: "A staff confirmation, promotion or renewal needs a second person.",
+        data: { employmentChangeId: dto.id },
+      },
+      { exclude: [p.userId] },
+    );
+    return dto;
   }
 
   /** Checker: decide. Separation of duties — the requester can never decide.

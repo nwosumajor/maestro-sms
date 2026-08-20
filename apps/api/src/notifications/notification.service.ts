@@ -119,6 +119,57 @@ export class NotificationService {
    * committed must not be reported as failed because one recipient's row could not
    * be written, so this returns the count and lets the caller carry on.
    */
+  /**
+   * Tell the people who can act on something that it is waiting for them.
+   *
+   * Written because it kept being needed and kept being skipped. A request that
+   * needs a second person — a salary change, an invoice waiver, an erasure
+   * request under a statutory deadline, a boarder asking to leave site — was
+   * created and announced to nobody, and every one of those paths had its own
+   * reason for it: the notification was somebody else's job, or the screen would
+   * show it, or it simply was not thought about. Five separate services, the
+   * same gap. One helper is harder to forget than five call sites.
+   *
+   * Recipients are resolved from the PERMISSION, not from a role list. A school
+   * that grants fee.approve to a bursar rather than the principal still gets
+   * told, and the notice cannot drift from the guard on the endpoint that
+   * approves — they name the same string.
+   *
+   * // SECURITY: `exclude` is not optional in practice. Every one of these is a
+   * // maker-checker control, so the person who raised the request must never be
+   * // invited to approve it — the endpoint refuses them, and a notice saying
+   * // otherwise sends somebody to a button that does not work.
+   *
+   * Best-effort by contract: returns the number told and raises nothing. The
+   * thing being announced has already happened, and telling somebody about it
+   * must never be able to undo it.
+   */
+  async notifyPermissionHolders(
+    actor: TenantContext,
+    permission: string,
+    input: Omit<NotificationInput, "recipientId">,
+    opts: { exclude?: string[] } = {},
+  ): Promise<number> {
+    try {
+      const rows = await this.db.runAsTenantReadOnly(this.ctx(actor), async (tx) =>
+        // ONE query. Tenant-scoped by RLS, so these are the school's own staff.
+        (await tx.userRole.findMany({
+          where: { role: { permissions: { some: { permission: { key: permission } } } } },
+          select: { userId: true },
+          distinct: ["userId"],
+        })) as Array<{ userId: string }>,
+      );
+      const skip = new Set(opts.exclude ?? []);
+      const to = [...new Set(rows.map((r) => r.userId))].filter((id) => !skip.has(id));
+      if (to.length === 0) return 0;
+      const { created } = await this.enqueueMany(actor, to, input);
+      return created;
+    } catch (e) {
+      this.logger.warn(`notifying holders of ${permission} failed: ${(e as Error).message}`);
+      return 0;
+    }
+  }
+
   async enqueueMany(
     actor: TenantContext,
     recipientIds: string[],
