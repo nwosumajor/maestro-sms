@@ -540,18 +540,43 @@ export class ScholarshipAdminService {
     let updated = 0;
 
     if (program.examMode === "ONLINE_CBT") {
+      // THREE QUERIES, not three PER CANDIDATE.
+      //
+      // This read the exam once per candidate, so every pupil in a school
+      // re-fetched that school's single exam row — 300 candidates in one school
+      // meant 300 identical lookups. Measured before the change: 637 ms for 300
+      // candidates while doing NO work at all, because no exam existed and each
+      // one looked for it anyway. With sittings present it was three queries per
+      // candidate, and this is an operator pressing a button on a program that
+      // spans every school in the platform.
+      //
+      // `announceExam`, directly above, already groups by school. This did not —
+      // the same job, written twice, one of them per-row.
+      const exams = (await db.cbtExam.findMany({
+        where: { scholarshipProgramId: programId, schoolId: { in: [...new Set(candidates.map((c) => c.schoolId))] } },
+        select: { id: true, schoolId: true },
+      })) as Array<{ id: string; schoolId: string }>;
+      const examOfSchool = new Map(exams.map((e) => [e.schoolId, e.id]));
+      const sittings = exams.length
+        ? ((await db.cbtSitting.findMany({
+            where: {
+              examId: { in: exams.map((e) => e.id) },
+              studentId: { in: candidates.map((c) => c.studentId) },
+              status: "SUBMITTED",
+            },
+            select: { examId: true, studentId: true, score: true, total: true },
+          })) as Array<{ examId: string; studentId: string; score: number | null; total: number | null }>)
+        : [];
+      const sittingOf = new Map(sittings.map((s2) => [`${s2.examId}:${s2.studentId}`, s2]));
+      const scored: Array<{ id: string; pct: number }> = [];
       for (const c of candidates) {
-        const exam = await db.cbtExam.findFirst({ where: { schoolId: c.schoolId, scholarshipProgramId: programId }, select: { id: true } });
-        if (!exam) continue;
-        const sitting = await db.cbtSitting.findFirst({
-          where: { examId: exam.id, studentId: c.studentId, status: "SUBMITTED" },
-          select: { score: true, total: true },
-        });
+        const examId = examOfSchool.get(c.schoolId);
+        if (!examId) continue;
+        const sitting = sittingOf.get(`${examId}:${c.studentId}`);
         if (!sitting || sitting.total == null || sitting.total === 0 || sitting.score == null) continue;
-        const pct = Math.round((sitting.score / sitting.total) * 10000) / 100;
-        await db.scholarshipApplication.update({ where: { id: c.id }, data: { examScorePct: pct } });
-        updated += 1;
+        scored.push({ id: c.id, pct: Math.round((sitting.score / sitting.total) * 10000) / 100 });
       }
+      updated = await this.writeScores(db, scored);
     } else if (program.examMode === "GAMES") {
       const comp = await db.ultimateCompetition.findFirst({ where: { scholarshipProgramId: programId }, select: { id: true } });
       if (comp) {
@@ -563,23 +588,60 @@ export class ScholarshipAdminService {
         finishers.sort((a, b) => (a.guessCount - b.guessCount) || ((a.elapsedMs ?? Infinity) - (b.elapsedMs ?? Infinity)));
         // participantId → userId via the tenant-scoped entry link (per school).
         const n = finishers.length;
+        // One query for every entry link, and a map for the candidate lookup —
+        // this read a link per finisher and then scanned the candidate array for
+        // each one, which is a query per row on top of an O(n²) search.
+        const links = (await db.ultimateEntryLink.findMany({
+          where: { participantId: { in: finishers.map((f) => f.id) } },
+          select: { participantId: true, userId: true },
+        })) as Array<{ participantId: string; userId: string }>;
+        const userOfParticipant = new Map(links.map((l) => [l.participantId, l.userId]));
+        const candOfStudent = new Map(candidates.map((c) => [c.studentId, c]));
+        const scored: Array<{ id: string; pct: number }> = [];
         for (let rank = 0; rank < n; rank++) {
-          const part = finishers[rank];
-          const link = await db.ultimateEntryLink.findFirst({ where: { participantId: part.id }, select: { userId: true } });
-          if (!link) continue;
-          const cand = candidates.find((c) => c.studentId === link.userId);
+          const userId = userOfParticipant.get(finishers[rank].id);
+          const cand = userId ? candOfStudent.get(userId) : undefined;
           if (!cand) continue;
           // Relative standing %: 1st = 100, last = ~ (1/n)·100.
-          const pct = Math.round(((n - rank) / n) * 10000) / 100;
-          await db.scholarshipApplication.update({ where: { id: cand.id }, data: { examScorePct: pct } });
-          updated += 1;
+          scored.push({ id: cand.id, pct: Math.round(((n - rank) / n) * 10000) / 100 });
         }
+        updated = await this.writeScores(db, scored);
       }
     } else {
       throw new BadRequestException("Automatic result collection applies to online CBT and games exams only");
     }
     await this.auditOwn(p, "scholarship.exam.collect", programId, { examMode: program.examMode, updated });
     return { updated };
+  }
+
+  /**
+   * Write every candidate's exam percentage in ONE statement.
+   *
+   * Prisma has no bulk update with a different value per row, and a loop of
+   * `update` calls is a round trip each — the shape this whole method was. A
+   * single UPDATE ... FROM (VALUES ...) does the same work in one, and the
+   * numbers are computed here rather than in SQL so the arithmetic stays in one
+   * place and testable.
+   *
+   * Chunked, because a statement with tens of thousands of bound parameters is
+   * its own problem: Postgres caps them at 65,535 and each row here binds two.
+   */
+  private async writeScores(db: PrismaClient, scored: Array<{ id: string; pct: number }>): Promise<number> {
+    if (scored.length === 0) return 0;
+    const CHUNK = 1000;
+    let written = 0;
+    for (let i = 0; i < scored.length; i += CHUNK) {
+      const batch = scored.slice(i, i + CHUNK);
+      const values = Prisma.join(
+        batch.map((s) => Prisma.sql`(${s.id}::uuid, ${s.pct}::double precision)`),
+      );
+      written += await db.$executeRaw`
+        UPDATE "scholarship_application" AS a
+           SET "examScorePct" = v.pct, "updatedAt" = now()
+          FROM (VALUES ${values}) AS v(id, pct)
+         WHERE a.id = v.id`;
+    }
+    return written;
   }
 
   /** Notify the student AND their guardians inside THEIR OWN school's tenant
