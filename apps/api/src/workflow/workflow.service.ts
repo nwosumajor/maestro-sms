@@ -539,19 +539,32 @@ export class WorkflowService {
         approverId: action === "SUBMIT" ? null : p.userId,
         oldState: req.state,
         newState: nextState,
+        // The reviewer's words AND what the system knows — never one instead of
+        // the other.
+        //
+        // This was `comments ?? [notes]`, so anything the reviewer typed
+        // replaced all three notes. Which stage was decided, that it was decided
+        // under a TEMPORARY ELEVATION, and that the routed approver had left the
+        // school are facts the reviewer cannot write and would have no reason
+        // to; the comment box is for their own reasoning, and the UI invites
+        // them to use it. So the more a reviewer explained themselves, the less
+        // the record said about how the decision was reached.
+        //
+        // It went exactly the wrong way round: the approvals JSON kept
+        // `viaElevation` while THIS row — the one that exists because "the
+        // detail view can be changed and this row cannot" — lost it. Verified
+        // live before the fix: a school_admin finalised a leave chain under an
+        // elevation grant and the trail read only "acting for the principal".
         comments:
-          comments ??
-          ([
+          [
+            comments,
             stageNote,
-            // The immutable trail says so too, not only the approvals JSON. The
-            // detail view can be changed; this row cannot.
             p.elevated?.includes(stages[req.currentStage]?.permission ?? "") &&
               "decided under a temporary elevation grant",
             routedApproverGone && `routed approver ${routedApproverGone} has left the school`,
           ]
             .filter(Boolean)
-            .join("; ") ||
-            null),
+            .join("; ") || null,
       });
 
       // Fan out to reactors (e.g. HR leave) on a terminal state, in-tx.
