@@ -578,6 +578,33 @@ export function supervisorStage(row: {
   return row.supervisorActedById ? "PASSED" : "SKIPPED_NO_SUPERVISOR";
 }
 
+/**
+ * The same question for a SCHOLARSHIP request, whose chain is
+ * supervisor -> guardian -> principal.
+ *
+ * It had no answer at all, because the stage could not be skipped: `submit` set
+ * PENDING_SUPERVISOR unconditionally and only a class teacher of a class the
+ * pupil is actively enrolled in may decide there. In a school where the class
+ * has no teacher — 30 of 31 classes in the demo database, covering 899 pupils —
+ * the request could be decided by NOBODY. Not the principal, who has no override
+ * at that stage; not the platform owner, whose queue refuses anything that has
+ * not completed school approval. Verified live against each of them.
+ *
+ * So it now fails open the way a subject selection does, and says so the same
+ * way: derived from the row, never stored.
+ */
+export function scholarshipSupervisorStage(row: {
+  status: string;
+  supervisorById: string | null;
+  supervisorAt: Date | string | null;
+}): SupervisorStage {
+  if (row.status === "PENDING_SUPERVISOR") return "PENDING";
+  // Moved past stage 1 with nobody recorded as having acted: there was no
+  // supervisor to act. The guardian and principal are then the only checks, and
+  // a reader deserves to know that rather than infer it.
+  return row.supervisorAt && row.supervisorById ? "PASSED" : "SKIPPED_NO_SUPERVISOR";
+}
+
 export interface SubjectSelectionDto {
   id: string;
   sessionId: string;

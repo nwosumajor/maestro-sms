@@ -10,6 +10,7 @@
 // Relationship scoping: applicant → students they may apply for; anyone else 404.
 // =============================================================================
 
+import { scholarshipSupervisorStage } from "@sms/types";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { reportedTermGrade, resolveGradeBands, type StoredTermResult, type ScholarshipPortalDto, type ScholarshipApplicationDto } from "@sms/types";
 import {
@@ -262,18 +263,42 @@ export class ScholarshipService {
         throw new BadRequestException("A guardian must give consent before this application can be submitted");
       }
       const signals = await this.collectSignals(tx, app.studentId, p.schoolId);
+      // FAIL OPEN WHEN THERE IS NO SUPERVISOR TO ASK.
+      //
+      // Stage 1 can only be decided by a class teacher of a class the pupil is
+      // actively enrolled in. A class with no teacher — 30 of 31 in the demo
+      // database, covering 899 pupils — left the request decidable by NOBODY:
+      // not the principal, who has no override here, and not the platform owner,
+      // whose queue refuses anything that has not completed school approval.
+      // Verified against each of them before this changed.
+      //
+      // A subject selection already solves this by going straight to the next
+      // stage, and this follows it — including the part that matters, that the
+      // skip is VISIBLE (scholarshipSupervisorStage) rather than a PENDING_PARENT
+      // indistinguishable from one a teacher passed.
+      const hasSupervisor = isStudentChain ? await this.hasClassSupervisor(tx, app.studentId) : false;
+      const nextStatus = !isStudentChain ? "SUBMITTED" : hasSupervisor ? "PENDING_SUPERVISOR" : "PENDING_PARENT";
       const row = await tx.scholarshipApplication.update({
         where: { id: app.id },
-        data: { status: isStudentChain ? "PENDING_SUPERVISOR" : "SUBMITTED", signals: signals as never },
+        data: { status: nextStatus, signals: signals as never },
       });
       await this.log(tx, p, "scholarship.submit", app.id, { studentId: app.studentId, chain: isStudentChain });
-      return { row, studentId: app.studentId, isStudentChain };
+      return { row, studentId: app.studentId, isStudentChain, hasSupervisor };
     });
     // Best-effort notifications: chain → wake the class supervisor(s); legacy →
     // tell the guardians it's in.
     try {
       const dto = await this.db.runAsTenant(this.ctx(p), (tx) => this.toApplicationDtos(tx, [result.row]));
-      if (result.isStudentChain) {
+      if (result.isStudentChain && !result.hasSupervisor) {
+        // Stage 1 was skipped, so the guardian is who must act — telling
+        // supervisors who do not exist is what left these requests silent.
+        await this.notifyGuardians(
+          p,
+          result.studentId,
+          `Scholarship request for ${dto[0].studentName} needs your consent`,
+          "Their class has no supervisor recorded, so it comes to you next. Open Scholarships to approve or reject it.",
+        );
+      } else if (result.isStudentChain) {
         await this.notifySupervisors(
           p,
           result.studentId,
@@ -530,6 +555,7 @@ export class ScholarshipService {
       consentById: r.consentById,
       consentAt: r.consentAt,
       supervisorById: r.supervisorById,
+      supervisorStage: scholarshipSupervisorStage(r),
       supervisorAt: r.supervisorAt,
       supervisorNote: r.supervisorNote,
       parentNote: r.parentNote,
@@ -569,6 +595,24 @@ export class ScholarshipService {
   }
 
   /** The class supervisor(s): assigned class teachers of the student's ACTIVE classes. */
+  /**
+   * Is there anybody who could decide stage 1 for this pupil?
+   *
+   * The same question `decideStage` asks when it authorises a supervisor, asked
+   * BEFORE the request is parked in a state only they can leave. One query.
+   */
+  private async hasClassSupervisor(tx: TenantTx, studentId: string): Promise<boolean> {
+    const classIds = (
+      (await tx.enrollment.findMany({
+        where: { studentId, status: "ACTIVE" },
+        select: { classId: true },
+      })) as Array<{ classId: string }>
+    ).map((e) => e.classId);
+    if (classIds.length === 0) return false; // no class at all — nobody supervises them
+    const one = await tx.classTeacher.findFirst({ where: { classId: { in: classIds } }, select: { id: true } });
+    return !!one;
+  }
+
   private async notifySupervisors(p: Principal, studentId: string, title: string, body: string) {
     const teacherIds = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const classIds = (

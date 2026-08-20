@@ -1,3 +1,4 @@
+import type { SupervisorStage } from "../grading";
 // =============================================================================
 // Scholarship — response DTOs (Date fields are `Date`; web consumes Serialized<…>)
 // =============================================================================
@@ -148,6 +149,16 @@ export interface ScholarshipApplicationDto {
   /** Student-chain stage records (who decided + when + note). */
   supervisorById: string | null;
   supervisorAt: Date | null;
+  /**
+   * What actually happened at stage 1 — see `scholarshipSupervisorStage`.
+   *
+   * DERIVED, never stored, so it cannot drift from the row it describes. A
+   * request whose class had no supervisor now skips to the guardian rather than
+   * parking in a state nobody can leave; without this field that request would
+   * be indistinguishable from one a teacher actually passed, and a chain that
+   * quietly became two stages would read as three.
+   */
+  supervisorStage: SupervisorStage;
   supervisorNote: string | null;
   parentNote: string | null;
   principalById: string | null;

@@ -17,7 +17,7 @@ import { Prisma, type PrismaClient } from "@sms/db";
 import { SCHOLARSHIP_MAX_AWARDS, type ScholarshipApplicationDto, type ScholarshipProgramDto,
   scholarshipSubjectConcept,
 } from "@sms/types";
-import { uniqueEntityCode } from "@sms/types";
+import { scholarshipSupervisorStage, uniqueEntityCode } from "@sms/types";
 import { NotificationService } from "../notifications/notification.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import {
@@ -214,6 +214,7 @@ export class ScholarshipAdminService {
       consentById: r.consentById,
       consentAt: r.consentAt,
       supervisorById: r.supervisorById,
+      supervisorStage: scholarshipSupervisorStage(r),
       supervisorAt: r.supervisorAt,
       supervisorNote: r.supervisorNote,
       parentNote: r.parentNote,
@@ -725,7 +726,8 @@ export class ScholarshipAdminService {
       applicantId: r.applicantId, applicantName: applicant?.name ?? "Applicant", applicantRole: r.applicantRole,
       answers: r.answers ?? null, signals: (r.signals as ScholarshipApplicationDto["signals"]) ?? null, status: r.status,
       consentById: r.consentById, consentAt: r.consentAt,
-      supervisorById: r.supervisorById, supervisorAt: r.supervisorAt, supervisorNote: r.supervisorNote,
+      supervisorById: r.supervisorById,
+      supervisorStage: scholarshipSupervisorStage(r), supervisorAt: r.supervisorAt, supervisorNote: r.supervisorNote,
       parentNote: r.parentNote, principalById: r.principalById, principalAt: r.principalAt, principalNote: r.principalNote,
       rejectedStage: r.rejectedStage,
       examMode: program?.examMode ?? null, examAt: program?.examAt ?? null,
