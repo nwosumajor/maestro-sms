@@ -54,6 +54,7 @@ import { auth } from "@/lib/auth";
 import { regionOf } from "@/lib/format";
 import { RegionProvider } from "./RegionProvider";
 import { ImpersonationBanner } from "./ImpersonationBanner";
+import { ElevationNotice } from "./ElevationNotice";
 import { SessionIdleGuard } from "./SessionIdleGuard";
 import { CredentialPromptHost } from "@/components/security/CredentialPrompt";
 import { apiGet } from "@/lib/api";
@@ -365,6 +366,10 @@ export async function AppShell({
   // distinguishing "you are the owner" from "you are them". Read from the session
   // rather than a prop so no caller can render an impersonated shell without it.
   const impersonating = Boolean(session?.user?.impersonatedBy);
+  // Anything this session can do by an ACTIVE elevation grant rather than by a
+  // role. Read from the session for the same reason as impersonation: no caller
+  // should be able to render a shell that hides borrowed authority.
+  const elevated = session?.user?.elevated ?? [];
   // The platform owner (super_admin) is not a member of any customer school, so the
   // tenant-operational pages (Analytics, Games, …) are noise for them. Restrict
   // their nav to the platform surfaces; the operator console is their home.
@@ -443,6 +448,9 @@ export async function AppShell({
       <SessionIdleGuard />
       <CredentialPromptHost />
       {impersonating && <ImpersonationBanner userName={userName} schoolName={schoolName} />}
+      {elevated.length > 0 && (
+        <ElevationNotice permissions={elevated} canReview={permissions.includes("security.elevation.request")} />
+      )}
       {/* Top bar */}
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-border/70 bg-card/80 px-4 backdrop-blur-md supports-[backdrop-filter]:bg-card/65">
         <div className="flex items-center gap-2.5">
