@@ -142,7 +142,15 @@ export function WorkflowInbox({
         run: () => call(`workflows/${w.id}/submit`, {}, `${w.id}:submit`),
       });
     }
-    if (canReview && !isInitiator && w.state === "PENDING_REVIEW") {
+    // `awaitingMe` is the SERVER's answer to "can this person decide this now",
+    // computed with the same rule the engine enforces. It was `canReview &&
+    // !isInitiator`, i.e. the GENERIC workflow.review — so every pending row
+    // offered Approve / Reject / Request revision to anyone holding it, while
+    // the engine decides by the current stage's granular permission, by whether
+    // you already acted on an earlier stage, and by whether the stage is routed
+    // to somebody else. A school_admin met "You are not the Principal (final)
+    // approver" on a row this page had just invited them to approve.
+    if (canReview && w.awaitingMe) {
       out.push({
         action: "APPROVE",
         label: "Approve",
@@ -276,7 +284,25 @@ export function WorkflowInbox({
         <p className="text-sm text-muted-foreground">No requests yet.</p>
       ) : (
         <div className="space-y-3">
-          {initial.map((w) => {
+          {/* The page is titled "everything waiting on you" and the list is the
+              whole school's register — leadership can see what is in flight,
+              which is deliberate. So say which is which, rather than leaving a
+              reviewer to work out that most of a long list is not theirs. */}
+          {(() => {
+            const mine = initial.filter((w) => w.awaitingMe).length;
+            return (
+              <p className="text-sm text-muted-foreground">
+                {mine === 0
+                  ? initial.some((w) => w.state === "PENDING_REVIEW")
+                    ? "Nothing is waiting on your decision. The requests below are your school's, shown so you can follow them."
+                    : "Nothing is waiting on your decision."
+                  : `${mine} ${mine === 1 ? "request is" : "requests are"} waiting on your decision.`}
+              </p>
+            );
+          })()}
+          {[...initial]
+            .sort((a, b) => Number(b.awaitingMe) - Number(a.awaitingMe))
+            .map((w) => {
             const actions = actionsFor(w);
             return (
               <Card key={w.id}>
@@ -301,6 +327,7 @@ export function WorkflowInbox({
                     <Badge variant={STATE_VARIANT[w.state] ?? "secondary"}>
                       {w.state.replace("_", " ")}
                     </Badge>
+                    {w.awaitingMe && <Badge variant="outline">Waiting on you</Badge>}
                     {w.stageCount > 0 && w.state === "PENDING_REVIEW" && (
                       <span className="text-xs text-muted-foreground">
                         Stage {w.currentStage + 1}/{w.stageCount}

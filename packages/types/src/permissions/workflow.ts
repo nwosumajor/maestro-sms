@@ -308,3 +308,61 @@ export const WORKFLOW_ROLE_PERMISSIONS = {
   accountant: [WORKFLOW_PERMISSIONS.CREATE, WORKFLOW_PERMISSIONS.READ],
   hr_clerk: [WORKFLOW_PERMISSIONS.CREATE, WORKFLOW_PERMISSIONS.READ],
 } as const;
+
+/** One decision already recorded on a request. Mirrors the engine's StageApproval. */
+export interface RecordedApproval {
+  stageKey: string;
+  approverId: string;
+  at: string;
+  viaElevation?: boolean;
+}
+
+/**
+ * Can THIS person decide THIS request right now?
+ *
+ * The approvals page lists the whole tenant's register — leadership should see
+ * what is in flight — but it offered Approve / Reject / Request revision on
+ * every pending row to anyone holding the GENERIC `workflow.review`. The engine
+ * decides by four narrower rules, so those buttons were an invitation to a 403:
+ * a school_admin met "You are not the Principal (final) approver" on a row the
+ * page had just invited them to approve.
+ *
+ * The rules, in the engine's own order:
+ *   - the request is PENDING_REVIEW;
+ *   - you are not its initiator (separation of duties);
+ *   - a ROUTED stage names one person and only they may act — unless they have
+ *     LEFT the school, which is what `namedApproverActive: false` means and is
+ *     the engine's self-healing fallback;
+ *   - you hold the CURRENT stage's granular permission (an elevation grant
+ *     counts: the guard merges it into `permissions` before anything reads it);
+ *   - you have not already acted on this request, at any stage.
+ *
+ * Legacy single-stage requests carry no chain, so the generic `workflow.review`
+ * is the whole gate — matching the engine, which skips every staged rule when
+ * `stages` is empty.
+ *
+ * Pure and shared so the page and the engine cannot drift into disagreeing
+ * about who may act, which is the failure this whole field exists to prevent.
+ */
+export function canDecideWorkflowNow(
+  request: {
+    state: string;
+    initiatorId: string;
+    currentStage: number;
+    stages: WorkflowStage[] | null;
+    approvals: RecordedApproval[] | null;
+  },
+  actor: { userId: string; permissions: string[] },
+  /** False ONLY when the stage is routed to somebody who is no longer ACTIVE. */
+  namedApproverActive = true,
+): boolean {
+  if (request.state !== "PENDING_REVIEW") return false;
+  if (request.initiatorId === actor.userId) return false;
+  const stages = request.stages ?? [];
+  if (stages.length === 0) return actor.permissions.includes(WORKFLOW_PERMISSIONS.REVIEW);
+  const stage = stages[request.currentStage];
+  if (!stage) return false;
+  if (stage.approverId && stage.approverId !== actor.userId && namedApproverActive) return false;
+  if (!actor.permissions.includes(stage.permission)) return false;
+  return !(request.approvals ?? []).some((a) => a.approverId === actor.userId);
+}

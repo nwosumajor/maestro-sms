@@ -30,12 +30,14 @@ import {
   CUSTOM_CHAIN_MIN_STAGES,
   STAGED_WORKFLOW_TYPES,
   LIST_CAP,
+  canDecideWorkflowNow,
   STAFF_REQUEST_CHAIN,
   WORKFLOW_PERMISSIONS,
   WORKFLOW_TRANSITIONS,
   type WorkflowAction,
   type WorkflowApproverOptionDto,
   type WorkflowInboxItemDto,
+  type RecordedApproval,
   type WorkflowDetailDto,
   type WorkflowStage,
   type WorkflowState,
@@ -271,6 +273,30 @@ export class WorkflowService {
       // Reviewers/board see all in-tenant; everyone else sees only what they raised.
       const where = this.isReviewer(p) ? {} : { initiatorId: p.userId };
       const rows = await tx.workflowRequest.findMany({ where, orderBy: { createdAt: "desc" }, take: LIST_CAP });
+
+      // A ROUTED stage names one approver, and the engine lets anyone eligible
+      // act once that person has LEFT. Deciding `awaitingMe` needs to know
+      // which of them are still here — asked ONCE for the whole page rather
+      // than per row, and only for rows where it can change the answer.
+      const routedElsewhere = [
+        ...new Set(
+          rows
+            .filter((r) => r.state === "PENDING_REVIEW")
+            .map((r) => ((r.stages as WorkflowStage[] | null) ?? [])[r.currentStage]?.approverId)
+            .filter((id): id is string => !!id && id !== p.userId),
+        ),
+      ];
+      const stillHere = new Set<string>(
+        routedElsewhere.length
+          ? (
+              (await tx.user.findMany({
+                where: { id: { in: routedElsewhere }, status: "ACTIVE" },
+                select: { id: true },
+              })) as Array<{ id: string }>
+            ).map((u) => u.id)
+          : [],
+      );
+
       return rows.map((r) => {
         const stages = (r.stages as WorkflowStage[] | null) ?? [];
         const pending = r.state === "PENDING_REVIEW" ? (stages[r.currentStage]?.label ?? null) : null;
@@ -292,6 +318,19 @@ export class WorkflowService {
           summary: (r.payload as { summary?: unknown } | null)?.summary
             ? String((r.payload as { summary: unknown }).summary).slice(0, 300)
             : null,
+          // Whether this caller can act on it NOW — the same rule the engine
+          // enforces, so the page stops offering buttons that 403.
+          awaitingMe: canDecideWorkflowNow(
+            {
+              state: r.state,
+              initiatorId: r.initiatorId,
+              currentStage: r.currentStage,
+              stages,
+              approvals: (r.approvals as RecordedApproval[] | null) ?? [],
+            },
+            p,
+            !stages[r.currentStage]?.approverId || stillHere.has(stages[r.currentStage]?.approverId ?? ""),
+          ),
         };
       });
     });

@@ -158,6 +158,19 @@ export interface WorkflowInboxItemDto {
   /** A one-line, service-written summary of what is being approved — the facts
    *  an approver would otherwise have to go and look up. Never the raw payload. */
   summary: string | null;
+  /** Whether THIS caller can decide THIS request right now.
+   *
+   *  The list is the whole tenant's register, by design — leadership can see
+   *  what is in flight. But the UI offered Approve / Reject / Request revision
+   *  on every pending row to anyone holding the GENERIC `workflow.review`,
+   *  while the engine decides by the CURRENT STAGE's granular permission, by
+   *  whether you are the initiator, by whether you already acted on an earlier
+   *  stage, and by whether the stage is routed to somebody else. So the buttons
+   *  were an invitation to a 403.
+   *
+   *  Computed on the server because only the server knows all four — and knows
+   *  about an elevation grant, which is not derivable from the caller's roles. */
+  awaitingMe: boolean;
 }
 
 
