@@ -284,15 +284,29 @@ export class ScholarshipAdminService {
         throw new BadRequestException(`The ${position === 1 ? "1st" : position === 2 ? "2nd" : "3rd"} position has already been awarded`);
       }
       nextStatus = "AWARDED";
+      // CLAIM THE AWARD BEFORE SPENDING ANYTHING.
+      //
+      // The status check at the top of this method is a READ. At READ COMMITTED
+      // two awards of the same application both pass it, both disburse, and the
+      // family is credited twice — the same read-then-write shape already
+      // hardened on a library return and on every workflow transition, but on
+      // the one path that moves money onto a child's fee account.
+      //
+      // The conditional update is the serialisation point: exactly one caller
+      // gets count 1, and everything with a consequence happens after it.
+      const claimed = await db.scholarshipApplication.updateMany({
+        where: { id, status: { notIn: ["AWARDED", "REJECTED"] } },
+        data: { status: nextStatus as never, awardMinor, awardPosition: position, reviewedById: p.userId, reviewNote: body.note ?? null },
+      });
+      if (claimed.count === 0) throw new BadRequestException("This application has already been finalised");
       // Disburse a fees credit into the student's OWN school (privileged; the
       // Payment carries the school's id so it's correctly tenant-owned).
       if ((program?.awardKind ?? "FEES_CREDIT") === "FEES_CREDIT") {
         disbursement = await this.disburseFeesCredit(db, app.schoolId, app.studentId, awardMinor, app.id, p.userId);
       }
-      await db.scholarshipApplication.update({
-        where: { id },
-        data: { status: nextStatus as never, awardMinor, awardPosition: position, reviewedById: p.userId, reviewNote: body.note ?? null, disbursementPaymentId: disbursement?.paymentId ?? null },
-      });
+      if (disbursement) {
+        await db.scholarshipApplication.update({ where: { id }, data: { disbursementPaymentId: disbursement.paymentId } });
+      }
       await this.auditOwn(p, "scholarship.award", id, { targetSchoolId: app.schoolId, studentId: app.studentId, awardMinor, position, disbursed: disbursement?.amountMinor ?? 0 });
       const posLabel = position === 1 ? "1st" : position === 2 ? "2nd" : "3rd";
       await this.notifyFamily(
@@ -680,6 +694,18 @@ export class ScholarshipAdminService {
       orderBy: { createdAt: "desc" },
     });
     if (!invoice) return null;
+    // IDEMPOTENT ON THE APPLICATION, because the claim above cannot help across
+    // a crash. If the process dies after this payment is written and before the
+    // application records it, the row still reads QUALIFIED and the next award
+    // credits the family a SECOND time — no concurrency required. Reproduced
+    // against the database: two POSTED payments, the same reference, one award.
+    //
+    // The reference already identified the award uniquely; nothing looked. This
+    // is the check `billFine` makes a few files away for exactly this reason.
+    const already = invoice.payments.find(
+      (pay) => pay.reference === `SCHOLARSHIP:${applicationId}` && pay.status === "POSTED",
+    );
+    if (already) return { paymentId: already.id, amountMinor: already.amountMinor };
     const paid = invoice.payments
       .filter((pay) => pay.status === "POSTED")
       .reduce((s, pay) => s + (pay.kind === "REFUND" ? -pay.amountMinor : pay.amountMinor), 0);
