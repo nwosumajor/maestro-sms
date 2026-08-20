@@ -27,6 +27,20 @@
 // and an out-of-scope record should get 404 rather than 403 — both are the
 // system working. Only a 200 carrying somebody else's child is a finding.
 //
+// PART TWO asks the id-addressed question, which part one deliberately does not:
+// what happens when a family names another family's record directly. Six
+// separate modules state the same rule in a comment — "404, not 403 — never
+// reveal another family's invoice / document / student" — because a 403
+// confirms the record exists.
+//
+// EVERY PROBE IS PAIRED WITH A GHOST — the same request with an id that exists
+// nowhere. Only a DIFFERENCE between the two discloses anything. Without that
+// control this probe reported two leaks that were nothing of the kind: a pupil
+// asking for contacts or a medical record gets 403 from the permission guard,
+// which holds no opinion about whether the record exists, and answers a
+// non-existent id identically. A status code on its own cannot tell those
+// apart.
+//
 // Usage (needs the stack up and the demo fixtures seeded):
 //   WEB_URL=http://localhost pnpm --filter @sms/web probe:family
 // =============================================================================
@@ -104,6 +118,26 @@ async function ownFamily(c) {
   return { ids, names };
 }
 
+/**
+ * Records belonging to another family, and one that exists nowhere.
+ *
+ * Read from a STAFF account for the same reason as the roster: asking the parent
+ * which records they cannot see would assume the answer.
+ */
+async function foreignRecords(staff, ownIds) {
+  const pick = (text, key) => {
+    for (const m of text.matchAll(/"id":"([0-9a-f-]{36})"/g)) if (!ownIds.has(m[1])) return m[1];
+    return null;
+  };
+  const students = await staff.get("/students?kind=student");
+  const invoices = await staff.get("/invoices");
+  return {
+    studentId: students.status === 200 ? pick(students.text) : null,
+    invoiceId: invoices.status === 200 ? pick(invoices.text) : null,
+    ghost: "00000000-0000-4000-8000-0000000000ff",
+  };
+}
+
 const main = async () => {
   const c = client();
   // The roster of everyone else is read from a STAFF account, because a probe
@@ -157,7 +191,42 @@ const main = async () => {
     }
     console.log("");
   }
-  console.log(findings === 0 ? "PASS — no response carried another family's child" : `FAIL — ${findings} endpoint(s) leaked`);
+  // --- part two: naming another family's record directly --------------------
+  const own = await (async () => { await c.login(AS[0]); return ownFamily(c); })();
+  const foreign = await foreignRecords(staff, own.ids);
+  if (!foreign.studentId) {
+    console.log("(skipping the id-addressed checks — no second family in this school)");
+  } else {
+    for (const who of AS) {
+      await c.login(who);
+      console.log(`--- ${who}: naming another family's records ---`);
+      const cases = [
+        ["their profile", `/students/${foreign.studentId}`],
+        ["their contacts", `/students/${foreign.studentId}/contacts`],
+        ["their guardians", `/students/${foreign.studentId}/guardians`],
+        ["their medical record", `/students/${foreign.studentId}/medical`],
+        ["their attendance", `/students/${foreign.studentId}/attendance`],
+        ["their privacy export", `/privacy/export/${foreign.studentId}`],
+        ...(foreign.invoiceId ? [["their invoice", `/invoices/${foreign.invoiceId}`]] : []),
+      ];
+      for (const [label, path] of cases) {
+        const real = await c.get(path);
+        const ghost = await c.get(path.replace(foreign.studentId, foreign.ghost).replace(foreign.invoiceId ?? "@", foreign.ghost));
+        // The finding is a DIFFERENCE, never a status on its own: a 403 that a
+        // non-existent id also gets is the permission guard, and discloses
+        // nothing about whether the record is there.
+        if (real.status !== ghost.status) {
+          findings += 1;
+          console.log(`  LEAK ${label} — real ${real.status} vs non-existent ${ghost.status}`);
+        } else {
+          console.log(`  ok   ${label} (${real.status}, same as a non-existent id)`);
+        }
+      }
+      console.log("");
+    }
+  }
+
+  console.log(findings === 0 ? "PASS — no response carried another family's child, and no status distinguished a real record from a ghost" : `FAIL — ${findings} finding(s)`);
   process.exit(findings === 0 ? 0 : 1);
 };
 
