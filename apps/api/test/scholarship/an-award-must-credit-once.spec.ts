@@ -126,3 +126,47 @@ describe("the award is claimed before anything is spent", () => {
     expect(decide.indexOf("claimed.count === 0")).toBeLessThan(decide.indexOf("disburseFeesCredit("));
   });
 });
+
+// -----------------------------------------------------------------------------
+// Best Three is an invariant across DIFFERENT applications, which a per-row
+// claim cannot hold. The position check reads every already-awarded row for the
+// programme; two awards for two candidates at the same position can both pass it.
+//
+// It did NOT reproduce over HTTP — two simultaneous awards at position 1, then
+// three at position 2, were each correctly refused. The window is narrow. That
+// is a reason to close it cheaply rather than to call it safe, which is the
+// verdict this repo already reached on the library-return race it hardened
+// anyway; here the consequence is money and a promise to a family about where
+// their child placed.
+// -----------------------------------------------------------------------------
+describe("one award per position, per programme", () => {
+  const src = require("node:fs").readFileSync(
+    require("node:path").join(__dirname, "../../src/scholarship/scholarship-admin.service.ts"),
+    "utf8",
+  ) as string;
+
+  it("is held by the DATABASE, not only by a read", () => {
+    const sql = require("node:fs").readFileSync(
+      require("node:path").join(
+        __dirname,
+        "../../../../packages/db/prisma/migrations/20261227000000_scholarship_award_position_unique/migration.sql",
+      ),
+      "utf8",
+    ) as string;
+    expect(sql).toMatch(/CREATE UNIQUE INDEX/);
+    expect(sql).toMatch(/\("programId", "awardPosition"\)/);
+    // PARTIAL: awardPosition means nothing on a rejected row, and a plain unique
+    // index would collide across them.
+    expect(sql).toMatch(/WHERE status = 'AWARDED'/);
+  });
+
+  it("turns the database's refusal into the sentence a person can act on", () => {
+    // Unhandled, a constraint violation is a 500 — which reads as a broken
+    // platform rather than "somebody just took that position".
+    const decide = src.slice(src.indexOf("async decide("), src.indexOf("async announceExam("));
+    expect(decide).toMatch(/code === "P2002"/);
+    expect(decide).toMatch(/position has already been awarded/);
+    // And only P2002: anything else must keep its own failure.
+    expect(decide).toMatch(/throw e;/);
+  });
+});

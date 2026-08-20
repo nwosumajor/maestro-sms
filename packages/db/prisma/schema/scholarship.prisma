@@ -169,6 +169,12 @@ model ScholarshipApplication {
 
   /// One application per student per program.
   @@unique([programId, studentId])
+  /// PARTIAL UNIQUE (programId, awardPosition) WHERE status = 'AWARDED' —
+  /// created in migration 20261227000000_scholarship_award_position_unique.
+  /// Prisma cannot express a partial index, so it lives in SQL only; declared
+  /// here so it is not read as missing. It makes "Best Three" structural: at
+  /// most three awardees, each at a distinct position, rather than a rule two
+  /// concurrent awards could both pass.
   @@index([schoolId])
   @@index([schoolId, status])
   @@index([programId, status])

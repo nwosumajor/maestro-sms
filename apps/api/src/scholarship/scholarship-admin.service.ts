@@ -294,10 +294,25 @@ export class ScholarshipAdminService {
       //
       // The conditional update is the serialisation point: exactly one caller
       // gets count 1, and everything with a consequence happens after it.
-      const claimed = await db.scholarshipApplication.updateMany({
-        where: { id, status: { notIn: ["AWARDED", "REJECTED"] } },
-        data: { status: nextStatus as never, awardMinor, awardPosition: position, reviewedById: p.userId, reviewNote: body.note ?? null },
-      });
+      let claimed: { count: number };
+      try {
+        claimed = await db.scholarshipApplication.updateMany({
+          where: { id, status: { notIn: ["AWARDED", "REJECTED"] } },
+          data: { status: nextStatus as never, awardMinor, awardPosition: position, reviewedById: p.userId, reviewNote: body.note ?? null },
+        });
+      } catch (e) {
+        // The position check above is a read across OTHER applications, which no
+        // per-row claim can serialise. The database holds that invariant (partial
+        // unique on programId + awardPosition where AWARDED), and this turns its
+        // refusal into the sentence the read would have given rather than a 500 —
+        // the pattern RecruitmentService.convert uses for a duplicate email.
+        if (typeof e === "object" && e !== null && (e as { code?: string }).code === "P2002") {
+          throw new BadRequestException(
+            `The ${position === 1 ? "1st" : position === 2 ? "2nd" : "3rd"} position has already been awarded`,
+          );
+        }
+        throw e;
+      }
       if (claimed.count === 0) throw new BadRequestException("This application has already been finalised");
       // Disburse a fees credit into the student's OWN school (privileged; the
       // Payment carries the school's id so it's correctly tenant-owned).
