@@ -381,7 +381,17 @@ function ProgramRow({
             🥇{money(pr.awardMinor)} 🥈{money(pr.award2Minor ?? pr.awardMinor)} 🥉{money(pr.award3Minor ?? pr.awardMinor)}
           </span>{" "}
           <Badge variant="outline">{String(pr.category).replaceAll("_", " ").toLowerCase()}</Badge>{" "}
-          <Badge variant={pr.status === "OPEN" ? "secondary" : "outline"}>{pr.status}</Badge>
+          <Badge variant={pr.status === "OPEN" ? "secondary" : "outline"}>{pr.status}</Badge>{" "}
+          {/* Budget vs what is already committed. The budget used to be collected,
+              stored and never compared to anything; an award past it is refused
+              now, and this is what makes that refusal predictable instead of a
+              surprise at the moment of awarding. A budget of 0 means none was
+              set, so nothing is shown. */}
+          {pr.budgetMinor > 0 && (
+            <Badge variant={pr.committedMinor >= pr.budgetMinor ? "destructive" : "outline"} className="font-normal">
+              {money(pr.committedMinor)} of {money(pr.budgetMinor)} committed
+            </Badge>
+          )}
           {pr.examMode && pr.examAt && (
             <span className="ml-1 text-xs text-muted-foreground">
               exam: {pr.examMode.replaceAll("_", " ").toLowerCase()} · {shortDate(pr.examAt)}

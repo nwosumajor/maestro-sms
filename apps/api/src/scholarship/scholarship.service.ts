@@ -497,7 +497,10 @@ export class ScholarshipService {
     examDurationMin: number; examQuestions: unknown; createdAt: Date;
   }) {
     return {
-      id: pr.id, title: pr.title, description: pr.description, budgetMinor: toMinor(pr.budgetMinor), awardMinor: pr.awardMinor,
+      id: pr.id, title: pr.title, description: pr.description, budgetMinor: toMinor(pr.budgetMinor),
+      // A family's view does not need the committed spend, and it is not theirs
+      // to know — the operator's console computes it.
+      committedMinor: 0, awardMinor: pr.awardMinor,
       award2Minor: pr.award2Minor, award3Minor: pr.award3Minor,
       awardKind: pr.awardKind, selectionBasis: pr.selectionBasis, eligibility: pr.eligibility ?? null,
       opensAt: pr.opensAt, closesAt: pr.closesAt, status: pr.status,

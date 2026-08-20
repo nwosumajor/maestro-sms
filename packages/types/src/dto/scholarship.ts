@@ -88,6 +88,16 @@ export interface ScholarshipProgramDto {
   description: string | null;
   /** Integer minor units (kobo). awardMinor = 1st prize; 2nd/3rd fall back to it. */
   budgetMinor: number;
+  /**
+   * Already committed to awards on this programme.
+   *
+   * Shown beside the budget because a limit is only a control if the person
+   * spending can see how much is left BEFORE they decide. The budget was
+   * previously stored, displayed and never compared to anything; an award that
+   * would exceed it is now refused, and this is the number that makes the
+   * refusal predictable rather than a surprise.
+   */
+  committedMinor: number;
   awardMinor: number;
   award2Minor: number | null;
   award3Minor: number | null;

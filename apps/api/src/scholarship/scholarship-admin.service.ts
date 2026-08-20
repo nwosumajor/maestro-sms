@@ -29,6 +29,7 @@ import {
 } from "../integrity/integrity.foundation";
 import { Inject } from "@nestjs/common";
 import { toMinor } from "../common/money";
+import { formatMoney } from "@sms/types";
 
 interface ProgramInput {
   title: string;
@@ -77,7 +78,17 @@ export class ScholarshipAdminService {
   // --- programs (global) -----------------------------------------------------
   async listPrograms(): Promise<ScholarshipProgramDto[]> {
     const rows = await this.client().scholarshipProgram.findMany({ orderBy: { createdAt: "desc" } });
-    return rows.map((r) => this.programDto(r));
+    // ONE grouped query for every programme's committed spend, not one per row.
+    const committed = new Map<string, number>(
+      (
+        (await this.client().scholarshipApplication.groupBy({
+          by: ["programId"],
+          where: { status: "AWARDED" },
+          _sum: { awardMinor: true },
+        } as never)) as unknown as Array<{ programId: string; _sum: { awardMinor: number | null } }>
+      ).map((g) => [g.programId, g._sum.awardMinor ?? 0]),
+    );
+    return rows.map((r) => this.programDto(r, committed.get(r.id) ?? 0));
   }
 
   async createProgram(p: Principal, input: ProgramInput): Promise<ScholarshipProgramDto> {
@@ -261,7 +272,7 @@ export class ScholarshipAdminService {
     else if (body.action === "AWARD") {
       const program = await db.scholarshipProgram.findFirst({
         where: { id: app.programId },
-        select: { title: true, awardMinor: true, award2Minor: true, award3Minor: true, awardKind: true },
+        select: { title: true, awardMinor: true, award2Minor: true, award3Minor: true, awardKind: true, budgetMinor: true },
       });
       // Position 1|2|3 → the matching prize (2nd/3rd fall back to 1st when unset);
       // an explicit awardMinor override still wins. Each position granted ONCE.
@@ -275,13 +286,40 @@ export class ScholarshipAdminService {
       // Best Three: at most SCHOLARSHIP_MAX_AWARDS awards, and each POSITION once.
       const awardedRows = await db.scholarshipApplication.findMany({
         where: { programId: app.programId, status: "AWARDED" },
-        select: { awardPosition: true },
+        select: { awardPosition: true, awardMinor: true },
       });
       if (awardedRows.length >= SCHOLARSHIP_MAX_AWARDS) {
         throw new BadRequestException(`This scholarship already has its best ${SCHOLARSHIP_MAX_AWARDS} awardees`);
       }
       if (awardedRows.some((a) => a.awardPosition === position)) {
         throw new BadRequestException(`The ${position === 1 ? "1st" : position === 2 ? "2nd" : "3rd"} position has already been awarded`);
+      }
+      // THE BUDGET WAS DECORATIVE. The operator is asked for one on the create
+      // form, it is stored, it is shown back — and nothing ever compared it to
+      // anything. A programme budgeted at 100,000 with three 50,000 prizes could
+      // award 150,000 and nothing objected. A field that looks like a spending
+      // control and constrains nothing is worse than no field: it is read as a
+      // limit that is being observed.
+      //
+      // ZERO MEANS "NOT SET", not "spend nothing". It is the column default, so
+      // enforcing it literally would refuse every award on every programme whose
+      // budget was left blank.
+      const budget = toMinor(program?.budgetMinor ?? 0);
+      if (budget > 0) {
+        const spent = awardedRows.reduce((sum, a) => sum + (a.awardMinor ?? 0), 0);
+        if (spent + awardMinor > budget) {
+          // formatMoney, never minor/100 — the CFA franc and ten other
+          // currencies in the catalogue have no minor unit, and dividing prints
+          // a figure a hundred times too small. The repo has a gate for this and
+          // it caught the first version of this very message.
+          const school = await db.school.findFirst({ where: { id: app.schoolId }, select: { currency: true } });
+          const cur = school?.currency ?? "NGN";
+          throw new BadRequestException(
+            `This award of ${formatMoney(awardMinor, cur)} would take the programme past its budget — ` +
+              `${formatMoney(spent, cur)} of ${formatMoney(budget, cur)} is already committed. ` +
+              `Raise the budget or lower the award.`,
+          );
+        }
       }
       nextStatus = "AWARDED";
       // CLAIM THE AWARD BEFORE SPENDING ANYTHING.
@@ -886,9 +924,10 @@ export class ScholarshipAdminService {
     awardKind: string; selectionBasis: string; eligibility: unknown; opensAt: Date; closesAt: Date; status: string;
     category: string; examMode: string | null; examAt: Date | null; examVenue: string | null;
     examDurationMin: number; examQuestions: unknown; createdAt: Date;
-  }): ScholarshipProgramDto {
+  }, committedMinor = 0): ScholarshipProgramDto {
     return {
-      id: r.id, title: r.title, description: r.description, budgetMinor: toMinor(r.budgetMinor), awardMinor: r.awardMinor,
+      id: r.id, title: r.title, description: r.description, budgetMinor: toMinor(r.budgetMinor),
+      committedMinor, awardMinor: r.awardMinor,
       award2Minor: r.award2Minor, award3Minor: r.award3Minor,
       awardKind: r.awardKind, selectionBasis: r.selectionBasis, eligibility: r.eligibility ?? null,
       opensAt: r.opensAt, closesAt: r.closesAt, status: r.status,
