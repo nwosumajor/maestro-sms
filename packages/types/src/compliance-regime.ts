@@ -56,6 +56,22 @@ export interface ComplianceProfile {
    */
   breachNotify: { kind: "hours"; hours: number } | { kind: "no-fixed-period" } | { kind: "unknown" };
   /**
+   * How long the school has to ANSWER a data subject — an erasure or access
+   * request from a family.
+   *
+   * OPTIONAL, and absent for almost every regime here on purpose. A breach
+   * deadline was researched per country and written down; a subject-request
+   * deadline was not, and inventing twenty-five of them to make a column look
+   * complete would print a number to a DPO as though it were their law. Absent
+   * falls back to the good-practice target below, which the screen labels as
+   * practice — the same rule `breachNotify` already follows for the regimes
+   * whose period is not modelled.
+   *
+   * Adding one is a single line here, and it is the kind of line a school's own
+   * DPO should supply rather than a developer guess.
+   */
+  subjectRequest?: { kind: "days"; days: number };
+  /**
    * Whether this regime requires a designated privacy officer.
    *
    * FALSE is a real answer for the older francophone statutes, which are built
@@ -83,12 +99,24 @@ export interface ComplianceProfile {
  *  fixed period or is not modelled. Shown as practice, never as statute. */
 export const DEFAULT_BREACH_TARGET_HOURS = 72;
 
+/**
+ * The good-practice period for answering a data subject where the regime's own
+ * is not recorded. One month is the most widely adopted figure and is a
+ * defensible target anywhere; it is shown as PRACTICE, never as law.
+ */
+export const DEFAULT_SUBJECT_REQUEST_TARGET_DAYS = 30;
+
 export const COMPLIANCE_PROFILES: Record<string, ComplianceProfile> = {
   GDPR: {
     key: "GDPR",
     label: "UK/EU GDPR",
     authority: "the supervisory authority",
     breachNotify: { kind: "hours", hours: 72 },
+    // Art. 12(3): "without undue delay and in any event within one month of
+    // receipt". The Article also allows a two-month extension for complex
+    // requests, which is a decision a controller RECORDS rather than something
+    // a countdown may assume, so the base period is what is modelled.
+    subjectRequest: { kind: "days", days: 30 },
     officerRequired: true,
     officerTitle: "Data Protection Officer",
     modelled: true,
@@ -328,6 +356,22 @@ export function breachTarget(key: string | null | undefined): { hours: number; s
   return p.breachNotify.kind === "hours"
     ? { hours: p.breachNotify.hours, statutory: true }
     : { hours: DEFAULT_BREACH_TARGET_HOURS, statutory: false };
+}
+
+/**
+ * Days to answer a data subject, and whether that is the law or good practice.
+ *
+ * Mirrors `breachTarget` exactly, including the part that matters: only a period
+ * this file has actually recorded is `statutory`. Everything else gets a
+ * good-practice target that the screen is required to label as practice, so a
+ * countdown never poses as a legal deadline for a country whose rule nobody
+ * looked up.
+ */
+export function subjectRequestTarget(key: string | null | undefined): { days: number; statutory: boolean } {
+  const p = complianceProfile(key);
+  return p.subjectRequest
+    ? { days: p.subjectRequest.days, statutory: true }
+    : { days: DEFAULT_SUBJECT_REQUEST_TARGET_DAYS, statutory: false };
 }
 
 /** Why the target is not statutory, so the screen can word it. */

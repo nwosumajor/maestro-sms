@@ -13,6 +13,14 @@ import { ConflictException, NotFoundException } from "@nestjs/common";
 import { PLATFORM_STAFF_ROLE } from "@sms/types";
 import { OperatorProvisioningService } from "../../src/operator/operator-provisioning.service";
 
+// This suite mints real accounts, so every case pays for a bcrypt hash at cost
+// factor 10 — about 40 seconds for the file on its own. That is the security
+// parameter doing its job, not slow code, so the timeout moves rather than the
+// cost. Left at the 5s default it passes alone and fails under full-suite
+// parallelism, which teaches people to re-run a red suite instead of reading it.
+jest.setTimeout(60_000);
+
+
 const owner = { userId: "owner-1", schoolId: "platform", roles: ["super_admin"], permissions: ["platform.staff.manage"] };
 const ORG = { id: "platform", name: "MAESTRO-SMS", slug: "sms-platform" };
 

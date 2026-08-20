@@ -11,6 +11,13 @@ import { AdmissionsService } from "../../src/admissions/admissions.service";
 import { ADMISSION_REVIEW_CHAIN } from "@sms/types";
 import type { Principal, TenantContext, TenantTx } from "../../src/integrity/integrity.foundation";
 
+// Bcrypt at cost factor 10 dominates this suite's runtime — that is the security
+// parameter doing its job, not slow code, so the timeout moves rather than the
+// cost. At the 5s default these pass alone and fail under full-suite
+// parallelism, which teaches people to re-run a red suite instead of reading it.
+jest.setTimeout(60_000);
+
+
 type Row = Record<string, unknown>;
 
 function baseApp(over: Row = {}): Row {

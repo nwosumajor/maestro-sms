@@ -22,6 +22,14 @@ import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { OperatorProvisioningService } from "../../src/operator/operator-provisioning.service";
 import type { Principal } from "../../src/integrity/integrity.foundation";
 
+// This suite mints real accounts, so every case pays for a bcrypt hash at cost
+// factor 10 — about 40 seconds for the file on its own. That is the security
+// parameter doing its job, not slow code, so the timeout moves rather than the
+// cost. Left at the 5s default it passes alone and fails under full-suite
+// parallelism, which teaches people to re-run a red suite instead of reading it.
+jest.setTimeout(60_000);
+
+
 const OWNER: Principal = {
   schoolId: "platform-org",
   userId: "owner-1",

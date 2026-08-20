@@ -5,6 +5,13 @@
 import { ParentImportService } from "../../src/parent/parent-import.service";
 import type { Principal, TenantContext, TenantTx } from "../../src/integrity/integrity.foundation";
 
+// Bcrypt at cost factor 10 dominates this suite's runtime — that is the security
+// parameter doing its job, not slow code, so the timeout moves rather than the
+// cost. At the 5s default these pass alone and fail under full-suite
+// parallelism, which teaches people to re-run a red suite instead of reading it.
+jest.setTimeout(60_000);
+
+
 function makeService(over: {
   batch?: Record<string, unknown> | null;
   existingParent?: { id: string; name: string; email?: string } | null;

@@ -15,6 +15,13 @@
 import { ScholarshipAdminService } from "../../src/scholarship/scholarship-admin.service";
 import type { Principal, TenantContext, TenantTx } from "../../src/integrity/integrity.foundation";
 
+// Bcrypt at cost factor 10 dominates this suite's runtime — that is the security
+// parameter doing its job, not slow code, so the timeout moves rather than the
+// cost. At the 5s default these pass alone and fail under full-suite
+// parallelism, which teaches people to re-run a red suite instead of reading it.
+jest.setTimeout(60_000);
+
+
 const owner: Principal = {
   schoolId: "platform-org",
   userId: "owner-1",

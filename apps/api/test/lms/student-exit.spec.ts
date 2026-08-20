@@ -15,6 +15,13 @@
 import { STUDENT_EXIT_CHAIN, WORKFLOW_PERMISSIONS, ROLE_PERMISSIONS } from "@sms/types";
 import { StudentExitService } from "../../src/lms/student-exit.service";
 
+// Bcrypt at cost factor 10 dominates this suite's runtime — that is the security
+// parameter doing its job, not slow code, so the timeout moves rather than the
+// cost. At the 5s default these pass alone and fail under full-suite
+// parallelism, which teaches people to re-run a red suite instead of reading it.
+jest.setTimeout(60_000);
+
+
 const SCHOOL = "11111111-1111-1111-1111-111111111111";
 const STUDENT = "22222222-2222-2222-2222-222222222222";
 

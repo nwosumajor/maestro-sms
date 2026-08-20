@@ -37,10 +37,30 @@ export function ErasureReview({ requests }: { requests: ErasureRequest[] }) {
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <Badge variant={VARIANT[r.status] ?? "outline"}>{titleCase(r.status)}</Badge>
+                {/* How long is left to answer. Red only once it is actually
+                    late — a register that shouts at everything is one nobody
+                    reads. */}
+                {r.overdue && <Badge variant="destructive">Overdue</Badge>}
                 <code className="text-xs text-muted-foreground">student {r.studentId.slice(0, 8)}…</code>
               </div>
               <p className="mt-0.5 text-sm">{r.reason}</p>
-              <p className="text-xs text-muted-foreground">{dateTime(r.createdAt)}</p>
+              <p className="text-xs text-muted-foreground">
+                {dateTime(r.createdAt)}
+                {r.daysRemaining !== null && (
+                  <>
+                    {" · "}
+                    {/* The wording carries whether the date is the LAW or a
+                        target. Saying "statutory deadline" for a regime whose
+                        period nobody recorded would invent one. */}
+                    {r.overdue
+                      ? `${Math.abs(r.daysRemaining)} day${Math.abs(r.daysRemaining) === 1 ? "" : "s"} past the `
+                      : `${r.daysRemaining} day${r.daysRemaining === 1 ? "" : "s"} left of the `}
+                    {r.deadlineIsStatutory
+                      ? `${r.targetDays}-day statutory deadline`
+                      : `${r.targetDays}-day target (good practice — this regime's own period is not recorded)`}
+                  </>
+                )}
+              </p>
             </div>
             {r.status === "PENDING" && (
               <div className="flex gap-2">

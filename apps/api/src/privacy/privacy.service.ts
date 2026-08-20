@@ -9,7 +9,10 @@
 // =============================================================================
 
 import { NotificationService } from "../notifications/notification.service";
-import { PRIVACY_PERMISSIONS } from "@sms/types";
+import { PRIVACY_PERMISSIONS, subjectRequestTarget } from "@sms/types";
+import { SchoolRegionService } from "../foundation/school-region.service";
+
+const DAY_MS = 86_400_000;
 import { ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { decryptField } from "../foundation/field-crypto";
 import { STORAGE_PROVIDER, type StorageProvider } from "../documents/storage.provider";
@@ -35,6 +38,8 @@ export class PrivacyService {
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     @Inject(STORAGE_PROVIDER) private readonly storage: StorageProvider,
     private readonly notifications: NotificationService,
+    // The school's compliance regime decides how long there is to answer.
+    private readonly region: SchoolRegionService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -225,15 +230,49 @@ export class PrivacyService {
     return req;
   }
 
+  /**
+   * Erasure requests, each carrying HOW LONG IT HAS BEEN WAITING.
+   *
+   * Answering a data subject is time-bound, and the row said only when it
+   * arrived — leaving the person responsible to do the arithmetic on every line
+   * and to know the period from memory. The breach register beside it has
+   * computed `notifyDueAt` / `overdue` / `deadlineIsStatutory` since it was
+   * built; the same clock simply was not applied here.
+   *
+   * `deadlineIsStatutory` is the honest half. Only a period this platform has
+   * actually recorded for the school's regime counts as law; everything else is
+   * a good-practice target the screen must label as such, so a countdown never
+   * poses as a legal deadline for a country whose rule nobody looked up.
+   */
   async listErasureRequests(p: Principal) {
     const canReview = p.permissions.includes("privacy.erasure.review");
-    return this.db.runAsTenant(this.ctx(p), (tx) =>
+    const rows = await this.db.runAsTenant(this.ctx(p), (tx) =>
       tx.erasureRequest.findMany({
         where: canReview ? {} : { requestedById: p.userId },
         orderBy: { createdAt: "desc" },
         take: 200,
       }),
     );
+    // The same accessor the breach register uses, so the two clocks can never
+    // read a different regime for one school.
+    const regime = (await this.region.forSchool(p.schoolId)).compliance;
+    const target = subjectRequestTarget(regime);
+    const now = Date.now();
+    return (rows as Array<{ id: string; studentId: string; reason: string; status: string; createdAt: Date }>).map((r) => {
+      const dueAt = new Date(r.createdAt.getTime() + target.days * DAY_MS);
+      // A DECIDED request has no clock left to run. Showing one still ticking
+      // beside an answered request is how a register trains its reader to
+      // ignore the column.
+      const open = r.status === "PENDING";
+      return {
+        ...r,
+        dueAt,
+        daysRemaining: open ? Math.ceil((dueAt.getTime() - now) / DAY_MS) : null,
+        overdue: open && now > dueAt.getTime(),
+        deadlineIsStatutory: target.statutory,
+        targetDays: target.days,
+      };
+    });
   }
 
   async reviewErasure(p: Principal, id: string, decision: "APPROVED" | "REJECTED", note?: string) {

@@ -25,7 +25,7 @@ function make(opts: { withFiles?: { id: string; fileKey: string }[]; storageThro
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const del = jest.fn(() => (opts.storageThrows ? Promise.reject(new Error("s3 down")) : Promise.resolve()));
   const storage = { presignUpload: jest.fn(), presignDownload: jest.fn(), delete: del };
-  return { service: new PrivacyService(db as never, audit as never, storage as never, { notifyPermissionHolders: jest.fn().mockResolvedValue(0), enqueueMany: jest.fn().mockResolvedValue({ created: 0, failed: 0 }) } as never), del, updateMany };
+  return { service: new PrivacyService(db as never, audit as never, storage as never, { notifyPermissionHolders: jest.fn().mockResolvedValue(0), enqueueMany: jest.fn().mockResolvedValue({ created: 0, failed: 0 }) } as never, { forSchool: async () => ({ compliance: "GDPR" }) } as never), del, updateMany };
 }
 
 const reviewer: Principal = { schoolId: "A", userId: "ctrl", roles: ["school_admin"], permissions: ["privacy.erasure.review"] };

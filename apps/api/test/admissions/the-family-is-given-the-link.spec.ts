@@ -19,6 +19,13 @@ import { verifyDocumentUploadToken } from "../../src/documents/document-upload-t
 import { UPLOAD_TOKEN_TTL_DAYS } from "@sms/types";
 import type { Principal, TenantContext, TenantTx } from "../../src/integrity/integrity.foundation";
 
+// Bcrypt at cost factor 10 dominates this suite's runtime — that is the security
+// parameter doing its job, not slow code, so the timeout moves rather than the
+// cost. At the 5s default these pass alone and fail under full-suite
+// parallelism, which teaches people to re-run a red suite instead of reading it.
+jest.setTimeout(60_000);
+
+
 type Sent = { target: string; title: string; body: string };
 
 const APP = "44444444-4444-4444-4444-444444444444";
