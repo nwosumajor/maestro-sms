@@ -65,11 +65,22 @@ function makeService(tables: FakeTables) {
   return { service, classFindMany, tx };
 }
 
-const principal = (roles: string[]): Principal => ({
+/**
+ * `permissions` is no longer decorative here.
+ *
+ * Seeing the whole school's pupils BY NAME needs the role AND the
+ * `enrollment.read` grant — the split that stops `board`, which holds class.read
+ * and deliberately not enrollment.read, from being served every pupil. Every
+ * role these tests drive (school_admin, junior_admin, head_teacher, hr_*) holds
+ * it in the seed, so the fixture says so; a caller that genuinely lacks it is
+ * exercised by the board case in
+ * test/lms/oversight-sees-shape-not-children.spec.ts.
+ */
+const principal = (roles: string[], permissions: string[] = ["enrollment.read"]): Principal => ({
   schoolId: "school-A",
   userId: "u-1",
   roles,
-  permissions: [],
+  permissions,
 });
 
 describe("LmsService relationship scoping", () => {

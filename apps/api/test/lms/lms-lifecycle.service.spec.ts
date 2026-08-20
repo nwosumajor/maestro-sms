@@ -39,7 +39,13 @@ function svc(over: Record<string, unknown>) {
   return { service: new LmsService(db as never, audit as never), tx };
 }
 
-const admin: Principal = { schoolId: "A", userId: "a1", roles: ["school_admin"], permissions: [] };
+// enrollment.read is load-bearing now: the whole-school view of pupils BY NAME
+// (roster, eligibility) needs the role AND the grant, which is what keeps
+// `board` — class.read but deliberately not enrollment.read — from being served
+// every child. school_admin holds it in the seed.
+const admin: Principal = {
+  schoolId: "A", userId: "a1", roles: ["school_admin"], permissions: ["enrollment.read"],
+};
 const student = (id: string): Principal => ({ schoolId: "A", userId: id, roles: ["student"], permissions: [] });
 
 describe("LmsService lifecycle", () => {

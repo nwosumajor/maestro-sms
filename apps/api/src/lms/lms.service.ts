@@ -30,6 +30,7 @@ import {
   type UserKind,
   MEETING_PERMISSIONS,
 } from "@sms/types";
+import { LMS_PERMISSIONS } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -91,7 +92,44 @@ export class LmsService {
   private ctx(p: Principal): TenantContext {
     return { schoolId: p.schoolId, userId: p.userId };
   }
+  /**
+   * May this caller see the WHOLE school's pupils, by name?
+   *
+   * Two conditions, and the second was missing. The role set above decides who
+   * has no teaching or parental relationship to fall back on; the GRANT decides
+   * whether pupils' names are theirs to read. The comment on that set already
+   * states the rule — "class.read -> the school's SHAPE; enrollment.read -> the
+   * ROSTER of pupil names; board NO, head_teacher YES" — and the picker checked
+   * only the set.
+   *
+   * So `board`, which holds class.read and deliberately not enrollment.read,
+   * was served all 500 pupils by name from GET /students, and 901 from
+   * /students/count. Verified live before the fix. Read-only oversight is meant
+   * to see how many classes there are and how full they are, never who is in
+   * them (Golden Rule #5).
+   *
+   * The GATE on the endpoint stays class.read, because `parent` and `student`
+   * hold that and not enrollment.read, and they must keep the relationship-
+   * scoped picker for their own family. Moving the gate would have refused them
+   * their own children — the fix that looks tidier and breaks the people it is
+   * not aimed at.
+   */
   private isRosterWide(p: Principal): boolean {
+    return this.isSchoolWideStaff(p) && p.permissions.includes(LMS_PERMISSIONS.ENROLLMENT_READ);
+  }
+
+  /**
+   * The role half on its own — for figures that carry no pupil's identity.
+   *
+   * A COUNT is school shape, which is exactly what read-only oversight is for
+   * ("how many classes, how full"). Making the count follow the name rule would
+   * drop `board` into the relationship branch, where it has no teaching or
+   * parental link and the honest answer is zero — so the tile would report
+   * "0 students" to the board of a 901-pupil school. A wrong number is worse
+   * than either a refusal or the truth, and it protects nobody: the thing
+   * Golden Rule #5 guards is a child's identity, and there is none in a total.
+   */
+  private isSchoolWideStaff(p: Principal): boolean {
     return p.roles.some((r) => ROSTER_WIDE_ROLES.has(r));
   }
 
@@ -1101,7 +1139,7 @@ export class LmsService {
   private async visibleClasses(tx: TenantTx, p: Principal) {
     {
       // principal / school_admin / HR see every class (to pick one + view its roster).
-      if (this.isRosterWide(p)) {
+      if (this.isSchoolWideStaff(p)) {
         return tx.class.findMany({ orderBy: { name: "asc" } });
       }
       const classIds = new Set<string>();
@@ -1282,7 +1320,8 @@ export class LmsService {
    */
   async countStudents(p: Principal): Promise<{ students: number }> {
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
-      if (this.isRosterWide(p)) {
+      // The role half only — see isSchoolWideStaff. A total names nobody.
+      if (this.isSchoolWideStaff(p)) {
         const students = (await tx.user.count({ where: ON_ROLL_STUDENT })) as number;
         return { students };
       }
@@ -1471,7 +1510,7 @@ export class LmsService {
       const cls = await tx.class.findFirst({ where: { id: classId } });
       if (!cls) throw new NotFoundException("Class not found");
 
-      if (!this.isRosterWide(p)) {
+      if (!this.isSchoolWideStaff(p)) {
         // Members: enrolled student, a parent of an enrolled child, a class/subject
         // teacher, or the supervisor.
         let member = cls.supervisorId === p.userId;
