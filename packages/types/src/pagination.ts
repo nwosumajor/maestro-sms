@@ -32,3 +32,7 @@ export const ROSTER_CAP = 500;
  *  reviewer reads rather than a table line they scan — and because the register
  *  is now reachable by filter and page instead of by scrolling 500 cards. */
 export const WORKFLOW_PAGE_SIZE = 25;
+
+/** One page of the leave register. Rows are table lines rather than cards, so a
+ *  page can be larger than the approvals register's. */
+export const LEAVE_PAGE_SIZE = 50;

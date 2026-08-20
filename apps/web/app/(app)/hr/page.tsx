@@ -1,4 +1,4 @@
-import type { EmployeeDto, LeaveRequestDto, LeaveTypeDto, OrgNodeDto, SalaryChangeDto, Serialized } from "@sms/types";
+import type { EmployeeDto, LeavePageDto, LeaveRequestDto, LeaveTypeDto, OrgNodeDto, SalaryChangeDto, Serialized } from "@sms/types";
 import Link from "next/link";
 import { hasPermission } from "@/lib/permissions";
 import { redirect } from "next/navigation";
@@ -22,7 +22,24 @@ export const dynamic = "force-dynamic";
 
 type Employee = Serialized<EmployeeDto>;
 
-export default async function HrPage() {
+/** Only the filters actually set — an empty query string keeps the endpoint's
+ *  default, which is what it always returned. */
+function leaveQs(sp: { status?: string; q?: string; from?: string; to?: string; page?: string }) {
+  const params = new URLSearchParams();
+  for (const key of ["status", "q", "from", "to", "page"] as const) {
+    const v = sp[key];
+    if (v) params.set(key, v);
+  }
+  const qs = params.toString();
+  return qs ? `?${qs}` : "";
+}
+
+export default async function HrPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ status?: string; q?: string; from?: string; to?: string; page?: string }>;
+}) {
+  const sp = await searchParams;
   const session = await auth();
   const user = session!.user;
   if (!hasPermission(user.permissions, "hr.read")) redirect("/dashboard");
@@ -35,7 +52,7 @@ export default async function HrPage() {
     hasPermission(user.permissions, "directory.people.read") ? apiGet<{ id: string; name: string; roles: string[] }[]>("/directory/people?kind=staff") : Promise.resolve(null),
     apiGet<Serialized<SalaryChangeDto>[]>("/hr/salary/changes"),
     canLeaveManage ? apiGet<Serialized<LeaveTypeDto>[]>("/hr/leave/types") : Promise.resolve(null),
-    canLeaveManage ? apiGet<Serialized<LeaveRequestDto>[]>("/hr/leave/requests") : Promise.resolve(null),
+    canLeaveManage ? apiGet<Serialized<LeavePageDto>>(`/hr/leave/requests${leaveQs(sp)}`) : Promise.resolve(null),
     canLeaveManage ? apiGet<Serialized<LeaveRequestDto>[]>("/hr/leave/calendar") : Promise.resolve(null),
     apiGet<Serialized<OrgNodeDto>[]>("/hr/org"),
   ]);
@@ -130,7 +147,17 @@ export default async function HrPage() {
             Staff waiting on a leave decision would not appear below.
           </LoadFailure>
         )}
-        {canLeaveManage && <LeaveAdmin types={leaveTypes ?? []} requests={leaveRequests ?? []} coverage={coverage ?? []} />}
+        {canLeaveManage && (
+          <LeaveAdmin
+            types={leaveTypes ?? []}
+            requests={leaveRequests?.items ?? []}
+            total={leaveRequests?.total ?? 0}
+            page={leaveRequests?.page ?? 1}
+            pageSize={leaveRequests?.pageSize ?? 50}
+            filters={{ status: sp.status ?? "", q: sp.q ?? "", from: sp.from ?? "", to: sp.to ?? "" }}
+            coverage={coverage ?? []}
+          />
+        )}
         {/* School-wide, so it lives here rather than on one person's page. */}
         {canWrite && <ElapsedExitsCard />}
       </div>

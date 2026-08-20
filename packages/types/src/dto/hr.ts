@@ -153,6 +153,24 @@ export interface LeaveRequestDto {
   createdAt: Date;
 }
 
+/**
+ * One page of the school's leave register.
+ *
+ * The register used to return the 500 most recent requests, unfiltered and
+ * unpaged. Leave is a payroll-relevant record — it decides balances, unpaid
+ * days and who was covering whom — and a 60-staff school generates roughly that
+ * many requests in a year, so its own history fell off the end. Measured on 800
+ * requests: 500 returned, 300 unreachable by any means the product offered, and
+ * a 621 KB page to read them in.
+ */
+export interface LeavePageDto {
+  items: LeaveRequestDto[];
+  /** Matching the filter, not the page. */
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 export interface HrAnalyticsDto {
   headcount: {
     active: number;

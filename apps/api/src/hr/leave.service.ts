@@ -13,9 +13,12 @@
 import { BadRequestException, Inject, Injectable, NotFoundException, type OnModuleInit } from "@nestjs/common";
 import {
   LIST_CAP,
+  SEARCH_CAP,
+  LEAVE_PAGE_SIZE,
   STAFF_REQUEST_CHAIN,
   type LeaveBalanceDto,
   type LeaveRequestDto,
+  type LeavePageDto,
   type LeaveTypeDto,
 } from "@sms/types";
 import {
@@ -169,11 +172,6 @@ export class LeaveService implements OnModuleInit {
     return this.listRequestsWhere(p, { userId: p.userId });
   }
 
-  /** HR/managers see all leave requests in the tenant. */
-  async listRequests(p: Principal): Promise<LeaveRequestDto[]> {
-    return this.listRequestsWhere(p, {});
-  }
-
   /** Approved leave overlapping [from, to] — the "who's out" coverage view. */
   async calendar(p: Principal, fromISO?: string, toISO?: string): Promise<LeaveRequestDto[]> {
     const from = fromISO ? new Date(fromISO) : new Date();
@@ -193,18 +191,87 @@ export class LeaveService implements OnModuleInit {
     });
   }
 
+  /**
+   * One page of the school-wide leave register — filtered, searchable, paged.
+   *
+   * It used to be the 500 most recent, unfiltered, on the reasoning that an
+   * approver only needs the current page. But this list is also the RECORD: it
+   * is what a school reads to answer "was she on approved leave that week", and
+   * that question is asked about last year as often as this one. At 800
+   * requests, 300 could not be reached at all.
+   *
+   * `q` matches the STAFF MEMBER, because that is how the question arrives —
+   * "show me Mrs Adeyemi's leave", never a request id. Names live on `user`, so
+   * they resolve to ids first (bounded by SEARCH_CAP) and the register is
+   * filtered on those.
+   *
+   * `from`/`to` are an OVERLAP, the same rule the coverage calendar uses: a
+   * request from 28 March to 2 April is leave taken in March, and a filter that
+   * missed it would quietly answer "nobody was off".
+   */
+  async listRegister(
+    p: Principal,
+    opts: { status?: string; q?: string; from?: string; to?: string; page?: number } = {},
+  ): Promise<LeavePageDto> {
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      const q = opts.q?.trim();
+      let userIds: string[] | null = null;
+      if (q) {
+        const people = (await tx.user.findMany({
+          where: { name: { contains: q, mode: "insensitive" } },
+          select: { id: true },
+          take: SEARCH_CAP,
+        })) as Array<{ id: string }>;
+        userIds = people.map((u) => u.id);
+        // Nobody of that name — an empty page, not the whole register.
+        if (userIds.length === 0) {
+          return { items: [], total: 0, page: Math.max(1, Math.floor(opts.page ?? 1)), pageSize: LEAVE_PAGE_SIZE };
+        }
+      }
+      const where = {
+        ...(opts.status ? { status: opts.status } : {}),
+        ...(userIds ? { userId: { in: userIds } } : {}),
+        // Overlap, not containment — see above.
+        ...(opts.to ? { startDate: { lte: new Date(opts.to) } } : {}),
+        ...(opts.from ? { endDate: { gte: new Date(opts.from) } } : {}),
+      };
+      const page = Math.max(1, Math.floor(opts.page ?? 1));
+      const [rows, total] = await Promise.all([
+        tx.leaveRequest.findMany({
+          where,
+          orderBy: { createdAt: "desc" },
+          skip: (page - 1) * LEAVE_PAGE_SIZE,
+          take: LEAVE_PAGE_SIZE,
+        }),
+        tx.leaveRequest.count({ where }),
+      ]);
+      return { items: await this.decorateMany(tx, rows), total, page, pageSize: LEAVE_PAGE_SIZE };
+    });
+  }
+
+  /** Resolve type and staff names for a batch of rows — two queries whatever the
+   *  page size, never one per row. */
+  private async decorateMany(
+    tx: TenantTx,
+    rows: Array<Parameters<LeaveService["decorateRequest"]>[0] & { userId: string }>,
+  ): Promise<LeaveRequestDto[]> {
+    const typeIds = [...new Set(rows.map((r) => r.leaveTypeId))];
+    const userIds = [...new Set(rows.map((r) => r.userId))];
+    const [types, users] = await Promise.all([
+      tx.leaveType.findMany({ where: { id: { in: typeIds } }, select: { id: true, name: true } }),
+      tx.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } }),
+    ]);
+    const typeName = new Map((types as Array<{ id: string; name: string }>).map((t) => [t.id, t.name]));
+    const userName = new Map((users as Array<{ id: string; name: string }>).map((u) => [u.id, u.name]));
+    return rows.map((r) => this.decorateRequest(r, typeName.get(r.leaveTypeId) ?? null, userName.get(r.userId) ?? null));
+  }
+
+  /** ONE person's own leave — naturally bounded by a career, so it is still the
+   *  capped most-recent list. The school-wide register is `listRegister`. */
   private async listRequestsWhere(p: Principal, where: { userId?: string }): Promise<LeaveRequestDto[]> {
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
-      // scale: the school-wide approver view ({}) grows without bound over time —
-      // cap to the most-recent page. Self-service ({userId}) is naturally small.
       const rows = await tx.leaveRequest.findMany({ where, orderBy: { createdAt: "desc" }, take: LIST_CAP });
-      const typeIds = [...new Set(rows.map((r) => r.leaveTypeId))];
-      const userIds = [...new Set(rows.map((r) => r.userId))];
-      const types = await tx.leaveType.findMany({ where: { id: { in: typeIds } }, select: { id: true, name: true } });
-      const users = await tx.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } });
-      const typeName = new Map(types.map((t) => [t.id, t.name]));
-      const userName = new Map(users.map((u) => [u.id, u.name]));
-      return rows.map((r) => this.decorateRequest(r, typeName.get(r.leaveTypeId) ?? null, userName.get(r.userId) ?? null));
+      return this.decorateMany(tx, rows);
     });
   }
 

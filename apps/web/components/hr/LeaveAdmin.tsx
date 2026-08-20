@@ -17,7 +17,23 @@ const VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline
   PENDING: "secondary", APPROVED: "default", REJECTED: "destructive", CANCELLED: "outline",
 };
 
-export function LeaveAdmin({ types, requests, coverage }: { types: Type[]; requests: Request[]; coverage: Request[] }) {
+export function LeaveAdmin({
+  types,
+  requests,
+  coverage,
+  total,
+  page,
+  pageSize,
+  filters,
+}: {
+  types: Type[];
+  requests: Request[];
+  coverage: Request[];
+  total: number;
+  page: number;
+  pageSize: number;
+  filters: { status: string; q: string; from: string; to: string };
+}) {
   const router = useRouter();
   const [name, setName] = React.useState("");
   const [days, setDays] = React.useState("");
@@ -39,6 +55,19 @@ export function LeaveAdmin({ types, requests, coverage }: { types: Type[]; reque
     else setMsg(await readApiError(res));
   };
 
+  /** Keep the filters when paging — losing them on page 2 makes the register
+   *  unsearchable again the moment a search matches more than one page. */
+  const pageHref = (n: number) => {
+    const params = new URLSearchParams();
+    if (filters.q) params.set("q", filters.q);
+    if (filters.status) params.set("status", filters.status);
+    if (filters.from) params.set("from", filters.from);
+    if (filters.to) params.set("to", filters.to);
+    if (n > 1) params.set("page", String(n));
+    const qs = params.toString();
+    return qs ? `/hr?${qs}` : "/hr";
+  };
+
   return (
     <Card>
       <CardHeader><CardTitle className="text-base">Leave administration</CardTitle></CardHeader>
@@ -52,9 +81,45 @@ export function LeaveAdmin({ types, requests, coverage }: { types: Type[]; reque
         </form>
 
         <div>
-          <p className="mb-2 text-sm font-medium">All leave requests</p>
+          <p className="mb-2 text-sm font-medium">Leave register</p>
+          {/* "Was she on approved leave that week" is asked about last year as
+              often as this one, and the register used to stop at the 500 most
+              recent — 300 of 800 requests unreachable by any means. Every
+              control here narrows the query in the database. */}
+          <form method="GET" className="mb-3 flex flex-wrap items-end gap-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="lv-q" className="text-xs">Staff member</Label>
+              <Input id="lv-q" name="q" defaultValue={filters.q} placeholder="Name" className="w-44" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="lv-status" className="text-xs">Status</Label>
+              <select id="lv-status" name="status" defaultValue={filters.status}
+                className="h-9 rounded-md border border-input bg-background px-2 text-sm">
+                <option value="">Any</option>
+                {["PENDING", "APPROVED", "REJECTED", "CANCELLED"].map((st) => (
+                  <option key={st} value={st}>{st}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="lv-from" className="text-xs">Off on or after</Label>
+              <Input id="lv-from" name="from" type="date" defaultValue={filters.from} className="w-40" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="lv-to" className="text-xs">Off on or before</Label>
+              <Input id="lv-to" name="to" type="date" defaultValue={filters.to} className="w-40" />
+            </div>
+            <Button type="submit" size="sm">Filter</Button>
+            {(filters.q || filters.status || filters.from || filters.to) && (
+              <a href="/hr" className="text-sm underline underline-offset-2">Clear</a>
+            )}
+          </form>
           {requests.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No requests.</p>
+            <p className="text-sm text-muted-foreground">
+              {filters.q || filters.status || filters.from || filters.to
+                ? "No leave matches those filters."
+                : "No requests."}
+            </p>
           ) : (
             <table className="w-full text-sm">
               <thead className="border-b border-border text-left text-muted-foreground">
@@ -72,6 +137,37 @@ export function LeaveAdmin({ types, requests, coverage }: { types: Type[]; reque
                 ))}
               </tbody>
             </table>
+          )}
+          {total > 0 && (
+            <div className="mt-2 flex items-center justify-between">
+              {/* What is SHOWN out of what MATCHES. A register that silently
+                  truncates reads as a complete answer. */}
+              <span className="text-xs text-muted-foreground">
+                Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}
+                {filters.q || filters.status || filters.from || filters.to ? " matching" : ""}
+              </span>
+              {total > pageSize && (
+                <span className="flex items-center gap-2">
+                  <a
+                    href={pageHref(page - 1)}
+                    aria-disabled={page <= 1}
+                    className={page <= 1 ? "pointer-events-none text-xs text-muted-foreground/40" : "text-xs underline underline-offset-2"}
+                  >
+                    Previous
+                  </a>
+                  <span className="text-xs text-muted-foreground">
+                    Page {page} of {Math.max(1, Math.ceil(total / pageSize))}
+                  </span>
+                  <a
+                    href={pageHref(page + 1)}
+                    aria-disabled={page * pageSize >= total}
+                    className={page * pageSize >= total ? "pointer-events-none text-xs text-muted-foreground/40" : "text-xs underline underline-offset-2"}
+                  >
+                    Next
+                  </a>
+                </span>
+              )}
+            </div>
           )}
           <p className="mt-2 text-xs text-muted-foreground">Approvals happen in the Approvals inbox (head → HR → principal).</p>
         </div>
