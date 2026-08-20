@@ -79,7 +79,13 @@ describe("the guard makes elevation additive to the JWT", () => {
   it("still records the elevated USE when the grant is what admitted the route", () => {
     // Same audit action as before, asked after the merge rather than during the
     // gate — so it reports the grant that mattered instead of re-deciding.
-    expect(GUARD).toMatch(/granted\.includes\(required\) && !jwtPermissions\.includes\(required\)/);
+    //
+    // It reports the permission that ACTUALLY admitted the route, which is why
+    // this reads `satisfiedBy` rather than a route's first-listed permission: a
+    // route may now accept any of several, and logging the wrong one would name
+    // a grant the caller never used.
+    expect(GUARD).toMatch(/satisfiedBy && granted\.includes\(satisfiedBy\) && !jwtPermissions\.includes\(satisfiedBy\)/);
+    expect(GUARD).toMatch(/recordElevatedUse\(principal, satisfiedBy\)/);
     expect(GUARD).toMatch(/action: "security\.elevation\.used"/);
   });
 

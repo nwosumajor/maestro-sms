@@ -278,7 +278,7 @@ export default async function DashboardPage() {
     { icon: CreditCardIcon, label: can("fee.manage") ? "Manage fees" : "Pay fees", href: "/fees", hint: can("fee.manage") ? "Invoices & payments" : "Invoices & receipts", show: can("fee.read") && mod("fees") },
     { icon: BookOpenIcon, label: "My classes", href: "/classes", hint: "Lessons, quizzes & forums", show: can("class.read") && mod("lms") },
     { icon: MonitorCheckIcon, label: "CBT exams", href: "/cbt", hint: can("cbt.manage") ? "Author & schedule" : "Sit your exams", show: (can("cbt.manage") || can("cbt.take")) && mod("cbt") },
-    { icon: AwardIcon, label: "Scholarships", href: "/scholarships", hint: "Requests & decisions", show: can("scholarship.apply") || can("scholarship.read") },
+    { icon: AwardIcon, label: "Scholarships", href: "/scholarships", hint: "Requests & decisions", show: can("scholarship.apply") || can("scholarship.read") || can("workflow.review.principal") },
     { icon: BriefcaseIcon, label: "HR & payroll", href: "/hr", hint: "Staff records & runs", show: can("hr.read") && mod("hr") },
     { icon: UsersIcon, label: "My children", href: "/family", hint: "Profiles & progress", show: can("family.read") },
     { icon: MessageSquareIcon, label: "Messages", href: "/messages", hint: "Write to the school", show: can("message.read") && mod("messaging") },

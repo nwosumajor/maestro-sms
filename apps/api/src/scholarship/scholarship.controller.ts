@@ -10,7 +10,7 @@
 
 import { Body, Controller, Get, Param, Post, Put, Query } from "@nestjs/common";
 import { z } from "zod";
-import { SCHOLARSHIP_PERMISSIONS } from "@sms/types";
+import { SCHOLARSHIP_PERMISSIONS, WORKFLOW_PERMISSIONS } from "@sms/types";
 import type { ScholarshipApplicationDto } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { RequireStepUp } from "../auth/require-stepup.decorator";
@@ -70,9 +70,12 @@ export class ScholarshipController {
   ) {}
 
   // --- applicant (parent / teacher) ------------------------------------------
-  /** Open programs + students I can apply for + my applications. */
+  /** Open programs + students I can apply for + my applications + anything
+   *  waiting on MY decision. The reviewer gate opens it too: this is where the
+   *  pending queue lives, and a reviewer who can decide must be able to see
+   *  what is waiting. Every list inside is scoped to the caller regardless. */
   @Get("portal")
-  @RequirePermission(SCHOLARSHIP_PERMISSIONS.APPLY)
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.APPLY, WORKFLOW_PERMISSIONS.REVIEW_PRINCIPAL)
   portal(@CurrentPrincipal() p: Principal) {
     return this.scholarships.getPortal(p);
   }
@@ -113,9 +116,11 @@ export class ScholarshipController {
    *  GUARDIAN (whose approval doubles as consent), then the PRINCIPAL each
    *  approve or reject. One endpoint — the service routes by the application's
    *  current stage and verifies the caller's RELATIONSHIP to the student
-   *  (teacher-of-class / linked guardian / principal role); wrong person → 404. */
+   *  (teacher-of-class / linked guardian / holder of workflow.review.principal);
+   *  wrong person → 404. Two permissions open it because the applicant side and
+   *  the school's final reviewer are different people holding different grants. */
   @Post("applications/:id/decision")
-  @RequirePermission(SCHOLARSHIP_PERMISSIONS.APPLY)
+  @RequirePermission(SCHOLARSHIP_PERMISSIONS.APPLY, WORKFLOW_PERMISSIONS.REVIEW_PRINCIPAL)
   decideStage(
     @CurrentPrincipal() p: Principal,
     @Param("id") id: string,

@@ -10,7 +10,7 @@
 // Relationship scoping: applicant → students they may apply for; anyone else 404.
 // =============================================================================
 
-import { scholarshipSupervisorStage } from "@sms/types";
+import { scholarshipSupervisorStage, WORKFLOW_PERMISSIONS } from "@sms/types";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { reportedTermGrade, resolveGradeBands, type StoredTermResult, type ScholarshipPortalDto, type ScholarshipApplicationDto } from "@sms/types";
 import {
@@ -140,7 +140,8 @@ export class ScholarshipService {
   }
 
   /** Applications sitting at MY chain stage: class supervisor → their classes'
-   *  students; guardian → their children; principal → school-wide. */
+   *  students; guardian → their children; principal (by permission,
+   *  see decideStage) → school-wide. */
   private async pendingForMe(tx: TenantTx, p: Principal) {
     const out: Array<Awaited<ReturnType<TenantTx["scholarshipApplication"]["findMany"]>>[number]> = [];
     const supervised = await tx.classTeacher.findMany({ where: { teacherId: p.userId }, select: { classId: true } });
@@ -168,7 +169,10 @@ export class ScholarshipService {
         })),
       );
     }
-    if (p.roles.includes("principal")) {
+    // Same permission the decision gate uses, deliberately: a queue keyed on the
+    // role while the gate is keyed on the permission gives a delegate the power
+    // to decide and nothing to decide on.
+    if (p.permissions.includes(WORKFLOW_PERMISSIONS.REVIEW_PRINCIPAL)) {
       out.push(...(await tx.scholarshipApplication.findMany({ where: { status: "PENDING_PRINCIPAL" }, orderBy: { createdAt: "asc" } })));
     }
     return out;
@@ -369,7 +373,24 @@ export class ScholarshipService {
         };
       } else if (app.status === "PENDING_PRINCIPAL") {
         stage = "PRINCIPAL";
-        if (!p.roles.includes("principal")) throw new NotFoundException("Application not found");
+        // The PERMISSION, not the role name.
+        //
+        // Only `principal` holds workflow.review.principal today, so this changes
+        // nothing for any existing school — but it is the difference between a
+        // chain a school can unstick and one it cannot. Checked by role name, a
+        // school whose principal account is deactivated (a staff exit revokes
+        // access) has every pending request stranded at this stage with NO way
+        // forward: there is no override here, and unlike the supervisor stage
+        // there is no next reviewer to fail open to — skipping it would send an
+        // application to the platform without the school's endorsement, which is
+        // the control itself.
+        //
+        // Checked by permission, the school grants it to another leader and the
+        // queue moves. It is also how the workflow engine expresses the same
+        // stage (STAFF_REQUEST_CHAIN's principal step), so the two now agree.
+        if (!p.permissions.includes(WORKFLOW_PERMISSIONS.REVIEW_PRINCIPAL)) {
+          throw new NotFoundException("Application not found");
+        }
         data = {
           principalById: p.userId,
           principalAt: now,

@@ -115,10 +115,12 @@ export class PermissionGuard implements CanActivate {
       throw new NotFoundException();
     }
 
-    const required = this.reflector.getAllAndOverride<string | undefined>(PERMISSION_KEY, [
+    const declared = this.reflector.getAllAndOverride<string | string[] | undefined>(PERMISSION_KEY, [
       context.getHandler(),
       context.getClass(),
     ]);
+    // One string or several — several mean ANY one of them opens the route.
+    const accepted = declared === undefined ? [] : Array.isArray(declared) ? declared : [declared];
     // ELEVATION IS ADDITIVE TO THE JWT — which it was not. The gate below
     // honoured a grant, and nothing else did: `principal.permissions` still held
     // only the role permissions, so every service that re-checks it (the
@@ -144,18 +146,21 @@ export class PermissionGuard implements CanActivate {
     // Permission gate, in order of decreasing durability: the role permission in the
     // verified JWT, then an active JIT elevation grant (bottom-up, never platform.*),
     // then a live owner-granted platform delegation (top-down, delegable subset only).
-    if (
-      required &&
-      !principal.permissions.includes(required) &&
-      !(await this.hasPlatformDelegation(principal, required))
-    ) {
+    let satisfiedBy: string | undefined;
+    for (const perm of accepted) {
+      if (principal.permissions.includes(perm) || (await this.hasPlatformDelegation(principal, perm))) {
+        satisfiedBy = perm;
+        break;
+      }
+    }
+    if (accepted.length && !satisfiedBy) {
       throw new ForbiddenException();
     }
     // Audit the elevated use where the grant is what let this route through —
     // unchanged in meaning, but now asked AFTER the merge, so it reports the
     // grant that mattered rather than re-querying for it.
-    if (required && granted.includes(required) && !jwtPermissions.includes(required)) {
-      await this.recordElevatedUse(principal, required);
+    if (satisfiedBy && granted.includes(satisfiedBy) && !jwtPermissions.includes(satisfiedBy)) {
+      await this.recordElevatedUse(principal, satisfiedBy);
     }
 
     // Step-up gate: the most sensitive routes also need a fresh re-auth token.

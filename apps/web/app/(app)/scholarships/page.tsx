@@ -16,6 +16,13 @@ export default async function ScholarshipsPage() {
   const session = await auth();
   const user = session!.user;
   const canApply = hasPermission(user.permissions, "scholarship.apply");
+  // The portal carries the pending-decision queue, so whoever decides the final
+  // stage needs it too — and a school covering for an absent principal gives a
+  // deputy `workflow.review.principal`, not `scholarship.apply`. Gating the
+  // fetch on the applicant permission alone left that deputy on a page with
+  // nothing on it while the API would happily have answered them.
+  const canDecideFinal = hasPermission(user.permissions, "workflow.review.principal");
+  const needsPortal = canApply || canDecideFinal;
 
   // Applicants (parent/teacher) get the interactive portal; staff-read roles see
   // the same OPEN programs as information.
@@ -25,7 +32,7 @@ export default async function ScholarshipsPage() {
   // they could see their students' applications here while fetching none.
   const canOversee = hasPermission(user.permissions, "scholarship.read");
   const [portal, schoolApplications] = await Promise.all([
-    canApply ? apiGet<Portal>("/scholarships/portal") : Promise.resolve(null),
+    needsPortal ? apiGet<Portal>("/scholarships/portal") : Promise.resolve(null),
     canOversee
       ? apiGet<Serialized<ScholarshipApplicationDto>[]>("/scholarships/school-applications")
       : Promise.resolve(null),
@@ -38,9 +45,9 @@ export default async function ScholarshipsPage() {
             form — the request is approved by the class supervisor, then a parent/guardian, then the principal,
             before the sponsor reviews, examines qualified candidates, and awards the best three.</>} />
 
-        {canApply && portal ? (
+        {needsPortal && portal ? (
           <ScholarshipPortal portal={portal} roles={user.roles} />
-        ) : canApply ? (
+        ) : needsPortal ? (
           <Alert variant="info">
             <AlertTitle>Couldn&apos;t load scholarships</AlertTitle>
             <AlertDescription>Please refresh — your session may have expired.</AlertDescription>

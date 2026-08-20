@@ -205,7 +205,7 @@ const NAV: {
   // to billing.read staff so the proprietor's account sees it.
   { key: "group", label: "Group console", icon: BarChart3Icon, href: "/group", perm: "billing.read", module: MODULES.GROUP },
   { key: "documents", label: "Documents", icon: FolderIcon, href: "/documents", perm: "document.read", module: MODULES.DOCUMENTS },
-  { key: "scholarships", label: "Scholarships", icon: AwardIcon, href: "/scholarships", anyPerm: ["scholarship.apply", "scholarship.read"] },
+  { key: "scholarships", label: "Scholarships", icon: AwardIcon, href: "/scholarships", anyPerm: ["scholarship.apply", "scholarship.read", "workflow.review.principal"] },
   { key: "leave", label: "Leave", icon: CalendarCheckIcon, href: "/leave", perm: "hr.self", module: MODULES.HR },
   { key: "hr", label: "HR", icon: BriefcaseIcon, href: "/hr", perm: "hr.read", module: MODULES.HR },
   { key: "assessments", label: "Assessments", icon: BookOpenIcon, href: "/assessments", perm: "assessment.read", module: MODULES.INTEGRITY },
