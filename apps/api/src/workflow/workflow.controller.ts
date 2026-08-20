@@ -1,7 +1,7 @@
-import { Body, Controller, ForbiddenException, Get, Param, Post } from "@nestjs/common";
+import { Body, Controller, ForbiddenException, Get, Param, Post, Query } from "@nestjs/common";
 import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
-import type { WorkflowApproverOptionDto, WorkflowInboxItemDto, WorkflowDetailDto } from "@sms/types";
+import type { WorkflowApproverOptionDto, WorkflowPageDto, WorkflowDetailDto } from "@sms/types";
 import { z } from "zod";
 import { canInitiateWorkflowType, WORKFLOW_PERMISSIONS, WORKFLOW_TYPES } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -23,6 +23,16 @@ const reviewSchema = z.object({
   comments: z.string().max(2000).optional(),
 });
 const commentSchema = z.object({ comments: z.string().max(2000).optional() });
+/** Register filters. All optional — omitting everything gives the most recent
+ *  page, which is what the endpoint always returned. `mine` is a string because
+ *  it arrives on a query string; anything but "0"/"false" means yes. */
+const listQuerySchema = z.object({
+  type: z.enum(WORKFLOW_TYPES).optional(),
+  state: z.enum(["DRAFT", "PENDING_REVIEW", "REVISION_REQUESTED", "APPROVED", "REJECTED"]).optional(),
+  q: z.string().max(200).optional(),
+  page: z.coerce.number().int().min(1).max(10_000).optional(),
+  mine: z.string().optional(),
+});
 
 @RequireModule(MODULES.WORKFLOW)
 @Controller("workflows")
@@ -82,10 +92,22 @@ export class WorkflowController {
     return this.workflow.veto(p, id, body.comments);
   }
 
+  /** The approvals register: filtered, searchable, paged.
+   *
+   *  Every parameter is optional and the default is what it always was — the
+   *  most recent page. `mine=1` narrows to what THIS caller can decide now. */
   @Get()
   @RequirePermission(WORKFLOW_PERMISSIONS.READ)
-  list(@CurrentPrincipal() p: Principal): Promise<WorkflowInboxItemDto[]> {
-    return this.workflow.listRequests(p);
+  list(
+    @CurrentPrincipal() p: Principal,
+    @Query(new ZodValidationPipe(listQuerySchema)) query: z.infer<typeof listQuerySchema>,
+  ): Promise<WorkflowPageDto> {
+    // A query string carries text, not booleans: present and not an explicit
+    // no means yes.
+    return this.workflow.listRequests(p, {
+      ...query,
+      mine: query.mine !== undefined && query.mine !== "0" && query.mine !== "false",
+    });
   }
 
   /** Senior staff the caller may route approval stages to. MUST be declared

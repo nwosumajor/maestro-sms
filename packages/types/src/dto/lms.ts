@@ -234,6 +234,26 @@ export interface WorkflowDetailDto {
   trail: WorkflowTrailEntryDto[];
 }
 
+/**
+ * One page of the approvals register.
+ *
+ * The list used to be the 500 most recent requests, unfiltered and unpaged,
+ * because the cap's own note says inbox views "only ever surface the most-recent
+ * page". True of a queue; wrong here, because this list is ALSO how a school
+ * reads its maker-checker record. Measured on 702 requests: the API returned
+ * exactly 500, the oldest reachable was three weeks old, and everything before
+ * it could not be reached by any means the product offered — the rows existed
+ * and nothing could show them. A record that cannot be read is most of the way
+ * to not having one.
+ */
+export interface WorkflowPageDto {
+  items: WorkflowInboxItemDto[];
+  /** Matching the filter, not the page — so the UI can say how many there are. */
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 /** A senior staff member the initiator can route an approval stage to
  *  (a holder of workflow.review — principal / school_admin / head_teacher /
  *  head_admin / hr_manager). */

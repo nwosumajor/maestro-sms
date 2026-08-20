@@ -30,6 +30,7 @@ import {
   CUSTOM_CHAIN_MIN_STAGES,
   STAGED_WORKFLOW_TYPES,
   LIST_CAP,
+  WORKFLOW_PAGE_SIZE,
   canDecideWorkflowNow,
   STAFF_REQUEST_CHAIN,
   WORKFLOW_PERMISSIONS,
@@ -37,6 +38,7 @@ import {
   type WorkflowAction,
   type WorkflowApproverOptionDto,
   type WorkflowInboxItemDto,
+  type WorkflowPageDto,
   type RecordedApproval,
   type WorkflowDetailDto,
   type WorkflowStage,
@@ -266,13 +268,49 @@ export class WorkflowService {
   }
 
   // --- reads (scoped) --------------------------------------------------------
-  async listRequests(p: Principal): Promise<WorkflowInboxItemDto[]> {
+  /**
+   * One page of the approvals register — filtered, searchable, paged.
+   *
+   * It used to return the 500 most recent, unfiltered: fine for a queue of live
+   * work, wrong for the register a school reads its maker-checker record from.
+   * At 702 requests the oldest reachable was three weeks old and nothing could
+   * reach what came before it.
+   *
+   * `mine` is served differently on purpose. Whether a request awaits YOU
+   * depends on the current stage's permission, which lives inside a JSON column
+   * — not something to filter on in SQL. But it only ever applies to
+   * PENDING_REVIEW rows, and those are bounded by what the school is actually
+   * working on rather than by its history, so that set is read (still capped)
+   * and narrowed in memory. History is paged in the database, where it grows.
+   */
+  async listRequests(
+    p: Principal,
+    opts: { type?: string; state?: string; q?: string; page?: number; mine?: boolean | undefined } = {},
+  ): Promise<WorkflowPageDto> {
     // Pure read → replica path (Phase 1). scale: reviewers see the whole tenant's
     // requests, which grows without bound over time — cap to the most-recent page.
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       // Reviewers/board see all in-tenant; everyone else sees only what they raised.
-      const where = this.isReviewer(p) ? {} : { initiatorId: p.userId };
-      const rows = await tx.workflowRequest.findMany({ where, orderBy: { createdAt: "desc" }, take: LIST_CAP });
+      const scope = this.isReviewer(p) ? {} : { initiatorId: p.userId };
+      const q = opts.q?.trim();
+      const where = {
+        ...scope,
+        ...(opts.type ? { type: opts.type } : {}),
+        // `mine` is only ever about live work; an explicit state still wins for
+        // anyone browsing history.
+        ...(opts.mine ? { state: "PENDING_REVIEW" } : opts.state ? { state: opts.state } : {}),
+        ...(q ? { title: { contains: q, mode: "insensitive" as const } } : {}),
+      };
+      const page = Math.max(1, Math.floor(opts.page ?? 1));
+      const rows = await tx.workflowRequest.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        // A `mine` page is narrowed in memory below, so it reads the live set
+        // (capped) rather than a database page that would count the wrong rows.
+        skip: opts.mine ? 0 : (page - 1) * WORKFLOW_PAGE_SIZE,
+        take: opts.mine ? (LIST_CAP as number) : (WORKFLOW_PAGE_SIZE as number),
+      });
+      const total = opts.mine ? 0 : await tx.workflowRequest.count({ where });
 
       // A ROUTED stage names one approver, and the engine lets anyone eligible
       // act once that person has LEFT. Deciding `awaitingMe` needs to know
@@ -297,7 +335,7 @@ export class WorkflowService {
           : [],
       );
 
-      return rows.map((r) => {
+      const items = rows.map((r) => {
         const stages = (r.stages as WorkflowStage[] | null) ?? [];
         const pending = r.state === "PENDING_REVIEW" ? (stages[r.currentStage]?.label ?? null) : null;
         return {
@@ -333,6 +371,17 @@ export class WorkflowService {
           ),
         };
       });
+
+      if (opts.mine) {
+        const waiting = items.filter((i) => i.awaitingMe);
+        return {
+          items: waiting.slice((page - 1) * WORKFLOW_PAGE_SIZE, page * WORKFLOW_PAGE_SIZE),
+          total: waiting.length,
+          page,
+          pageSize: WORKFLOW_PAGE_SIZE,
+        };
+      }
+      return { items, total, page, pageSize: WORKFLOW_PAGE_SIZE };
     });
   }
 

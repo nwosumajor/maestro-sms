@@ -27,3 +27,8 @@ export const SEARCH_CAP = 50;
  * particular person searches (SEARCH_CAP).
  */
 export const ROSTER_CAP = 500;
+
+/** One page of the approvals register. Small, because each row is a card the
+ *  reviewer reads rather than a table line they scan — and because the register
+ *  is now reachable by filter and page instead of by scrolling 500 cards. */
+export const WORKFLOW_PAGE_SIZE = 25;

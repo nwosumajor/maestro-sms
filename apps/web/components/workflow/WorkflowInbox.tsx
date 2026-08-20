@@ -41,10 +41,18 @@ const STATE_VARIANT: Record<string, "default" | "secondary" | "destructive" | "o
 
 export function WorkflowInbox({
   initial,
+  total,
+  page,
+  pageSize,
+  filters,
   userId,
   permissions,
 }: {
   initial: WorkflowDto[];
+  total: number;
+  page: number;
+  pageSize: number;
+  filters: { type: string; state: string; q: string; mine: boolean };
   userId: string;
   permissions: string[];
 }) {
@@ -53,6 +61,19 @@ export function WorkflowInbox({
   const canCreate = has(WORKFLOW_PERMISSIONS.CREATE);
   const canReview = has(WORKFLOW_PERMISSIONS.REVIEW);
   const canVeto = has(WORKFLOW_PERMISSIONS.VETO);
+  /** Keep the filters when moving between pages — losing them on page 2 makes
+   *  the register unsearchable again the moment a search matches more than one
+   *  page of results. */
+  const pageHref = (n: number) => {
+    const params = new URLSearchParams();
+    if (filters.q) params.set("q", filters.q);
+    if (filters.type) params.set("type", filters.type);
+    if (filters.state) params.set("state", filters.state);
+    if (filters.mine) params.set("mine", "1");
+    if (n > 1) params.set("page", String(n));
+    const s = params.toString();
+    return s ? `/workflows?${s}` : "/workflows";
+  };
 
   const [type, setType] = React.useState<WorkflowType>("STAFF_REQUEST");
   const [title, setTitle] = React.useState("");
@@ -280,8 +301,53 @@ export function WorkflowInbox({
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 
+      {/* FINDING one request, months later. The register is the school's
+          maker-checker record, and reading it used to mean scrolling the 500
+          most recent cards — past which nothing could be reached at all. Every
+          control here narrows the query in the database. */}
+      <form method="GET" className="flex flex-wrap items-end gap-2 rounded-md border border-border p-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="wf-q" className="text-xs">Search title</Label>
+          <Input id="wf-q" name="q" defaultValue={filters.q} placeholder="e.g. Leave: Annual" className="w-52" />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="wf-type" className="text-xs">Type</Label>
+          <select id="wf-type" name="type" defaultValue={filters.type}
+            className="h-9 rounded-md border border-input bg-background px-2 text-sm">
+            <option value="">Any</option>
+            {WORKFLOW_TYPES.map((t) => (
+              <option key={t} value={t}>{t.replace(/_/g, " ")}</option>
+            ))}
+          </select>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="wf-state" className="text-xs">State</Label>
+          <select id="wf-state" name="state" defaultValue={filters.state}
+            className="h-9 rounded-md border border-input bg-background px-2 text-sm">
+            <option value="">Any</option>
+            {["DRAFT", "PENDING_REVIEW", "REVISION_REQUESTED", "APPROVED", "REJECTED"].map((st) => (
+              <option key={st} value={st}>{st.replace(/_/g, " ")}</option>
+            ))}
+          </select>
+        </div>
+        <label className="flex h-9 items-center gap-1.5 text-sm">
+          <input type="checkbox" name="mine" value="1" defaultChecked={filters.mine} />
+          Waiting on me
+        </label>
+        <Button type="submit" size="sm">Filter</Button>
+        {(filters.q || filters.type || filters.state || filters.mine) && (
+          <Button type="button" size="sm" variant="outline" onClick={() => router.push("/workflows")}>
+            Clear
+          </Button>
+        )}
+      </form>
+
       {initial.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No requests yet.</p>
+        <p className="text-sm text-muted-foreground">
+          {filters.q || filters.type || filters.state || filters.mine
+            ? "No requests match those filters."
+            : "No requests yet."}
+        </p>
       ) : (
         <div className="space-y-3">
           {/* The page is titled "everything waiting on you" and the list is the
@@ -290,13 +356,19 @@ export function WorkflowInbox({
               reviewer to work out that most of a long list is not theirs. */}
           {(() => {
             const mine = initial.filter((w) => w.awaitingMe).length;
+            const from = (page - 1) * pageSize + 1;
+            const to = Math.min(page * pageSize, total);
             return (
               <p className="text-sm text-muted-foreground">
                 {mine === 0
-                  ? initial.some((w) => w.state === "PENDING_REVIEW")
-                    ? "Nothing is waiting on your decision. The requests below are your school's, shown so you can follow them."
-                    : "Nothing is waiting on your decision."
-                  : `${mine} ${mine === 1 ? "request is" : "requests are"} waiting on your decision.`}
+                  ? "Nothing on this page is waiting on your decision."
+                  : `${mine} ${mine === 1 ? "request is" : "requests are"} waiting on your decision.`}{" "}
+                {/* Say what is being SHOWN out of what MATCHES. A register that
+                    silently truncates reads as a complete answer. */}
+                <span>
+                  Showing {from}–{to} of {total}
+                  {filters.q || filters.type || filters.state || filters.mine ? " matching" : ""}.
+                </span>
               </p>
             );
           })()}
@@ -356,6 +428,31 @@ export function WorkflowInbox({
               </Card>
             );
           })}
+          {total > pageSize && (
+            <div className="flex items-center justify-between pt-1">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={page <= 1}
+                onClick={() => router.push(pageHref(page - 1))}
+              >
+                Previous
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                Page {page} of {Math.max(1, Math.ceil(total / pageSize))}
+              </span>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={page * pageSize >= total}
+                onClick={() => router.push(pageHref(page + 1))}
+              >
+                Next
+              </Button>
+            </div>
+          )}
         </div>
       )}
     </div>
