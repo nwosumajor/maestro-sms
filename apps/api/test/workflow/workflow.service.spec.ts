@@ -30,7 +30,10 @@ function makeService(request: Record<string, unknown> | null) {
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const hooks = { onFinalized: jest.fn(), runFinalized: jest.fn().mockResolvedValue(undefined) };
-  return { service: new WorkflowService(db as never, hooks as never), update, updateMany, auditCreate, hooks };
+  // The engine now tells whoever must act next; these suites assert transitions,
+  // so the notifier is a no-op that records nothing.
+  const notifications = { enqueueMany: jest.fn().mockResolvedValue(undefined) };
+  return { service: new WorkflowService(db as never, hooks as never, notifications as never), update, updateMany, auditCreate, hooks, notifications };
 }
 
 const p = (permissions: string[], userId = "me"): Principal => ({
@@ -226,7 +229,8 @@ describe("WorkflowService initiator-routed chains (named approvers)", () => {
     } as unknown as TenantTx;
     const db = { runAsTenant: <T,>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
     const hooks = { onFinalized: jest.fn(), runFinalized: jest.fn().mockResolvedValue(undefined) };
-    return { service: new WorkflowService(db as never, hooks as never), updateMany };
+    const notifications = { enqueueMany: jest.fn().mockResolvedValue(undefined) };
+    return { service: new WorkflowService(db as never, hooks as never, notifications as never), updateMany, notifications };
   }
 
   const routedStages = [

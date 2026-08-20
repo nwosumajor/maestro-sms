@@ -111,7 +111,7 @@ d("LmsContentService integration (authoring, approval, quiz, forum, RLS)", () =>
     // (Redis) we don't run here; the service swallows failures regardless.
     const notifier = { enqueue: async () => undefined } as never;
     const hooks = new WorkflowHooksService();
-    const workflow = new WorkflowService(tenant, hooks);
+    const workflow = new WorkflowService(tenant, hooks, { enqueueMany: async () => undefined } as never);
     const termResults = new TermResultService(tenant, new AuditLogService() as never, workflow, hooks, { academicInTx: async () => ({ calendarTemplate: "THREE_TERM", grading: { components: GRADE_COMPONENTS } }), academicForSchool: async () => ({ calendarTemplate: "THREE_TERM", grading: { components: GRADE_COMPONENTS } }) } as never);
     svc = new LmsContentService(
       tenant,

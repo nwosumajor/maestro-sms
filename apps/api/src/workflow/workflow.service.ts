@@ -20,9 +20,11 @@ import {
   ForbiddenException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from "@nestjs/common";
 import { Prisma } from "@sms/db";
+import { NotificationService } from "../notifications/notification.service";
 import {
   CUSTOM_CHAIN_MAX_STAGES,
   CUSTOM_CHAIN_MIN_STAGES,
@@ -63,6 +65,8 @@ interface StageApproval {
 interface RequestRow {
   id: string;
   type: string;
+  /** Named so the notice can say WHICH request is waiting. */
+  title: string;
   state: WorkflowState;
   initiatorId: string;
   payload: unknown;
@@ -74,9 +78,15 @@ interface RequestRow {
 
 @Injectable()
 export class WorkflowService {
+  private readonly logger = new Logger("Workflow");
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     private readonly hooks: WorkflowHooksService,
+    // The engine tells whoever must act next. NotificationModule imports only
+    // BullModule and PaymentsModule, and neither reaches Workflow, so this
+    // cannot close a cycle — the failure a cycle causes is Nest refusing to
+    // boot, which no unit test would catch.
+    private readonly notifications: NotificationService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -395,7 +405,7 @@ export class WorkflowService {
     comments: string | undefined,
     rules: { mustBeInitiator?: boolean; mustNotBeInitiator?: boolean },
   ) {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    const out = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const req = (await tx.workflowRequest.findFirst({ where: { id } })) as RequestRow | null;
       if (!req) throw new NotFoundException("Request not found");
 
@@ -555,8 +565,107 @@ export class WorkflowService {
           initiatorId: req.initiatorId,
         });
       }
-      return { id, state: nextState, currentStage: nextStage };
+      return {
+        id,
+        state: nextState,
+        currentStage: nextStage,
+        initiatorId: req.initiatorId,
+        title: req.title,
+        stages: stages as WorkflowStage[],
+      };
     });
+    // TELL WHOEVER HAS TO ACT NEXT. Outside the transaction and never fatal:
+    // the transition is already real, and a notification commits in its own
+    // transaction, so sending it from inside would announce a state a later
+    // failure rolled back.
+    await this.announce(p, out);
+    return { id: out.id, state: out.state, currentStage: out.currentStage };
+  }
+
+  /**
+   * The engine sent nothing at all — 0 notification calls in the whole module.
+   *
+   * Every maker-checker control on this platform rests on a SECOND person
+   * acting: leave, grade publication, salary changes, fee schedules, admin
+   * appointments, stale-register amendments, student exits. That person was
+   * never told a request existed. Proven against the running system: a leave
+   * request left the engine PENDING_REVIEW at stage 0 and the notification count
+   * did not move. The approval sat until somebody happened to open the approvals
+   * page, and the requester was never told the outcome either.
+   *
+   * Placed on `transition` rather than on each caller because that is the single
+   * funnel every action passes through — submit, approve, reject, request
+   * revision, veto — so one change covers every workflow type, including any
+   * added later.
+   */
+  private async announce(
+    p: Principal,
+    out: { id: string; state: string; currentStage: number; initiatorId: string; title: string; stages: WorkflowStage[] },
+  ): Promise<void> {
+    try {
+      if (out.state === "PENDING_REVIEW") {
+        const to = await this.approversFor(p, out.stages, out.currentStage, out.initiatorId);
+        if (to.length === 0) return;
+        await this.notifications.enqueueMany(this.ctx(p), to, {
+          type: "WORKFLOW_UPDATE",
+          title: "A request is waiting for your approval",
+          body: out.title,
+          data: { requestId: out.id },
+        });
+        return;
+      }
+      // The other direction, which was equally silent: the person who raised it
+      // learns what happened to it.
+      if (out.state === "APPROVED" || out.state === "REJECTED" || out.state === "DRAFT") {
+        if (out.initiatorId === p.userId) return; // they just did it themselves
+        const said =
+          out.state === "APPROVED" ? "approved" : out.state === "REJECTED" ? "rejected" : "sent back for changes";
+        await this.notifications.enqueueMany(this.ctx(p), [out.initiatorId], {
+          type: "WORKFLOW_UPDATE",
+          title: `Your request was ${said}`,
+          body: out.title,
+          data: { requestId: out.id },
+        });
+      }
+    } catch (e) {
+      this.logger.warn(`workflow notice for ${out.id} failed: ${(e as Error).message}`);
+    }
+  }
+
+  /**
+   * Who may act at the stage the request is now sitting on.
+   *
+   * A stage names a PERMISSION, and an initiator-routed chain may also name one
+   * specific person. Both are honoured, in that order — a named approver is the
+   * only one who may act, so telling anybody else would be noise pointing at a
+   * button they do not have.
+   *
+   * An EMPTY chain is the documented legacy single-stage shape, reviewed by any
+   * `workflow.review` holder.
+   *
+   * // SECURITY: the initiator is filtered out. Separation of duties means they
+   * // cannot approve their own request, and a notice inviting them to do so
+   * // would be telling somebody to attempt something the engine refuses.
+   */
+  private async approversFor(
+    p: Principal,
+    stages: WorkflowStage[],
+    currentStage: number,
+    initiatorId: string,
+  ): Promise<string[]> {
+    const stage = stages[currentStage];
+    if (stage?.approverId) return stage.approverId === initiatorId ? [] : [stage.approverId];
+    const key = stage?.permission ?? WORKFLOW_PERMISSIONS.REVIEW;
+    const rows = await this.db.runAsTenantReadOnly(this.ctx(p), async (tx) =>
+      // ONE query: users whose role carries the stage's permission. Tenant-scoped
+      // by RLS, so this is the school's own reviewers and nobody else's.
+      (await tx.userRole.findMany({
+        where: { role: { permissions: { some: { permission: { key } } } } },
+        select: { userId: true },
+        distinct: ["userId"],
+      })) as Array<{ userId: string }>,
+    );
+    return [...new Set(rows.map((r) => r.userId))].filter((id) => id !== initiatorId);
   }
 
   private async writeAudit(
