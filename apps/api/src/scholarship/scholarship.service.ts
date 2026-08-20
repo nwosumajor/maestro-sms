@@ -451,11 +451,23 @@ export class ScholarshipService {
       .filter((v): v is number => v !== null);
     const publishedSessionAverage = totals.length ? Math.round((totals.reduce((s, v) => s + v, 0) / totals.length) * 100) / 100 : null;
 
+    // EXCUSED COUNTS AS ATTENDING, which is this platform's rule and was not
+    // this signal's. AttendanceRollupService states it where the figure is
+    // defined: "LATE and EXCUSED count as attending — the pupil was in school,
+    // or their absence was authorised. Counting them against attendance would
+    // understate it and contradict the report card, which uses the same rule."
+    // The group console, the LMS engagement figure and the parent portal all
+    // follow it; this one put EXCUSED in the denominator only.
+    //
+    // It is read by somebody deciding whether to fund a child, so the effect was
+    // to hold an authorised absence — illness with a note, a bereavement, a
+    // hospital appointment — against them, and to disagree with the attendance
+    // percentage printed on their own report card.
     const att = await tx.attendanceRecord.groupBy({ by: ["status"], where: { studentId }, _count: { _all: true } });
     const count = (s: string) => att.find((a: { status: string; _count: { _all: number } }) => a.status === s)?._count._all ?? 0;
-    const present = count("PRESENT") + count("LATE");
-    const attTotal = present + count("ABSENT") + count("EXCUSED");
-    const attendanceRatePct = attTotal ? Math.round((present / attTotal) * 100) : null;
+    const attended = count("PRESENT") + count("LATE") + count("EXCUSED");
+    const attTotal = attended + count("ABSENT");
+    const attendanceRatePct = attTotal ? Math.round((attended / attTotal) * 100) : null;
 
     const invoices = await tx.invoice.findMany({
       where: { studentId, status: { in: ["ISSUED", "PARTIALLY_PAID"] } },
