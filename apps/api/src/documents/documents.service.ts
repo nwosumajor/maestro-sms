@@ -200,6 +200,7 @@ export class DocumentsService {
     const doc = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const d = await this.requireVisible(tx, p, id);
       if (d.status !== "UPLOADED") throw new NotFoundException("Document not available");
+      await this.assertReleasable(tx, d);
       await this.log(tx, p, "document.download", "document", id, { studentId: d.studentId });
       return d;
     });
@@ -258,21 +259,7 @@ export class DocumentsService {
     const doc = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const d = await this.requireVisible(tx, p, id);
       if (d.status !== "UPLOADED") throw new NotFoundException("Document not available");
-      // The leaver gate applies HERE too, or it does not apply at all.
-      //
-      // Generating a report card or issuing a certificate for a withheld leaver
-      // is refused. But generating a report card also FILES a copy in this vault
-      // — so every artefact the gate blocks at issue was already retrievable
-      // through a second door, and a family could simply download the previous
-      // term's copy. A control with another way round it is not a control.
-      //
-      // ACADEMIC TYPES ONLY, matching the gate's own scope. A RECEIPT is a
-      // financial record the family is entitled to whatever they owe, and
-      // withholding personal data over a debt is unlawful rather than firm —
-      // the same distinction the gate draws for the data-protection export.
-      if (d.studentId && GATED_ON_RELEASE.has(d.type as string)) {
-        await assertDocumentsReleasable(tx, d.studentId);
-      }
+      await this.assertReleasable(tx, d);
       // Golden Rule #5: log access to a student's document, with the actor.
       await this.log(tx, p, "document.download", "document", id, { studentId: d.studentId });
       return d;
@@ -308,6 +295,32 @@ export class DocumentsService {
   private slug(title: string): string {
     const s = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
     return s || "file";
+  }
+
+  /**
+   * The leaver gate, on EVERY door that hands over the bytes.
+   *
+   * It lived inline in `getDownloadUrl`, under a comment arguing that a control
+   * with another way round it is not a control — and `streamFile` was the other
+   * way round it. Worse, `streamFile` is the door the product uses: the web's
+   * download button calls `/documents/:id/file`, so the gate was applied only
+   * on the path nothing called.
+   *
+   * Reproduced before the fix, one exited pupil with documents unreleased, the
+   * family asking for the same report card:
+   *
+   *     /download  403  "has left the school and their documents ... not released"
+   *     /file      200  the bytes
+   *
+   * ACADEMIC TYPES ONLY, matching the gate's own scope. A RECEIPT is a
+   * financial record the family is entitled to whatever they owe, and
+   * withholding personal data over a debt is unlawful rather than firm — the
+   * same distinction the gate draws for the data-protection export.
+   */
+  private async assertReleasable(tx: TenantTx, d: { studentId: string | null; type: string }): Promise<void> {
+    if (d.studentId && GATED_ON_RELEASE.has(d.type)) {
+      await assertDocumentsReleasable(tx, d.studentId);
+    }
   }
 
   private async requireVisible(tx: TenantTx, p: Principal, id: string) {
