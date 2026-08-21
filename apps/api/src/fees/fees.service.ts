@@ -278,6 +278,65 @@ export class FeesService {
     return invoice;
   }
 
+  /**
+   * Issue MANY drafts in one action.
+   *
+   * A fee run is a batch — hostel rent for every boarder, transport fares for a
+   * route, a term's tuition — and each one lands as a DRAFT invoice, because a
+   * draft is where a bursar assembles a bill. There was no way to finish that:
+   * `POST /invoices/:id/issue` is the only issue path and the UI offers it on
+   * the single-invoice page, so making a 200-boarder rent run real meant
+   * opening 200 invoices. What happens instead is that nobody does it, and the
+   * charges stay DRAFT — invisible to families (the list deliberately hides
+   * drafts), absent from receivables and the ageing report, and uncollectable
+   * online.
+   *
+   * Explicit ids, never "issue everything": a draft is by definition a bill
+   * somebody is still assembling, and a filter-driven sweep would issue the
+   * half-finished one sitting next to the batch.
+   *
+   * PARTIAL SUCCESS IS THE HONEST OUTCOME. An id that is not DRAFT any more —
+   * already issued, cancelled, issued by a colleague a second ago — is reported
+   * as skipped rather than failing the batch, because the alternative is a
+   * bursar pressing the button again and wondering which half took.
+   */
+  async issueInvoices(p: Principal, ids: string[]): Promise<{ issued: string[]; skipped: Array<{ id: string; reason: string }> }> {
+    const issued: Array<{ id: string; studentId: string; reference: string; totalMinor: number; currency: string; dueDate: Date }> = [];
+    const skipped: Array<{ id: string; reason: string }> = [];
+    await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      for (const id of [...new Set(ids)]) {
+        // Claimed, not read-then-written: two bursars pressing this on the same
+        // batch would otherwise both "issue" it and both notify the family.
+        const claimed = await tx.invoice.updateMany({
+          where: { id, status: "DRAFT" },
+          data: { status: "ISSUED", issuedAt: new Date() },
+        });
+        if (claimed.count === 0) {
+          const inv = await tx.invoice.findFirst({ where: { id }, select: { status: true } });
+          skipped.push({ id, reason: inv ? `already ${inv.status}` : "not found" });
+          continue;
+        }
+        const inv = await tx.invoice.findFirst({
+          where: { id },
+          select: { id: true, studentId: true, reference: true, totalMinor: true, currency: true, dueDate: true },
+        });
+        if (inv) issued.push(inv);
+        await this.log(tx, p, "fee.invoice.issue", "invoice", id, { bulk: true });
+      }
+    });
+    // Told AFTER the transaction, one family at a time: a notification failure
+    // must not roll back invoices that are now real bills.
+    for (const inv of issued) {
+      await this.notifyGuardians(p, inv.studentId, {
+        type: "INVOICE_ISSUED",
+        title: "New invoice",
+        body: `Invoice ${inv.reference} for ${this.money(inv.totalMinor, inv.currency)} is due on ${this.dateOnly(inv.dueDate)}.`,
+        data: { invoiceId: inv.id, reference: inv.reference },
+      });
+    }
+    return { issued: issued.map((i) => i.id), skipped };
+  }
+
   async cancelInvoice(p: Principal, id: string) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const inv = await tx.invoice.findFirst({ where: { id } });

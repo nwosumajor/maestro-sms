@@ -53,6 +53,11 @@ const invoiceSchema = z.object({
     )
     .min(1),
 });
+/** A bounded, explicit list. Capped because this notifies a family per invoice
+ *  and an unbounded batch is a way to send a school's worth of email by accident. */
+const issueBulkSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1).max(500),
+});
 const paymentSchema = z.object({
   amountMinor: z.number().int().min(1),
   method: z.enum(PAYMENT_METHODS),
@@ -449,6 +454,17 @@ export class FeesController {
   @RequirePermission(FEES_PERMISSIONS.FEE_READ)
   getInvoice(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<InvoiceDetailDto> {
     return this.fees.getInvoice(p, id);
+  }
+
+  /** Issue many drafts at once — the batch end of a fee run. Declared BEFORE
+   *  `invoices/:id/issue` so "issue-bulk" is never captured as an invoice id. */
+  @Post("invoices/issue-bulk")
+  @RequirePermission(FEES_PERMISSIONS.FEE_MANAGE)
+  issueBulk(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(issueBulkSchema)) body: z.infer<typeof issueBulkSchema>,
+  ) {
+    return this.fees.issueInvoices(p, body.ids);
   }
 
   @Post("invoices/:id/issue")

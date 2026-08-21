@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { readApiError } from "@/lib/api-error";
 import Link from "next/link";
 import type { InvoiceListItemDto, InvoiceSummaryDto, Serialized } from "@sms/types";
 import { Badge } from "@/components/ui/badge";
@@ -87,6 +88,31 @@ export function InvoiceBrowser({
     [query],
   );
 
+  /** Issue exactly the drafts currently listed. Partial success is reported as
+   *  it comes back: "issued 38, skipped 2 (already issued)" is the truth and is
+   *  more useful than a blanket success. */
+  const issueShown = React.useCallback(async () => {
+    const ids = rows.filter((r) => r.status === "DRAFT").map((r) => r.id);
+    if (ids.length === 0) return;
+    setBusy(true);
+    setMsg(null);
+    const res = await fetch("/api/sms/invoices/issue-bulk", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+    if (!res.ok) {
+      setBusy(false);
+      setMsg(await readApiError(res));
+      return;
+    }
+    const out = (await res.json()) as { issued: string[]; skipped: Array<{ id: string; reason: string }> };
+    setMsg(
+      `Issued ${out.issued.length}${out.skipped.length ? `, skipped ${out.skipped.length} (${out.skipped[0].reason})` : ""}.`,
+    );
+    await load(false);
+  }, [rows, load]);
+
   // Re-query on a filter change; debounce the text box so typing a reference does
   // not fire a request per keystroke.
   const first = React.useRef(true);
@@ -135,6 +161,16 @@ export function InvoiceBrowser({
             </Button>
           ))}
         </div>
+        {/* A fee run — hostel rent, a route's fares, a term's tuition — lands as
+            a batch of DRAFTS, and issuing them one page at a time is how they
+            end up never issued: invisible to families and absent from
+            receivables. Offered ONLY on the Draft filter, and only for what is
+            actually on screen, so nobody issues a bill they have not looked at. */}
+        {canManage && filter === "DRAFT" && rows.length > 0 && (
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => void issueShown()}>
+            Issue {rows.length} shown
+          </Button>
+        )}
         <input
           placeholder="Search reference…"
           className="w-52 rounded-md border bg-background p-1.5 text-sm"
