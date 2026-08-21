@@ -39,7 +39,9 @@ function makeService(over: {
       updateMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
     subject: { findFirst: jest.fn().mockResolvedValue(over.subject ?? { id: "s1" }) },
-    user: { findFirst: jest.fn().mockResolvedValue(over.user ?? { id: "t1" }) },
+    // Every real `user` row carries a status, and a class handed to somebody
+    // who has left is refused now — so the stub has to model the column.
+    user: { findFirst: jest.fn().mockResolvedValue(over.user ?? { id: "t1", name: "T One", status: "ACTIVE" }) },
     enrollment: { findMany: jest.fn().mockResolvedValue([]) },
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
@@ -66,7 +68,7 @@ describe("LmsService subjects + supervisor", () => {
   });
 
   it("assignClassSubject upserts one teacher per (class, subject)", async () => {
-    const { service, upsert } = makeService({ cls: { id: "c1" }, subject: { id: "s1" }, user: { id: "t1" } });
+    const { service, upsert } = makeService({ cls: { id: "c1" }, subject: { id: "s1" }, user: { id: "t1", name: "T One", status: "ACTIVE" } });
     await service.assignClassSubject(teacher("admin"), "c1", "s1", "t1");
     expect(upsert).toHaveBeenCalledWith(
       expect.objectContaining({ where: { classId_subjectId: { classId: "c1", subjectId: "s1" } } }),

@@ -20,7 +20,13 @@ function harness(opts: { classExists?: boolean; assignment?: { id: string } | nu
   const upserts: Array<Record<string, unknown>> = [];
   const tx = {
     class: { findFirst: jest.fn().mockResolvedValue(opts.classExists === false ? null : { id: "c1", name: "JSS2" }) },
-    user: { findFirst: jest.fn().mockResolvedValue(opts.teacherExists === false ? null : { id: "t1" }) },
+    // Same row the database would return, status included: a teacher who has
+    // left can no longer be given a class.
+    user: {
+      findFirst: jest.fn().mockResolvedValue(
+        opts.teacherExists === false ? null : { id: "t1", name: "T One", status: "ACTIVE" },
+      ),
+    },
     classTeacher: {
       findFirst: jest.fn().mockResolvedValue(opts.assignment === undefined ? { id: "ct1" } : opts.assignment),
       upsert: jest.fn((args: Record<string, unknown>) => {
@@ -113,7 +119,7 @@ describe("reassigning a class's subject teacher", () => {
     const tx = {
       class: { findFirst: jest.fn().mockResolvedValue({ id: "c1", name: "SS1 Science A" }) },
       subject: { findFirst: jest.fn().mockResolvedValue({ id: "phy", name: "Physics" }) },
-      user: { findFirst: jest.fn().mockResolvedValue({ id: "t2", name: "Mr Previous" }) },
+      user: { findFirst: jest.fn().mockResolvedValue({ id: "t2", name: "Mr Previous", status: "ACTIVE" }) },
       room: { findFirst: jest.fn().mockResolvedValue({ id: "r1" }) },
       classSubjectTeacher: {
         findFirst: jest.fn().mockResolvedValue(

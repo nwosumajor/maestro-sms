@@ -23,6 +23,7 @@ import {
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
+import { assertStillHere } from "../common/still-here";
 
 const STATUSES = ["OPEN", "IN_REVIEW", "RESOLVED", "DISMISSED"];
 // Picker/typeahead cap — a target list never ships a whole large-school roster.
@@ -272,6 +273,9 @@ export class DisciplineService {
     this.requireManage(p);
     const dto = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.requireVisible(tx, p, complaintId);
+      // A complaint assigned to somebody who has left is a complaint nobody is
+      // handling, on the register that most needs an owner.
+      await assertStillHere(tx, assigneeId, "Member of staff");
       const u = await tx.user.findFirst({ where: { id: assigneeId }, select: { id: true } });
       if (!u) throw new NotFoundException("Assignee not found in this school");
       const dup = await tx.disciplineAssignee.findFirst({ where: { complaintId, assigneeId }, select: { id: true } });

@@ -20,6 +20,7 @@ import {
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
+import { whoHasLeft } from "../common/still-here";
 
 const TASK_STATUSES = ["OPEN", "IN_PROGRESS", "COMPLETED", "CANCELLED"];
 const ASSIGNEE_STATUSES = ["ASSIGNED", "IN_PROGRESS", "SUBMITTED", "DONE"];
@@ -50,6 +51,14 @@ export class TaskService {
       const uniqueAssignees = [...new Set(input.assigneeIds)];
       const found = await tx.user.findMany({ where: { id: { in: uniqueAssignees } }, select: { id: true } });
       if (found.length !== uniqueAssignees.length) throw new BadRequestException("one or more assignees are not in this school");
+      // Named all at once: refusing twelve people one at a time makes somebody
+      // resubmit twelve times to discover the same list.
+      const left = await whoHasLeft(tx, uniqueAssignees);
+      if (left.length > 0) {
+        throw new BadRequestException(
+          `${left.join(", ")} ${left.length === 1 ? "has" : "have"} left the school and cannot be given a task.`,
+        );
+      }
       const task = await tx.task.create({
         data: {
           schoolId: p.schoolId,

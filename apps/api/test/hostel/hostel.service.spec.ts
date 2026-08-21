@@ -41,7 +41,9 @@ function makeTx(over: Partial<Record<string, unknown>> = {}) {
       findMany: jest.fn().mockResolvedValue([]),
       create: jest.fn(() => { calls.lineCreate++; return Promise.resolve({}); }),
     },
-    user: { findFirst: jest.fn().mockResolvedValue({ id: "stu1", name: "Stu" }) },
+    // `status` because every real `user` row has one, and assigning a place or
+    // a warden duty now refuses anybody who has left the school.
+    user: { findFirst: jest.fn().mockResolvedValue({ id: "stu1", name: "Stu", status: "ACTIVE" }) },
     // Row-lock the room for allocation concurrency (no-op in the mock).
     $executeRaw: jest.fn().mockResolvedValue(0),
   } as unknown as TenantTx;
@@ -134,7 +136,7 @@ describe("HostelService", () => {
     const tx = {
       hostelRoom: { findFirst: jest.fn().mockResolvedValue({ id: "r1", hostelId: "hb", capacity: 2 }) },
       hostel: { findFirst: jest.fn().mockResolvedValue({ type: "BOYS", name: "Boys House" }) },
-      user: { findFirst: jest.fn().mockResolvedValue({ id: "girl" }) },
+      user: { findFirst: jest.fn().mockResolvedValue({ id: "girl", name: "Girl", status: "ACTIVE" }) },
       studentProfile: { findFirst: jest.fn().mockResolvedValue({ gender: "F" }) },
       hostelAllocation: { count: jest.fn(), findFirst: jest.fn() },
       $executeRaw: jest.fn(),
@@ -146,7 +148,7 @@ describe("HostelService", () => {
     const tx = {
       hostelRoom: { findFirst: jest.fn().mockResolvedValue({ id: "r1", hostelId: "hb", capacity: 2 }), findFirstOrThrow: jest.fn().mockResolvedValue({ id: "r1", hostelId: "hb", roomNumber: "1", rentMinor: 0 }) },
       hostel: { findFirst: jest.fn().mockResolvedValue({ type: "BOYS", name: "Boys House" }), findFirstOrThrow: jest.fn().mockResolvedValue({ name: "Boys House" }) },
-      user: { findFirst: jest.fn().mockResolvedValue({ id: "boy", name: "Boy" }) },
+      user: { findFirst: jest.fn().mockResolvedValue({ id: "boy", name: "Boy", status: "ACTIVE" }) },
       studentProfile: { findFirst: jest.fn().mockResolvedValue({ gender: "M" }) },
       hostelAllocation: { count: jest.fn().mockResolvedValue(0), findFirst: jest.fn().mockResolvedValue(null), create: jest.fn().mockResolvedValue({ id: "a1" }), findFirstOrThrow: jest.fn().mockResolvedValue({ id: "a1", roomId: "r1", studentId: "boy", status: "ACTIVE", allocatedAt: new Date(), vacatedAt: null }) },
       $executeRaw: jest.fn().mockResolvedValue(0),

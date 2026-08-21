@@ -825,6 +825,27 @@ can decide its CURRENT stage — one query per distinct stage permission on the
 page — and `/workflows` says so and names the fix. The guard prevents new dead
 ends; a school still has to be able to SEE the ones a resignation created.
 
+### Work is only ever given to somebody who is still here
+`assertStillHere` / `whoHasLeft` / `STILL_HERE` (`apps/api/src/common/still-here.ts`)
+gate every surface that hands out FUTURE work. A staff exit sets
+`User.status = EXITED` and deliberately keeps the roles and the record
+(`hr/staff-access.ts`); nothing on the consuming side asked. `GET /users?kind=staff`
+— the picker behind every assignment screen — had NO status filter, so a teacher
+who left last term went on being offered by name, and seven services took them:
+cover reliever, exam invigilator, class teacher, subject teacher, task assignee,
+hostel warden, transport driver, discipline assignee. The duty roster was the ONE
+that got it right (it resolves through `employee.status = "ACTIVE"`), which is how
+the rest became visible. The failure is not a broken screen: it is Tuesday period 3
+with a reliever who does not work here, and a notification into an inbox its owner
+can no longer open — so the assigner is told they were informed.
+// GOTCHA: it fails CLOSED on a row with no `status` at all, which broke six
+FIXTURES and no real path — every `user` row has the column, so a stub without one
+models something the database cannot produce.
+DELIBERATELY NARROW: reading a departed person's NAME onto a record they were part
+of (a payslip, an old audit entry, last year's report card, a case history) is
+untouched. A leaver vanishing from their own past is a worse bug than the one
+being fixed.
+
 ## Repo workflow & gotchas
 - DB setup order: `prisma migrate deploy` → `pnpm --filter @sms/db rls` →
   `prisma db seed` (or `pnpm --filter @sms/db setup`). RLS lives in `prisma/rls/`,

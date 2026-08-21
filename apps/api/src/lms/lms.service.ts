@@ -40,6 +40,7 @@ import {
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
+import { assertStillHere, STILL_HERE } from "../common/still-here";
 
 // Staff whose duties span the whole school: they may view ANY class roster, the
 // full class list, AND the school-wide student directory (req: principal, school
@@ -504,8 +505,9 @@ export class LmsService {
       await this.requireClass(tx, classId);
       const subj = await tx.subject.findFirst({ where: { id: subjectId }, select: { id: true } });
       if (!subj) throw new NotFoundException("Subject not found");
-      const teacher = await tx.user.findFirst({ where: { id: teacherId }, select: { id: true } });
-      if (!teacher) throw new NotFoundException("Teacher not found");
+      // Still employed, not merely on file: a class handed to somebody who left
+      // has no teacher, and the screen says it does.
+      await assertStillHere(tx, teacherId, "Teacher");
 
       // Who is being replaced, if anyone — read BEFORE the upsert overwrites it.
       const prev = (await tx.classSubjectTeacher.findFirst({
@@ -634,8 +636,9 @@ export class LmsService {
   async assignTeacher(p: Principal, classId: string, teacherId: string) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.requireClass(tx, classId);
-      const teacher = await tx.user.findFirst({ where: { id: teacherId }, select: { id: true } });
-      if (!teacher) throw new NotFoundException("Teacher not found");
+      // Still employed, not merely on file: a class handed to somebody who left
+      // has no teacher, and the screen says it does.
+      await assertStillHere(tx, teacherId, "Teacher");
       // Idempotent: assigning twice is a duplicate click, not an error, and the
       // unique index would otherwise surface it as a raw 500.
       const row = await tx.classTeacher.upsert({
@@ -1426,6 +1429,16 @@ export class LmsService {
       const [users, roles] = await Promise.all([
         tx.user.findMany({
           where: {
+            // STILL HERE. This picker is what every assignment screen offers —
+            // cover reliever, invigilator, class teacher, task assignee, warden,
+            // driver — and it had no status filter, so a teacher who left last
+            // term went on being offered by name for months. The services refuse
+            // them now; a list that keeps offering somebody the system will
+            // refuse is a trap rather than a convenience.
+            //
+            // The parent/guardian kinds ride the same filter, which is right for
+            // the same reason: you cannot ring a number that has been closed.
+            ...STILL_HERE,
             ...(roleFilter ? { roles: roleFilter } : {}),
             ...(needle
               ? {

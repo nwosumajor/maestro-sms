@@ -40,6 +40,7 @@ import { NotificationService } from "../notifications/notification.service";
 import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 import { SchoolRegionService } from "../foundation/school-region.service";
+import { assertStillHere } from "../common/still-here";
 
 /** How many upcoming exams a personal list will return. A student sits a dozen a
  *  term; a parent of several children a few dozen. Well clear of real use, but it
@@ -926,6 +927,10 @@ export class ExamService {
     const outcome = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const sitting = await tx.examSitting.findFirst({ where: { id: sittingId }, select: { id: true, title: true, date: true, startsAt: true, endsAt: true, hall: true } });
       if (!sitting) throw new NotFoundException("Sitting not found");
+      // Still employed, as well as staff. The clash check below exists so a
+      // hall is never left unattended; rostering somebody who has left leaves
+      // it unattended by a different route.
+      await assertStillHere(tx, staffId, "Staff member");
       const staff = await tx.user.findFirst({ where: { id: staffId }, select: { id: true, name: true, roles: { select: { role: { select: { name: true } } } } } });
       if (!staff) throw new NotFoundException("Staff not found");
       const isStaff = staff.roles.some((r: { role: { name: string } }) => r.role.name !== "student" && r.role.name !== "parent");

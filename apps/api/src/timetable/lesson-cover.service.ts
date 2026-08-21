@@ -23,6 +23,7 @@ import {
 } from "../integrity/integrity.foundation";
 import { NotificationService } from "../notifications/notification.service";
 import { SchoolRegionService } from "../foundation/school-region.service";
+import { assertStillHere } from "../common/still-here";
 
 const DOW = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"] as const;
 const MAX_WINDOW_DAYS = 62;
@@ -163,8 +164,9 @@ export class LessonCoverService {
       if (entry.dayOfWeek !== DOW[date.getUTCDay()]) {
         throw new BadRequestException("That date is not the lesson's weekday");
       }
-      const reliever = await tx.user.findFirst({ where: { id: input.coveringTeacherId }, select: { id: true, name: true } });
-      if (!reliever) throw new NotFoundException("Teacher not found");
+      // A reliever who has left cannot cover Tuesday period 3, and the whole
+      // point of this feature is that the class is not left unattended.
+      const reliever = await assertStillHere(tx, input.coveringTeacherId, "Teacher");
       if (input.coveringTeacherId === entry.teacherId) {
         throw new BadRequestException("The absent teacher cannot cover their own lesson");
       }

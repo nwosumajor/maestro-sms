@@ -12,7 +12,15 @@ const assignee: Principal = { schoolId: "A", userId: "stu1", roles: ["student"],
 function makeTx(over: Record<string, unknown> = {}) {
   const calls = { taskCreate: 0, assignCreate: 0, assignUpdate: 0 };
   const tx = {
-    user: { findMany: jest.fn().mockResolvedValue(over.users ?? [{ id: "stu1" }, { id: "stu2" }]), findFirst: jest.fn().mockResolvedValue({ id: "stu1", name: "Stu" }) },
+    // findMany answers TWO questions now: who exists, and (with a NOT status
+    // filter) who has left. Model the filter rather than returning the same
+    // rows to both, or every assignee reads as departed.
+    user: {
+      findMany: jest.fn(({ where }: { where: { NOT?: { status: string } } }) =>
+        Promise.resolve(where?.NOT ? [] : (over.users ?? [{ id: "stu1" }, { id: "stu2" }])),
+      ),
+      findFirst: jest.fn().mockResolvedValue({ id: "stu1", name: "Stu", status: "ACTIVE" }),
+    },
     task: {
       create: jest.fn(() => { calls.taskCreate++; return Promise.resolve({ id: "t1" }); }),
       findFirst: jest.fn().mockResolvedValue(over.task ?? { id: "t1", createdById: "mgr" }),

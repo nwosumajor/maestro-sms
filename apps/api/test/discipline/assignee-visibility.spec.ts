@@ -63,7 +63,12 @@ function makeService(opts: { assignedTo?: string[]; complainantId?: string } = {
     },
     disciplineEvidence: { findMany: jest.fn().mockResolvedValue([]) },
     disciplineEntry: { findMany: jest.fn().mockResolvedValue([]) },
-    user: { findFirst: jest.fn().mockResolvedValue({ id: "teach-1" }), findMany: jest.fn().mockResolvedValue([]) },
+    // `status`, because a complaint can no longer be assigned to somebody who
+    // has left — an owner who cannot sign in is not an owner.
+    user: {
+      findFirst: jest.fn().mockResolvedValue({ id: "teach-1", name: "Mr Teach", status: "ACTIVE" }),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
   };
   const db = {
     runAsTenant: <T>(_c: unknown, fn: (t: unknown) => Promise<T>) => fn(tx),

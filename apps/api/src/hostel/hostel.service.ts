@@ -34,6 +34,7 @@ import {
 import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 import { NotificationService } from "../notifications/notification.service";
+import { assertStillHere } from "../common/still-here";
 
 type Json = Record<string, string>;
 
@@ -866,8 +867,9 @@ export class HostelService {
   // --- helpers --------------------------------------------------------------
 
   private async assertUserInSchool(tx: TenantTx, userId: string): Promise<void> {
-    const u = await tx.user.findFirst({ where: { id: userId }, select: { id: true } });
-    if (!u) throw new NotFoundException("User not found in this school");
+    // In this school AND still here. Existing was never the question: a hostel
+    // duty handed to somebody who has left is a duty nobody is doing.
+    await assertStillHere(tx, userId, "User");
   }
 
   private async roomDto(tx: TenantTx, roomId: string): Promise<HostelRoomDto> {
