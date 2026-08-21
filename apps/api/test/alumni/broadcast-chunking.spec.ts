@@ -29,7 +29,12 @@ function makeService(count: number) {
   const tx = {
     alumnus: {
       findMany: jest.fn().mockResolvedValue(rows),
-      count: jest.fn().mockResolvedValue(count),
+      // TWO questions now, not one: how many can be written to, and how many
+      // cannot. A stub that answers both with the same number would report the
+      // whole register as unreachable. This fixture links every alumnus.
+      count: jest.fn(({ where }: { where: { userId?: unknown } }) =>
+        Promise.resolve(where?.userId === null ? 0 : count),
+      ),
     },
   };
   const svc = Object.create(AlumniService.prototype) as AlumniService;
@@ -107,7 +112,9 @@ describe("the request itself", () => {
     const out = await svc.broadcast(p, msg);
     expect(add).toHaveBeenCalledTimes(1);
     expect(enqueueMany).not.toHaveBeenCalled();
-    expect(out).toEqual({ queued: 2000 });
+    // `unreachable` rides alongside since a broadcast now says how much of the
+    // register it could NOT write to; this stub links every alumnus.
+    expect(out).toEqual({ queued: 2000, unreachable: 0 });
   });
 
   it("counts without loading every alumnus to do it", async () => {
@@ -122,7 +129,7 @@ describe("the request itself", () => {
 
   it("queues nothing when there is nobody to write to", async () => {
     const { svc, add } = makeService(0);
-    expect(await svc.broadcast(p, msg)).toEqual({ queued: 0 });
+    expect(await svc.broadcast(p, msg)).toEqual({ queued: 0, unreachable: 0 });
     expect(add).not.toHaveBeenCalled();
   });
 });

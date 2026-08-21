@@ -29,6 +29,39 @@ export function AlumniManager({ alumni }: { alumni: Alumnus[] }) {
     if (res.ok) { setMsg(ok); router.refresh(); } else setMsg(res.error ?? "Request failed.");
   };
 
+  /**
+   * Reports what the broadcast ACTUALLY reached.
+   *
+   * This used to say "it goes out to the alumni body", which contradicted the
+   * card above it: a broadcast is a notification addressed to a user account,
+   * and an alumnus recorded after the fact has none. A school with fifty on
+   * file and three linked accounts was told it had gone out.
+   */
+  const sendBroadcast = async () => {
+    setBusy(true);
+    setMsg(null);
+    const res = await postSms<{ queued: number; unreachable: number }>("alumni/broadcast", {
+      title: bTitle,
+      body: bBody,
+    });
+    setBusy(false);
+    if (!res.ok) {
+      setMsg(res.error ?? "Request failed.");
+      return;
+    }
+    const queued = res.data?.queued ?? 0;
+    const unreachable = res.data?.unreachable ?? 0;
+    setMsg(
+      `Queued for ${queued} alumn${queued === 1 ? "us" : "i"} with an account.` +
+        (unreachable > 0
+          ? ` ${unreachable} more ${unreachable === 1 ? "has" : "have"} no account and were not written to — add one to reach them.`
+          : ""),
+    );
+    setBTitle("");
+    setBBody("");
+    router.refresh();
+  };
+
   return (
     <div className="space-y-6">
       {msg && <p className="text-sm text-muted-foreground">{msg}</p>}
@@ -51,7 +84,13 @@ export function AlumniManager({ alumni }: { alumni: Alumnus[] }) {
         <CardContent className="flex flex-wrap items-end gap-2">
           <div className="space-y-1.5"><Label>Title</Label><Input value={bTitle} onChange={(e) => setBTitle(e.target.value)} /></div>
           <div className="space-y-1.5 flex-1 min-w-60"><Label>Message</Label><Input value={bBody} onChange={(e) => setBBody(e.target.value)} /></div>
-          <Button variant="outline" disabled={busy || !bTitle || !bBody} onClick={() => run(() => postSms("alumni/broadcast", { title: bTitle, body: bBody }), "Broadcast queued — it goes out to the alumni body in the background.").then(() => { setBTitle(""); setBBody(""); })}>Send</Button>
+          <Button
+            variant="outline"
+            disabled={busy || !bTitle || !bBody}
+            onClick={() => void sendBroadcast()}
+          >
+            Send
+          </Button>
         </CardContent>
       </Card>
 

@@ -121,13 +121,34 @@ export class AlumniService {
    * and always has been; it meant "inbox rows written", which is exactly what
    * the job now does.
    */
-  async broadcast(p: Principal, input: { title: string; body: string; year?: number }): Promise<{ queued: number }> {
-    const queued = await this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const where: Record<string, unknown> = { userId: { not: null } };
-      if (input.year) where.graduationYear = input.year;
-      const count = await tx.alumnus.count({ where });
-      await this.log(tx, p, "alumni.broadcast", "broadcast", { year: input.year, count });
-      return count;
+  /**
+   * Message the alumni body — and say how much of it this actually reaches.
+   *
+   * A broadcast goes out as a NOTIFICATION, which is addressed to a user
+   * account. An alumnus recorded after the fact has no account — `userId` is
+   * nullable for exactly that reason — so those records are skipped. The count
+   * returned was the reached ones alone, and the screen said "it goes out to
+   * the alumni body", so a school with fifty alumni on file and three linked
+   * accounts was told the broadcast was queued and never learnt that
+   * forty-seven people were not written to.
+   *
+   * "Queued 3" and "queued 3, 47 have no account" are different facts, and the
+   * second is the one that makes somebody go and collect email addresses. Same
+   * reasoning as the fee run reporting what it skipped.
+   */
+  async broadcast(
+    p: Principal,
+    input: { title: string; body: string; year?: number },
+  ): Promise<{ queued: number; unreachable: number }> {
+    const { queued, unreachable } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const audience: Record<string, unknown> = {};
+      if (input.year) audience.graduationYear = input.year;
+      const [count, missing] = await Promise.all([
+        tx.alumnus.count({ where: { ...audience, userId: { not: null } } }),
+        tx.alumnus.count({ where: { ...audience, userId: null } }),
+      ]);
+      await this.log(tx, p, "alumni.broadcast", "broadcast", { year: input.year, count, unreachable: missing });
+      return { queued: count, unreachable: missing };
     });
     if (queued > 0) {
       await this.queue.add(
@@ -136,7 +157,7 @@ export class AlumniService {
         { removeOnComplete: true, removeOnFail: 50 },
       );
     }
-    return { queued };
+    return { queued, unreachable };
   }
 
   /**
