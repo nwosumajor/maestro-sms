@@ -39,15 +39,13 @@ const TEST = join(__dirname, "..");
  * the reason it earns its place.
  */
 const KEPT_WITHOUT_CALLERS: Record<string, string> = {
-  // The READER of the attendance rollup. Nothing calls it, the rollup table is
-  // empty, and `refreshEndedTerms` (its writer) is reachable only by an operator
-  // endpoint — so the feature is built and connected to nothing at both ends.
-  // Kept rather than deleted because deleting it would make the rollup
-  // write-only for certain, and whether to complete the feature or remove it is
-  // a decision about a table and a schedule, not a tidy-up. Report cards compute
-  // attendance live meanwhile, which is correct, just repeated.
+  // The READER of the attendance rollup, and a duplicate: AttendanceService
+  // reads the same table inline (`useRollup`) and is what actually serves the
+  // overview. Kept because it is the only place the rollup-vs-live decision is
+  // written down as one testable rule, and the rollup now has a nightly sweep
+  // populating it.
   "attendance/attendance-rollup.service.ts::totalsFor":
-    "reader of a rollup nothing writes to yet — see the report-card attendance path",
+    "second reader of the rollup; AttendanceService.useRollup is the live one",
 };
 
 /** Statement keywords that can wrap onto a two-space indent and read like a

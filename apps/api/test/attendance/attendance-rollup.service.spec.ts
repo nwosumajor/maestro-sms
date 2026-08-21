@@ -21,7 +21,10 @@ const mk = (tx: Record<string, unknown>) => {
     runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx as unknown as TenantTx),
     runAsTenantReadOnly: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx as unknown as TenantTx),
   };
-  return new AttendanceRollupService(db as never, { record: jest.fn() } as never);
+  // The nightly sweep needs a privileged client to list schools; these cases
+  // drive one tenant directly, so it is absent — which is also the shape the
+  // sweep must survive (it logs and returns zero rather than throwing).
+  return new AttendanceRollupService(db as never, { record: jest.fn() } as never, { client: null } as never);
 };
 
 const day = (offset: number) => {

@@ -9,6 +9,7 @@ import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { AttendanceService } from "./attendance.service";
 import { AttendanceRollupService } from "./attendance-rollup.service";
+import { JobRunsService } from "../maintenance/job-runs.service";
 
 /** Query-string numbers arrive as strings; coerce and bound them at the boundary. */
 const pageSchema = z.coerce.number().int().min(1).max(100_000).optional();
@@ -32,6 +33,7 @@ export class AttendanceController {
   constructor(
     private readonly attendance: AttendanceService,
     private readonly rollup: AttendanceRollupService,
+    private readonly jobRuns: JobRunsService,
   ) {}
 
   /** Take/correct a class register for a date. Teacher-of-class scoped. */
@@ -68,7 +70,9 @@ export class AttendanceController {
   @Post("attendance/rollup/refresh")
   @RequirePermission(ATTENDANCE_PERMISSIONS.ATTENDANCE_WRITE)
   refreshRollup(@CurrentPrincipal() p: Principal) {
-    return this.rollup.refreshEndedTerms(p);
+    // Recorded like the scheduled run, so the jobs console shows one history
+    // rather than a nightly sweep and an invisible manual one beside it.
+    return this.jobRuns.record("attendance.rollup", "MANUAL", () => this.rollup.refreshEndedTerms(p));
   }
 
   /** Attendance BY CLASS over a window — the senior-staff overview. Each row says

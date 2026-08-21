@@ -155,7 +155,7 @@ d("Five years of attendance history (real Postgres)", () => {
 
     const tenantDb = new PrismaTenantService();
     const audit = new AuditLogService();
-    rollup = new AttendanceRollupService(tenantDb, audit);
+    rollup = new AttendanceRollupService(tenantDb, audit, { client: null } as never);
     const region = new SchoolRegionService(tenantDb);
     svc = new AttendanceService(tenantDb, audit, { notifyMany: jest.fn() } as never, {} as never, region, {
       onFinalized: jest.fn(),

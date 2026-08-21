@@ -188,6 +188,20 @@ export const SCHEDULED_JOBS = [
     },
   },
   {
+    key: "attendance.rollup",
+    label: "Attendance term rollup",
+    // NIGHTLY. Only ENDED terms are rolled up and the work is idempotent, so a
+    // missed night costs a slower page and nothing else — which is precisely why
+    // it needs to be in this catalogue. A sweep whose absence is invisible is
+    // how this one came to exist without a schedule at all: the table sat empty
+    // while every attendance overview quietly took the live path.
+    everyMinutes: 1440,
+    manual: {
+      path: "attendance/rollup/refresh",
+      permission: "attendance.write",
+    },
+  },
+  {
     key: "operator.feedbackDigest",
     label: "Feedback digest",
     // HOURLY — `DEFAULT_FEEDBACK_DIGEST_CRON` is "0 * * * *". Declared as daily

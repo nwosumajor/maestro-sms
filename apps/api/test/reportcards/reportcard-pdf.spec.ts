@@ -208,8 +208,15 @@ describe("the year so far", () => {
     // A term with no marks is an absent measurement. Counting it as zero would
     // print a failure the pupil never earned.
     const t = textOf(await render({ annualBySubject: { s1: [90, null, 80], s2: [65, null, null] } }));
-    expect(t).toContain("85");
-    expect(t).not.toContain("57"); // (90 + 0 + 80) / 3
+    // Pinned to the ROW, not to the document. This read `expect(t).not
+    // .toContain("57")` over the whole PDF, so any incidental 57 anywhere —
+    // a generated-at time, an id — failed it: it went red once under full-suite
+    // parallelism and passed on a re-run, which is the worst kind of gate,
+    // because the next person spends their time proving their change innocent.
+    // The cells are newline-separated, so the row pins the average to the marks
+    // it was computed from.
+    expect(t).toContain("\n90\n—\n80\n85\n");
+    expect(t).not.toContain("\n90\n—\n80\n57\n"); // (90 + 0 + 80) / 3
   });
 
   it("stays off a card with only one term of marks", async () => {

@@ -28,6 +28,7 @@ import {
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
+import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 
 /** Totals for one window, whatever produced them. */
 export interface AttendanceTotals {
@@ -49,7 +50,68 @@ export class AttendanceRollupService {
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
+    private readonly privileged: PrivilegedDatabaseService,
   ) {}
+
+  /**
+   * Roll up every school's ended terms — the nightly sweep.
+   *
+   * THE THING THIS FIXES: the rollup was built, consumed and never populated.
+   * `AttendanceService` reads the table (`useRollup`) and falls through to the
+   * live path when it is empty, so the figures were always right — and always
+   * computed the slow way, because the only thing that WROTE a rollup was a
+   * manual endpoint no screen calls. The table held 0 rows against 173,701
+   * attendance records, and this service's own comments described "the daily
+   * sweep" as though one existed.
+   *
+   * Measured on that data: the whole-school term aggregate the rollup replaces
+   * is 93 ms, and it is bounded by the school's LIFETIME rather than its size —
+   * five years of registers is roughly a quarter of a second on a page senior
+   * staff open constantly.
+   *
+   * Cross-tenant like the progression and dunning sweeps: the school list is a
+   * privileged read, each school's work is tenant-scoped, and a school with no
+   * management user to attribute the write to is skipped rather than written as
+   * SYSTEM (audit_log.actorId is a non-null FK). One school's failure never
+   * stops the rest — the worst case is that its figures stay live, which is
+   * what they were before this existed.
+   */
+  async runSweep(): Promise<{ schools: number; terms: number; skipped: number }> {
+    const client = this.privileged.client;
+    if (!client) {
+      this.logger.warn("Rollup sweep requested but no privileged DB — skipping.");
+      return { schools: 0, terms: 0, skipped: 0 };
+    }
+    const schools = await client.school.findMany({ where: { isPlatform: false }, select: { id: true } });
+    let terms = 0;
+    let skipped = 0;
+    let touched = 0;
+    for (const s of schools) {
+      const actor = await client.userRole.findFirst({
+        where: { schoolId: s.id, role: { name: { in: ["principal", "school_admin"] } } },
+        select: { userId: true },
+      });
+      if (!actor) {
+        skipped++;
+        continue;
+      }
+      try {
+        const r = await this.refreshEndedTerms({
+          schoolId: s.id,
+          userId: actor.userId,
+          roles: [],
+          permissions: [],
+        });
+        if (r.refreshed.length > 0) touched++;
+        terms += r.refreshed.length;
+        skipped += r.skipped;
+      } catch (err) {
+        skipped++;
+        this.logger.warn(`rollup sweep failed for school ${s.id}: ${String(err)}`);
+      }
+    }
+    return { schools: touched, terms, skipped };
+  }
 
   private ctx(p: Principal): TenantContext {
     return { schoolId: p.schoolId, userId: p.userId };
