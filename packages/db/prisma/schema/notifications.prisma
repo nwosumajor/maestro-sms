@@ -105,6 +105,22 @@ model Notification {
   @@index([schoolId])
   @@index([schoolId, recipientId])
   @@index([schoolId, recipientId, readAt])
+  // THE INBOX'S OWN QUERY. Every read of this table is "this person's, newest
+  // first, one page" — and no index carried `createdAt`, so Postgres read every
+  // row the recipient had ever received and top-N sorted it. Measured on the
+  // platform owner with 500k notifications: a parallel SEQ SCAN of 500,000 rows,
+  // 11,654 buffer pages, 63 ms warm and local for a page of 100. With this index
+  // it is an Index Scan: 18 pages, 0.23 ms. The cost stops scaling with how long
+  // the account has existed and starts scaling with the page size, which is the
+  // difference between a screen that is fine in year one and fine in year ten.
+  @@index([schoolId, recipientId, createdAt(sort: Desc)])
+  // NO trigram index for the search: under RLS it could not be used. `texticlike`
+  // is not leakproof, so Postgres will not evaluate ILIKE before a row-security
+  // qual, and the plan falls back to a scan for every role that does not bypass
+  // RLS — which is every role the application uses. The index above bounds the
+  // search instead, by narrowing to the recipient first. See migration
+  // 20261228000000_notification_inbox_at_scale, which drops three indexes added
+  // on exactly that mistaken assumption.
   @@map("notification")
 }
 

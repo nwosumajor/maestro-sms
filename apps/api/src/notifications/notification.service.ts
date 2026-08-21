@@ -38,6 +38,8 @@ import {
   NOTIFICATION_QUEUE,
   type DeliverNotificationJob,
   type NotificationChannelProvider,
+  NOTIFICATION_PAGE_SIZE,
+  NOTIFICATION_COUNT_CAP,
 } from "./notification.constants";
 
 const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal"]);
@@ -217,19 +219,88 @@ export class NotificationService {
   }
 
   // --- recipient inbox (self-scoped) ----------------------------------------
-  async listMine(p: Principal, opts?: { unreadOnly?: boolean; limit?: number }) {
+  /**
+   * One page of the caller's own inbox — filtered, searchable, counted.
+   *
+   * It used to be "the most recent hundred", with nothing said about the rest.
+   * That is right for a queue and wrong for a record, and this inbox is both.
+   * The platform owner's is the clearest case: operator alerts, dunning digests,
+   * dispute warnings and onboarding requests all land here, and it is where "did
+   * anyone get told about that" is answered months later. With 500,000 rows the
+   * page showed a hundred, offered no filter, and had no way to reach the other
+   * 499,900.
+   *
+   * FILTERED IN SQL, never in memory: narrowing the most-recent hundred can only
+   * ever search the most-recent hundred, so a type filter would have quietly
+   * meant "of the last hundred" — the same trap the approvals register had.
+   *
+   * The `q` search is an ILIKE and CANNOT be index-accelerated here: `texticlike`
+   * is not leakproof, so under RLS Postgres refuses to evaluate it before the
+   * row-security qual and no trigram index is reachable (three that were added on
+   * that assumption are dropped in 20261228000000). What bounds it instead is the
+   * (schoolId, recipientId, createdAt) index: the scan is over the CALLER'S OWN
+   * inbox, not the table — 0.9 ms for an ordinary one.
+   */
+  async listMine(
+    p: Principal,
+    opts?: { unreadOnly?: boolean; limit?: number; page?: number; type?: string; q?: string },
+  ) {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const where: Record<string, unknown> = { recipientId: p.userId };
-      if (opts?.unreadOnly) where.readAt = null;
-      // The dashboard shows six; the inbox page shows the full hundred. Fetching a
+      const needle = opts?.q?.trim();
+      const where: Record<string, unknown> = {
+        recipientId: p.userId,
+        ...(opts?.unreadOnly ? { readAt: null } : {}),
+        ...(opts?.type ? { type: opts.type } : {}),
+        ...(needle
+          ? {
+              OR: [
+                { title: { contains: needle, mode: "insensitive" as const } },
+                { body: { contains: needle, mode: "insensitive" as const } },
+              ],
+            }
+          : {}),
+      };
+      // The dashboard shows six; the inbox page shows a page of fifty. Fetching a
       // hundred rows to render six is the kind of waste that only shows up as a
       // slow home page nobody can attribute to anything.
-      const take = Math.min(Math.max(opts?.limit ?? 100, 1), 100);
-      const [items, unread] = await Promise.all([
-        tx.notification.findMany({ where, orderBy: { createdAt: "desc" }, take }),
-        tx.notification.count({ where: { recipientId: p.userId, readAt: null } }),
+      const take = Math.min(Math.max(opts?.limit ?? NOTIFICATION_PAGE_SIZE, 1), 100);
+      const page = Math.max(1, Math.floor(opts?.page ?? 1));
+      // COUNTS ARE CAPPED, THE PAGE IS NOT.
+      //
+      // A plain `count` walks every row the recipient has ever received: 27 ms
+      // for the total and 42 ms for a filtered one on 500,000 rows, on every
+      // page load, growing every year the account exists. Bounding the count at
+      // NOTIFICATION_COUNT_CAP makes that a fixed cost and "1,000+" is as useful
+      // to read as "47,213". Paging is not bounded by it — `hasMore` comes from
+      // fetching one row past the page, so the owner can still walk back to
+      // anything in the inbox.
+      const cappedCount = async (w: Record<string, unknown>) =>
+        (await tx.notification.findMany({ where: w, select: { id: true }, take: NOTIFICATION_COUNT_CAP })).length;
+      const [rows, unread, total] = await Promise.all([
+        tx.notification.findMany({
+          where,
+          orderBy: { createdAt: "desc" },
+          skip: (page - 1) * take,
+          // One past the page: the only honest way to say "there is more" without
+          // paying for a full count.
+          take: take + 1,
+        }),
+        // The badge always counts ALL unread, never "unread on this page" — it is
+        // the number that tells somebody to come back to this screen.
+        cappedCount({ recipientId: p.userId, readAt: null }),
+        cappedCount(where),
       ]);
-      return { items, unread };
+      const items = rows.slice(0, take);
+      return {
+        items,
+        unread,
+        unreadIsCapped: unread >= NOTIFICATION_COUNT_CAP,
+        total,
+        totalIsCapped: total >= NOTIFICATION_COUNT_CAP,
+        page,
+        pageSize: take,
+        hasMore: rows.length > take,
+      };
     });
   }
 

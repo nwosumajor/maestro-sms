@@ -846,6 +846,37 @@ of (a payslip, an old audit entry, last year's report card, a case history) is
 untouched. A leaver vanishing from their own past is a worse bug than the one
 being fixed.
 
+### The inbox is a record, and a trigram index under RLS is not an index
+`GET /notifications` is paged, filtered (`type`, `q` over title+body, `unread`)
+and counted; the page says what it is SHOWING out of what MATCHES. It used to
+return the most-recent hundred and say nothing — right for a queue, wrong for a
+record, and the platform owner's inbox is a record: operator alerts, dunning
+digests, dispute warnings and onboarding requests all land there and are looked
+up months later.
+Measured on 500,000 notifications for one recipient, as the APPLICATION role with
+RLS in force: the list was a Parallel Seq Scan of every row that recipient ever
+received (11,654 buffers, 63 ms for 100 rows); with
+`notification_schoolId_recipientId_createdAt_idx` (migration `20261228000000`) it
+is an Index Scan — 18 buffers, 0.12 ms. // GOTCHA: **counts do NOT get that
+treatment** — `count(*)` still walks the whole inbox (27 ms plain, 42 ms filtered),
+on every page load, growing every year. So counts stop at `NOTIFICATION_COUNT_CAP`
+and render as "1,000+", while PAGING runs off `hasMore` (fetch one row past the
+page) so the cap never becomes a wall in front of the records.
+// GOTCHA, and it invalidates a claim made earlier in this repo: **a GIN trigram
+index cannot serve `ILIKE` under RLS.** `texticlike` has `proleakproof = false`,
+and Postgres will not evaluate a non-leakproof operator before a row-security
+qual. Same query, same data, differing only by who asks: as `postgres` (RLS
+bypassed) a Bitmap Index Scan, 0.9 ms; as `major_user` a Seq Scan.
+`20260925000000_search_trigram_indexes` was verified the first way, so
+`user_name_trgm_idx` / `class_name_trgm_idx` / `invoice_reference_trgm_idx` cost
+storage and write amplification on three hot tables and were never once used —
+dropped in `20261228000000`. Nothing on the privileged RLS-bypassing client
+searches those columns (the operator console searches `school` and `user.email`).
+Bring them back only WITH such a reader. What bounds the inbox search instead is
+the same createdAt index: the scan is over the CALLER'S OWN inbox, not the table
+— 0.9 ms for an ordinary one. **Measure plans as `major_user` with
+`app.current_school_id` set, never as `postgres`.**
+
 ## Repo workflow & gotchas
 - DB setup order: `prisma migrate deploy` → `pnpm --filter @sms/db rls` →
   `prisma db seed` (or `pnpm --filter @sms/db setup`). RLS lives in `prisma/rls/`,

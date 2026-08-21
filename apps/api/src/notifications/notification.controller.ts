@@ -117,18 +117,33 @@ export class NotificationController {
     );
   }
 
-  /** The caller's own inbox (self-scoped). `?unread=1` for unread only. */
+  /**
+   * The caller's own inbox (self-scoped), one page at a time.
+   *
+   * `?unread=1` unread only, `?type=` one kind, `?q=` a search over title and
+   * body, `?page=` anything older than the first page. The filters are applied
+   * in SQL, so they search the whole inbox rather than the page it happened to
+   * return — the distinction that made the old "most recent hundred" a record
+   * nobody could look anything up in.
+   */
   @Get()
   @RequirePermission(NOTIFICATION_PERMISSIONS.NOTIFICATION_READ)
   list(
     @CurrentPrincipal() p: Principal,
     @Query("unread") unread?: string,
     @Query("limit") limit?: string,
+    @Query("page") page?: string,
+    @Query("type") type?: string,
+    @Query("q") q?: string,
   ): Promise<NotificationInboxDto> {
     const n = limit ? Number(limit) : undefined;
+    const pg = page ? Number(page) : undefined;
     return this.notifications.listMine(p, {
       unreadOnly: unread === "1" || unread === "true",
       limit: Number.isFinite(n) ? n : undefined,
+      page: Number.isFinite(pg) ? pg : undefined,
+      type: type?.trim() || undefined,
+      q: q?.trim() || undefined,
     });
   }
 

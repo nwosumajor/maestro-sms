@@ -57,3 +57,28 @@ export interface NotificationChannelProvider {
    */
   listRecentMessages?(since: Date): Promise<Array<{ providerRef: string; status?: string }>>;
 }
+
+/**
+ * One page of the inbox.
+ *
+ * Fifty rather than the old hundred: the hundred existed because it was the
+ * WHOLE list, so it had to be big enough to be useful. Now that older pages are
+ * reachable, a page is a page — and every one of these rows carries a title and
+ * a body, so a hundred cards is a slower render for something nobody scrolls.
+ */
+export const NOTIFICATION_PAGE_SIZE = 50;
+
+/**
+ * How far a count is willing to look.
+ *
+ * The page is bounded by the index now, but every COUNT next to it still walked
+ * the whole inbox: on the platform owner's 500,000 rows, 27 ms for the plain
+ * total, 42 ms for a type filter — on every page load, growing every year the
+ * account exists. A screen that says "showing 50 of 1,000+" is as useful as one
+ * that says "of 47,213" and costs a fixed amount to produce, so the count stops
+ * looking once it has seen this many and says so.
+ *
+ * Paging is NOT limited by it: `hasMore` comes from fetching one row past the
+ * page, so the owner can walk past the cap to anything in the inbox.
+ */
+export const NOTIFICATION_COUNT_CAP = 1000;

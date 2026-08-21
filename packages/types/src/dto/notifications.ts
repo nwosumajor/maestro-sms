@@ -12,6 +12,29 @@ export interface NotificationItemDto {
 export interface NotificationInboxDto {
   items: NotificationItemDto[];
   unread: number;
+  /**
+   * How many match the filter — NOT how many were returned.
+   *
+   * The inbox returned the most-recent hundred and said nothing about the rest,
+   * which is right for a queue and wrong for a record. The platform owner's
+   * inbox is a record: it is where "did we alert anyone about that dispute",
+   * "when did that school lapse" and "what did the dunning sweep say in March"
+   * are answered, and there was no filter, no page and no way to reach anything
+   * older than the last hundred arrivals.
+   */
+  total: number;
+  /** The count stopped looking at the cap — display it as "1,000+", not "1,000". */
+  totalIsCapped: boolean;
+  unreadIsCapped: boolean;
+  page: number;
+  pageSize: number;
+  /**
+   * There is at least one more page.
+   *
+   * From fetching one row past the page, NOT from the total — so paging is never
+   * limited by the count's cap, and the owner can walk back to anything.
+   */
+  hasMore: boolean;
 }
 
 // =============================================================================
