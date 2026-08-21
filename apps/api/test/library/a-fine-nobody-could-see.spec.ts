@@ -202,3 +202,25 @@ describe("telling the family", () => {
     expect(payments).toHaveLength(1);
   });
 });
+
+describe("how the money arrived", () => {
+  // The fees journal export has a Method column, and this path hard-coded CASH.
+  // Every fine a school ever collected reached its accountant as cash whether it
+  // was handed over at the desk, transferred, or paid by card — and the endpoint
+  // took no method, so it could not be recorded correctly by somebody who
+  // noticed. A ledger that cannot say how money arrived is wrong in the one
+  // column reconciliation reads.
+
+  it("records the method it was given", async () => {
+    const { svc, payments } = makeService({ existingLine: { invoiceId: "inv-1" } });
+    await svc.payFine(librarian, LOAN, "BANK_TRANSFER");
+    expect(payments[0]).toMatchObject({ method: "BANK_TRANSFER", amountMinor: 35000 });
+  });
+
+  it("still records CASH when none is given", async () => {
+    // What a library desk mostly takes, and what every existing row says.
+    const { svc, payments } = makeService({ existingLine: { invoiceId: "inv-1" } });
+    await svc.payFine(librarian, LOAN);
+    expect(payments[0]).toMatchObject({ method: "CASH" });
+  });
+});

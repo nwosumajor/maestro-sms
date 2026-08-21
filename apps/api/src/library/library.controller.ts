@@ -1,7 +1,7 @@
 import { RequireModule } from "../auth/require-module.decorator";
 import { Delete, Body, Controller, Get, Param, Post, Put, Query, Res, StreamableFile } from "@nestjs/common";
 import type { Response } from "express";
-import { LIBRARY_PERMISSIONS, MODULES } from "@sms/types";
+import { LIBRARY_PERMISSIONS, MODULES, PAYMENT_METHODS } from "@sms/types";
 import type { BookLoanDto, FineReceiptDto, LibraryBookDto, LibraryReportDto } from "@sms/types";
 import { z } from "zod";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -11,6 +11,12 @@ import type { Principal } from "../integrity/integrity.foundation";
 import { LibraryService } from "./library.service";
 
 const customFields = z.record(z.string()).optional();
+/** How the money arrived. Optional, defaulting to CASH — the same value every
+ *  existing row carries, so an old caller behaves exactly as it did. */
+const payFineSchema = z.object({
+  method: z.enum(PAYMENT_METHODS).optional().default("CASH"),
+});
+
 const bookSchema = z.object({
   title: z.string().min(1).max(300),
   author: z.string().max(200).nullish(),
@@ -91,10 +97,16 @@ export class LibraryController {
   returnLoan(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<BookLoanDto> {
     return this.library.returnLoan(p, id);
   }
+  /** Body is optional: an existing caller that sends nothing still records CASH,
+   *  which is what every row said before the method could be given at all. */
   @Post("loans/:id/pay-fine")
   @RequirePermission(LIBRARY_PERMISSIONS.LIBRARY_MANAGE)
-  payFine(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<FineReceiptDto> {
-    return this.library.payFine(p, id);
+  payFine(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(payFineSchema)) body: z.infer<typeof payFineSchema>,
+  ): Promise<FineReceiptDto> {
+    return this.library.payFine(p, id, body.method);
   }
 
   /**

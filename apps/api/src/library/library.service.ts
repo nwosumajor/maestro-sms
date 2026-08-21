@@ -22,6 +22,7 @@ import { csvCell } from "../common/csv";
 import { Prisma } from "@sms/db";
 import type { BookLoanDto, FineReceiptDto, LibraryBookDto, LibraryReportDto } from "@sms/types";
 import { formatMoney } from "@sms/types";
+import type { PaymentMethodValue } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -435,7 +436,20 @@ export class LibraryService {
   }
 
   /** Record payment of an overdue fine → a digital receipt. Librarian. */
-  async payFine(p: Principal, loanId: string): Promise<FineReceiptDto> {
+  /**
+   * Record payment of a fine — and HOW it arrived.
+   *
+   * The method was hard-coded CASH. The fees journal export has a Method
+   * column, so every fine a school ever collected reached its accountant as
+   * cash whether it was handed over at the desk, transferred, or paid by card —
+   * and the endpoint accepted no method, so it could not be recorded correctly
+   * even by somebody who noticed. A ledger that cannot say how the money
+   * arrived is wrong in the one column reconciliation reads.
+   *
+   * CASH stays the default: it is what a library desk mostly takes, and it is
+   * what every existing row says.
+   */
+  async payFine(p: Principal, loanId: string, method: PaymentMethodValue = "CASH"): Promise<FineReceiptDto> {
     let paidCurrency = "NGN";
     let payerId = "";
     const receipt = await this.db.runAsTenant(this.ctx(p), async (tx) => {
@@ -499,7 +513,7 @@ export class LibraryService {
             schoolId: p.schoolId,
             invoiceId: line.invoiceId,
             amountMinor: loan.fineMinor,
-            method: "CASH",
+            method,
             kind: "PAYMENT",
             status: "POSTED",
             recordedById: p.userId,
