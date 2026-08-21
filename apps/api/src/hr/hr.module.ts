@@ -27,6 +27,7 @@ import { S3StorageProvider } from "../documents/s3-storage.provider";
 import { PayrollService } from "./payroll.service";
 import { StaffLifecycleController } from "./staff-lifecycle.controller";
 import { StaffLifecycleService } from "./staff-lifecycle.service";
+import { StaffHandoverService } from "./staff-handover.service";
 import { HrReviewsController } from "./reviews.controller";
 import { HrReviewsService } from "./reviews.service";
 import { HrAnalyticsController } from "./analytics.controller";
@@ -72,6 +73,7 @@ import { DocumentsModule } from "../documents/documents.module";
     ExitService,
     LetterService,
     StaffLifecycleService,
+    StaffHandoverService,
     HrReviewsService,
     HrAnalyticsService,
     RecruitmentService,

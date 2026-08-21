@@ -893,6 +893,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "GET /hr/staff/:p/handover": {
+      "kind": "ui",
+      "note": "HandoverPanel on /hr/staff/[userId] — what a leaver still holds"
+    },
     "GET /hr/staff/checklists": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"

@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
 import { MODULES, HR_PERMISSIONS } from "@sms/types";
-import type { StaffChecklistDto, StaffDocumentDto, TrainingRecordDto } from "@sms/types";
+import type { StaffChecklistDto, StaffDocumentDto, TrainingRecordDto, StaffHandoverDto } from "@sms/types";
 import { z } from "zod";
 import { RequireModule } from "../auth/require-module.decorator";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -8,6 +8,7 @@ import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { StaffLifecycleService } from "./staff-lifecycle.service";
+import { StaffHandoverService } from "./staff-handover.service";
 import { JobRunsService } from "../maintenance/job-runs.service";
 
 const checklistSchema = z.object({ type: z.enum(["ONBOARDING", "OFFBOARDING"]) });
@@ -29,7 +30,26 @@ const trainingSchema = z.object({
 @RequireModule(MODULES.HR)
 @Controller("hr/staff")
 export class StaffLifecycleController {
-  constructor(private readonly lifecycle: StaffLifecycleService, private readonly jobRuns: JobRunsService) {}
+  constructor(
+    private readonly lifecycle: StaffLifecycleService,
+    private readonly jobRuns: JobRunsService,
+    private readonly handover: StaffHandoverService,
+  ) {}
+
+  /**
+   * What this person still holds — classes, cover, invigilation, open tasks.
+   *
+   * Read-only and reassigns nothing: the platform cannot know who should take a
+   * class, and quietly moving thirty assignments to a name it picked would be a
+   * worse failure than the one being fixed. This is the list a human works
+   * through, and it is worth asking BEFORE an exit as well as after — "what
+   * would we have to cover" is the question a head asks when somebody resigns.
+   */
+  @Get(":userId/handover")
+  @RequirePermission(HR_PERMISSIONS.HR_READ)
+  handoverFor(@CurrentPrincipal() p: Principal, @Param("userId") userId: string): Promise<StaffHandoverDto> {
+    return this.handover.openDuties(p, userId);
+  }
 
   // --- checklists ------------------------------------------------------------
   @Post(":userId/checklists")

@@ -409,3 +409,46 @@ export interface StaffExitDto {
   decidedAt: Date | null;
   createdAt: Date;
 }
+
+/**
+ * ONE DUTY a departing member of staff still holds.
+ *
+ * `count` rather than a list of every row: a teacher leaving mid-year holds
+ * thirty subject assignments, and thirty lines of detail is a wall nobody reads.
+ * The count says how big the job is; `detail` names enough of it to start.
+ */
+export interface OpenDutyDto {
+  /** Stable key, so the web can order and label without parsing prose. */
+  kind:
+    | "CLASS_TEACHER"
+    | "SUBJECT_TEACHER"
+    | "TIMETABLED_LESSON"
+    | "COVER"
+    | "INVIGILATION"
+    | "TASK"
+    | "DISCIPLINE_CASE"
+    | "MEETING_SLOT"
+    | "HOSTEL"
+    | "VEHICLE"
+    | "APPRAISAL_REVIEWER";
+  label: string;
+  count: number;
+  /** A few examples, for a handover conversation. Never the whole set. */
+  detail: string[];
+  /**
+   * Whether this duty falls due AFTER they have gone.
+   *
+   * A cover lesson next Tuesday and an exam they are rostered to invigilate are
+   * a different kind of problem from a class list that needs tidying: somebody
+   * has to be standing in a room. The screen leads with these.
+   */
+  dated: boolean;
+}
+
+/** Everything one person would leave behind, newest concern first. */
+export interface StaffHandoverDto {
+  userId: string;
+  userName: string | null;
+  duties: OpenDutyDto[];
+  total: number;
+}

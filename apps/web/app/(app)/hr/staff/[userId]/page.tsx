@@ -1,4 +1,4 @@
-import type { AppraisalDto, DisciplinaryCaseDto, EmployeeDto, EmploymentChangeDto, PayComponentDto, StaffChecklistDto, StaffDocumentDto, StaffExitDto, SubmissionChecklistDto, TrainingRecordDto, Serialized } from "@sms/types";
+import type { AppraisalDto, DisciplinaryCaseDto, EmployeeDto, EmploymentChangeDto, PayComponentDto, StaffChecklistDto, StaffDocumentDto, StaffExitDto, SubmissionChecklistDto, TrainingRecordDto, Serialized, StaffHandoverDto } from "@sms/types";
 import Link from "next/link";
 import { hasPermission } from "@/lib/permissions";
 import { redirect } from "next/navigation";
@@ -12,6 +12,7 @@ import { CompensationPanel } from "@/components/hr/CompensationPanel";
 import { EmploymentLifecycle } from "@/components/hr/EmploymentLifecycle";
 import { ExitPanel } from "@/components/hr/ExitPanel";
 import { PageHeader } from "@/components/shell/PageHeader";
+import { HandoverPanel } from "@/components/hr/HandoverPanel";
 import { DocumentChecklist } from "@/components/documents/DocumentChecklist";
 
 export const dynamic = "force-dynamic";
@@ -25,7 +26,7 @@ export default async function StaffDetailPage({ params }: { params: { userId: st
   const canDiscipline = hasPermission(user.permissions, "hr.disciplinary.manage");
   const canWrite = hasPermission(user.permissions, "hr.write");
   const canApprove = hasPermission(user.permissions, "hr.salary.approve");
-  const [checklists, documents, training, appraisals, cases, components, employee, changes, exits, docChecklist] = await Promise.all([
+  const [checklists, documents, training, appraisals, cases, components, employee, changes, exits, docChecklist, handover] = await Promise.all([
     apiGet<Serialized<StaffChecklistDto>[]>(`/hr/staff/checklists?userId=${userId}`),
     apiGet<Serialized<StaffDocumentDto>[]>(`/hr/staff/documents?userId=${userId}`),
     apiGet<Serialized<TrainingRecordDto>[]>(`/hr/staff/training?userId=${userId}`),
@@ -41,6 +42,10 @@ export default async function StaffDetailPage({ params }: { params: { userId: st
     canWrite
       ? apiGet<Serialized<SubmissionChecklistDto>>(`/documents/checklist?subjectKind=STAFF&subjectId=${userId}`)
       : Promise.resolve(null),
+    // What they still hold. Worth knowing BEFORE an exit as much as after —
+    // "what would we have to cover" is the question a head asks the moment
+    // somebody hands in their notice.
+    canWrite ? apiGet<Serialized<StaffHandoverDto>>(`/hr/staff/${userId}/handover`) : Promise.resolve(null),
   ]);
   const name = checklists?.[0]?.userName ?? documents?.[0]?.userName ?? training?.[0]?.userName ?? appraisals?.[0]?.userName ?? cases?.[0]?.userName ?? "Staff member";
 
@@ -64,6 +69,7 @@ export default async function StaffDetailPage({ params }: { params: { userId: st
         {canWrite && <EmploymentLifecycle userId={userId} employee={employee} initial={changes ?? []} canApprove={canApprove} />}
         {canWrite && <CompensationPanel userId={userId} initial={components ?? []} />}
         {canWrite && <ExitPanel userId={userId} initial={exits ?? []} canApprove={canApprove} />}
+        {canWrite && <HandoverPanel handover={handover} />}
         <StaffLifecyclePanel userId={userId} checklists={checklists ?? []} documents={documents ?? []} training={training ?? []} />
         {(appraisals === null || cases === null) && (
           <LoadFailure what="Appraisals and disciplinary cases">

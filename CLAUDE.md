@@ -920,6 +920,29 @@ regional read replicas → Aurora write forwarding (still one writer) → tenant
 pinning. Multi-master is deliberately not on that list. See
 `docs/RUNBOOK-INCIDENT-RESPONSE.md` §5.x and §5.y.
 
+### A leaver's duties are named, never silently reassigned
+`StaffHandoverService` (`GET /hr/staff/:userId/handover`, `hr.read`; panel on
+`/hr/staff/[userId]`) lists what a member of staff still holds across ELEVEN
+surfaces — class teacher, subject teacher, timetabled lessons, cover,
+invigilation, tasks, discipline cases, meeting slots, hostels, vehicles and
+appraisals they are reviewing. Approving an exit closed the employment record,
+recovered loans and ended access on the last working day, and said NOTHING about
+the work; the offboarding checklist's "Handover notes" is a tickbox, the same
+shape "Revoke system access" had when it did nothing. Live, one teacher holds 30
+class-subject assignments — when they go, 30 pairings name somebody who cannot
+sign in and the first symptom is a lesson nobody turns up to.
+DATED duties (cover, invigilation, future meeting slots) sort FIRST whatever
+their count and are counted separately in the notice: 30 class assignments are a
+tidying job, one exam next week is a hall with nobody in it. Only work still
+AHEAD counts for those, measured from the SCHOOL's today.
+**It reassigns nothing, and says so** — the platform cannot know who should take
+a class, and moving 30 assignments to a name it picked is a worse failure than
+the silence. Signals for a human decision (Golden Rule #8's posture, applied to
+HR). The notice goes to the approver AT APPROVAL, not on the last working day:
+approval is when there is still a notice period in which to hand over. Nothing
+is sent when they hold nothing — a notice that fires on every exit is one people
+learn to ignore, including on the exit where it mattered.
+
 ## Repo workflow & gotchas
 - DB setup order: `prisma migrate deploy` → `pnpm --filter @sms/db rls` →
   `prisma db seed` (or `pnpm --filter @sms/db setup`). RLS lives in `prisma/rls/`,

@@ -11,11 +11,14 @@
 // (account disabling stays a human checklist task — never automatic).
 // =============================================================================
 
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { computeFinalSettlement, type FinalSettlement, type StaffExitDto } from "@sms/types";
 import { decryptField, encryptField } from "../foundation/field-crypto";
 import { endsOnOrBefore, revokeStaffAccessInTx } from "./staff-access";
 import { StaffLifecycleService } from "./staff-lifecycle.service";
+import { StaffHandoverService } from "./staff-handover.service";
+import { NotificationService } from "../notifications/notification.service";
+import { SchoolRegionService } from "../foundation/school-region.service";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -41,10 +44,15 @@ type ExitRow = {
 
 @Injectable()
 export class ExitService {
+  private readonly logger = new Logger("StaffExit");
+
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly lifecycle: StaffLifecycleService,
+    private readonly handover: StaffHandoverService,
+    private readonly notifications: NotificationService,
+    private readonly region: SchoolRegionService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -195,8 +203,52 @@ export class ExitService {
       } catch {
         /* best-effort — the exit itself is committed */
       }
+      // WHAT THEY ARE STILL HOLDING, said out loud, to the person who just
+      // approved the exit.
+      //
+      // The checklist's "Handover notes" is a tickbox; it does not know that
+      // this teacher has thirty class-subject assignments and an exam to
+      // invigilate a fortnight after their last day. Sent on APPROVAL rather
+      // than on the last working day on purpose: approval is when there is
+      // still time to hand the work over, and a notice period is the whole
+      // window in which that can happen.
+      await this.tellSomebodyWhatIsOutstanding(p, decided.userId);
     }
     return decided;
+  }
+
+  /**
+   * Name the work a departing member of staff still holds, to the people who
+   * can hand it over.
+   *
+   * Best-effort by design: the exit is committed and correct whether or not
+   * this notice is sent, and failing the approval because a notification could
+   * not be written would be the tail wagging the dog. It is logged instead.
+   */
+  private async tellSomebodyWhatIsOutstanding(p: Principal, userId: string): Promise<void> {
+    try {
+      const tz = (await this.region.forSchool(p.schoolId)).timezone;
+      const outstanding = await this.db.runAsTenantReadOnly(this.ctx(p), (tx) =>
+        this.handover.dutiesIn(tx, userId, tz),
+      );
+      if (outstanding.total === 0) return;
+      const dated = outstanding.duties.filter((d) => d.dated);
+      const lines = outstanding.duties.map((d) => `• ${d.label}: ${d.count}`).join("\n");
+      await this.notifications.enqueue(this.ctx(p), {
+        recipientId: p.userId,
+        type: "GENERIC",
+        title: `${outstanding.userName ?? "This member of staff"} still holds ${outstanding.total} duties`,
+        body:
+          `Their exit is approved. Nothing has been reassigned — the platform cannot know who should take it on.\n\n${lines}` +
+          (dated.length > 0
+            ? `\n\n${dated.reduce((n, d) => n + d.count, 0)} of these are DATED — somebody has to be in a room for them.`
+            : ""),
+        data: { userId, total: outstanding.total },
+        channels: ["EMAIL"],
+      });
+    } catch (err) {
+      this.logger.warn(`could not report outstanding duties for ${userId}: ${(err as Error).message}`);
+    }
   }
 
   /**
