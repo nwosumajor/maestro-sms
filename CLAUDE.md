@@ -1327,6 +1327,76 @@ Three tiers gate a register write (`AttendanceService.markAttendance`):
 `attendance.amend.review` is a NEW permission → re-run the seed on a live DB (the
 guard reads role→perms from the DB).
 
+## August 2026 correctness pass — what changed, and the rules behind it
+Twenty-five fixes found by asking, of each control, "is it applied on every path
+that does the thing?" The durable facts:
+
+- **A REGISTER IS NOT A QUEUE.** `LIST_CAP = 500` says inbox views "only ever
+  surface the most-recent page" — true of live work, false whenever the list is
+  also the record a school reads LATER. Approvals (`GET /workflows`), the leave
+  register (`GET /hr/leave/requests`) and assessments (`GET /assessments`) now
+  take filters + `page` and return `{items,total,page,pageSize}` with the
+  MATCHING total. Measured before: 702 workflow requests returned 500; 800 leave
+  requests hid 300; 541 assessments hid 41 with no filter that could reach them.
+  Filter in SQL — filtering in memory still only sees the recent rows. A search
+  must AND onto the caller's scoping, never replace it. `mine=1` on approvals is
+  narrowed in memory ON PURPOSE (it depends on a stage permission inside a JSON
+  column) and is safe only because live work is bounded; history is paged in the
+  database. A fee run's DRAFTs are finished with `POST /invoices/issue-bulk`
+  (explicit ids, capped, partial success reported) — there was no batch way to
+  issue a batch, so hostel rent stayed invisible.
+- **ELEVATION REACHES THE UI.** `activeGrantPermissions` is the ONE definition of
+  what a grant gives you, called by the guard AND by login/refresh; the session
+  carries `elevated` and `sessionPermissions()` merges it. Before, a grant was
+  honoured by the API and lit up no screen. The AppShell says when authority is
+  borrowed. A workflow stage decided under a grant is recorded in the IMMUTABLE
+  trail — the reviewer's comment no longer REPLACES the system's notes (`??`
+  became a join), which is where that fact used to vanish.
+- **"TODAY" IS THE SCHOOL'S DAY** — now also the transport boarding register
+  (keyed on `(passenger,date,direction)`, so a wrong day OVERWRITES another
+  journey) and the exam-day board's default. Six remaining `toISOString()` uses
+  label a document; they do not key a record.
+- **A CONTROL WITH ANOTHER WAY ROUND IT IS NOT A CONTROL.** The leaver
+  document gate ran on `getDownloadUrl` and not on `streamFile` — the door the
+  web actually uses. Both now call one `assertReleasable`, BEFORE the bytes are
+  fetched. A RECEIPT is never gated: withholding personal data over a debt is
+  unlawful rather than firm.
+- **EXITED USERS CANNOT AUTHENTICATE.** `validateLogin`, `refreshClaims` and the
+  password-reset path all refuse a non-ACTIVE user. This BOUNDS a whole class of
+  "a leaver still has X" worries — check it before treating one as live. Staff
+  may no longer REPLY to a pupil who has left (the thread stays readable, the
+  office remains reachable); a class change deliberately does NOT end a
+  conversation, because that moves it to WhatsApp.
+- **MONEY MUST SAY WHERE IT WENT.** A library fine now lands on an ISSUED
+  invoice (a DRAFT is not a bill: hidden from families, excluded from
+  receivables — so an UNPAID fine was invisible and became visible only by being
+  paid), records the METHOD it was paid by (the journal has a Method column and
+  everything read CASH), bills the charge if it is missing rather than taking
+  cash with nothing on the ledger, and tells the family at both ends.
+- **REPORT WHAT YOU DID NOT DO.** The exeat sweep marked every overdue boarder
+  as handled including the ones it could tell nobody about; it now marks only
+  what it alerted, and alerts the FAMILY in their own words. An alumni broadcast
+  reports `unreachable` (records with no linked account). The attendance rollup
+  had no sweep at all — built, consumed by `useRollup`, and never populated;
+  nightly now (`attendance.rollup` in the jobs catalogue), 452 ms -> 32 ms with
+  IDENTICAL figures.
+- **A SIGNAL IS NOT A PENALTY.** Scholarship signals report `disciplineUpheld`
+  and `disciplineOpen` separately and NEVER a DISMISSED complaint. `discipline
+  .file` is held by students, so the old single count let a classmate's
+  accusation — and a complaint the school had rejected — count against a child
+  asking for help with fees.
+
+**Gates added, each validated by reintroducing the defect it exists for:**
+`service-methods-nobody-calls` (a dead read is a query somebody can wire up in
+one line; five removed, the sixth exempted with a reason),
+`assertions-that-match-by-accident` (`not.toContain("5")` matched a digit in a
+timestamp — made three times in this repo), `wire-shape-agrees` (`apiGet<T>`
+ASSERTS the wire and never checks it; a paging change broke two pages with a
+clean typecheck and 3,600 green tests). // GOTCHA: after ANY response-shape
+change, grep the web consumers AND run `WEB_URL=http://localhost pnpm --filter
+@sms/web smoke:routes` — the smoke is still the only thing that catches a
+field-level break.
+
 ## Operating the live system — runbooks
 - **`docs/RUNBOOK-INCIDENT-RESPONSE.md`** — the on-call playbook: severity
   levels, 5-minute triage, per-symptom playbooks (outage / latency / DB / Redis

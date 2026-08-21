@@ -474,6 +474,20 @@ docker compose logs backend | grep -iE "SKIPPED|no privileged DB"
 
 A sweep reporting `schools=0` with no SKIPPED line genuinely found nothing.
 
+**The attendance rollup** (`attendance.rollup`, nightly 03:20, `ATTENDANCE_ROLLUP_CRON`)
+joined this list in August 2026 and needs the same privileged URL. It is the one
+sweep whose absence shows up as a SLOW PAGE rather than a missing action: only
+ENDED terms are rolled up and the work is idempotent, so a missed night costs
+nothing except that the attendance overview takes the live path again (measured
+at 452 ms against 32 ms on one term of 31 classes). If a school reports that
+page getting slower, check this job before looking at the database.
+
+**An overdue boarder with nobody to alert now RETRIES every hour** and logs
+`boarder overdue but nobody to alert` each time. That repetition is deliberate —
+the sweep used to mark such an exeat as handled, so the one child nobody was
+told about was also the one it never looked at again. The fix is to give the
+hostel a warden or the school a head warden, not to silence the line.
+
 Every one of these also has a manual trigger endpoint — use it to catch up, they
 are all idempotent. The retention sweep is the exception (it is a one-shot task,
 not an endpoint) and can be run directly:
