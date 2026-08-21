@@ -52,6 +52,7 @@ import {
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
+import { holdersOf, noApproverAtAllMessage, noSecondApproverMessage } from "../common/approvers";
 import { WorkflowHooksService } from "./workflow-hooks.service";
 
 const REVIEW_PERMS = new Set(["workflow.review", "workflow.veto"]);
@@ -514,6 +515,44 @@ export class WorkflowService {
       const stages = (req.stages as WorkflowStage[] | null) ?? [];
       const isStaged = stages.length > 0;
       const approvals = (req.approvals as StageApproval[] | null) ?? [];
+
+      // A CHAIN NOBODY CAN DECIDE IS A DEAD END, NOT A CONTROL.
+      //
+      // Submitting only moved the request to PENDING_REVIEW; nothing asked
+      // whether the stages it would pass through have anybody in them. A school
+      // with no head teacher raises a leave request that dies at stage one and
+      // says "pending" for ever — and six chains start there (leave, staff
+      // requests, grade publish, content publish, exam schedule, CBT answer
+      // release). On the live database one of the three schools has NO holder
+      // of workflow.review.head and none of workflow.review.hr.
+      //
+      // Checked at SUBMIT rather than at create, because that is when the chain
+      // is fixed and when the person is present to be told. EVERY stage, not
+      // just the first: dying at stage two is just as dead, and the point is to
+      // say so now. The INITIATOR does not count — separation of duties means
+      // the only holder being the person asking is the same dead end.
+      //
+      // The same guard `requestAdjustment` and the salary change already apply,
+      // and the same sentence, which names the fix rather than the refusal.
+      if (action === "SUBMIT" && isStaged) {
+        for (const stage of stages) {
+          // A routed stage names its person; `review` already falls back to the
+          // permission when they have left, so the permission is the question
+          // either way.
+          const holders = await holdersOf(tx, stage.permission);
+          if (!holders.some((id) => id !== req.initiatorId)) {
+            // Two different facts, and the wrong one sends an administrator
+            // looking for somebody who does not exist: a stage with NOBODY in
+            // it, versus one where the only holder is the person asking.
+            const what = `The "${stage.label}" stage`;
+            throw new BadRequestException(
+              holders.length === 0
+                ? noApproverAtAllMessage(what, stage.permission)
+                : noSecondApproverMessage(what, stage.permission),
+            );
+          }
+        }
+      }
 
       let nextState: WorkflowState = baseNext;
       let nextStage = req.currentStage;

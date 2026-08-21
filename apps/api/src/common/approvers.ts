@@ -57,6 +57,18 @@ export async function hasSecondApprover(
  * guessing at a fix that is one role assignment away, and the fix is not
  * something they can be expected to infer from the permission string.
  */
+/**
+ * The sentence for a stage with NOBODY in it — which is a different fact from
+ * "you are the only one", and saying the wrong one sends an administrator
+ * looking for a person who does not exist.
+ */
+export function noApproverAtAllMessage(what: string, permission: string): string {
+  return (
+    `${what} has to be approved, and nobody at this school currently can. ` +
+    `Ask an administrator to give "${permission}" to a member of staff, then try again.`
+  );
+}
+
 export function noSecondApproverMessage(what: string, permission: string): string {
   return (
     `${what} has to be approved by a different person, and you are currently the only member of staff who can approve it. ` +

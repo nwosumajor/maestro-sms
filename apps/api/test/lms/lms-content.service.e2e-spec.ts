@@ -41,6 +41,8 @@ d("LmsContentService integration (authoring, approval, quiz, forum, RLS)", () =>
   const S2 = randomUUID(); // NOT enrolled
   const PRB = randomUUID(); // principal in other tenant
   const CLS = randomUUID();
+  /** Global tables — the schoolId-scoped teardown cannot reach them. */
+  const fixtureRoles: string[] = [];
 
   const teacher = (): Principal => ({ userId: T, schoolId: SA, roles: ["teacher"], permissions: [] });
   // Carries the granular stage permission the guard would populate from the role
@@ -104,6 +106,34 @@ d("LmsContentService integration (authoring, approval, quiz, forum, RLS)", () =>
     }
     await admin.query(`INSERT INTO class (id,"schoolId",name,"updatedAt") VALUES ($1,$2,'Class A',now())`, [CLS, SA]);
     await admin.query(`INSERT INTO class_teacher (id,"schoolId","classId","teacherId") VALUES ($1,$2,$3,$4)`, [randomUUID(), SA, CLS, T]);
+    // THE CHAIN HAS TO BE DECIDABLE. Content publish routes head -> principal,
+    // and submitting now refuses when a stage has nobody in it — a chain nobody
+    // can decide is a dead end, not a control. These principals held the review
+    // permissions on their Principal object only, so as far as the database was
+    // concerned this school had no approvers at all.
+    for (const [role, perms, holders] of [
+      ["lms-head-" + SA.slice(0, 8), ["workflow.review.head"], [PR, PRB]],
+      ["lms-principal-" + SA.slice(0, 8), ["workflow.review.principal"], [PR, PRB]],
+    ] as const) {
+      const roleId = randomUUID();
+      fixtureRoles.push(roleId);
+      await admin.query(`INSERT INTO role (id,name) VALUES ($1,$2)`, [roleId, role]);
+      for (const key of perms) {
+        await admin.query(`INSERT INTO permission (id,key) VALUES ($1,$2) ON CONFLICT (key) DO NOTHING`, [randomUUID(), key]);
+        await admin.query(
+          `INSERT INTO role_permission ("roleId","permissionId") SELECT $1,p.id FROM permission p WHERE p.key = $2`,
+          [roleId, key],
+        );
+      }
+      for (const holder of holders) {
+        await admin.query(`INSERT INTO user_role (id,"schoolId","userId","roleId") VALUES ($1,$2,$3,$4)`, [
+          randomUUID(),
+          holder === PRB ? SB : SA,
+          holder,
+          roleId,
+        ]);
+      }
+    }
     await admin.query(`INSERT INTO enrollment (id,"schoolId","classId","studentId") VALUES ($1,$2,$3,$4)`, [randomUUID(), SA, CLS, S1]);
 
     const tenant = new PrismaTenantService() as never;
@@ -133,7 +163,12 @@ d("LmsContentService integration (authoring, approval, quiz, forum, RLS)", () =>
     for (const t of ["enrollment", "class_teacher", "class", "audit_log"]) {
       await admin.query(`DELETE FROM ${t} WHERE "schoolId" = ANY($1)`, [[SA, SB]]);
     }
+    await admin.query(`DELETE FROM user_role WHERE "schoolId" = ANY($1)`, [[SA, SB]]);
     await admin.query(`DELETE FROM "user" WHERE "schoolId" = ANY($1)`, [[SA, SB]]);
+    // `role` and `role_permission` carry no schoolId, so the loop above cannot
+    // reach them and every run would leave one behind for ever.
+    await admin.query(`DELETE FROM role_permission WHERE "roleId" = ANY($1)`, [fixtureRoles]);
+    await admin.query(`DELETE FROM role WHERE id = ANY($1)`, [fixtureRoles]);
     await admin.query(`DELETE FROM school WHERE id = ANY($1)`, [[SA, SB]]);
     await admin.end();
     await prisma.$disconnect();
