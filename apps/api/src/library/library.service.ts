@@ -305,7 +305,30 @@ export class LibraryService {
     // from the invoice, so a fine raised in the column default could never be
     // paid online by a school billing in anything else.
     const school = await tx.school.findFirst({ where: { id: p.schoolId }, select: { currency: true } });
-    let invoice = await tx.invoice.findFirst({ where: { studentId: loan.borrowerId, status: "DRAFT" } });
+    // A FINE IS DUE THE MOMENT THE BOOK IS LATE, so it goes onto a LIVE debt.
+    //
+    // This used to attach the fine to a DRAFT invoice, or create one — and a
+    // DRAFT is not a bill. The fees service says so itself, in both directions:
+    // it hides DRAFT invoices from families ("A DRAFT IS NOT A BILL YET, so a
+    // family must not be shown one") and refuses to record a payment against
+    // one ("Issue the invoice before recording payment"). So the fine was a
+    // charge nobody could see and the library then took cash against an invoice
+    // the finance module would not have accepted a payment on.
+    //
+    // Reproduced end to end before this change: a book returned seven days
+    // late billed 35,000 to a DRAFT invoice; the parent's invoice list showed
+    // two invoices and neither was the fine; paying at the desk posted against
+    // the DRAFT and took it straight to PAID without ever being ISSUED; and the
+    // school's own figures — invoiced 185,000, collected 85,000 — contained
+    // neither the charge nor the cash, because the billable set excludes DRAFT.
+    // Which is the exact opposite of why the fine was put on the ledger.
+    //
+    // PARTIALLY_PAID counts as a live debt and PAID deliberately does not:
+    // adding a line to a settled invoice would silently reopen it as underpaid.
+    let invoice = await tx.invoice.findFirst({
+      where: { studentId: loan.borrowerId, status: { in: ["ISSUED", "PARTIALLY_PAID"] } },
+      orderBy: { createdAt: "desc" },
+    });
     if (!invoice) {
       invoice = await tx.invoice.create({
         data: {
@@ -313,7 +336,7 @@ export class LibraryService {
           studentId: loan.borrowerId,
           createdById: p.userId,
           reference: `FINE-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-          status: "DRAFT",
+          status: "ISSUED",
           totalMinor: 0,
           currency: school?.currency ?? "NGN",
           dueDate: new Date(),
@@ -358,13 +381,32 @@ export class LibraryService {
       // and reconciliation never saw. The charge is billed on return; this is
       // the settlement of it, and it goes through the same Payment table as
       // every other payment so a fine is countable in the same place as a fee.
-      const line = await tx.invoiceLineItem.findFirst({
-        where: {
-          description: `Library fine — loan ${loanId.slice(0, 8).toUpperCase()}`,
-          invoice: { studentId: loan.borrowerId },
-        },
-        select: { invoiceId: true },
-      });
+      const findLine = () =>
+        tx.invoiceLineItem.findFirst({
+          where: {
+            description: `Library fine — loan ${loanId.slice(0, 8).toUpperCase()}`,
+            invoice: { studentId: loan.borrowerId },
+          },
+          select: { invoiceId: true },
+        });
+      // CASH IS NEVER TAKEN WITH NOTHING ON THE LEDGER.
+      //
+      // The posting was conditional on finding the charge, and a miss was
+      // silent: the fine was marked paid, a receipt was printed, and no Payment
+      // existed. There is a loan on the live database in exactly that state —
+      // `fineMinor` set with no line item, because it predates fines being
+      // billed at all — so the first person to pay it would have handed over
+      // money the ledger never heard about.
+      //
+      // Billing here rather than refusing: the school IS owed this, the
+      // librarian has the borrower in front of them, and `billFine` is
+      // idempotent on the same marker, so it either creates the missing charge
+      // or finds it already there.
+      let line = await findLine();
+      if (!line) {
+        await this.billFine(tx, p, { id: loanId, borrowerId: loan.borrowerId, bookId: loan.bookId }, loan.fineMinor, 0);
+        line = await findLine();
+      }
       if (line) {
         await tx.payment.create({
           data: {
