@@ -403,8 +403,10 @@ paid sub of an attributed school (onboarding `agentCode` → provisioning stamps
 (6) **MESSAGE CREDITS**: append-only `message_credit_entry` (rls/73); bundles
 (`MESSAGE_CREDIT_BUNDLES`) bought via checkout (webhook credits, idempotent);
 each SMS/WHATSAPP delivery debits 1 ONLY after the gateway CONFIRMS the send
-(`hasBalanceInTx` gates the attempt, `debitInTx` fires post-send — a failed
-delivery never spends a paid credit), empty balance fails those channels soft;
+(a per-job ALLOWANCE from `balanceInTx` gates the attempt — read once and shared
+out, so two metered channels can't both spend the school's last credit — and
+`debitInTx` fires post-send, so a failed delivery never spends a paid credit),
+empty balance fails those channels soft;
 WHATSAPP channel added (enum+types+Twilio `whatsapp:`); `user.phone`
 self-service on /account. **Operator oversight** (`/operator/message-credits`,
 `OperatorCreditsService`): cross-tenant balance list (search + paginate, one

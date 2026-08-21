@@ -578,17 +578,6 @@ export class TermResultService {
     });
   }
 
-  /** Throw 404 unless `p` may grade this class-subject. Public wrapper over the
-   *  private scope check so the LMS "pull scores into the gradebook" flow gates
-   *  its read on the exact same rule as grading. */
-  async ensureCanGrade(p: Principal, classId: string, subjectId: string): Promise<void> {
-    await this.db.runAsTenant(this.ctx(p), async (tx) => {
-      if (!(await this.canGradeClassSubject(tx, p, classId, subjectId))) {
-        throw new NotFoundException("Not found");
-      }
-    });
-  }
-
   /** Set ONLY the "assignment" CA component on a student's SubjectResult,
    *  MERGING it with the existing exam/midterm/class-note marks (so pulling an
    *  LMS score never wipes marks a teacher already entered). Runs the full

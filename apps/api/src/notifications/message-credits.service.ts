@@ -300,10 +300,6 @@ export class MessageCreditsService {
     return { refunded: true };
   }
 
-  async hasBalanceInTx(tx: TenantTx, schoolId: string): Promise<boolean> {
-    return (await this.balanceInTx(tx, schoolId)) > 0;
-  }
-
   /**
    * Debit one credit for a delivery, in the delivery's OWN tenant transaction.
    * Call ONLY after the gateway has CONFIRMED the send — a failed delivery

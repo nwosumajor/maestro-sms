@@ -242,14 +242,4 @@ export class PlatformDelegationService {
     });
   }
 
-  /**
-   * Does this principal hold `permission` through a live delegation?
-   *
-   * Delegates to the SAME function the PermissionGuard uses — one implementation of
-   * "is this loan live", so the console can never show a duty as active that the
-   * guard would refuse, or the reverse.
-   */
-  async hasDelegation(tx: TenantTx, userId: string, permission: string): Promise<boolean> {
-    return hasLiveDelegation(tx, userId, permission);
-  }
 }

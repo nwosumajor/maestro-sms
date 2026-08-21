@@ -14,6 +14,7 @@
 
 import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { DELEGABLE_PLATFORM_PERMISSIONS, MAX_DELEGATION_DAYS, OPERATOR_PERMISSIONS } from "@sms/types";
+import { hasLiveDelegation } from "../../src/auth/platform-delegation.util";
 import { PlatformDelegationService } from "../../src/operator/platform-delegation.service";
 import type { Principal, TenantContext, TenantTx } from "../../src/integrity/integrity.foundation";
 
@@ -205,26 +206,45 @@ describe("PlatformDelegationService.revoke", () => {
   });
 });
 
-describe("PlatformDelegationService.hasDelegation (the guard's question)", () => {
+describe("the delegation check the GUARD actually runs", () => {
+  // These two assertions used to target `PlatformDelegationService.hasDelegation`
+  // — a method with no callers anywhere. The guard has always asked
+  // `hasLiveDelegation` in auth/platform-delegation.util, which had NO tests at
+  // all. So the security property was proven about a copy nobody runs, and the
+  // live path was unproven. Moved rather than deleted, which is the whole point:
+  // the dead method is gone and the property now guards the real one.
+  const tx = () => ({ platformDelegation: { findFirst: jest.fn().mockResolvedValue(null) } });
+
   it("refuses a non-delegable permission even if a row somehow exists", async () => {
     // Defence in depth, mirroring isElevatable: a row written before the lendable
     // set was tightened — or inserted by any other route — must not be honoured.
-    const { svc, tx } = makeService();
-    tx.platformDelegation.findFirst.mockResolvedValue({ id: "tampered" });
+    const t = tx();
+    t.platformDelegation.findFirst.mockResolvedValue({ id: "tampered" });
     await expect(
-      svc.hasDelegation(tx as unknown as TenantTx, MANAGER, OPERATOR_PERMISSIONS.PLATFORM_IMPERSONATE),
+      hasLiveDelegation(t as unknown as TenantTx, MANAGER, OPERATOR_PERMISSIONS.PLATFORM_IMPERSONATE),
     ).resolves.toBe(false);
     // It does not even ask the database.
-    expect(tx.platformDelegation.findFirst).not.toHaveBeenCalled();
+    expect(t.platformDelegation.findFirst).not.toHaveBeenCalled();
   });
 
   it("only counts loans that are neither revoked nor expired", async () => {
-    const { svc, tx } = makeService();
-    await svc.hasDelegation(tx as unknown as TenantTx, MANAGER, LENDABLE);
-    expect(tx.platformDelegation.findFirst).toHaveBeenCalledWith(
+    const t = tx();
+    await hasLiveDelegation(t as unknown as TenantTx, MANAGER, LENDABLE);
+    expect(t.platformDelegation.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ revokedAt: null, expiresAt: expect.objectContaining({ gt: expect.any(Date) }) }),
+        where: expect.objectContaining({
+          userId: MANAGER,
+          permission: LENDABLE,
+          revokedAt: null,
+          expiresAt: expect.objectContaining({ gt: expect.any(Date) }),
+        }),
       }),
     );
+  });
+
+  it("honours a live loan of a lendable permission", async () => {
+    const t = tx();
+    t.platformDelegation.findFirst.mockResolvedValue({ id: "loan-1" });
+    await expect(hasLiveDelegation(t as unknown as TenantTx, MANAGER, LENDABLE)).resolves.toBe(true);
   });
 });

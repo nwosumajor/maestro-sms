@@ -207,15 +207,4 @@ export class GrowthService {
     return this.client().agentCommission.findFirst({ where: { id } });
   }
 
-  /** Provisioning: resolve an agent code to its id (privileged; null when unknown). */
-  async resolveAgentCode(code: string | null | undefined): Promise<string | null> {
-    if (!code) return null;
-    const client = this.privileged.client;
-    if (!client) return null;
-    const agent = await client.agent.findFirst({
-      where: { code: code.trim().toUpperCase(), active: true },
-      select: { id: true },
-    });
-    return agent?.id ?? null;
-  }
 }

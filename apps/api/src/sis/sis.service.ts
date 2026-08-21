@@ -296,41 +296,6 @@ export class SisService {
     });
   }
 
-  /** Profiles awaiting THIS reviewer: supervisors see their classes, admins see all. */
-  async reviewQueue(p: Principal): Promise<Array<{ studentId: string; studentName: string; className: string | null; submittedAt: Date | null; supervisorChecked: boolean }>> {
-    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
-      const profiles = await tx.studentProfile.findMany({
-        where: { profileStatus: "SUBMITTED" },
-        select: { studentId: true, submittedAt: true, supervisorReviewedAt: true },
-        orderBy: { submittedAt: "asc" },
-        take: 500,
-      });
-      if (profiles.length === 0) return [];
-      const ids = profiles.map((r) => r.studentId);
-      // ONE query each for names and enrolments — never per pupil.
-      const [users, enrolments] = await Promise.all([
-        tx.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }),
-        tx.enrollment.findMany({
-          where: { studentId: { in: ids }, status: "ACTIVE" },
-          select: { studentId: true, classId: true, class: { select: { name: true, supervisorId: true } } },
-        }),
-      ]);
-      const nameOf = new Map(users.map((u: { id: string; name: string }) => [u.id, u.name] as const));
-      const enrolOf = new Map(enrolments.map((e) => [e.studentId, e] as const));
-      const wide = this.isSchoolWide(p);
-      return profiles
-        // A supervisor sees only their own classes; school-wide staff see everything.
-        .filter((r) => wide || enrolOf.get(r.studentId)?.class?.supervisorId === p.userId)
-        .map((r) => ({
-          studentId: r.studentId,
-          studentName: nameOf.get(r.studentId) ?? "Unknown",
-          className: enrolOf.get(r.studentId)?.class?.name ?? null,
-          submittedAt: r.submittedAt,
-          supervisorChecked: !!r.supervisorReviewedAt,
-        }));
-    });
-  }
-
   // --- notifications ---------------------------------------------------------
   // Guardians are copied on everything about a minor's record, and every send is
   // best-effort: a notification hiccup must never fail the review itself.
