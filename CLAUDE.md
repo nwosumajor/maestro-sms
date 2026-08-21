@@ -849,9 +849,23 @@ unit tests + an `observability.module` DI smoke test.
   has NO DELETE on those tables; the purge connects via `DATABASE_RETENTION_URL`
   (falls back to `DATABASE_MIGRATE_URL`); unset → retention DISABLED. See
   `apps/api/src/integrity/retention` and `prisma/rls/06_*`.
-- Tests: the RLS e2e needs `TEST_DATABASE_URL` (app role) + `TEST_ADMIN_URL`
-  (superuser, to seed across FKs); both are declared in `turbo.json`
-  `test.passThroughEnv` — Turbo 2 strict env will otherwise SKIP the suite.
+- Tests: **`pnpm --filter @sms/api test:db` runs ALL of it.** A bare `jest` runs
+  3,619 tests and SKIPS 28 suites (396 tests, the RLS e2e among them) because
+  every DB-gated spec `describe.skip`s without `TEST_DATABASE_URL`. CI supplies
+  the variables and runs 4,015, so **a green local run says nothing about a
+  quarter of the suite** — CI sat red for three days (0 of 71 runs after 17 Aug
+  2026) on three of those tests and no local run could have shown it. The script
+  reads `infrastructure/.env` and points at the `sms-test-pg` container on 5434.
+  It needs FOUR variables, not two, and each was found by hitting it: the raw-pool
+  RLS spec takes `TEST_DATABASE_URL` (app role) + `TEST_ADMIN_URL` (superuser, to
+  seed across FKs); the Prisma-backed service e2es go through the `@sms/db`
+  singleton and need `DATABASE_URL`; and the storage stub signs presigned URLs
+  with `AUTH_SECRET` — without it the report-card vault write fails, is SWALLOWED
+  by a best-effort catch, and the test fails two assertions later on a status.
+  All are declared in `turbo.json` `test.passThroughEnv` — Turbo 2 strict env
+  will otherwise SKIP the suite. // GOTCHA: on main the DEPLOY workflow fails on
+  every push and always has (no AWS credentials), so "a red run" is ambiguous —
+  check WHICH workflow with `gh run list --workflow=ci.yml`.
 - EVERY DB-gated e2e suite must `await prisma.$disconnect()` (the `@sms/db`
   singleton) in `afterAll`, even if it only touched the DB via a service — an
   undisconnected pool keeps the jest worker alive and HANGS the CI test step
