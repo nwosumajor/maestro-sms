@@ -13,6 +13,7 @@ import {
 import { NotificationService } from "../notifications/notification.service";
 import { type AuditLogService } from "../foundation/audit-log.service";
 import { Prisma } from "@sms/db";
+import { EVER_ENROLLED_STUDENT } from "../common/student-scope";
 import { decodeCursor, pageLimit, seekWhere, toPage } from "../common/keyset-cursor";
 
 // =============================================================================
@@ -414,15 +415,19 @@ export class MessagingService {
   async reply(p: Principal, threadId: string, body: string) {
     const res = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.assertParticipant(tx, p, threadId);
-      const msg = await tx.message.create({ data: { schoolId: p.schoolId, threadId, senderId: p.userId, body } });
-      await tx.messageThread.update({ where: { id: threadId }, data: { updatedAt: new Date() } });
-      await tx.threadParticipant.updateMany({ where: { threadId, userId: p.userId }, data: { lastReadAt: new Date() } });
+      // The other side is read BEFORE the message is written, because whether
+      // this may be sent depends on who is at the other end.
       const others = await tx.threadParticipant.findMany({
         where: { threadId, userId: { not: p.userId } },
         select: { userId: true },
       });
+      const recipients = others.map((o: { userId: string }) => o.userId);
+      await this.assertRecipientHasNotLeft(tx, p, recipients);
+      const msg = await tx.message.create({ data: { schoolId: p.schoolId, threadId, senderId: p.userId, body } });
+      await tx.messageThread.update({ where: { id: threadId }, data: { updatedAt: new Date() } });
+      await tx.threadParticipant.updateMany({ where: { threadId, userId: p.userId }, data: { lastReadAt: new Date() } });
       const thread = await tx.messageThread.findFirst({ where: { id: threadId }, select: { subject: true } });
-      return { msg, recipients: others.map((o: { userId: string }) => o.userId), subject: thread?.subject ?? "Message" };
+      return { msg, recipients, subject: thread?.subject ?? "Message" };
     });
     await this.notify(p, res.recipients, res.subject);
     return res.msg;
@@ -432,6 +437,53 @@ export class MessagingService {
   private async assertParticipant(tx: TenantTx, p: Principal, threadId: string) {
     const part = await tx.threadParticipant.findFirst({ where: { threadId, userId: p.userId }, select: { id: true } });
     if (!part) throw new NotFoundException("Thread not found");
+  }
+
+  /**
+   * A PRIVATE LINE TO A CHILD DOES NOT OUTLIVE THE SCHOOL.
+   *
+   * Starting a thread requires the relationship — a teacher may write to the
+   * pupils they teach, ACTIVE enrolment only, "a pupil who has left is no
+   * longer theirs to write to". Replying required only that you were already a
+   * participant, so a channel opened legitimately went on working after the
+   * child left the school: two participants, nobody else able to see it, and no
+   * remaining role connecting the adult to the child.
+   *
+   * SCOPED TO PUPILS WHO HAVE LEFT THE SCHOOL, and deliberately not to a class
+   * change. Blocking a teacher from answering a pupil who is still here — who
+   * asked a question last week and changed set this term — does not end the
+   * conversation, it moves it to WhatsApp, where the school can see nothing at
+   * all. That is the opposite of the point. While the child is in the school
+   * there is a continuing pastoral role and ordinary supervision; once they
+   * have gone there is neither.
+   *
+   * WHOLE-SCHOOL STAFF ARE UNAFFECTED. The office is exactly who should still
+   * be reachable about a transcript or a final report, which is why the refusal
+   * names them.
+   *
+   * The THREAD STAYS READABLE. History is a safeguarding record; removing reach
+   * must not remove evidence.
+   *
+   * One extra query, and only for a caller who is not whole-school —
+   * `ThreadParticipant` carries no Prisma relation to `User` (the scalar +
+   * DB-FK pattern this schema uses), so the status cannot ride along on the
+   * lookup above.
+   */
+  private async assertRecipientHasNotLeft(tx: TenantTx, p: Principal, recipientIds: string[]) {
+    if (recipientIds.length === 0) return;
+    if (p.roles.some((r) => SCHOOL_WIDE_SENDERS.has(r))) return;
+    // EVER_ENROLLED_STUDENT, not a hand-rolled role clause: "who is a student"
+    // has one definition in this codebase and a guard that fails the build when
+    // a new call site writes its own. It caught this one.
+    const gone = await tx.user.findFirst({
+      where: { id: { in: recipientIds }, ...EVER_ENROLLED_STUDENT, status: "EXITED" },
+      select: { name: true },
+    });
+    if (!gone) return;
+    throw new ForbiddenException(
+      `${gone.name} has left the school, so this conversation is closed to you. ` +
+        `The school office can pass a message on.`,
+    );
   }
 
   private async assertCanMessage(tx: TenantTx, p: Principal, recipientId: string) {
