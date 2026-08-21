@@ -40,6 +40,14 @@ d("Online settlement, verify-on-return and reconciliation (real Postgres)", () =
   const PARENT = randomUUID();
   const STUDENT = randomUUID();
   const invoiceId = randomUUID();
+  // The sweep case gets its OWN invoice. It used to reuse the one above, which
+  // the two cases before it pay off in full (15,000 + 25,000 of 40,000) — so by
+  // the time the sweep ran, settlement correctly REFUSED to post against a PAID
+  // invoice ("not open for payment", the guard that stopped a cancelled invoice
+  // being brought back to life) and the case failed on an outcome that was
+  // right. A fixture that depends on the balance an earlier case happens to
+  // leave is a test of test order.
+  const sweepInvoice = randomUUID();
 
   const parent = (): Principal => ({ userId: PARENT, schoolId: SA, roles: ["parent"], permissions: ["fee.read"] });
 
@@ -72,6 +80,11 @@ d("Online settlement, verify-on-return and reconciliation (real Postgres)", () =
       `INSERT INTO invoice (id,"schoolId","studentId",reference,status,"totalMinor","dueDate","createdById","updatedAt")
        VALUES ($1,$2,$3,'INV-REC-1','ISSUED',40000,now(),$4,now())`,
       [invoiceId, SA, STUDENT, STAFF],
+    );
+    await admin.query(
+      `INSERT INTO invoice (id,"schoolId","studentId",reference,status,"totalMinor","dueDate","createdById","updatedAt")
+       VALUES ($1,$2,$3,'INV-REC-SWEEP','ISSUED',5000,now(),$4,now())`,
+      [sweepInvoice, SA, STUDENT, STAFF],
     );
 
     const tenant = new PrismaTenantService() as never;
@@ -253,7 +266,7 @@ d("Online settlement, verify-on-return and reconciliation (real Postgres)", () =
         .fn()
         .mockResolvedValue([
           { reference: "REC-REF-1", amountMinor: 15_000, currency: "NGN", metadata: meta() }, // already posted
-          { reference: "REC-REF-3", amountMinor: 5_000, currency: "NGN", metadata: meta({ invoiceAmountMinor: 5_000 }) }, // missed
+          { reference: "REC-REF-3", amountMinor: 5_000, currency: "NGN", metadata: meta({ invoiceId: sweepInvoice, invoiceAmountMinor: 5_000 }) }, // missed
           { reference: "OTHER", amountMinor: 1_000, currency: "NGN", metadata: { kind: "subscription" } }, // not an invoice charge
         ]),
     };
@@ -290,8 +303,12 @@ d("Online settlement, verify-on-return and reconciliation (real Postgres)", () =
 
     const r = await reconcile.sweep("SCHEDULED");
     expect(r).toMatchObject({ scanned: 3, invoiceCharges: 2, missing: 1, posted: 1 });
+    // Two on the original invoice, and the recovered one on the sweep's own.
     const pays = await admin.query(`SELECT reference FROM payment WHERE "invoiceId" = $1 ORDER BY "createdAt"`, [invoiceId]);
-    expect(pays.rowCount).toBe(3);
+    expect(pays.rowCount).toBe(2);
+    const recovered = await admin.query(`SELECT reference FROM payment WHERE "invoiceId" = $1`, [sweepInvoice]);
+    expect(recovered.rowCount).toBe(1);
+    expect((recovered.rows[0] as { reference: string }).reference).toBe("REC-REF-3");
     const owner = await admin.query(
       `SELECT title FROM notification WHERE "recipientId" = $1 AND title LIKE 'Reconciliation recovered%'`,
       [STAFF],

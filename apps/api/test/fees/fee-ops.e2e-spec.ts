@@ -41,6 +41,7 @@ d("FeeOpsService adjustments + late fees + receipts + journal (real Postgres)", 
   const adjInvoice = randomUUID(); // 100k — gets a 20k discount
   const lateInvoice = randomUUID(); // overdue past grace — gets the late fee
   const freshInvoice = randomUUID(); // due in future — must be untouched
+  const approverRole = randomUUID(); // fixture role carrying fee.approve (global table)
   const paymentId = randomUUID(); // posted payment for receipt/journal
 
   const maker = (): Principal => ({ userId: MAKER, schoolId: SA, roles: ["accountant"], permissions: ["fee.manage"] });
@@ -71,6 +72,26 @@ d("FeeOpsService adjustments + late fees + receipts + journal (real Postgres)", 
       SA,
       GUARDIAN,
       STUDENT,
+    ]);
+    // A SECOND APPROVER HAS TO EXIST IN THE DATABASE, not just in a Principal.
+    //
+    // `requestAdjustment` refuses to raise a maker-checker request at all when
+    // nobody else could ever decide it — a two-person rule with one person is a
+    // dead end, not a control. That guard asks `user_role`, so the checker's
+    // `fee.approve` has to be a real role grant here; carrying it on the
+    // Principal alone told the service the school had exactly one approver.
+    const feeApprove = randomUUID();
+    await admin.query(`INSERT INTO role (id,name,description) VALUES ($1,$2,'fixture approver')`, [approverRole, "fo-approver-" + SA.slice(0, 8)]);
+    await admin.query(`INSERT INTO permission (id,key) VALUES ($1,'fee.approve') ON CONFLICT (key) DO NOTHING`, [feeApprove]);
+    await admin.query(
+      `INSERT INTO role_permission ("roleId","permissionId") SELECT $1,p.id FROM permission p WHERE p.key = 'fee.approve'`,
+      [approverRole],
+    );
+    await admin.query(`INSERT INTO user_role (id,"schoolId","userId","roleId") VALUES ($1,$2,$3,$4)`, [
+      randomUUID(),
+      SA,
+      CHECKER,
+      approverRole,
     ]);
     for (const [id, ref, total, due] of [
       [adjInvoice, "INV-FO-ADJ", 100_000, "now() + interval '10 days'"],
@@ -115,10 +136,18 @@ d("FeeOpsService adjustments + late fees + receipts + journal (real Postgres)", 
       "notification",
       "audit_log",
       "parent_child",
+      // The approver role assignment seeded above — a CHILD of `user`, so it
+      // goes before the users do or the delete violates the FK.
+      "user_role",
     ]) {
       await admin.query(`DELETE FROM ${t} WHERE "schoolId" = $1`, [SA]);
     }
     await admin.query(`DELETE FROM "user" WHERE "schoolId" = $1`, [SA]);
+    // The fixture's own role (role and role_permission are GLOBAL — no schoolId
+    // — so the loop above cannot reach them, and a run would otherwise leave a
+    // "fo-approver-…" role behind in every test database for ever).
+    await admin.query(`DELETE FROM role_permission WHERE "roleId" = $1`, [approverRole]);
+    await admin.query(`DELETE FROM role WHERE id = $1`, [approverRole]);
     await admin.query(`DELETE FROM school WHERE id = $1`, [SA]);
     await admin.end();
     await prisma.$disconnect();

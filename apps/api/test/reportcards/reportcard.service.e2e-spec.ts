@@ -108,7 +108,14 @@ d("ReportCardService generate() persists to the Document Vault (real Postgres)",
     expect(rc!.status).toBe("UPLOADED");
 
     const dl = await documents.getDownloadUrl(student(), rc!.id);
-    expect(dl.download.url).toContain("op=get");
+    // The OPERATION IS INSIDE THE SIGNATURE, not a query parameter — that is
+    // what stops "serve this inline" being switched on by editing the URL. This
+    // asserted `op=get` and had been failing since the signing changed, unseen
+    // because the whole suite skips without a database.
+    expect(dl.download.url).toContain("/local-storage/");
+    expect(dl.download.url).toMatch(/[?&]sig=[0-9a-f]{64}/);
+    expect(dl.download.url).toMatch(/[?&]exp=\d+/);
+    expect(dl.download.url).not.toContain("op=");
   });
 
   it("the GUARDIAN can retrieve the same document independently", async () => {
