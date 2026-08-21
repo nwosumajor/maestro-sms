@@ -46,6 +46,25 @@ const under = (p: typeof OLD, row: Parameters<typeof reportedTermGrade>[0]) =>
 /** The real row from the probe: published as 81 A. */
 const MARKS = { exam: 57, midterm: 9, assignment: 8, classNote: 7 };
 
+
+/** The full text of the call that starts at `anchor`, matched by walking its
+ *  parentheses. Asserting the ABSENCE of something inside a fixed-size slice is
+ *  only ever as true as the size somebody picked. */
+function callAt(src: string, anchor: string): string {
+  const at = src.indexOf(anchor);
+  if (at < 0) throw new Error(`anchor not found: ${anchor}`);
+  const open = src.indexOf("(", at + anchor.lastIndexOf("findMany"));
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    if (src[i] === "(") depth += 1;
+    else if (src[i] === ")") {
+      depth -= 1;
+      if (depth === 0) return src.slice(at, i + 1);
+    }
+  }
+  throw new Error(`unbalanced call at ${anchor}`);
+}
+
 describe("a published result", () => {
   it("reports the figures it was published with, not today's arithmetic", () => {
     const published = { ...MARKS, status: "PUBLISHED", total: 81, grade: "A" };
@@ -173,7 +192,14 @@ describe("every reader of a published mark", () => {
       "tx.subjectResult.findMany({ where: { classId, termId } })",
     ]) {
       expect(src).toContain(anchor);
-      expect(src.slice(src.indexOf(anchor), src.indexOf(anchor) + 220)).not.toMatch(/select:/);
+      // The WHOLE call, walked by its brackets — not a fixed number of
+      // characters after the anchor. A window is a guess about how long the
+      // call is, and the guess only has to be wrong once: elsewhere in this
+      // suite a 480-character window sat in front of a safeguarding bug for
+      // exactly this reason, asserting the absence of something that was
+      // thirty lines further down. These three calls are 57–148 characters
+      // today, so 220 covered them — until somebody adds a longer `where`.
+      expect(callAt(src, anchor)).not.toMatch(/select:/);
     }
   });
 
