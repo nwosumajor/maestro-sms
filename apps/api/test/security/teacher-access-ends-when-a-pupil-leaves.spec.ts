@@ -47,6 +47,12 @@ const TEACHER_DIRECTION: Array<[string, string]> = [
   ["attendance/attendance.service.ts", "assertCanAccessStudent"],
   ["reportcards/reportcard.service.ts", "assertCanAccess"],
   ["gradebook/term-result.service.ts", "canReadReport"],
+  // MESSAGING decides the same question and was not on this list. It applies
+  // the rule — "ACTIVE enrolment only: a pupil who has left is no longer theirs
+  // to write to" is written in that very function — but an enumeration of the
+  // places that decide a teacher's reach is only as good as its enumeration,
+  // and a private channel to a child is the reach that matters most.
+  ["communication/messaging.service.ts", "recipientScope"],
 ];
 
 /** Brace-match forward from `open`, returning the balanced span. */
@@ -100,7 +106,10 @@ describe("the six checks that decided a teacher's reach", () => {
     // office must still be able to issue a transcript or a final report.
     for (const [file] of TEACHER_DIRECTION) {
       const src = SRC(file);
-      expect([file, /isStaffWide|isReadWide|isRosterWide|_WIDE\b|WIDE_ROLES/.test(src)]).toEqual([file, true]);
+      // `_WIDE\b` did not match SCHOOL_WIDE_SENDERS — an underscore is a word
+      // character, so there is no boundary after WIDE. The property held; the
+      // pattern just did not recognise how messaging spells it.
+      expect([file, /isStaffWide|isReadWide|isRosterWide|_WIDE/.test(src)]).toEqual([file, true]);
     }
   });
 });
