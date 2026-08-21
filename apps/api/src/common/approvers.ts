@@ -25,10 +25,33 @@
 
 import type { TenantTx } from "../integrity/integrity.foundation";
 
-/** Every user in the tenant whose roles grant `permission`. ONE query. */
+/**
+ * Every user in the tenant who can exercise `permission`. ONE query.
+ *
+ * ACTIVE only, and that word is doing the work. Exiting a member of staff sets
+ * `User.status = EXITED` and deliberately LEAVES their `user_role` rows alone —
+ * the row is employment history, and auth refuses the login instead. So the
+ * plain role query answered "who was ever given this", and every caller here is
+ * asking "who could decide this now". A school whose only head teacher resigned
+ * on Friday was still told, on Monday, that its approval chain was staffed.
+ *
+ * That is not a cosmetic difference. It is the precise case the dead-end guard
+ * exists to catch, and counting a departed approver walks straight past it: the
+ * request is accepted, sits at a stage its one holder can no longer reach, and
+ * says "pending" for ever.
+ *
+ * DELIBERATELY NOT counting a temporary elevation grant. A grant CAN carry
+ * `workflow.review.*` — it is elevatable — so this under-reports for the hours
+ * one is live. But the recertification report asks this same question to say
+ * whether a two-person rule is STAFFED, and a control held up by a grant that
+ * expires on Thursday is exactly the thin control it is trying to name.
+ */
 export async function holdersOf(tx: TenantTx, permission: string): Promise<string[]> {
   const rows = (await tx.userRole.findMany({
-    where: { role: { permissions: { some: { permission: { key: permission } } } } },
+    where: {
+      user: { status: "ACTIVE" },
+      role: { permissions: { some: { permission: { key: permission } } } },
+    },
     select: { userId: true },
     distinct: ["userId"],
   })) as Array<{ userId: string }>;

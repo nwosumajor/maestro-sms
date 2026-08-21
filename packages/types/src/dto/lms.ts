@@ -171,6 +171,16 @@ export interface WorkflowInboxItemDto {
    *  Computed on the server because only the server knows all four — and knows
    *  about an elevation grant, which is not derivable from the caller's roles. */
   awaitingMe: boolean;
+  /**
+   * Nobody can move this request.
+   *
+   * Its current stage's permission is held by nobody at the school — or only by
+   * the person who raised it, which separation of duties makes the same thing.
+   * Raising such a request is refused now, but a school that LOSES its only head
+   * teacher strands everything already sitting at that stage, and the applicant
+   * goes on seeing "pending" with nothing anywhere to say otherwise.
+   */
+  stalled: boolean;
 }
 
 

@@ -356,6 +356,7 @@ export function WorkflowInbox({
               reviewer to work out that most of a long list is not theirs. */}
           {(() => {
             const mine = initial.filter((w) => w.awaitingMe).length;
+            const stuck = initial.filter((w) => w.stalled).length;
             const from = (page - 1) * pageSize + 1;
             const to = Math.min(page * pageSize, total);
             return (
@@ -368,7 +369,16 @@ export function WorkflowInbox({
                 <span>
                   Showing {from}–{to} of {total}
                   {filters.q || filters.type || filters.state || filters.mine ? " matching" : ""}.
-                </span>
+                </span>{" "}
+                {/* The one fact on this page that nobody will ever find out any
+                    other way. A stranded request looks exactly like a request
+                    somebody has not got round to. */}
+                {stuck > 0 && (
+                  <span className="text-destructive">
+                    {stuck === 1 ? "1 request cannot" : `${stuck} requests cannot`} be approved by
+                    anyone here.
+                  </span>
+                )}
               </p>
             );
           })()}
@@ -393,6 +403,17 @@ export function WorkflowInbox({
                     )}
                     {/* Who decided what, and whether under a temporary grant.
                         The endpoint behind this existed and nothing called it. */}
+                    {/* Says the FIX, not just the fault: this is one role
+                        assignment away, and an administrator cannot be expected
+                        to infer that from a request that simply never moves. */}
+                    {w.stalled && (
+                      <p className="mt-1 text-sm text-destructive">
+                        Waiting at
+                        {w.stageLabel ? ` the ${w.stageLabel} stage` : " this stage"}, which nobody
+                        still at the school can decide. Give that duty to a member of staff on the
+                        Roles page and this will move.
+                      </p>
+                    )}
                     <WorkflowChain requestId={w.id} />
                   </div>
                   <div className="flex flex-col items-end gap-1">
@@ -400,6 +421,7 @@ export function WorkflowInbox({
                       {w.state.replace("_", " ")}
                     </Badge>
                     {w.awaitingMe && <Badge variant="outline">Waiting on you</Badge>}
+                    {w.stalled && <Badge variant="destructive">Nobody can approve</Badge>}
                     {w.stageCount > 0 && w.state === "PENDING_REVIEW" && (
                       <span className="text-xs text-muted-foreground">
                         Stage {w.currentStage + 1}/{w.stageCount}

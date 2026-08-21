@@ -101,6 +101,37 @@ export class WorkflowService {
     return p.permissions.some((perm) => REVIEW_PERMS.has(perm));
   }
 
+  /**
+   * Refuse a chain that nobody could ever decide.
+   *
+   * EVERY stage, not just the first: dying at stage two is just as dead, and
+   * the point is to say so while the person is still standing there. A ROUTED
+   * stage names its approver, but `review` already falls back to the permission
+   * once that person has left, so the permission is the question either way.
+   * The INITIATOR does not count — separation of duties makes "the only holder
+   * is the person asking" the same dead end as an empty stage.
+   *
+   * The two messages are different facts and the wrong one sends an
+   * administrator hunting for somebody who does not exist.
+   */
+  private async assertChainCanBeDecided(
+    tx: TenantTx,
+    stages: WorkflowStage[],
+    initiatorId: string,
+  ): Promise<void> {
+    for (const stage of stages) {
+      const holders = await holdersOf(tx, stage.permission);
+      if (!holders.some((id) => id !== initiatorId)) {
+        const what = `The "${stage.label}" stage`;
+        throw new BadRequestException(
+          holders.length === 0
+            ? noApproverAtAllMessage(what, stage.permission)
+            : noSecondApproverMessage(what, stage.permission),
+        );
+      }
+    }
+  }
+
   async createRequest(
     p: Principal,
     input: {
@@ -125,6 +156,20 @@ export class WorkflowService {
       } else {
         stages = STAGED_WORKFLOW_TYPES.has(input.type) ? STAFF_REQUEST_CHAIN : [];
       }
+      // CHECKED HERE, BEFORE ANYTHING IS WRITTEN.
+      //
+      // The check used to live only at SUBMIT. But all eleven callers create
+      // and then submit in SEPARATE transactions — `requestLeave` is three —
+      // so a refusal at submit left behind a DRAFT request AND the caller's own
+      // row: the teacher saw an error AND a leave application sitting at
+      // "Pending", which nobody could review and nobody could even submit. The
+      // guard against silence was creating some.
+      //
+      // Refusing at create makes that impossible for every caller at once, and
+      // the submit check stays as the backstop for a DRAFT that was raised
+      // while the school still had a head teacher.
+      if (stages.length > 0) await this.assertChainCanBeDecided(tx, stages, p.userId);
+
       const req = await tx.workflowRequest.create({
         data: {
           schoolId: p.schoolId,
@@ -336,6 +381,30 @@ export class WorkflowService {
           : [],
       );
 
+      // WHICH PENDING REQUESTS CAN NOBODY MOVE.
+      //
+      // Raising a request into an undecidable chain is refused now. That says
+      // nothing about the ones already in flight: a school whose head teacher
+      // leaves in October strands every request sitting at that stage, and the
+      // applicant goes on seeing "pending" with nothing anywhere — no person,
+      // page or sweep — to say otherwise. The guard prevents new dead ends; a
+      // school still needs to be able to SEE the ones it already has.
+      //
+      // One query per DISTINCT stage permission on the page, which in practice
+      // is two or three, rather than one per row.
+      const pendingPermissions = [
+        ...new Set(
+          rows
+            .filter((r) => r.state === "PENDING_REVIEW")
+            .map((r) => ((r.stages as WorkflowStage[] | null) ?? [])[r.currentStage]?.permission)
+            .filter((k): k is NonNullable<typeof k> => !!k),
+        ),
+      ];
+      const holdersByPermission = new Map<string, string[]>();
+      for (const permission of pendingPermissions) {
+        holdersByPermission.set(permission, await holdersOf(tx, permission));
+      }
+
       const items = rows.map((r) => {
         const stages = (r.stages as WorkflowStage[] | null) ?? [];
         const pending = r.state === "PENDING_REVIEW" ? (stages[r.currentStage]?.label ?? null) : null;
@@ -370,6 +439,14 @@ export class WorkflowService {
             p,
             !stages[r.currentStage]?.approverId || stillHere.has(stages[r.currentStage]?.approverId ?? ""),
           ),
+          // Nobody can move this one. Its current stage's permission is held by
+          // nobody still at the school — or only by the person who raised it,
+          // which separation of duties makes the same thing.
+          stalled:
+            !!pending &&
+            !(holdersByPermission.get(stages[r.currentStage]?.permission ?? "") ?? []).some(
+              (id) => id !== r.initiatorId,
+            ),
         };
       });
 
@@ -535,23 +612,7 @@ export class WorkflowService {
       // The same guard `requestAdjustment` and the salary change already apply,
       // and the same sentence, which names the fix rather than the refusal.
       if (action === "SUBMIT" && isStaged) {
-        for (const stage of stages) {
-          // A routed stage names its person; `review` already falls back to the
-          // permission when they have left, so the permission is the question
-          // either way.
-          const holders = await holdersOf(tx, stage.permission);
-          if (!holders.some((id) => id !== req.initiatorId)) {
-            // Two different facts, and the wrong one sends an administrator
-            // looking for somebody who does not exist: a stage with NOBODY in
-            // it, versus one where the only holder is the person asking.
-            const what = `The "${stage.label}" stage`;
-            throw new BadRequestException(
-              holders.length === 0
-                ? noApproverAtAllMessage(what, stage.permission)
-                : noSecondApproverMessage(what, stage.permission),
-            );
-          }
-        }
+        await this.assertChainCanBeDecided(tx, stages, req.initiatorId);
       }
 
       let nextState: WorkflowState = baseNext;

@@ -35,9 +35,15 @@ describe("who can approve", () => {
   it("asks for the users whose ROLE grants the permission, in one query", async () => {
     const t = tx(["a"]);
     await holdersOf(t, "fee.approve");
+    // ACTIVE too: exiting a member of staff leaves their role row in place —
+    // it is employment history — so the role alone answers "who was ever given
+    // this", and the question here is who can decide it now.
     expect(t.userRole.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { role: { permissions: { some: { permission: { key: "fee.approve" } } } } },
+        where: {
+          user: { status: "ACTIVE" },
+          role: { permissions: { some: { permission: { key: "fee.approve" } } } },
+        },
       }),
     );
     expect((t.userRole.findMany as jest.Mock).mock.calls).toHaveLength(1);

@@ -801,6 +801,30 @@ request/tenant context + logs them, then RE-THROWS unchanged so response semanti
 captured by the pino request log. Verified by `metrics.service`/`metrics.controller`
 unit tests + an `observability.module` DI smoke test.
 
+### An approver is somebody who is still here
+`holdersOf` (`apps/api/src/common/approvers.ts`) is the ONE place the platform
+asks who can approve a thing — the workflow dead-end guard, the salary and
+employment maker-checker, fee adjustments, and the recertification report all
+read it. It now filters to `user.status = "ACTIVE"`, because exiting a member of
+staff sets that status and DELIBERATELY leaves their `user_role` rows in place
+(the row is employment history; auth refuses the login instead). Without the
+filter it answered "who was ever given this", so a school whose only head
+teacher resigned on Friday was told on Monday that its approval chain was
+staffed. Deliberately NOT counting a live elevation grant: the recertification
+report uses the same function to say whether a two-person rule is STAFFED, and a
+control held up by a grant that expires on Thursday is exactly the thin control
+it exists to name.
+The undecidable-chain refusal happens at CREATE, not submit
+(`assertChainCanBeDecided`). All eleven callers create then submit in SEPARATE
+transactions — `requestLeave` uses three — so refusing at submit left a DRAFT
+request AND the caller's own row behind: an error AND a leave application at
+"Pending" that nobody could review or even submit. The submit check stays as the
+backstop for a DRAFT raised while the school still had a head teacher.
+`GET /workflows` marks each pending row `stalled` when nobody but the initiator
+can decide its CURRENT stage — one query per distinct stage permission on the
+page — and `/workflows` says so and names the fix. The guard prevents new dead
+ends; a school still has to be able to SEE the ones a resignation created.
+
 ## Repo workflow & gotchas
 - DB setup order: `prisma migrate deploy` → `pnpm --filter @sms/db rls` →
   `prisma db seed` (or `pnpm --filter @sms/db setup`). RLS lives in `prisma/rls/`,

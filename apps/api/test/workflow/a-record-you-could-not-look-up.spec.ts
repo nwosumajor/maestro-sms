@@ -35,6 +35,10 @@ function makeService(rows: Array<Record<string, unknown>>) {
   const tx = {
     workflowRequest: { findMany, count },
     user: { findMany: jest.fn().mockResolvedValue([]) },
+    // The list also asks who could decide each pending stage, to say which
+    // requests are stranded. Nobody holds anything in this fixture, which these
+    // paging tests do not care about either way.
+    userRole: { findMany: jest.fn().mockResolvedValue([]) },
   } as unknown as TenantTx;
   const db = {
     runAsTenantReadOnly: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),

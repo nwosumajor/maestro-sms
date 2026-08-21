@@ -23,6 +23,10 @@ function makeService(request: Record<string, unknown> | null) {
       update,
       updateMany,
     },
+    // Creating a request now checks that each stage has somebody who could
+    // decide it — a chain nobody can decide is a dead end, and refusing at
+    // submit left a DRAFT behind. Two seniors, neither of them the initiator.
+    userRole: { findMany: jest.fn().mockResolvedValue([{ userId: "senior1" }, { userId: "senior2" }]) },
     workflowAuditLog: {
       create: auditCreate,
       findMany: jest.fn().mockResolvedValue([]),
@@ -215,6 +219,10 @@ describe("WorkflowService initiator-routed chains (named approvers)", () => {
         findMany: jest.fn().mockResolvedValue([]),
         updateMany,
       },
+      // Creating a request now checks that each stage has somebody who could
+      // decide it — a chain nobody can decide is a dead end, and refusing at
+      // submit left a DRAFT behind. Two seniors, neither of them the initiator.
+      userRole: { findMany: jest.fn().mockResolvedValue([{ userId: "senior1" }, { userId: "senior2" }]) },
       workflowAuditLog: { create: jest.fn().mockResolvedValue({}), findMany: jest.fn().mockResolvedValue([]) },
       user: {
         findMany: jest.fn().mockResolvedValue(eligibleUsers),
