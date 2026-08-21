@@ -943,6 +943,27 @@ approval is when there is still a notice period in which to hand over. Nothing
 is sent when they hold nothing — a notice that fires on every exit is one people
 learn to ignore, including on the exit where it mattered.
 
+### The family-scope probe derives its own surface, and compares BODIES
+`pnpm --filter @sms/web probe:family` signs in as a real parent and a real pupil
+and looks for another family's child. It used to probe THIRTEEN hand-written
+paths while a pupil's session could reach 133 GET routes — so it now reads the
+API's controllers, keeps the routes whose `@RequirePermission` the account
+actually holds, and probes those (60 for a parent, ~70 for a pupil, plus every
+route taking a `:studentId`, asked about somebody else's child). A hand-kept list
+of "what a family can reach" is a list that falls behind, the same reason the RLS
+coverage meta-test computes its set from `pg_class`. Parameterised routes it
+cannot fill are COUNTED OUT LOUD rather than skipped silently.
+// GOTCHA, found by deleting a real control to check the probe could see it:
+**comparing STATUS is not enough.** With `assertCanRead` removed,
+`/reportcards/:studentId/remarks` returned 200 carrying another family's child —
+and a non-existent id ALSO returned 200 with an empty body, so the statuses
+agreed and the probe said "ok". It now compares the two BODIES with the
+requested id stripped out (an endpoint that merely echoes the id back differs
+without disclosing anything). Re-validated both ways: control removed + the
+probed child given a remark ⇒ FAIL naming the route; control restored ⇒ PASS.
+Both halves are validated by making them fire — the listing half against a
+teacher, who legitimately sees 480 pupils.
+
 ## Repo workflow & gotchas
 - DB setup order: `prisma migrate deploy` → `pnpm --filter @sms/db rls` →
   `prisma db seed` (or `pnpm --filter @sms/db setup`). RLS lives in `prisma/rls/`,

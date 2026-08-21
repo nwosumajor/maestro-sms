@@ -45,6 +45,10 @@
 //   WEB_URL=http://localhost pnpm --filter @sms/web probe:family
 // =============================================================================
 
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 const WEB = process.env.WEB_URL ?? "http://localhost:3000";
 const PASSWORD = process.env.SMOKE_PASSWORD ?? "password123";
 /** Ordinary family accounts — the position a real parent and pupil are in. */
@@ -56,6 +60,17 @@ const AS = (process.env.PROBE_FAMILY ?? "parent@demo.school,student@demo.school"
  * Parameterless on purpose. An id-addressed probe is the other script's job and
  * answers a different question ("can I reach a record I already know of");, this
  * one asks what the system VOLUNTEERS when simply asked for the ordinary page.
+ */
+/**
+ * THE HAND-WRITTEN LIST IS THE FLOOR, NOT THE COVERAGE.
+ *
+ * These carry query strings a reader cannot invent, so they stay written out.
+ * Everything else is DERIVED below from the API's own controllers, because a
+ * hand-maintained list of "what a family can reach" is a list that falls behind:
+ * it had thirteen entries while a pupil's session could reach 133 GET routes.
+ * The same reasoning as the RLS coverage meta-test — the set under test has to
+ * be computed from the code, or a new endpoint joins the surface untested and
+ * the probe still says PASS.
  */
 const PATHS = [
   "/students",
@@ -74,6 +89,65 @@ const PATHS = [
   // things by name.
   "/search?q=Pupil",
 ];
+
+// --- what this account can actually reach ------------------------------------
+
+/**
+ * Every parameter-less GET the API serves whose permission this account holds.
+ *
+ * Read from the controllers rather than from a list, so an endpoint added
+ * tomorrow and gated on `grade.read` is probed tonight without anyone
+ * remembering to add it.
+ *
+ * PARAMETERISED ROUTES ARE NOT COVERED HERE and are counted out loud. They need
+ * an id this probe cannot invent; part two asks the id-addressed question for
+ * the family-facing ones deliberately. A probe that quietly skipped them would
+ * be claiming a coverage it does not have.
+ */
+function reachableGets(permissions) {
+  const held = new Set(permissions);
+  const apiSrc = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "api", "src");
+
+  // Permission CONSTANTS -> their string values, from the single source of truth.
+  const values = new Map();
+  const typesSrc = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "packages", "types", "src", "permissions");
+  for (const f of walk(typesSrc, (n) => n.endsWith(".ts"))) {
+    for (const m of readFileSync(f, "utf8").matchAll(/(\w+):\s*"([\w.]+)"/g)) values.set(m[1], m[2]);
+  }
+
+  const out = [];
+  const skipped = [];
+  for (const file of walk(apiSrc, (n) => n.endsWith(".controller.ts"))) {
+    const src = readFileSync(file, "utf8");
+    const prefix = (/@Controller\(\s*["'`]([^"'`]*)["'`]\s*\)/.exec(src) ?? [null, ""])[1];
+    for (const m of src.matchAll(/@Get\(\s*(?:["'`]([^"'`]*)["'`])?\s*\)([\s\S]{0,400}?)\)\s*(?::|\{)/g)) {
+      const sub = m[1] ?? "";
+      const body = m[2];
+      if (/@(Post|Put|Patch|Delete)\(/.test(body)) continue;
+      const keys = new Set();
+      for (const g of body.matchAll(/@RequirePermission\(([^)]*)\)/g)) {
+        for (const c of g[1].matchAll(/([A-Z_]+_PERMISSIONS)\.(\w+)/g)) {
+          if (values.has(c[2])) keys.add(values.get(c[2]));
+        }
+        for (const lit of g[1].matchAll(/"([\w.]+)"/g)) keys.add(lit[1]);
+      }
+      if (keys.size === 0 || ![...keys].some((k) => held.has(k))) continue;
+      const path = "/" + [prefix, sub].filter(Boolean).join("/");
+      (path.includes(":") ? skipped : out).push(path);
+    }
+  }
+  return { paths: [...new Set(out)].sort(), skipped: [...new Set(skipped)] };
+}
+
+function walk(dir, pred, acc = []) {
+  for (const e of readdirSync(dir)) {
+    if (e === "node_modules" || e === "dist") continue;
+    const f = join(dir, e);
+    if (statSync(f).isDirectory()) walk(f, pred, acc);
+    else if (pred(e)) acc.push(f);
+  }
+  return acc;
+}
 
 function client() {
   const jar = new Map();
@@ -103,6 +177,16 @@ function client() {
     async get(path) {
       const res = await fetch(`${WEB}/api/sms${path}`, { headers: { cookie: header() }, redirect: "manual" });
       return { status: res.status, text: await res.text() };
+    },
+    /** The signed-in session, for the permissions this account actually holds. */
+    async permissions() {
+      const res = await fetch(`${WEB}/api/auth/session`, { headers: { cookie: header() } });
+      if (!res.ok) return [];
+      try {
+        return (await res.json())?.user?.permissions ?? [];
+      } catch {
+        return [];
+      }
     },
   };
 }
@@ -171,8 +255,15 @@ const main = async () => {
     const foreignIds = allIds.filter((id) => !own.ids.has(id));
     // Longest first: a short name is a substring of a longer one.
     const foreignNames = allNames.filter((n) => !own.names.has(n)).sort((a, b) => b.length - a.length);
-    console.log(`--- ${who} (own family: ${own.ids.size}) ---`);
-    for (const path of PATHS) {
+    // What THIS account can reach, computed from its own session permissions.
+    const perms = await c.permissions();
+    const reachable = perms.length > 0 ? reachableGets(perms) : { paths: [], skipped: [] };
+    const probing = [...new Set([...PATHS, ...reachable.paths])];
+    console.log(
+      `--- ${who} (own family: ${own.ids.size}; ${probing.length} routes, ` +
+        `${reachable.skipped.length} parameterised and not covered here) ---`,
+    );
+    for (const path of probing) {
       const r = await c.get(path);
       if (r.status !== 200) {
         console.log(`  ${r.status} ${path}`);
@@ -194,13 +285,55 @@ const main = async () => {
   // --- part two: naming another family's record directly --------------------
   const own = await (async () => { await c.login(AS[0]); return ownFamily(c); })();
   const foreign = await foreignRecords(staff, own.ids);
+  // Real ids for the OTHER parameters, so a route like
+  // /term-results/report/:studentId/:sessionId can be asked at all. They come
+  // from a staff account: a session or term the family cannot see would make
+  // every such probe 404 for the wrong reason and quietly prove nothing.
+  const first = (text) => (/"id":"([0-9a-f-]{36})"/.exec(text) ?? [])[1] ?? null;
+  const sessions = await staff.get("/academic/sessions");
+  const terms = await staff.get("/attendance/terms");
+  const classes = await staff.get("/classes/overview");
+  const fixtures = {
+    sessionId: sessions.status === 200 ? first(sessions.text) : null,
+    termId: terms.status === 200 ? first(terms.text) : null,
+    classId: classes.status === 200 ? first(classes.text) : null,
+  };
+  // Say WHICH record was used. A probe that reports "ok" without naming what it
+  // asked about cannot be told apart from one that asked about nothing.
+  console.log(`id-addressed checks use pupil ${foreign.studentId ?? "(none)"}, ghost ${foreign.ghost}\n`);
   if (!foreign.studentId) {
     console.log("(skipping the id-addressed checks — no second family in this school)");
   } else {
     for (const who of AS) {
       await c.login(who);
       console.log(`--- ${who}: naming another family's records ---`);
+      // DERIVED id-addressed cases: every reachable route that takes a pupil's
+      // id, asked about somebody else's child.
+      //
+      // This is where an id-addressed leak actually lives — `/reportcards/
+      // :studentId/remarks` is another child's report-card remarks, and no
+      // listing endpoint would ever have shown it. The hand-written cases below
+      // stay because they name the records that matter most; these add every
+      // route the permission set can reach without anyone maintaining a list.
+      const perms = await c.permissions();
+      const derived = [];
+      if (perms.length > 0) {
+        for (const route of reachableGets(perms).skipped) {
+          const filled = route
+            .replace(/:studentId\b/g, foreign.studentId)
+            .replace(/:sessionId\b/g, fixtures.sessionId ?? "")
+            .replace(/:termId\b/g, fixtures.termId ?? "")
+            .replace(/:classId\b/g, fixtures.classId ?? "");
+          // Only routes whose every parameter could be filled, and only those
+          // that actually name a pupil — anything else would be probing a
+          // random id and reporting noise.
+          if (filled.includes(":") || filled.includes("//")) continue;
+          if (!route.includes(":studentId")) continue;
+          derived.push([`their ${route}`, filled]);
+        }
+      }
       const cases = [
+        ...derived,
         ["their profile", `/students/${foreign.studentId}`],
         ["their contacts", `/students/${foreign.studentId}/contacts`],
         ["their guardians", `/students/${foreign.studentId}/guardians`],
@@ -210,17 +343,38 @@ const main = async () => {
         ...(foreign.invoiceId ? [["their invoice", `/invoices/${foreign.invoiceId}`]] : []),
       ];
       for (const [label, path] of cases) {
+        const ghostPath = path.replace(foreign.studentId, foreign.ghost).replace(foreign.invoiceId ?? "@", foreign.ghost);
         const real = await c.get(path);
-        const ghost = await c.get(path.replace(foreign.studentId, foreign.ghost).replace(foreign.invoiceId ?? "@", foreign.ghost));
+        const ghost = await c.get(ghostPath);
         // The finding is a DIFFERENCE, never a status on its own: a 403 that a
         // non-existent id also gets is the permission guard, and discloses
         // nothing about whether the record is there.
         if (real.status !== ghost.status) {
           findings += 1;
           console.log(`  LEAK ${label} — real ${real.status} vs non-existent ${ghost.status}`);
-        } else {
-          console.log(`  ok   ${label} (${real.status}, same as a non-existent id)`);
+          continue;
         }
+        // A MATCHING STATUS IS NOT A MATCHING ANSWER, and comparing only the
+        // status was a blind spot proved by removing a real control: with
+        // `assertCanRead` deleted, /reportcards/:studentId/remarks returned 200
+        // carrying another family's child — and a non-existent id returned 200
+        // with an empty body, so the statuses agreed and the probe said "ok".
+        //
+        // So when both are 200, compare the BODIES with the requested id
+        // stripped out (an endpoint that merely echoes the id back differs
+        // without disclosing anything). Anything left over is data that exists
+        // only because that child does.
+        if (real.status === 200) {
+          const strip = (t, id) => t.split(id).join("<id>");
+          const a = strip(strip(real.text, foreign.studentId), foreign.invoiceId ?? "\u0000");
+          const b = strip(ghost.text, foreign.ghost);
+          if (a !== b) {
+            findings += 1;
+            console.log(`  LEAK ${label} — 200 for another family's child, and its body differs from a non-existent id's`);
+            continue;
+          }
+        }
+        console.log(`  ok   ${label} (${real.status}, same as a non-existent id)`);
       }
       console.log("");
     }
