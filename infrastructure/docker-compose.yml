@@ -80,6 +80,12 @@ services:
       # the opt-in pgbouncer pooler (see the `pgbouncer` service below).
       DATABASE_URL: ${DATABASE_URL:-postgresql://major_user:${APP_DB_PASSWORD}@postgres:5432/${POSTGRES_DB}}
       # Migrations + RLS grants run as the superuser.
+      # READ REPLICA. Unset by default: one Postgres, and every read is
+      # trivially up to date. Set it (a hot standby, or an Aurora reader
+      # endpoint in cloud) to exercise the replica-routed read path — and the
+      # read-after-write routing that path requires — locally rather than
+      # discovering both in production. See docs/RUNBOOK-INCIDENT-RESPONSE.md.
+      DATABASE_REPLICA_URL: ${DATABASE_REPLICA_URL:-}
       DATABASE_MIGRATE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       # PRIVILEGED background jobs — the NDPR integrity purge, billing dunning, HR
       # document reminders, the SIS profile nudge, operator/cross-tenant reads. They

@@ -625,6 +625,98 @@ Almost always configuration rather than a fault. Check in this order:
 
 ---
 
+### 5.x "It saved, then it wasn't there" — the read replica
+
+**Symptom.** A user saves something, the very next screen does not show it, and
+it appears a moment later. Almost always the read replica, not a lost write.
+
+**Confirm it in one request.** `GET /health` on the API reports the standby:
+
+```json
+"replica": { "replayLsn": "3/B6124E30", "lagSeconds": 0, "degraded": false, "configured": true }
+```
+
+* `configured: false` — there is no replica. Look elsewhere; this is not it.
+* `degraded: true` — the standby is past `REPLICA_LAG_THRESHOLD_SECONDS` (5 by
+  default) and **every** read is already going to the primary. Users are seeing
+  correct data; the primary is carrying the whole load. Find out why the standby
+  is behind before it becomes a capacity incident.
+* `lagSeconds: 0, degraded: false` — the standby is healthy, and a user still
+  reporting this needs a different explanation.
+
+`db_replica_lag_seconds`, `db_replica_degraded` and
+`db_reads_routed_total{target,reason}` carry the same facts to Prometheus. The
+`reason` label matters: `replica has not replayed this user's write` is the
+system working as designed and should never alert; `replica lagging` is the one
+worth waking up for.
+
+**What the application already does.** A write records the primary's WAL
+position against the user; their next read compares it with the standby's replay
+position and goes to the primary until the standby has caught up. This is per
+user, so one person saving does not push a whole school onto the primary.
+Nothing needs to be switched on during an incident, and there is nothing to
+switch off afterwards — it releases itself.
+
+**On the standby itself:**
+
+```sql
+SELECT pg_is_in_recovery(), pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn(),
+       now() - pg_last_xact_replay_timestamp() AS since_last_xact;
+```
+
+// GOTCHA: `since_last_xact` is **not lag**. On an idle primary it grows without
+bound while the standby is byte-for-byte identical — a quiet Sunday reads as two
+hours behind. Compare `pg_last_wal_receive_lsn()` with `pg_last_wal_replay_lsn()`
+instead: equal means nothing is outstanding, whatever the clock says. The
+sampler computes it that way for exactly this reason.
+
+**Common causes, in the order they are worth checking:** a long-running query on
+the standby blocking replay (`max_standby_streaming_delay`); a bulk write on the
+primary (an import, a fee run, a migration); network saturation between AZs;
+storage throttling on the replica instance.
+
+**Recovering the replica is a database action, not an application one.** The
+application is already correct and merely more loaded, so there is no user-facing
+emergency to race.
+
+### 5.y Multi-region: there is nothing to resolve, and that is the design
+
+The question "how do we resolve conflicting writes across regions" has one
+answer here: **the platform never takes two.** There is a single writer;
+replicas are physically read-only, and a write sent to one is refused by
+Postgres, not merged. Conflict resolution would be code that can never run.
+
+That is a deliberate position, not an omission. Last-write-wins on an invoice
+balance is a lost payment; on an `approvals` chain it is an approval nobody
+gave. This domain has ledgers, maker-checker controls and immutable audit
+trails, and every one of them assumes a single total order of writes. Multi-
+master would trade correctness we rely on for latency we can buy another way.
+
+**If write latency from a distant region becomes the problem, the answer is
+tenant pinning, not multi-master.** Every table already carries `school_id`, and
+a school's records are only ever written by that school — the partition key is
+already in the schema. Give each school a home region, route its writes there,
+and keep read replicas everywhere. Two regions then never write the same row,
+so there is no conflict to resolve: it is prevented by construction rather than
+repaired afterwards. `school.country/timezone` already anchors a school to a
+place.
+
+Order of work, cheapest first, and stop as soon as the numbers are acceptable:
+
+1. **Regional read replicas** (what this section describes). Reads local, writes
+   cross-region. Fixes read latency, which is most of the traffic.
+2. **Aurora Global Database with write forwarding.** Writes are forwarded to the
+   single global writer: still one writer, still no conflicts, and no
+   application change.
+3. **Tenant pinning by home region.** Full write locality with conflicts
+   impossible by construction. A real project — routing, migration between
+   regions, and the cross-tenant surfaces (the Ultimate arena, scholarships, the
+   platform registry) each need a home of their own.
+
+Multi-master is not on that list on purpose.
+
+---
+
 ## 6. Rollback
 
 **Rolling back is not an admission of failure — it is the fastest path to

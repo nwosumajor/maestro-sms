@@ -13,7 +13,7 @@
 // =============================================================================
 
 import { Injectable } from "@nestjs/common";
-import { Counter, Histogram, Registry, collectDefaultMetrics } from "prom-client";
+import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from "prom-client";
 
 @Injectable()
 export class MetricsService {
@@ -21,6 +21,9 @@ export class MetricsService {
   private readonly httpTotal: Counter<"method" | "route" | "status">;
   private readonly httpDuration: Histogram<"method" | "route">;
   private readonly tenantTotal: Counter<"school_id">;
+  private readonly replicaLag: Gauge<string>;
+  private readonly replicaDegraded: Gauge<string>;
+  private readonly readRouting: Counter<"target" | "reason">;
 
   constructor() {
     collectDefaultMetrics({ register: this.registry });
@@ -43,6 +46,34 @@ export class MetricsService {
       labelNames: ["school_id"],
       registers: [this.registry],
     });
+    // REPLICA HEALTH AND WHERE READS WENT.
+    //
+    // Lag alone does not say whether anybody was affected, and routing counts
+    // alone do not say why. Both, with the reason as a label, answer "are we
+    // serving stale data" and "is the replica earning its cost" from one scrape.
+    this.replicaLag = new Gauge({
+      name: "db_replica_lag_seconds",
+      help: "Seconds between the primary's clock and the standby's last replayed transaction. Absent when no replica is configured.",
+      registers: [this.registry],
+    });
+    this.replicaDegraded = new Gauge({
+      name: "db_replica_degraded",
+      help: "1 when the replica is unfit and every read is going to the primary.",
+      registers: [this.registry],
+    });
+    this.readRouting = new Counter({
+      name: "db_reads_routed_total",
+      help: "Read-only transactions by which database served them and why.",
+      labelNames: ["target", "reason"],
+      registers: [this.registry],
+    });
+  }
+
+  /** One routing decision: which database served a read-only transaction, and why. */
+  observeReadRouting(primary: boolean, reason: string, lagSeconds: number | null): void {
+    this.readRouting.inc({ target: primary ? "primary" : "replica", reason });
+    if (lagSeconds !== null) this.replicaLag.set(lagSeconds);
+    this.replicaDegraded.set(primary && reason === "replica lagging" ? 1 : 0);
   }
 
   /** Record one finished HTTP request. durationSec in seconds. */

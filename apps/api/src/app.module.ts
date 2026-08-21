@@ -1,8 +1,10 @@
-import { Module, type MiddlewareConsumer, type NestModule } from "@nestjs/common";
+import { Module, type MiddlewareConsumer, type NestModule, type OnModuleInit } from "@nestjs/common";
 import { BullModule } from "@nestjs/bullmq";
 import { FoundationModule } from "./foundation/foundation.module";
 import { PrivilegedDatabaseModule } from "./common/privileged-database.module";
 import { ObservabilityModule } from "./observability/observability.module";
+import { MetricsService } from "./observability/metrics.service";
+import { ReplicaRouterService } from "./foundation/replica-router.service";
 import { MetricsMiddleware } from "./observability/metrics.middleware";
 import { IntegrityModule } from "./integrity/integrity.module";
 import { LmsModule } from "./lms/lms.module";
@@ -126,7 +128,28 @@ import { HealthController } from "./health.controller";
   ],
   controllers: [HealthController],
 })
-export class AppModule implements NestModule {
+export class AppModule implements NestModule, OnModuleInit {
+  constructor(
+    private readonly metrics: MetricsService,
+    private readonly replicaRouter: ReplicaRouterService,
+  ) {}
+
+  /**
+   * Publish each read-routing decision to /metrics.
+   *
+   * Wired HERE, where both modules already meet, rather than inside either one.
+   * The router must not depend on the observability stack — it sits on the path
+   * of every read, and a metrics import there is a module edge maintained for
+   * ever; ObservabilityModule must not depend on the foundation either, or its
+   * DI smoke test can no longer stand the module up alone, which is the whole
+   * point of that test. The router offers a callback and this is its one caller.
+   */
+  onModuleInit(): void {
+    this.replicaRouter.setObserver(({ primary, reason, lagSeconds }) =>
+      this.metrics.observeReadRouting(primary, reason, lagSeconds),
+    );
+  }
+
   // Per-request prom-client metrics on EVERY route (records on response finish, so
   // it sees the final status + the matched principal). Request LOGGING is handled
   // automatically by nestjs-pino (ObservabilityModule).

@@ -877,6 +877,49 @@ the same createdAt index: the scan is over the CALLER'S OWN inbox, not the table
 — 0.9 ms for an ordinary one. **Measure plans as `major_user` with
 `app.current_school_id` set, never as `postgres`.**
 
+### The replica answers a read only if it can answer it correctly
+The read/write split routes 103 paths to `DATABASE_REPLICA_URL`, and Terraform
+already provisions replicas and wires that variable into ECS — with nothing
+checking whether the standby had caught up. Proven against a real streaming
+standby with replay paused: a teacher POSTs a leave request (201, committed) and
+their own approvals list comes back EMPTY. From their side the system lost it,
+and the natural next action is to submit it again.
+`ReplicaRouterService` (foundation) decides, cheapest disqualifier first: no
+replica → primary; lag past `REPLICA_LAG_THRESHOLD_SECONDS` (5) → primary for
+EVERYBODY until it recovers; this user wrote and the standby has not replayed
+that far → primary for them alone; otherwise the replica.
+**LSN-based, not time-based.** "Primary for N seconds after a write" is wrong in
+both directions — too weak (a standby can lag for minutes) and too strong (it
+forfeits the replica when the standby caught up in 20 ms). A write records
+`pg_current_wal_lsn()` AFTER commit (before commit is a position that does not
+include our own commit record — the same stale read, one statement early); a read
+compares it with `pg_last_wal_replay_lsn()`. The note lives in REDIS, not memory:
+the write and the read after it are two requests and land on different ECS tasks.
+SESSION consistency, per user — "read everyone's writes instantly" would route a
+whole school to the primary while anybody in it is typing.
+Cost: `txid_current_if_assigned()` inside the tx says whether it WROTE (0.068 ms
+vs 0.063 ms for `SELECT 1` — one round trip), and the whole block is skipped when
+no replica is configured. // GOTCHA, and it took a real standby to see it:
+`now() - pg_last_xact_replay_timestamp()` is **NOT lag** — on an IDLE primary it
+grows without bound while the standby is byte-for-byte identical (measured: 14 s
+"behind" with receive = replay = the primary's current LSN), so a 5-second
+threshold disables a healthy replica every quiet hour. Compare
+`pg_last_wal_receive_lsn()` with `pg_last_wal_replay_lsn()` instead.
+Visible on `GET /health` and as `db_replica_lag_seconds` /
+`db_replica_degraded` / `db_reads_routed_total{target,reason}`; the `reason`
+label separates "you just wrote" (normal) from "replica lagging" (alert).
+**CROSS-REGION WRITE CONFLICTS ARE NOT SOLVED, because they cannot happen.**
+There is ONE writer; a replica is physically read-only and refuses a write rather
+than merging it, so conflict-resolution code could never run. Deliberate: last-
+write-wins on an invoice balance is a lost payment, and on an approval chain it
+is an approval nobody gave. If write latency ever demands more, the answer is
+TENANT PINNING — every table already carries `school_id` and a school's rows are
+only ever written by that school, so giving each school a home region makes
+conflicts impossible by construction rather than repaired afterwards. Order:
+regional read replicas → Aurora write forwarding (still one writer) → tenant
+pinning. Multi-master is deliberately not on that list. See
+`docs/RUNBOOK-INCIDENT-RESPONSE.md` §5.x and §5.y.
+
 ## Repo workflow & gotchas
 - DB setup order: `prisma migrate deploy` → `pnpm --filter @sms/db rls` →
   `prisma db seed` (or `pnpm --filter @sms/db setup`). RLS lives in `prisma/rls/`,
