@@ -36,3 +36,6 @@ export const WORKFLOW_PAGE_SIZE = 25;
 /** One page of the leave register. Rows are table lines rather than cards, so a
  *  page can be larger than the approvals register's. */
 export const LEAVE_PAGE_SIZE = 50;
+
+/** One page of the assessment list — cards a teacher scans for today's work. */
+export const ASSESSMENT_PAGE_SIZE = 30;

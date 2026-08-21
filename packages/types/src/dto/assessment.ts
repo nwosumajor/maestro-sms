@@ -1,5 +1,22 @@
 // Assessment list + submissions response DTOs (Assessment Integrity module).
 
+/**
+ * One page of the assessment list.
+ *
+ * School-wide staff saw every assessment ever created, capped to the 500 most
+ * recent — measured on the live dev school at 541, so 41 were already
+ * unreachable with no filter that could reach them and nothing saying so. A
+ * class filter narrows it, but only if you already know which class; "find the
+ * mid-term essay" had no answer short of scrolling.
+ */
+export interface AssessmentPageDto {
+  items: AssessmentSummaryDto[];
+  /** Matching the filter, not the page. */
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 export interface AssessmentSummaryDto {
   id: string;
   title: string;

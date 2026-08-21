@@ -1,4 +1,4 @@
-import type { AssessmentSummaryDto, Serialized } from "@sms/types";
+import type { AssessmentPageDto, AssessmentSummaryDto, Serialized } from "@sms/types";
 import Link from "next/link";
 import { hasPermission } from "@/lib/permissions";
 import { redirect } from "next/navigation";
@@ -19,21 +19,38 @@ type Assessment = Serialized<AssessmentSummaryDto>;
 export default async function AssessmentsPage({
   searchParams,
 }: {
-  searchParams?: { classId?: string };
+  searchParams?: { classId?: string; q?: string; page?: string };
 }) {
   const session = await auth();
   const user = session!.user;
   if (!hasPermission(user.permissions, "assessment.read")) redirect("/dashboard");
   const canReview = hasPermission(user.permissions, "integrity.report.read");
   const canWrite = hasPermission(user.permissions, "assessment.write");
+  const qs = new URLSearchParams();
+  for (const key of ["classId", "q", "page"] as const) {
+    const v = searchParams?.[key];
+    if (v) qs.set(key, v);
+  }
   const [assessmentsData, classes] = await Promise.all([
-    // Filtering narrows the QUERY — this list caps at its most-recent page, so
-    // narrowing by class is how you reach an older assessment at all.
-    apiGet<Assessment[]>(`/assessments${searchParams?.classId ? `?classId=${encodeURIComponent(searchParams.classId)}` : ""}`),
+    // Every filter narrows the QUERY. The list is paged, so an older assessment
+    // is reachable by searching its title or stepping back a page — it used to
+    // be the 500 most recent and nothing else, with nothing saying so.
+    apiGet<Serialized<AssessmentPageDto>>(`/assessments${qs.toString() ? `?${qs}` : ""}`),
     apiGet<{ id: string; name: string }[]>("/classes/mine"),
   ]);
-  const assessments = assessmentsData ?? [];
+  const assessments = assessmentsData?.items ?? [];
+  const total = assessmentsData?.total ?? 0;
+  const page = assessmentsData?.page ?? 1;
+  const pageSize = assessmentsData?.pageSize ?? 30;
   const assessmentsUnavailable = assessmentsData === null;
+  /** Keep the class filter and the search when paging. */
+  const pageHref = (n: number) => {
+    const p = new URLSearchParams();
+    if (searchParams?.classId) p.set("classId", searchParams.classId);
+    if (searchParams?.q) p.set("q", searchParams.q);
+    if (n > 1) p.set("page", String(n));
+    return p.toString() ? `/assessments?${p}` : "/assessments";
+  };
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="assessments" permissions={user.permissions}>
@@ -63,6 +80,27 @@ export default async function AssessmentsPage({
           </div>
         )}
 
+        {/* Search the title, because "find the mid-term essay" is how the
+            question arrives when the class filter alone is not enough. */}
+        <form method="GET" className="flex flex-wrap items-end gap-2">
+          {searchParams?.classId && <input type="hidden" name="classId" value={searchParams.classId} />}
+          <input
+            name="q"
+            defaultValue={searchParams?.q ?? ""}
+            placeholder="Search by title"
+            className="h-9 w-56 rounded-md border border-input bg-background px-2 text-sm"
+            aria-label="Search assessments by title"
+          />
+          <button type="submit" className="h-9 rounded-md border border-border px-3 text-sm font-medium hover:bg-accent">
+            Search
+          </button>
+          {searchParams?.q && (
+            <Link href={searchParams.classId ? `/assessments?classId=${searchParams.classId}` : "/assessments"} className="text-sm underline underline-offset-2">
+              Clear
+            </Link>
+          )}
+        </form>
+
         {canWrite && <CreateAssessment classes={classes ?? []} />}
 
         {assessmentsUnavailable ? (
@@ -72,7 +110,11 @@ export default async function AssessmentsPage({
         ) : assessments.length === 0 ? (
           <Alert variant="info">
             <AlertTitle>No assessments</AlertTitle>
-            <AlertDescription>Nothing here yet for your account.</AlertDescription>
+            <AlertDescription>
+              {searchParams?.q || searchParams?.classId
+                ? "Nothing matches that search. Clear it to see the rest."
+                : "Nothing here yet for your account."}
+            </AlertDescription>
           </Alert>
         ) : (
           <Card>
@@ -112,6 +154,25 @@ export default async function AssessmentsPage({
               </table>
             </CardContent>
           </Card>
+        )}
+
+        {/* What is SHOWN out of what MATCHES. Without it, a truncated list reads
+            as the complete answer — which is how 41 assessments on this very
+            school were unreachable and unremarked. */}
+        {total > 0 && (
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span>
+              Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}
+              {searchParams?.q || searchParams?.classId ? " matching" : ""}
+            </span>
+            {total > pageSize && (
+              <span className="flex items-center gap-3">
+                {page > 1 && <Link href={pageHref(page - 1)} className="underline underline-offset-2">Previous</Link>}
+                <span>Page {page} of {Math.max(1, Math.ceil(total / pageSize))}</span>
+                {page * pageSize < total && <Link href={pageHref(page + 1)} className="underline underline-offset-2">Next</Link>}
+              </span>
+            )}
+          </div>
         )}
       </div>
     </AppShell>

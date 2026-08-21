@@ -10,7 +10,13 @@
 // =============================================================================
 
 import { ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { INTEGRITY_PERMISSIONS, LIST_CAP, type AssessmentSubmissionDto, type AssessmentSummaryDto } from "@sms/types";
+import {
+  ASSESSMENT_PAGE_SIZE,
+  INTEGRITY_PERMISSIONS,
+  type AssessmentPageDto,
+  type AssessmentSubmissionDto,
+  type AssessmentSummaryDto,
+} from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -45,11 +51,24 @@ export class AssessmentListService {
     return p.roles.some((r) => SCHOOL_WIDE_ROLES.has(r));
   }
 
-  /** `classId` narrows the QUERY. A school-wide caller sees every assessment ever
-   *  created, capped to the most-recent page — so without a filter the older ones
-   *  are simply unreachable, and "which assessments does JSS2B have?" had no answer
-   *  short of scrolling. */
-  async listAssessments(p: Principal, filter: { classId?: string } = {}): Promise<AssessmentSummaryDto[]> {
+  /**
+   * One page of the assessments this caller may see — filtered, searchable.
+   *
+   * `classId` narrows the QUERY, and used to be the only narrowing there was: a
+   * school-wide caller got the 500 most recent and everything older was simply
+   * unreachable. Measured on the live dev school, 541 assessments — already 41
+   * past the cap, with nothing saying so. A class filter only helps if you
+   * already know the class; "find the mid-term essay" had no answer short of
+   * scrolling.
+   *
+   * Every filter is ANDed on top of the relationship scoping below, so it can
+   * only ever narrow what the caller was already entitled to see — never widen
+   * it. That is the property to keep if this grows more filters.
+   */
+  async listAssessments(
+    p: Principal,
+    filter: { classId?: string; q?: string; page?: number } = {},
+  ): Promise<AssessmentPageDto> {
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       let where: Record<string, unknown> = {};
       if (!this.schoolWide(p)) {
@@ -62,8 +81,19 @@ export class AssessmentListService {
       // The class filter is ANDed on top of the scoping above, so it can only ever
       // narrow what the caller was already entitled to see.
       if (filter.classId) where = { AND: [where, { classId: filter.classId }] };
-      const assessments = await tx.assessment.findMany({ where, orderBy: { createdAt: "desc" }, take: LIST_CAP });
-      if (assessments.length === 0) return [];
+      const q = filter.q?.trim();
+      if (q) where = { AND: [where, { title: { contains: q, mode: "insensitive" } }] };
+      const page = Math.max(1, Math.floor(filter.page ?? 1));
+      const [assessments, total] = await Promise.all([
+        tx.assessment.findMany({
+          where,
+          orderBy: { createdAt: "desc" },
+          skip: (page - 1) * ASSESSMENT_PAGE_SIZE,
+          take: ASSESSMENT_PAGE_SIZE,
+        }),
+        tx.assessment.count({ where }),
+      ]);
+      if (assessments.length === 0) return { items: [], total, page, pageSize: ASSESSMENT_PAGE_SIZE };
       const ids = assessments.map((a) => a.id);
       const classIds = [...new Set(assessments.map((a) => a.classId).filter((c): c is string => !!c))];
       const classes = await tx.class.findMany({ where: { id: { in: classIds } }, select: { id: true, name: true } });
@@ -96,7 +126,7 @@ export class AssessmentListService {
         (counts as Array<{ assessmentId: string; _count: { _all: number } }>).map((c) => [c.assessmentId, c._count._all]),
       );
       const myStatus = new Map(mine.map((s: { assessmentId: string; status: string }) => [s.assessmentId, s.status]));
-      return assessments.map<AssessmentSummaryDto>((a) => ({
+      const items = assessments.map<AssessmentSummaryDto>((a) => ({
         id: a.id,
         title: a.title,
         description: a.description,
@@ -110,6 +140,7 @@ export class AssessmentListService {
         mySubmissionStatus: myStatus.get(a.id) ?? null,
         createdAt: a.createdAt,
       }));
+      return { items, total, page, pageSize: ASSESSMENT_PAGE_SIZE };
     });
   }
 

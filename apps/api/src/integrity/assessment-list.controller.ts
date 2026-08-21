@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, Post, Put, Query } from "@nestjs/common";
 import { MODULES, INTEGRITY_PERMISSIONS } from "@sms/types";
-import type { AssessmentSubmissionDto, AssessmentSummaryDto } from "@sms/types";
+import type { AssessmentPageDto, AssessmentSubmissionDto, AssessmentSummaryDto } from "@sms/types";
 import { z } from "zod";
 import { RequireModule } from "../auth/require-module.decorator";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -9,6 +9,11 @@ import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "./integrity.foundation";
 import { AssessmentListService } from "./assessment-list.service";
 
+const listQuerySchema = z.object({
+  classId: z.string().uuid().optional(),
+  q: z.string().max(200).optional(),
+  page: z.coerce.number().int().min(1).max(10_000).optional(),
+});
 const createSchema = z.object({
   title: z.string().min(1).max(200),
   description: z.string().max(2000).nullish(),
@@ -41,13 +46,15 @@ const updateSchema = z.object({
 export class AssessmentListController {
   constructor(private readonly assessments: AssessmentListService) {}
 
+  /** The assessments this caller may see: class filter, title search, paged.
+   *  Omitting everything gives the most recent page, as before. */
   @Get()
   @RequirePermission(INTEGRITY_PERMISSIONS.ASSESSMENT_READ)
   list(
     @CurrentPrincipal() p: Principal,
-    @Query("classId") classId?: string,
-  ): Promise<AssessmentSummaryDto[]> {
-    return this.assessments.listAssessments(p, { classId });
+    @Query(new ZodValidationPipe(listQuerySchema)) query: z.infer<typeof listQuerySchema>,
+  ): Promise<AssessmentPageDto> {
+    return this.assessments.listAssessments(p, query);
   }
 
   /** Create an assessment/assignment (teacher of the class / school-wide). */

@@ -23,7 +23,9 @@ function makeService() {
   const classTeacherFindMany = jest.fn().mockResolvedValue([]);
   const enrollmentFindMany = jest.fn().mockResolvedValue([]);
   const tx = {
-    assessment: { findMany: assessmentFindMany },
+    // The list is a PAGE now: rows plus how many match, so a truncated view
+    // cannot read as the complete answer.
+    assessment: { findMany: assessmentFindMany, count: jest.fn().mockResolvedValue(1) },
     classTeacher: { findMany: classTeacherFindMany, findFirst: jest.fn().mockResolvedValue(null) },
     enrollment: { findMany: enrollmentFindMany },
     class: { findMany: jest.fn().mockResolvedValue([{ id: "c-1", name: "JSS2A" }]) },
@@ -56,7 +58,7 @@ describe("AssessmentListService scoping", () => {
   it("school_admin sees every assessment (no membership filter)", async () => {
     const { service, assessmentFindMany, classTeacherFindMany } = makeService();
     const out = await service.listAssessments(principal(["school_admin"]));
-    expect(out).toHaveLength(1);
+    expect(out.items).toHaveLength(1);
     expect(whereOf(assessmentFindMany)).toEqual({});
     expect(classTeacherFindMany).not.toHaveBeenCalled();
   });
@@ -67,14 +69,14 @@ describe("AssessmentListService scoping", () => {
   it("principal sees every assessment — same as the report + exemption reads", async () => {
     const { service, assessmentFindMany } = makeService();
     const out = await service.listAssessments(principal(["principal"]));
-    expect(out).toHaveLength(1);
+    expect(out.items).toHaveLength(1);
     expect(whereOf(assessmentFindMany)).toEqual({});
   });
 
   it("junior_admin (records tier) sees every assessment", async () => {
     const { service, assessmentFindMany } = makeService();
     const out = await service.listAssessments(principal(["junior_admin"]));
-    expect(out).toHaveLength(1);
+    expect(out.items).toHaveLength(1);
     expect(whereOf(assessmentFindMany)).toEqual({});
   });
 
@@ -106,7 +108,7 @@ describe("AssessmentListService submission counts", () => {
   it("groups the count in SQL and asks only for the caller's own submissions", async () => {
     const { service, tx } = makeService();
     const out = await service.listAssessments(principal(["school_admin"]));
-    expect(out[0].submissionCount).toBe(27);
+    expect(out.items[0].submissionCount).toBe(27);
 
     const groupBy = tx.submission.groupBy as jest.Mock;
     expect(groupBy).toHaveBeenCalledTimes(1);
