@@ -60,7 +60,16 @@ function svc(tx: TenantTx) {
   const notifications = { enqueue: jest.fn().mockResolvedValue(undefined) };
   const workflow = { createRequest: jest.fn().mockResolvedValue({ id: "wf1" }), submit: jest.fn().mockResolvedValue({}) };
   const hooks = { onFinalized: jest.fn() };
-  return new TransportService(db as never, audit as never, notifications as never, workflow as never, hooks as never);
+  return new TransportService(
+    db as never,
+    audit as never,
+    notifications as never,
+    workflow as never,
+    hooks as never,
+    // A boarding is filed against the SCHOOL's day; these cases pass an
+    // explicit date or do not reach that path, so any zone will do.
+    { inTx: jest.fn().mockResolvedValue({ timezone: "Africa/Lagos" }) } as never,
+  );
 }
 
 describe("TransportService", () => {
@@ -177,7 +186,14 @@ describe("TransportService", () => {
     } as unknown as TenantTx;
     const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
     const audit = { record: jest.fn().mockResolvedValue(undefined) };
-    const service = new TransportService(db as never, audit as never, { enqueue } as never, {} as never, { onFinalized: jest.fn() } as never);
+    const service = new TransportService(
+      db as never,
+      audit as never,
+      { enqueue } as never,
+      {} as never,
+      { onFinalized: jest.fn() } as never,
+      { inTx: jest.fn().mockResolvedValue({ timezone: "Africa/Lagos" }) } as never,
+    );
     await service.recordBoarding(staff, { routeId: "r1", passengerId: "stu1", direction: "PICKUP" });
     expect(enqueue).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ recipientId: "dad-1", type: "TRANSPORT" }));
   });
@@ -197,7 +213,14 @@ describe("TransportService", () => {
       user: { findMany: jest.fn().mockResolvedValue([{ id: "stu1", name: "Ada" }]) },
     } as unknown as TenantTx;
     const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
-    const service = new TransportService(db as never, { record: jest.fn() } as never, { enqueue } as never, {} as never, { onFinalized: jest.fn() } as never);
+    const service = new TransportService(
+      db as never,
+      { record: jest.fn() } as never,
+      { enqueue } as never,
+      {} as never,
+      { onFinalized: jest.fn() } as never,
+      { inTx: jest.fn().mockResolvedValue({ timezone: "Africa/Lagos" }) } as never,
+    );
     await service.recordBoarding(staff, { routeId: "r1", passengerId: "stu1", direction: "PICKUP" });
     expect(enqueue).not.toHaveBeenCalled(); // no duplicate guardian alert
   });

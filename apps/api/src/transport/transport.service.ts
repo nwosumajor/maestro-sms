@@ -11,6 +11,7 @@
 
 import { ConflictException, BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@sms/db";
+import { schoolToday } from "@sms/types";
 import type {
   RouteStopDto,
   TransportAssignmentDto,
@@ -33,6 +34,7 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 import { WorkflowService } from "../workflow/workflow.service";
+import { SchoolRegionService } from "../foundation/school-region.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 import { NotificationService } from "../notifications/notification.service";
 
@@ -53,6 +55,9 @@ export class TransportService {
     private readonly notifications: NotificationService,
     private readonly workflow: WorkflowService,
     hooks: WorkflowHooksService,
+    // Last, so the positional constructor calls in the existing suites keep
+    // meaning what they meant.
+    private readonly region: SchoolRegionService,
   ) {
     // Maker-checker reactor: an APPROVED FEE_SCHEDULE request raised by the head
     // driver posts the fare run in the SAME tenant tx as the approval (atomic).
@@ -518,11 +523,22 @@ export class TransportService {
     p: Principal,
     input: { routeId: string; passengerId: string; direction?: string; date?: string; method?: string; status?: string },
   ): Promise<TransportBoardingDto> {
-    const day = input.date ? new Date(`${input.date}T00:00:00.000Z`) : new Date(new Date().toISOString().slice(0, 10) + "T00:00:00.000Z");
-    if (Number.isNaN(day.getTime())) throw new BadRequestException("Invalid date");
+    const explicitDay = input.date ? new Date(`${input.date}T00:00:00.000Z`) : null;
+    if (explicitDay && Number.isNaN(explicitDay.getTime())) throw new BadRequestException("Invalid date");
     const direction = input.direction === "DROPOFF" ? "DROPOFF" : "PICKUP";
     const { dto, notify, passengerType } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.assertRouteInScope(tx, p, input.routeId);
+      // "TODAY" IS THE SCHOOL'S DAY, not the server's.
+      //
+      // This defaulted to the server's UTC date, and the boarding register is
+      // keyed on (passenger, date, direction). A school east of UTC records its
+      // morning pickup before UTC midnight — 07:30 in Singapore is 23:30 the
+      // PREVIOUS day in UTC — so the run was filed against yesterday, on top of
+      // yesterday's row for the same child and direction. One journey
+      // overwrites another, and the register for the day a parent asks about is
+      // the wrong one. The same rule the class register, the gate scan and the
+      // staff clock-in already follow.
+      const day = explicitDay ?? schoolToday((await this.region.inTx(tx, p.schoolId)).timezone);
       // The passenger must be assigned to this route.
       const assignment = await tx.transportAssignment.findFirst({
         where: { routeId: input.routeId, passengerId: input.passengerId, status: "ACTIVE" },

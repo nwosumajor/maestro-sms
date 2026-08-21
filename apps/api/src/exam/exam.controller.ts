@@ -102,7 +102,9 @@ export class ExamController {
   @Get("day")
   @RequirePermission(EXAM_PERMISSIONS.EXAM_MANAGE)
   day(@CurrentPrincipal() p: Principal, @Query("date") date?: string): Promise<ExamDayDto> {
-    return this.exams.examDay(p, ymd.parse(date ?? new Date().toISOString().slice(0, 10)));
+    // No default here: "today" is a question about the SCHOOL's timezone and
+    // the service is what knows it.
+    return this.exams.examDay(p, date ? ymd.parse(date) : undefined);
   }
 
   @Post()

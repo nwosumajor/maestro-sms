@@ -26,7 +26,7 @@ import {
   findHallClash,
   findPersonClash,
   isValidTimeRange,
-} from "@sms/types";
+  schoolDateString,} from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -480,7 +480,17 @@ export class ExamService {
    * the one omission that cannot be repaired after the fact, so it is surfaced as
    * a flag on the payload rather than something the browser has to notice.
    */
-  async examDay(p: Principal, date: string): Promise<ExamDayDto> {
+  /** `date` omitted means TODAY AT THE SCHOOL — never the server's UTC day.
+   *  The controller used to default it, and a school east of UTC opening this
+   *  board on an exam morning (07:00 in Singapore is 23:00 the previous day in
+   *  UTC) was shown YESTERDAY's exam day: the wrong halls, the wrong sittings,
+   *  on the morning it matters most. */
+  async examDay(p: Principal, date?: string): Promise<ExamDayDto> {
+    const day = date ?? schoolDateString((await this.region.forSchool(p.schoolId)).timezone);
+    return this.examDayFor(p, day);
+  }
+
+  private async examDayFor(p: Principal, date: string): Promise<ExamDayDto> {
     const sittings = await this.listSittings(p, { date });
     // Register tallies for the whole day in one read, so a hall shows how many
     // failed to turn up next to how many were expected.
