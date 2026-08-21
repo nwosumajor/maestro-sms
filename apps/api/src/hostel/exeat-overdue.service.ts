@@ -88,7 +88,7 @@ export class ExeatOverdueService {
 
     for (const [schoolId, exeats] of bySchool) {
       try {
-        const [staff, students, hostels] = await Promise.all([
+        const [staff, students, hostels, guardianRows] = await Promise.all([
           client.userRole.findMany({
             where: { schoolId, role: { name: { in: SCHOOL_WIDE_ALERT_ROLES } } },
             select: { userId: true },
@@ -110,62 +110,112 @@ export class ExeatOverdueService {
             where: { id: { in: [...new Set(exeats.map((e) => e.hostelId))] } },
             select: { id: true, wardenId: true },
           }),
+          // THE FAMILY, who this module tells about every other step.
+          //
+          // Guardians are notified when an exeat is approved, when the child
+          // signs out and when they sign back in — and were told nothing in the
+          // one case that matters. The destination is usually home, so the
+          // guardian is very often the person who knows where the child is and
+          // the only one who can say "they left an hour ago" or "they are still
+          // here". Silence at exactly the alarming moment is not discretion; it
+          // is the school withholding the fact from the people most able to
+          // resolve it.
+          client.parentChild.findMany({
+            where: { studentId: { in: [...new Set(exeats.map((e) => e.studentId))] } },
+            select: { studentId: true, parentId: true },
+          }),
         ]);
         const nameOf = new Map(students.map((s) => [s.id, s.name]));
         const wardenOf = new Map(
           (hostels as Array<{ id: string; wardenId: string | null }>).map((h) => [h.id, h.wardenId]),
         );
         const schoolWide = staff.map((s) => s.userId);
+        const guardiansOf = new Map<string, string[]>();
+        for (const g of guardianRows as Array<{ studentId: string; parentId: string }>) {
+          guardiansOf.set(g.studentId, [...(guardiansOf.get(g.studentId) ?? []), g.parentId]);
+        }
         if (schoolWide.length === 0 && hostels.every((h: { wardenId: string | null }) => !h.wardenId)) {
-          // Said out loud. A school with nobody in these roles gets no alert,
-          // and silently dropping it would look identical to "nobody is late".
+          // Said out loud. A school with nobody in these roles has no member of
+          // staff to act, and silently dropping it would look identical to
+          // "nobody is late".
+          //
+          // It WARNS and carries on rather than skipping the school, because
+          // the families can still be told — and a school with no warden on
+          // record is exactly the one where the parent finding out matters
+          // most. The per-exeat check below is what decides whether there is
+          // anybody at all.
           this.logger.warn(
             `school=${schoolId}: ${exeats.length} overdue boarder(s) but no head warden, administrator or hostel warden to tell`,
           );
-          continue;
         }
 
+        // Only the ones somebody was actually TOLD about get marked. The bulk
+        // update below used to mark every exeat in the school's batch,
+        // including the ones this loop skipped for having nobody to alert —
+        // so the single case where no human learned a child was missing was
+        // also the case recorded as handled, and the next hour did not try
+        // again. The comment three lines under the skip already said "left
+        // unmarked so the next hour tries again"; the code did the opposite.
+        const alertedIds: string[] = [];
         for (const e of exeats) {
           const name = nameOf.get(e.studentId) ?? "A boarder";
           // This hostel's own warden, plus everyone school-wide. Deduped: a head
           // warden who also wardens this hostel must not be told twice.
           const warden = wardenOf.get(e.hostelId);
-          const recipients = [...new Set([...schoolWide, ...(warden ? [warden] : [])])];
-          if (recipients.length === 0) {
-            // Say it rather than skipping quietly: this hostel has no warden and
-            // the school has nobody school-wide, so a child is late back and
-            // there is literally nobody to tell. Left unmarked so the next hour
-            // tries again.
+          const staffToTell = [...new Set([...schoolWide, ...(warden ? [warden] : [])])];
+          const family = guardiansOf.get(e.studentId) ?? [];
+          if (staffToTell.length === 0 && family.length === 0) {
+            // Say it rather than skipping quietly: this hostel has no warden,
+            // the school has nobody school-wide, and the child has no guardian
+            // on record — so a child is late back and there is literally nobody
+            // to tell. Left UNMARKED so the next hour tries again, which is
+            // what the marking below now honours.
             this.logger.warn(
-              `school=${schoolId} hostel=${e.hostelId}: boarder overdue but no warden or administrator to alert`,
+              `school=${schoolId} hostel=${e.hostelId}: boarder overdue but nobody to alert`,
             );
             continue;
           }
           const dueAt = e.expectedReturnAt.toISOString().slice(0, 16).replace("T", " ");
-          await this.notifications.enqueueMany(
-            { schoolId, userId: SYSTEM_ACTOR_ID },
-            recipients,
-            {
-              // ESSENTIAL, so a per-type mute cannot silence it — a late
-              // boarder is not a notification anybody opts out of.
+          const from = e.destination ? ` from ${e.destination}` : "";
+          const data = { exeatId: e.id, studentId: e.studentId, hostelId: e.hostelId };
+          // ESSENTIAL type, so a per-type mute cannot silence it — a late
+          // boarder is not a notification anybody opts out of.
+          if (staffToTell.length > 0) {
+            await this.notifications.enqueueMany({ schoolId, userId: SYSTEM_ACTOR_ID }, staffToTell, {
               type: "OPERATOR_ALERT",
               title: `${name} is late back from exeat`,
               body:
-                `${name} was due back at ${dueAt}` +
-                (e.destination ? ` from ${e.destination}` : "") +
-                ` and has not signed in. Check on them, then record the return on the hostel page.`,
-              data: { exeatId: e.id, studentId: e.studentId, hostelId: e.hostelId },
-            },
-          );
+                `${name} was due back at ${dueAt}${from} and has not signed in. ` +
+                `Check on them, then record the return on the hostel page.`,
+              data,
+            });
+          }
+          // The family gets the same fact and a DIFFERENT instruction. Telling a
+          // parent to "record the return on the hostel page" is telling them to
+          // do something they cannot do; what the school needs from them is to
+          // say where the child is.
+          if (family.length > 0) {
+            await this.notifications.enqueueMany({ schoolId, userId: SYSTEM_ACTOR_ID }, family, {
+              type: "OPERATOR_ALERT",
+              title: `${name} has not signed back in`,
+              body:
+                `${name} was due back at the hostel at ${dueAt}${from} and has not signed in. ` +
+                `Please contact the school to confirm where they are.`,
+              data,
+            });
+          }
+          alertedIds.push(e.id);
           alerted += 1;
         }
         // Marked only after the alert actually went out, so a failure mid-way
         // leaves the exeat to be picked up by the next hour rather than
         // silently marked as handled.
-        await client.hostelExeat.updateMany({
-          where: { id: { in: exeats.map((e) => e.id) }, overdueNotifiedAt: null },
-          data: { overdueNotifiedAt: now },
-        });
+        if (alertedIds.length > 0) {
+          await client.hostelExeat.updateMany({
+            where: { id: { in: alertedIds }, overdueNotifiedAt: null },
+            data: { overdueNotifiedAt: now },
+          });
+        }
       } catch (err) {
         this.logger.error(`school=${schoolId}: overdue exeat alert failed: ${(err as Error).message}`);
       }

@@ -25,6 +25,42 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { ExeatOverdueService } from "../../src/hostel/exeat-overdue.service";
+
+/** Drives the real sweep. The cases below are about WHO is told and WHICH
+ *  exeats end up marked, and neither can be read off the source. */
+function makeService(opts: {
+  exeats: Array<Record<string, unknown>>;
+  staff?: Array<{ userId: string }>;
+  hostels?: Array<{ id: string; wardenId: string | null }>;
+  guardians?: Array<{ studentId: string; parentId: string }>;
+}) {
+  const updateMany = jest.fn().mockResolvedValue({ count: 0 });
+  const enqueueMany = jest.fn().mockResolvedValue(undefined);
+  const client = {
+    hostelExeat: { findMany: jest.fn().mockResolvedValue(opts.exeats), updateMany },
+    userRole: { findMany: jest.fn().mockResolvedValue(opts.staff ?? []) },
+    user: { findMany: jest.fn().mockResolvedValue([{ id: "kid-1", name: "Ada Obi" }, { id: "kid-2", name: "Bola Ade" }]) },
+    hostel: { findMany: jest.fn().mockResolvedValue(opts.hostels ?? [{ id: "h-1", wardenId: "warden-1" }]) },
+    parentChild: { findMany: jest.fn().mockResolvedValue(opts.guardians ?? []) },
+  };
+  const svc = Object.create(ExeatOverdueService.prototype) as ExeatOverdueService;
+  Object.assign(svc, {
+    db: { client },
+    notifications: { enqueueMany },
+    logger: { log: jest.fn(), warn: jest.fn(), error: jest.fn() },
+  });
+  return { svc, updateMany, enqueueMany };
+}
+
+const exeat = (id: string, hostelId: string, studentId: string) => ({
+  id,
+  schoolId: "A",
+  hostelId,
+  studentId,
+  destination: "home",
+  expectedReturnAt: new Date("2026-08-20T18:00:00Z"),
+});
 
 const SRC = readFileSync(join(__dirname, "../../src/hostel/exeat-overdue.service.ts"), "utf8");
 const HOSTEL = readFileSync(join(__dirname, "../../src/hostel/hostel.service.ts"), "utf8");
@@ -35,15 +71,28 @@ describe("who is told a boarder is late back", () => {
     expect(SRC).not.toMatch(/ALERT_ROLES = \["warden"/);
   });
 
-  it("the hostel's OWN warden is added per exeat", () => {
-    expect(SRC).toMatch(/const warden = wardenOf\.get\(e\.hostelId\)/);
-    expect(SRC).toMatch(/\[\.\.\.new Set\(\[\.\.\.schoolWide, \.\.\.\(warden \? \[warden\] : \[\]\)\]\)\]/);
+  it("the hostel's OWN warden is added, and another hostel's is not", async () => {
+    const { svc, enqueueMany } = makeService({
+      exeats: [exeat("e-1", "h-1", "kid-1")],
+      staff: [],
+      hostels: [
+        { id: "h-1", wardenId: "warden-1" },
+        { id: "h-2", wardenId: "warden-2" },
+      ],
+    });
+    await svc.sweep();
+    expect(enqueueMany.mock.calls[0][1]).toEqual(["warden-1"]);
   });
 
-  it("nobody is told twice", () => {
+  it("nobody is told twice", async () => {
     // A head warden who also wardens this hostel appears in both lists.
-    const line = SRC.slice(SRC.indexOf("const recipients ="), SRC.indexOf("const recipients =") + 160);
-    expect(line).toMatch(/new Set\(/);
+    const { svc, enqueueMany } = makeService({
+      exeats: [exeat("e-1", "h-1", "kid-1")],
+      staff: [{ userId: "warden-1" }],
+      hostels: [{ id: "h-1", wardenId: "warden-1" }],
+    });
+    await svc.sweep();
+    expect(enqueueMany.mock.calls[0][1]).toEqual(["warden-1"]);
   });
 
   it("resolves the warden from the hostel, in the same batch as the names", () => {
@@ -53,21 +102,102 @@ describe("who is told a boarder is late back", () => {
 });
 
 describe("when there is nobody to tell", () => {
-  it("says so per hostel rather than skipping quietly", () => {
-    // Introduced by this change and caught while making it: with no school-wide
-    // staff and a hostel that has no warden, a `continue` would have dropped the
-    // alert in silence — the exact fault this campaign keeps finding.
-    expect(SRC).toMatch(/boarder overdue but no warden or administrator to alert/);
+  // These were source-text assertions, and that is HOW the defect below
+  // survived: the "left unmarked" one took a 480-character window after the
+  // skip and checked `overdueNotifiedAt` did not appear in it. The marking was
+  // thirty lines further down, outside the window — so the test proved two
+  // strings were near each other and never proved the exeat was left alone.
+  // They now drive the sweep.
+
+  it("leaves the exeat UNMARKED so the next hour tries again", async () => {
+    // No school-wide staff, this hostel has no warden, this child has no
+    // guardian on record: nobody learns the child is missing. Marking it would
+    // record the one case nobody was told about as handled — and the sweep
+    // would never look at it again.
+    const { svc, updateMany, enqueueMany } = makeService({
+      exeats: [exeat("e-1", "h-nowarden", "kid-1")],
+      staff: [],
+      hostels: [{ id: "h-nowarden", wardenId: null }],
+    });
+    await svc.sweep();
+    expect(enqueueMany).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
   });
 
-  it("still warns for the whole school when nobody at all exists", () => {
-    expect(SRC).toMatch(/no head warden, administrator or hostel warden to tell/);
+  it("marks only the exeats somebody was actually told about", async () => {
+    // The bug in one case: two overdue children, one hostel with a warden and
+    // one without, and no school-wide staff. The alert goes out for the first;
+    // the bulk update used to mark BOTH.
+    const { svc, updateMany, enqueueMany } = makeService({
+      exeats: [exeat("e-told", "h-1", "kid-1"), exeat("e-silent", "h-nowarden", "kid-2")],
+      staff: [],
+      hostels: [
+        { id: "h-1", wardenId: "warden-1" },
+        { id: "h-nowarden", wardenId: null },
+      ],
+    });
+    await svc.sweep();
+    expect(enqueueMany).toHaveBeenCalledTimes(1);
+    expect(updateMany.mock.calls[0][0].where.id).toEqual({ in: ["e-told"] });
   });
 
-  it("leaves the exeat unmarked so the next hour retries", () => {
-    const block = SRC.slice(SRC.indexOf("if (recipients.length === 0)"), SRC.indexOf("if (recipients.length === 0)") + 480);
-    expect(block).toMatch(/continue;/);
-    expect(block).not.toMatch(/overdueNotifiedAt/);
+  it("still says so, per hostel", async () => {
+    const { svc } = makeService({
+      exeats: [exeat("e-1", "h-nowarden", "kid-1")],
+      staff: [],
+      hostels: [{ id: "h-nowarden", wardenId: null }],
+    });
+    await svc.sweep();
+    expect(SRC).toMatch(/boarder overdue but nobody to alert/);
+  });
+});
+
+describe("telling the family", () => {
+  // Guardians are notified when an exeat is approved, when the child signs out
+  // and when they sign back in — and were told nothing in the one case that
+  // matters. The destination is usually home, so the guardian is very often the
+  // only person who can say where the child actually is.
+
+  it("alerts the guardians as well as the staff", async () => {
+    const { svc, enqueueMany } = makeService({
+      exeats: [exeat("e-1", "h-1", "kid-1")],
+      staff: [{ userId: "principal-1" }],
+      guardians: [{ studentId: "kid-1", parentId: "mum-1" }],
+    });
+    await svc.sweep();
+    const audiences = enqueueMany.mock.calls.map((c) => c[1] as string[]);
+    expect(audiences).toEqual([["principal-1", "warden-1"], ["mum-1"]]);
+  });
+
+  it("gives the family a DIFFERENT instruction from the staff", async () => {
+    // "Record the return on the hostel page" is telling a parent to do
+    // something they cannot do. What the school needs from them is where the
+    // child is.
+    const { svc, enqueueMany } = makeService({
+      exeats: [exeat("e-1", "h-1", "kid-1")],
+      staff: [{ userId: "principal-1" }],
+      guardians: [{ studentId: "kid-1", parentId: "mum-1" }],
+    });
+    await svc.sweep();
+    const [staffMsg, familyMsg] = enqueueMany.mock.calls.map((c) => c[2] as { body: string });
+    expect(staffMsg.body).toMatch(/record the return on the hostel page/i);
+    expect(familyMsg.body).toMatch(/contact the school/i);
+    expect(familyMsg.body).not.toMatch(/hostel page/i);
+  });
+
+  it("alerts the family even when the school has no warden or office to act", async () => {
+    // The configuration where a parent finding out matters MOST.
+    const { svc, enqueueMany, updateMany } = makeService({
+      exeats: [exeat("e-1", "h-nowarden", "kid-1")],
+      staff: [],
+      hostels: [{ id: "h-nowarden", wardenId: null }],
+      guardians: [{ studentId: "kid-1", parentId: "mum-1" }],
+    });
+    await svc.sweep();
+    expect(enqueueMany).toHaveBeenCalledTimes(1);
+    expect(enqueueMany.mock.calls[0][1]).toEqual(["mum-1"]);
+    // Told somebody, so it counts as handled.
+    expect(updateMany.mock.calls[0][0].where.id).toEqual({ in: ["e-1"] });
   });
 });
 

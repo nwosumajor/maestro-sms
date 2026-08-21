@@ -35,6 +35,9 @@ function makeService(
     userRole: { findMany: jest.fn().mockResolvedValue(staff) },
     user: { findMany: jest.fn().mockResolvedValue([{ id: "kid-1", name: "Ada Obi" }]) },
     hostel: { findMany: jest.fn().mockResolvedValue(hostels) },
+    // The family is told too, in its own words. These cases are about the STAFF
+    // fan-out, so there are no guardians unless a case supplies them.
+    parentChild: { findMany: jest.fn().mockResolvedValue([]) },
   };
   const svc = Object.create(ExeatOverdueService.prototype) as ExeatOverdueService;
   Object.assign(svc, {
