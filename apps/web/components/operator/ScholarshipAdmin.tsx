@@ -276,7 +276,18 @@ export function ScholarshipAdmin() {
                     {s && (
                       <p className="mt-1 text-xs text-muted-foreground">
                         Signals — avg: <strong>{s.publishedSessionAverage ?? "—"}</strong> · attendance: <strong>{s.attendanceRatePct ?? "—"}%</strong> · outstanding fees: <strong>{money(s.outstandingFeesMinor)}</strong>
-                        {s.disciplineComplaints != null && <> · discipline: <strong>{s.disciplineComplaints}</strong></>}
+                        {/* Upheld and open are DIFFERENT facts about a child, and the old single
+    figure also counted complaints the school dismissed. `disciplineComplaints`
+    is the legacy snapshot shape — shown as it was recorded, because a signals
+    block is what a reviewer was told at the time. */}
+{s.disciplineUpheld != null || s.disciplineOpen != null ? (
+  <>
+    {" "}· discipline: <strong>{s.disciplineUpheld ?? 0}</strong> upheld
+    {(s.disciplineOpen ?? 0) > 0 && <>, {s.disciplineOpen} undecided</>}
+  </>
+) : (
+  s.disciplineComplaints != null && <> · discipline (legacy count): <strong>{s.disciplineComplaints}</strong></>
+)}
                         {s.tasksCompleted != null && <> · tasks done: <strong>{s.tasksCompleted}</strong></>}
                         {" "}<span className="italic">(for judgement only, not a verdict)</span>
                       </p>

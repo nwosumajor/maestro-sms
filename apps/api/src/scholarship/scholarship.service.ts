@@ -508,7 +508,22 @@ export class ScholarshipService {
       select: { class: { select: { name: true } } },
     });
     const classNames = enrolments.map((e: { class: { name: string } }) => e.class.name);
-    const disciplineComplaints = await tx.disciplineComplaint.count({ where: { againstId: studentId } });
+    // UPHELD and OPEN, counted apart — never one number.
+    //
+    // This was a single `count()` over every complaint ever filed against the
+    // pupil, at any status. `discipline.file` is held by STUDENTS, so a
+    // classmate's accusation counted; so did one the school investigated and
+    // DISMISSED. That number sat beside the grade average in front of the
+    // person deciding an award, and nothing on the screen said which of the
+    // four statuses it contained.
+    //
+    // DISMISSED is excluded entirely rather than reported as a third figure: the
+    // school has already found it baseless, and a reviewer cannot unsee a
+    // number once it is on the page.
+    const [disciplineUpheld, disciplineOpen] = await Promise.all([
+      tx.disciplineComplaint.count({ where: { againstId: studentId, status: "RESOLVED" } }),
+      tx.disciplineComplaint.count({ where: { againstId: studentId, status: { in: ["OPEN", "IN_REVIEW"] } } }),
+    ]);
     const tasksCompleted = await tx.taskAssignment.count({ where: { assigneeId: studentId, status: "DONE" } });
 
     return {
@@ -516,7 +531,8 @@ export class ScholarshipService {
       attendanceRatePct,
       outstandingFeesMinor,
       classNames,
-      disciplineComplaints,
+      disciplineUpheld,
+      disciplineOpen,
       tasksCompleted,
       capturedAt: new Date(),
     };

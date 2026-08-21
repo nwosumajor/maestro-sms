@@ -309,7 +309,14 @@ function DecisionCard({
             {sig.publishedSessionAverage != null && <span>Grade avg: {sig.publishedSessionAverage}%</span>}
             {sig.attendanceRatePct != null && <span>Attendance: {sig.attendanceRatePct}%</span>}
             <span>Outstanding fees: {money(sig.outstandingFeesMinor)}</span>
-            {sig.disciplineComplaints != null && <span>Discipline complaints: {sig.disciplineComplaints}</span>}
+            {sig.disciplineUpheld != null || sig.disciplineOpen != null ? (
+  <span>
+    Discipline: {sig.disciplineUpheld ?? 0} upheld
+    {(sig.disciplineOpen ?? 0) > 0 ? `, ${sig.disciplineOpen} undecided` : ""}
+  </span>
+) : (
+  sig.disciplineComplaints != null && <span>Discipline complaints: {sig.disciplineComplaints}</span>
+)}
             {sig.tasksCompleted != null && <span>Tasks completed: {sig.tasksCompleted}</span>}
           </div>
         )}

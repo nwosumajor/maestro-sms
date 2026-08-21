@@ -130,8 +130,32 @@ export interface ApplicationSignalsDto {
   outstandingFeesMinor: number;
   /** ACTIVE class enrolments at submission (the student's class). */
   classNames?: string[];
-  /** Discipline complaints filed AGAINST the student (count only). */
+  /**
+   * Discipline complaints filed AGAINST the student (count only).
+   *
+   * LEGACY, and kept because a signals block is a SNAPSHOT of what a reviewer
+   * was shown. Rewriting it would change the record of a decision already made.
+   * New snapshots carry `disciplineUpheld` / `disciplineOpen` instead.
+   */
   disciplineComplaints?: number;
+  /**
+   * Complaints CONCLUDED against the student — the school looked and upheld it.
+   *
+   * The old figure counted every complaint filed, at any status, and any pupil
+   * can file one against another pupil (`discipline.file` is held by students).
+   * So a classmate's accusation, and a complaint the school investigated and
+   * DISMISSED, both counted against a child asking for a scholarship — for
+   * good, next to their grade average, in front of the person deciding the
+   * award. Golden Rule #8 says signals for human review, never a penalty; a
+   * single number that cannot tell an accusation from a finding is a penalty
+   * wearing a signal's clothes.
+   *
+   * DISMISSED is not reported at all: the school has already decided it was
+   * baseless, and a reviewer cannot unsee a number.
+   */
+  disciplineUpheld?: number;
+  /** Complaints still OPEN or IN_REVIEW — undecided, and shown as undecided. */
+  disciplineOpen?: number;
   /** Completed (DONE) task assignments (count). */
   tasksCompleted?: number;
   capturedAt: Date;
