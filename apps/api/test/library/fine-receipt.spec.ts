@@ -53,8 +53,17 @@ function makeService(loan: Record<string, unknown> | null, line: { invoiceId: st
     runAsTenantReadOnly: <T>(_c: unknown, fn: (t: unknown) => Promise<T>) => fn(tx),
   };
   const svc = Object.create(LibraryService.prototype) as LibraryService;
-  Object.assign(svc, { db, audit: { record: jest.fn() } });
-  return { svc, tx, update, paymentCreate , updateMany };
+  // Built through the prototype rather than the constructor, so field
+  // initialisers never run: the logger and the notifier have to be supplied
+  // here or the first thing that uses them dies on `undefined`.
+  const enqueue = jest.fn().mockResolvedValue(undefined);
+  Object.assign(svc, {
+    db,
+    audit: { record: jest.fn() },
+    notifications: { enqueue },
+    logger: { error: jest.fn(), log: jest.fn(), warn: jest.fn() },
+  });
+  return { svc, tx, update, paymentCreate, updateMany, enqueue };
 }
 
 const paidLoan = {
@@ -172,8 +181,10 @@ describe("a fine reaches the ledger", () => {
   const src = readFileSync(join(__dirname, "../../src/library/library.service.ts"), "utf8");
 
   it("is billed as an invoice line when the book comes back late", () => {
+    // The call now captures the currency it billed in, so the notice sent to the
+    // family can name the amount in the school's own money.
     const ret = src.slice(src.indexOf("async returnLoan"), src.indexOf("private async billFine"));
-    expect(ret).toMatch(/if \(fineMinor > 0\) await this\.billFine/);
+    expect(ret).toMatch(/if \(fineMinor > 0\) fineCurrency = await this\.billFine/);
   });
 
   it("is idempotent, so a replay cannot charge the fine twice", () => {
@@ -181,7 +192,10 @@ describe("a fine reaches the ledger", () => {
     // use: two lines saying the same thing is what a bursar cannot untangle.
     const bill = src.slice(src.indexOf("private async billFine"), src.indexOf("async payFine"));
     expect(bill).toMatch(/Library fine — loan/);
-    expect(bill).toMatch(/if \(existing\) return;/);
+    // The guard returns the CURRENCY of the charge that already exists rather
+    // than bare `return`, so a replay still tells the caller what to announce.
+    expect(bill).toMatch(/if \(existing\) \{/);
+    expect(bill).toMatch(/Already billed — a replay, not a second fine/);
   });
 
   it("raises the invoice in the SCHOOL's currency", () => {

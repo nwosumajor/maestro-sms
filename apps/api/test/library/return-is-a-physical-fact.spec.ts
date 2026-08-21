@@ -76,7 +76,7 @@ function makeService() {
     auditLog: { create: jest.fn(async () => ({})) },
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
-  const service = new LibraryService(db as never, { record: jest.fn() } as never);
+  const service = new LibraryService(db as never, { record: jest.fn() } as never, { enqueue: jest.fn() } as never);
   jest.spyOn(service as never, "loanDto").mockResolvedValue({ id: "loan-1", status: "RETURNED" } as never);
   return { service, tx };
 }

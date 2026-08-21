@@ -8,10 +8,20 @@
 // only act on their OWN loans. Overdue fines accrue per day on return. Audited.
 // =============================================================================
 
-import {ConflictException, BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException} from "@nestjs/common";
+import {
+  ConflictException,
+  BadRequestException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from "@nestjs/common";
+import { NotificationService } from "../notifications/notification.service";
 import { csvCell } from "../common/csv";
 import { Prisma } from "@sms/db";
 import type { BookLoanDto, FineReceiptDto, LibraryBookDto, LibraryReportDto } from "@sms/types";
+import { formatMoney } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -37,10 +47,55 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 @Injectable()
 export class LibraryService {
+  private readonly logger = new Logger("LibraryService");
+
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
+    private readonly notifications: NotificationService,
   ) {}
+
+  /**
+   * Tell the borrower — and a pupil's guardians — about their fine.
+   *
+   * A charge the family cannot see is the defect this module just fixed by
+   * making fines a real ISSUED debt; a charge nobody MENTIONS is the quieter
+   * half of it. Every other charge on this ledger announces itself: the fees
+   * module notifies guardians when an invoice is issued and receipts every
+   * posted payment. A library fine did neither, so the first a parent knew of
+   * it was finding it on their invoice list, if they looked.
+   *
+   * Staff borrow books too, so the BORROWER is always told and guardians are
+   * added only when there are any — nobody is a special case, they simply have
+   * no parentChild rows.
+   *
+   * Best-effort, and after the transaction: a notification failure must never
+   * undo a return or a payment that already happened.
+   */
+  private async notifyFine(
+    p: Principal,
+    borrowerId: string,
+    msg: { type: string; title: string; body: string; data?: Record<string, unknown> },
+  ): Promise<void> {
+    try {
+      const guardians = (await this.db.runAsTenant(this.ctx(p), (tx) =>
+        tx.parentChild.findMany({ where: { studentId: borrowerId }, select: { parentId: true } }),
+      )) as Array<{ parentId: string }>;
+      const recipients = [...new Set([borrowerId, ...guardians.map((g) => g.parentId)])];
+      for (const recipientId of recipients) {
+        await this.notifications.enqueue(this.ctx(p), {
+          recipientId,
+          type: msg.type,
+          title: msg.title,
+          body: msg.body,
+          data: msg.data,
+          channels: ["EMAIL"],
+        });
+      }
+    } catch (err) {
+      this.logger.error(`Library fine notification failed for ${borrowerId}: ${String(err)}`);
+    }
+  }
 
   private ctx(p: Principal): TenantContext {
     return { schoolId: p.schoolId, userId: p.userId };
@@ -228,13 +283,20 @@ export class LibraryService {
         "A return is recorded by the library when the book is handed in. Take it to the library desk.",
       );
     }
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    let lateDays = 0;
+    // THE SCHOOL'S currency, never a hard-coded one: money is scaled by the
+    // currency and eleven of the catalogued African currencies have no minor
+    // unit at all, so a divide-by-100 or an assumed NGN prints a CFA-franc fine
+    // at a hundredth of its value.
+    let fineCurrency = "NGN";
+    const dto = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const loan = await tx.bookLoan.findFirst({ where: { id: loanId } });
       if (!loan) throw new NotFoundException("Loan not found");
       if (loan.status !== "ISSUED") throw new BadRequestException("Loan already returned");
       const now = new Date();
       const daysLate = Math.max(0, Math.floor((now.getTime() - loan.dueAt.getTime()) / DAY_MS));
       const fineMinor = daysLate * FINE_PER_DAY_MINOR;
+      lateDays = daysLate;
       // A FINE IS A CHARGE, so it goes on the ledger like every other charge.
       //
       // It used to live only on the loan row: `payFine` marked a boolean and
@@ -270,12 +332,28 @@ export class LibraryService {
         data: { status: "RETURNED", returnedAt: now, fineMinor },
       });
       if (claimed.count === 0) throw new BadRequestException("Loan already returned");
-      if (fineMinor > 0) await this.billFine(tx, p, loan, fineMinor, daysLate);
+      if (fineMinor > 0) fineCurrency = await this.billFine(tx, p, loan, fineMinor, daysLate);
       await tx.libraryBook.update({ where: { id: loan.bookId }, data: { availableCopies: { increment: 1 } } });
       await this.log(tx, p, "library.return", loanId, { daysLate, fineMinor });
       return this.loanDto(tx, loanId);
     });
+    // After the transaction, and never inside it: the return and the charge are
+    // committed facts by now, so a notification that fails costs a message and
+    // not a book.
+    if (dto.fineMinor > 0) {
+      await this.notifyFine(p, dto.borrowerId, {
+        type: "INVOICE_ISSUED",
+        title: "Library fine",
+        body:
+          `${dto.bookTitle} was returned ${lateDays} day${lateDays === 1 ? "" : "s"} late. ` +
+          `A fine of ${formatMoney(dto.fineMinor, fineCurrency)} has been added to the invoice.`,
+        data: { loanId, fineMinor: dto.fineMinor },
+      });
+    }
+    return dto;
   }
+
+
 
   /**
    * Put an overdue fine on the borrower's invoice.
@@ -294,13 +372,18 @@ export class LibraryService {
     loan: { id: string; borrowerId: string; bookId: string },
     fineMinor: number,
     daysLate: number,
-  ): Promise<void> {
+  ): Promise<string> {
     const description = `Library fine — loan ${loan.id.slice(0, 8).toUpperCase()}`;
     const existing = await tx.invoiceLineItem.findFirst({
       where: { description, invoice: { studentId: loan.borrowerId } },
       select: { id: true },
     });
-    if (existing) return; // already billed — a replay, not a second fine
+    if (existing) {
+      // Already billed — a replay, not a second fine. Still report the currency
+      // the charge is denominated in, because the caller announces it.
+      const inv = await tx.invoice.findFirst({ where: { lineItems: { some: { description } } }, select: { currency: true } });
+      return inv?.currency ?? "NGN";
+    }
     // The SCHOOL's currency: settlement refuses a charge whose currency differs
     // from the invoice, so a fine raised in the column default could never be
     // paid online by a school billing in anything else.
@@ -348,11 +431,14 @@ export class LibraryService {
     });
     await tx.invoice.update({ where: { id: invoice.id }, data: { totalMinor: { increment: fineMinor } } });
     await this.log(tx, p, "library.fine.billed", loan.id, { fineMinor, daysLate, invoiceId: invoice.id });
+    return invoice.currency;
   }
 
   /** Record payment of an overdue fine → a digital receipt. Librarian. */
   async payFine(p: Principal, loanId: string): Promise<FineReceiptDto> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    let paidCurrency = "NGN";
+    let payerId = "";
+    const receipt = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const loan = await tx.bookLoan.findFirst({ where: { id: loanId } });
       if (!loan) throw new NotFoundException("Loan not found");
       if (loan.fineMinor <= 0) throw new BadRequestException("No fine to pay");
@@ -421,10 +507,14 @@ export class LibraryService {
           },
         });
         await this.settleInvoiceIfPaid(tx, line.invoiceId);
+        paidCurrency =
+          (await tx.invoice.findFirst({ where: { id: line.invoiceId }, select: { currency: true } }))?.currency ??
+          paidCurrency;
       }
       await this.log(tx, p, "library.fine.pay", loanId, { fineMinor: loan.fineMinor, invoiceId: line?.invoiceId ?? null });
       const book = await tx.libraryBook.findFirstOrThrow({ where: { id: loan.bookId }, select: { title: true } });
       const borrower = await tx.user.findFirst({ where: { id: loan.borrowerId }, select: { name: true } });
+      payerId = loan.borrowerId;
       return {
         loanId,
         bookTitle: book.title,
@@ -434,6 +524,17 @@ export class LibraryService {
         reference: `FINE-${loanId.slice(0, 8).toUpperCase()}`,
       };
     });
+    // A RECEIPT, like every other payment on this ledger. Cash handed over at a
+    // desk is the payment least likely to leave the payer with anything in
+    // writing, and the fees module already receipts every posted payment — this
+    // one went through the same Payment table and told nobody.
+    await this.notifyFine(p, payerId, {
+      type: "PAYMENT_RECEIVED",
+      title: "Library fine paid",
+      body: `${formatMoney(receipt.fineMinor, paidCurrency)} received for ${receipt.bookTitle}. Receipt ${receipt.reference}.`,
+      data: { loanId, reference: receipt.reference },
+    });
+    return receipt;
   }
 
   /**

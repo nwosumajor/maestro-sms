@@ -78,12 +78,14 @@ function makeService(opts: {
       aggregate: jest.fn().mockResolvedValue({ _sum: { amountMinor: 0 } }),
     },
     school: { findFirst: jest.fn().mockResolvedValue({ currency: "NGN" }) },
+    parentChild: { findMany: jest.fn().mockResolvedValue([{ parentId: "mum-1" }]) },
     libraryBook: { findFirstOrThrow: jest.fn().mockResolvedValue({ title: "SEED Reader 37" }) },
     user: { findFirst: jest.fn().mockResolvedValue({ name: "Demo Student" }) },
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
-  const svc = new LibraryService(db as never, { record: jest.fn() } as never);
-  return { svc, tx, created, payments, lines };
+  const enqueue = jest.fn().mockResolvedValue(undefined);
+  const svc = new LibraryService(db as never, { record: jest.fn() } as never, { enqueue } as never);
+  return { svc, tx, created, payments, lines, enqueue };
 }
 
 const librarian: Principal = {
@@ -164,5 +166,39 @@ describe("taking the money", () => {
     const { svc, tx } = makeService({ existingLine: { invoiceId: "inv-1" } });
     (tx.bookLoan.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
     await expect(svc.payFine(librarian, LOAN)).rejects.toThrow(/already paid/i);
+  });
+});
+
+describe("telling the family", () => {
+  it("receipts the payer AND their guardians when a fine is paid", async () => {
+    // Cash over a desk is the payment least likely to leave the payer with
+    // anything in writing, and the fees module receipts every other posted
+    // payment. This one went through the same Payment table and told nobody.
+    const { svc, enqueue } = makeService({ existingLine: { invoiceId: "inv-1" } });
+    await svc.payFine(librarian, LOAN);
+    const to = enqueue.mock.calls.map((c) => (c[1] as { recipientId: string }).recipientId);
+    expect(to).toEqual(["pupil-1", "mum-1"]);
+    expect((enqueue.mock.calls[0][1] as { title: string }).title).toMatch(/paid/i);
+  });
+
+  it("names the amount in the invoice's OWN currency", async () => {
+    // Money is scaled by the currency: eleven of the catalogued African
+    // currencies have no minor unit, so an assumed NGN would print a CFA-franc
+    // fine at a hundredth of its value.
+    const { svc, enqueue, tx } = makeService({ existingLine: { invoiceId: "inv-1" } });
+    (tx.invoice.findFirst as jest.Mock).mockResolvedValue({ currency: "XOF" });
+    await svc.payFine(librarian, LOAN);
+    const body = (enqueue.mock.calls[0][1] as { body: string }).body;
+    expect(body).toContain("35,000");
+    expect(body).not.toContain("350.00");
+  });
+
+  it("never lets a failed notice undo the payment", async () => {
+    // Best-effort and AFTER the transaction: the money is a committed fact by
+    // the time anyone is told about it.
+    const { svc, enqueue, payments } = makeService({ existingLine: { invoiceId: "inv-1" } });
+    enqueue.mockRejectedValue(new Error("smtp down"));
+    await expect(svc.payFine(librarian, LOAN)).resolves.toMatchObject({ fineMinor: 35000 });
+    expect(payments).toHaveLength(1);
   });
 });

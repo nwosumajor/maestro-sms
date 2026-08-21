@@ -68,7 +68,7 @@ function makeTx(over: Record<string, unknown> = {}) {
 function svc(tx: TenantTx) {
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
-  return new LibraryService(db as never, audit as never);
+  return new LibraryService(db as never, audit as never, { enqueue: jest.fn() } as never);
 }
 
 describe("LibraryService", () => {
@@ -166,7 +166,7 @@ describe("LibraryService", () => {
         runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx as unknown as TenantTx),
         runAsTenantReadOnly: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx as unknown as TenantTx),
       };
-      return new LibraryService(db as never, { record: jest.fn() } as never);
+      return new LibraryService(db as never, { record: jest.fn() } as never, { enqueue: jest.fn() } as never);
     };
     const book = (i: number) => ({
       id: `b${i}`, title: `Title ${i}`, author: "A", isbn: null, barcode: `BC${i}`,
