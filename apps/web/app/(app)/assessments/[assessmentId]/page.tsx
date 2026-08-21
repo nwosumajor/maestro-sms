@@ -1,4 +1,4 @@
-import type { AssessmentSubmissionDto, AssessmentSummaryDto, Serialized } from "@sms/types";
+import type { AssessmentPageDto, AssessmentSubmissionDto, Serialized } from "@sms/types";
 import Link from "next/link";
 import { hasPermission } from "@/lib/permissions";
 import { redirect } from "next/navigation";
@@ -21,9 +21,13 @@ export default async function AssessmentSubmissionsPage({ params }: { params: { 
   const { assessmentId } = params;
   const [submissions, list] = await Promise.all([
     apiGet<Serialized<AssessmentSubmissionDto>[]>(`/assessments/${assessmentId}/submissions`),
-    apiGet<Serialized<AssessmentSummaryDto>[]>("/assessments"),
+    // A PAGE, not an array. This is only used to put a title on the header, so
+    // the first page is enough and a miss falls back to "Assessment" — there is
+    // no get-one endpoint, and adding one to render a heading would be a route
+    // for nobody.
+    apiGet<Serialized<AssessmentPageDto>>("/assessments"),
   ]);
-  const title = list?.find((a) => a.id === assessmentId)?.title ?? "Assessment";
+  const title = list?.items.find((a) => a.id === assessmentId)?.title ?? "Assessment";
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="assessments" permissions={user.permissions}>

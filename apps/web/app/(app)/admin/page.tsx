@@ -30,7 +30,10 @@ export default async function AdminPage() {
     // covered the most recent page, so "Total invoiced" quietly under-reported once
     // a school passed that many invoices.
     apiGet<InvoiceSummary>("/invoices/summary"),
-    apiGet<WorkflowRow[]>("/workflows"),
+    // A PAGE, not an array — /workflows is filtered and paged. This tile counts
+    // what is waiting on THIS person, which the API already computes, so ask for
+    // exactly that instead of counting a page of the whole school's register.
+    apiGet<{ items: WorkflowRow[]; total: number }>("/workflows?mine=1"),
   ]);
 
   // A FAILED READ IS NOT A ZERO. `?? 0` here printed "Outstanding ₦0.00",
@@ -39,7 +42,7 @@ export default async function AdminPage() {
   // was fixed this way already; this page kept the false zeros.
   const feesUnknown = invoices === null;
   const currency = invoices?.currency ?? "NGN";
-  const pendingApprovals = (workflows ?? []).filter((w) => w.state === "PENDING_REVIEW").length;
+  const pendingApprovals = workflows?.total ?? 0;
 
   /** An em dash where a number cannot be established. */
   const num = (value: number, unknown: boolean) => (unknown ? "—" : String(value));
