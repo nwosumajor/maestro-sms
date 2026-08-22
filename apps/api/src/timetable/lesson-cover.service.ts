@@ -24,6 +24,7 @@ import {
 import { NotificationService } from "../notifications/notification.service";
 import { SchoolRegionService } from "../foundation/school-region.service";
 import { assertStillHere } from "../common/still-here";
+import { lockPerson } from "../common/person-lock";
 
 const DOW = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"] as const;
 const MAX_WINDOW_DAYS = 62;
@@ -172,6 +173,12 @@ export class LessonCoverService {
       }
       // Double-booking: the reliever's OWN lesson at this period on this weekday,
       // OR another cover already assigned to them at this period/date.
+      //
+      // Serialised on the reliever first: both checks read and then decide in
+      // Node, so two requests arriving together would each see a clear diary and
+      // each succeed — the same race the exam roster had, with the same result,
+      // a person expected in two rooms at once.
+      await lockPerson(tx, p.schoolId, input.coveringTeacherId);
       const clashOwn = await tx.timetableEntry.findFirst({
         where: { teacherId: input.coveringTeacherId, dayOfWeek: entry.dayOfWeek, periodId: entry.periodId },
         select: { id: true },

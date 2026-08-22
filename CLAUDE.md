@@ -1035,6 +1035,25 @@ still AHEAD is announced. `deleteSitting` now also records `seatsDeleted` /
 to "where did those thirty seats go". // GOTCHA: the roster must be read BEFORE
 the delete; afterwards the cascade has taken it and there is nobody left to tell.
 
+### A clash check that reads and then writes is not a clash check
+`lockPerson` (`apps/api/src/common/person-lock.ts`) takes a transaction-scoped
+advisory lock on `(schoolId, personId)` before the invigilator and cover
+double-booking checks. Both READ what somebody is down for, decide the overlap in
+Node, then INSERT — with nothing in between. Proved live, one member of staff and
+two sittings in the same 09:00–11:00 window:
+`sequential 201 then 409` (the check works) versus `concurrent 201 and 201` —
+rostered in TWO halls at nine o'clock, which is exactly what the check exists to
+prevent. After: 201 and 409, either order, one hall.
+A LOCK, NOT A CONSTRAINT: the other races here were closed with a unique key or
+an atomic claim (library decrements `availableCopies` with a predicate, hostel
+row-locks the room), which works when the thing claimed is ONE ROW. A clash is
+"does any row overlap this window" — two tables for cover, an interval comparison
+for exams — and no unique index expresses it. Same tool `TermResultService`
+already uses for the shared result row. Keyed per PERSON (seating a hall is a
+burst of these, so a per-school lock would serialise the lot) and per SCHOOL (the
+advisory namespace is cluster-wide, so without the tenant one school's rostering
+blocks another's). `_xact_` so nothing is left held by a request that threw.
+
 ## Repo workflow & gotchas
 - DB setup order: `prisma migrate deploy` → `pnpm --filter @sms/db rls` →
   `prisma db seed` (or `pnpm --filter @sms/db setup`). RLS lives in `prisma/rls/`,

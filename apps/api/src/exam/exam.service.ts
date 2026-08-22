@@ -41,6 +41,7 @@ import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 import { SchoolRegionService } from "../foundation/school-region.service";
 import { assertStillHere } from "../common/still-here";
+import { lockPerson } from "../common/person-lock";
 
 /** How many upcoming exams a personal list will return. A student sits a dozen a
  *  term; a parent of several children a few dozen. Well clear of real use, but it
@@ -967,6 +968,12 @@ export class ExamService {
       // Nobody can watch two halls at once. Checked here rather than left to the
       // roster-builder's memory, because the failure surfaces on exam morning with
       // one of the two halls simply unattended.
+      //
+      // The lock comes FIRST. The check reads the roster and decides in Node, so
+      // without it two requests arriving together both saw a clear diary and both
+      // succeeded — measured: sequential 201 then 409, concurrent 201 and 201,
+      // and one person rostered in two halls at 09:00.
+      await lockPerson(tx, p.schoolId, staffId);
       await this.assertNoInvigilatorClash(tx, staffId, sitting);
       // Assignment rows are INSERT/DELETE only (rls/87 grants no UPDATE — a
       // roster change is a remove + re-add, so the history reads honestly).
