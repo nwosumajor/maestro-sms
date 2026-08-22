@@ -7,6 +7,7 @@ import { MetricsService } from "./metrics.service";
 import { MetricsController } from "./metrics.controller";
 import { MetricsMiddleware } from "./metrics.middleware";
 import { ErrorLoggingInterceptor } from "./error-logging.interceptor";
+import { isAnonymityBearing } from "./anonymity";
 
 interface PrincipalReq extends IncomingMessage {
   principal?: { schoolId?: string; userId?: string };
@@ -36,6 +37,14 @@ interface PrincipalReq extends IncomingMessage {
         // The principal is attached by the guard; available by the time we log (res finish).
         customProps: (req: IncomingMessage) => {
           const p = (req as PrincipalReq).principal;
+          // WHO called this, EXCEPT where knowing that breaks a promise the
+          // platform made. A poll vote is anonymous by construction and its
+          // audit row is deliberately written under SYSTEM; logging the caller
+          // here hands back exactly what that was protecting, and the vote row's
+          // own timestamp then gives away the option too. See anonymity.ts.
+          if (isAnonymityBearing(req.method, req.url)) {
+            return { school_id: p?.schoolId, user_withheld: "anonymous route" };
+          }
           return { school_id: p?.schoolId, user_id: p?.userId };
         },
         // SECURITY: never log credentials. Strip auth/cookie/step-up/webhook-sig headers.

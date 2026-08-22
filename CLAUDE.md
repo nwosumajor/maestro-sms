@@ -964,6 +964,29 @@ probed child given a remark ⇒ FAIL naming the route; control restored ⇒ PASS
 Both halves are validated by making them fire — the listing half against a
 teacher, who legitimately sees 480 pupils.
 
+### An anonymous vote is only anonymous if the LOG agrees
+`apps/api/src/observability/anonymity.ts` lists the routes whose whole point is
+that nobody can tell who called them — `POST /polls/:id/vote` and
+`POST /forms/:id/respond` — and pino's `customProps` plus the Sentry interceptor
+withhold `user_id` on them (everything else — method, route, status, latency,
+tenant, request id — is still logged, plus `user_withheld: "anonymous route"` so
+the absence is legible).
+The poll module had done everything right: schema says "Identity is never
+revealed", the vote's audit row is written under SYSTEM *because* "naming the
+voter there handed leadership the roll of who answered a poll about leadership",
+no read returns voterId beside optionId, results are tallies. The REQUEST LOG,
+added later by the observability spine, undid all of it. Measured live, one vote:
+`log POST /polls/…/vote user_id c337f8f4… 09:59:03.648` against
+`poll_vote "Option A" 09:59:03.635` — **thirteen milliseconds apart**, so log +
+database recovers not just WHO voted but WHAT THEY CHOSE, for everybody.
+A ROUTE, not a flag: a form is anonymous only when it says so and the logger
+cannot know that without a read on the request path, so every form response
+withholds it — costs operations nothing, and getting it wrong the other way
+breaks a promise made to a child. Patterns are anchored at BOTH ends and the
+query string is stripped before matching (a `?` would defeat the anchor).
+Over-withholding is not free — every id withheld is an incident somebody cannot
+trace — so reads, creates and closes are deliberately NOT on the list.
+
 ## Repo workflow & gotchas
 - DB setup order: `prisma migrate deploy` → `pnpm --filter @sms/db rls` →
   `prisma db seed` (or `pnpm --filter @sms/db setup`). RLS lives in `prisma/rls/`,

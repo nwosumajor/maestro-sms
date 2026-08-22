@@ -25,6 +25,7 @@ import { throwError } from "rxjs";
 import { catchError } from "rxjs/operators";
 import type { Request } from "express";
 import type { Principal } from "../auth/principal";
+import { isAnonymityBearing } from "./anonymity";
 
 interface ObservedRequest extends Request {
   principal?: Principal;
@@ -46,7 +47,13 @@ export class ErrorLoggingInterceptor implements NestInterceptor {
           route: (req.route?.path as string | undefined) ?? "unmatched",
           status,
           school_id: req.principal?.schoolId,
-          user_id: req.principal?.userId,
+          // Withheld on an anonymity-bearing route, for the same reason the
+          // request log withholds it: a 500 on a vote must not be the one place
+          // that records who cast it. Everything else — route, status, request
+          // id, tenant — is still here, which is what a 500 is debugged from.
+          ...(isAnonymityBearing(req.method, req.url)
+            ? { user_withheld: "anonymous route" }
+            : { user_id: req.principal?.userId }),
         };
         if (status >= 500) {
           if (process.env.SENTRY_DSN) {
