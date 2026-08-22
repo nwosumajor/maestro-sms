@@ -53,6 +53,8 @@ export interface DunningResult {
   reminded: number;
   pastDue: number;
   scanned: number;
+  /** Subscriptions whose dunning threw. They were NOT flipped and NOT reminded. */
+  failed: number;
   /** Lapsed schools reported to the platform owners in the red alert. */
   alerted: number;
   /** Saved-card renewal charges attempted / declined this sweep. */
@@ -85,7 +87,7 @@ export class BillingDunningService {
     if (!client) {
       this.logger.warn("Dunning sweep requested but no privileged DB — skipping.");
       return {
-        reminded: 0, pastDue: 0, scanned: 0, alerted: 0,
+        reminded: 0, pastDue: 0, scanned: 0, failed: 0, alerted: 0,
         autoRenewCharged: 0, autoRenewFailed: 0, abandoned: 0, skipped: "NO_DB",
       };
     }
@@ -118,8 +120,18 @@ export class BillingDunningService {
     let pastDue = 0;
     let autoRenewCharged = 0;
     let autoRenewFailed = 0;
+    // ONE SCHOOL'S FAILURE MUST NOT END THE RUN.
+    //
+    // Unguarded, a subscription that threw — a declined card that errored rather
+    // than returning, a notification that could not be written — abandoned every
+    // school after it: not flipped to PAST_DUE, not reminded, silently, and the
+    // same way the next night. The attendance rollup and the late-fee sweep
+    // already guard per item; this did not. Counted and returned, because the
+    // job-runs catalogue is where an operator finds out.
+    let failed = 0;
     for (const s of subs) {
       if (!s.currentPeriodEnd) continue;
+      try {
       // Saved-card auto-renew: attempt the charge shortly BEFORE the period
       // lapses (and while recently lapsed) — success flows through the normal
       // webhook apply (idempotent on reference), so this only INITIATES.
@@ -159,6 +171,10 @@ export class BillingDunningService {
           `Your ${s.plan} plan renews on ${s.currentPeriodEnd.toDateString()}. Renew to keep your modules enabled.`,
         );
       }
+      } catch (err) {
+        failed += 1;
+        this.logger.error(`dunning failed for school ${s.schoolId}: ${(err as Error).message}`);
+      }
     }
 
     // RED ALERT to the platform owners: one aggregated daily digest of EVERY
@@ -171,7 +187,9 @@ export class BillingDunningService {
     this.logger.log(
       `Dunning sweep (${trigger}): scanned=${subs.length} reminded=${reminded} pastDue=${pastDue} alerted=${alerted} autoRenew=${autoRenewCharged}/${autoRenewCharged + autoRenewFailed} abandoned=${abandoned}`,
     );
-    return { reminded, pastDue, scanned: subs.length, alerted, autoRenewCharged, autoRenewFailed, abandoned };
+    // `failed` is RETURNED, not merely logged: a sweep that reports "12 scanned,
+    // 3 reminded" while four schools threw reads as a quiet night.
+    return { reminded, pastDue, scanned: subs.length, failed, alerted, autoRenewCharged, autoRenewFailed, abandoned };
   }
 
   /**

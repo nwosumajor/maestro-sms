@@ -79,6 +79,8 @@ const LMS_REVISIONS_KEPT = Number(process.env.LMS_REVISIONS_KEPT ?? 50);
  *  platform-wide — so no caller has to add them up and get it wrong. */
 export interface RetentionSweepResult {
   schools: SchoolRetentionResult[];
+  /** Schools whose purge threw. Their data is still past its window. */
+  failed: number;
   purged: number;
   platformWide: { gatewayEvents: number; contentRevisions: number; gameGuesses: number; readNotifications: number; jobRuns: number };
   /** True when no privileged DB was configured — NOT the same as "nothing to purge". */
@@ -139,14 +141,34 @@ export class IntegrityRetentionService {
     const client = this.db.client;
     if (!client) {
       this.logger.warn("Retention sweep requested but no privileged DB — skipping.");
-      return { schools: [], purged: 0, platformWide: EMPTY_PLATFORM_COUNTS, skipped: true };
+      return { schools: [], failed: 0, purged: 0, platformWide: EMPTY_PLATFORM_COUNTS, skipped: true };
     }
     const schools = await client.school.findMany({
       select: { id: true, integrityRetentionDays: true },
     });
     const results: SchoolRetentionResult[] = [];
+    // ONE SCHOOL'S FAILURE MUST NOT END THE FLEET'S SWEEP.
+    //
+    // Unguarded, a single school's purge throwing abandoned every school after
+    // it AND the platform-wide streams below — and it would fail the same way
+    // every night, so minors' telemetry would sit past its retention window
+    // indefinitely, which is the one thing this job exists to prevent. The
+    // late-fee sweep and the attendance rollup already work this way; this did
+    // not.
+    //
+    // The failure is COUNTED and RETURNED, not just logged: the job-runs
+    // catalogue is what an operator reads, and a sweep that reports success
+    // while skipping four schools is worse than one that fails loudly.
+    let failed = 0;
     for (const s of schools) {
-      results.push(await this.purgeSchool(s.id, s.integrityRetentionDays, trigger));
+      try {
+        results.push(await this.purgeSchool(s.id, s.integrityRetentionDays, trigger));
+      } catch (err) {
+        failed += 1;
+        this.logger.error(
+          `retention purge failed for school ${s.id} — its telemetry is still past its window: ${(err as Error).message}`,
+        );
+      }
     }
     // The two PLATFORM-WIDE streams, swept once rather than per school.
     //
@@ -169,7 +191,7 @@ export class IntegrityRetentionService {
         `Platform-wide: gatewayEvents=${globalCounts.gatewayEvents} contentRevisions=${globalCounts.contentRevisions} ` +
           `gameGuesses=${globalCounts.gameGuesses} readNotifications=${globalCounts.readNotifications} jobRuns=${globalCounts.jobRuns}.`,
     );
-    return { schools: results, purged: purged + platformTotal, platformWide: globalCounts, skipped: false };
+    return { schools: results, failed, purged: purged + platformTotal, platformWide: globalCounts, skipped: false };
   }
 
   /** Purge one school using its window. schoolId/retentionDays come from the

@@ -1076,6 +1076,21 @@ already unique — the remaining six are closed by `20261229000000` and
 `20261230000000` (adding one sitting per CBT exam, and one open meeting request
 per parent+child+teacher).
 
+### One school's failure must not end the fleet's sweep
+Of the scheduled cross-tenant jobs, the late-fee sweep, the attendance rollup and
+the message-credit reconciliation already caught, counted and carried on per
+school. **Retention and billing dunning did not**: the first school to throw
+abandoned every school after it — and for retention the PLATFORM-WIDE streams
+below the loop too (gateway events, read notifications, old job runs). It would
+fail the same way every night, so the damage is not one missed night but an
+indefinite one: minors' telemetry retained past the window a school told parents
+about, and lapsed subscriptions never chased or told. Both now catch per item,
+NAME the school in the log (a count says four failed and never which; the one
+failing nightly is the one worth fixing) and COUNT the failure into the returned
+result — `DunningResult.failed`, `RetentionResult.failed` — because the job-runs
+catalogue is what an operator reads and "12 scanned, 3 reminded" while four
+schools threw reads as a quiet night. Live: `{"scanned":2,"failed":0,…}`.
+
 ## Repo workflow & gotchas
 - DB setup order: `prisma migrate deploy` → `pnpm --filter @sms/db rls` →
   `prisma db seed` (or `pnpm --filter @sms/db setup`). RLS lives in `prisma/rls/`,
