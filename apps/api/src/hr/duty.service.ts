@@ -143,17 +143,46 @@ export class DutyService {
   }
 
   /** Unassign (a roster is a plan — the delete is audited). */
+  /**
+   * Take a duty off somebody — and SAY SO.
+   *
+   * Assigning one sends "Duty assigned: Gate — 07:30–08:15 on 2026-12-05".
+   * Removing it said nothing, so the only record they had still told them to be
+   * at the gate on Saturday morning. A dated duty is something a person plans
+   * their week around; withdrawing it in silence is worse than never having
+   * sent the first notice, because they are now acting on a record the school
+   * knows is wrong.
+   *
+   * The same asymmetry the exam roster and the cover list had: given with a
+   * notice, taken away without one.
+   */
   async remove(p: Principal, id: string): Promise<{ deleted: boolean }> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const row = await tx.dutyAssignment.findFirst({ where: { id } });
-      if (!row) throw new NotFoundException("Duty assignment not found");
+    const row = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const found = (await tx.dutyAssignment.findFirst({ where: { id } })) as DutyRow | null;
+      if (!found) throw new NotFoundException("Duty assignment not found");
       await tx.dutyAssignment.delete({ where: { id } });
       await this.audit.record(
-        { actorId: p.userId, action: "hr.duty.unassign", entity: "duty_assignment", entityId: id, schoolId: p.schoolId, metadata: { userId: row.userId, title: row.title } },
+        { actorId: p.userId, action: "hr.duty.unassign", entity: "duty_assignment", entityId: id, schoolId: p.schoolId, metadata: { userId: found.userId, title: found.title } },
         tx,
       );
-      return { deleted: true };
+      return found;
     });
+    // Best-effort, outside the tx, exactly like the assignment notice: the duty
+    // is off whether or not the message gets through, and failing the removal
+    // because a notification did not send would leave the roster wrong rather
+    // than merely quiet.
+    try {
+      await this.notifications.enqueue(this.ctx(p), {
+        recipientId: row.userId,
+        type: "ANNOUNCEMENT",
+        title: `Duty cancelled: ${row.title}`,
+        body: `You are no longer on ${row.title} at ${row.startTime}–${row.endTime} on ${dutyDay(row.date)}.`,
+        data: { kind: "duty", title: row.title },
+      });
+    } catch {
+      /* notification is best-effort */
+    }
+    return { deleted: true };
   }
 
   private toDto(r: DutyRow, userName: string | null): DutyAssignmentDto {
@@ -169,4 +198,16 @@ export class DutyService {
       createdAt: r.createdAt,
     };
   }
+}
+
+/**
+ * The duty's own day.
+ *
+ * `date` is a `@db.Date` — a DAY, not an instant — so it serialises as midnight
+ * UTC and must be read in UTC. Formatting it in a zone west of UTC would name
+ * the PREVIOUS day, which on a cancellation notice is worse than no notice: the
+ * reader would stand down from the wrong shift.
+ */
+function dutyDay(date: Date): string {
+  return date.toISOString().slice(0, 10);
 }

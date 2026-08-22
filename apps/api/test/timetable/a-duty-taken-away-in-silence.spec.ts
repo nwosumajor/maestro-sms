@@ -217,3 +217,75 @@ describe("cancelling an exam somebody was rostered for", () => {
     expect(enqueue).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+
+import { DutyService } from "../../src/hr/duty.service";
+
+/** The third instance of the same asymmetry: the duty roster. */
+function makeDuty(row: Record<string, unknown> | null) {
+  const enqueue = jest.fn().mockResolvedValue(undefined);
+  const tx = {
+    dutyAssignment: {
+      findFirst: jest.fn().mockResolvedValue(row),
+      delete: jest.fn().mockResolvedValue({}),
+    },
+  } as unknown as TenantTx;
+  const svc = Object.create(DutyService.prototype) as DutyService;
+  Object.assign(svc, {
+    db: { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) },
+    audit: { record: jest.fn() },
+    notifications: { enqueue },
+  });
+  return { svc, enqueue };
+}
+
+const GATE = {
+  id: "d1",
+  userId: "t1",
+  title: "Gate",
+  date: new Date("2026-12-05T00:00:00.000Z"),
+  startTime: "07:30",
+  endTime: "08:15",
+  note: null,
+};
+
+describe("taking a rostered duty off somebody", () => {
+  it("tells them, naming the duty and the day", async () => {
+    const { svc, enqueue } = makeDuty(GATE);
+    await svc.remove(staff, "d1");
+    const msg = enqueue.mock.calls[0][1] as { recipientId: string; title: string; body: string };
+    expect(msg.recipientId).toBe("t1");
+    expect(msg.title).toBe("Duty cancelled: Gate");
+    expect(msg.body).toMatch(/no longer on Gate at 07:30–08:15 on 2026-12-05/);
+  });
+
+  it("reads the row before deleting it", async () => {
+    const { svc, enqueue } = makeDuty(GATE);
+    await svc.remove(staff, "d1");
+    expect(enqueue).toHaveBeenCalledTimes(1);
+  });
+
+  it("names the day in UTC, because a duty date is a DAY", async () => {
+    // `date` is a @db.Date and serialises as midnight UTC. Formatting it in a
+    // zone west of UTC names the PREVIOUS day — on a cancellation notice that
+    // stands somebody down from the wrong shift.
+    const { svc, enqueue } = makeDuty({ ...GATE, date: new Date("2026-12-05T00:00:00.000Z") });
+    await svc.remove(staff, "d1");
+    expect((enqueue.mock.calls[0][1] as { body: string }).body).toMatch(/2026-12-05/);
+  });
+
+  it("still removes the duty when the notice cannot be sent", async () => {
+    const { svc } = makeDuty(GATE);
+    (svc as unknown as { notifications: { enqueue: jest.Mock } }).notifications.enqueue = jest
+      .fn()
+      .mockRejectedValue(new Error("mail down"));
+    await expect(svc.remove(staff, "d1")).resolves.toEqual({ deleted: true });
+  });
+
+  it("says nothing about a duty that was not there", async () => {
+    const { svc, enqueue } = makeDuty(null);
+    await expect(svc.remove(staff, "nope")).rejects.toThrow();
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+});

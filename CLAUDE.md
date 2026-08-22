@@ -1015,10 +1015,13 @@ behaviour cannot see it — `beforeSend` scrubs everything, so removing the
 integration option changes no output and every behavioural test still passes.
 
 ### A duty that is given with a notice is taken away with one
-Assigning work notified the person; withdrawing it notified nobody, in two
+Assigning work notified the person; withdrawing it notified nobody, in three
 modules at once: `removeInvigilator`, `deleteSitting` (which cascades EVERY seat
-and invigilator), `removeCover`, and `deleteEntry` (whose `lesson_cover` FK is
-ON DELETE CASCADE) were all silent. So the only record a teacher held still told
+and invigilator), `removeCover`, `deleteEntry` (whose `lesson_cover` FK is
+ON DELETE CASCADE) and the duty roster's `remove` were all silent. Discipline and
+meetings already did it right, which is what made the rest visible; class-teacher
+assignment is silent BOTH ways and is deliberately left alone — symmetric silence
+about something you read off a page is not a stale duty you turn up for. So the only record a teacher held still told
 them to be in Hall A for an exam that no longer exists, or to teach a lesson that
 is no longer theirs. A teacher who turns up has wasted a free period; one who
 does NOT turn up, assuming it was withdrawn, is a class left unattended — the
