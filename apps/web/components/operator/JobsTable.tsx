@@ -36,6 +36,9 @@ export type JobStatus = {
   runsInDay: number;
   expectedInDay: number;
   overrunning: boolean;
+  /** Items the last run could not process. A run that skipped four schools
+   *  still reports lastOk: true — this is the only signal that says otherwise. */
+  lastFailed: number | null;
   manual?: {
     path: string;
     permission: string;
@@ -101,7 +104,12 @@ export function JobsTable({ jobs, permissions }: { jobs: JobStatus[]; permission
   // page could not see: it asks whether a job ran RECENTLY, so a sweep running
   // sixty times an hour was the healthiest-looking row here. That is how a stale
   // every-minute schedule hid for 874 firings.
-  const wrong = (j: JobStatus) => j.neverRun || j.overdue || j.lastOk === false || j.overrunning;
+  // A PARTIAL RUN IS NOT A HEALTHY RUN. A cross-tenant sweep that catches per
+  // school does not throw, so lastOk stays true and every other signal is clean
+  // — a run that skipped four schools looked exactly like one that swept the
+  // whole fleet.
+  const wrong = (j: JobStatus) =>
+    j.neverRun || j.overdue || j.lastOk === false || j.overrunning || (j.lastFailed ?? 0) > 0;
   const sorted = [...jobs].sort((a, b) => Number(wrong(b)) - Number(wrong(a)));
   const problems = sorted.filter(wrong).length;
 
@@ -158,6 +166,8 @@ export function JobsTable({ jobs, permissions }: { jobs: JobStatus[]; permission
                     <Badge variant="destructive">Late</Badge>
                   ) : j.overrunning ? (
                     <Badge variant="destructive">Too often</Badge>
+                  ) : (j.lastFailed ?? 0) > 0 ? (
+                    <Badge variant="destructive">Partial</Badge>
                   ) : (
                     <Badge variant="secondary">OK</Badge>
                   )}
@@ -172,6 +182,12 @@ export function JobsTable({ jobs, permissions }: { jobs: JobStatus[]; permission
                     <span>
                       No record of this job ever running. Check the scheduler is registered and the
                       worker is up.
+                    </span>
+                  ) : (j.lastFailed ?? 0) > 0 ? (
+                    <span className="text-destructive">
+                      Ran, but {j.lastFailed} {j.lastFailed === 1 ? "item" : "items"} could not be
+                      processed and {j.lastFailed === 1 ? "was" : "were"} left as they were. The log
+                      names them.
                     </span>
                   ) : j.lastError ? (
                     <span className="text-destructive">{j.lastError.slice(0, 160)}</span>

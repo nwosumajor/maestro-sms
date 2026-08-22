@@ -240,6 +240,21 @@ export interface JobStatusDto {
   /** Running far MORE often than declared — the opposite failure from `overdue`,
    *  and the one this console could not see. */
   overrunning: boolean;
+  /**
+   * Items the last run could not process, from the job's own `failed` count.
+   *
+   * A CROSS-TENANT SWEEP THAT CATCHES PER SCHOOL DOES NOT THROW, so `lastOk` is
+   * true and every other signal here is clean: a run that skipped four schools
+   * was indistinguishable from a run that did the whole fleet. That is the
+   * failure this exists for — the retention purge and the dunning run both count
+   * their failures now, and a count nobody surfaces is a count nobody acts on.
+   *
+   * The convention is narrow and deliberate: `failed` means "items THIS RUN
+   * could not process". It is not the alumni broadcast's `unreachable` (a fact
+   * about the data, reported and correct) nor a sweep's `skipped` (work that was
+   * not due). null when the job reports no such count.
+   */
+  lastFailed: number | null;
   /** How to run it by hand, if it can be. Absent = timer only. */
   manual?: { path: string; permission: string; scope: "PLATFORM" | "SCHOOL"; where?: string };
 }
@@ -255,6 +270,21 @@ const LATE_FACTOR = 2.5;
  * declared rate, so a threshold of three is nowhere near it.
  */
 const OVERRUN_FACTOR = 3;
+
+/**
+ * The `failed` count out of a job's own result, if it reports one.
+ *
+ * Read from the stored summary rather than a column, because the summary is
+ * whatever each job returns and this convention is opt-in: a job that has no
+ * notion of a partial failure reports nothing and gets null, which is different
+ * from zero. Anything non-numeric is treated as absent — a job that returned a
+ * string here would otherwise render as a permanent alarm nobody could clear.
+ */
+function failedCount(summary: unknown): number | null {
+  if (!summary || typeof summary !== "object") return null;
+  const value = (summary as { failed?: unknown }).failed;
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
 
 @Injectable()
 export class JobRunsService {
@@ -366,6 +396,7 @@ export class JobRunsService {
         lastOk: last?.ok ?? null,
         lastTrigger: last?.trigger ?? null,
         lastSummary: last?.summary ?? null,
+        lastFailed: failedCount(last?.summary),
         lastError: last?.error ?? null,
         neverRun: !last,
         runsInDay,

@@ -84,3 +84,46 @@ describe("a fleet-wide sweep", () => {
     expect(loopBody(RETENTION, "for (const s of schools) {")).toMatch(/catch \(err\)/);
   });
 });
+
+// ---------------------------------------------------------------------------
+
+// A COUNT NOBODY SURFACES IS A COUNT NOBODY ACTS ON.
+//
+// Catching per school is what stops the sweep throwing — so `lastOk` stays TRUE,
+// `overdue` is false, `overrunning` is false, and the operator's jobs console
+// showed a run that skipped four schools as healthy. The console's own health
+// test was `neverRun || overdue || lastOk === false || overrunning`, and a
+// partial run is none of those.
+
+import { readFileSync as read } from "node:fs";
+
+const JOB_RUNS = read(join(__dirname, "../../src/maintenance/job-runs.service.ts"), "utf8");
+const JOBS_TABLE = read(join(__dirname, "../../../web/components/operator/JobsTable.tsx"), "utf8");
+
+describe("what the operator sees after a partial run", () => {
+  it("reads the job's own failed count out of the stored summary", () => {
+    expect(JOB_RUNS).toMatch(/function failedCount/);
+    expect(JOB_RUNS).toMatch(/lastFailed: failedCount\(last\?\.summary\)/);
+  });
+
+  it("treats a missing count as absent, not as zero", () => {
+    // A job with no notion of a partial failure reports nothing, which is a
+    // different fact from "it failed for nobody" — and a non-numeric value must
+    // not become a permanent alarm nobody can clear.
+    expect(JOB_RUNS).toMatch(/typeof value === "number" && Number\.isFinite\(value\)/);
+    expect(JOB_RUNS).toMatch(/lastFailed: number \| null;/);
+  });
+
+  it("counts a partial run as UNHEALTHY on the console", () => {
+    expect(JOBS_TABLE).toMatch(/\(j\.lastFailed \?\? 0\) > 0/);
+    const wrongAt = JOBS_TABLE.indexOf("const wrong = (j: JobStatus)");
+    expect(JOBS_TABLE.slice(wrongAt, wrongAt + 260)).toMatch(/lastFailed/);
+  });
+
+  it("says what was left undone, rather than only that something was", () => {
+    // "Partial" alone sends somebody to the logs to find out whether it was one
+    // school or forty.
+    expect(JOBS_TABLE).toMatch(/could not be/);
+    expect(JOBS_TABLE).toMatch(/left as they were/);
+  });
+});

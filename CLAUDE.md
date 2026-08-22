@@ -1090,6 +1090,18 @@ failing nightly is the one worth fixing) and COUNT the failure into the returned
 result — `DunningResult.failed`, `RetentionResult.failed` — because the job-runs
 catalogue is what an operator reads and "12 scanned, 3 reminded" while four
 schools threw reads as a quiet night. Live: `{"scanned":2,"failed":0,…}`.
+// GOTCHA: catching per school is exactly what stops the sweep THROWING, so
+`lastOk` stays true, `overdue`/`overrunning` are false, and the operator's jobs
+console counted a run that skipped four schools as healthy — its health test was
+`neverRun || overdue || lastOk === false || overrunning`. `JobStatusDto.lastFailed`
+now carries the job's own `failed` out of the stored summary (opt-in: a job with
+no such notion reports null, which is not zero), the console marks the row
+"Partial" and says how many were left as they were. A count nobody surfaces is a
+count nobody acts on.
+// GOTCHA when verifying a client component from SSR HTML: `JobsTable` is
+`"use client"`, so the server sends the DATA and the browser renders the badge —
+grepping the page for "Partial" matches the shipped bundle, not a rendered row.
+Assert the prop (`lastFailed` in the payload) or drive a real browser.
 
 ## Repo workflow & gotchas
 - DB setup order: `prisma migrate deploy` → `pnpm --filter @sms/db rls` →
