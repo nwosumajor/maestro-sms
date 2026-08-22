@@ -34,6 +34,7 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 import { NotificationService } from "../notifications/notification.service";
+import { asDuplicateConflict } from "../common/unique-violation";
 
 /** Who may see every request and act on the leadership stage. */
 const LEADERSHIP = new Set(["school_admin", "principal", "head_teacher"]);
@@ -84,7 +85,12 @@ export class MeetingRequestService {
     if (!MEETING_REQUEST_TOPIC_LABELS[input.topic as keyof typeof MEETING_REQUEST_TOPIC_LABELS]) {
       throw new BadRequestException("Choose what the meeting is about.");
     }
-    const created = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+    // The guard below is the sentence a user reads; a unique index is what
+    // makes it true when two requests arrive together. Translated so the loser
+    // of that race is told the same thing, with the same status, as somebody
+    // who simply pressed second.
+    const created = await asDuplicateConflict('You already have a request open with that teacher.', () =>
+      this.db.runAsTenant(this.ctx(p), async (tx) => {
       const mine = await tx.parentChild.findFirst({
         where: { parentId: p.userId, studentId: input.studentId },
         select: { id: true },
@@ -143,7 +149,8 @@ export class MeetingRequestService {
       })) as RequestRow;
       await this.log(tx, p, "meeting.request.create", row.id, { topic: input.topic, status });
       return row;
-    });
+      }),
+    );
 
     // Told AFTER commit: a notification failure must not lose the request.
     await this.tell(p, created, created.status === "PENDING_APPROVAL" ? "leadership" : "teacher");

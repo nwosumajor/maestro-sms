@@ -74,9 +74,9 @@ describe("the lock that makes the clash check mean something", () => {
 
 // ---------------------------------------------------------------------------
 
-import { BadRequestException } from "@nestjs/common";
+import { BadRequestException, ConflictException } from "@nestjs/common";
 import { Prisma } from "@sms/db";
-import { asDuplicate } from "../../src/common/unique-violation";
+import { asDuplicate, asDuplicateConflict } from "../../src/common/unique-violation";
 
 // The same race, in a shape an INDEX can express — and four places where the
 // rule was code-only:
@@ -127,7 +127,16 @@ describe("the constraint behind the sentence", () => {
     await expect(asDuplicate("x", async () => "ok")).resolves.toBe("ok");
   });
 
-  it("is applied at all four sites, with the guard's message", () => {
+  it("mirrors the guard's own STATUS, not just its words", async () => {
+    // A guard that says 409 and a race that says 400 are distinguishable, which
+    // makes the race observable to the user. Two named helpers rather than a
+    // status parameter, because the choice has to match the guard standing next
+    // to it — it is not a caller's preference.
+    await expect(asDuplicateConflict("x", async () => { throw P2002; })).rejects.toThrow(ConflictException);
+    await expect(asDuplicate("x", async () => { throw P2002; })).rejects.toThrow(BadRequestException);
+  });
+
+  it("is applied at every site the sweep found, with that site's message", () => {
     // The index without the translation is a 500; the translation without the
     // index is the race. Both, at every site.
     const sites: Array<[string, string]> = [
@@ -135,10 +144,13 @@ describe("the constraint behind the sentence", () => {
       ["../../src/transport/transport.service.ts", "Passenger already has an active transport assignment"],
       ["../../src/hr/exit.service.ts", "An exit for this employee is already awaiting a decision"],
       ["../../src/hr/employment.service.ts", "An identical request is already awaiting a decision"],
+      ["../../src/exam/exam.service.ts", "That CBT exam is already attached to a sitting"],
+      ["../../src/meeting/meeting-request.service.ts", "You already have a request open with that teacher."],
+      ["../../src/game/ultimate.service.ts", "you have already entered this competition"],
     ];
     for (const [file, message] of sites) {
       const src = readFileSync(join(__dirname, file), "utf8");
-      const at = src.indexOf("asDuplicate(");
+      const at = Math.max(src.indexOf("asDuplicate("), src.indexOf("asDuplicateConflict("));
       expect([file, at]).not.toEqual([file, -1]);
       expect([file, src.slice(at, at + 200).includes(message)]).toEqual([file, true]);
     }

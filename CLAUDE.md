@@ -1066,7 +1066,15 @@ STAY — they produce the sentence a user reads — and each site wraps its writ
 somebody who simply pressed second, not a 500. // GOTCHA: that translator must
 NOT key off `meta.target` — Prisma does not populate it here (the same trap
 `TimetableService` documents), and a fixture that supplies one makes the tests
-pass against code that cannot work.
+pass against code that cannot work. The translation must also mirror the guard's
+own STATUS (`asDuplicate` = 400, `asDuplicateConflict` = 409) — two named helpers
+rather than a parameter, because a guard that says 409 and a race that says 400
+are distinguishable, which makes the race observable to the user.
+The sweep found 21 such guards; the database already backed 15. Of the six it did
+not, one was a false positive (a "not found" guard) and `ultimate_entry_link` was
+already unique — the remaining six are closed by `20261229000000` and
+`20261230000000` (adding one sitting per CBT exam, and one open meeting request
+per parent+child+teacher).
 
 ## Repo workflow & gotchas
 - DB setup order: `prisma migrate deploy` → `pnpm --filter @sms/db rls` →

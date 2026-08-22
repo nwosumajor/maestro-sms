@@ -42,6 +42,7 @@ import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 import { SchoolRegionService } from "../foundation/school-region.service";
 import { assertStillHere } from "../common/still-here";
 import { lockPerson } from "../common/person-lock";
+import { asDuplicateConflict } from "../common/unique-violation";
 
 /** How many upcoming exams a personal list will return. A student sits a dozen a
  *  term; a parent of several children a few dozen. Well clear of real use, but it
@@ -220,7 +221,12 @@ export class ExamService {
       cbtExamId?: string | null;
     },
   ): Promise<ExamSittingDto> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    // The guard below is the sentence a user reads; a unique index is what
+    // makes it true when two requests arrive together. Translated so the loser
+    // of that race is told the same thing, with the same status, as somebody
+    // who simply pressed second.
+    return asDuplicateConflict('That CBT exam is already attached to a sitting', () =>
+      this.db.runAsTenant(this.ctx(p), async (tx) => {
       // Validate the schedule + CBT exam are in-tenant, and that a CBT-backed
       // sitting only attaches a DRAFT exam (it gets published via the schedule
       // approval, never already-live).
@@ -266,7 +272,8 @@ export class ExamService {
         tx,
       );
       return this.toSittingDto(row, 0, 0, { status: cbtStatus, released: false, started: 0, submitted: 0 }, className);
-    });
+    }),
+    );
   }
 
   /**

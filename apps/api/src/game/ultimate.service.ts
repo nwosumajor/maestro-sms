@@ -63,6 +63,7 @@ import {
 } from "../integrity/integrity.foundation";
 import { effectiveGameSettings } from "./game-settings.util";
 import { GameEventsService } from "./game-events.service";
+import { asDuplicateConflict } from "../common/unique-violation";
 
 const cryptoRng = () => randomInt(0, 1_000_000) / 1_000_000;
 
@@ -286,7 +287,12 @@ export class UltimateService {
     if (!isValidHandle(trimmed)) {
       throw new BadRequestException("handle must be 3–24 chars: letters, digits, space, _ or -");
     }
-    const entry = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+    // The guard below is the sentence a user reads; a unique index is what
+    // makes it true when two requests arrive together. Translated so the loser
+    // of that race is told the same thing, with the same status, as somebody
+    // who simply pressed second.
+    const entry = await asDuplicateConflict('you have already entered this competition', () =>
+      this.db.runAsTenant(this.ctx(p), async (tx) => {
       const comp = await this.requireCompetition(tx, competitionId);
       if (comp.status !== "ACTIVE") throw new ConflictException("competition is not open");
 
@@ -357,7 +363,8 @@ export class UltimateService {
       });
       await this.log(tx, p, "ultimate.enter", competitionId, { participantId });
       return this.myEntryView(tx, competitionId, participantId, trimmed);
-    });
+      }),
+    );
     this.events.emitChanged(competitionId); // a new participant appears on the board
     return entry;
   }

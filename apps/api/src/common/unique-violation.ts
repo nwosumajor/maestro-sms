@@ -18,7 +18,7 @@
 // aborted the surrounding transaction, so any follow-up read fails too.
 // =============================================================================
 
-import { BadRequestException } from "@nestjs/common";
+import { BadRequestException, ConflictException } from "@nestjs/common";
 import { Prisma } from "@sms/db";
 
 /**
@@ -35,6 +35,27 @@ export async function asDuplicate<T>(message: string, fn: () => Promise<T>): Pro
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
       throw new BadRequestException(message);
+    }
+    throw e;
+  }
+}
+
+/**
+ * The same translation for a guard that refuses with 409 rather than 400.
+ *
+ * TWO functions rather than a status parameter, because the choice is not a
+ * caller's preference: it has to MATCH the guard standing next to it. A guard
+ * that says 409 and a race that says 400 are distinguishable, which makes the
+ * race observable to the user and produces a support report nobody can
+ * reproduce — the whole point being that losing a race and simply pressing
+ * second are the same event.
+ */
+export async function asDuplicateConflict<T>(message: string, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+      throw new ConflictException(message);
     }
     throw e;
   }
