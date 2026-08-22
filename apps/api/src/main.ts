@@ -1,6 +1,7 @@
 import "reflect-metadata";
 import type { Server as HttpServer } from "node:http";
 import * as Sentry from "@sentry/node";
+import { sentryOptions } from "./observability/sentry-options";
 import { HttpAdapterHost, NestFactory } from "@nestjs/core";
 import { Logger as PinoLogger } from "nestjs-pino";
 import { AppModule } from "./app.module";
@@ -11,12 +12,10 @@ async function bootstrap() {
   // Error tracking: only active when a DSN is configured (no-op otherwise). The
   // ErrorLoggingInterceptor captures 5xx with request/tenant context.
   if (process.env.SENTRY_DSN) {
-    Sentry.init({
-      dsn: process.env.SENTRY_DSN,
-      environment: process.env.NODE_ENV ?? "production",
-      tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE ?? 0),
-      release: process.env.APP_RELEASE,
-    });
+    // The options live in observability/sentry-options.ts so the test can
+    // exercise the SAME object. On defaults this sent request bodies, headers
+    // and cookies to a third party — a child's medical record among them.
+    Sentry.init(sentryOptions());
   }
 
   // rawBody: true preserves the exact bytes so the Paystack webhook HMAC

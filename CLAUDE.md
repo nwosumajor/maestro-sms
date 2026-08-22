@@ -987,6 +987,33 @@ query string is stripped before matching (a `?` would defeat the anchor).
 Over-withholding is not free — every id withheld is an incident somebody cannot
 trace — so reads, creates and closes are deliberately NOT on the list.
 
+### Sentry gets the exception, and nothing from the request
+`Sentry.init` ran on defaults. `requestDataIntegration` defaults to
+`{ cookies: true, data: true, headers: true, query_string: true }` — and `data`
+is THE REQUEST BODY. Run against this app's own SDK (8.55.2) with a transport
+that never leaves the process, one captured exception carried
+`{allergies:"penicillin", conditions:"asthma", medication:"salbutamol inhaler"}`,
+the `Authorization` bearer token AND the session cookie: a child's medical record
+sent to a third party, for data this platform field-encrypts at rest with a
+per-tenant key and audit-logs every read of. A 500 on `POST /auth/login` would
+have sent the plaintext password the same way. pino had already been hardened for
+exactly this (it redacts authorization/cookie/x-stepup/webhook signatures and
+strips the query string) — two recorders of the same requests, one careful and
+one not.
+`observability/sentry-options.ts` now owns the options main.ts passes, so the
+test exercises THE SAME object rather than a copy. Nothing request-derived
+survives: no body, headers, cookies or query string. What a 5xx is debugged from
+— the exception and its stack, plus the request id, method, matched route, status
+and tenant that `ErrorLoggingInterceptor` attaches explicitly — is untouched.
+BELT AND BRACES on purpose: the integration option is version-specific (its
+defaults are internal and have changed before) and `beforeSend` is the published
+contract that runs last on every event. // GOTCHA: deleting `query_string` is not
+enough — the same secret lives INSIDE `request.url`, so `…/medical?token=secret`
+survived until the url's query was stripped too (the test found that, not a
+reading of the SDK). // GOTCHA: the redundancy is asserted STRUCTURALLY, because
+behaviour cannot see it — `beforeSend` scrubs everything, so removing the
+integration option changes no output and every behavioural test still passes.
+
 ## Repo workflow & gotchas
 - DB setup order: `prisma migrate deploy` → `pnpm --filter @sms/db rls` →
   `prisma db seed` (or `pnpm --filter @sms/db setup`). RLS lives in `prisma/rls/`,
