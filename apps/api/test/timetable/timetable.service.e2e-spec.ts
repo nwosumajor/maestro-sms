@@ -23,6 +23,15 @@ import { PrismaTenantService } from "../../src/foundation/prisma-tenant.service"
 import { AuditLogService } from "../../src/foundation/audit-log.service";
 import type { Principal } from "../../src/integrity/integrity.foundation";
 
+/**
+ * Deleting a lesson now tells anyone who was covering it — its cascade removes
+ * their assignment. These suites assert timetable behaviour, so the notice is a
+ * no-op that records nothing.
+ */
+const coverStub = () =>
+  ({ announceCoverWithdrawn: jest.fn().mockResolvedValue(undefined) }) as never;
+
+
 const APP_URL = process.env.TEST_DATABASE_URL;
 const ADMIN_URL = process.env.TEST_ADMIN_URL;
 const d = APP_URL && ADMIN_URL ? describe : describe.skip;
@@ -98,7 +107,7 @@ d("TimetableService integration (CSP auto-generation, RLS)", () => {
       );
     }
     const tenant = new PrismaTenantService() as never;
-    svc = new TimetableService(tenant, new AuditLogService() as never);
+    svc = new TimetableService(tenant, new AuditLogService() as never, coverStub());
   });
 
   afterAll(async () => {

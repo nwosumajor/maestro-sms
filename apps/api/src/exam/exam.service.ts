@@ -539,16 +539,45 @@ export class ExamService {
     return { date, halls };
   }
 
+  /**
+   * Delete a sitting — and account for what went with it.
+   *
+   * The cascade takes every seat and every invigilator. Both were silent: the
+   * rostered staff kept a notice telling them to be in Hall A for an exam that
+   * no longer exists, the seated pupils' `/exams/mine` simply emptied, and the
+   * audit row recorded neither how many seats nor how many duties were
+   * destroyed. "It cascades" is a fact about the database, not an answer to
+   * "who needs to know".
+   */
   async deleteSitting(p: Principal, id: string): Promise<{ deleted: boolean }> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    const outcome = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const sitting = await tx.examSitting.findFirst({
+        where: { id },
+        select: { title: true, date: true, startsAt: true, hall: true },
+      });
+      // Read BEFORE the delete: after it, the cascade has taken them and there
+      // is nobody left to tell.
+      const roster = (await tx.examInvigilator.findMany({ where: { sittingId: id }, select: { staffId: true } })) as Array<{ staffId: string }>;
+      const seats = await tx.examSeat.count({ where: { sittingId: id } });
       const res = await tx.examSitting.deleteMany({ where: { id } }); // cascades seats + invigilators
       if (res.count === 0) throw new NotFoundException("Sitting not found");
       await this.audit.record(
-        { actorId: p.userId, action: "exam.sitting.delete", entity: "exam_sitting", entityId: id, schoolId: p.schoolId },
+        {
+          actorId: p.userId,
+          action: "exam.sitting.delete",
+          entity: "exam_sitting",
+          entityId: id,
+          schoolId: p.schoolId,
+          // What was destroyed with it, so the trail answers "where did those
+          // thirty seats go" a term later.
+          metadata: { seatsDeleted: seats, invigilatorsRemoved: roster.length },
+        },
         tx,
       );
-      return { deleted: true };
+      return { sitting, staffIds: roster.map((r) => r.staffId) };
     });
+    await this.tellInvigilatorsItIsOff(p, outcome.staffIds, outcome.sitting, "An exam you were invigilating was cancelled");
+    return { deleted: true };
   }
 
   // --- schedules (maker-checker) + day-of release -----------------------------
@@ -965,16 +994,62 @@ export class ExamService {
     return { sittingId, staffId, staffName: outcome.staff.name, lead };
   }
 
+  /**
+   * Take an invigilation duty away — and SAY SO.
+   *
+   * Assigning one sends "You're invigilating Maths Paper 1 on the 4th at 09:00
+   * (Hall A)". Removing it said nothing at all, so the only record the person
+   * had still told them to be in a hall they are no longer rostered for. The
+   * notice is half of the assignment; a duty that can be given silently taken
+   * away is a duty nobody can rely on.
+   */
   async removeInvigilator(p: Principal, sittingId: string, staffId: string): Promise<{ removed: boolean }> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    const outcome = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const sitting = await tx.examSitting.findFirst({
+        where: { id: sittingId },
+        select: { title: true, date: true, startsAt: true, hall: true },
+      });
       const res = await tx.examInvigilator.deleteMany({ where: { sittingId, staffId } });
       if (res.count === 0) throw new NotFoundException("Not found");
       await this.audit.record(
         { actorId: p.userId, action: "exam.invigilator.remove", entity: "exam_sitting", entityId: sittingId, schoolId: p.schoolId, metadata: { staffId } },
         tx,
       );
-      return { removed: true };
+      return sitting;
     });
+    await this.tellInvigilatorsItIsOff(p, [staffId], outcome, "You are no longer invigilating");
+    return { removed: true };
+  }
+
+  /**
+   * One notice, three callers: a roster removal, a re-seat that drops somebody,
+   * and a deleted sitting. Best-effort AFTER the commit, like the assignment —
+   * a duty that has been withdrawn stays withdrawn whether or not the message
+   * gets through, and failing the removal because a notification did not send
+   * would leave the roster wrong instead of merely quiet.
+   */
+  private async tellInvigilatorsItIsOff(
+    p: Principal,
+    staffIds: string[],
+    sitting: { title: string; date: Date; startsAt: string; hall: string } | null,
+    title: string,
+  ): Promise<void> {
+    if (staffIds.length === 0 || !sitting) return;
+    const when = `${this.dateOnly(sitting.date)} at ${sitting.startsAt}`;
+    for (const staffId of staffIds) {
+      try {
+        await this.notifications.enqueue(this.ctx(p), {
+          recipientId: staffId,
+          type: "GENERIC",
+          title,
+          body: `${sitting.title} on ${when} (${sitting.hall}) is no longer yours to invigilate. Check the exam board for your current duties.`,
+          data: { sittingId: null },
+          channels: ["EMAIL"],
+        });
+      } catch {
+        /* non-fatal */
+      }
+    }
   }
 
   async getInvigilators(p: Principal, sittingId: string): Promise<InvigilationDto[]> {

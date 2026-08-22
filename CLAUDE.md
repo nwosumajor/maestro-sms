@@ -1014,6 +1014,24 @@ reading of the SDK). // GOTCHA: the redundancy is asserted STRUCTURALLY, because
 behaviour cannot see it — `beforeSend` scrubs everything, so removing the
 integration option changes no output and every behavioural test still passes.
 
+### A duty that is given with a notice is taken away with one
+Assigning work notified the person; withdrawing it notified nobody, in two
+modules at once: `removeInvigilator`, `deleteSitting` (which cascades EVERY seat
+and invigilator), `removeCover`, and `deleteEntry` (whose `lesson_cover` FK is
+ON DELETE CASCADE) were all silent. So the only record a teacher held still told
+them to be in Hall A for an exam that no longer exists, or to teach a lesson that
+is no longer theirs. A teacher who turns up has wasted a free period; one who
+does NOT turn up, assuming it was withdrawn, is a class left unattended — the
+thing cover exists to prevent.
+They NOTIFY rather than refuse: deleting is legitimate (timetables change, exams
+are cancelled) and the defect was the silence. The cascade path and the explicit
+removal share ONE notice (`LessonCoverService.announceCoverWithdrawn`), so a
+reliever is told the same thing whichever way the duty vanished, and only work
+still AHEAD is announced. `deleteSitting` now also records `seatsDeleted` /
+`invigilatorsRemoved` — "it cascades" is a fact about the database, not an answer
+to "where did those thirty seats go". // GOTCHA: the roster must be read BEFORE
+the delete; afterwards the cascade has taken it and there is nobody left to tell.
+
 ## Repo workflow & gotchas
 - DB setup order: `prisma migrate deploy` → `pnpm --filter @sms/db rls` →
   `prisma db seed` (or `pnpm --filter @sms/db setup`). RLS lives in `prisma/rls/`,

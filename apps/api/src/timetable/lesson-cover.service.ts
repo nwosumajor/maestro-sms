@@ -241,17 +241,79 @@ export class LessonCoverService {
     };
   }
 
-  /** Remove a cover assignment. timetable.write. */
+  /**
+   * Remove a cover assignment — and TELL THE RELIEVER.
+   *
+   * Assigning one notifies them; removing it said nothing, so the only record
+   * they had still told them to teach a lesson that is no longer theirs. A
+   * teacher who turns up is a wasted free period; a teacher who does not turn up
+   * because they assumed it had been withdrawn is a class left unattended, which
+   * is the thing this whole feature exists to prevent.
+   */
   async removeCover(p: Principal, id: string): Promise<{ removed: boolean }> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    const outcome = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      // Read the row BEFORE deleting it — afterwards there is nobody to tell.
+      const row = (await tx.lessonCover.findFirst({
+        where: { id },
+        select: { coveringTeacherId: true, date: true, timetableEntryId: true },
+      })) as { coveringTeacherId: string; date: Date; timetableEntryId: string } | null;
       const res = await tx.lessonCover.deleteMany({ where: { id } });
       if (res.count === 0) throw new NotFoundException("Cover not found");
       await this.audit.record(
         { actorId: p.userId, action: "timetable.cover.remove", entity: "lesson_cover", entityId: id, schoolId: p.schoolId },
         tx,
       );
-      return { removed: true };
+      if (!row) return null;
+      const entry = (await tx.timetableEntry.findFirst({
+        where: { id: row.timetableEntryId },
+        select: { subject: true, classId: true },
+      })) as { subject: string; classId: string } | null;
+      const className = entry
+        ? ((await tx.class.findFirst({ where: { id: entry.classId }, select: { name: true } })) as { name: string } | null)?.name ?? ""
+        : "";
+      return { ...row, subject: entry?.subject ?? "", className };
     });
+    await this.tellRelieverItIsOff(p, outcome);
+    return { removed: true };
+  }
+
+  /**
+   * The other half of "Cover lesson assigned".
+   *
+   * Best-effort after the commit, exactly like the assignment notice: the cover
+   * is withdrawn whether or not the message gets through, and failing the
+   * removal because a notification did not send would leave the roster wrong
+   * rather than merely quiet.
+   */
+  /** Public so a timetable delete — whose cascade removes the cover row — can
+   *  send the SAME notice rather than a second wording of it. */
+  async announceCoverWithdrawn(
+    p: Principal,
+    row: { coveringTeacherId: string; date: Date; subject: string; className: string },
+  ): Promise<void> {
+    return this.tellRelieverItIsOff(p, row);
+  }
+
+  private async tellRelieverItIsOff(
+    p: Principal,
+    row: { coveringTeacherId: string; date: Date; subject: string; className: string } | null,
+  ): Promise<void> {
+    if (!row) return;
+    try {
+      await this.notifications.enqueue(this.ctx(p), {
+        recipientId: row.coveringTeacherId,
+        type: "GENERIC",
+        title: "A cover lesson was taken off your list",
+        body:
+          `You are no longer covering ${row.subject || "a lesson"}` +
+          `${row.className ? ` for ${row.className}` : ""} on ${row.date.toISOString().slice(0, 10)}. ` +
+          `Check your cover list for what you are still down for.`,
+        data: {},
+        channels: ["EMAIL"],
+      });
+    } catch {
+      /* non-fatal */
+    }
   }
 
   /** A teacher's own upcoming cover duties. Self-scoped. */

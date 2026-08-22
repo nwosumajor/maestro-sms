@@ -5,6 +5,15 @@
 import { TimetableService } from "../../src/timetable/timetable.service";
 import type { Principal, TenantContext, TenantTx } from "../../src/integrity/integrity.foundation";
 
+/**
+ * Deleting a lesson now tells anyone who was covering it — its cascade removes
+ * their assignment. These suites assert timetable behaviour, so the notice is a
+ * no-op that records nothing.
+ */
+const coverStub = () =>
+  ({ announceCoverWithdrawn: jest.fn().mockResolvedValue(undefined) }) as never;
+
+
 interface Fakes {
   /** What timetableEntry.findFirst returns for the conflict probes, in order. */
   conflicts?: ({ id: string } | null)[];
@@ -47,7 +56,7 @@ function makeService(f: Fakes) {
 
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
-  const service = new TimetableService(db as never, audit as never);
+  const service = new TimetableService(db as never, audit as never, coverStub());
   return { service, tx };
 }
 

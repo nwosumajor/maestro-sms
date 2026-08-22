@@ -46,6 +46,7 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 import { generateTimetable, unavailableKey, type Offering, type Slot } from "./auto-timetable";
+import { LessonCoverService } from "./lesson-cover.service";
 
 // junior_admin owns timetabling (CLAUDE.md) and holds timetable.write. It could
 // already create periods/rooms/entries (those gate on the permission only), but
@@ -95,6 +96,7 @@ export class TimetableService {
   constructor(
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
+    private readonly cover: LessonCoverService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -533,14 +535,46 @@ export class TimetableService {
     });
   }
 
+  /**
+   * Delete a lesson from the timetable — and tell anyone who was covering it.
+   *
+   * `lesson_cover` references this row ON DELETE CASCADE, so removing a lesson
+   * silently deletes the cover assignments attached to it. Somebody was told
+   * "Cover lesson assigned" for next Tuesday; nothing told them it had gone
+   * with the lesson. Deleting the lesson is legitimate — timetables change —
+   * so this notifies rather than refuses; the defect was the silence, not the
+   * delete.
+   *
+   * Only FUTURE cover is announced. A cover date that has already passed is
+   * history, and telling somebody a lesson they taught last month is off would
+   * be noise on the one channel that has to stay worth reading.
+   */
   async deleteEntry(p: Principal, id: string) {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const existing = await tx.timetableEntry.findFirst({ where: { id }, select: { id: true } });
+    const outcome = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const existing = await tx.timetableEntry.findFirst({
+        where: { id },
+        select: { id: true, subject: true, classId: true },
+      });
       if (!existing) throw new NotFoundException("Timetable entry not found");
+      // Read the cover BEFORE the cascade removes it.
+      const today = new Date(new Date().toISOString().slice(0, 10));
+      const covers = (await tx.lessonCover.findMany({
+        where: { timetableEntryId: id, date: { gte: today } },
+        select: { coveringTeacherId: true, date: true },
+      })) as Array<{ coveringTeacherId: string; date: Date }>;
+      const className =
+        ((await tx.class.findFirst({ where: { id: existing.classId }, select: { name: true } })) as { name: string } | null)
+          ?.name ?? "";
       await tx.timetableEntry.delete({ where: { id } });
-      await this.log(tx, p, "timetable.entry.delete", "timetable_entry", id);
-      return { id, deleted: true };
+      await this.log(tx, p, "timetable.entry.delete", "timetable_entry", id, {
+        coverAssignmentsRemoved: covers.length,
+      });
+      return covers.map((c) => ({ ...c, subject: existing.subject, className }));
     });
+    // One shared notice with the explicit removal path, so a reliever is told
+    // the same thing whichever way the duty disappeared.
+    for (const row of outcome) await this.cover.announceCoverWithdrawn(p, row);
+    return { id, deleted: true };
   }
 
   async listEntries(

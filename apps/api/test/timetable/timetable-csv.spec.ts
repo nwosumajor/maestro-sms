@@ -14,6 +14,15 @@
 import { TimetableService } from "../../src/timetable/timetable.service";
 import type { Principal, TenantContext, TenantTx } from "../../src/integrity/integrity.foundation";
 
+/**
+ * Deleting a lesson now tells anyone who was covering it — its cascade removes
+ * their assignment. These suites assert timetable behaviour, so the notice is a
+ * no-op that records nothing.
+ */
+const coverStub = () =>
+  ({ announceCoverWithdrawn: jest.fn().mockResolvedValue(undefined) }) as never;
+
+
 const admin = { userId: "u1", schoolId: "s1", roles: ["school_admin"], permissions: [] } as unknown as Principal;
 
 function harness(rows: Array<Record<string, unknown>>) {
@@ -46,7 +55,7 @@ function harness(rows: Array<Record<string, unknown>>) {
     runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
     runAsTenantReadOnly: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
   };
-  const svc = new TimetableService(db as never, { record: jest.fn() } as never);
+  const svc = new TimetableService(db as never, { record: jest.fn() } as never, coverStub());
   return { svc, tx, get viewWhere() { return viewWhere; } };
 }
 
