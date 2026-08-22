@@ -35,6 +35,7 @@ import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 import { NotificationService } from "../notifications/notification.service";
 import { assertStillHere } from "../common/still-here";
+import { asDuplicate } from "../common/unique-violation";
 
 type Json = Record<string, string>;
 
@@ -306,7 +307,12 @@ export class HostelService {
   // --- allocations ----------------------------------------------------------
 
   async allocate(p: Principal, roomId: string, studentId: string): Promise<HostelAllocationDto> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    // The guard below is the sentence a user reads; a partial unique index
+    // (migration 20261229000000) is what makes it true when two people press
+    // at once. Translate the constraint so the loser of that race is told the
+    // same thing as somebody who simply pressed second, not a 500.
+    return asDuplicate('Student already has an active hostel allocation', () =>
+      this.db.runAsTenant(this.ctx(p), async (tx) => {
       const room = await tx.hostelRoom.findFirst({ where: { id: roomId } });
       if (!room) throw new NotFoundException("Room not found");
       await this.assertHostelInScope(tx, p, room.hostelId);
@@ -340,7 +346,8 @@ export class HostelService {
       });
       await this.log(tx, p, "hostel.allocate", a.id, { roomId, studentId });
       return this.allocationDto(tx, a.id);
-    });
+    }),
+    );
   }
 
   async vacate(p: Principal, allocationId: string): Promise<HostelAllocationDto> {

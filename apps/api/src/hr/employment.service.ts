@@ -21,6 +21,7 @@ import {
   type TenantContext,
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
+import { asDuplicate } from "../common/unique-violation";
 
 type ChangeRow = {
   id: string;
@@ -61,7 +62,12 @@ export class EmploymentService {
       reason?: string;
     },
   ): Promise<EmploymentChangeDto> {
-    const dto = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+    // The guard below is the sentence a user reads; a partial unique index
+    // (migration 20261229000000) is what makes it true when two people press at
+    // once. Translate the constraint so the loser of that race is told the same
+    // thing as somebody who simply pressed second, not a 500.
+    const dto = await asDuplicate("An identical request is already awaiting a decision", () =>
+      this.db.runAsTenant(this.ctx(p), async (tx) => {
       const emp = await tx.employee.findFirst({ where: { userId: input.userId } });
       if (!emp) throw new NotFoundException("Employee record not found");
       if (input.type === "CONFIRMATION" && emp.confirmationStatus !== "PROBATION") {
@@ -108,7 +114,8 @@ export class EmploymentService {
         tx,
       );
       return this.toDto(row as ChangeRow, null);
-    });
+      }),
+    );
     // Maker-checker: a DIFFERENT hr.salary.approve holder decides a confirmation,
     // promotion or contract renewal, and none of them was told one was waiting.
     await this.notifications.notifyPermissionHolders(

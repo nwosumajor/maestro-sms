@@ -71,3 +71,76 @@ describe("the lock that makes the clash check mean something", () => {
     expect(LOCK_SRC).not.toMatch(/pg_advisory_unlock/);
   });
 });
+
+// ---------------------------------------------------------------------------
+
+import { BadRequestException } from "@nestjs/common";
+import { Prisma } from "@sms/db";
+import { asDuplicate } from "../../src/common/unique-violation";
+
+// The same race, in a shape an INDEX can express — and four places where the
+// rule was code-only:
+//
+//   hostel_allocation          "Student already has an active hostel allocation"
+//   transport_assignment       "Passenger already has an active transport assignment"
+//   staff_exit                 "An exit for this employee is already awaiting a decision"
+//   employment_change_request  "An identical request is already awaiting a decision"
+//
+// A boarder in two beds, a passenger on two routes, and on the two maker-checker
+// paths two settlements or two pay changes awaiting approval for one person —
+// either of which is money.
+//
+// A partial unique index, NOT a lock: "one row per person among those in the
+// active state" is exactly an index, unlike "does any row overlap this window".
+// Declarative, binding on every writer for ever, free at read time.
+
+describe("the constraint behind the sentence", () => {
+  const P2002 = new Prisma.PrismaClientKnownRequestError("Unique constraint failed on the (not available)", {
+    code: "P2002",
+    clientVersion: "5.22.0",
+    // meta.target DELIBERATELY absent: this deployment does not send one, and a
+    // translator that keys off the column list silently never fires. A fixture
+    // that supplied one would make this test pass against code that cannot work.
+  });
+
+  it("turns a unique violation into the guard's own words", async () => {
+    await expect(asDuplicate("Student already has an active hostel allocation", async () => {
+      throw P2002;
+    })).rejects.toThrow("Student already has an active hostel allocation");
+  });
+
+  it("answers the loser of a race exactly as it answers a late press", async () => {
+    // If the two are distinguishable, the race becomes observable to the user —
+    // and support gets a report of an error nobody can reproduce.
+    await expect(asDuplicate("x", async () => { throw P2002; })).rejects.toThrow(BadRequestException);
+  });
+
+  it("does not swallow anything else", async () => {
+    // A foreign-key failure or a dropped connection must not be reported as a
+    // duplicate; that is how a real fault gets closed as user error.
+    const other = new Prisma.PrismaClientKnownRequestError("FK", { code: "P2003", clientVersion: "5.22.0" });
+    await expect(asDuplicate("x", async () => { throw other; })).rejects.toThrow("FK");
+    await expect(asDuplicate("x", async () => { throw new Error("socket closed"); })).rejects.toThrow("socket closed");
+  });
+
+  it("returns the value untouched when nothing collides", async () => {
+    await expect(asDuplicate("x", async () => "ok")).resolves.toBe("ok");
+  });
+
+  it("is applied at all four sites, with the guard's message", () => {
+    // The index without the translation is a 500; the translation without the
+    // index is the race. Both, at every site.
+    const sites: Array<[string, string]> = [
+      ["../../src/hostel/hostel.service.ts", "Student already has an active hostel allocation"],
+      ["../../src/transport/transport.service.ts", "Passenger already has an active transport assignment"],
+      ["../../src/hr/exit.service.ts", "An exit for this employee is already awaiting a decision"],
+      ["../../src/hr/employment.service.ts", "An identical request is already awaiting a decision"],
+    ];
+    for (const [file, message] of sites) {
+      const src = readFileSync(join(__dirname, file), "utf8");
+      const at = src.indexOf("asDuplicate(");
+      expect([file, at]).not.toEqual([file, -1]);
+      expect([file, src.slice(at, at + 200).includes(message)]).toEqual([file, true]);
+    }
+  });
+});

@@ -27,6 +27,7 @@ import {
   type TenantContext,
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
+import { asDuplicate } from "../common/unique-violation";
 
 type ExitRow = {
   id: string;
@@ -67,7 +68,12 @@ export class ExitService {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(input.lastWorkingDay)) {
       throw new BadRequestException("lastWorkingDay must be YYYY-MM-DD");
     }
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    // The guard below is the sentence a user reads; a partial unique index
+    // (migration 20261229000000) is what makes it true when two people press
+    // at once. Translate the constraint so the loser of that race is told the
+    // same thing as somebody who simply pressed second, not a 500.
+    return asDuplicate('An exit for this employee is already awaiting a decision', () =>
+      this.db.runAsTenant(this.ctx(p), async (tx) => {
       const emp = await tx.employee.findFirst({ where: { userId: input.userId } });
       if (!emp) throw new NotFoundException("Employee record not found");
       if (emp.status !== "ACTIVE") throw new BadRequestException("This employee is not active");
@@ -105,7 +111,8 @@ export class ExitService {
         tx,
       );
       return this.toDto(p, row as ExitRow, null);
-    });
+    }),
+    );
   }
 
   /** Checker: decide (≠ initiator). Approval applies everything in one tx. */

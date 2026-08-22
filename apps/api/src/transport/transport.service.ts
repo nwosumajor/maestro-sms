@@ -38,6 +38,7 @@ import { SchoolRegionService } from "../foundation/school-region.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 import { NotificationService } from "../notifications/notification.service";
 import { assertStillHere } from "../common/still-here";
+import { asDuplicate } from "../common/unique-violation";
 
 type Json = Record<string, string>;
 
@@ -303,7 +304,12 @@ export class TransportService {
     p: Principal,
     input: { routeId: string; stopId?: string | null; passengerId: string; passengerType: "STUDENT" | "STAFF" },
   ): Promise<TransportAssignmentDto> {
-    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+    // The guard below is the sentence a user reads; a partial unique index
+    // (migration 20261229000000) is what makes it true when two people press
+    // at once. Translate the constraint so the loser of that race is told the
+    // same thing as somebody who simply pressed second, not a 500.
+    return asDuplicate('Passenger already has an active transport assignment', () =>
+      this.db.runAsTenant(this.ctx(p), async (tx) => {
       const route = await tx.transportRoute.findFirst({ where: { id: input.routeId } });
       if (!route) throw new NotFoundException("Route not found");
       if (route.status !== "ACTIVE") throw new BadRequestException("Route is retired");
@@ -339,7 +345,8 @@ export class TransportService {
       });
       await this.log(tx, p, "transport.assign", a.id, { routeId: input.routeId, passengerId: input.passengerId });
       return this.assignmentDto(tx, a.id);
-    });
+    }),
+    );
   }
 
   /** Move a passenger to a different route/stop and ALERT their guardians. */

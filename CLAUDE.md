@@ -1053,6 +1053,20 @@ already uses for the shared result row. Keyed per PERSON (seating a hall is a
 burst of these, so a per-school lock would serialise the lot) and per SCHOOL (the
 advisory namespace is cluster-wide, so without the tenant one school's rostering
 blocks another's). `_xact_` so nothing is left held by a request that threw.
+The SAME race in a shape an index CAN express is closed with a partial unique
+index instead (migration `20261229000000`): "one active X per person" was
+code-only on four paths — `hostel_allocation`, `transport_assignment`,
+`staff_exit`, `employment_change_request` — meaning a boarder in two beds, a
+passenger on two routes, and two settlements or two pay changes awaiting approval
+for one person. Prefer the INDEX wherever the rule is expressible as one: it is
+declarative, binds every writer for ever including a manual fix at 2am, and costs
+nothing at read time; the lock is for rules an index cannot state. The code guards
+STAY — they produce the sentence a user reads — and each site wraps its write in
+`asDuplicate(message, …)` so the loser of a race is told the same thing as
+somebody who simply pressed second, not a 500. // GOTCHA: that translator must
+NOT key off `meta.target` — Prisma does not populate it here (the same trap
+`TimetableService` documents), and a fixture that supplies one makes the tests
+pass against code that cannot work.
 
 ## Repo workflow & gotchas
 - DB setup order: `prisma migrate deploy` → `pnpm --filter @sms/db rls` →
