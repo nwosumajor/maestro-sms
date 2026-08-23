@@ -107,7 +107,7 @@ export function AdjustmentsPanel({
           </table>
         )}
         <div className="flex flex-wrap items-center gap-2 rounded-md border p-3">
-          <select
+          <select aria-label="Adjustment kind"
             className="rounded-md border bg-background p-1.5 text-sm"
             value={kind}
             onChange={(e) => setKind(e.target.value as "DISCOUNT" | "WAIVER")}

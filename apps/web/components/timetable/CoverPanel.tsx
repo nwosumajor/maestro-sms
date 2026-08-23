@@ -103,7 +103,7 @@ export function CoverPanel({ teachers }: { teachers: { id: string; name: string;
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1.5">
-                        <select
+                        <select aria-label="Assign reliever"
                           className="rounded-md border bg-background p-1 text-xs"
                           value={picks[key(c)] ?? ""}
                           onChange={(e) => setPicks((p) => ({ ...p, [key(c)]: e.target.value }))}

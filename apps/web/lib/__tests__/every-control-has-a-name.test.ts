@@ -52,10 +52,11 @@ function withoutComments(src: string): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 }
 
-/** Every real `<input …>` extent: scan to the matching `>` at brace depth 0. */
-function inputTags(src: string): Array<{ at: number; tag: string }> {
+/** Every real `<input …>` / `<select …>` / `<textarea …>` extent: scan to the
+ *  matching `>` at brace depth 0. */
+function controlTags(src: string, name: string): Array<{ at: number; tag: string }> {
   const out: Array<{ at: number; tag: string }> = [];
-  for (const m of src.matchAll(/<input\b/g)) {
+  for (const m of src.matchAll(new RegExp(`<${name}\\b`, "g"))) {
     let i = m.index! + m[0].length;
     let depth = 0;
     while (i < src.length) {
@@ -81,13 +82,25 @@ function wrappedInLabel(src: string, at: number): boolean {
 
 const files = walk(WEB);
 
+/**
+ * The shadcn primitives, which FORWARD props rather than being controls.
+ *
+ * `ui/textarea.tsx` has no label of its own and should not: its callers supply
+ * one, and hard-coding a name there would put the same wrong label on every
+ * textarea in the app.
+ */
+const PRIMITIVES = ["components/ui/textarea.tsx", "components/ui/input.tsx"];
+
+const CONTROLS = ["input", "select", "textarea"];
+
 describe("every text control can be named by a screen reader", () => {
   const silent: string[] = [];
   const placeholderOnly: string[] = [];
 
   for (const file of files) {
     const src = withoutComments(readFileSync(file, "utf8"));
-    for (const { at, tag } of inputTags(src)) {
+    if (PRIMITIVES.some((q) => file.endsWith(q))) continue;
+    for (const { at, tag } of CONTROLS.flatMap((c) => controlTags(src, c))) {
       // Hidden fields and checkboxes/radios are named by their own labels or
       // are not user-facing text entry.
       if (/type="(hidden|checkbox|radio)"/.test(tag)) continue;
@@ -119,7 +132,10 @@ describe("every text control can be named by a screen reader", () => {
   it("actually parsed something, rather than matching nothing", () => {
     // The gate's own blind spot, made visible: a parser that silently found no
     // inputs would pass for ever.
-    const total = files.reduce((n, f) => n + inputTags(withoutComments(readFileSync(f, "utf8"))).length, 0);
-    expect(total).toBeGreaterThan(50);
+    const total = files.reduce(
+      (n, f) => n + CONTROLS.reduce((k, c) => k + controlTags(withoutComments(readFileSync(f, "utf8")), c).length, 0),
+      0,
+    );
+    expect(total).toBeGreaterThan(150);
   });
 });

@@ -317,7 +317,7 @@ export function MeetingsClient({
                       </td>
                       <td className="px-4 py-2 text-right">
                         <span className="inline-flex items-center gap-1.5">
-                          <select className="rounded-md border bg-background p-1 text-xs" value={childBy[s.id] ?? children[0]?.studentId ?? ""} onChange={(e) => setChildBy({ ...childBy, [s.id]: e.target.value })}>
+                          <select aria-label="Student" className="rounded-md border bg-background p-1 text-xs" value={childBy[s.id] ?? children[0]?.studentId ?? ""} onChange={(e) => setChildBy({ ...childBy, [s.id]: e.target.value })}>
                             {children.map((c) => <option key={c.studentId} value={c.studentId}>{c.studentName}</option>)}
                           </select>
                           <Button size="sm" disabled={busy || children.length === 0} onClick={() => run(() => postSms("meetings/bookings", { slotId: s.id, studentId: childBy[s.id] ?? children[0]?.studentId }), "Booked.")}>Book</Button>

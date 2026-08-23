@@ -70,7 +70,7 @@ export function CertificateIssuer({ staff, students = [] }: { staff: Person[]; s
         <div className="flex flex-wrap items-end gap-2">
           <div className="space-y-1.5">
             <Label>Type</Label>
-            <select value={type} onChange={(e) => setType(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
+            <select aria-label="Type" value={type} onChange={(e) => setType(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
               <option value="ID_CARD">ID card</option>
               <option value="COMPLETION">Completion certificate</option>
               <option value="PARTICIPATION">Participation</option>
@@ -79,7 +79,7 @@ export function CertificateIssuer({ staff, students = [] }: { staff: Person[]; s
           </div>
           <div className="space-y-1.5">
             <Label>For</Label>
-            <select
+            <select aria-label="Category"
               value={category}
               onChange={(e) => {
                 const c = e.target.value as "STUDENT" | "STAFF";
@@ -99,7 +99,7 @@ export function CertificateIssuer({ staff, students = [] }: { staff: Person[]; s
             {category === "STUDENT" ? (
               <StudentPicker value={subjectId} onChange={setSubjectId} seed={students} />
             ) : (
-              <select value={subjectId} onChange={(e) => setSubjectId(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
+              <select aria-label="Subject" value={subjectId} onChange={(e) => setSubjectId(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
                 {people.map((u) => <option key={u.id} value={u.id}>{personLabel(u)}</option>)}
               </select>
             )}

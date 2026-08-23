@@ -101,7 +101,7 @@ export function RemarksEditor({
       <CardContent className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
           <label className="text-sm text-muted-foreground">Term</label>
-          <select
+          <select aria-label="Term"
             className="rounded-md border bg-background p-1.5 text-sm"
             value={termId}
             onChange={(e) => setTermId(e.target.value)}
@@ -124,7 +124,7 @@ export function RemarksEditor({
               Class teacher's remark
               {by.ct && <span className="ml-2 font-normal text-xs text-muted-foreground">last written by {by.ct}</span>}
             </label>
-            <textarea
+            <textarea aria-label="Class teacher remark"
               className="w-full rounded-md border bg-background p-2 text-sm"
               rows={2}
               value={ct}
@@ -143,7 +143,7 @@ export function RemarksEditor({
               Head's remark
               {by.head && <span className="ml-2 font-normal text-xs text-muted-foreground">last written by {by.head}</span>}
             </label>
-            <textarea
+            <textarea aria-label="Head teacher remark"
               className="w-full rounded-md border bg-background p-2 text-sm"
               rows={2}
               value={head}

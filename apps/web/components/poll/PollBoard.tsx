@@ -49,7 +49,7 @@ export function PollBoard({ page, canManage }: { page: Paged<Poll>; canManage: b
               <div className="space-y-1.5 flex-1 min-w-60"><Label>Question</Label><Input value={q} onChange={(e) => setQ(e.target.value)} /></div>
               <div className="space-y-1.5">
                 <Label>Audience</Label>
-                <select value={audience} onChange={(e) => setAudience(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
+                <select aria-label="Audience" value={audience} onChange={(e) => setAudience(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
                   <option value="ALL">Everyone</option><option value="STUDENTS">Students</option><option value="STAFF">Staff</option>
                 </select>
               </div>
@@ -171,7 +171,7 @@ function PollEditor({
         <Input value={question} disabled={voted} onChange={(e) => setQuestion(e.target.value)} />
       </div>
       <div className="space-y-1.5"><Label>Audience</Label>
-        <select value={audience} disabled={voted} onChange={(e) => setAudience(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm disabled:opacity-50">
+        <select aria-label="Audience" value={audience} disabled={voted} onChange={(e) => setAudience(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm disabled:opacity-50">
           <option value="ALL">Everyone</option><option value="STUDENTS">Students</option><option value="STAFF">Staff</option>
         </select>
       </div>

@@ -62,7 +62,7 @@ export function DisciplineRoom({
             <div className="space-y-1.5 flex-1 min-w-60"><Label>Subject</Label><Input value={subject} onChange={(e) => setSubject(e.target.value)} /></div>
             <div className="space-y-1.5">
               <Label>Type</Label>
-              <select
+              <select aria-label="Against type"
                 value={againstType}
                 onChange={(e) => {
                   const t = e.target.value;
@@ -76,7 +76,7 @@ export function DisciplineRoom({
             </div>
             <div className="space-y-1.5">
               <Label>Against</Label>
-              <select value={against} onChange={(e) => setAgainst(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
+              <select aria-label="Against" value={against} onChange={(e) => setAgainst(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
                 {againstList.map((u) => <option key={u.id} value={u.id}>{personLabel(u)}</option>)}
               </select>
             </div>
@@ -135,7 +135,7 @@ export function DisciplineRoom({
                   <div className="space-y-1.5">
                     <Label className="text-xs">Assign resolver</Label>
                     {/* Resolvers are staff — students never appear here. */}
-                    <select value={assignee[c.id] ?? ""} onChange={(e) => setAssignee((m) => ({ ...m, [c.id]: e.target.value }))} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
+                    <select aria-label="Assign to" value={assignee[c.id] ?? ""} onChange={(e) => setAssignee((m) => ({ ...m, [c.id]: e.target.value }))} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
                       <option value="">Select…</option>
                       {staff.map((u) => <option key={u.id} value={u.id}>{personLabel(u)}</option>)}
                     </select>

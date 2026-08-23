@@ -194,7 +194,7 @@ export function HostelManager({
           <CardContent className="flex flex-wrap items-end gap-2">
             <div className="space-y-1.5">
               <Label>Room</Label>
-              <select value={allocRoom} onChange={(e) => setAllocRoom(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
+              <select aria-label="Room" value={allocRoom} onChange={(e) => setAllocRoom(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
                 <option value="">Select…</option>
                 {allRooms.map((r) => <option key={r.id} value={r.id} disabled={r.available <= 0}>{r.hostelName} · {r.roomNumber} ({r.available} free)</option>)}
               </select>
@@ -219,7 +219,7 @@ export function HostelManager({
           <CardContent className="flex flex-wrap items-end gap-2">
             <div className="space-y-1.5">
               <Label>Hostel</Label>
-              <select value={feeHostel} onChange={(e) => setFeeHostel(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
+              <select aria-label="Hostel" value={feeHostel} onChange={(e) => setFeeHostel(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
                 <option value="">All hostels</option>
                 {hostels.map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
               </select>

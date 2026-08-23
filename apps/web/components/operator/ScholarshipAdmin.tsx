@@ -195,13 +195,13 @@ export function ScholarshipAdmin() {
             <div className="space-y-1"><Label className="text-xs">Budget (₦)</Label><Input type="number" min={0} className="w-32" value={f.budget} onChange={(e) => setF({ ...f, budget: e.target.value })} /></div>
             <div className="space-y-1">
               <Label className="text-xs">Basis</Label>
-              <select value={f.basis} onChange={(e) => setF({ ...f, basis: e.target.value })} className={sel}>
+              <select aria-label="Basis" value={f.basis} onChange={(e) => setF({ ...f, basis: e.target.value })} className={sel}>
                 <option value="BOTH">Merit + need</option><option value="MERIT">Merit</option><option value="NEED">Need</option>
               </select>
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Category</Label>
-              <select value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })} className={sel}>
+              <select aria-label="Category" value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })} className={sel}>
                 <option value="GENERAL_SCIENCE">General Science</option>
                 <option value="ART">Art</option>
                 <option value="COMMUNITY_DEVELOPMENT">Community Development</option>
@@ -239,7 +239,7 @@ export function ScholarshipAdmin() {
         <div className="space-y-2">
           <div className="flex items-center gap-2">
             <p className="text-xs font-medium text-muted-foreground">Applications</p>
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={sel}>
+            <select aria-label="Status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={sel}>
               <option value="">All (submitted)</option>
               <option value="SUBMITTED">Submitted</option>
               <option value="UNDER_REVIEW">Under review</option>
@@ -420,7 +420,7 @@ function ProgramRow({
       <div className="flex flex-wrap items-end gap-2">
         <div className="space-y-1">
           <Label className="text-xs">Exam mode</Label>
-          <select value={mode} onChange={(e) => setMode(e.target.value)} className={sel}>
+          <select aria-label="Mode" value={mode} onChange={(e) => setMode(e.target.value)} className={sel}>
             <option value="">Select…</option>
             <option value="ONLINE_CBT">Online CBT mock</option>
             <option value="GAMES">Games arena</option>

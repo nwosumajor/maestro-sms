@@ -1218,14 +1218,22 @@ grepping the page for "Partial" matches the shipped bundle, not a rendered row.
 Assert the prop (`lastFailed` in the payload) or drive a real browser.
 
 ### Every text control can be named by a screen reader
-`apps/web/lib/__tests__/every-control-has-a-name.test.ts` fails if any `<input>`
-has no accessible name. CLAUDE.md already committed to accessibility for the
+`apps/web/lib/__tests__/every-control-has-a-name.test.ts` fails if any `<input>`,
+`<select>` or `<textarea>` has no accessible name — 99 controls were unnamed
+(26 inputs, 68 selects, 5 textareas). CLAUDE.md already committed to accessibility for the
 integrity module — paste-blocking "MUST have an exemption flag per student… or it
 becomes discriminatory" — and that reasoning had never been applied to the rest of
 the UI: 26 inputs announced as "edit text, blank", among them the FILE INPUTS a
 parent uses to send in a child's documents, the date filters on the attendance
-register and the exam planner, and the meeting-slot times. All 26 now carry an
-`aria-label` taken from the surrounding UI.
+register and the exam planner, and the meeting-slot times. All 99 now carry an `aria-label`
+taken from the surrounding UI: a select's own placeholder option where it had one
+("Room…" → "Room"), otherwise the value binding, humanised. // GOTCHA: that
+derivation was ~75% right and confidently WRONG for the rest — "Select", "+ role",
+"No classes", "Present", "— none —" — all read off an option that was never a
+label. Each was corrected by hand, because a wrong name asserted to a screen
+reader is worse than none. The shadcn primitives (`ui/textarea.tsx`,
+`ui/input.tsx`) are EXEMPT: they forward props, and hard-coding a name there would
+put the same wrong label on every control in the app.
 What counts as a name: `aria-label`, `aria-labelledby`, an `id` (assumed paired
 with a label's `htmlFor`), or being wrapped in a `<label>`. A PLACEHOLDER is
 accepted but reported, never treated as a label — it vanishes the moment somebody

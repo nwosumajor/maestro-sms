@@ -109,7 +109,7 @@ export function SubscriptionManager({ schoolId, plan: initialPlan }: { schoolId:
         <div className="space-y-4">
           <div className="flex items-center gap-3">
             <label className="text-sm font-medium">Plan</label>
-            <select
+            <select aria-label="Plan"
               value={plan}
               onChange={(e) => changePlan(e.target.value as Plan)}
               className="h-9 rounded-md border border-input bg-background px-3 text-sm"

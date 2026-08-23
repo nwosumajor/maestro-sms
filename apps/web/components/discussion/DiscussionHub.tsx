@@ -61,7 +61,7 @@ export function DiscussionHub({ groups, canModerate }: { groups: Group[]; canMod
             <div className="space-y-1.5"><Label>Name</Label><Input value={gName} onChange={(e) => setGName(e.target.value)} /></div>
             <div className="space-y-1.5">
               <Label>Audience</Label>
-              <select value={gAudience} onChange={(e) => setGAudience(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
+              <select aria-label="Group audience" value={gAudience} onChange={(e) => setGAudience(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
                 <option value="ALL">Everyone</option><option value="STUDENTS">Students</option><option value="STAFF">Staff</option>
               </select>
             </div>

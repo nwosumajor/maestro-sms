@@ -139,7 +139,7 @@ export function TimetableAdmin({
             {breaks.map((b, i) => (
               <div key={i} className="flex flex-wrap items-end gap-2">
                 <div className="space-y-1"><Label className="text-xs">After period</Label>
-                  <select value={b.afterPeriod} onChange={(e) => setBreaks(breaks.map((x, j) => j === i ? { ...x, afterPeriod: e.target.value } : x))} className="h-9 w-28 rounded-md border border-input bg-background px-2 text-sm">
+                  <select aria-label="After period" value={b.afterPeriod} onChange={(e) => setBreaks(breaks.map((x, j) => j === i ? { ...x, afterPeriod: e.target.value } : x))} className="h-9 w-28 rounded-md border border-input bg-background px-2 text-sm">
                     <option value="">—</option>
                     {Array.from({ length: Math.max(0, Number(gen.teachingPeriods) - 1) }, (_, k) => k + 1).map((n) => <option key={n} value={n}>Period {n}</option>)}
                   </select>

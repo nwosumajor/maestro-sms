@@ -87,7 +87,7 @@ export function RecruitmentManager({ requisitions, applicants }: { requisitions:
                         )}
                       </td>
                       <td className="py-2">
-                        <select value={a.stage} disabled={!!a.convertedUserId} onChange={(e) => post(`hr/recruitment/applicants/${a.id}/stage`, { stage: e.target.value }, a.id)} className="h-8 rounded-md border border-input bg-background px-2 text-sm">
+                        <select aria-label="Stage" value={a.stage} disabled={!!a.convertedUserId} onChange={(e) => post(`hr/recruitment/applicants/${a.id}/stage`, { stage: e.target.value }, a.id)} className="h-8 rounded-md border border-input bg-background px-2 text-sm">
                           {STAGES.map((s) => <option key={s} value={s}>{s.toLowerCase()}</option>)}
                         </select>
                       </td>

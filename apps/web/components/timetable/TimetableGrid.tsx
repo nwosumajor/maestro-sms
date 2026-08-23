@@ -37,11 +37,11 @@ function CellEditor({
   return (
     <div className="mt-1.5 space-y-1.5 rounded-md border border-primary/40 bg-card p-2 shadow-card">
       <Input className="h-7 text-xs" placeholder="Subject" value={form.subject} onChange={(e) => setForm((f) => ({ ...f, subject: e.target.value }))} />
-      <select className={sel} value={form.teacherId} onChange={(e) => setForm((f) => ({ ...f, teacherId: e.target.value }))}>
+      <select aria-label="Teacher" className={sel} value={form.teacherId} onChange={(e) => setForm((f) => ({ ...f, teacherId: e.target.value }))}>
         {teachers.length === 0 && <option value="">No teacher on this class</option>}
         {teachers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
       </select>
-      <select className={sel} value={form.roomId} onChange={(e) => setForm((f) => ({ ...f, roomId: e.target.value }))}>
+      <select aria-label="Room" className={sel} value={form.roomId} onChange={(e) => setForm((f) => ({ ...f, roomId: e.target.value }))}>
         <option value="">No room</option>
         {rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
       </select>

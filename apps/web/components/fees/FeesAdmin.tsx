@@ -126,7 +126,7 @@ export function FeesAdmin({ students, items }: { students: Student[]; items: Fee
               {lines.map((l, i) => (
                 <div key={i} className="flex flex-wrap items-center gap-2">
                   {items.length > 0 && (
-                    <select onChange={(e) => prefill(i, e.target.value)} defaultValue=""
+                    <select aria-label="Fee item from the catalogue" onChange={(e) => prefill(i, e.target.value)} defaultValue=""
                       className="h-9 rounded-md border border-input bg-background px-2 text-xs text-muted-foreground">
                       <option value="" disabled>From catalog…</option>
                       {items.map((it) => <option key={it.id} value={it.id}>{it.name}</option>)}

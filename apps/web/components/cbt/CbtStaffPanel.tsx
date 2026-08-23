@@ -294,7 +294,7 @@ export function CbtStaffPanel({
           )}
           <div className="flex flex-wrap items-end gap-2">
             <Input className="w-56" placeholder="New bank name" value={bankName} onChange={(e) => setBankName(e.target.value)} />
-            <select
+            <select aria-label="Subject"
               value={bankSubjectId}
               onChange={(e) => setBankSubjectId(e.target.value)}
               className="h-9 rounded-md border border-input bg-background px-3 text-sm"
@@ -322,7 +322,7 @@ export function CbtStaffPanel({
             <div className="space-y-3 border-t border-border pt-3">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm font-medium">Add questions to</span>
-                <select value={qBank} onChange={(e) => setQBank(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
+                <select aria-label="Question bank" value={qBank} onChange={(e) => setQBank(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
                   {banks.map((b) => (
                     <option key={b.id} value={b.id}>{b.name}</option>
                   ))}
@@ -604,12 +604,12 @@ export function CbtStaffPanel({
           )}
           <div className="grid gap-2 border-t border-border pt-3 sm:grid-cols-2 lg:grid-cols-3">
             <Input placeholder="Exam title" value={exam.title} onChange={(e) => setExam({ ...exam, title: e.target.value })} />
-            <select value={exam.bankId} onChange={(e) => setExam({ ...exam, bankId: e.target.value, classId: "" })} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
+            <select aria-label="Question bank" value={exam.bankId} onChange={(e) => setExam({ ...exam, bankId: e.target.value, classId: "" })} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
               {banks.map((b) => (
                 <option key={b.id} value={b.id}>{b.name}</option>
               ))}
             </select>
-            <select value={exam.classId} onChange={(e) => setExam({ ...exam, classId: e.target.value })} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
+            <select aria-label="Class" value={exam.classId} onChange={(e) => setExam({ ...exam, classId: e.target.value })} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
               {options.schoolWide ? <option value="">Whole school</option> : <option value="">Pick your class…</option>}
               {examClasses.map((c) => (
                 <option key={c.id} value={c.id}>{c.name}</option>

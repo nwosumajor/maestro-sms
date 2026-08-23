@@ -87,12 +87,12 @@ export function ClassIssuer({ classes }: { classes: IdName[] }) {
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="flex flex-wrap items-end gap-2">
-          <select className="rounded-md border bg-background p-1.5 text-sm" value={classId} onChange={(e) => setClassId(e.target.value)}>
+          <select aria-label="Class" className="rounded-md border bg-background p-1.5 text-sm" value={classId} onChange={(e) => setClassId(e.target.value)}>
             {classes.map((c) => (
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </select>
-          <select className="rounded-md border bg-background p-1.5 text-sm" value={type} onChange={(e) => setType(e.target.value)}>
+          <select aria-label="Type" className="rounded-md border bg-background p-1.5 text-sm" value={type} onChange={(e) => setType(e.target.value)}>
             {TYPES.map((t) => (
               <option key={t.value} value={t.value}>{t.label}</option>
             ))}

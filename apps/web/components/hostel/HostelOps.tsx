@@ -70,11 +70,11 @@ function TransferPanel({ boarders, rooms, onMsg }: { boarders: Alloc[]; rooms: {
       <CardHeader><CardTitle className="text-base">Room transfer</CardTitle><CardDescription>Move a boarder to another room (vacate + re-allocate atomically).</CardDescription></CardHeader>
       <CardContent className="flex flex-wrap items-end gap-2">
         <div className="space-y-1"><Label>Student</Label>
-          <select className={sel} value={studentId} onChange={(e) => setStudentId(e.target.value)}>
+          <select aria-label="Student" className={sel} value={studentId} onChange={(e) => setStudentId(e.target.value)}>
             {boarders.map((b) => <option key={b.id} value={b.studentId}>{b.studentName} ({b.roomNumber})</option>)}
           </select></div>
         <div className="space-y-1"><Label>To room</Label>
-          <select className={sel} value={toRoomId} onChange={(e) => setToRoomId(e.target.value)}>
+          <select aria-label="Move to room" className={sel} value={toRoomId} onChange={(e) => setToRoomId(e.target.value)}>
             <option value="">Select…</option>
             {rooms.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
           </select></div>
@@ -119,7 +119,7 @@ function RollCallPanel({ hostels, onMsg }: { hostels: Hostel[]; onMsg: (s: strin
       <CardHeader><CardTitle className="text-base">Nightly roll-call</CardTitle><CardDescription>Headcount of current boarders.</CardDescription></CardHeader>
       <CardContent className="space-y-3">
         <div className="flex flex-wrap items-end gap-2">
-          <select className={sel} value={hostelId} onChange={(e) => setHostelId(e.target.value)}>{hostels.map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}</select>
+          <select aria-label="Hostel" className={sel} value={hostelId} onChange={(e) => setHostelId(e.target.value)}>{hostels.map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}</select>
           <Input type="date" max={today(timezone)} value={date} onChange={(e) => setDate(e.target.value)} className="w-40" />
         </div>
         <div className="max-h-56 space-y-1 overflow-y-auto">
@@ -127,7 +127,7 @@ function RollCallPanel({ hostels, onMsg }: { hostels: Hostel[]; onMsg: (s: strin
           {boarders.map((b) => (
             <div key={b.studentId} className="flex items-center justify-between gap-2 text-sm">
               <span>{b.studentName}</span>
-              <select className="h-7 rounded border border-input bg-background px-2 text-xs" value={marks[b.studentId] ?? "PRESENT"} onChange={(e) => setMarks((m) => ({ ...m, [b.studentId]: e.target.value }))}>
+              <select aria-label="Attendance status" className="h-7 rounded border border-input bg-background px-2 text-xs" value={marks[b.studentId] ?? "PRESENT"} onChange={(e) => setMarks((m) => ({ ...m, [b.studentId]: e.target.value }))}>
                 {STATUSES.map((s) => <option key={s} value={s}>{s[0] + s.slice(1).toLowerCase()}</option>)}
               </select>
             </div>
@@ -248,8 +248,8 @@ function IncidentPanel({ hostels, onMsg }: { hostels: Hostel[]; onMsg: (s: strin
       <CardHeader><CardTitle className="text-base">Maintenance & incidents</CardTitle><CardDescription>Broken facilities, discipline, health, security.</CardDescription></CardHeader>
       <CardContent className="space-y-3">
         <div className="flex flex-wrap items-end gap-2">
-          <select className={sel} value={hostelId} onChange={(e) => setHostelId(e.target.value)}>{hostels.map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}</select>
-          <select className={sel} value={category} onChange={(e) => setCategory(e.target.value)}>{CATS.map((c) => <option key={c} value={c}>{c[0] + c.slice(1).toLowerCase()}</option>)}</select>
+          <select aria-label="Hostel" className={sel} value={hostelId} onChange={(e) => setHostelId(e.target.value)}>{hostels.map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}</select>
+          <select aria-label="Category" className={sel} value={category} onChange={(e) => setCategory(e.target.value)}>{CATS.map((c) => <option key={c} value={c}>{c[0] + c.slice(1).toLowerCase()}</option>)}</select>
           <Input placeholder="What happened?" value={title} onChange={(e) => setTitle(e.target.value)} className="w-48" />
           <Button size="sm" disabled={!title} onClick={report}>Log</Button>
         </div>

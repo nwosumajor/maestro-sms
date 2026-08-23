@@ -77,7 +77,7 @@ export function OperatorUsers({ schoolId, schoolName, canCredentials = true, can
         {open && canCredentials && (
           <div className="flex items-center gap-1.5 text-xs">
             <span className="text-muted-foreground">Require 2FA for role:</span>
-            <select
+            <select aria-label="Role"
               value={roleMfa}
               onChange={(e) => setRoleMfa(e.target.value as (typeof MANAGED_ROLES)[number])}
               className="h-7 rounded-md border border-input bg-background px-2 text-xs"

@@ -618,7 +618,7 @@ function CreateForm({
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Scoring</Label>
-                  <select className={sel} value={quizScoring} onChange={(e) => setQuizScoring(e.target.value as "BEST" | "LATEST")}>
+                  <select aria-label="Quiz scoring" className={sel} value={quizScoring} onChange={(e) => setQuizScoring(e.target.value as "BEST" | "LATEST")}>
                     <option value="BEST">Best attempt</option>
                     <option value="LATEST">Latest attempt</option>
                   </select>

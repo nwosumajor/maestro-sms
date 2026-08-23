@@ -119,7 +119,7 @@ export function BrandingManager({ initial, slug }: { initial: Serialized<SchoolB
           <div className="space-y-1.5"><Label>Lightness</Label><Input className="w-20" type="number" min={0} max={100} value={light} onChange={(e) => setLight(Number(e.target.value))} /></div>
           <div className="space-y-1.5">
             <Label>Font</Label>
-            <select value={font} onChange={(e) => setFont(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm" style={{ fontFamily: font }}>
+            <select aria-label="Font" value={font} onChange={(e) => setFont(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm" style={{ fontFamily: font }}>
               {FONTS.map((fnt) => <option key={fnt} value={fnt} style={{ fontFamily: fnt }}>{fnt.split(",")[0].replace(/"/g, "")}</option>)}
             </select>
           </div>

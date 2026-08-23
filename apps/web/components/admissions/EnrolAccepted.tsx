@@ -104,7 +104,7 @@ export function EnrolAccepted({
         </Button>
       ) : (
         <div className="flex flex-wrap items-center gap-2">
-          <select
+          <select aria-label="Class"
             className="rounded-md border border-border bg-background px-2 py-1 text-sm"
             value={classId}
             onChange={(e) => setClassId(e.target.value)}

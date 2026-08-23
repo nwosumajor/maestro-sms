@@ -75,7 +75,7 @@ export function TransportManager({
             <div className="space-y-1.5"><Label>Capacity</Label><Input className="w-24" type="number" min={0} value={vCap} onChange={(e) => setVCap(Number(e.target.value))} /></div>
             <div className="space-y-1.5">
               <Label>Driver</Label>
-              <select value={vDriver} onChange={(e) => setVDriver(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
+              <select aria-label="Driver" value={vDriver} onChange={(e) => setVDriver(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
                 <option value="">— none —</option>
                 {staff.map((s) => <option key={s.id} value={s.id}>{personLabel(s)}</option>)}
               </select>
@@ -119,14 +119,14 @@ export function TransportManager({
             <div className="space-y-1.5"><Label>Name</Label><Input value={rName} onChange={(e) => setRName(e.target.value)} placeholder="Lekki Run" /></div>
             <div className="space-y-1.5">
               <Label>Vehicle</Label>
-              <select value={rVehicle} onChange={(e) => setRVehicle(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
+              <select aria-label="Vehicle" value={rVehicle} onChange={(e) => setRVehicle(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
                 <option value="">None</option>
                 {vehicles.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
               </select>
             </div>
             <div className="space-y-1.5">
               <Label>Fare mode</Label>
-              <select value={rMode} onChange={(e) => setRMode(e.target.value as "FLAT" | "STOP")} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
+              <select aria-label="Route mode" value={rMode} onChange={(e) => setRMode(e.target.value as "FLAT" | "STOP")} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
                 <option value="FLAT">Flat</option><option value="STOP">Per stop</option>
               </select>
             </div>
@@ -191,7 +191,7 @@ export function TransportManager({
           <CardContent className="flex flex-wrap items-end gap-2">
             <div className="space-y-1.5">
               <Label>Route</Label>
-              <select value={aRoute} onChange={(e) => setARoute(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
+              <select aria-label="Route" value={aRoute} onChange={(e) => setARoute(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
                 <option value="">Select…</option>
                 {activeRoutes.map((r) => <option key={r.id} value={r.id} disabled={r.capacity > 0 && r.seatsAvailable <= 0}>{r.name} ({r.seatsAvailable} free)</option>)}
               </select>
@@ -216,7 +216,7 @@ export function TransportManager({
           <CardContent className="flex flex-wrap items-end gap-2">
             <div className="space-y-1.5">
               <Label>Route</Label>
-              <select value={feeRoute} onChange={(e) => setFeeRoute(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
+              <select aria-label="Route" value={feeRoute} onChange={(e) => setFeeRoute(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
                 <option value="">All routes</option>
                 {routes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
               </select>

@@ -29,7 +29,7 @@ export function DisputeRespondForm({ disputeId }: { disputeId: string }) {
 
   return (
     <div className="space-y-2">
-      <textarea
+      <textarea aria-label="Response to the dispute"
         className="w-full rounded-md border bg-background p-2 text-sm"
         rows={2}
         placeholder="What evidence was submitted on the gateway dashboard (receipt, enrollment record, delivery proof…)?"

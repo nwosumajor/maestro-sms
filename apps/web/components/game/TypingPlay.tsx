@@ -139,7 +139,7 @@ export function TypingPlay({ initial }: { initial: Race }) {
 
           {/* Typing input */}
           {active && joined && !finished && (
-            <textarea
+            <textarea aria-label="Type the passage here"
               autoFocus
               value={typed}
               onChange={(e) => onType(e.target.value)}

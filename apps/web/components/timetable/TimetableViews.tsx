@@ -103,13 +103,13 @@ export function TimetableViews({
 
         <div className="flex flex-wrap items-center gap-2">
           {axis === "teacher" && (
-            <select className="rounded-md border bg-background p-1.5 text-sm" value={teacherId} onChange={(e) => setTeacherId(e.target.value)}>
+            <select aria-label="Pick a teacher" className="rounded-md border bg-background p-1.5 text-sm" value={teacherId} onChange={(e) => setTeacherId(e.target.value)}>
               <option value="">Pick a teacher…</option>
               {teachers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
           )}
           {axis === "room" && (
-            <select className="rounded-md border bg-background p-1.5 text-sm" value={roomId} onChange={(e) => setRoomId(e.target.value)}>
+            <select aria-label="Pick a room" className="rounded-md border bg-background p-1.5 text-sm" value={roomId} onChange={(e) => setRoomId(e.target.value)}>
               <option value="">Pick a room…</option>
               {rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
             </select>

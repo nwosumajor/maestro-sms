@@ -66,7 +66,7 @@ export function UserRolesManager({ users, allRoles }: { users: User[]; allRoles:
                   {r} ✕
                 </Badge>
               ))}
-              <select
+              <select aria-label="Add a role"
                 disabled={busy === u.id}
                 defaultValue=""
                 onChange={(e) => { assign(u.id, e.target.value); e.currentTarget.value = ""; }}

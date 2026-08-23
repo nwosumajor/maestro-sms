@@ -293,7 +293,7 @@ function HostRow({
             Delete
           </button>
         )}
-        <select
+        <select aria-label="Class"
           value={classId}
           onChange={(e) => setClassId(e.target.value)}
           className="h-8 rounded-md border border-input bg-background px-2 text-sm"

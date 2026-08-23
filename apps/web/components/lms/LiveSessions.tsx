@@ -172,7 +172,7 @@ function CreateForm({ classId, onCreated }: { classId: string; onCreated: () => 
         </div>
         <div className="space-y-1">
           <Label className="text-xs">Provider</Label>
-          <select className={sel + " w-full"} value={provider} onChange={(e) => setProvider(e.target.value)}>
+          <select aria-label="Provider" className={sel + " w-full"} value={provider} onChange={(e) => setProvider(e.target.value)}>
             <option value="MEET">Google Meet</option>
             <option value="ZOOM">Zoom</option>
             <option value="JITSI">Jitsi</option>

@@ -81,9 +81,9 @@ function BoardingPanel({ routes, assignments, onMsg }: { routes: Route[]; assign
       <CardHeader><CardTitle className="text-base">Boarding confirmation</CardTitle><CardDescription>A pickup alerts the child&apos;s guardians.</CardDescription></CardHeader>
       <CardContent className="space-y-3">
         <div className="flex flex-wrap items-end gap-2">
-          <select className={sel} value={routeId} onChange={(e) => setRouteId(e.target.value)}>{routes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select>
+          <select aria-label="Route" className={sel} value={routeId} onChange={(e) => setRouteId(e.target.value)}>{routes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select>
           <Input type="date" max={today(timezone)} value={date} onChange={(e) => setDate(e.target.value)} className="w-40" />
-          <select className={sel} value={direction} onChange={(e) => setDirection(e.target.value)}><option value="PICKUP">Pickup</option><option value="DROPOFF">Drop-off</option></select>
+          <select aria-label="Direction" className={sel} value={direction} onChange={(e) => setDirection(e.target.value)}><option value="PICKUP">Pickup</option><option value="DROPOFF">Drop-off</option></select>
         </div>
         <div className="max-h-56 space-y-1 overflow-y-auto">
           {routePassengers.length === 0 && <p className="text-sm text-muted-foreground">No passengers assigned to this route.</p>}
@@ -162,7 +162,7 @@ function GpsPanel({ vehicles, canManage, onMsg }: { vehicles: Vehicle[]; canMana
         {canManage && (
           <div className="flex flex-wrap items-end gap-2 border-t border-border pt-2">
             <span className="text-xs text-muted-foreground">Post a ping (device/driver app):</span>
-            <select className={sel} value={vehicleId} onChange={(e) => setVehicleId(e.target.value)}>{vehicles.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}</select>
+            <select aria-label="Vehicle" className={sel} value={vehicleId} onChange={(e) => setVehicleId(e.target.value)}>{vehicles.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}</select>
             <Input placeholder="lat" value={lat} onChange={(e) => setLat(e.target.value)} className="w-24" />
             <Input placeholder="lng" value={lng} onChange={(e) => setLng(e.target.value)} className="w-24" />
             <Button size="sm" variant="outline" disabled={!lat || !lng} onClick={push}>Ping</Button>
@@ -193,8 +193,8 @@ function TripsPanel({ routes, onMsg }: { routes: Route[]; onMsg: (s: string) => 
       <CardHeader><CardTitle className="text-base">Trip schedule</CardTitle><CardDescription>Morning pickup / afternoon drop-off times per route.</CardDescription></CardHeader>
       <CardContent className="space-y-3">
         <div className="flex flex-wrap items-end gap-2">
-          <select className={sel} value={routeId} onChange={(e) => setRouteId(e.target.value)}>{routes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select>
-          <select className={sel} value={direction} onChange={(e) => setDirection(e.target.value)}><option value="AM_PICKUP">AM pickup</option><option value="PM_DROPOFF">PM drop-off</option></select>
+          <select aria-label="Route" className={sel} value={routeId} onChange={(e) => setRouteId(e.target.value)}>{routes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select>
+          <select aria-label="Direction" className={sel} value={direction} onChange={(e) => setDirection(e.target.value)}><option value="AM_PICKUP">AM pickup</option><option value="PM_DROPOFF">PM drop-off</option></select>
           <Input type="time" value={departTime} onChange={(e) => setDepartTime(e.target.value)} className="w-28" />
           <Button size="sm" onClick={create}>Add trip</Button>
         </div>
@@ -238,8 +238,8 @@ function MaintenancePanel({ vehicles, onMsg }: { vehicles: Vehicle[]; onMsg: (s:
       <CardHeader><CardTitle className="text-base">Maintenance & fuel log</CardTitle><CardDescription>Service, repair, fuel and inspection records + cost.</CardDescription></CardHeader>
       <CardContent className="space-y-3">
         <div className="flex flex-wrap items-end gap-2">
-          <select className={sel} value={vehicleId} onChange={(e) => setVehicleId(e.target.value)}>{vehicles.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}</select>
-          <select className={sel} value={type} onChange={(e) => setType(e.target.value)}>{TYPES.map((t) => <option key={t} value={t}>{t[0] + t.slice(1).toLowerCase()}</option>)}</select>
+          <select aria-label="Vehicle" className={sel} value={vehicleId} onChange={(e) => setVehicleId(e.target.value)}>{vehicles.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}</select>
+          <select aria-label="Type" className={sel} value={type} onChange={(e) => setType(e.target.value)}>{TYPES.map((t) => <option key={t} value={t}>{t[0] + t.slice(1).toLowerCase()}</option>)}</select>
           <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-36" />
           <Input placeholder="cost ₦" value={cost} onChange={(e) => setCost(e.target.value)} className="w-24" />
           {type === "FUEL" && <Input placeholder="litres" value={litres} onChange={(e) => setLitres(e.target.value)} className="w-20" />}

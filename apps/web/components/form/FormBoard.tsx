@@ -50,7 +50,7 @@ export function FormBoard({ page, canManage }: { page: Paged<Form>; canManage: b
               <div className="space-y-1.5 flex-1 min-w-60"><Label>Title</Label><Input value={title} onChange={(e) => setTitle(e.target.value)} /></div>
               <div className="space-y-1.5">
                 <Label>Audience</Label>
-                <select value={audience} onChange={(e) => setAudience(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
+                <select aria-label="Audience" value={audience} onChange={(e) => setAudience(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
                   <option value="ALL">Everyone</option><option value="STUDENTS">Students</option><option value="STAFF">Staff</option>
                 </select>
               </div>
@@ -61,7 +61,7 @@ export function FormBoard({ page, canManage }: { page: Paged<Form>; canManage: b
               {fields.map((f, i) => (
                 <div key={i} className="flex flex-wrap items-end gap-2">
                   <Input value={f.label} onChange={(e) => setField(i, { label: e.target.value })} placeholder={`Question ${i + 1}`} className="flex-1 min-w-48" />
-                  <select value={f.type} onChange={(e) => setField(i, { type: e.target.value })} className="h-9 rounded-md border border-input bg-background px-2 text-sm">
+                  <select aria-label="Type" value={f.type} onChange={(e) => setField(i, { type: e.target.value })} className="h-9 rounded-md border border-input bg-background px-2 text-sm">
                     <option value="text">Text</option><option value="textarea">Long text</option><option value="number">Number</option><option value="rating">Rating</option>
                   </select>
                   <label className="flex items-center gap-1 text-xs"><input type="checkbox" checked={f.required ?? false} onChange={(e) => setField(i, { required: e.target.checked })} />required</label>
