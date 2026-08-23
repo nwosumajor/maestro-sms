@@ -18,6 +18,7 @@ import { AcademicProgressionService } from "./progression/academic-progression.s
 import { AcademicProgressionScheduler } from "./progression/academic-progression.scheduler";
 import { AcademicProgressionProcessor } from "./progression/academic-progression.processor";
 import { AcademicProgressionController } from "./progression/academic-progression.controller";
+import { usingS3 } from "../documents/storage-provider.config";
 
 // Depends on the global FoundationModule (TENANT_DATABASE, AUDIT_LOG_SERVICE,
 // auth guard). Imports WorkflowModule for approval-gated content publication, and
@@ -44,7 +45,7 @@ import { AcademicProgressionController } from "./progression/academic-progressio
     {
       provide: STORAGE_PROVIDER,
       useClass:
-        process.env.STORAGE_PROVIDER === "s3" ? S3StorageProvider : StubStorageProvider,
+        usingS3() ? S3StorageProvider : StubStorageProvider,
     },
   ],
   exports: [LmsService],

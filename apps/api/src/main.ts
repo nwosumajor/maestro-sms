@@ -2,6 +2,7 @@ import "reflect-metadata";
 import type { Server as HttpServer } from "node:http";
 import * as Sentry from "@sentry/node";
 import { sentryOptions } from "./observability/sentry-options";
+import { assertStorageProviderConfigured } from "./documents/storage-provider.config";
 import { HttpAdapterHost, NestFactory } from "@nestjs/core";
 import { Logger as PinoLogger } from "nestjs-pino";
 import { AppModule } from "./app.module";
@@ -21,6 +22,11 @@ async function bootstrap() {
   // rawBody: true preserves the exact bytes so the Paystack webhook HMAC
   // signature can be verified (re-serialising JSON would not match). bufferLogs so
   // early framework logs flush through pino once the logger is resolved.
+  // Fail on an unrecognised STORAGE_PROVIDER before anything is served. An
+  // unknown value used to select the local stub silently, which works in testing
+  // and loses every upload at the next redeploy.
+  assertStorageProviderConfigured();
+
   const app = await NestFactory.create(AppModule, { rawBody: true, bufferLogs: true });
   const logger = app.get(PinoLogger);
   app.useLogger(logger); // route ALL Nest logs through pino (structured)

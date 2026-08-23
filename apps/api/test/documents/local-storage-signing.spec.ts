@@ -93,6 +93,12 @@ describe("it is absent in production", () => {
     // Not "checked and refused" — NOT REGISTERED. A development convenience
     // must not be a production surface, and the surest way is for it not to
     // exist there at all.
-    expect(moduleSrc).toMatch(/STORAGE_PROVIDER === "s3" \? \[\] : \[LocalStorageController\]/);
+    //
+    // Asserted against the SHARED decision (`usingS3()`), not a copy of the
+    // env comparison. There were nine such copies; this route's registration
+    // was one of them, so a copy that drifted would have mounted an
+    // unauthenticated write endpoint in production. See
+    // documents/storage-provider.config.ts.
+    expect(moduleSrc).toMatch(/usingS3\(\) \? \[\] : \[LocalStorageController\]/);
   });
 });

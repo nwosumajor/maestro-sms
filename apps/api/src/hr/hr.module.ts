@@ -40,6 +40,7 @@ import { StaffReminderService } from "./staff-reminder.service";
 import { StaffReminderScheduler } from "./staff-reminder.scheduler";
 import { StaffReminderProcessor } from "./staff-reminder.processor";
 import { DocumentsModule } from "../documents/documents.module";
+import { usingS3 } from "../documents/storage-provider.config";
 
 @Module({
   imports: [WorkflowModule, NotificationModule, BrandingModule, DocumentsModule, BullModule.registerQueue({ name: HR_REMINDER_QUEUE })],
@@ -83,7 +84,7 @@ import { DocumentsModule } from "../documents/documents.module";
     { provide: HR_REMINDER_DATABASE, useExisting: PrivilegedDatabaseService },
     {
       provide: STORAGE_PROVIDER,
-      useClass: process.env.STORAGE_PROVIDER === "s3" ? S3StorageProvider : StubStorageProvider,
+      useClass: usingS3() ? S3StorageProvider : StubStorageProvider,
     },
   ],
   exports: [HrService, LeaveService, SalaryService, PayrollService, StaffLifecycleService, HrReviewsService],

@@ -4,6 +4,7 @@ import { DisciplineService } from "./discipline.service";
 import { STORAGE_PROVIDER, StubStorageProvider } from "../documents/storage.provider";
 import { S3StorageProvider } from "../documents/s3-storage.provider";
 import { NotificationModule } from "../notifications/notification.module";
+import { usingS3 } from "../documents/storage-provider.config";
 
 // Discipline Room. Depends on the global FoundationModule. Binds the pluggable
 // StorageProvider (same as the Document Vault) for evidence attachments.
@@ -16,7 +17,7 @@ import { NotificationModule } from "../notifications/notification.module";
     DisciplineService,
     {
       provide: STORAGE_PROVIDER,
-      useClass: process.env.STORAGE_PROVIDER === "s3" ? S3StorageProvider : StubStorageProvider,
+      useClass: usingS3() ? S3StorageProvider : StubStorageProvider,
     },
   ],
   exports: [DisciplineService],

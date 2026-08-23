@@ -34,6 +34,7 @@ import { IntegrityRetentionService } from "./retention/integrity-retention.servi
 import { IntegrityRetentionProcessor } from "./retention/integrity-retention.processor";
 import { IntegrityRetentionScheduler } from "./retention/integrity-retention.scheduler";
 import { IntegrityRetentionController } from "./retention/integrity-retention.controller";
+import { usingS3 } from "../documents/storage-provider.config";
 
 @Module({
   imports: [
@@ -57,7 +58,7 @@ import { IntegrityRetentionController } from "./retention/integrity-retention.co
     // Submission file answers reuse the Document Vault's pluggable storage.
     {
       provide: STORAGE_PROVIDER,
-      useClass: process.env.STORAGE_PROVIDER === "s3" ? S3StorageProvider : StubStorageProvider,
+      useClass: usingS3() ? S3StorageProvider : StubStorageProvider,
     },
     // --- Retention / NDPR purge (Golden Rule #5). Uses the shared privileged DB
     //     client (one pool per process); the scheduler registers the daily sweep. ---

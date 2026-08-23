@@ -3,6 +3,7 @@ import { BrandingController } from "./branding.controller";
 import { BrandingService } from "./branding.service";
 import { STORAGE_PROVIDER, StubStorageProvider } from "../documents/storage.provider";
 import { S3StorageProvider } from "../documents/s3-storage.provider";
+import { usingS3 } from "../documents/storage-provider.config";
 
 // Per-school login-page logo. Storage backend selected by env (same as documents):
 // STORAGE_PROVIDER=s3 binds the real presigner, else the local stub.
@@ -12,7 +13,7 @@ import { S3StorageProvider } from "../documents/s3-storage.provider";
     BrandingService,
     {
       provide: STORAGE_PROVIDER,
-      useClass: process.env.STORAGE_PROVIDER === "s3" ? S3StorageProvider : StubStorageProvider,
+      useClass: usingS3() ? S3StorageProvider : StubStorageProvider,
     },
   ],
   exports: [BrandingService],

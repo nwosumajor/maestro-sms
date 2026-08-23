@@ -17,6 +17,7 @@ import { SuppliedDocumentsService } from "./supplied-documents.service";
 import { STORAGE_PROVIDER, StubStorageProvider } from "./storage.provider";
 import { S3StorageProvider } from "./s3-storage.provider";
 import { NotificationModule } from "../notifications/notification.module";
+import { usingS3 } from "./storage-provider.config";
 
 // Depends on the global FoundationModule (TENANT_DATABASE, AUDIT_LOG_SERVICE,
 // auth guard). Imports NotificationModule to alert guardians when a shareable
@@ -35,7 +36,7 @@ import { NotificationModule } from "../notifications/notification.module";
   // registered at all — a development convenience must not be a production
   // surface, and the surest way is for it not to be there.
   controllers: [
-    ...(process.env.STORAGE_PROVIDER === "s3" ? [] : [LocalStorageController]),
+    ...(usingS3() ? [] : [LocalStorageController]),
     PublicDocumentsController,
     SuppliedDocumentsController,
     DocumentsController,
@@ -55,7 +56,7 @@ import { NotificationModule } from "../notifications/notification.module";
     {
       provide: STORAGE_PROVIDER,
       useClass:
-        process.env.STORAGE_PROVIDER === "s3" ? S3StorageProvider : StubStorageProvider,
+        usingS3() ? S3StorageProvider : StubStorageProvider,
     },
   ],
   exports: [DocumentsService, SuppliedDocumentsService, SubmissionRetentionService],

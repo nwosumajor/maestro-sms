@@ -780,6 +780,23 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### The storage provider is decided ONCE, and an unknown value refuses to boot
+`usingS3()` / `assertStorageProviderConfigured()`
+(`apps/api/src/documents/storage-provider.config.ts`).
+`process.env.STORAGE_PROVIDER === "s3"` was written longhand in NINE places —
+eight module bindings plus the conditional registration of `LocalStorageController`,
+the DEV upload route. They agreed and nothing made them agree; one drifting copy
+sends a module's files to a different store than its metadata assumes, or mounts
+an unauthenticated write endpoint in production.
+// SECURITY: it also failed OPEN. Anything not exactly `"s3"` chose the STUB, so
+`S3`, a trailing space or a future `r2` wrote every upload to the container's own
+disk — works in testing, survives no redeploy, gone by the time a family asks for
+the document, and nothing said so. The value is now normalised (`S3` and `" s3 "`
+are the same intent) and an unrecognised one REFUSES TO START at boot, before
+anything is served. Verified against the built image: `""` → stub, `"s3"` and
+`"S3 "` → bucket, `"r2"` → refused by name. A test fails if any file compares the
+env var directly again.
+
 **Cloud infra is BUILT** as Terraform in `infrastructure/terraform/` (VPC + 3
 subnet tiers, ECS Fargate web/api, ALB, CloudFront + WAFv2, RDS Postgres 16,
 ElastiCache Redis, S3 Document Vault + customer-managed KMS, Secrets Manager,

@@ -12,6 +12,7 @@ import { NotificationModule } from "../notifications/notification.module";
 import { BullModule } from "@nestjs/bullmq";
 import { STORAGE_PROVIDER, StubStorageProvider } from "../documents/storage.provider";
 import { S3StorageProvider } from "../documents/s3-storage.provider";
+import { usingS3 } from "../documents/storage-provider.config";
 
 // NDPR data-subject rights (export + erasure requests). Depends on the global
 // FoundationModule (TENANT_DATABASE, AUDIT_LOG_SERVICE, auth guard). Binds the
@@ -28,7 +29,7 @@ import { S3StorageProvider } from "../documents/s3-storage.provider";
     PrivacyService,
     {
       provide: STORAGE_PROVIDER,
-      useClass: process.env.STORAGE_PROVIDER === "s3" ? S3StorageProvider : StubStorageProvider,
+      useClass: usingS3() ? S3StorageProvider : StubStorageProvider,
     }, ComplianceService, SchoolArchiveService, TermArchiveProcessor, TermArchiveScheduler],
   exports: [PrivacyService],
 })
