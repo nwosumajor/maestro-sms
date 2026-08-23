@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { hasPermission } from "@/lib/permissions";
+import { money, regionOf } from "@/lib/format";
 import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -14,8 +15,7 @@ export const dynamic = "force-dynamic";
 
 type Overview = Serialized<FamilyOverviewDto>;
 
-const naira = (minor: number) =>
-  `₦${(minor / 100).toLocaleString("en-NG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
 const date = (iso: string | null) => (iso ? iso.slice(0, 10) : "—");
 
 export default async function FamilyPage() {
@@ -24,6 +24,12 @@ export default async function FamilyPage() {
   // Gate matches this section's AppShell nav entry ("family.read"), so the page
   // cannot be reached by URL by someone the nav hides it from.
   if (!hasPermission(user.permissions, "family.read")) redirect("/dashboard");
+  // The SCHOOL's currency, from the session. A parent whose child is at a
+  // Ghanaian or British school read their outstanding fees with a naira sign in
+  // front, divided by 100 — this being the one page whose whole purpose is to
+  // tell a family what they owe.
+  const region = regionOf(user);
+  const fees = (minor: number) => money(minor, region.currency, region.locale);
   const overview = (await apiGet<Overview>("/family/overview")) ?? { children: [] };
 
   return (
@@ -131,7 +137,7 @@ export default async function FamilyPage() {
                   <p className="mt-2 text-sm">
                     {c.fees.outstandingMinor > 0 ? (
                       <>
-                        <span className="font-medium text-destructive">{naira(c.fees.outstandingMinor)}</span>
+                        <span className="font-medium text-destructive">{fees(c.fees.outstandingMinor)}</span>
                         <span className="text-muted-foreground"> outstanding on {c.fees.unpaidInvoices} invoice{c.fees.unpaidInvoices === 1 ? "" : "s"}</span>
                       </>
                     ) : (

@@ -38,7 +38,7 @@ async function req(method: string, path: string, body?: unknown) {
 export function CompensationPanel({ userId, initial }: { userId: string; initial: Component[] }) {
   // The SCHOOL's currency and locale, not the platform's — this used to be a
   // module-level `naira()` that hard-coded ₦, en-NG and a divide by 100.
-  const { money } = useFormat();
+  const { money, minorFrom } = useFormat();
   const router = useRouter();
   const [items, setItems] = React.useState<Component[]>(initial);
   const [kind, setKind] = React.useState("ALLOWANCE");
@@ -54,7 +54,7 @@ export function CompensationPanel({ userId, initial }: { userId: string; initial
   }
 
   async function add() {
-    const minor = Math.round(Number(amount) * 100);
+    const minor = minorFrom(amount);
     if (!name.trim() || !(minor > 0)) return;
     setBusy(true);
     setErr(null);

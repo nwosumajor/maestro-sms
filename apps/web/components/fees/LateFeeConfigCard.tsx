@@ -6,12 +6,17 @@ import type { LateFeeConfigDto } from "@sms/types";
 import { sendWithStepUp } from "@/lib/stepup";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { useFormat } from "@/components/shell/RegionProvider";
 
 // Per-school automatic late-fee policy (money-policy write: step-up gated,
 // same as settlement). 0 flat fee = disabled.
 export function LateFeeConfigCard({ initial }: { initial: LateFeeConfigDto }) {
   const router = useRouter();
-  const [flat, setFlat] = React.useState(String(initial.lateFeeFlatMinor / 100));
+  // The SCHOOL's currency. This card both reads and writes a money figure, and
+  // both directions assumed two decimal places — so a school billing in francs
+  // typed 500 and saved a late fee of 50,000.
+  const { minorFrom, majorFrom } = useFormat();
+  const [flat, setFlat] = React.useState(String(majorFrom(initial.lateFeeFlatMinor)));
   const [grace, setGrace] = React.useState(String(initial.lateFeeGraceDays));
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
@@ -20,7 +25,7 @@ export function LateFeeConfigCard({ initial }: { initial: LateFeeConfigDto }) {
     setBusy(true);
     setMsg(null);
     const res = await sendWithStepUp("PUT", "fees/late-fee-config", {
-      lateFeeFlatMinor: Math.round(Number(flat) * 100),
+      lateFeeFlatMinor: minorFrom(flat),
       lateFeeGraceDays: Number(grace),
     });
     setBusy(false);

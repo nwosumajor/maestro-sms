@@ -210,7 +210,7 @@ function TripsPanel({ routes, onMsg }: { routes: Route[]; onMsg: (s: string) => 
 }
 
 function MaintenancePanel({ vehicles, onMsg }: { vehicles: Vehicle[]; onMsg: (s: string) => void }) {
-  const { money } = useFormat();
+  const { money, minorFrom } = useFormat();
   const [list, setList] = React.useState<Serialized<VehicleMaintenanceDto>[]>([]);
   const [vehicleId, setVehicleId] = React.useState(vehicles[0]?.id ?? "");
   const [type, setType] = React.useState("SERVICE");
@@ -226,7 +226,7 @@ function MaintenancePanel({ vehicles, onMsg }: { vehicles: Vehicle[]; onMsg: (s:
   const add = async () => {
     const r = await send("POST", "/transport/maintenance", {
       vehicleId, type, date,
-      costMinor: Math.round(Number(cost || 0) * 100),
+      costMinor: minorFrom(cost),
       litres: type === "FUEL" && litres ? Number(litres) : null,
     });
     onMsg(r.ok ? "Logged." : (r.error ?? "Failed."));

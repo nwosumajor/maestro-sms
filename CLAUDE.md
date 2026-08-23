@@ -202,6 +202,20 @@ conflicts with it, flag the conflict before proceeding.
   .effective()` refuses a currency with no prices rather than quoting zero. A
   school's FEE currency is a free-form ISO code on `school.currency` and is a
   separate thing again.
+  // GOTCHA: the READING half of this was fixed long before the WRITING half.
+  Components were given `useFormat()` and comments about "the SCHOOL's currency,
+  not the platform's", and still sent `Math.round(Number(x) * 100)` two lines
+  below — so a school was shown its francs correctly and stored a hundred times
+  what the bursar typed. Fourteen sites: salary, staff loans, fee items, invoice
+  lines, adjustments, credits, instalments, late fees, admission fees, transport
+  costs. `minorFrom`/`majorFrom` in `lib/format.ts` are the missing direction and
+  ride `useFormat()` beside `money`; where a row carries its OWN currency the
+  helper follows that. The PUBLIC directory had no session to read a region from
+  and hard-coded `en-NG`/NGN for every school, so `PublicSchoolDto` now carries
+  `currency`. Gate:
+  `apps/web/lib/__tests__/money-is-not-divided-by-a-hundred.test.ts` fails the
+  build on a literal 100 near a money word, with a named exemption per genuine
+  platform-currency site.
 - **A GATEWAY IS ALWAYS TOLD THE CURRENCY** (`PAYSTACK_CURRENCIES` /
   `paystackCanSettle` in `currency.ts`). Omit it and the rail charges in ITS OWN
   account currency: `transaction/initialize` was never sent one, and **27 of the

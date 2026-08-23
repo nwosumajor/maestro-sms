@@ -14,8 +14,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useFormat } from "@/components/shell/RegionProvider";
 
 export function FormFeeCard({ initialMinor, canManage }: { initialMinor: number; canManage: boolean }) {
-  const { money: fmtMoney } = useFormat();
-  const [major, setMajor] = React.useState(initialMinor > 0 ? String(initialMinor / 100) : "");
+  const { money: fmtMoney, minorFrom, majorFrom } = useFormat();
+  const [major, setMajor] = React.useState(initialMinor > 0 ? String(majorFrom(initialMinor)) : "");
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
 
@@ -24,7 +24,7 @@ export function FormFeeCard({ initialMinor, canManage }: { initialMinor: number;
     if (!Number.isFinite(n) || n < 0) return setMsg("Enter a valid amount (blank or 0 = free).");
     setBusy(true);
     setMsg(null);
-    const res = await sendWithStepUp("PUT", "admissions/settings/form-fee", { feeMinor: Math.round(n * 100) });
+    const res = await sendWithStepUp("PUT", "admissions/settings/form-fee", { feeMinor: minorFrom(n) });
     setBusy(false);
     setMsg(res.ok ? (n > 0 ? "Saved — new applicants pay before review." : "Saved — applications are free.") : await readApiError(res));
   };

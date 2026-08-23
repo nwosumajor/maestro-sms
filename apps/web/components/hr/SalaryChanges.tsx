@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { money } from "@/lib/format";
+import { useFormat } from "@/components/shell/RegionProvider";
 
 type Employee = Serialized<EmployeeDto>;
 type Change = Serialized<SalaryChangeDto>;
@@ -34,6 +34,9 @@ export function SalaryChanges({
   canApprove: boolean;
   userId: string;
 }) {
+  // The SCHOOL's currency, both directions. A salary is the one figure where
+  // a hundredfold error is least likely to be questioned before it is paid.
+  const { money, minorFrom } = useFormat();
   const router = useRouter();
   const [employeeId, setEmployeeId] = React.useState(employees[0]?.id ?? "");
   const [salaryMajor, setSalaryMajor] = React.useState("");
@@ -47,7 +50,7 @@ export function SalaryChanges({
     setBusy("request");
     setMsg(null);
     const res = await postWithStepUp(`hr/salary/employees/${employeeId}/changes`, {
-      newSalaryMinor: Math.round(parseFloat(salaryMajor) * 100),
+      newSalaryMinor: minorFrom(salaryMajor),
       reason: reason || null,
     });
     setBusy(null);

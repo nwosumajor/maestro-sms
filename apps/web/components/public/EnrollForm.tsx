@@ -2,12 +2,24 @@
 
 import * as React from "react";
 import type { PublicSchoolDto } from "@sms/types";
+import { formatMoney } from "@sms/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
 const MAX_SCHOOLS = 2;
+
+/**
+ * The SCHOOL's own currency, scaled by that currency.
+ *
+ * This is a PUBLIC, pre-auth page — there is no session to read a region from,
+ * so the currency has to travel with the school. It rendered every fee as
+ * `en-NG` naira divided by 100, which for a Ghanaian school named the wrong
+ * currency and for a francophone one showed a hundredth of the fee, on the
+ * screen a family reads before deciding whether they can afford to apply.
+ */
+const fee = (s: PublicSchoolDto) => formatMoney(s.admissionFormFeeMinor, s.currency || "NGN", "en");
 
 export function EnrollForm({ schools, preselect }: { schools: PublicSchoolDto[]; preselect?: string }) {
   const [selected, setSelected] = React.useState<string[]>(
@@ -119,7 +131,7 @@ export function EnrollForm({ schools, preselect }: { schools: PublicSchoolDto[];
                     <a href={l.url} className="text-primary underline underline-offset-2">
                       Pay {school?.name ?? l.slug}&apos;s form fee
                       {school && school.admissionFormFeeMinor > 0
-                        ? ` (${new Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN" }).format(school.admissionFormFeeMinor / 100)})`
+                        ? ` (${fee(school)})`
                         : ""}
                     </a>
                   </li>
@@ -156,7 +168,7 @@ export function EnrollForm({ schools, preselect }: { schools: PublicSchoolDto[];
                   {s.admissionFormFeeMinor > 0 && (
                     <span className="ml-1.5 text-xs text-muted-foreground">
                       · form fee{" "}
-                      {new Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN" }).format(s.admissionFormFeeMinor / 100)}
+                      {fee(s)}
                     </span>
                   )}
                 </span>

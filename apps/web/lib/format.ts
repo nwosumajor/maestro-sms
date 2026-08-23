@@ -22,7 +22,7 @@
 // zone. See `isCalendarDate`.
 // =============================================================================
 
-import { formatMoney } from "@sms/types";
+import { formatMoney, toMajor, toMinor } from "@sms/types";
 
 export interface DisplayRegion {
   locale: string;
@@ -130,10 +130,39 @@ export function todayIn(timezone: string): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(new Date());
 }
 
+/**
+ * What a person TYPED -> integer minor units, for sending to the API.
+ *
+ * The other half of `money`, and the half that was missing. Every form in the
+ * web tier wrote `Math.round(Number(x) * 100)`: a salary, a loan, a fee item, a
+ * late fee, an adjustment, a transport cost, a prepayment, an instalment. The
+ * DISPLAY side had already been made region-aware — several of these components
+ * read money through `useFormat().money` two lines above sending it — so they
+ * showed a Senegalese school its francs correctly and then stored a hundred
+ * times what the bursar typed.
+ *
+ * Reading is a wrong number on a screen. Writing is a wrong number on an
+ * invoice, a payslip or a loan, which is why this direction matters more.
+ */
+export function minorFrom(amountMajor: string | number, currency = PLATFORM_REGION.currency): number {
+  const n = typeof amountMajor === "number" ? amountMajor : parseFloat(amountMajor || "0");
+  return Number.isFinite(n) ? toMinor(n, currency) : 0;
+}
+
+/** Integer minor units -> a bare major number, for PREFILLING an input. Not for
+ *  display: `money` is for display, and this deliberately carries no symbol. */
+export function majorFrom(amountMinor: number, currency = PLATFORM_REGION.currency): number {
+  return toMajor(amountMinor ?? 0, currency);
+}
+
 export function formattersFor(region: DisplayRegion) {
   return {
     region,
     money: (minor: number, currency?: string) => money(minor, currency || region.currency, region.locale),
+    /** Typed amount -> minor units, in the school's currency. */
+    minorFrom: (major: string | number, currency?: string) => minorFrom(major, currency || region.currency),
+    /** Minor units -> a bare major number, for prefilling an input. */
+    majorFrom: (minor: number, currency?: string) => majorFrom(minor, currency || region.currency),
     shortDate: (v: string | Date | null | undefined) => shortDate(v, region),
     dateTime: (v: string | Date | null | undefined) => dateTime(v, region),
     /** Today, as the school reckons it — see `todayIn`. */

@@ -95,7 +95,7 @@ export class PublicService {
     return this.db.runAsTenant({ schoolId: ZERO, userId: ZERO }, (tx) =>
       tx.school.findMany({
         where: { status: "ACTIVE", isPlatform: false },
-        select: { id: true, name: true, slug: true, admissionFormFeeMinor: true },
+        select: { id: true, name: true, slug: true, admissionFormFeeMinor: true, currency: true },
         orderBy: { name: "asc" },
       }),
     );

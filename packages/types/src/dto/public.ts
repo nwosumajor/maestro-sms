@@ -5,8 +5,14 @@ export interface PublicSchoolDto {
   id: string;
   name: string;
   slug: string;
-  /** Admission-form fee (kobo; 0 = free) — shown to applicants before they apply. */
+  /** Admission-form fee in MINOR UNITS (0 = free) — shown to applicants before
+   *  they apply. Minor units are not always hundredths: read it with
+   *  `currency` below, never by dividing by 100. */
   admissionFormFeeMinor: number;
+  /** The school's own currency (ISO 4217). Null = the platform's home currency.
+   *  Without it this page rendered every school's fee as naira, on the one
+   *  screen a family reads BEFORE deciding whether they can afford to apply. */
+  currency: string | null;
 }
 
 /** Shared vocab for the public onboarding intake — one source for the form's

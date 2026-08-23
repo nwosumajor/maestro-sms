@@ -24,6 +24,7 @@ import {
   type ModuleKey,
   type Plan,
   type PlanPriceDto,
+  toMajor,
 } from "@sms/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -120,9 +121,13 @@ export function OnboardForm({ defaultReferralCode = "" }: { defaultReferralCode?
   const [cycle, setCycle] = React.useState<BillingCycle>(BILLING_CYCLES.TERM);
   const estCurrency = defaultCurrencyFor(plan);
   const perSeat = pricing?.find((r) => r.plan === plan && r.currency === estCurrency)?.perSeatMonthlyMinor ?? null;
+  // toMajor asks the currency, rather than assuming hundredths. Both tiers are
+  // priced in NGN or USD today, so this is the same number — but the assumption
+  // is one `planCurrencies()` entry away from being wrong, and it is the figure
+  // a prospective owner decides on.
   const estimate =
     perSeat != null && students > 0
-      ? Math.round((applyCycleDiscountMinor(students * perSeat * CYCLE_MONTHS[cycle], cycle) / 100) * 100) / 100
+      ? toMajor(applyCycleDiscountMinor(students * perSeat * CYCLE_MONTHS[cycle], cycle), estCurrency)
       : null;
   const CYCLE_LABEL: Record<BillingCycle, string> = {
     MONTH: "Monthly",

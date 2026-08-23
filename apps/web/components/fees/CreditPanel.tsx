@@ -6,7 +6,7 @@ import type { CreditBalanceDto, Serialized } from "@sms/types";
 import { postSms } from "@/components/game/play-ui";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { money } from "@/lib/format";
+import { minorFrom, money } from "@/lib/format";
 
 // The student's fee-credit balance on the invoice page: staff can apply it to
 // this invoice or move an overpayment into it; family can top it up (prepay
@@ -89,7 +89,7 @@ export function CreditPanel({
             size="sm"
             variant="outline"
             disabled={busy || !prepayAmount || Number(prepayAmount) < 100}
-            onClick={() => run(`students/${studentId}/prepay/init`, { amountMinor: Math.round(Number(prepayAmount) * 100) })}
+            onClick={() => run(`students/${studentId}/prepay/init`, { amountMinor: minorFrom(prepayAmount, currency) })}
           >
             Prepay online
           </Button>

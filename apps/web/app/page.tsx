@@ -296,7 +296,10 @@ async function effectivePlans() {
     // Cycle marketing: the SAME discount rule checkout charges with (one source).
     // Scaled by the CURRENCY, not by 100 — the shared helper, so this page cannot
     // drift from what checkout charges.
-    const toMajor = (minor: number) => Math.round(minorToMajor(minor, currency) * 100) / 100;
+    // No rounding pass: minorToMajor divides by the currency's own scale, so the
+    // result is already exact. `Math.round(x * 100) / 100` re-imposed two
+    // decimal places on a currency that may have none.
+    const toMajor = (minor: number) => minorToMajor(minor, currency);
     const perStudent = (cycle: keyof typeof CYCLE_MONTHS) =>
       toMajor(applyCycleDiscountMinor(perSeatMinor * CYCLE_MONTHS[cycle], cycle));
     return {

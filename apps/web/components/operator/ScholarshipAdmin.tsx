@@ -16,12 +16,20 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { money, shortDate } from "@/lib/format";
+import { CURRENCIES, toMinor } from "@sms/types";
 
 type Program = Serialized<ScholarshipProgramDto>;
 type Application = Serialized<ScholarshipApplicationDto>;
 
 const sel = "h-9 rounded-md border border-input bg-background px-3 text-sm";
-const nairaToKobo = (naira: string) => Math.round((parseFloat(naira) || 0) * 100);
+/**
+ * A scholarship is sponsored by the PLATFORM, so its award is denominated in the
+ * platform's own currency — not the recipient school's, which may be any of the
+ * catalogue. Stated through the shared helper rather than a bare `* 100`, so the
+ * assumption is visible and so this console cannot disagree with the API about
+ * the scale of the number it is sending.
+ */
+const awardToMinor = (major: string) => toMinor(parseFloat(major) || 0, CURRENCIES.NGN);
 
 export function ScholarshipAdmin() {
   const [programs, setPrograms] = React.useState<Program[]>([]);
@@ -54,10 +62,10 @@ export function ScholarshipAdmin() {
     const res = await sendWithStepUp("POST", "scholarships/programs", {
       title: f.title,
       description: f.description || null,
-      awardMinor: nairaToKobo(f.award),
-      award2Minor: f.award2 ? nairaToKobo(f.award2) : null,
-      award3Minor: f.award3 ? nairaToKobo(f.award3) : null,
-      budgetMinor: nairaToKobo(f.budget),
+      awardMinor: awardToMinor(f.award),
+      award2Minor: f.award2 ? awardToMinor(f.award2) : null,
+      award3Minor: f.award3 ? awardToMinor(f.award3) : null,
+      budgetMinor: awardToMinor(f.budget),
       selectionBasis: f.basis,
       opensAt: new Date(f.opensAt).toISOString(),
       closesAt: new Date(f.closesAt).toISOString(),

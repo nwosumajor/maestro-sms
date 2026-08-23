@@ -16,8 +16,6 @@ type Student = Serialized<IdNameDto>;
 type FeeItem = Serialized<FeeItemDto>;
 interface Line { description: string; amountMajor: string; quantity: number }
 
-const toMinor = (major: string) => Math.round(parseFloat(major || "0") * 100);
-
 export function FeesAdmin({ students, items }: { students: Student[]; items: FeeItem[] }) {
   const router = useRouter();
   const [tab, setTab] = React.useState<"invoice" | "catalog">("invoice");
@@ -27,8 +25,13 @@ export function FeesAdmin({ students, items }: { students: Student[]; items: Fee
   const [dueDate, setDueDate] = React.useState("");
   // Currency defaults to the SCHOOL's, not the platform's. A school billing in
   // pounds could previously only raise naira invoices — the option was not there.
-  const { region, money: fmtMoney } = useFormat();
+  const { region, money: fmtMoney, minorFrom, majorFrom } = useFormat();
   const [currency, setCurrency] = React.useState(region.currency);
+  // Scaled by the SELECTED currency, not by 100 — this form can raise a USD or
+  // a franc invoice, and a franc has no centime. `* 100` here stored a hundred
+  // times what the bursar typed, on the same screen that displayed the total
+  // back to them correctly.
+  const toMinor = (major: string) => minorFrom(major, currency);
   const [lines, setLines] = React.useState<Line[]>([{ description: "", amountMajor: "", quantity: 1 }]);
   const [invBusy, setInvBusy] = React.useState(false);
   const [invMsg, setInvMsg] = React.useState<string | null>(null);
@@ -38,7 +41,8 @@ export function FeesAdmin({ students, items }: { students: Student[]; items: Fee
     setLines((xs) => xs.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
   const prefill = (i: number, itemId: string) => {
     const it = items.find((x) => x.id === itemId);
-    if (it) setLine(i, { description: it.name, amountMajor: (it.amountMinor / 100).toFixed(2) });
+    // The catalogue item carries its OWN currency; prefill in that scale.
+    if (it) setLine(i, { description: it.name, amountMajor: String(majorFrom(it.amountMinor, it.currency ?? currency)) });
   };
 
   const createInvoice = async (e: React.FormEvent) => {
@@ -75,7 +79,7 @@ export function FeesAdmin({ students, items }: { students: Student[]; items: Fee
     const res = await fetch("/api/sms/fees/items", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: fiName, amountMinor: toMinor(fiAmount) }),
+      body: JSON.stringify({ name: fiName, amountMinor: minorFrom(fiAmount, region.currency) }),
     });
     setFiBusy(false);
     if (res.ok) { setFiName(""); setFiAmount(""); router.refresh(); }

@@ -6,7 +6,7 @@ import type { InvoiceAdjustmentDto, Serialized } from "@sms/types";
 import { postSms } from "@/components/game/play-ui";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { money, shortDate } from "@/lib/format";
+import { minorFrom, money, shortDate } from "@/lib/format";
 
 type Adjustment = Serialized<InvoiceAdjustmentDto>;
 
@@ -44,7 +44,7 @@ export function AdjustmentsPanel({
     setErr(null);
     const res = await postSms(`invoices/${invoiceId}/adjustments`, {
       kind,
-      amountMinor: Math.round(Number(amount) * 100),
+      amountMinor: minorFrom(amount, currency),
       reason: reason.trim(),
     });
     setBusy(false);

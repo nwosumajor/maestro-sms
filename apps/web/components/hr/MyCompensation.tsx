@@ -39,7 +39,7 @@ async function req(method: string, path: string, body?: unknown) {
 export function MyCompensation({ slips, loans: initialLoans }: { slips: Slip[]; loans: Loan[] }) {
   // The SCHOOL's currency and locale, not the platform's — this used to be a
   // module-level `naira()` that hard-coded ₦, en-NG and a divide by 100.
-  const { money } = useFormat();
+  const { money, minorFrom } = useFormat();
   const [loans, setLoans] = React.useState<Loan[]>(initialLoans);
   const [principal, setPrincipal] = React.useState("");
   const [monthly, setMonthly] = React.useState("");
@@ -49,8 +49,8 @@ export function MyCompensation({ slips, loans: initialLoans }: { slips: Slip[]; 
   const [busy, setBusy] = React.useState(false);
 
   async function requestLoan() {
-    const pMinor = Math.round(Number(principal) * 100);
-    const mMinor = Math.round(Number(monthly) * 100);
+    const pMinor = minorFrom(principal);
+    const mMinor = minorFrom(monthly);
     if (!(pMinor > 0) || !(mMinor > 0) || !purpose.trim()) return;
     setBusy(true);
     setErr(null);

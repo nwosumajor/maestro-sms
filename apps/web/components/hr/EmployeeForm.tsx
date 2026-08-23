@@ -9,10 +9,13 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { readApiError } from "@/lib/api-error";
 import { personLabel } from "@/lib/people";
+import { useFormat } from "@/components/shell/RegionProvider";
 
 type User = Serialized<UserSummaryDto>;
 
 export function EmployeeForm({ users, managers = [] }: { users: User[]; managers?: { userId: string; name: string }[] }) {
+  // The SCHOOL's currency — a salary typed in francs was stored a hundredfold.
+  const { minorFrom } = useFormat();
   const router = useRouter();
   const [userId, setUserId] = React.useState(users[0]?.id ?? "");
   const [jobTitle, setJobTitle] = React.useState("");
@@ -34,7 +37,7 @@ export function EmployeeForm({ users, managers = [] }: { users: User[]; managers
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         jobTitle, department: department || null, employmentType, startDate,
-        salaryMinor: salaryMajor ? Math.round(parseFloat(salaryMajor) * 100) : null,
+        salaryMinor: salaryMajor ? minorFrom(salaryMajor) : null,
         tin: tin.trim() || null,
         rsaPin: rsaPin.trim() || null,
         managerId: managerId || null,

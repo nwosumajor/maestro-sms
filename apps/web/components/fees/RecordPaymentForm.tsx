@@ -98,7 +98,7 @@ export function RecordPaymentForm({
         </select>
       </div>
       <Button type="submit" disabled={busy}>
-        {busy ? "Recording…" : `${kind === "REFUND" ? "Refund" : "Record"} ${money(Math.round(parseFloat(amountMajor || "0") * 100), currency)}`}
+        {busy ? "Recording…" : `${kind === "REFUND" ? "Refund" : "Record"} ${money(toMinor(parseFloat(amountMajor || "0"), currency), currency)}`}
       </Button>
       {error && <p className="text-sm text-destructive sm:ml-3">{error}</p>}
       {info && <p className="text-sm text-muted-foreground sm:ml-3">{info}</p>}

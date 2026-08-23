@@ -6,7 +6,7 @@ import type { PaymentPlanDto, Serialized } from "@sms/types";
 import { sendSms } from "@/components/game/play-ui";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { money, shortDate } from "@/lib/format";
+import { minorFrom, money, shortDate } from "@/lib/format";
 
 type Plan = Serialized<PaymentPlanDto>;
 
@@ -48,7 +48,7 @@ export function PaymentPlanCard({
   const submit = async () => {
     const parsed = rows
       .filter((r) => r.dueDate && r.amount)
-      .map((r) => ({ dueDate: r.dueDate, amountMinor: Math.round(Number(r.amount) * 100) }));
+      .map((r) => ({ dueDate: r.dueDate, amountMinor: minorFrom(r.amount, currency) }));
     const sum = parsed.reduce((n, t) => n + t.amountMinor, 0);
     if (sum !== totalMinor) {
       setErr(`Tranches must sum to the invoice total (${money(totalMinor, currency)}); currently ${money(sum, currency)}.`);
