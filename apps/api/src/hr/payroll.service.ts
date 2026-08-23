@@ -169,9 +169,10 @@ export class PayrollService {
           select: { id: true, name: true },
         });
         const nameById = new Map(names.map((u) => [u.id, u.name]));
-        const naira = (m: number) => formatMoney(m, region.currency, region.locale);
+        // Named for the currency it formats, which is the school's, not ours.
+        const cash = (m: number) => formatMoney(m, region.currency, region.locale);
         const list = overdrawn
-          .map((o) => `${nameById.get(o.e.userId) ?? o.e.userId} (deductions exceed pay by ${naira(-o.bd.netMinor)})`)
+          .map((o) => `${nameById.get(o.e.userId) ?? o.e.userId} (deductions exceed pay by ${cash(-o.bd.netMinor)})`)
           .join("; ");
         throw new BadRequestException(
           `Cannot generate payroll — deductions exceed pay for ${overdrawn.length} employee(s): ${list}. ` +
@@ -413,7 +414,19 @@ export class PayrollService {
     });
     // Quote + neutralise spreadsheet formula injection (OWASP CSV injection).
     const dec = (v: string | null | undefined) => (v ? decryptField(v, p.schoolId) : "");
-    const money = (m: number) => (m / 100).toFixed(2);
+    // ASK THE CURRENCY, do not assume two decimals. This file is filed with a
+    // revenue authority and a pension administrator, and `/100` is right for
+    // NGN and GBP and 100x WRONG for the CFA franc and every other zero-decimal
+    // currency — eleven of the twenty-nine African countries in the catalogue.
+    // The BANK EXPORT beside this one already did it properly (toMajor +
+    // currencyDecimals); this one was missed.
+    //
+    // Latent rather than live today: PAYROLL_PACKS implements NG and GB only and
+    // createRun REFUSES a country without a pack, so no zero-decimal school can
+    // reach this yet. It would go wrong silently on the day one is added, which
+    // is the worst moment to find it.
+    const region = await this.region.forSchool(p.schoolId);
+    const money = (m: number) => toMajor(m, region.currency).toFixed(currencyDecimals(region.currency));
     const period = `${data.run.periodYear}-${String(data.run.periodMonth).padStart(2, "0")}`;
     const lines: string[] = [];
     for (const s of data.slips) {
@@ -441,12 +454,18 @@ export class PayrollService {
         lines.push([csvCell(name), money(bd.grossMinor), money(total)].join(","));
       }
     }
+    // And the COLUMN NAMES follow the currency too. Getting the figures right
+    // while heading the column "Gross (NGN)" produces a filing that states the
+    // wrong currency — which on a statutory return is not a cosmetic problem,
+    // because the number and its unit are read together. The bank export beside
+    // this one already interpolates `region.currency`.
+    const cur = region.currency;
     const header =
       type === "paye"
-        ? '"Employee","TIN","Gross (NGN)","PAYE (NGN)"'
+        ? `"Employee","TIN","Gross (${cur})","PAYE (${cur})"`
         : type === "pension"
-          ? '"Employee","RSA PIN","Gross (NGN)","Employee 8% (NGN)","Employer 10% (NGN)","Total (NGN)"'
-          : '"Employee","Gross (NGN)","NHF (NGN)"';
+          ? `"Employee","RSA PIN","Gross (${cur})","Employee 8% (${cur})","Employer 10% (${cur})","Total (${cur})"`
+          : `"Employee","Gross (${cur})","NHF (${cur})"`;
     return {
       csv: [header, ...lines].join("\n") + "\n",
       filename: `${type}-remittance-${period}${data.run.runType !== "MONTHLY" ? `-${data.run.runType.toLowerCase()}` : ""}.csv`,
@@ -488,15 +507,15 @@ export class PayrollService {
     // printed "NGN" beside every figure and called the deduction "Pension (8%)",
     // which is a Nigerian rate on a British salary.
     const region = await this.region.forSchool(p.schoolId);
-    const cash = (m: number) => {
-      try {
-        // The locale was already right here; the /100 was not. formatMoney
-        // asks Intl how many minor units the currency actually has.
-        return formatMoney(m, region.currency, region.locale);
-      } catch {
-        return `${region.currency} ${(m / 100).toFixed(2)}`;
-      }
-    };
+    // The locale was already right here; the /100 was not. formatMoney asks Intl
+    // how many minor units the currency actually has.
+    //
+    // No try/catch: formatMoney cannot throw — an unknown currency or locale
+    // falls back INSIDE it, to `${currency} ${major.toFixed(currencyDecimals)}`,
+    // which is still scaled correctly. The catch that used to be here was
+    // unreachable, and its body divided by 100, so the one arm of this that
+    // would have been wrong was the one that could never run.
+    const cash = (m: number) => formatMoney(m, region.currency, region.locale);
     const buffer = await new Promise<Buffer>((resolve, reject) => {
       const doc = new PDFDocument({ size: "A4", margin: 50 });
       const chunks: Buffer[] = [];

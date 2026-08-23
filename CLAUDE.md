@@ -270,7 +270,19 @@ conflicts with it, flag the conflict before proceeding.
   Scotland's bands differ and are deliberately unimplemented
   (`SCOTTISH_RATES_UNSUPPORTED`); non-cumulative (Month-1 basis), not HMRC-exact
   across a year of changing pay. Figures must be verified against HMRC before a
-  real run.
+  real run. // GOTCHA: the STATUTORY REMITTANCE CSV — the one filed with a revenue
+  authority and a pension administrator — divided by 100 and headed every column
+  `(NGN)`, while the BANK EXPORT immediately beside it already asked the currency
+  (`toMajor` + `currencyDecimals`) and interpolated `region.currency`. Classic
+  sibling asymmetry: two exports off the same run, one right and one not. The
+  figures AND the column names both follow the school's currency now. Also gone:
+  an unreachable `catch` in the payslip PDF whose only body divided by 100 —
+  `formatMoney` cannot throw (it falls back internally, still correctly scaled),
+  so the single arm that would have been wrong was the one that could never run.
+  LATENT, not live: `PAYROLL_PACKS` covers NG and GB only and `createRun` refuses
+  a country without a pack, so no zero-decimal school can reach it — it would
+  have gone wrong silently on the day one was added, which is the worst moment to
+  find out, because the first evidence is a filing somebody has already made.
 - **GDPR mode — BUILT** (`apps/api/src/privacy/compliance.*`, `data_breach_incident`,
   migration `20261119000000`, rls/100, web `/admin/compliance`). Art. 33's 72-hour
   clock runs from `discoveredAt` — when the school BECAME AWARE — which is captured
