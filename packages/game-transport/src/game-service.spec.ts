@@ -110,11 +110,32 @@ describe("GameService — server-authoritative orchestration (spec §11 step 2)"
 
     for (const client of [a, b]) {
       for (const msg of client.received) {
-        // any non-finished state frame must not contain either secret
+        // any non-finished state frame must not carry either secret
         if (msg.type === "state" && msg.game.status !== "finished") {
-          const json = JSON.stringify(msg);
-          expect(json).not.toContain("1234");
-          expect(json).not.toContain("5678");
+          // THE FIELD, not a substring of the whole frame.
+          //
+          // This asserted `JSON.stringify(msg)` did not CONTAIN "1234"/"5678",
+          // and the frame carries randomUUID() ids — 32 hex characters, in which
+          // "1234" and "5678" are perfectly ordinary substrings. Measured: 0.045%
+          // per id, about 0.8% per run across the ids in these frames, which is
+          // roughly one CI failure in every 125 pushes on a test that is not
+          // wrong about anything. It failed exactly that way on an accessibility
+          // commit that touched no game code.
+          //
+          // `secret` is documented as "Present ONLY when the game is finished",
+          // so its absence is the actual invariant and cannot match by accident.
+          for (const player of msg.game.players) {
+            expect(player.secret).toBeUndefined();
+          }
+          // Belt as well as braces — the secret must not reach the client by any
+          // OTHER field either — but with the random ids removed first, since
+          // they are the only part of the frame that can collide by chance.
+          const withoutIds = JSON.stringify(msg).replace(
+            /"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"/g,
+            '"<id>"',
+          );
+          expect(withoutIds).not.toContain("1234");
+          expect(withoutIds).not.toContain("5678");
         }
       }
     }

@@ -31,7 +31,25 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-const TEST_ROOT = join(__dirname, "..");
+/**
+ * EVERY test tree in the monorepo, not just this one.
+ *
+ * The gate lived in apps/api and scanned only apps/api/test — so the same defect
+ * recurred just outside its reach. `packages/game-transport`'s duel spec
+ * asserted `JSON.stringify(frame)` did not contain the secret "1234", over a
+ * frame carrying `randomUUID()` ids in which "1234" is an ordinary hex
+ * substring: about 0.045% per id and ~0.8% per run, which is roughly one red CI
+ * in every 125 pushes on a test that is not wrong about anything. It duly failed
+ * on an accessibility commit that touched no game code.
+ *
+ * A gate that covers one directory is a gate the next instance is written
+ * outside.
+ */
+const ROOTS = [
+  join(__dirname, ".."),                       // apps/api/test
+  join(__dirname, "../../../../packages"),     // packages/*/src/**.spec.ts
+  join(__dirname, "../../../web"),             // apps/web/**/__tests__
+];
 
 /**
  * Short numeric needles that earn their place, each with the reason.
@@ -47,6 +65,10 @@ const MIN_NEEDLE = 4;
 
 function specs(dir: string, out: string[] = []): string[] {
   for (const e of readdirSync(dir)) {
+    // node_modules holds SYMLINKED workspace packages, so every package's specs
+    // appear again under each dependent — the same file reported two or three
+    // times under names nobody can open.
+    if (e === "node_modules" || e === "dist" || e === ".next") continue;
     const f = join(dir, e);
     if (statSync(f).isDirectory()) specs(f, out);
     else if (f.endsWith(".spec.ts")) out.push(f);
@@ -57,11 +79,11 @@ function specs(dir: string, out: string[] = []): string[] {
 describe("an absence is asserted on the field, not by searching for a number", () => {
   const offenders: string[] = [];
 
-  for (const file of specs(TEST_ROOT)) {
-    const rel = file.slice(TEST_ROOT.length + 1);
-    readFileSync(file, "utf8")
-      .split("\n")
-      .forEach((line, i) => {
+  const REPO = join(__dirname, "../../../..");
+  for (const file of ROOTS.flatMap((r) => specs(r))) {
+    const rel = file.slice(REPO.length + 1);
+    const all = readFileSync(file, "utf8").split("\n");
+    all.forEach((line, i) => {
         // PROSE IS NOT CODE. Both this file's own header and the comment in
         // retention-coverage quote the bad pattern in order to explain it, and
         // a gate that cannot tell an example from an assertion would force
@@ -74,7 +96,36 @@ describe("an absence is asserted on the field, not by searching for a number", (
         const m = /\.not\.toContain\((["'`])([0-9][0-9.,]*)\1\)/.exec(line);
         if (!m) return;
         const needle = m[2];
-        if (needle.length >= MIN_NEEDLE) return;
+        // LENGTH IS NOT THE WHOLE RISK — the HAYSTACK is.
+        //
+        // Four characters was treated as specific enough, and
+        // `expect(JSON.stringify(frame)).not.toContain("1234")` in the duel spec
+        // duly failed in CI: the frame carries randomUUID() ids, 32 hex
+        // characters in which "1234" is an ordinary substring (0.045% per id,
+        // ~0.8% per run). Searching a whole serialised OBJECT is the risky act,
+        // however long the needle, because the object carries ids, timestamps
+        // and counts that nobody chose.
+        // The subject is usually assigned on an EARLIER line —
+        //   const json = JSON.stringify(msg);
+        //   expect(json).not.toContain("1234");
+        // — which is exactly the form that failed in CI, so a line-local check
+        // misses the very case this rule exists for. Follow the variable back.
+        const subject = /expect\(\s*([A-Za-z_$][\w$]*)\s*\)/.exec(line)?.[1];
+        const near = all.slice(Math.max(0, i - 12), i).join("\n");
+        const assignment =
+          // Captured to the END OF THE LINE, not just up to `JSON.stringify(`:
+          // the sanitising `.replace(` comes AFTER it, so a match that stopped
+          // there could never see it and every correct fix looked unsafe.
+          subject && new RegExp(`\\b${subject}\\b\\s*=[^=][^\n]*JSON\\.stringify\\([^\n]*`).exec(near)?.[0];
+        const wholeObject = /JSON\.stringify\(/.test(line) || !!assignment;
+        // SANITISED SUBJECTS ARE FINE. The safe form of this assertion strips
+        // the random parts before searching — `JSON.stringify(x).replace(uuid,
+        // "<id>")` — and then a short needle means what it says. Recognising
+        // that keeps the rule from forcing an allowance onto every correct fix.
+        const sanitised = /\.replace\(/.test(assignment ?? (wholeObject ? line : ""));
+        if (sanitised) return;
+        if (!wholeObject && needle.length >= MIN_NEEDLE) return;
+        if (wholeObject && needle.length > 8) return;
         const key = `${rel}:${i + 1}`;
         if (!(key in ALLOWED)) offenders.push(`${key}  not.toContain("${needle}")`);
       });
@@ -89,7 +140,7 @@ describe("an absence is asserted on the field, not by searching for a number", (
     // as a stale audit or orphan-method exemption.
     for (const key of Object.keys(ALLOWED)) {
       const [rel, lineNo] = key.split(":");
-      const lines = readFileSync(join(TEST_ROOT, rel), "utf8").split("\n");
+      const lines = readFileSync(join(join(__dirname, "../../../.."), rel), "utf8").split("\n");
       expect(lines[Number(lineNo) - 1]).toMatch(/\.not\.toContain\(/);
     }
   });

@@ -93,7 +93,13 @@ describe("Ring — Elimination Ring engine (spec §4 / §11.6)", () => {
       // was NEVER guessed, so it must appear in no view; nor any `secret` key.
       for (const viewer of [null, "alice", "bob", "carol"]) {
         const view = r.viewFor(viewer);
-        const json = JSON.stringify(view);
+        // Ids stripped first: the view carries random ids in which a four-digit
+        // run is an ordinary substring, so an unsanitised search fails about
+        // once in 125 runs on a test that is not wrong about anything.
+        const json = JSON.stringify(view).replace(
+          /"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"/g,
+          '"<id>"',
+        );
         expect(json).not.toContain("9012"); // carol's un-cracked secret
         expect(json).not.toMatch(/"secret"/);
         expect(view.players.every((p) => !("secret" in p))).toBe(true);

@@ -108,7 +108,14 @@ describe("RingService — server-authoritative ring orchestration (spec §4 / §
     // `secret` field is ever serialized.
     for (const client of [a, b, c]) {
       for (const msg of client.received) {
-        const json = JSON.stringify(msg);
+        // Ids stripped first: a frame carries randomUUID() ids, 32 hex
+        // characters in which a four-digit run like "9012" is an ordinary
+        // substring — about 0.045% per id, which is a red CI roughly once in
+        // every 125 pushes on a test that is not wrong about anything.
+        const json = JSON.stringify(msg).replace(
+          /"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"/g,
+          '"<id>"',
+        );
         expect(json).not.toContain("9012");
         expect(json).not.toMatch(/"secret"/);
       }

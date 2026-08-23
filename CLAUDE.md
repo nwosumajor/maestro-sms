@@ -1246,6 +1246,27 @@ the TypeScript duplicate-attribute error caught it. The gate reads each tag to i
 matching `>` at brace depth zero, and strips COMMENTS first (a JSDoc block
 documenting `<input type="datetime-local">` is not a control anyone can fix).
 
+### The accident gate now covers every test tree, and the HAYSTACK not just the needle
+`assertions-that-match-by-accident.spec.ts` scanned only `apps/api/test` and
+flagged numeric needles shorter than four characters. CI went red on
+`packages/game-transport`'s duel spec — `JSON.stringify(frame)` asserted not to
+contain the secret `"1234"`, over a frame carrying `randomUUID()` ids in which
+`1234` is an ordinary hex substring: **0.045% per id, ~0.8% per run**, about one
+red push in 125, on a test that is not wrong about anything. It failed on an
+accessibility commit that touched no game code.
+Two gaps, not one: the gate's ROOT (one directory — a gate that covers one tree
+is one the next instance is written outside) and its RULE (four characters was
+"specific enough", but specificity depends on the haystack — searching a whole
+serialised object is the risky act however long the needle). It now walks
+`apps/api/test`, `packages/*` and `apps/web`, skipping `node_modules` (symlinked
+workspace packages report the same file three times), and follows the subject
+back up to twelve lines because `const json = JSON.stringify(x)` on the PREVIOUS
+line is the form that actually failed. A subject sanitised with `.replace(` is
+accepted — that is the correct fix, and a rule that forced an allowance onto
+every correct fix would be abandoned.
+It immediately found FIVE more latent flakes of the same kind in `game-engine`
+and `game-transport`. All six now strip ids before searching.
+
 ## Repo workflow & gotchas
 - DB setup order: `prisma migrate deploy` → `pnpm --filter @sms/db rls` →
   `prisma db seed` (or `pnpm --filter @sms/db setup`). RLS lives in `prisma/rls/`,

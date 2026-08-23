@@ -102,7 +102,13 @@ describe("Duel — server-authoritative 2-player match (spec §11 step 2)", () =
       const d = activeDuel({ aliceSecret: "1234", bobSecret: "5678" });
       d.guess("alice", "9012", 1); // a non-winning guess, no secret digits placed
       for (const viewer of ["alice", "bob", null] as const) {
-        const json = JSON.stringify(d.viewFor(viewer));
+        // Ids stripped first: the view carries random ids in which a four-digit
+        // run is an ordinary substring, so an unsanitised search fails about
+        // once in 125 runs on a test that is not wrong about anything.
+        const json = JSON.stringify(d.viewFor(viewer)).replace(
+          /"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"/g,
+          '"<id>"',
+        );
         expect(json).not.toContain("1234"); // Alice's secret
         expect(json).not.toContain("5678"); // Bob's secret — even Bob doesn't get it back over the wire
       }

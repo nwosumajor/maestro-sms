@@ -62,7 +62,13 @@ describe("Race — Class Race engine (spec §5 / §11.5)", () => {
       // Before anyone cracks it, the target appears in NO view and there is no
       // target/secret field anywhere.
       for (const viewer of [null, "a", "b", "c"]) {
-        const json = JSON.stringify(r.viewFor(viewer));
+        // Ids stripped first: the view carries random ids in which a four-digit
+        // run is an ordinary substring, so an unsanitised search fails about
+        // once in 125 runs on a test that is not wrong about anything.
+        const json = JSON.stringify(r.viewFor(viewer)).replace(
+          /"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"/g,
+          '"<id>"',
+        );
         expect(json).not.toContain("1234");
         expect(json).not.toMatch(/"target"|"secret"/);
       }
@@ -128,7 +134,13 @@ describe("Race — Class Race engine (spec §5 / §11.5)", () => {
       r.guess("b", "5678", 1600); // B never cracks
       r.end(1700);
       // B's secret-free view: B never guessed 1234, so it appears nowhere for B.
-      const json = JSON.stringify(r.viewFor("b"));
+      // Ids stripped first: the view carries random ids in which a four-digit
+        // run is an ordinary substring, so an unsanitised search fails about
+        // once in 125 runs on a test that is not wrong about anything.
+      const json = JSON.stringify(r.viewFor("b")).replace(
+        /"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"/g,
+        '"<id>"',
+      );
       expect(json).not.toContain("1234");
       expect(json).not.toMatch(/"target"|"secret"/);
     });
