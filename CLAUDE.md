@@ -780,6 +780,25 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### The signing key was printed in the example file
+`secretProblem()` / `assertAuthSecretUsable()` (`auth/secrets.ts`). `AUTH_SECRET`
+signs EVERY token — session bearers, the ws-ticket, step-up, invite links,
+password-reset links, the local storage presigns — and was unchecked beyond
+"is it set". `.env.example` shipped `AUTH_SECRET=change-me-32-char-min-secret`:
+PUBLISHED IN THIS REPOSITORY, 28 bytes despite its own "32-char-min" advice, and
+the value the local stack was actually running. Any deployment that copied the
+example — the ordinary way to start — could have a session minted for any user in
+any school by anyone who had read the source, plus step-up tokens and
+password-reset links. Same shape as the demo-seed password this project already
+treats as a full platform compromise.
+Now: production REFUSES TO BOOT on a placeholder or anything under 32 BYTES
+(bytes, not characters), naming which and how to generate one; non-production
+warns. `.env.example` ships an EMPTY value with `openssl rand -base64 32` — the
+failure was not only that the value was weak but that copying the example gave
+you a WORKING stack, so nothing forced the question. // GOTCHA: the local compose
+sets `NODE_ENV=production` for parity, so this refuses to start a local stack
+still on the placeholder — which is correct, and the fix is to generate one.
+
 ### A mis-set encryption key disabled encryption in SILENCE
 `keyProblem()` / `assertFieldCryptoConfigured()` (`foundation/field-crypto.ts`).
 A MISSING `DATA_ENCRYPTION_KEY` disables field encryption and warns — deliberate,

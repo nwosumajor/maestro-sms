@@ -46,3 +46,62 @@ export function verifyHs256(token: string): Record<string, unknown> {
   }
   throw lastErr;
 }
+
+/**
+ * Minimum length for an HS256 signing key.
+ *
+ * Everything this platform issues is signed with it: session bearers, the
+ * ws-ticket, step-up tokens, invite links, password-reset links and the local
+ * storage presigns. A short key is a forgeable session for every user in every
+ * school.
+ */
+const MIN_SECRET_BYTES = 32;
+
+/**
+ * Values that are obviously not a secret.
+ *
+ * `.env.example` shipped `change-me-32-char-min-secret` — a value PUBLISHED IN
+ * THE REPOSITORY, twenty-eight characters long despite its own advice, and the
+ * one a deployment is likeliest to inherit by copying the example. Anyone who
+ * has read this repo could mint a session for any user in any school, a step-up
+ * token to pass re-auth, or a password-reset link. It is the same shape as the
+ * demo-seed password this project already treats as a platform compromise.
+ */
+const PLACEHOLDERS = [/^change-?me/i, /^secret$/i, /^dev(elopment)?$/i, /^test$/i, /^password/i];
+
+/** What is wrong with the signing secret, or null if nothing is. */
+export function secretProblem(): string | null {
+  const secret = process.env.AUTH_SECRET;
+  if (!secret) return "AUTH_SECRET is not set";
+  if (PLACEHOLDERS.some((re) => re.test(secret))) {
+    return "AUTH_SECRET is still the example placeholder, which is published in this repository";
+  }
+  if (Buffer.byteLength(secret, "utf8") < MIN_SECRET_BYTES) {
+    return `AUTH_SECRET is ${Buffer.byteLength(secret, "utf8")} bytes; ${MIN_SECRET_BYTES} is the minimum for HS256`;
+  }
+  return null;
+}
+
+/**
+ * Refuse to start in production on a secret anyone could guess.
+ *
+ * Production only, for the same reason the field-crypto assertion is: local work
+ * must not need a generated secret. Outside production it warns instead — and it
+ * does warn, because a developer running with the placeholder should know that
+ * every token their stack issues is forgeable.
+ *
+ * // SECURITY: this is the key for the WHOLE token family. A weak one is not a
+ * degraded feature, it is authentication that can be bypassed by anybody.
+ */
+export function assertAuthSecretUsable(): void {
+  const problem = secretProblem();
+  if (!problem) return;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      `${problem}. Refusing to start: this key signs every session, step-up token, invite and ` +
+        `password-reset link. Generate one with \`openssl rand -base64 32\`.`,
+    );
+  }
+  // eslint-disable-next-line no-console -- reason: boot-time security notice
+  console.warn(`[auth] ${problem} — every token this stack issues is forgeable.`);
+}

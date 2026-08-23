@@ -4,6 +4,7 @@ import * as Sentry from "@sentry/node";
 import { sentryOptions } from "./observability/sentry-options";
 import { assertStorageProviderConfigured } from "./documents/storage-provider.config";
 import { assertFieldCryptoConfigured } from "./foundation/field-crypto";
+import { assertAuthSecretUsable } from "./auth/secrets";
 import { HttpAdapterHost, NestFactory } from "@nestjs/core";
 import { Logger as PinoLogger } from "nestjs-pino";
 import { AppModule } from "./app.module";
@@ -31,6 +32,9 @@ async function bootstrap() {
   // disable encryption silently; in production that is medical data written in
   // the clear, which no later fix undoes.
   assertFieldCryptoConfigured();
+  // And that the key signing every session is not one anybody can read off the
+  // example file.
+  assertAuthSecretUsable();
 
   const app = await NestFactory.create(AppModule, { rawBody: true, bufferLogs: true });
   const logger = app.get(PinoLogger);
