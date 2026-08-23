@@ -92,8 +92,17 @@ export class BillingDunningService {
       };
     }
     const now = new Date();
+    // NOT a school the operator has switched off. DISABLED blocks every login,
+    // so "renew now" would go to admins who cannot sign in to act on it — a loop
+    // that cannot close, and a message from a platform that has already shut the
+    // door. Their subscription state is untouched and resumes when the owner
+    // switches them back on.
     const subs = await client.schoolSubscription.findMany({
-      where: { status: SUBSCRIPTION_STATUS.ACTIVE, currentPeriodEnd: { not: null } },
+      where: {
+        status: SUBSCRIPTION_STATUS.ACTIVE,
+        currentPeriodEnd: { not: null },
+        school: { is: { status: "ACTIVE" } },
+      },
       select: {
         id: true,
         schoolId: true,

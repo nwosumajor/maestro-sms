@@ -20,6 +20,13 @@ import { PrismaTenantService } from "../../src/foundation/prisma-tenant.service"
 import { AuditLogService } from "../../src/foundation/audit-log.service";
 import type { Principal } from "../../src/integrity/integrity.foundation";
 
+/**
+ * Switching a school off now invalidates a cached status so the change takes
+ * effect at once; these suites assert operator behaviour, so it is a no-op.
+ */
+const schoolStatusStub = () => ({ isActive: async () => true, invalidate: () => {} }) as never;
+
+
 const APP_URL = process.env.TEST_DATABASE_URL;
 const ADMIN_URL = process.env.TEST_ADMIN_URL;
 const d = APP_URL && ADMIN_URL ? describe : describe.skip;
@@ -46,7 +53,7 @@ d("Subscription / module entitlements (RLS, plan tiers, overrides)", () => {
     );
     const tenant = new PrismaTenantService() as never;
     entitlements = new ModuleEntitlementService(tenant);
-    svc = new OperatorService(tenant, new AuditLogService() as never, entitlements, { invalidate: jest.fn(), forSchool: jest.fn().mockResolvedValue({ country: "NG", timezone: "Africa/Lagos", payrollPack: "NG" }) } as never, { client: null } as never);
+    svc = new OperatorService(tenant, new AuditLogService() as never, entitlements, { invalidate: jest.fn(), forSchool: jest.fn().mockResolvedValue({ country: "NG", timezone: "Africa/Lagos", payrollPack: "NG" }) } as never, { client: null } as never, schoolStatusStub());
   });
 
   afterAll(async () => {

@@ -141,6 +141,14 @@ import { MODULE_KEY } from "../../src/auth/require-module.decorator";
 import { PERMISSION_KEY } from "../../src/auth/require-permission.decorator";
 import { STEPUP_KEY } from "../../src/auth/require-stepup.decorator";
 
+/**
+ * A school that is switched ON. The guard refuses every request from a DISABLED
+ * school now — these suites are about permissions and modules, so the school is
+ * active and that check is a no-op.
+ */
+const activeSchool = () => ({ isActive: async () => true }) as never;
+
+
 function ctx(): ExecutionContext {
   const req = { headers: { authorization: "Bearer t" } };
   const res = { setHeader: jest.fn() };
@@ -177,12 +185,12 @@ const noGrantDb = {
 
 describe("PermissionGuard — manager_admin boundary", () => {
   it.each(OWNER_ONLY)("403s a manager_admin on owner-only %s", async (perm) => {
-    const guard = new PermissionGuard(reflector(perm), noGrantDb as never, {} as never, {} as never, { forRoles: jest.fn().mockResolvedValue([]) } as never, allowRate as never);
+    const guard = new PermissionGuard(reflector(perm), noGrantDb as never, {} as never, {} as never, { forRoles: jest.fn().mockResolvedValue([]) } as never, allowRate as never, activeSchool());
     await expect(guard.canActivate(ctx())).rejects.toThrow(ForbiddenException);
   });
 
   it("allows a manager_admin on the standing floor without any delegation", async () => {
-    const guard = new PermissionGuard(reflector(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ), noGrantDb as never, {} as never, {} as never, { forRoles: jest.fn().mockResolvedValue([]) } as never, allowRate as never);
+    const guard = new PermissionGuard(reflector(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ), noGrantDb as never, {} as never, {} as never, { forRoles: jest.fn().mockResolvedValue([]) } as never, allowRate as never, activeSchool());
     await expect(guard.canActivate(ctx())).resolves.toBe(true);
   });
 
@@ -195,7 +203,7 @@ describe("PermissionGuard — manager_admin boundary", () => {
   );
 
   it.each(lendableBeyondFloor)("403s a manager_admin on %s with NO delegation", async (perm) => {
-    const guard = new PermissionGuard(reflector(perm), noGrantDb as never, {} as never, {} as never, { forRoles: jest.fn().mockResolvedValue([]) } as never, allowRate as never);
+    const guard = new PermissionGuard(reflector(perm), noGrantDb as never, {} as never, {} as never, { forRoles: jest.fn().mockResolvedValue([]) } as never, allowRate as never, activeSchool());
     await expect(guard.canActivate(ctx())).rejects.toThrow(ForbiddenException);
   });
 
@@ -218,7 +226,8 @@ describe("PermissionGuard — manager_admin boundary", () => {
       {} as never,
       { forRoles: jest.fn().mockResolvedValue([]) } as never,
       allowRate as never,
-    );
+        activeSchool(),
+      );
     await expect(guard.canActivate(ctx())).resolves.toBe(true);
   });
 
@@ -237,7 +246,8 @@ describe("PermissionGuard — manager_admin boundary", () => {
       {} as never,
       { forRoles: jest.fn().mockResolvedValue([]) } as never,
       allowRate as never,
-    );
+        activeSchool(),
+      );
     await expect(guard.canActivate(ctx())).rejects.toThrow(ForbiddenException);
   });
 });

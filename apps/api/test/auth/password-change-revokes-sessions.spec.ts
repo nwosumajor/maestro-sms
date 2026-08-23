@@ -55,7 +55,13 @@ function makeService(opts: { passwordChangedAt?: Date | null; locked?: boolean }
     // grant, so the browser knows about one. None here — these tests are about
     // the password epoch, and a teacher with no grant is the ordinary case.
     privilegeGrant: { findMany: jest.fn(async () => []) },
-    school: { findUnique: jest.fn(async () => ({ id: "S", name: "A School", status: "ACTIVE", isPlatform: false })) },
+    // findFirst as well as findUnique: the refresh now checks the SCHOOL's status
+    // too, so a session open when the operator switches a school off is revoked
+    // on its next refresh.
+    school: {
+      findUnique: jest.fn(async () => ({ id: "S", name: "A School", status: "ACTIVE", isPlatform: false })),
+      findFirst: jest.fn(async () => ({ status: "ACTIVE" })),
+    },
   } as unknown as TenantTx;
 
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };

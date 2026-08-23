@@ -107,7 +107,9 @@ describe("every school lookup BY SLUG excludes the platform org", () => {
 
   it("the branding resolver specifically — the one that was missed", () => {
     const src = readFileSync(join(SRC, "branding/branding.service.ts"), "utf8");
-    expect(src).toMatch(/where: \{ slug, isPlatform: false \}/);
+    // The status filter joined it later — a switched-off school does not present
+    // a login page of its own — so match the two facts, not the exact literal.
+    expect(src).toMatch(/where: \{ slug, isPlatform: false, status: "ACTIVE" \}/);
   });
 
   it("the resolvers that were already right stay right", () => {

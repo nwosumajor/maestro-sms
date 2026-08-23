@@ -8,6 +8,13 @@
 
 import { OperatorService } from "../../src/operator/operator.service";
 
+/**
+ * Switching a school off now invalidates a cached status so the change takes
+ * effect at once; these suites assert operator behaviour, so it is a no-op.
+ */
+const schoolStatusStub = () => ({ isActive: async () => true, invalidate: () => {} }) as never;
+
+
 function makeService(rows: Record<string, unknown>[] | null) {
   const findMany = jest.fn().mockResolvedValue(rows ?? []);
   const client =
@@ -29,7 +36,7 @@ function makeService(rows: Record<string, unknown>[] | null) {
   const audit = { record: jest.fn() };
   const entitlements = {};
   const privileged = { client };
-  const service = new OperatorService(db as never, audit as never, entitlements as never, { invalidate: jest.fn(), forSchool: jest.fn().mockResolvedValue({ country: "NG", timezone: "Africa/Lagos", payrollPack: "NG" }) } as never, privileged as never);
+  const service = new OperatorService(db as never, audit as never, entitlements as never, { invalidate: jest.fn(), forSchool: jest.fn().mockResolvedValue({ country: "NG", timezone: "Africa/Lagos", payrollPack: "NG" }) } as never, privileged as never, schoolStatusStub());
   return { service, findMany };
 }
 

@@ -32,6 +32,14 @@ import { MODULE_KEY } from "../../src/auth/require-module.decorator";
 import { PERMISSION_KEY, RequirePermission } from "../../src/auth/require-permission.decorator";
 import { STEPUP_KEY } from "../../src/auth/require-stepup.decorator";
 
+/**
+ * A school that is switched ON. The guard refuses every request from a DISABLED
+ * school now — these suites are about permissions and modules, so the school is
+ * active and that check is a no-op.
+ */
+const activeSchool = () => ({ isActive: async () => true }) as never;
+
+
 function makeCtx(): ExecutionContext {
   const req = { headers: { authorization: "Bearer token" } };
   const res = { setHeader: jest.fn() };
@@ -67,7 +75,8 @@ function guardFor(declared: unknown, grants: string[] = []) {
     { isEnabled: jest.fn().mockResolvedValue(true) } as never,
     { forRoles: jest.fn().mockResolvedValue([]) } as never,
     allowRate as never,
-  );
+        activeSchool(),
+      );
 }
 
 afterEach(() => {

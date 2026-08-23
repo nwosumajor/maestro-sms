@@ -226,7 +226,8 @@ export class BrandingService {
       // Nothing secret leaked; the inconsistency is the point, and this was the
       // one resolver the earlier sweep missed.
       const school = await prisma.school.findFirst({
-        where: { slug, isPlatform: false },
+        // A switched-off school does not present a login page of its own.
+        where: { slug, isPlatform: false, status: "ACTIVE" },
         select: { id: true, name: true },
       });
       if (!school) throw new NotFoundException("School not found");

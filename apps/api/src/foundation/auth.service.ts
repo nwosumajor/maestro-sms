@@ -366,13 +366,29 @@ export class AuthService {
           },
         });
         if (!u || u.status !== "ACTIVE") return { revoked: true as const };
-
         const userRoles = await tx.userRole.findMany({
           where: { userId: p.userId },
           include: { role: { include: { permissions: { include: { permission: true } } } } },
         });
         const roles: string[] = userRoles.map((ur: { role: { name: string } }) => ur.role.name);
         const isSuperAdmin = roles.includes("super_admin");
+
+        // AND THE SCHOOL, not only the user. This checked the USER's status
+        // alone, so a session already open when the operator switched the school
+        // off kept refreshing — every minute, indefinitely, for as long as
+        // somebody kept clicking. Revoked here, so those sessions close on their
+        // next refresh instead of living out their full lifetime.
+        //
+        // The owner is exempt for the same reason the guard exempts them: the
+        // lever that switches a school back on must not be reachable only from
+        // inside the school it switched off.
+        if (!isSuperAdmin) {
+          const school = (await tx.school.findFirst({
+            where: { id: p.schoolId },
+            select: { status: true },
+          })) as { status: string } | null;
+          if (school?.status !== "ACTIVE") return { revoked: true as const };
+        }
 
         // Locked = revoked, with the same super_admin auto-expiry the login path
         // honours (but WITHOUT clearing counters — this is a read-only check).

@@ -31,6 +31,7 @@ import { ModuleEntitlementService } from "../foundation/module-entitlement.servi
 import { RolePermissionsService } from "../foundation/role-permissions.service";
 import { TenantRateLimitService } from "../common/tenant-rate-limit.service";
 import { requestContext } from "./request-context";
+import { SchoolStatusService } from "../foundation/school-status.service";
 
 export interface AuthedRequest extends Request {
   principal?: Principal;
@@ -57,6 +58,7 @@ export class PermissionGuard implements CanActivate {
     private readonly modules: ModuleEntitlementService,
     private readonly rolePerms: RolePermissionsService,
     private readonly rateLimit: TenantRateLimitService,
+    private readonly schoolStatus: SchoolStatusService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -83,6 +85,25 @@ export class PermissionGuard implements CanActivate {
     if (principal.impersonatedBy) {
       const store = requestContext.getStore();
       if (store) store.impersonatedBy = principal.impersonatedBy;
+    }
+
+    // A SWITCHED-OFF SCHOOL REACHES NOTHING.
+    //
+    // DISABLED used to mean only that a new LOGIN was refused, so a session
+    // already open kept refreshing and working indefinitely. Checked here, on
+    // every authenticated request, so the switch means what the operator console
+    // says it means wherever the request lands.
+    //
+    // super_admin is exempt: the lever that switches a school back on lives in
+    // the operator console, and locking it inside the thing it controls is how a
+    // school stays disabled for ever. Cached ~15s with an explicit invalidation
+    // on the operator write, so it costs nothing per request and takes effect at
+    // once.
+    if (!principal.roles.includes("super_admin") && !(await this.schoolStatus.isActive(principal.schoolId))) {
+      throw new HttpException(
+        "This school's access has been suspended by the platform. Contact your provider.",
+        HttpStatus.FORBIDDEN,
+      );
     }
 
     // Per-tenant rate limit — BEFORE the module/permission DB work, so a flooding

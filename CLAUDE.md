@@ -1267,6 +1267,30 @@ every correct fix would be abandoned.
 It immediately found FIVE more latent flakes of the same kind in `game-engine`
 and `game-transport`. All six now strip ids before searching.
 
+### A switched-off school reaches NOTHING, and only the owner switches it back
+DISABLED used to mean the front door only: the LOGIN was refused and everything
+else went on working. `SchoolStatusService` (foundation, @Global, 15s cache +
+Redis invalidation on the operator write) is consulted by `PermissionGuard` on
+EVERY authenticated request, so a suspended school is refused wherever it knocks
+— measured live: a staff session open at the moment the switch was thrown went
+from 200 to 403 on its very next request. Also closed: `refreshClaims` now
+revokes a rolling session (it checked the USER's status and never the school's,
+so an open session refreshed indefinitely), invite-accept and password-reset
+refuse, the public login-page BRANDING stops resolving, and subscription dunning
+skips it (a "renew now" to admins whose login is blocked is a loop that cannot
+close).
+SUPER_ADMIN IS EXEMPT everywhere, deliberately: the lever that switches a school
+back on lives in the operator console, and locking it inside the thing it
+controls is how a school stays disabled for ever.
+REINSTATEMENT IS TOTAL because disabling writes ONE COLUMN and deletes nothing —
+subscription, balances and due dates are all still there, so switching it back on
+restores the school to its original and due state with no restore step. A test
+pins that `setSchoolStatus` performs no cascading write, because the day somebody
+adds one is the day that stops being true. `platform.tenants.status` (super_admin
+only) + step-up gates the lever at both ends.
+// GOTCHA: an unknown school reads as INACTIVE, not active — the restrictive
+option, and the alternative is serving a tenant nobody can account for.
+
 ### A school the operator switched off is left alone
 `DISABLED` is the hard lever and auth states what it means — it "blocks ALL of its
 members' logins", deliberately unlike PAST_DUE, which only degrades modules so a

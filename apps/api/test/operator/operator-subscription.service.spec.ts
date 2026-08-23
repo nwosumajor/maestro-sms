@@ -12,6 +12,13 @@
 import { OperatorService } from "../../src/operator/operator.service";
 import type { Principal, TenantContext, TenantTx } from "../../src/integrity/integrity.foundation";
 
+/**
+ * Switching a school off now invalidates a cached status so the change takes
+ * effect at once; these suites assert operator behaviour, so it is a no-op.
+ */
+const schoolStatusStub = () => ({ isActive: async () => true, invalidate: () => {} }) as never;
+
+
 const OPERATOR_SCHOOL = "school-A";
 const TARGET_SCHOOL = "school-B";
 
@@ -38,7 +45,7 @@ function makeService() {
     resolve: jest.fn().mockResolvedValue({}),
     dtoFrom: jest.fn().mockReturnValue({ schoolId: TARGET_SCHOOL, plan: "STANDARD" }),
   };
-  const service = new OperatorService(db as never, audit as never, entitlements as never, { invalidate: jest.fn(), forSchool: jest.fn().mockResolvedValue({ country: "NG", timezone: "Africa/Lagos", payrollPack: "NG" }) } as never, { client: null } as never);
+  const service = new OperatorService(db as never, audit as never, entitlements as never, { invalidate: jest.fn(), forSchool: jest.fn().mockResolvedValue({ country: "NG", timezone: "Africa/Lagos", payrollPack: "NG" }) } as never, { client: null } as never, schoolStatusStub());
   return { service, db, audit, entitlements, txSchools };
 }
 

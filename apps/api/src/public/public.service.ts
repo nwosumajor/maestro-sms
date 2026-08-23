@@ -200,7 +200,18 @@ export class PublicService {
         });
         // The first password an account ever has, set from outside the app.
         await this.auditCredentialEvent(invite.schoolId, user.id, "auth.invite.accepted", tx);
-        const school = await tx.school.findFirst({ where: { id: invite.schoolId }, select: { slug: true } });
+        // A switched-off school issues nothing. The invite was valid when it was
+        // sent; accepting it now would create a working account in a school that
+        // has no access, which is a worse answer than a plain refusal.
+        const school = await tx.school.findFirst({
+          where: { id: invite.schoolId },
+          select: { slug: true, status: true },
+        });
+        if (school?.status !== "ACTIVE") {
+          throw new BadRequestException(
+            "This school's access has been suspended by the platform, so the invitation cannot be accepted.",
+          );
+        }
         return { email: user.email, schoolSlug: school?.slug ?? "" };
       },
     );
@@ -244,7 +255,18 @@ export class PublicService {
       if (!user || user.status !== "ACTIVE") return;
       const detail = await this.db.runAsTenant({ schoolId: user.school_id, userId: user.id }, async (tx) => {
         const u = await tx.user.findFirst({ where: { id: user.id }, select: { passwordChangedAt: true } });
-        const school = await tx.school.findFirst({ where: { id: user.school_id }, select: { slug: true } });
+        // Same for a password reset: a new password in a school nobody can sign
+        // in to is a false promise, and the link is a route into a tenant the
+        // platform has switched off.
+        const school = await tx.school.findFirst({
+          where: { id: user.school_id },
+          select: { slug: true, status: true },
+        });
+        if (school?.status !== "ACTIVE") {
+          throw new BadRequestException(
+            "This school's access has been suspended by the platform, so the password cannot be reset.",
+          );
+        }
         // Recorded for a REAL account only — an unknown address has no actor to
         // attribute it to, and inventing one would put attacker-supplied text in
         // the log. This is also the row that shows somebody probing an account:

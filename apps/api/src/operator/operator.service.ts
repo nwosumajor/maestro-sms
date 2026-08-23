@@ -41,6 +41,7 @@ import { PrivilegedDatabaseService } from "../common/privileged-database.service
 import { headcountBySchool, headcountInTenant, type SchoolHeadcount } from "./operator-people";
 import { SchoolRegionService } from "../foundation/school-region.service";
 import { ModuleEntitlementService } from "../foundation/module-entitlement.service";
+import { SchoolStatusService } from "../foundation/school-status.service";
 
 const IMPERSONATION_TTL = 900; // 15 min
 
@@ -54,6 +55,7 @@ export class OperatorService {
     private readonly entitlements: ModuleEntitlementService,
     private readonly regions: SchoolRegionService,
     private readonly privileged: PrivilegedDatabaseService,
+    private readonly schoolStatus: SchoolStatusService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -332,6 +334,9 @@ export class OperatorService {
     const school = await client.school.findFirst({ where: { id: schoolId, isPlatform: false }, select: { id: true, name: true } });
     if (!school) throw new NotFoundException("School not found");
     await client.school.update({ where: { id: schoolId }, data: { status } });
+    // Take effect NOW, on every instance, rather than when a 15-second cache
+    // happens to expire. The switch is the whole point of the lever.
+    this.schoolStatus.invalidate(schoolId);
     await this.db.runAsTenant(this.ctx(p), (tx) =>
       this.audit.record(
         {
