@@ -1743,6 +1743,55 @@ const documentSubmissionA = randomUUID();
     expect(rows.length).toBeGreaterThan(150);
   });
 
+  /**
+   * The COMPLEMENT of the gate above: a table with no `schoolId` at all.
+   *
+   * That gate asks whether every TENANT table is protected. Nothing asked the
+   * other question — which tables are global — and CLAUDE.md's instruction about
+   * them is "List them; never leave it implicit", which nothing enforced. A new
+   * global table with no policies would arrive silently, and "it has no schoolId"
+   * is not by itself a reason it should be readable by every tenant.
+   *
+   * Note what is NOT on this list: `plan_price`, `platform_fee_config`,
+   * `promo_code`, `agent` and `school_group` are global — no schoolId — and
+   * nonetheless have RLS ENABLED with restrictive policies (app role SELECT-only
+   * or deny-all, writes through the privileged client). Being global is not the
+   * same as being unprotected, and the prose that called them "RLS-exempt"
+   * undersold what they actually do.
+   */
+  it("only the documented global tables have no row security at all", async () => {
+    const { rows } = await adminPool.query<{ relname: string }>(`
+      SELECT c.relname
+      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND c.relispartition = false
+        AND c.relrowsecurity = false
+      ORDER BY 1`);
+
+    const documented = new Set([
+      // Prisma's own bookkeeping; not application data.
+      "_prisma_migrations",
+      // The platform registry and the global role/permission catalogue. Every
+      // tenant legitimately reads these; the app role cannot write them.
+      "school",
+      "role",
+      "permission",
+      "role_permission",
+      // The ONE deliberate cross-tenant surface: the Ultimate arena. Carries no
+      // PII — an opaque participant id, a handle, a school name for grouping —
+      // and de-anonymises only through the tenant-scoped entry link.
+      "ultimate_competition",
+      "ultimate_participant",
+    ]);
+
+    const undocumented = rows.map((r) => r.relname).filter((t) => !documented.has(t));
+    expect(undocumented).toEqual([]);
+    // And the list must not rot in the other direction: a table dropped from the
+    // schema should be dropped from here too, or the next reader trusts a name
+    // that means nothing.
+    const actual = new Set(rows.map((r) => r.relname));
+    expect([...documented].filter((t) => !actual.has(t))).toEqual([]);
+  });
+
   it("every tenant table has a validated FK to school with the right ON DELETE (Golden Rule #1)", async () => {
     const { rows } = await adminPool.query<{
       relname: string;

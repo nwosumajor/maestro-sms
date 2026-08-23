@@ -64,8 +64,17 @@ conflicts with it, flag the conflict before proceeding.
   `current_setting('app.current_school_id')`.
 - RLS policies: `USING (school_id = current_setting('app.current_school_id')::uuid)`
   on SELECT/UPDATE/DELETE, plus a matching `WITH CHECK` on INSERT/UPDATE.
-- Global (non-tenant) tables — the `School` registry, system roles/permissions —
-  are explicitly marked and RLS-exempt. List them; never leave it implicit.
+- Global (non-tenant) tables are listed and GATED, not merely described:
+  `rls.e2e-spec.ts` fails if any table has row security off and is not on its
+  documented list. Exactly seven qualify — `_prisma_migrations`, `school`, `role`,
+  `permission`, `role_permission`, and the deliberate cross-tenant Ultimate arena
+  pair (`ultimate_competition`, `ultimate_participant`).
+  // GOTCHA: "global" is NOT the same as "unprotected", and calling them
+  RLS-EXEMPT undersold the posture. `plan_price`, `platform_fee_config`,
+  `promo_code`, `agent` and `school_group` have no `schoolId` AND have RLS
+  ENABLED with restrictive policies — app-role SELECT-only or deny-all, writes
+  through the privileged client. Only the seven above have no row security at
+  all, and a new one cannot be added quietly.
 
 ## RBAC model (custom, data-driven)
 - Roles live in DB tables (`Role`/`Permission`/`RolePermission`/`UserRole`),
@@ -78,8 +87,13 @@ conflicts with it, flag the conflict before proceeding.
   module), junior_admin (day-to-day operational tier under school_admin: records/
   attendance/timetable/documents + fee RECORDING + admissions review, but NO
   approval powers — no rbac.manage / fee.approve / workflow.review; split by risk
-  of escalation like platform manager_admin) — 18 school roles. All except
-  super_admin are scoped to a single `school_id`.
+  of escalation like platform manager_admin) — and the two PLATFORM roles,
+  super_admin (cross-tenant) and manager_admin (the platform-staff floor whose
+  real duties are LENT, see below). NINETEEN roles in all: 17 school-scoped plus
+  those two. `ROLE_PERMISSIONS` in `@sms/types` is the single source and the seed
+  reads it; `claims-in-claude-md.spec.ts` fails if this paragraph and that map
+  stop agreeing, because a count typed into prose rots the moment a role is added
+  — this one said "18 school roles" and had never heard of manager_admin.
   Adding a role/permission is a seed change, not new code.
 - Admin-tier governance guards (AdminService): nobody may remove their OWN
   school_admin/principal role, and the LAST managing role in a school can't be
@@ -1199,6 +1213,7 @@ Assert the prop (`lastFailed` in the payload) or drive a real browser.
   the RLS-disabled `ultimate_participant` arena table (cross-tenant by design, no PII).
 - Demo logins (password `password123`): `teacher@` / `student@` / `parent@` /
   `admin@` / `principal@` / `board@` / `accountant@` / `hr@` (hr_clerk) /
+  `junioradmin@` /
   `hrmanager@` / `headteacher@` / `headadmin@` / `warden@` / `driver@` /
   `headwarden@` / `headdriver@` / `librarian@demo.school` (+ platform owner
   `owner@sms.platform`).
@@ -1462,7 +1477,14 @@ Still in the in-memory step-2 transport only (NOT the durable bridge): the live
 turn timers / 15s countdown / hard-disconnect handling for actively-played
 sockets.
 
-**FULL-STACK VERIFIED end-to-end (2026-06-27) against a real Postgres 18 (UTC):**
+**FULL-STACK VERIFIED end-to-end (2026-06-27) against a real Postgres 18 (UTC)
+— a SNAPSHOT OF THAT DATE, and its counts have since grown (24 RLS files → 112,
+71 RLS-enabled tenant tables → 196, 298 api tests → 4,000+). Read the numbers
+below as what was true then. What keeps coverage honest TODAY is not this
+paragraph but the gate: `rls.e2e-spec.ts` introspects `pg_class` for every table
+carrying a `schoolId` and fails if one lacks a cross-tenant case, so the set
+under test is computed rather than counted by hand. `ultimate_participant`
+remains the one documented exemption, still true.**
 migrate deploy (all migrations incl. all 6 game ones) → all 24 RLS files apply
 clean (`ON_ERROR_STOP=1`) → seed OK (game RBAC confirmed in DB: 10 `game.*` perms;
 ultimate.admin→super_admin, ultimate.consent→school_admin, ultimate.enroll→
