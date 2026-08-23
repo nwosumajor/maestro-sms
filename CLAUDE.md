@@ -1217,6 +1217,27 @@ count nobody acts on.
 grepping the page for "Partial" matches the shipped bundle, not a rendered row.
 Assert the prop (`lastFailed` in the payload) or drive a real browser.
 
+### Every text control can be named by a screen reader
+`apps/web/lib/__tests__/every-control-has-a-name.test.ts` fails if any `<input>`
+has no accessible name. CLAUDE.md already committed to accessibility for the
+integrity module — paste-blocking "MUST have an exemption flag per student… or it
+becomes discriminatory" — and that reasoning had never been applied to the rest of
+the UI: 26 inputs announced as "edit text, blank", among them the FILE INPUTS a
+parent uses to send in a child's documents, the date filters on the attendance
+register and the exam planner, and the meeting-slot times. All 26 now carry an
+`aria-label` taken from the surrounding UI.
+What counts as a name: `aria-label`, `aria-labelledby`, an `id` (assumed paired
+with a label's `htmlFor`), or being wrapped in a `<label>`. A PLACEHOLDER is
+accepted but reported, never treated as a label — it vanishes the moment somebody
+types; 26 inputs currently lean on one.
+// GOTCHA, and why the gate PARSES instead of grepping: `<input[^>]*>` truncates
+a JSX tag at the first `>`, and `onChange={(e) => …}` supplies one. My first scan
+therefore reported inputs that were already labelled — I "fixed" one carrying
+`aria-label={isCode ? "2FA code" : "Password"}` further down its own tag, and only
+the TypeScript duplicate-attribute error caught it. The gate reads each tag to its
+matching `>` at brace depth zero, and strips COMMENTS first (a JSDoc block
+documenting `<input type="datetime-local">` is not a control anyone can fix).
+
 ## Repo workflow & gotchas
 - DB setup order: `prisma migrate deploy` → `pnpm --filter @sms/db rls` →
   `prisma db seed` (or `pnpm --filter @sms/db setup`). RLS lives in `prisma/rls/`,

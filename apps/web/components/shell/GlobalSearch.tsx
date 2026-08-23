@@ -65,6 +65,7 @@ export function GlobalSearch() {
   return (
     <div ref={boxRef} className="relative hidden md:block">
       <input
+        aria-label="Search students, staff, classes and invoices"
         value={q}
         onChange={(e) => setQ(e.target.value)}
         onKeyDown={onKey}

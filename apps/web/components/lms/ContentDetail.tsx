@@ -418,7 +418,7 @@ function MaterialView({
               : `PDF only, up to ${MAX_MATERIAL_BYTES / 1024 / 1024} MB. Pupils taking this subject can open it once published.`}
           </p>
           <div className="mt-2 flex items-center gap-2">
-            <input ref={inputRef} type="file" accept="application/pdf" className="hidden" onChange={onPick} disabled={busy || locked} />
+            <input aria-label="Choose a PDF to attach" ref={inputRef} type="file" accept="application/pdf" className="hidden" onChange={onPick} disabled={busy || locked} />
             <Button type="button" size="sm" variant="outline" disabled={busy || locked} onClick={() => inputRef.current?.click()}>
               {busy ? "Uploading…" : name ? "Choose a different PDF" : "Choose PDF"}
             </Button>

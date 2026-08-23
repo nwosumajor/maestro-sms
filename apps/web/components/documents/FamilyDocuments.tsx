@@ -128,7 +128,7 @@ export function FamilyDocuments() {
                 {!r.mandatory && <span className="ml-2 text-xs text-muted-foreground">(optional)</span>}
               </p>
               {r.description && <p className="mt-1 text-sm text-muted-foreground">{r.description}</p>}
-              <input
+              <input aria-label="Choose a file to upload"
                 type="file"
                 className="mt-3 block w-full text-sm"
                 accept="application/pdf,image/jpeg,image/png"

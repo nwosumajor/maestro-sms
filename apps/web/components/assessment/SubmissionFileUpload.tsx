@@ -91,7 +91,7 @@ export function SubmissionFileUpload({
         {uploaded && fileName ? `Attached: ${fileName}` : "Upload your worked solution (PDF, image, doc)."}
       </p>
       <div className="mt-2 flex items-center gap-2">
-        <input ref={inputRef} type="file" className="hidden" onChange={onPick} disabled={disabled || busy} />
+        <input aria-label="Choose a file to submit" ref={inputRef} type="file" className="hidden" onChange={onPick} disabled={disabled || busy} />
         <Button type="button" size="sm" variant="outline" disabled={disabled || busy} onClick={() => inputRef.current?.click()}>
           {busy ? "Uploading…" : uploaded ? "Replace file" : "Choose file"}
         </Button>

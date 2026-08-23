@@ -68,9 +68,9 @@ export function CoverPanel({ teachers }: { teachers: { id: string; name: string;
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
-          <input type="date" className="rounded-md border bg-background p-1.5 text-sm" value={from} onChange={(e) => setFrom(e.target.value)} />
+          <input aria-label="Show cover from" type="date" className="rounded-md border bg-background p-1.5 text-sm" value={from} onChange={(e) => setFrom(e.target.value)} />
           <span className="text-sm text-muted-foreground">to</span>
-          <input type="date" className="rounded-md border bg-background p-1.5 text-sm" value={to} onChange={(e) => setTo(e.target.value)} />
+          <input aria-label="Show cover until" type="date" className="rounded-md border bg-background p-1.5 text-sm" value={to} onChange={(e) => setTo(e.target.value)} />
           <Button size="sm" disabled={busy} onClick={load}>
             Find lessons needing cover
           </Button>

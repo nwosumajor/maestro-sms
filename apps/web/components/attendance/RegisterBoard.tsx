@@ -66,7 +66,7 @@ export function RegisterBoard() {
               present, so a gap here is worth chasing before the 7-day correction window closes.
             </CardDescription>
           </div>
-          <input
+          <input aria-label="Register date"
             type="date"
             className="rounded-md border bg-background p-1.5 text-sm"
             value={date}

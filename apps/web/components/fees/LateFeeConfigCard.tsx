@@ -44,7 +44,7 @@ export function LateFeeConfigCard({ initial }: { initial: LateFeeConfigDto }) {
       </CardHeader>
       <CardContent className="flex flex-wrap items-center gap-2">
         <label className="text-sm text-muted-foreground">Fee (₦)</label>
-        <input
+        <input aria-label="Late fee amount"
           type="number"
           min="0"
           step="0.01"
@@ -53,7 +53,7 @@ export function LateFeeConfigCard({ initial }: { initial: LateFeeConfigDto }) {
           onChange={(e) => setFlat(e.target.value)}
         />
         <label className="text-sm text-muted-foreground">Grace (days)</label>
-        <input
+        <input aria-label="Grace period in days"
           type="number"
           min="0"
           max="90"

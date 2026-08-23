@@ -147,7 +147,7 @@ export function DocumentChecklist({
                 </div>
                 {r.description && <p className="mt-1 text-sm text-muted-foreground">{r.description}</p>}
                 {canDecide && (
-                  <input
+                  <input aria-label="Choose a file to upload"
                     type="file"
                     className="mt-2 block w-full text-sm"
                     accept="application/pdf,image/jpeg,image/png"
@@ -232,7 +232,7 @@ export function DocumentChecklist({
             <p className="text-xs text-muted-foreground">
               A document the school did not ask for but should keep. It satisfies nothing on the list.
             </p>
-            <input
+            <input aria-label="Choose an extra document to upload"
               type="file"
               className="mt-2 block w-full text-sm"
               accept="application/pdf,image/jpeg,image/png"

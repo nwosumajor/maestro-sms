@@ -88,7 +88,7 @@ export function ExamDayBoard({ canRelease }: { canRelease: boolean }) {
               </CardDescription>
             </div>
             <div className="flex items-center gap-2">
-              <input
+              <input aria-label="Exam day"
                 type="date"
                 className="rounded-md border bg-background p-1.5 text-sm"
                 value={date}

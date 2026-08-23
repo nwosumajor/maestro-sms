@@ -384,9 +384,9 @@ function NewSittingForm({
       <CardContent className="flex flex-wrap items-end gap-2">
         <input placeholder="Title" className={`${input} w-40`} value={f.title} onChange={(e) => set("title", e.target.value)} />
         <input placeholder="Subject (optional)" className={`${input} w-36`} value={f.subject} onChange={(e) => set("subject", e.target.value)} />
-        <input type="date" className={input} value={f.date} onChange={(e) => set("date", e.target.value)} />
-        <input type="time" className={input} value={f.startsAt} onChange={(e) => set("startsAt", e.target.value)} />
-        <input type="time" className={input} value={f.endsAt} onChange={(e) => set("endsAt", e.target.value)} />
+        <input aria-label="Sitting date" type="date" className={input} value={f.date} onChange={(e) => set("date", e.target.value)} />
+        <input aria-label="Sitting start time" type="time" className={input} value={f.startsAt} onChange={(e) => set("startsAt", e.target.value)} />
+        <input aria-label="Sitting end time" type="time" className={input} value={f.endsAt} onChange={(e) => set("endsAt", e.target.value)} />
         <select className={input} value={f.roomId} onChange={(e) => set("roomId", e.target.value)}>
           <option value="">Room…</option>
           {rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
@@ -557,11 +557,11 @@ function SittingRow({
 
       {editing && (
         <div className="mt-3 flex flex-wrap items-end gap-2 rounded-md bg-muted/40 p-2">
-          <input className={`${input} w-36`} value={edit.title} onChange={(e) => setEdit({ ...edit, title: e.target.value })} />
+          <input aria-label="Sitting title" className={`${input} w-36`} value={edit.title} onChange={(e) => setEdit({ ...edit, title: e.target.value })} />
           <input placeholder="Subject" className={`${input} w-32`} value={edit.subject} onChange={(e) => setEdit({ ...edit, subject: e.target.value })} />
-          <input type="date" className={input} value={edit.date} onChange={(e) => setEdit({ ...edit, date: e.target.value })} />
-          <input type="time" className={input} value={edit.startsAt} onChange={(e) => setEdit({ ...edit, startsAt: e.target.value })} />
-          <input type="time" className={input} value={edit.endsAt} onChange={(e) => setEdit({ ...edit, endsAt: e.target.value })} />
+          <input aria-label="Sitting date" type="date" className={input} value={edit.date} onChange={(e) => setEdit({ ...edit, date: e.target.value })} />
+          <input aria-label="Sitting start time" type="time" className={input} value={edit.startsAt} onChange={(e) => setEdit({ ...edit, startsAt: e.target.value })} />
+          <input aria-label="Sitting end time" type="time" className={input} value={edit.endsAt} onChange={(e) => setEdit({ ...edit, endsAt: e.target.value })} />
           <select className={input} value={edit.roomId} onChange={(e) => setEdit({ ...edit, roomId: e.target.value })}>
             <option value="">Keep hall &quot;{s.hall}&quot;</option>
             {rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}

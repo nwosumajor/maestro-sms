@@ -106,7 +106,7 @@ export function PaymentPlanCard({
           <div className="space-y-2 rounded-md border p-3">
             {rows.map((r, i) => (
               <div key={i} className="flex items-center gap-2">
-                <input
+                <input aria-label="Instalment due date"
                   type="date"
                   className="rounded-md border bg-background p-1.5 text-sm"
                   value={r.dueDate}

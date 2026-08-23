@@ -95,7 +95,7 @@ export function BrandingManager({ initial, slug }: { initial: Serialized<SchoolB
           <p className="text-sm text-muted-foreground">No logo set.</p>
         )}
         <div className="flex flex-wrap items-center gap-2">
-          <input ref={fileRef} type="file" accept="image/png,image/jpeg" className="text-sm" />
+          <input aria-label="Choose a logo image" ref={fileRef} type="file" accept="image/png,image/jpeg" className="text-sm" />
           <Button size="sm" disabled={busy} onClick={upload}>{busy ? "Uploading…" : "Upload"}</Button>
           {initial.logoKey && <Button size="sm" variant="outline" disabled={busy} onClick={remove}>Remove</Button>}
         </div>
@@ -111,7 +111,7 @@ export function BrandingManager({ initial, slug }: { initial: Serialized<SchoolB
           <div className="space-y-1.5">
             <Label>Brand colour</Label>
             <div className="flex items-center gap-2">
-              <input type="range" min={0} max={360} value={hue} onChange={(e) => setHue(Number(e.target.value))} />
+              <input aria-label="Brand colour" type="range" min={0} max={360} value={hue} onChange={(e) => setHue(Number(e.target.value))} />
               <span className="h-8 w-8 rounded-md border border-border" style={{ background: `hsl(${hue} ${sat}% ${light}%)` }} />
             </div>
           </div>
