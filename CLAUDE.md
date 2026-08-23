@@ -780,6 +780,27 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### A mis-set encryption key disabled encryption in SILENCE
+`keyProblem()` / `assertFieldCryptoConfigured()` (`foundation/field-crypto.ts`).
+A MISSING `DATA_ENCRYPTION_KEY` disables field encryption and warns — deliberate,
+so local work needs no secret. A MIS-SET one did the same thing and said NOTHING,
+because the warning only ever covered the unset case. Measured against the built
+image, encrypting "penicillin": `(unset)` → plaintext + warning; 32-byte base64 →
+encrypted; `"c2hvcnQ="` → **plaintext, no warning** (decodes to 5 bytes);
+`"not-base64-at-all"` → **plaintext, no warning** (`Buffer.from(x,"base64")` never
+throws, it decodes what it can). Those two are the likely operator mistakes — a
+truncated secret, a placeholder, a passphrase typed where base64 was wanted — and
+exactly the cases where somebody BELIEVES the key is set. 38 call sites: medical
+records, salaries, payslips, bank details, loan balances.
+// SECURITY: in PRODUCTION an absent or invalid key now REFUSES TO BOOT, naming
+the byte count it got. Unlike a wrong `STORAGE_PROVIDER`, this cannot be repaired
+by fixing the variable afterwards — the rows are already written in the clear
+(Golden Rule #5). Outside production the permissive behaviour stays and BOTH
+failures warn. // NOTE: medical columns are NOT `*Enc`-suffixed like the HR ones
+(`bloodGroup`, `allergies`, `conditions`, `medications`) — they are encrypted by
+`SisService` all the same, so a `%Enc` column search under-reports what is
+protected.
+
 ### The storage provider is decided ONCE, and an unknown value refuses to boot
 `usingS3()` / `assertStorageProviderConfigured()`
 (`apps/api/src/documents/storage-provider.config.ts`).

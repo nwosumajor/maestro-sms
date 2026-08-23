@@ -3,6 +3,7 @@ import type { Server as HttpServer } from "node:http";
 import * as Sentry from "@sentry/node";
 import { sentryOptions } from "./observability/sentry-options";
 import { assertStorageProviderConfigured } from "./documents/storage-provider.config";
+import { assertFieldCryptoConfigured } from "./foundation/field-crypto";
 import { HttpAdapterHost, NestFactory } from "@nestjs/core";
 import { Logger as PinoLogger } from "nestjs-pino";
 import { AppModule } from "./app.module";
@@ -26,6 +27,10 @@ async function bootstrap() {
   // unknown value used to select the local stub silently, which works in testing
   // and loses every upload at the next redeploy.
   assertStorageProviderConfigured();
+  // And that the field-encryption key actually works. A mis-set key used to
+  // disable encryption silently; in production that is medical data written in
+  // the clear, which no later fix undoes.
+  assertFieldCryptoConfigured();
 
   const app = await NestFactory.create(AppModule, { rawBody: true, bufferLogs: true });
   const logger = app.get(PinoLogger);
