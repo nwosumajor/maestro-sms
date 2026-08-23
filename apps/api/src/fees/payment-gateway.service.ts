@@ -44,6 +44,7 @@ import { InvoiceSettlementService } from "./settlement.service";
 import { VirtualAccountsService, isDedicatedAccountCredit } from "./virtual-accounts.service";
 import { PaymentPlansService } from "./payment-plans.service";
 import { PaymentChannelService } from "../payments/payment-channel.service";
+import { publicWebUrl } from "../common/public-url";
 
 /** Compare account names forgivingly: banks return them upper-cased with
  *  inconsistent spacing and punctuation, and the school is confirming that they
@@ -202,7 +203,7 @@ export class PaymentGatewayService {
       if (!this.stripe.isConfigured()) {
         throw new ServiceUnavailableException("USD payments are not configured");
       }
-      const base = process.env.PUBLIC_WEB_URL ?? "http://localhost:3000";
+      const base = publicWebUrl();
       const { authorizationUrl } = await this.stripe.createCheckoutSession({
         email,
         amountMinor: balance,
@@ -251,7 +252,7 @@ export class PaymentGatewayService {
       // and the invoice page confirms the charge against the gateway directly —
       // the payment posts even if the webhook never arrives (lost-webhook
       // recovery, layer 1; the reconciliation sweep is layer 2).
-      callbackUrl: `${process.env.PUBLIC_WEB_URL ?? "http://localhost:3000"}/fees/${invoiceId}?verify=1`,
+      callbackUrl: `${publicWebUrl()}/fees/${invoiceId}?verify=1`,
       // payerId: the signed-in user who clicked pay — the receipt goes to them
       // (plus the guardians and the student) when the webhook confirms.
       // invoiceAmountMinor/platformFeeMinor: the webhook credits the LEDGER with

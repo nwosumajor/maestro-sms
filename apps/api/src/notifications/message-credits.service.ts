@@ -25,6 +25,7 @@ import { PaymentChannelService } from "../payments/payment-channel.service";
 import { NotificationService } from "./notification.service";
 import { prisma } from "@sms/db";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
+import { publicWebUrl } from "../common/public-url";
 
 @Injectable()
 export class MessageCreditsService {
@@ -123,7 +124,7 @@ export class MessageCreditsService {
       // not, three bundles worth NGN 74,000 were charged by the gateway and
       // never became credits: no balance, no ledger row, nothing to explain
       // where the money went. Fees and subscriptions both learned this already.
-      callbackUrl: `${process.env.PUBLIC_WEB_URL ?? "http://localhost:3000"}/billing?verifyCredits=${encodeURIComponent(reference)}`,
+      callbackUrl: `${publicWebUrl()}/billing?verifyCredits=${encodeURIComponent(reference)}`,
     });
     return { authorizationUrl, reference };
   }

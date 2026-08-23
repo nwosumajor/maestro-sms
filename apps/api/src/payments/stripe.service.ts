@@ -13,6 +13,7 @@
 import { Injectable, Logger, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
 import crypto from "node:crypto";
 import { fetchWithTimeout } from "../common/http";
+import { publicWebUrl } from "../common/public-url";
 
 const STRIPE = "https://api.stripe.com";
 /** Reject webhook timestamps older than this (replay protection). */
@@ -100,7 +101,7 @@ export class StripeService {
     cancelUrl?: string;
   }): Promise<{ authorizationUrl: string }> {
     const secret = this.secret();
-    const base = process.env.PUBLIC_WEB_URL ?? "http://localhost:3000";
+    const base = publicWebUrl();
     // Stripe's API is form-encoded; bracket syntax expresses the nested params.
     const params = new URLSearchParams({
       mode: "payment",

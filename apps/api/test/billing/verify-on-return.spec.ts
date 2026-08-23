@@ -109,7 +109,10 @@ describe("the checkout brings the school back", () => {
     const { readFileSync } = await import("node:fs");
     const { join } = await import("node:path");
     const src = readFileSync(join(__dirname, "../../src/billing/billing.service.ts"), "utf8");
-    const hits = src.match(/callbackUrl: `\$\{process\.env\.PUBLIC_WEB_URL/g) ?? [];
+    // Matched against the SHARED resolver, not a copy of the env fallback:
+    // twelve callers used to build this URL independently, and a caller that
+    // drifted back to its own default would send a payer to localhost.
+    const hits = src.match(/callbackUrl: `\$\{publicWebUrl\(\)\}/g) ?? [];
     expect(hits.length).toBe(2);
     expect(src).toContain("/billing?verify=");
   });

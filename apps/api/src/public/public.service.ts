@@ -23,6 +23,7 @@ import { NotificationService } from "../notifications/notification.service";
 import { EmailService } from "../notifications/email.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import { mintPasswordResetToken, verifyInviteToken, verifyPasswordResetToken } from "../auth/invite";
+import { publicWebUrl } from "../common/public-url";
 
 const ZERO = "00000000-0000-0000-0000-000000000000";
 
@@ -251,7 +252,7 @@ export class PublicService {
         await this.auditCredentialEvent(user.school_id, user.id, "auth.password.reset.requested", tx);
         return { passwordChangedAt: u?.passwordChangedAt ?? null, slug: school?.slug ?? "" };
       });
-      const base = process.env.PUBLIC_WEB_URL ?? "http://localhost:3000";
+      const base = publicWebUrl();
       const link = `${base}/reset-password?token=${encodeURIComponent(
         mintPasswordResetToken(user.id, user.school_id, detail.passwordChangedAt),
       )}`;

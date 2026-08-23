@@ -5,6 +5,7 @@ import { sentryOptions } from "./observability/sentry-options";
 import { assertStorageProviderConfigured } from "./documents/storage-provider.config";
 import { assertFieldCryptoConfigured } from "./foundation/field-crypto";
 import { assertAuthSecretUsable } from "./auth/secrets";
+import { assertPublicWebUrlConfigured } from "./common/public-url";
 import { HttpAdapterHost, NestFactory } from "@nestjs/core";
 import { Logger as PinoLogger } from "nestjs-pino";
 import { AppModule } from "./app.module";
@@ -35,6 +36,9 @@ async function bootstrap() {
   // And that the key signing every session is not one anybody can read off the
   // example file.
   assertAuthSecretUsable();
+  // And that we know our own address: twelve callback and link builders used to
+  // guess localhost, where every symptom appears somewhere we cannot see.
+  assertPublicWebUrlConfigured();
 
   const app = await NestFactory.create(AppModule, { rawBody: true, bufferLogs: true });
   const logger = app.get(PinoLogger);

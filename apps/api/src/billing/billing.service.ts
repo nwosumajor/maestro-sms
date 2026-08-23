@@ -70,6 +70,7 @@ import PDFDocument from "pdfkit";
 import { GrowthService } from "./growth.service";
 import { PaymentChannelService } from "../payments/payment-channel.service";
 import { toMinor, toMinorOrNull } from "../common/money";
+import { publicWebUrl } from "../common/public-url";
 
 /** Tiers a school can actually buy (all four are paid; STANDARD is the floor). */
 const SELLABLE_TIERS: Plan[] = [PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE];
@@ -480,7 +481,7 @@ export class BillingService {
             currency,
             reference,
             metadata: { kind: "subscription", schoolId: p.schoolId, paymentId, reference },
-            callbackUrl: `${process.env.PUBLIC_WEB_URL ?? "http://localhost:3000"}/billing?verify=${encodeURIComponent(reference)}`,
+            callbackUrl: `${publicWebUrl()}/billing?verify=${encodeURIComponent(reference)}`,
           }));
     } catch (err) {
       await this.voidIntent(p.schoolId, paymentId, `Gateway refused: ${(err as Error).message}`);
@@ -684,7 +685,7 @@ export class BillingService {
             email, amountMinor, currency, reference, metadata,
             // Bring the school BACK so the page can verify immediately, rather
             // than leaving the whole flow dependent on a webhook arriving.
-            callbackUrl: `${process.env.PUBLIC_WEB_URL ?? "http://localhost:3000"}/billing?verify=${encodeURIComponent(reference)}`,
+            callbackUrl: `${publicWebUrl()}/billing?verify=${encodeURIComponent(reference)}`,
           }));
     } catch (err) {
       await this.voidIntent(p.schoolId, paymentId, `Gateway refused: ${(err as Error).message}`);

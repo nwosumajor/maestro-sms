@@ -34,6 +34,7 @@ import { MessageCreditReconciliationService } from "./message-credit-reconciliat
 import { Public } from "../auth/public.decorator";
 import { MessageCreditsService } from "./message-credits.service";
 import { verifyTwilioSignature } from "./twilio-channel.provider";
+import { publicWebUrl } from "../common/public-url";
 
 // Loose E.164: 8–15 digits with an optional +. Empty string clears the number.
 const languageSchema = z.object({
@@ -283,7 +284,7 @@ export class NotificationController {
     // refund a school's credits. Still answers 2xx on a bad signature — a
     // non-2xx makes Twilio retry for hours, and a forged callback should be
     // dropped quietly rather than invited back.
-    const url = `${process.env.PUBLIC_WEB_URL ?? "http://localhost:3000"}/api/webhooks/twilio`;
+    const url = `${publicWebUrl()}/api/webhooks/twilio`;
     if (!verifyTwilioSignature(url, body, signature ?? null))
       return { ok: true };
     const sid = body.MessageSid ?? body.SmsSid;

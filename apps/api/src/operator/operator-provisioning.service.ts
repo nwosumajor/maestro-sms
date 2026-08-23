@@ -50,6 +50,7 @@ import { PrivilegedDatabaseService } from "../common/privileged-database.service
 import { NotificationService } from "../notifications/notification.service";
 import { EmailService } from "../notifications/email.service";
 import { mintInviteToken } from "../auth/invite";
+import { publicWebUrl } from "../common/public-url";
 
 // Roles a super_admin may seed into a school via provisioning (the admin tier).
 const ADMIN_ROLES = new Set(["school_admin", "principal", "head_admin", "hr_manager"]);
@@ -356,7 +357,7 @@ export class OperatorProvisioningService {
           // one-time set-password link. SECURITY: the temporary password itself
           // is never emailed — it is shown once in the operator console; the
           // links are single-use (armed by passwordChangedAt=null) and expire.
-          const base = process.env.PUBLIC_WEB_URL ?? "http://localhost:3000";
+          const base = publicWebUrl();
           const accountLines = result.created
             .map(
               (a) =>
@@ -430,7 +431,7 @@ export class OperatorProvisioningService {
     slug: string,
   ): Promise<void> {
     try {
-      const base = process.env.PUBLIC_WEB_URL ?? "http://localhost:3000";
+      const base = publicWebUrl();
       const link = `${base}/welcome?token=${encodeURIComponent(mintInviteToken(userId, schoolId))}`;
       await this.email.send(
         email,
@@ -461,7 +462,7 @@ export class OperatorProvisioningService {
     schoolName: string,
     slug: string,
   ): Promise<{ link: string; emailDelivered: boolean }> {
-    const base = process.env.PUBLIC_WEB_URL ?? "http://localhost:3000";
+    const base = publicWebUrl();
     const link = `${base}/welcome?token=${encodeURIComponent(mintInviteToken(userId, schoolId))}`;
     try {
       const res = await this.email.send(

@@ -780,6 +780,29 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### Four boot assertions, and knowing our own address
+`main.ts` asserts before serving anything: `assertStorageProviderConfigured`,
+`assertFieldCryptoConfigured`, `assertAuthSecretUsable`,
+`assertPublicWebUrlConfigured`. All four refuse only in PRODUCTION, so local work
+needs no generated secrets.
+The last is `publicWebUrl()` (`common/public-url.ts`), which replaced TWELVE
+copies of `process.env.PUBLIC_WEB_URL ?? "http://localhost:3000"` — Paystack and
+Stripe return URLs, billing and message-credit checkout callbacks, invite links,
+password-reset links, the admissions documents link, and the URL the TWILIO
+SIGNATURE is verified against. Unset, all twelve fail the same way and none says
+so: payers returned to localhost so verify-on-return never fires, invite and
+reset links emailed to real people pointing at their own machine, and a signature
+computed over the wrong URL so credit refunds stop silently. **Every symptom is
+somewhere this deployment cannot see** — a payer's browser, somebody else's
+inbox, a webhook that quietly stops matching — which is why it is a boot failure
+and not a warning. // GOTCHA: the twelve were not even guessing consistently with
+the stack — the code assumed `http://localhost:3000` (Next dev) while
+docker-compose sets `http://localhost` (nginx). `publicWebUrl()` also strips a
+trailing slash: `https://x//billing?verify=…` is a different URL to a gateway and
+to Twilio's signature. Terraform DOES set it on the api task (checked) — this is
+latent, not live. mobile-money and admissions deliberately return EMPTY and warn
+rather than send half a URL; they were right and are left alone.
+
 ### A secret's SHAPE is not its PROVENANCE
 `PUBLISHED_SECRETS` / `isPublishedSecret` (`auth/published-secrets.ts`), consulted
 by both boot checks. `.env.example` shipped
