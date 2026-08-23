@@ -41,8 +41,11 @@ describe("what counts as a signing secret", () => {
   });
 
   it("rejects the example placeholder by name", () => {
+    // Reported by PROVENANCE now — it is on the published list — rather than by
+    // the pattern. Both messages say the same thing; the provenance check runs
+    // first because it is the stronger claim.
     process.env.AUTH_SECRET = "change-me-32-char-min-secret";
-    expect(secretProblem()).toMatch(/published in this repository/);
+    expect(secretProblem()).toMatch(/published/);
   });
 
   it("rejects placeholders generally, not just that exact string", () => {

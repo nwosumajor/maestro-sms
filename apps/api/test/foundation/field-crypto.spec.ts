@@ -4,7 +4,9 @@
 
 import { encryptField, decryptField, encryptionEnabled } from "../../src/foundation/field-crypto";
 
-const KEY = "Q5gcF3Ehy9TDmCWdhBIcu3BMCdoapo/z6xroVbv6zoE="; // 32 bytes base64
+const KEY = Buffer.alloc(32, 11).toString("base64"); // NOT the example key:
+// that value is published in this repository and is refused by keyProblem(),
+// which would silently disable encryption and make this suite assert nothing. // 32 bytes base64
 
 describe("field-crypto", () => {
   const schoolA = "11111111-1111-1111-1111-111111111111";

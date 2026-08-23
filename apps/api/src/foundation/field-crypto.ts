@@ -30,6 +30,7 @@
 // =============================================================================
 
 import crypto from "node:crypto";
+import { isPublishedSecret } from "../auth/published-secrets";
 
 const PREFIX = "enc:v1:";
 let warned = false;
@@ -59,6 +60,12 @@ function masterKey(): Buffer | null {
 export function keyProblem(): string | null {
   const raw = process.env.DATA_ENCRYPTION_KEY;
   if (!raw) return "DATA_ENCRYPTION_KEY unset";
+  // PROVENANCE, not shape. The example file shipped a perfectly well-formed
+  // 32-byte key, so every check below passes on it — and it is published in this
+  // repository, which makes the ciphertext it produces readable by anyone.
+  if (isPublishedSecret(raw)) {
+    return "DATA_ENCRYPTION_KEY is a value this repository has published, so anything encrypted with it is readable by anyone";
+  }
   const buf = Buffer.from(raw, "base64");
   if (buf.length < 32) {
     return `DATA_ENCRYPTION_KEY decodes to ${buf.length} bytes, and 32 are needed (is it base64?)`;

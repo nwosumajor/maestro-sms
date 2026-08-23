@@ -780,6 +780,26 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
+### A secret's SHAPE is not its PROVENANCE
+`PUBLISHED_SECRETS` / `isPublishedSecret` (`auth/published-secrets.ts`), consulted
+by both boot checks. `.env.example` shipped
+`DATA_ENCRYPTION_KEY=Q5gcF3Ehy9TDmCWdhBIcu3BMCdoapo/z6xroVbv6zoE=` — a perfectly
+well-formed 32-byte base64 key that passes every malformed-key check, and is
+PUBLISHED IN THIS REPOSITORY (the field-crypto suite used it too). Anything a
+copying deployment encrypted with it — medical records, salaries, payslips, bank
+details — is readable by anyone with the source: real ciphertext, no protection.
+No pattern catches that key, because it looks exactly like what it should be;
+the only thing that distinguishes it is that we published it.
+So both checks now ask PROVENANCE as well as shape, and NOTHING IS EVER REMOVED
+from the list — a value stays compromised after the example stops carrying it,
+because the deployments that copied it still have it.
+`published-secrets.spec.ts` reads `.env.example` and fails if it grows another
+secret-looking value that is not registered, so the list cannot fall behind the
+file that creates the problem. // GOTCHA: rotating `DATA_ENCRYPTION_KEY` does NOT
+re-protect existing rows — they must be RE-ENCRYPTED (decrypt with the old key,
+encrypt with the new, in one process, using the app's own `field-crypto` so the
+cipher is never re-implemented).
+
 ### The signing key was printed in the example file
 `secretProblem()` / `assertAuthSecretUsable()` (`auth/secrets.ts`). `AUTH_SECRET`
 signs EVERY token — session bearers, the ws-ticket, step-up, invite links,

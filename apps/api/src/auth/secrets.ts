@@ -13,6 +13,7 @@
 // =============================================================================
 
 import jwt from "jsonwebtoken";
+import { isPublishedSecret } from "./published-secrets";
 
 /** The signing secret (current only). Throws when auth is not configured. */
 export function signingSecret(): string {
@@ -73,6 +74,9 @@ const PLACEHOLDERS = [/^change-?me/i, /^secret$/i, /^dev(elopment)?$/i, /^test$/
 export function secretProblem(): string | null {
   const secret = process.env.AUTH_SECRET;
   if (!secret) return "AUTH_SECRET is not set";
+  if (isPublishedSecret(secret)) {
+    return "AUTH_SECRET is a value this repository has published, so it is not a secret";
+  }
   if (PLACEHOLDERS.some((re) => re.test(secret))) {
     return "AUTH_SECRET is still the example placeholder, which is published in this repository";
   }
