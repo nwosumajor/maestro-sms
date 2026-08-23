@@ -79,3 +79,13 @@ export const NOTIFICATION_ROLE_PERMISSIONS = {
   student: [NOTIFICATION_PERMISSIONS.NOTIFICATION_READ],
   parent: [NOTIFICATION_PERMISSIONS.NOTIFICATION_READ],
 } as const;
+
+/**
+ * The 403 a suspended school gets, told apart from an ordinary permission 403.
+ *
+ * Shared because BOTH sides must agree on it: the API guard raises it on every
+ * authenticated request from a school the operator has switched off, and the web
+ * turns it into a page that says so instead of an app full of empty panels.
+ * A literal on either side would be a contract nobody checks.
+ */
+export const SCHOOL_SUSPENDED_CODE = "SCHOOL_SUSPENDED";

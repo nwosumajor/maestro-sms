@@ -1267,6 +1267,25 @@ every correct fix would be abandoned.
 It immediately found FIVE more latent flakes of the same kind in `game-engine`
 and `game-transport`. All six now strip ids before searching.
 
+### A suspended school is TOLD, at the screen it actually reaches
+`SCHOOL_SUSPENDED_CODE` (`@sms/types`) is the one value both sides agree on — a
+literal on either side would be a contract nobody checks. The API's guard tags
+its 403 with it; the web tells it apart from an ordinary permission 403, which
+`apiGet` answers with `null` (right for a missing permission, useless here: every
+read 403s, so the user would get page after page of empty cards and no reason).
+// GOTCHA, found by driving it live: **the session revocation fires FIRST.**
+`refreshClaims` revokes a rolling session for a switched-off school, so
+`GET /dashboard` → `307 /login` and the user never sees `/suspended` — that page
+is only the safety net for the window where a server component gets the 403 first.
+The screen they ACTUALLY reach is the LOGIN page, and it was showing a catch-all
+that listed suspension among several possibilities, sending people to check a
+password that was never the problem. `authorize` now throws `CredentialsSignin`
+with the code (surfacing as `?error=CredentialsSignin&code=SCHOOL_SUSPENDED`) and
+the form says what happened, that nothing was deleted, and who can restore it.
+A wrong password still gets the generic refusal — naming a suspension is safe
+because nobody at the school can act on it either way, but naming which half of a
+credential was wrong is an oracle.
+
 ### A switched-off school reaches NOTHING, and only the owner switches it back
 DISABLED used to mean the front door only: the LOGIN was refused and everything
 else went on working. `SchoolStatusService` (foundation, @Global, 15s cache +

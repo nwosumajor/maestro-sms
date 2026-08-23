@@ -14,6 +14,8 @@ import Credentials from "next-auth/providers/credentials";
 import jwt from "jsonwebtoken";
 import { PLATFORM_REGION } from "@/lib/format";
 import { sessionPermissions } from "./permissions";
+import { CredentialsSignin } from "next-auth";
+import { SCHOOL_SUSPENDED_CODE } from "@sms/types";
 
 const API_BASE = process.env.API_BASE_URL ?? "http://localhost:3001";
 
@@ -235,7 +237,24 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           body: JSON.stringify({ email, password, mfaCode }),
           cache: "no-store",
         });
-        if (!res.ok) return null; // invalid credentials -> failed sign-in
+        if (!res.ok) {
+          // WHY, not just "no". Returning null for every refusal made the login
+          // page show one catch-all sentence listing several possible reasons,
+          // and a school whose access the platform had SUSPENDED was told to
+          // check its password. That is the one refusal nobody at the school can
+          // act on, so it is the one worth naming.
+          //
+          // CredentialsSignin carries a `code` through Auth.js to `res.error` on
+          // the client; anything else stays the generic failure, because telling
+          // a stranger which half of a wrong credential was wrong is an oracle.
+          const body = await res.text().catch(() => "");
+          if (body.includes(SCHOOL_SUSPENDED_CODE)) {
+            const err = new CredentialsSignin();
+            err.code = SCHOOL_SUSPENDED_CODE;
+            throw err;
+          }
+          return null; // invalid credentials -> failed sign-in
+        }
         const u = (await res.json()) as LoginResult;
         return {
           id: u.userId,

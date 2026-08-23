@@ -32,6 +32,7 @@ import { RolePermissionsService } from "../foundation/role-permissions.service";
 import { TenantRateLimitService } from "../common/tenant-rate-limit.service";
 import { requestContext } from "./request-context";
 import { SchoolStatusService } from "../foundation/school-status.service";
+import { SCHOOL_SUSPENDED_CODE } from "@sms/types";
 
 export interface AuthedRequest extends Request {
   principal?: Principal;
@@ -100,8 +101,18 @@ export class PermissionGuard implements CanActivate {
     // on the operator write, so it costs nothing per request and takes effect at
     // once.
     if (!principal.roles.includes("super_admin") && !(await this.schoolStatus.isActive(principal.schoolId))) {
+      // A CODE as well as a sentence. Every page in the web app reads something
+      // the caller may not be entitled to, so an ordinary 403 is answered with
+      // `null` and an empty panel — correct for a missing permission, and
+      // useless here, because the user would see a whole app of empty panels
+      // and no reason. The code lets the web tell the two apart and say what
+      // has actually happened.
       throw new HttpException(
-        "This school's access has been suspended by the platform. Contact your provider.",
+        {
+          statusCode: HttpStatus.FORBIDDEN,
+          code: SCHOOL_SUSPENDED_CODE,
+          message: "This school's access has been suspended by the platform. Contact your provider.",
+        },
         HttpStatus.FORBIDDEN,
       );
     }

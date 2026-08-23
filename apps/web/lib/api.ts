@@ -1,5 +1,7 @@
 import "server-only";
 import { bearerForSession } from "@/lib/apiToken";
+import { redirect } from "next/navigation";
+import { SCHOOL_SUSPENDED_CODE } from "@sms/types";
 
 const API_BASE = process.env.API_BASE_URL ?? "http://localhost:3001";
 
@@ -81,10 +83,22 @@ export async function apiGet<T>(path: string): Promise<T | null> {
     );
   }
   if (res.status === 403) {
-    // Logged, not thrown. Half the app's pages read something the caller may
-    // not be entitled to and expect null; throwing here broke 491 (page, role)
-    // pairs. A page that KNOWS its readers may lack a permission should still
-    // gate the call — `can ? apiGet(...) : null` — so this line stays quiet.
+    // A SUSPENDED SCHOOL IS NOT A MISSING PERMISSION.
+    //
+    // An ordinary 403 means this reader is not entitled to this endpoint, and
+    // `null` is the right answer — half the app's pages read something their
+    // caller may lack. But when the platform has switched the school off, EVERY
+    // read returns 403, so `null` everywhere renders a whole app of empty panels
+    // and tells the user nothing at all. The API tags that case; send them to a
+    // page that says what happened.
+    // Read directly, not through clone(): this branch always returns, so the
+    // body is never needed again — and clone() is one more thing a caller's test
+    // double has to implement for no benefit.
+    const body = await res.text().catch(() => "");
+    if (body.includes(SCHOOL_SUSPENDED_CODE)) redirect("/suspended");
+    // Logged, not thrown. Throwing here broke 491 (page, role) pairs. A page
+    // that KNOWS its readers may lack a permission should still gate the call —
+    // `can ? apiGet(...) : null` — so this line stays quiet.
     console.warn(`api: 403 GET ${path} — caller lacks the endpoint's permission`);
     return null;
   }

@@ -6,6 +6,7 @@ import { signIn } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SCHOOL_SUSPENDED_CODE } from "@sms/types";
 
 export function LoginForm({ next }: { next?: string | null }) {
   const router = useRouter();
@@ -25,8 +26,13 @@ export function LoginForm({ next }: { next?: string | null }) {
     const res = await signIn("credentials", { email, password, code, redirect: false });
     setBusy(false);
     if (res?.error) {
+      // A SUSPENDED SCHOOL IS TOLD SO. It is the one refusal nobody here can
+      // act on — no password, no code and no number of attempts will change it —
+      // and the catch-all below sent those users to check their password.
       setError(
-        "Invalid email, password, or 2FA code. After 3 failed attempts the account is locked — a platform administrator must reactivate it. If your school's access has been suspended, contact the platform operator.",
+        res.code === SCHOOL_SUSPENDED_CODE
+          ? "This school's access has been suspended by the platform, so nobody at the school can sign in. Nothing has been deleted — your records are as you left them. Please contact your provider to have access restored."
+          : "Invalid email, password, or 2FA code. After 3 failed attempts the account is locked — a platform administrator must reactivate it.",
       );
       return;
     }
