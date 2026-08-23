@@ -1267,6 +1267,25 @@ every correct fix would be abandoned.
 It immediately found FIVE more latent flakes of the same kind in `game-engine`
 and `game-transport`. All six now strip ids before searching.
 
+### A school the operator switched off is left alone
+`DISABLED` is the hard lever and auth states what it means — it "blocks ALL of its
+members' logins", deliberately unlike PAST_DUE, which only degrades modules so a
+school can still reach `/billing` and pay. Two nightly sweeps did not know: both
+`lateFeeSweep` and `reminderSweep` selected `{ isPlatform: false }` with NO status
+filter, so a switched-off school went on adding a late fee to its parents'
+invoices every night and emailing them about the balance IN THE SCHOOL'S NAME —
+while nobody there could sign in to see it, stop it, or answer a parent who rang.
+Both now require `status: "ACTIVE"`.
+DELIBERATELY NOT changed, and a test pins each: RETENTION still purges a disabled
+school (the obligation to delete minors' telemetry on time does not pause because
+a school stopped paying, and nothing about a purge reaches a person), and the
+attendance rollup and term roll-over still run because they move only internal
+state that must be right if the school is switched back on. The operator and
+reporting reads deliberately include disabled schools — an operator has to see
+them. // OPEN QUESTION for the owner: subscription DUNNING still chases a
+disabled school, emailing "renew now" to admins whose login is blocked. That is a
+revenue decision, not a bug to fix unilaterally.
+
 ## Repo workflow & gotchas
 - DB setup order: `prisma migrate deploy` → `pnpm --filter @sms/db rls` →
   `prisma db seed` (or `pnpm --filter @sms/db setup`). RLS lives in `prisma/rls/`,

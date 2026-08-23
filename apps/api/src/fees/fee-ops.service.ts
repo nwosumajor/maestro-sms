@@ -377,8 +377,16 @@ export class FeeOpsService {
       this.logger.warn("Late-fee sweep requested but no privileged DB — skipping. No late fee was applied to any school.");
       return { schools: 0, feesApplied: 0, skipped: true };
     }
+    // ONLY SCHOOLS THAT ARE STILL SWITCHED ON.
+    //
+    // DISABLED is the operator's hard lever and auth documents what it means:
+    // it "blocks ALL of its members' logins", deliberately unlike PAST_DUE,
+    // which only degrades modules so a school can still reach /billing and pay.
+    // Without this filter the sweep went on adding a late fee to that school's
+    // parents' invoices every night, in the school's name, while nobody at the
+    // school could sign in to see it, stop it, or answer a parent who rang.
     const schools = await client.school.findMany({
-      where: { isPlatform: false, lateFeeFlatMinor: { gt: 0 } },
+      where: { isPlatform: false, status: "ACTIVE", lateFeeFlatMinor: { gt: 0 } },
       // The TIMEZONE comes along because grace is counted in the school's own
       // days — see the cutoff below.
       select: { id: true, lateFeeFlatMinor: true, lateFeeGraceDays: true, country: true, timezone: true },
@@ -537,7 +545,13 @@ export class FeeOpsService {
       this.logger.warn("Overdue-reminder sweep requested but no privileged DB — skipping. No guardian was reminded.");
       return { schools: 0, reminded: 0, skipped: true };
     }
-    const schools = await client.school.findMany({ where: { isPlatform: false }, select: { id: true } });
+    // Same rule as the late-fee sweep next door: a switched-off school does not
+    // send reminders to its families. This one reaches PEOPLE — an email or an
+    // SMS about money, signed by a school that cannot log in to answer.
+    const schools = await client.school.findMany({
+      where: { isPlatform: false, status: "ACTIVE" },
+      select: { id: true },
+    });
     let reminded = 0;
     for (const school of schools) {
       try {
