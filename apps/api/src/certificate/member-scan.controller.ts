@@ -1,12 +1,21 @@
 import { BadRequestException, Body, Controller, Get, Param, Post , Query } from "@nestjs/common";
 import type { MemberScanDto, ScanRecordResultDto, ScanEventDto } from "@sms/types";
-import { isScanPurpose, SIS_PERMISSIONS } from "@sms/types";
+import { isScanPurpose, MODULES, SIS_PERMISSIONS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
+import { RequireModule } from "../auth/require-module.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import type { Principal } from "../integrity/integrity.foundation";
 import { MemberScanService } from "./member-scan.service";
 
+// The scan desk reads the QR printed on an ID CARD, which is what the
+// certificate module produces — so it is gated on the same module rather than
+// left open. It sat inside `certificate/` untagged while its sibling
+// `certificate.controller.ts` carried the tag, which meant every school on the
+// STANDARD tier got a PREMIUM feature. Nothing breaks by adding it: a school
+// without the certificate module has never had an ID card to scan, and no live
+// school has a single scan_event.
 @Controller("members")
+@RequireModule(MODULES.CERTIFICATE)
 export class MemberScanController {
   constructor(private readonly scan: MemberScanService) {}
 

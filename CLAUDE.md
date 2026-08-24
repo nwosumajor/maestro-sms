@@ -389,8 +389,10 @@ conflicts with it, flag the conflict before proceeding.
   charge.success can't double-credit an invoice).
 - Enforcement: controllers carry `@RequireModule(MODULES.X)` (class-level);
   `PermissionGuard` resolves the school's effective modules via
-  `ModuleEntitlementService` (foundation, 30s cache; invalidation fans across ECS
-  tasks via `RedisPubSubService` — see Live push) and returns **404** if the
+  `ModuleEntitlementService` (foundation, TEN-MINUTE cache — `CACHE_TTL_MS =
+  600_000`, not the 30s this line used to claim; invalidation fans across ECS
+  tasks via `RedisPubSubService` — see Live push, which is why the TTL can be
+  long, but a plan changed DIRECTLY in the database takes up to ten minutes) and returns **404** if the
   module is off — orthogonal to `@RequirePermission`, before the permission check.
   ALWAYS-ON (untagged) controllers: foundation/auth, security, privacy,
   notifications, admin dashboard, operator, **billing**. The public `/apply` intake
@@ -1126,6 +1128,33 @@ exactly like the regression this kind of index can cause. It was bloat from the
 bulk UPDATE that built the fixture (1,399 buffers to fetch 50 rows). VACUUM,
 re-measure, 0.60 ms. A benchmark must account for the churn the benchmark itself
 caused.
+
+### A paid module's controller with no entitlement tag is a free feature
+CLAUDE.md listed the deliberately ALWAYS-ON controllers as PROSE — seven
+categories against thirty untagged controller classes — and nothing checked it
+either way. The gap it hid: `MemberScanController` sat inside `certificate/`
+with no `@RequireModule` while `certificate.controller.ts` beside it carried one.
+CERTIFICATE is a PREMIUM add-on, so every school on the STANDARD tier had the
+ID-card scan desk for nothing. Tagging it breaks nobody — a school without the
+module has never had an ID card to scan, and no live school has a single
+`scan_event`. Live: STANDARD -> 404 on the scan desk and 200 on library;
+ENTERPRISE -> 200.
+The rest are genuinely always-on and now say so: infrastructure, the auth and
+security spine, the privacy/compliance obligations, cross-cutting features with
+no module key at all (search, meetings, exam logistics, directory, approvals —
+which "span modules a school may or may not have"), scholarship (a growth lever,
+open to every plan), and the public surface, which has no school session to
+resolve an entitlement from.
+Gate: `every-controller-declares-its-module.spec.ts` requires each controller to
+carry a tag or be named always-on WITH A REASON, and fails on a stale entry for a
+controller that no longer exists — a dangling exemption is a hole waiting for the
+name to be reused. It reads the decorator run above EACH CLASS, not the file:
+several files hold two controllers, which is exactly how the scan desk stayed
+untagged beside a tagged sibling.
+// GOTCHA while verifying: changing a plan directly in the database does NOT take
+effect for up to TEN MINUTES. The entitlement cache is `CACHE_TTL_MS = 600_000`,
+and the Redis invalidation that makes a long TTL safe only fires on a write
+through the application. Restart, or change the plan through the operator API.
 
 ### The front door, and the one place a rate limit would lose money
 Of 26 unauthenticated routes, 11 carried `RateLimitGuard`, and the pattern was
