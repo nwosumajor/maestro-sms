@@ -1127,6 +1127,34 @@ bulk UPDATE that built the fixture (1,399 buffers to fetch 50 rows). VACUUM,
 re-measure, 0.60 ms. A benchmark must account for the churn the benchmark itself
 caused.
 
+### The weaker action re-authenticated and the stronger one did not
+Step-up guards 53 of 502 mutating routes, which is right — asking for a password
+before every invoice line trains people to type it without reading. What is not
+right is applying it INCONSISTENTLY WITHIN ONE PERMISSION, and three cases had
+the gate on the weaker action:
+- `rbac.manage` — toggling the school's MFA POLICY needed step-up; **granting
+  somebody the PRINCIPAL role did not.** Only junior-admin-tier grants are
+  maker-checker; every other role was a direct audited write, and a role grant is
+  the classic escalation lever step-up exists for.
+- `platform.user.credentials` — resetting one user's password / MFA / status
+  needed it; **switching MFA OFF for a WHOLE ROLE across a tenant did not**,
+  which is strictly the larger act.
+- `platform.subscription.manage` — comping message credits needed it; **granting
+  a tenant a plan, a status and a paid period did not.**
+Live: `POST /admin/users/:id/roles` granting `principal` went from 201 to **403**
+without a step-up token, and still returns 201 with one.
+// GOTCHA: `OperatorUsers` already sent the header on every call via
+`sendWithStepUp`, so the operator half was a server-only change — the UI had been
+asking for re-auth the server never demanded. `UserRolesManager` and
+`SubscriptionManager` used a bare `fetch` and needed the web side changed too;
+gating a route whose UI does not send the header just breaks the screen.
+Gate: `step-up-is-consistent-within-a-permission.spec.ts` extracts every mutating
+route with its permission and decorators and fails when a permission holds both
+gated and ungated routes, unless the ungated one is named with a reason. It does
+NOT demand step-up everywhere: 33 routes are exempted, each with why (daily work,
+already maker-checker, or the restrictive direction — revoking authority should
+never be harder than granting it).
+
 ### Two producers of the same telemetry, one consent-gated and one not
 Golden Rule #5 binds behavioural telemetry on minors to NDPR consent, and
 `IntegrityService` enforces it carefully: `ingestClientSignals` refuses to

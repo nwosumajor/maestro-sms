@@ -116,6 +116,7 @@ export class AdminController {
 
   @Post("users/:userId/roles")
   @RequirePermission(ADMIN_PERMISSIONS.RBAC_MANAGE)
+  @RequireStepUp()
   assign(
     @CurrentPrincipal() p: Principal,
     @Param("userId") userId: string,
@@ -126,6 +127,7 @@ export class AdminController {
 
   @Delete("users/:userId/roles/:roleName")
   @RequirePermission(ADMIN_PERMISSIONS.RBAC_MANAGE)
+  @RequireStepUp()
   remove(@CurrentPrincipal() p: Principal, @Param("userId") userId: string, @Param("roleName") roleName: string) {
     return this.admin.removeRole(p, userId, roleName);
   }

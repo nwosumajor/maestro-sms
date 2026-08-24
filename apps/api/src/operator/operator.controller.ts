@@ -612,6 +612,7 @@ export class OperatorController {
 
   @Put("tenants/:schoolId/subscription")
   @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_SUBSCRIPTION_MANAGE)
+  @RequireStepUp()
   setSubscription(
     @CurrentPrincipal() p: Principal,
     @Param("schoolId") schoolId: string,
@@ -1101,6 +1102,7 @@ export class OperatorController {
   /** Mandate / release MFA enrolment for a single user. */
   @Put("tenants/:schoolId/users/:userId/mfa-required")
   @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_USER_CREDENTIALS)
+  @RequireStepUp()
   setUserMfaRequired(
     @CurrentPrincipal() p: Principal,
     @Param("schoolId") schoolId: string,
@@ -1113,6 +1115,7 @@ export class OperatorController {
   /** Mandate / release MFA for every user holding a role. */
   @Put("tenants/:schoolId/roles/:roleName/mfa-required")
   @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_USER_CREDENTIALS)
+  @RequireStepUp()
   setRoleMfaRequired(
     @CurrentPrincipal() p: Principal,
     @Param("schoolId") schoolId: string,

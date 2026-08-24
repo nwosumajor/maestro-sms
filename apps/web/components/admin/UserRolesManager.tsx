@@ -1,6 +1,7 @@
 "use client";
 
 import type { UserWithEmailDto, Serialized } from "@sms/types";
+import { sendWithStepUp } from "@/lib/stepup";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
@@ -18,9 +19,10 @@ export function UserRolesManager({ users, allRoles }: { users: User[]; allRoles:
     if (!roleName) return;
     setBusy(userId);
     setNotice(null);
-    const res = await fetch(`/api/sms/admin/users/${userId}/roles`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ roleName }),
-    });
+    // Step-up gated on the server. Granting a role is the classic escalation
+    // lever, and it was the one action here that did NOT re-authenticate while
+    // the MFA-policy toggle beside it did.
+    const res = await sendWithStepUp("POST", `admin/users/${userId}/roles`, { roleName });
     setBusy(null);
     if (!res.ok) {
       setNotice({ userId, kind: "error", text: await readApiError(res) });
@@ -37,7 +39,7 @@ export function UserRolesManager({ users, allRoles }: { users: User[]; allRoles:
   const remove = async (userId: string, roleName: string) => {
     setBusy(userId);
     setNotice(null);
-    const res = await fetch(`/api/sms/admin/users/${userId}/roles/${roleName}`, { method: "DELETE" });
+    const res = await sendWithStepUp("DELETE", `admin/users/${userId}/roles/${roleName}`);
     setBusy(null);
     if (!res.ok) {
       setNotice({ userId, kind: "error", text: await readApiError(res) });

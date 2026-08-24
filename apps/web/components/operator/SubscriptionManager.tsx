@@ -15,6 +15,7 @@ import {
   type Serialized,
   type SubscriptionDto,
 } from "@sms/types";
+import { sendWithStepUp } from "@/lib/stepup";
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -72,16 +73,15 @@ export function SubscriptionManager({ schoolId, plan: initialPlan }: { schoolId:
     const base = new Set<ModuleKey>(PLAN_MODULES[plan]);
     const enabled = [...selected].filter((m) => !base.has(m));
     const disabled = [...base].filter((m) => !selected.has(m));
-    const res = await fetch(`/api/sms/operator/tenants/${schoolId}/subscription`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        plan,
-        overrides: { enabled, disabled },
-        status,
-        // Date-only input → end of that day UTC; empty = clear the paid period.
-        currentPeriodEnd: periodEnd ? new Date(`${periodEnd}T23:59:59Z`).toISOString() : null,
-      }),
+    // Step-up gated on the server. Granting a tenant a plan, a status or a paid
+    // period is at least as large an act as comping message credits, which
+    // required re-authentication while this did not.
+    const res = await sendWithStepUp("PUT", `operator/tenants/${schoolId}/subscription`, {
+      plan,
+      overrides: { enabled, disabled },
+      status,
+      // Date-only input → end of that day UTC; empty = clear the paid period.
+      currentPeriodEnd: periodEnd ? new Date(`${periodEnd}T23:59:59Z`).toISOString() : null,
     });
     setBusy(false);
     setMsg(res.ok ? "Saved." : await readApiError(res));
