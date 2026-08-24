@@ -41,7 +41,10 @@ function makeService() {
       findFirst: jest.fn().mockResolvedValue(BANK),
     },
     cbtQuestion: {
-      groupBy: jest.fn().mockResolvedValue([{ bankId: "bank-1", _count: { id: 42 } }]),
+      // `_count: true` counts ROWS, so the aggregate comes back as a NUMBER — the
+      // shape that makes the count index-only. See
+      // the-bank-list-does-not-count-everything.
+      groupBy: jest.fn().mockResolvedValue([{ bankId: "bank-1", _count: 42 }]),
       findMany: jest.fn().mockResolvedValue([
         { id: "q1", prompt: "State Newton's second law", choices: ["a", "b"], answerIndex: 0, type: "MCQ", level: null, topic: null, maxMarks: 1, markGuide: null },
       ]),

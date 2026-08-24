@@ -1412,6 +1412,27 @@ regional read replicas → Aurora write forwarding (still one writer) → tenant
 pinning. Multi-master is deliberately not on that list. See
 `docs/RUNBOOK-INCIDENT-RESPONSE.md` §5.x and §5.y.
 
+### The bank list counted every question the school had ever written
+`listBanks` drew its counts with `groupBy({ by: ["bankId"], _count: { id: true } })`
+and NO `where` — so every page load aggregated the school's entire question
+table whatever was on screen, and nothing archives a bank. O(how long the school
+has been teaching), not O(what is shown).
+Measured as the APPLICATION role with RLS in force, 200 banks / 80,000 questions
+(a busy secondary school's decade): **103.3 ms / 1,380 buffers -> 3.6 ms / 59
+buffers**, Seq Scan + HashAggregate becoming an Index Only Scan on
+`(schoolId, bankId)`.
+// GOTCHA: TWO changes and both are needed. Scoping to the listed banks is what
+lets the index be used at all; `_count: true` counts ROWS rather than the `id`
+COLUMN, and THAT is what makes it index-only — counting a column must visit the
+heap for every row to read it. Scoped count(id) was 9.3 ms; scoped count(*) is
+3.6 ms.
+// WHERE THE CEILING IS, stated rather than implied: the list is deliberately NOT
+paginated because it feeds the bank PICKER, and paging a dropdown is a worse
+product than the problem it solves. At 800 banks / 320,000 questions — a bank
+every four days for a decade, past any real school — it costs 48 ms against 114
+before. Still O(the school's banks), so it degrades eventually; it would take
+thousands of banks to be felt.
+
 ### A question bank outlives the teacher who wrote it
 Asked directly: a subject teacher builds CBT banks over years and resigns — does
 the school still have them? **Yes, and structurally rather than by luck: bank
