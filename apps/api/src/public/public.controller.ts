@@ -56,6 +56,10 @@ export class PublicController {
 
   /** PUBLIC: the directory of onboarded schools (parents browse + apply). */
   @Public()
+  // Rate-limited: The parent-facing directory, and the only uncached database read on the public
+  // surface: an unlimited caller drives a findMany over every ACTIVE school on
+  // every request. Generous — a family browsing schools makes a handful.
+  @UseGuards(new RateLimitGuard(60, 60_000))
   @Get("schools")
   schools(): Promise<PublicSchoolDto[]> {
     return this.publicSvc.listSchools();

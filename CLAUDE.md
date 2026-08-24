@@ -1127,6 +1127,38 @@ bulk UPDATE that built the fixture (1,399 buffers to fetch 50 rows). VACUUM,
 re-measure, 0.60 ms. A benchmark must account for the churn the benchmark itself
 caused.
 
+### The front door, and the one place a rate limit would lose money
+Of 26 unauthenticated routes, 11 carried `RateLimitGuard`, and the pattern was
+that every public POST was limited and the public GETs were not — the wrong way
+round for cost. Applying for a job writes ONE row; LISTING vacancies queries the
+table, uncached, once per request, for anybody. `GET /public/schools` was the
+sharpest: the parent-facing directory, a `findMany` over every ACTIVE school, no
+cache and no limit, while `POST /public/admissions` beside it allowed 5 a minute.
+Now 60/min on `/public/schools` and both `/public/careers` reads.
+**THE EXEMPTIONS MATTER MORE THAN THE FIX.** A gateway webhook must NEVER be
+rate-limited: Paystack and Stripe retry on any non-2xx and a 429 IS a non-2xx, so
+a limiter turns a burst of real payments into a retry storm and then into money
+charged with no invoice credited; M-Pesa and MTN callbacks are delivered ONCE and
+a 429 loses the payment outright. The biometric endpoint is exempt too — a gate
+terminal legitimately bursts at the start of a school day and does not retry.
+Somebody tidying up "unprotected public routes" would add limiters to those in
+good faith, so `public-routes-are-rate-limited.spec.ts` asserts they stay
+UNLIMITED as well as asserting the rest are limited. Live: 70 hits on the
+directory gave 60x200 then 10x429; 30 rapid webhook posts gave 30x401 and never a
+429.
+// GOTCHA: the scan's first version used a fixed-size lookbehind for `@Public()`
+and picked up the PREVIOUS route's decorator — it claimed
+`POST /fees/reconciliation/run` and the applicant-to-staff conversion were open
+to the world. Both are permission-gated. Bound the decorator RUN, never a
+character count. And take the NEAREST `@Controller` above a route, not the first
+in the file: `attendance.controller.ts` holds two, so the biometric route came
+out under the wrong prefix and its exemption silently did not match.
+// GOTCHA, found BY this change: `platform-org-not-a-school.spec.ts` matched
+`@Public()[\s\S]{0,200}?@Get("…:slug…")`, so adding one more decorator pushed a
+route past 200 characters and it stopped being found — the count fell from 3 to
+2. Its own "did I find anything" assertion caught it. That gate now bounds by the
+decorator run too, and was re-validated by padding a route with three comments.
+
 ### "Every mutation writes an audit-log entry" — checked, not assumed
 It is a stated convention here and a Golden Rule for minors' data, and nothing
 verified it. Resolving all 502 mutating routes to the service method each calls

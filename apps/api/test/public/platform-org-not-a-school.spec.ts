@@ -57,10 +57,29 @@ describe("public routes that resolve a school by slug", () => {
   const publicSlugHandlers: Array<{ file: string; route: string; handler: string }> = [];
   for (const file of controllers(SRC)) {
     const src = readFileSync(file, "utf8");
-    const re = /@Public\(\)[\s\S]{0,200}?@(?:Get|Post|Put)\("([^"]*:slug[^"]*)"\)[\s\S]{0,200}?\n\s{2}(?:async\s+)?([a-zA-Z]+)\(/g;
-    let m;
-    while ((m = re.exec(src))) {
-      publicSlugHandlers.push({ file: file.slice(SRC.length + 1), route: m[1], handler: m[2] });
+    // Bounded by the route's own DECORATOR RUN, not by a character count.
+    //
+    // This used to be `@Public()[\s\S]{0,200}?@Get("…:slug…")`, and adding one
+    // more decorator to a route — a rate limiter, with the comment explaining
+    // why — pushed it past 200 characters. The route silently stopped being
+    // found and the count fell from three to two: a gate that quietly covers
+    // less than it says, which is exactly the failure the count below exists to
+    // catch. It caught it.
+    const lines = src.split("\n");
+    for (const [i, line] of lines.entries()) {
+      const route = /^\s*@(?:Get|Post|Put)\("([^"]*:slug[^"]*)"\)\s*$/.exec(line);
+      if (!route) continue;
+      // Walk up through contiguous decorators and comments looking for @Public.
+      let isPublic = false;
+      for (let j = i - 1; j >= 0; j--) {
+        const t = lines[j].trim();
+        if (!(t.startsWith("@") || t.startsWith("//") || t.startsWith("*") || t.startsWith("/*") || t === "")) break;
+        if (t.startsWith("@Public(")) isPublic = true;
+      }
+      if (!isPublic) continue;
+      // Then down to the handler name.
+      const handler = lines.slice(i + 1, i + 8).map((l) => /^\s{2}(?:async\s+)?([a-zA-Z]+)\(/.exec(l)?.[1]).find(Boolean);
+      if (handler) publicSlugHandlers.push({ file: file.slice(SRC.length + 1), route: route[1], handler });
     }
   }
 

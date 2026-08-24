@@ -153,12 +153,19 @@ export class PublicCareersController {
    *  BEFORE :slug — Nest matches in declaration order, and a literal route
    *  registered after a parameterised sibling is unreachable. */
   @Public()
+  // Rate-limited: Public job listings. The APPLY beside it was limited and the read was not,
+  // which is the wrong way round for cost: applying writes one row, listing
+  // queries the table.
+  @UseGuards(new RateLimitGuard(60, 60_000))
   @Get()
   index() {
     return this.recruit.publicCareersIndex();
   }
 
   @Public()
+  // Rate-limited: one school's vacancies, by slug — the same uncached read as the
+  // index above, and the shape somebody would use to walk every school.
+  @UseGuards(new RateLimitGuard(60, 60_000))
   @Get(":slug")
   openings(@Param("slug") slug: string) {
     return this.recruit.publicOpenings(slug);
