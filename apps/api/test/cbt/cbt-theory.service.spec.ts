@@ -76,7 +76,12 @@ function makeService(over: {
   // CBT pushes scores into the gradebook; the push itself is tested there.
   const notifications = { enqueue: jest.fn().mockResolvedValue(undefined) };
   const termResults = { applyExamComponent: jest.fn().mockResolvedValue({}) };
-  const service = new CbtService(db as never, audit as never, workflow as never, termResults as never, notifications as never, REGION_STUB, hooks as never);
+  const service = new CbtService(db as never, audit as never, workflow as never, termResults as never, notifications as never, REGION_STUB,
+    // Integrity signals from the exam hall are NDPR-consent-gated now, the same
+    // as the assessment path that writes the identical rows. Consent granted
+    // here, so these cases exercise the recording itself; the refusal has its
+    // own suite.
+    { hasIntegrityConsent: async () => true } as never, hooks as never);
   return { service, tx, audit, createMany, upsert, update, termResults, notifications };
 }
 

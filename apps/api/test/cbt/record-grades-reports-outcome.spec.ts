@@ -148,6 +148,10 @@ describe("driving the push", () => {
       termResults,
       { enqueue: jest.fn(), enqueueMany: jest.fn() },
       { academicInTx: async () => ({ grading: { components: [{ key: "exam", max: 60 }] } }) },
+      // Exam-hall integrity signals are NDPR-consent-gated now, the same as the
+      // assessment path that writes the identical rows. Positional, so it goes
+      // before `hooks`.
+      { hasIntegrityConsent: async () => true },
       { onFinalized: jest.fn() },
     );
     return { service, termResults };

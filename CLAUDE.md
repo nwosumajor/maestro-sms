@@ -1127,6 +1127,31 @@ bulk UPDATE that built the fixture (1,399 buffers to fetch 50 rows). VACUUM,
 re-measure, 0.60 ms. A benchmark must account for the churn the benchmark itself
 caused.
 
+### Two producers of the same telemetry, one consent-gated and one not
+Golden Rule #5 binds behavioural telemetry on minors to NDPR consent, and
+`IntegrityService` enforces it carefully: `ingestClientSignals` refuses to
+persist without consent AND without the assessment's monitoring flag, and
+`runDetection` re-checks consent so anything captured before a withdrawal is
+never analysed. `CbtService.recordIntegrityEvents` writes the SAME
+`IntegritySignal` table with the SAME two types — PASTE and FOCUS_LOSS,
+client-observed, about a child sitting an exam — and the service had no consent
+dependency at all. A rule enforced in the module it was written in is not
+enforced.
+Found by sweeping every write to the three telemetry tables and asking which
+passes the gate: four did, one did not. DROPPED, NOT REFUSED — the pupil goes on
+sitting the exam and the endpoint answers normally, because withholding consent
+for monitoring must never cost a child their paper.
+LATENT: `detector='cbt-exam-room'` has no rows, so nothing needs correcting.
+Retention was FINE all along — the purge deletes by `{schoolId, createdAt}` with
+no submission linkage, so exam-hall rows were always inside the window even
+though nothing gated their creation.
+Gate: `every-writer-of-telemetry-asks-for-consent.spec.ts` scans every write to
+`integritySignal`/`submissionTelemetry`/`submissionDraft` and fails unless the
+writer consults `hasIntegrityConsent` or is exempted BY NAME with a reason.
+`autosave` is the one exemption: a draft is the pupil's OWN WORK saved so they do
+not lose it, refusing it would cost a non-consenting child their essay, and the
+ANALYSIS of drafts is separately gated at detection time.
+
 ### The bundle said COMPLETE and read 8 of the 33 tables keyed on a pupil
 `collectStudentBundle`'s `coverage` manifest exists to remove one ambiguity — a
 recipient cannot otherwise tell whether `medical: "(not included)"` means no

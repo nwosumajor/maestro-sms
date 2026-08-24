@@ -50,11 +50,13 @@ import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
   type AuditLogService,
+  type ConsentService,
   type Principal,
   type TenantContext,
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
+import { CONSENT_SERVICE } from "../integrity/integrity.constants";
 import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 import { TermResultService } from "../gradebook/term-result.service";
@@ -96,6 +98,9 @@ export class CbtService {
     private readonly termResults: TermResultService,
     private readonly notifications: NotificationService,
     private readonly region: SchoolRegionService,
+    // The SAME consent service the assessment path uses. Provided globally by
+    // FoundationModule, so this adds no module coupling.
+    @Inject(CONSENT_SERVICE) private readonly consent: ConsentService,
     hooks: WorkflowHooksService,
     // LAST and @Optional, like every other PDF here: a branding lookup must
     // never be the reason an invigilator cannot print a paper.
@@ -1726,6 +1731,26 @@ export class CbtService {
       });
       if (!sitting) throw new NotFoundException("Sitting not found");
       if (sitting.status !== "IN_PROGRESS") return null; // nothing to record on a closed script
+
+      // NDPR CONSENT, THE SAME GATE THE OTHER PRODUCER OF THESE ROWS APPLIES.
+      //
+      // These are `IntegritySignal` rows — PASTE and FOCUS_LOSS about a minor
+      // sitting an exam, the identical categories `ingestClientSignals` writes.
+      // That path refuses to persist without consent for the child AND checks it
+      // AGAIN at detection time; this exam hall, built later, asked neither. Two
+      // producers of the same table, one gated and one not — Golden Rule #5 says
+      // behavioural telemetry on minors is consent-bound wherever it comes from,
+      // not wherever it happens to have been written first.
+      //
+      // DROPPED, NOT REFUSED. The pupil goes on sitting the exam exactly as
+      // before: withholding consent for monitoring must never cost a child their
+      // paper. Same posture as the assessment path, which returns quietly rather
+      // than erroring.
+      const consented = await this.consent.hasIntegrityConsent(
+        { studentId: p.userId, schoolId: p.schoolId },
+        tx,
+      );
+      if (!consented) return null;
 
       const rows = events
         .filter((e) => e.type === "FOCUS_LOSS" || e.type === "PASTE")
