@@ -62,6 +62,10 @@ function makeService(opts: { subaccount?: string | null }) {
     db,
     audit: { record: jest.fn() },
     notifications: { enqueue: jest.fn() },
+    // Settlement asks whether the school is switched off before it posts
+    // anything — a DISABLED school receives nothing. These cases are about a
+    // live school's settlement bank, so the stub says ACTIVE explicitly.
+    schoolStatus: { isActive: async () => true },
     logger: { log: jest.fn(), warn: jest.fn(), error: jest.fn() },
   });
   return { svc, created, tx };

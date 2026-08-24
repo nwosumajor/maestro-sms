@@ -52,7 +52,7 @@ function makeService(invoiceCurrency = "GHS") {
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const notifications = { enqueue: jest.fn().mockResolvedValue(undefined) };
-  const svc = new InvoiceSettlementService(db as never, audit as never, notifications as never);
+  const svc = new InvoiceSettlementService(db as never, audit as never, notifications as never, { isActive: async () => true } as never);
   return { svc, tx, created, notifications };
 }
 

@@ -417,9 +417,18 @@ export class BillingDunningService {
 
       const schools = await client.school.findMany({
         where: { id: { in: lapsed.map((s) => s.schoolId) } },
-        select: { id: true, name: true },
+        select: { id: true, name: true, status: true },
       });
       const nameOf = new Map(schools.map((s) => [s.id, s.name]));
+      // A SWITCHED-OFF SCHOOL IS STILL LISTED, AND SAID TO BE SWITCHED OFF.
+      //
+      // The sweep itself skips them — no "renew now" goes to admins who cannot
+      // sign in. This digest is the OWNER's own console and hiding a school
+      // from it would be worse than listing one: they need to see everything
+      // that is not paying. But "12 days past due" beside a school the owner
+      // themselves suspended reads as a school to chase, and the action is
+      // different — reinstate it, or leave it off deliberately.
+      const offOf = new Map(schools.map((s) => [s.id, s.status !== "ACTIVE"]));
 
       const lines = lapsed
         .map((s) => {
@@ -431,7 +440,7 @@ export class BillingDunningService {
             daysPast,
             text: `${nameOf.get(s.schoolId) ?? s.schoolId} (${s.plan}) — ${daysPast} day${daysPast === 1 ? "" : "s"} past due, ${
               downgraded ? "DOWNGRADED to Standard" : `${grace - daysPast} grace day(s) left`
-            }`,
+            }${offOf.get(s.schoolId) ? " — SWITCHED OFF; nobody there is being chased" : ""}`,
           };
         })
         .sort((a, b) => b.daysPast - a.daysPast);

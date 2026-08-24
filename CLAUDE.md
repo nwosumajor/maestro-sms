@@ -1375,9 +1375,40 @@ a school stopped paying, and nothing about a purge reaches a person), and the
 attendance rollup and term roll-over still run because they move only internal
 state that must be right if the school is switched back on. The operator and
 reporting reads deliberately include disabled schools — an operator has to see
-them. // OPEN QUESTION for the owner: subscription DUNNING still chases a
-disabled school, emailing "renew now" to admins whose login is blocked. That is a
-revenue decision, not a bug to fix unilaterally.
+them, though the lapsed-subscription digest now LABELS one "SWITCHED OFF; nobody
+there is being chased", because "12 days past due" beside a school the owner
+themselves suspended reads as a school to ring.
+
+### Nothing reaches a switched-off school, and no money posts to it
+The owner's decision, and it closed the last two ways in. Both are fixed at a
+FUNNEL, not at the producers.
+**Money**: `InvoiceSettlementService.applyOnlinePayment` refuses when the school
+is not ACTIVE, BEFORE it reads the invoice. It is the one posting path, so this
+covers card, mobile money, dedicated NUBAN, both verify-on-return routes, the
+reconciliation sweep and any rail not yet written. The routes in are ordinary: a
+checkout opened before the switch was thrown still calls back, and a NUBAN
+transfer needs no session at all. It does NOT throw — the callback still gets
+2xx, because a non-2xx makes a rail retry for days and retrying will not make
+the school active. // GOTCHA: **the payer has already been debited**, so
+refusing is only recoverable because somebody is told: it logs at ERROR and
+raises an OPERATOR_ALERT naming the school, amount and gateway reference, so the
+choice between reinstating and refunding reaches a person. No sweep will do it —
+reconciliation looks back three days and a suspension lasts as long as it lasts.
+**Words**: `NotificationService.persist` drops EXTERNAL channels for a school
+that is not ACTIVE, right beside the twin rule for a recipient who has left. The
+fee-reminder and late-fee sweeps had been stopped for this already; that was two
+sweeps, not the rule, and the overdue-boarder alert, the chargeback warning to
+finance and the HR document-expiry reminder still went out.
+**The in-app row is still written**, deliberately: disabling deletes nothing and
+reinstatement is total, so the notices a school missed are part of its original
+and due state, and nobody can read them meanwhile anyway. Operator alerts need
+no exception — they are enqueued into the PLATFORM org's tenant, so the school
+being asked about is the platform.
+Both guards fail OPEN on an unreadable status: an absent dependency must not
+silently stop every school's email.
+Live: signed webhook to a DISABLED school -> HTTP 201, zero payments, ERROR
+logged, owner alerted (delivered, since the platform org is ACTIVE); school
+switched back on, same charge replayed -> POSTED.
 
 ## Repo workflow & gotchas
 - DB setup order: `prisma migrate deploy` → `pnpm --filter @sms/db rls` →

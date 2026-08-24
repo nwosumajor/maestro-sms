@@ -22,6 +22,7 @@ import type { Queue } from "bullmq";
 import type { NotificationChannelValue, NotificationTypeValue, NotificationPreferenceDto, MessageLanguage, DeliveryProblemsDto } from "@sms/types";
 import { MESSAGE_LANGUAGES, messageLanguage, renderNotification } from "@sms/types";
 import { SchoolRegionService } from "../foundation/school-region.service";
+import { SchoolStatusService } from "../foundation/school-status.service";
 import { allowedChannels, deliverableEmail } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -89,6 +90,8 @@ export class NotificationService {
     // directly. Absent, a recipient with no locale of their own falls back to
     // the platform default rather than to their school's.
     @Optional() private readonly regions?: SchoolRegionService,
+    // Optional for the same reason again. Absent, nothing is suppressed.
+    @Optional() private readonly schoolStatus?: SchoolStatusService,
   ) {}
 
   private ctx(p: TenantContext): TenantContext {
@@ -719,6 +722,21 @@ export class NotificationService {
     return messageLanguage(region?.locale);
   }
 
+  /**
+   * Is this school switched on? Optional dependency, so a unit wiring without
+   * it behaves exactly as before — the same reason `credits` and `regions` are
+   * optional here. It fails OPEN rather than closed on purpose: an absent
+   * status service must not silently stop every school's email.
+   */
+  private async schoolIsActive(schoolId: string): Promise<boolean> {
+    if (!this.schoolStatus) return true;
+    try {
+      return await this.schoolStatus.isActive(schoolId);
+    } catch {
+      return true;
+    }
+  }
+
   private async persist(tx: TenantTx, actor: TenantContext, input: NotificationInput) {
     // Localise BEFORE writing, so the stored inbox row and every external
     // delivery say the same thing. Rendering at delivery time instead would let
@@ -773,6 +791,34 @@ export class NotificationService {
         select: { status: true },
       });
       if (recipient && recipient.status !== "ACTIVE") channels = [];
+    }
+
+    // AND NOTHING LEAVES THE BUILDING IN THE NAME OF A SCHOOL THAT IS SWITCHED
+    // OFF.
+    //
+    // The same rule as the line above, one level up. DISABLED means nobody at
+    // the school can sign in and it reaches nothing — but the platform went on
+    // emailing and texting people IN THAT SCHOOL'S NAME: an overdue-boarder
+    // alert to a family, a dispute warning to finance, a document-expiry
+    // reminder to HR. Every one of those invites a reply to a school that
+    // cannot read it, and points at a login that will be refused. The fee
+    // reminder and late-fee sweeps were fixed for exactly this; they were two
+    // instances of a rule that belongs in one place.
+    //
+    // THE INBOX ROW IS STILL WRITTEN, deliberately. Disabling deletes nothing
+    // and reinstatement is total — the notices a school missed are part of "its
+    // original and due state", and they are unreadable in the meantime because
+    // nobody can sign in. Suppressing the record as well would make the switch
+    // destructive, which is the one thing it is not.
+    //
+    // Operator alerts are unaffected without needing an exception: they are
+    // enqueued into the PLATFORM org's own tenant, so `actor.schoolId` is the
+    // platform, not the suspended school.
+    if (channels.length > 0 && !(await this.schoolIsActive(actor.schoolId))) {
+      this.logger.log(
+        `external delivery suppressed for ${input.type} to ${input.recipientId}: school ${actor.schoolId} is not ACTIVE`,
+      );
+      channels = [];
     }
     for (const channel of channels) {
       await tx.notificationDelivery.create({

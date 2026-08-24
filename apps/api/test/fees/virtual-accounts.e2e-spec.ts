@@ -90,7 +90,7 @@ d("VirtualAccountsService dedicated NUBAN (real Postgres)", () => {
     const audit = new AuditLogService();
     const queue = { add: jest.fn().mockResolvedValue(undefined) };
     const notifications = new NotificationService(tenant, audit, queue as never);
-    const settlement = new InvoiceSettlementService(tenant, audit, notifications);
+    const settlement = new InvoiceSettlementService(tenant, audit, notifications, { isActive: async () => true } as never);
     const paystack = {
       isConfigured: () => true,
       createCustomer: jest.fn().mockResolvedValue({ customerCode: CUS }),

@@ -12,7 +12,7 @@
 // BillingModule; imports neither).
 // =============================================================================
 
-import { Inject, Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { formatMoney } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -24,6 +24,8 @@ import {
 import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
 
 import { NotificationService } from "../notifications/notification.service";
+import { SchoolStatusService } from "../foundation/school-status.service";
+import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 
 /** Who is told when money reached a gateway and we declined to post it. Same
  *  set the dispute alerts use — whoever reconciles the bank. */
@@ -89,7 +91,8 @@ export type SettlementOutcome =
   | "duplicate"
   | "invoice_missing"
   | "currency_mismatch"
-  | "invoice_not_open";
+  | "invoice_not_open"
+  | "school_disabled";
 
 @Injectable()
 export class InvoiceSettlementService {
@@ -98,10 +101,90 @@ export class InvoiceSettlementService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly notifications: NotificationService,
+    private readonly schoolStatus: SchoolStatusService,
+    @Optional() private readonly privileged?: PrivilegedDatabaseService,
   ) {}
+
+  /**
+   * Tell the platform owner that money arrived for a school that is switched
+   * off. Best-effort, and deliberately not fatal: failing to send the alert
+   * must not turn into a non-2xx that makes the rail retry for days.
+   *
+   * The alert is the ONLY thing standing between the payer and a silent loss,
+   * because nothing else revisits this. It names the reference, so whoever
+   * picks it up can find the charge on the gateway without guessing.
+   */
+  private async alertOwnersOfMoneyForADisabledSchool(input: OnlinePaymentInput): Promise<void> {
+    try {
+      const client = this.privileged?.client;
+      if (!client) return;
+      const [school, owners] = await Promise.all([
+        client.school.findFirst({ where: { id: input.schoolId }, select: { name: true, status: true } }),
+        client.user.findMany({
+          where: { roles: { some: { role: { name: "super_admin" } } } },
+          select: { id: true, schoolId: true },
+        }),
+      ]);
+      const name = school?.name ?? input.schoolId;
+      const title = `Payment received for ${name}, which is switched off`;
+      const body =
+        `${formatMoney(input.creditMinor, input.currency)} was charged (reference ${input.reference}) against an ` +
+        `invoice at ${name}. The school's status is ${school?.status ?? "not ACTIVE"}, so nothing was posted to its ` +
+        `ledger and no receipt was sent. The payer HAS been debited. Either reinstate the school — which restores it ` +
+        `to its original and due state and lets the reconciliation sweep post this — or refund the payment on the ` +
+        `gateway.`;
+      for (const owner of owners) {
+        await this.notifications.enqueue(
+          { schoolId: owner.schoolId, userId: owner.id },
+          {
+            recipientId: owner.id,
+            type: "OPERATOR_ALERT",
+            title,
+            body,
+            data: { schoolId: input.schoolId, reference: input.reference, creditMinor: input.creditMinor, currency: input.currency },
+            channels: ["EMAIL"],
+          },
+        );
+      }
+    } catch (e) {
+      this.logger.warn(`disabled-school settlement alert failed: ${(e as Error).message}`);
+    }
+  }
 
   async applyOnlinePayment(input: OnlinePaymentInput): Promise<SettlementOutcome> {
     const { schoolId, invoiceId } = input;
+    // A SWITCHED-OFF SCHOOL RECEIVES NOTHING.
+    //
+    // DISABLED means the school reaches nothing and nobody at it can sign in.
+    // Money kept arriving anyway: a checkout opened before the switch was
+    // thrown still calls back, and a dedicated NUBAN transfer needs no session
+    // at all — a parent can pay into it at any hour. Every one of those posted
+    // to a ledger nobody could open, against an invoice nobody could see, and
+    // sent a receipt in the name of a school that could not answer the phone.
+    //
+    // Checked HERE because this is the one posting path: card, mobile money,
+    // virtual account, both verify-on-return routes and the reconciliation
+    // sweep all come through it, so one guard closes every rail including the
+    // ones not written yet — the same argument the currency check below makes.
+    //
+    // It does NOT change the HTTP answer. A callback still gets 2xx; a
+    // non-2xx makes a rail retry for days, and retrying will not make the
+    // school active. Refusing to POST is the whole of the refusal.
+    if (!(await this.schoolStatus.isActive(schoolId))) {
+      // THE MONEY HAS ALREADY MOVED, so this cannot be silent. The payer has
+      // been debited and the platform is now holding funds for a school that
+      // is switched off; only a person can decide between reinstating the
+      // school and refunding the payer. There is no sweep that will do it —
+      // the reconciliation sweep looks back three days and a suspension lasts
+      // as long as it lasts.
+      this.logger.error(
+        `settlement refused: school ${schoolId} is not ACTIVE — ${input.currency} ${input.creditMinor} ` +
+          `(ref ${input.reference}) was charged and has NOT been posted to invoice ${invoiceId}. ` +
+          `Reinstate the school or refund the payer.`,
+      );
+      await this.alertOwnersOfMoneyForADisabledSchool(input);
+      return "school_disabled" as const;
+    }
     // System-context write (no user): the audit actor is the invoice's creator.
     const receipt = await this.db.runAsTenant({ schoolId, userId: SYSTEM_ACTOR_ID }, async (tx) => {
       const inv = await tx.invoice.findFirst({ where: { id: invoiceId } });

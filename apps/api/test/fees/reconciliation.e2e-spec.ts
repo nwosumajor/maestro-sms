@@ -91,7 +91,10 @@ d("Online settlement, verify-on-return and reconciliation (real Postgres)", () =
     const audit = new AuditLogService();
     const queue = { add: jest.fn().mockResolvedValue(undefined) };
     notifications = new NotificationService(tenant, audit, queue as never);
-    settlement = new InvoiceSettlementService(tenant, audit, notifications);
+    // Settlement now asks whether the school is switched off before posting —
+    // DISABLED schools receive nothing. These cases are all about an ACTIVE
+    // school, so the stub says so rather than leaving it to a default.
+    settlement = new InvoiceSettlementService(tenant, audit, notifications, { isActive: async () => true } as never);
   });
 
   afterAll(async () => {
