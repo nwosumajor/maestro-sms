@@ -23,6 +23,10 @@ model MessageThread {
 
   @@index([schoolId])
   @@map("message_thread")
+  // Serves the paged inbox (ORDER BY createdAt DESC, id DESC) and its keyset
+  // cursor. Without it the school-office account — which is in every thread —
+  // sorted the school's entire messaging history on each page load.
+  @@index([schoolId, createdAt(sort: Desc), id(sort: Desc)])
 }
 
 model ThreadParticipant {

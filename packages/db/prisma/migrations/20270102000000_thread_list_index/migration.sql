@@ -1,0 +1,31 @@
+-- The staff inbox sorted every thread the school had ever opened.
+--
+-- `listThreads` pages with `ORDER BY "createdAt" DESC, id DESC LIMIT n` over the
+-- threads the caller participates in. `message_thread` had only a `schoolId`
+-- index, so nothing served that order.
+--
+-- The plan depends on HOW MANY THREADS THE CALLER IS IN, and only one of the two
+-- cases was bad — which is why it needed measuring at both extremes rather than
+-- at one. Measured as the APPLICATION role with RLS in force, 100,000 threads:
+--
+--   a user in 50 of them     0.63 ms   participant-driven nested loop: already fine
+--   the OFFICE account, in
+--   every thread            66.06 ms   Parallel Seq Scan of all 100,000 + an
+--                                      external merge sort SPILLING 2.5 MB to disk
+--
+-- The second is not a corner case: a general-enquiries, bursar or school-office
+-- account IS in every conversation, and nothing archives threads, so its inbox
+-- page cost grows with the school's whole messaging history for ever.
+--
+-- After:
+--
+--   the OFFICE account       0.38 ms   walks this index newest-first, stops at the
+--                                      limit, no sort and no spill  (172x)
+--   a user in 50             0.60 ms   UNCHANGED — the planner keeps the
+--                                      participant-driven plan, so the sparse
+--                                      case pays nothing for the fix
+--
+-- Both directions were measured because an index that fixes one shape by
+-- dragging the planner off a good plan for the other is not an improvement.
+CREATE INDEX "message_thread_schoolId_createdAt_id_idx"
+  ON "message_thread" ("schoolId", "createdAt" DESC, "id" DESC);

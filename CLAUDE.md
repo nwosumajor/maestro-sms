@@ -1098,6 +1098,35 @@ parent's own list then seq-scanned — correctly, since the index had no
 selectivity. A volume test with an unrealistic DISTRIBUTION measures the wrong
 thing; redistributed across 2,001 pupils it is an index scan at 0.28 ms.
 
+### The same measurement, applied to the other big reads
+Attendance, messaging and audit, measured the same way — as the APPLICATION role
+with RLS in force, at volume. Two were already right and one was not, and saying
+which is the point of doing it rather than asserting it.
+- **Attendance register history** — `Index Scan Backward` on
+  `attendance_session_classId_date_key`, 29 buffers, **1.85 ms**. Fine.
+- **Audit log page** — `Index Scan Backward` per PARTITION on
+  `(schoolId, createdAt)`, **0.59 ms**. Fine, and the monthly partitioning is
+  doing real work.
+- **Staff inbox** — the O(lifetime) shape again, and it took BOTH extremes to
+  see it, because the plan depends on how many threads the caller is in. At
+  100,000 threads: a user in 50 of them 0.63 ms (participant-driven nested loop,
+  already fine); **the OFFICE account, in every thread, 66.06 ms — a Parallel Seq
+  Scan of all 100,000 plus an external merge sort SPILLING 2.5 MB to disk.** Not
+  a corner case: a general-enquiries or bursar account IS in every conversation
+  and nothing archives threads. `message_thread (schoolId, createdAt DESC, id
+  DESC)` (migration `20270102000000`) takes the office case to **0.38 ms** with
+  no sort, and leaves the sparse case at 0.60 ms — the planner keeps its good
+  plan, so nobody pays for the fix.
+// GOTCHA: the dev database said 12 ms for this and looked mildly slow, not
+broken. 2,601 threads is small enough that a seq scan IS the cheaper plan, so
+the bad plan only appears at volume — the reason `measure on volume` is a rule
+here rather than advice.
+// GOTCHA: after adding the index the SPARSE case first read 9.7 ms, which looked
+exactly like the regression this kind of index can cause. It was bloat from the
+bulk UPDATE that built the fixture (1,399 buffers to fetch 50 rows). VACUUM,
+re-measure, 0.60 ms. A benchmark must account for the churn the benchmark itself
+caused.
+
 ### The replica answers a read only if it can answer it correctly
 The read/write split routes 103 paths to `DATABASE_REPLICA_URL`, and Terraform
 already provisions replicas and wires that variable into ECS — with nothing
