@@ -1127,6 +1127,36 @@ bulk UPDATE that built the fixture (1,399 buffers to fetch 50 rows). VACUUM,
 re-measure, 0.60 ms. A benchmark must account for the churn the benchmark itself
 caused.
 
+### "Every mutation writes an audit-log entry" — checked, not assumed
+It is a stated convention here and a Golden Rule for minors' data, and nothing
+verified it. Resolving all 502 mutating routes to the service method each calls
+found ONE real gap: `POST /public/biometric/:slug/events`. A terminal posts an
+HMAC-signed batch and `staff_attendance` rows are created for real members of
+staff; every OTHER write in that service is audited (kiosk clock-in, admin mark,
+corrections) and this one — over a PUBLIC endpoint, on the say-so of a device —
+recorded nothing. A stale clock, a drifted enrolment map or a leaked secret left
+no trace of what was claimed, and staff attendance is read for lateness and feeds
+pay. ONE entry per BATCH, not per event: a gate terminal posts continuously and a
+row per clock-in would bury the log. Live, the row carries `unknown: 1` — a
+device whose enrolments have drifted, which nothing else surfaces.
+Gate: `every-mutation-leaves-a-trail.spec.ts`. // GOTCHA, three times, and every
+one caught by MUTATION TESTING rather than by reading it: (1) inspecting only the
+method the controller calls reported 71 offenders, nearly all false —
+`markAttendance` audits inside `applyRegister`; (2) following delegation by
+method NAME across files made `this.db.runAsTenant(...)` match every
+`runAsTenant` in the codebase, so the gate went green for the wrong reason and
+deleting the audit call it exists for did not fail it; (3) excluding plumbing
+names then excluded genuine service methods called `create`/`update`. It resolves
+the injected property to its CLASS to its FILE. And it walks controllers and
+services only — reading all 440 sources into memory aborted the whole suite on
+the Node heap under `--runInBand`.
+Exemptions are decisions, mostly "the row IS the record": gateway webhooks
+(`gateway_event`, written before dispatch), append-only ledgers, inbox reads, and
+manual sweep triggers — those are wrapped in `jobRuns.record(...)`, whose
+immutable JobRun row carries who, when, how long and what it returned, which is a
+fuller trail than an audit line. That one is a RULE in the gate, not sixteen
+identical exemptions.
+
 ### The weaker action re-authenticated and the stronger one did not
 Step-up guards 53 of 502 mutating routes, which is right — asking for a password
 before every invoice line trains people to type it without reading. What is not

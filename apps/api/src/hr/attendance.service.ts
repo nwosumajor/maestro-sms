@@ -15,6 +15,7 @@
 // =============================================================================
 
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { SYSTEM_ACTOR_ID } from "../billing/billing.constants";
 import { Prisma } from "@sms/db";
 import { schoolToday } from "@sms/types";
 import type {
@@ -495,6 +496,35 @@ export class StaffAttendanceService {
         }
       }
       await tx.attendanceDevice.update({ where: { id: device.id }, data: { lastSeenAt: new Date() } });
+      // A MACHINE WRITING ATTENDANCE RECORDS ABOUT PEOPLE LEAVES A TRAIL.
+      //
+      // Every other write in this service is audited — the kiosk clock-in, the
+      // admin mark, the corrections. This path creates the SAME
+      // `staff_attendance` rows, over a PUBLIC endpoint, on the say-so of a
+      // device, and recorded nothing. So a terminal with a stale clock, a
+      // mis-mapped enrolment or a leaked secret produced attendance for real
+      // members of staff with no trace of which device claimed what — and staff
+      // attendance is read for lateness and feeds pay decisions.
+      //
+      // ONE ENTRY PER BATCH, not per event. A gate terminal posts continuously;
+      // an audit row per clock-in would bury the log it is meant to make
+      // readable, and the batch is the unit somebody would actually investigate.
+      // The counts are the useful part — `unknown` climbing is a device whose
+      // enrolments have drifted, which nothing else surfaces.
+      //
+      // SYSTEM actor, because there is no user: the caller is a device, and
+      // naming it is what the metadata is for.
+      await this.audit.record(
+        {
+          actorId: SYSTEM_ACTOR_ID,
+          action: "hr.attendance.device.ingest",
+          entity: "attendance_device",
+          entityId: device.id,
+          schoolId: school.id,
+          metadata: { deviceId: device.deviceId, accepted, alreadyMarked, unknown, events: body.events.length },
+        },
+        tx,
+      );
       return { accepted, alreadyMarked, unknown };
     });
   }
