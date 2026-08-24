@@ -78,6 +78,24 @@ model School {
   /// step-up, privileged write) like the other school fee columns.
   lateFeeFlatMinor       Int      @default(0)
   lateFeeGraceDays       Int      @default(7)
+  /// Payments at or above this (MINOR UNITS OF THIS SCHOOL'S OWN CURRENCY)
+  /// need a second approver. NULL = not set, and the two halves of that fail
+  /// in OPPOSITE directions on purpose:
+  ///   - a school on the platform's home currency keeps the ₦50,000 default,
+  ///     so nothing changes for anyone already live;
+  ///   - a school billing in anything else requires a second signature on
+  ///     EVERY payment until somebody states the figure, because an unset
+  ///     CONTROL must not stop protecting (Golden Rule #7).
+  /// The platform has no FX rate and will not invent one to convert a control.
+  paymentApprovalThresholdMinor Int?
+  /// Overdue library fine per day, in MINOR UNITS OF THIS SCHOOL'S OWN
+  /// CURRENCY. NULL = not set: the home-currency default (₦50/day) for a
+  /// school on the platform's currency, and ZERO — no fine — for any other.
+  /// The opposite fail-safe to the threshold above, and for the reason that
+  /// distinguishes them: an unset CHARGE must not bill a family, while an
+  /// unset CONTROL must not stop protecting. Charging nothing is recoverable;
+  /// putting £50 a day on a family's invoice is not.
+  libraryFinePerDayMinor Int?
   /// Admission-form fee (kobo) charged to PUBLIC applicants before review;
   /// 0 = free applications. Set by finance staff (fee.manage + step-up,
   /// privileged write). Collected via the school's settlement split with the

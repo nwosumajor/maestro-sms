@@ -26,7 +26,23 @@ import { hasSecondApprover, noSecondApproverMessage } from "../common/approvers"
 import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, Optional, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { csvCell } from "../common/csv";
 import PDFDocument from "pdfkit";
-import { FEES_PERMISSIONS, type InvoiceAdjustmentDto, type LateFeeConfigDto } from "@sms/types";
+import {
+  FEES_PERMISSIONS,
+  PLATFORM_HOME_CURRENCY,
+  effectiveLibraryFinePerDayMinor,
+  effectivePaymentApprovalThresholdMinor,
+  type InvoiceAdjustmentDto,
+  type LateFeeConfigDto,
+  type LateFeeConfigInput,
+} from "@sms/types";
+
+/**
+ * The library's home-currency default, quoted here so the settings screen can
+ * show what is in force. The enforcing copy lives in LibraryService; this file
+ * must not become a second opinion about it, so both go through
+ * `effectiveLibraryFinePerDayMinor` and only the number is shared.
+ */
+const LIBRARY_FINE_HOME_DEFAULT_MINOR = 5000;
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -329,18 +345,51 @@ export class FeeOpsService {
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       const school = await tx.school.findFirst({
         where: { id: p.schoolId },
-        select: { lateFeeFlatMinor: true, lateFeeGraceDays: true },
+        select: {
+          lateFeeFlatMinor: true,
+          lateFeeGraceDays: true,
+          paymentApprovalThresholdMinor: true,
+          libraryFinePerDayMinor: true,
+          currency: true,
+        },
       });
-      return { lateFeeFlatMinor: school?.lateFeeFlatMinor ?? 0, lateFeeGraceDays: school?.lateFeeGraceDays ?? 7 };
+      const currency = school?.currency || PLATFORM_HOME_CURRENCY;
+      return {
+        lateFeeFlatMinor: school?.lateFeeFlatMinor ?? 0,
+        lateFeeGraceDays: school?.lateFeeGraceDays ?? 7,
+        paymentApprovalThresholdMinor: school?.paymentApprovalThresholdMinor ?? null,
+        libraryFinePerDayMinor: school?.libraryFinePerDayMinor ?? null,
+        currency,
+        // Resolved HERE, by the same functions the enforcing code uses, so the
+        // screen shows what is actually in force rather than a second opinion
+        // about it. A page that re-derives a rule is a page that can disagree
+        // with the rule.
+        effectiveApprovalThresholdMinor: effectivePaymentApprovalThresholdMinor({
+          configuredMinor: school?.paymentApprovalThresholdMinor,
+          currency,
+        }),
+        effectiveLibraryFinePerDayMinor: effectiveLibraryFinePerDayMinor({
+          configuredMinor: school?.libraryFinePerDayMinor,
+          currency,
+          homeDefaultMinor: LIBRARY_FINE_HOME_DEFAULT_MINOR,
+        }),
+      };
     });
   }
 
-  async setLateFeeConfig(p: Principal, input: LateFeeConfigDto): Promise<LateFeeConfigDto> {
+  async setLateFeeConfig(p: Principal, input: LateFeeConfigInput): Promise<LateFeeConfigDto> {
     const client = this.privileged.client;
     if (!client) throw new ServiceUnavailableException("Late-fee configuration requires the privileged database configuration");
     await client.school.update({
       where: { id: p.schoolId },
-      data: { lateFeeFlatMinor: input.lateFeeFlatMinor, lateFeeGraceDays: input.lateFeeGraceDays },
+      data: {
+        lateFeeFlatMinor: input.lateFeeFlatMinor,
+        lateFeeGraceDays: input.lateFeeGraceDays,
+        // Undefined leaves the column alone; null CLEARS it back to the
+        // fail-safe. Both are meaningful here, so neither is coalesced away.
+        paymentApprovalThresholdMinor: input.paymentApprovalThresholdMinor,
+        libraryFinePerDayMinor: input.libraryFinePerDayMinor,
+      },
     });
     await this.db.runAsTenant(this.ctx(p), (tx) =>
       this.audit.record(

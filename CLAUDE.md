@@ -216,6 +216,29 @@ conflicts with it, flag the conflict before proceeding.
   `apps/web/lib/__tests__/money-is-not-divided-by-a-hundred.test.ts` fails the
   build on a literal 100 near a money word, with a named exemption per genuine
   platform-currency site.
+- **A NAIRA CONSTANT IS NOT A RULE FOR EVERY SCHOOL.** Two figures were written
+  in kobo and applied whatever `school.currency` says. The maker-checker
+  threshold `PAYMENT_APPROVAL_THRESHOLD_MINOR` (5,000,000) is ₦50,000 as
+  intended and **£50,000 in a British school** — a two-person rule that never
+  fires, degrading in SILENCE while /fees and the manual go on promising it; and
+  the library's `FINE_PER_DAY_MINOR` (5,000) is ₦50 a day and **£50 a day** on a
+  family's invoice for an overdue reading book. There is no FX rate in this
+  platform and inventing one to convert a control would be worse than the bug,
+  so the school states the figure: `school.paymentApprovalThresholdMinor` and
+  `school.libraryFinePerDayMinor` (both NULLABLE, migration `20261231000000`, on
+  the /fees/reports money-policy card, step-up + privileged write).
+  // GOTCHA: **the two fail-safes point in OPPOSITE directions and that is the
+  whole point.** An unset CONTROL tightens — every payment is reviewed until a
+  figure is set — because a control that relaxes when unset stops protecting. An
+  unset CHARGE goes to ZERO, because a charge that guesses bills a family.
+  Golden Rule #7 read properly is "the more restrictive option", and which
+  option is more restrictive depends on who the rule is pointed at; hence two
+  named resolvers (`effectivePaymentApprovalThresholdMinor` /
+  `effectiveLibraryFinePerDayMinor`) rather than one shared "default for this
+  currency" helper. A school on the platform's own currency is UNCHANGED, so
+  nothing moves for anyone already live. `paymentNeedsApproval` now takes a
+  REQUIRED `thresholdMinor` — a required parameter is a search for every caller
+  relying on the default, the same trick that found the Paystack currency sites.
 - **A GATEWAY IS ALWAYS TOLD THE CURRENCY** (`PAYSTACK_CURRENCIES` /
   `paystackCanSettle` in `currency.ts`). Omit it and the rail charges in ITS OWN
   account currency: `transaction/initialize` was never sent one, and **27 of the
@@ -539,7 +562,8 @@ login** (`RateLimitGuard` 10/min per IP on POST /auth/login — the in-process
 backstop to the edge WAF), and
 **step-up re-auth** (`POST /security/stepup` mints a 5-min token; `@RequireStepUp`
 + guard enforce it — applied to medical edits and MFA-disable; BFF forwards the
-`x-stepup` header). **Maker-checker on money** (large payments ≥ ₦50k and ALL
+`x-stepup` header). **Maker-checker on money** (large payments at or above the SCHOOL's own
+threshold and ALL
 refunds post as PENDING_APPROVAL and don't move the balance until a DIFFERENT
 staff member with `fee.approve` approves; separation of duties enforced),
 **field-level PII encryption** (medical fields AES-256-GCM with a per-tenant HKDF

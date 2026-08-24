@@ -37,8 +37,74 @@ export const FEES_PERMISSIONS = {
   FEE_RECONCILE_RUN: "fee.reconcile.run",
 } as const;
 
-/** Payments at/above this (minor units) need a second approver. ~₦50,000. */
+/**
+ * The DEFAULT threshold, in the platform's HOME currency: ₦50,000 in kobo.
+ *
+ * // GOTCHA: this is a naira figure and it was applied to every school on the
+ * platform, whatever `school.currency` says. 5,000,000 minor units is:
+ *
+ *     NGN   ₦50,000        the figure intended
+ *     GBP   £50,000        the control is effectively OFF
+ *     GHS   GHS 50,000     likewise
+ *     XOF   5,000,000 F    a zero-decimal currency: a hundred times too lax
+ *
+ * A maker-checker rule that never triggers is not a weaker control, it is no
+ * control — and it degrades SILENTLY, on a screen that goes on saying large
+ * payments need a second signature. There is no FX rate anywhere in this
+ * platform and inventing one to convert a control threshold would be worse than
+ * the bug, so the school is ASKED (`school.paymentApprovalThresholdMinor`).
+ */
 export const PAYMENT_APPROVAL_THRESHOLD_MINOR = 5_000_000;
+
+/**
+ * The threshold that actually applies to a school.
+ *
+ * FAIL-SAFE DIRECTION MATTERS, and it is the opposite of the one the library
+ * fine uses. This is a CONTROL: an unset control must not stop protecting, so a
+ * school billing in a currency the default was never written for requires a
+ * second signature on EVERY payment until somebody states the figure. That is
+ * loud and fixable in one save; the alternative is a two-person rule that
+ * quietly never fires. Golden Rule #7.
+ *
+ * A school on the platform's own currency keeps the existing default, so
+ * nothing changes for anyone already live.
+ */
+export function effectivePaymentApprovalThresholdMinor(input: {
+  configuredMinor: number | null | undefined;
+  currency: string | null | undefined;
+}): number {
+  if (input.configuredMinor != null) return input.configuredMinor;
+  const currency = (input.currency || PLATFORM_HOME_CURRENCY).toUpperCase();
+  return currency === PLATFORM_HOME_CURRENCY ? PAYMENT_APPROVAL_THRESHOLD_MINOR : 0;
+}
+
+/** The currency every hard-coded money constant in this platform is written in. */
+export const PLATFORM_HOME_CURRENCY = "NGN";
+
+/**
+ * The overdue library fine per day that applies to a school.
+ *
+ * Deliberately next to `effectivePaymentApprovalThresholdMinor`, because the
+ * pair is only legible together: both resolve a naira constant for a school
+ * that may bill in anything, and they fail in OPPOSITE directions.
+ *
+ *   a CONTROL, unset  ->  tighten (every payment needs a second signature)
+ *   a CHARGE,  unset  ->  zero    (no fine at all)
+ *
+ * An unset control that relaxes stops protecting; an unset charge that guesses
+ * bills a family £50 a day for an overdue library book. Golden Rule #7 read
+ * properly is "choose the more restrictive option", and which option is more
+ * restrictive depends on who the rule is pointed at.
+ */
+export function effectiveLibraryFinePerDayMinor(input: {
+  configuredMinor: number | null | undefined;
+  currency: string | null | undefined;
+  homeDefaultMinor: number;
+}): number {
+  if (input.configuredMinor != null) return input.configuredMinor;
+  const currency = (input.currency || PLATFORM_HOME_CURRENCY).toUpperCase();
+  return currency === PLATFORM_HOME_CURRENCY ? input.homeDefaultMinor : 0;
+}
 
 /**
  * The threshold is judged against everything posted on an invoice in this
@@ -65,9 +131,13 @@ export function paymentNeedsApproval(input: {
   kind: string;
   amountMinor: number;
   recentPostedMinor: number;
+  /** REQUIRED, and deliberately so: making it a parameter is what finds every
+   *  caller that was relying on a naira default. Same reason `PaystackService`
+   *  made `currency` required. */
+  thresholdMinor: number;
 }): boolean {
   if (input.kind === "REFUND") return true;
-  return input.amountMinor + input.recentPostedMinor >= PAYMENT_APPROVAL_THRESHOLD_MINOR;
+  return input.amountMinor + input.recentPostedMinor >= input.thresholdMinor;
 }
 
 /** Chargeback-rate escalation: this many disputes opened against one school

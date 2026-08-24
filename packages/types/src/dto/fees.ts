@@ -243,10 +243,43 @@ export interface InvoiceAdjustmentDto {
   createdAt: Date;
 }
 
-/** Per-school automatic late-fee policy (0 flat = disabled). */
+/**
+ * Per-school money policy, in the SCHOOL's own currency (0 flat late fee =
+ * disabled).
+ *
+ * The two nullable fields were platform constants written in kobo and applied
+ * to every school whatever its currency. NULL means "not set", and the two
+ * resolve in opposite directions — see `effectivePaymentApprovalThresholdMinor`
+ * and `effectiveLibraryFinePerDayMinor`. `currency` rides along so the screen
+ * can label the boxes with the unit the figures are actually in.
+ */
 export interface LateFeeConfigDto {
   lateFeeFlatMinor: number;
   lateFeeGraceDays: number;
+  /** Payments at or above this need a second approver. Null = not set. */
+  paymentApprovalThresholdMinor: number | null;
+  /** Overdue library fine per day. Null = not set. */
+  libraryFinePerDayMinor: number | null;
+  /** What the figures above are denominated in. */
+  currency: string;
+  /** The threshold actually in force, once the fail-safe has been applied —
+   *  so the screen never has to re-derive the rule and disagree with the API. */
+  effectiveApprovalThresholdMinor: number;
+  /** The fine actually in force, likewise. */
+  effectiveLibraryFinePerDayMinor: number;
+}
+
+/**
+ * What a save SENDS. Deliberately not the read shape: `currency` and the two
+ * `effective*` fields are DERIVED, and accepting them on a write would let a
+ * caller assert a threshold that is not the one being enforced.
+ */
+export interface LateFeeConfigInput {
+  lateFeeFlatMinor: number;
+  lateFeeGraceDays: number;
+  /** null CLEARS it back to the fail-safe; undefined leaves it unchanged. */
+  paymentApprovalThresholdMinor?: number | null;
+  libraryFinePerDayMinor?: number | null;
 }
 
 // =============================================================================

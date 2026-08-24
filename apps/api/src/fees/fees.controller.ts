@@ -91,6 +91,11 @@ const adjustmentSchema = z.object({
 const lateFeeSchema = z.object({
   lateFeeFlatMinor: z.number().int().min(0).max(10_000_000),
   lateFeeGraceDays: z.number().int().min(0).max(90),
+  // NULLABLE and OPTIONAL are different answers here and both are accepted:
+  // null CLEARS the figure back to its fail-safe, undefined leaves it alone.
+  // Collapsing them would make "unset it again" impossible from the screen.
+  paymentApprovalThresholdMinor: z.number().int().min(0).max(1_000_000_000).nullable().optional(),
+  libraryFinePerDayMinor: z.number().int().min(0).max(10_000_000).nullable().optional(),
 });
 
 const planSchema = z.object({

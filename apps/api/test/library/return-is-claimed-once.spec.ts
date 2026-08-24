@@ -81,6 +81,10 @@ function makeService(loan: { id: string; status: string; renewedCount: number; d
     },
     user: { findFirst: jest.fn(async () => ({ id: "s-1", name: "A Pupil" })) },
     invoice: { findFirst: jest.fn(async () => null), create: jest.fn(async () => ({ id: "inv-1" })) },
+    // The daily fine is per-school now — ₦50 a day was charged as £50 a day in a
+    // British school. NGN keeps the platform default, which is what these cases
+    // are about.
+    school: { findFirst: jest.fn(async () => ({ currency: "NGN", libraryFinePerDayMinor: null })) },
     invoiceLineItem: { create: jest.fn(async () => ({})) },
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };

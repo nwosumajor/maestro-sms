@@ -27,6 +27,14 @@ function makeService(f: Fakes) {
   const createdInvoice = { id: "inv-1", studentId: "stu-1", reference: "INV-X", totalMinor: 10000, currency: "NGN", status: "DRAFT" };
   const tx = {
     feeItem: { create: jest.fn().mockResolvedValue({ id: "fi-1" }), findMany: jest.fn().mockResolvedValue([]) },
+    // The approval threshold is per-school now: 5,000,000 minor units is
+    // ₦50,000 in a Nigerian school and £50,000 in a British one, so a single
+    // platform constant meant a maker-checker rule that never fired. These
+    // cases are all about the NGN default, so the row states it explicitly
+    // rather than leaning on a fallback.
+    school: {
+      findFirst: jest.fn().mockResolvedValue({ currency: "NGN", paymentApprovalThresholdMinor: null }),
+    },
     user: { findFirst: jest.fn().mockResolvedValue(f.studentUser === undefined ? { id: "stu-1" } : f.studentUser) },
     invoice: {
       create: jest.fn().mockResolvedValue(createdInvoice),

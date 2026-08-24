@@ -21,7 +21,7 @@ import { NotificationService } from "../notifications/notification.service";
 import { csvCell } from "../common/csv";
 import { Prisma } from "@sms/db";
 import type { BookLoanDto, FineReceiptDto, LibraryBookDto, LibraryReportDto } from "@sms/types";
-import { formatMoney } from "@sms/types";
+import { formatMoney, effectiveLibraryFinePerDayMinor } from "@sms/types";
 import type { PaymentMethodValue } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -43,7 +43,22 @@ const CATALOGUE_EXPORT_MAX = 20_000;
 const LOAN_DAYS = 14;
 const RENEW_DAYS = 7;
 const MAX_RENEWALS = 2;
-const FINE_PER_DAY_MINOR = 5000; // ₦50 / day overdue
+/**
+ * The DEFAULT overdue fine per day, in the platform's HOME currency: ₦50.
+ *
+ * // GOTCHA: this was applied to every school whatever `school.currency` says.
+ * 5,000 minor units is ₦50 as intended, £50 in a British school and 5,000
+ * francs in a Senegalese one — a charge that lands on a family's fee invoice.
+ * The DISPLAY side of this was made currency-aware (see `returnLoan`); the
+ * AMOUNT was not, so the fine was correctly formatted and wrong.
+ *
+ * A school states its own figure in `school.libraryFinePerDayMinor`. Unset
+ * FAILS TO ZERO for any other currency — no fine — because an unset CHARGE
+ * must not bill a family, and charging nothing is recoverable in a way that
+ * putting £50 a day on an invoice is not. (The payment-approval threshold
+ * beside it fails the OTHER way for exactly this reason: it is a control.)
+ */
+const FINE_PER_DAY_MINOR = 5000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 @Injectable()
@@ -296,7 +311,17 @@ export class LibraryService {
       if (loan.status !== "ISSUED") throw new BadRequestException("Loan already returned");
       const now = new Date();
       const daysLate = Math.max(0, Math.floor((now.getTime() - loan.dueAt.getTime()) / DAY_MS));
-      const fineMinor = daysLate * FINE_PER_DAY_MINOR;
+      // The school's own daily rate, in the school's own currency.
+      const school = await tx.school.findFirst({
+        where: { id: p.schoolId },
+        select: { libraryFinePerDayMinor: true, currency: true },
+      });
+      const perDayMinor = effectiveLibraryFinePerDayMinor({
+        configuredMinor: school?.libraryFinePerDayMinor,
+        currency: school?.currency,
+        homeDefaultMinor: FINE_PER_DAY_MINOR,
+      });
+      const fineMinor = daysLate * perDayMinor;
       lateDays = daysLate;
       // A FINE IS A CHARGE, so it goes on the ledger like every other charge.
       //

@@ -14,7 +14,7 @@ import { randomUUID } from "node:crypto";
 // VALUE import: Prisma.sql/join only resolve as values, not types (CLAUDE.md).
 import { Prisma } from "@sms/db";
 import {
-  PAYMENT_APPROVAL_THRESHOLD_MINOR,
+  effectivePaymentApprovalThresholdMinor,
   PAYMENT_APPROVAL_WINDOW_HOURS,
   paymentNeedsApproval,
   type InvoiceStatusValue,
@@ -605,10 +605,27 @@ export class FeesService {
         where: { invoiceId, status: "POSTED", createdAt: { gte: since } },
         _sum: { amountMinor: true },
       })) as { _sum: { amountMinor: number | null } };
+      // THE THRESHOLD IS THE SCHOOL'S, IN THE SCHOOL'S OWN CURRENCY.
+      //
+      // It was a single naira constant applied to every school: 5,000,000 minor
+      // units, which is ₦50,000 as intended and £50,000 in a British school —
+      // a two-person rule that never fires, on a screen still saying large
+      // payments need a second signature. There is no FX rate here and
+      // inventing one to convert a control would be worse than the bug, so the
+      // school states the figure and an unset one FAILS TIGHT.
+      const school = await tx.school.findFirst({
+        where: { id: p.schoolId },
+        select: { paymentApprovalThresholdMinor: true, currency: true },
+      });
+      const thresholdMinor = effectivePaymentApprovalThresholdMinor({
+        configuredMinor: school?.paymentApprovalThresholdMinor,
+        currency: school?.currency,
+      });
       const needsApproval = paymentNeedsApproval({
         kind,
         amountMinor: input.amountMinor,
         recentPostedMinor: recent._sum.amountMinor ?? 0,
+        thresholdMinor,
       });
       if (inv.status === "DRAFT") throw new BadRequestException("Issue the invoice before recording payment");
       if (inv.status === "CANCELLED") throw new BadRequestException("Invoice is cancelled");
