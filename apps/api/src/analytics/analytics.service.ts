@@ -8,6 +8,7 @@
 // =============================================================================
 
 import { Inject, Injectable , Optional } from "@nestjs/common";
+import { ON_ROLL_STUDENT } from "../common/student-scope";
 import { csvCell } from "../common/csv";
 import type { AnalyticsOverviewDto } from "@sms/types";
 import { normalizeGender,
@@ -376,10 +377,22 @@ export class AnalyticsService {
       if (staff) {
         const counts: Record<string, number> = {};
         // COUNT in the database — never findMany().length (ships whole ID sets).
-        // students needs COUNT(DISTINCT) which Prisma count() can't express, so
-        // groupBy on studentId and count the groups (still no row payloads).
-        const enr = await tx.enrollment.groupBy({ by: ["studentId"] });
-        counts.students = enr.length;
+        //
+        // This line said exactly that and then did it. `groupBy({ by:
+        // ["studentId"] })` returns ONE ROW PER DISTINCT PUPIL so the length can
+        // be taken in Node — a whole id set, shipped, to produce one integer —
+        // and the scan behind it is over every enrolment row the school has ever
+        // written (pupils x years), which nothing archives.
+        //
+        // WORSE, IT WAS COUNTING THE WRONG PEOPLE. `student-scope.ts` is explicit
+        // that a headcount on a dashboard wants ON ROLL, and an enrolment-derived
+        // count is EVER ENROLLED: a school that exited a hundred children went on
+        // seeing them here. The sweep that fixed twelve such sites watched for
+        // hand-rolled ROLE filters and could not see this one, because it reached
+        // the same wrong answer by a different route — through enrolment.
+        //
+        // One indexed count of the people who are actually here.
+        counts.students = await tx.user.count({ where: ON_ROLL_STUDENT });
         counts.classes = await tx.class.count();
         if (p.permissions.includes("workflow.read")) {
           counts.pendingApprovals = await tx.workflowRequest.count({ where: { state: "PENDING_REVIEW" } });

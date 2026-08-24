@@ -1412,6 +1412,26 @@ regional read replicas → Aurora write forwarding (still one writer) → tenant
 pinning. Multi-master is deliberately not on that list. See
 `docs/RUNBOOK-INCIDENT-RESPONSE.md` §5.x and §5.y.
 
+### The dashboard headcount counted children who had left
+Swept every aggregate with no `where` — 73 of them. Most are reference data
+bounded by a school's STRUCTURE (subjects, periods, rooms, classes, terms) and
+never grow. One was not.
+`AnalyticsService` counted pupils with `enrollment.groupBy({ by: ["studentId"] })`
+and took `.length` — directly beneath a comment reading "COUNT in the database —
+never findMany().length (ships whole ID sets)". It returns ONE ROW PER DISTINCT
+PUPIL to produce one integer, over a scan of every enrolment row the school has
+ever written (pupils x years).
+**And it counted the wrong people.** `student-scope.ts` is explicit that a
+dashboard headcount wants ON ROLL; an enrolment-derived count is EVER ENROLLED.
+Live proof: exit 50 pupils and the figure should fall — before it stayed at 901,
+after it reads 851. Now one indexed `user.count({ where: ON_ROLL_STUDENT })`.
+// GOTCHA: the sweep that fixed twelve such sites watched for a hand-rolled
+`role: { name: "student" }` and could not see this one, because it reached the
+same wrong answer BY A DIFFERENT ROUTE — through enrolment. A gate that watches
+one road to a wrong answer will eventually meet the other. `student-scope.spec.ts`
+now refuses a distinct-pupil count derived from enrolment too, with the archive
+named as the one legitimate EVER-ENROLLED exception.
+
 ### The bank list counted every question the school had ever written
 `listBanks` drew its counts with `groupBy({ by: ["bankId"], _count: { id: true } })`
 and NO `where` — so every page load aggregated the school's entire question

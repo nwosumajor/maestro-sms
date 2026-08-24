@@ -79,9 +79,43 @@ describe("no call site hand-rolls it", () => {
     expect(offenders).toEqual([]);
   });
 
+  /**
+   * Counting pupils through ENROLMENT reaches the same wrong answer by another
+   * road.
+   *
+   * The check above watches for a hand-rolled `role: { name: "student" }`. The
+   * school-operations dashboard did not have one — it counted
+   * `enrollment.groupBy({ by: ["studentId"] })` and took the length, which is
+   * EVER ENROLLED however you dress it, so a school that exited a hundred
+   * children went on seeing them in its headcount. A gate that watches one route
+   * to a wrong answer is a gate that will meet the other one.
+   *
+   * An enrolment aggregate is legitimate when the question really is about
+   * enrolments (how many places are filled, per class) — so what is refused is
+   * specifically counting DISTINCT PUPILS that way.
+   */
+  const ENROLMENT_HEADCOUNT_OK: Record<string, string> = {
+    "privacy/archive.service.ts":
+      "The institutional archive is EVER ENROLLED by design — a school still owes a leaver their records.",
+  };
+
+  it("no headcount is derived from enrolment rows", () => {
+    const offenders: string[] = [];
+    for (const file of files) {
+      const rel = file.split("/src/")[1];
+      if (ENROLMENT_HEADCOUNT_OK[rel]) continue;
+      const src = readFileSync(file, "utf8");
+      for (const m of src.matchAll(/enrollment\.groupBy\(\s*\{\s*by:\s*\[\s*["']studentId["']\s*\]/g)) {
+        const line = src.slice(0, m.index ?? 0).split("\n").length;
+        offenders.push(`${rel}:${line} — counts distinct pupils through enrolment (EVER ENROLLED), not ON_ROLL_STUDENT`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
   it("the named exceptions still exist, so the list cannot rot", () => {
     // An exemption naming a deleted file would hide a real offender behind it.
-    for (const rel of Object.keys(EVER_ENROLLED_BY_DESIGN)) {
+    for (const rel of [...Object.keys(EVER_ENROLLED_BY_DESIGN), ...Object.keys(ENROLMENT_HEADCOUNT_OK)]) {
       expect(files.some((f) => f.endsWith(`/src/${rel}`))).toBe(true);
     }
   });
