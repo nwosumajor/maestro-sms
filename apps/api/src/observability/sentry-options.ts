@@ -36,6 +36,7 @@
 // =============================================================================
 
 import * as Sentry from "@sentry/node";
+import { envOr } from "../common/env";
 
 /** Nothing derived from the request survives this. */
 export function scrubRequest(event: Sentry.ErrorEvent): Sentry.ErrorEvent {
@@ -68,7 +69,7 @@ export function scrubRequest(event: Sentry.ErrorEvent): Sentry.ErrorEvent {
 export function sentryOptions(): Sentry.NodeOptions {
   return {
     dsn: process.env.SENTRY_DSN,
-    environment: process.env.NODE_ENV ?? "production",
+    environment: envOr("NODE_ENV", "production"),
     tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE ?? 0),
     release: process.env.APP_RELEASE,
     // Never IP addresses, cookies or user identity, whatever an integration

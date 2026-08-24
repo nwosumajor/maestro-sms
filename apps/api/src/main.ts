@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { envOr } from "./common/env";
 import type { Server as HttpServer } from "node:http";
 import * as Sentry from "@sentry/node";
 import { sentryOptions } from "./observability/sentry-options";
@@ -6,6 +7,7 @@ import { assertStorageProviderConfigured } from "./documents/storage-provider.co
 import { assertFieldCryptoConfigured } from "./foundation/field-crypto";
 import { assertAuthSecretUsable } from "./auth/secrets";
 import { assertPublicWebUrlConfigured } from "./common/public-url";
+import { assertEmailSenderConfigured } from "./notifications/email.service";
 import { HttpAdapterHost, NestFactory } from "@nestjs/core";
 import { Logger as PinoLogger } from "nestjs-pino";
 import { AppModule } from "./app.module";
@@ -39,6 +41,10 @@ async function bootstrap() {
   // And that we know our own address: twelve callback and link builders used to
   // guess localhost, where every symptom appears somewhere we cannot see.
   assertPublicWebUrlConfigured();
+  // And that outbound email has a sender on a domain we actually own. Same
+  // reason as its four siblings: the symptom is that other people stop
+  // receiving things, which nothing on this side can see.
+  assertEmailSenderConfigured();
 
   const app = await NestFactory.create(AppModule, { rawBody: true, bufferLogs: true });
   const logger = app.get(PinoLogger);
@@ -47,7 +53,7 @@ async function bootstrap() {
 
   // CORS for the Next.js web app (credentials carry the Auth.js session cookie).
   app.enableCors({
-    origin: process.env.WEB_ORIGIN ?? "http://localhost:3000",
+    origin: envOr("WEB_ORIGIN", "http://localhost:3000"),
     credentials: true,
   });
   // NOTE: validation is done per-route with Zod (ZodValidationPipe), so we do
@@ -59,7 +65,7 @@ async function bootstrap() {
   // adapter, so it is registered after create().
   app.useGlobalFilters(new MalformedIdFilter(app.get(HttpAdapterHost).httpAdapter));
 
-  const port = Number(process.env.API_PORT ?? 3001);
+  const port = Number(envOr("API_PORT", "3001"));
   await app.listen(port);
 
   // Attach the live game WebSocket gateway to the same http server (it claims

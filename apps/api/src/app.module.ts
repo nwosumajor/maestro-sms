@@ -1,4 +1,5 @@
 import { Module, type MiddlewareConsumer, type NestModule, type OnModuleInit } from "@nestjs/common";
+import { envOr } from "./common/env";
 import { BullModule } from "@nestjs/bullmq";
 import { FoundationModule } from "./foundation/foundation.module";
 import { PrivilegedDatabaseModule } from "./common/privileged-database.module";
@@ -63,8 +64,8 @@ import { HealthController } from "./health.controller";
     // Redis connection for BullMQ (notifications, reports, integrity jobs).
     BullModule.forRoot({
       connection: {
-        host: process.env.REDIS_HOST ?? "127.0.0.1",
-        port: Number(process.env.REDIS_PORT ?? 6379),
+        host: envOr("REDIS_HOST", "127.0.0.1"),
+        port: Number(envOr("REDIS_PORT", "6379")),
         // Set only when ElastiCache transit encryption + auth are enabled. An
         // empty REDIS_TLS leaves both off for the local/dev Redis.
         ...(process.env.REDIS_PASSWORD

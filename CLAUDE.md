@@ -830,10 +830,10 @@ self-service (`/hr/me*`, leave self endpoints, appraisal acknowledge, `/leave` p
 reads are now audit-logged (`hr.appraisal.read` / `hr.disciplinary.read`).
 Auth is JWT-only — the dev `x-dev-principal` guard bypass has been removed; the
 API verifies HS256 with `algorithms: ["HS256"]` pinned.
-### Four boot assertions, and knowing our own address
+### Five boot assertions, and knowing our own address
 `main.ts` asserts before serving anything: `assertStorageProviderConfigured`,
 `assertFieldCryptoConfigured`, `assertAuthSecretUsable`,
-`assertPublicWebUrlConfigured`. All four refuse only in PRODUCTION, so local work
+`assertPublicWebUrlConfigured`, `assertEmailSenderConfigured`. All four refuse only in PRODUCTION, so local work
 needs no generated secrets.
 The last is `publicWebUrl()` (`common/public-url.ts`), which replaced TWELVE
 copies of `process.env.PUBLIC_WEB_URL ?? "http://localhost:3000"` — Paystack and
@@ -852,6 +852,41 @@ trailing slash: `https://x//billing?verify=…` is a different URL to a gateway 
 to Twilio's signature. Terraform DOES set it on the api task (checked) — this is
 latent, not live. mobile-money and admissions deliberately return EMPTY and warn
 rather than send half a URL; they were right and are left alone.
+
+### An environment variable set to an EMPTY STRING is not unset
+`envOrNull` / `envOr` / `envIsSet` (`common/env.ts`). `process.env.X ?? fallback`
+is blind to `""`. Nullish coalescing is the CAREFUL operator — it does not treat
+`0` or `false` as absent — and for env vars, which are always strings, that
+carefulness is exactly wrong: the one falsy value a variable can hold is the
+empty string, and it means not configured.
+Nothing checked the boundary. Seven variables reach the ECS tasks from Terraform
+variables declared `default = ""`, so a deployment that simply does not set one
+hands the container an empty string and every `??` behind it fails to fire. Two
+were live defects on the path to a real person, and one costs money:
+**`TWILIO_WHATSAPP_FROM`** — `?? process.env.TWILIO_FROM` never fired, so the
+fallback the comment beside it described was unreachable. The empty sender then
+hit a branch that logged "no Twilio creds" (untrue) and returned `{ ok: true }`
+to degrade gracefully — and `ok` is what decides whether to DEBIT A PAID MESSAGE
+CREDIT. A school was charged per WhatsApp message, none were sent, each recorded
+SENT. // GOTCHA: NOT CONFIGURED and MIS-CONFIGURED must not share an answer.
+`ok:true` is right for a deployment with no Twilio account (the stub case) and
+wrong the moment credentials are real and only the sender is missing.
+**`EMAIL_FROM`** — `?? DEFAULT_FROM` never fired, so every email would carry a
+blank From and be rejected. `assertEmailSenderConfigured` now refuses to boot in
+production when `EMAIL_API_KEY` is set and the sender is blank OR still the
+placeholder `no-reply@sms.school` — a domain this platform does not own, so the
+mail fails SPF/DKIM and gets the account marked as a spammer. Terraform's
+`email_from` no longer has a default at all.
+Also fixed: `DATABASE_MIGRATE_URL ?? DATABASE_RETENTION_URL` (both directions) —
+an empty value silently disabled retention, dunning and provisioning while the
+warning named both variables as if neither were set.
+Gate: `test/infrastructure/an-empty-string-is-not-unset.spec.ts` reads BOTH
+SIDES — `ecs.tf` for what is shipped, the API sources for how it is read — and
+fails on any `??` around a shipped variable. // GOTCHA: its first version keyed
+on the empty-DEFAULT set, so removing a bad default switched OFF the app-side
+check: the fix disabled the test that proved the fix. It keys on what the
+deployment SHIPS instead, because anything an operator can type into a task
+definition can arrive blank.
 
 ### A secret's SHAPE is not its PROVENANCE
 `PUBLISHED_SECRETS` / `isPublishedSecret` (`auth/published-secrets.ts`), consulted

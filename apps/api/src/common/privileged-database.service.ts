@@ -23,6 +23,7 @@
 // =============================================================================
 
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
+import { envOrNull } from "./env";
 import { PrismaClient } from "@sms/db";
 
 @Injectable()
@@ -31,7 +32,12 @@ export class PrivilegedDatabaseService implements OnModuleInit, OnModuleDestroy 
   private _client: PrismaClient | null = null;
 
   onModuleInit(): void {
-    const url = process.env.DATABASE_MIGRATE_URL ?? process.env.DATABASE_RETENTION_URL;
+    // envOrNull, not `??`: a variable SET TO AN EMPTY STRING is not absent, so
+    // `MIGRATE ?? RETENTION` never fell through — the client was disabled and
+    // the warning below named both variables as though neither were set. That
+    // silently switches off retention (an NDPR obligation on minors' data),
+    // billing dunning and operator provisioning.
+    const url = envOrNull("DATABASE_MIGRATE_URL") ?? envOrNull("DATABASE_RETENTION_URL");
     if (!url) {
       this.logger.warn(
         "No DATABASE_MIGRATE_URL / DATABASE_RETENTION_URL set — privileged " +

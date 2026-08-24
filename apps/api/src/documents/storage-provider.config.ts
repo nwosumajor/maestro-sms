@@ -21,6 +21,8 @@
 // is the more restrictive option and the one that gets noticed (Golden Rule #7).
 // =============================================================================
 
+import { envOrNull } from "../common/env";
+
 /** Values this platform understands. Unset means the local stub, as documented. */
 const KNOWN = new Set(["s3", "stub", "local", ""]);
 
@@ -35,7 +37,7 @@ export function usingS3(): boolean {
 }
 
 function normalised(): string {
-  return (process.env.STORAGE_PROVIDER ?? "").trim().toLowerCase();
+  return (envOrNull("STORAGE_PROVIDER") ?? "").toLowerCase();
 }
 
 /**

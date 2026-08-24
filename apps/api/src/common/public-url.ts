@@ -23,9 +23,11 @@
 // refuses to boot, alongside the storage, encryption and signing-key checks.
 // =============================================================================
 
+import { envOr } from "./env";
+
 /** The public origin of this deployment, without a trailing slash. */
 export function publicWebUrl(): string {
-  const raw = (process.env.PUBLIC_WEB_URL ?? "http://localhost:3000").trim();
+  const raw = envOr("PUBLIC_WEB_URL", "http://localhost:3000");
   return raw.replace(/\/+$/, "");
 }
 

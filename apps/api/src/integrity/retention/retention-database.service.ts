@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
+import { envOrNull } from "../../common/env";
 import { PrismaClient } from "@sms/db";
 
 /**
@@ -23,7 +24,11 @@ export class RetentionDatabaseService implements OnModuleInit, OnModuleDestroy {
 
   onModuleInit(): void {
     const url =
-      process.env.DATABASE_RETENTION_URL ?? process.env.DATABASE_MIGRATE_URL;
+      // envOrNull, not `??`: a variable set to an EMPTY STRING is not absent,
+      // so the fallback never fired and the sweep silently disabled itself —
+      // on the job that purges minors\' telemetry to a deadline the school has
+      // told parents about.
+      envOrNull("DATABASE_RETENTION_URL") ?? envOrNull("DATABASE_MIGRATE_URL");
     if (!url) {
       this.logger.warn(
         "No DATABASE_RETENTION_URL / DATABASE_MIGRATE_URL set — integrity " +

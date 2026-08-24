@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { envOrNull } from "../common/env";
 import { Injectable, Logger } from "@nestjs/common";
 import type { ChannelDeliveryRequest, NotificationChannelProvider } from "./notification.constants";
 import { fetchWithTimeout, GATEWAY_TIMEOUT_MS } from "../common/http";
@@ -22,13 +23,42 @@ export class TwilioChannelProvider implements NotificationChannelProvider {
       this.logger.log(`[non-sms] ${req.channel} -> ${req.target}`);
       return { ok: true };
     }
-    const sid = process.env.TWILIO_ACCOUNT_SID;
-    const token = process.env.TWILIO_AUTH_TOKEN;
-    // WhatsApp uses its own approved sender (falls back to the SMS number).
-    const from = req.channel === "WHATSAPP" ? (process.env.TWILIO_WHATSAPP_FROM ?? process.env.TWILIO_FROM) : process.env.TWILIO_FROM;
-    if (!sid || !token || !from) {
+    const sid = envOrNull("TWILIO_ACCOUNT_SID");
+    const token = envOrNull("TWILIO_AUTH_TOKEN");
+    // WhatsApp uses its own approved sender, falling back to the SMS number.
+    //
+    // envOrNull, not `??`: Terraform declares `twilio_whatsapp_from` with a
+    // default of "", so a deployment that does not set it hands this task an
+    // EMPTY STRING, and `?? process.env.TWILIO_FROM` never fires — the fallback
+    // this very comment describes was unreachable for the commonest possible
+    // configuration.
+    const from =
+      req.channel === "WHATSAPP"
+        ? envOrNull("TWILIO_WHATSAPP_FROM") ?? envOrNull("TWILIO_FROM")
+        : envOrNull("TWILIO_FROM");
+
+    // NOT CONFIGURED AT ALL is a different thing from MIS-configured, and they
+    // must not share an answer.
+    //
+    // Both used to return { ok: true } — "degrade gracefully; don't fail the
+    // pipeline" — which is right for a deployment with no Twilio account: the
+    // stub semantics the logging provider has. It is wrong when the credentials
+    // ARE present and only the sender is missing, because `ok` is what
+    // `NotificationService` reads to decide whether to DEBIT A PAID MESSAGE
+    // CREDIT. A school would be charged for every WhatsApp message, none of
+    // which were sent, each one recorded SENT. The old log line even said "no
+    // Twilio creds" when the creds were fine.
+    if (!sid || !token) {
       this.logger.warn(`[messaging disabled — no Twilio creds] ${req.channel} -> ${req.target}`);
       return { ok: true }; // degrade gracefully; don't fail the pipeline
+    }
+    if (!from) {
+      const missing = req.channel === "WHATSAPP" ? "TWILIO_WHATSAPP_FROM or TWILIO_FROM" : "TWILIO_FROM";
+      this.logger.error(
+        `${req.channel} not sent: Twilio is configured but no sender is set (${missing}). ` +
+          `No message credit has been spent.`,
+      );
+      return { ok: false, error: `no ${req.channel} sender configured` };
     }
     try {
       const auth = Buffer.from(`${sid}:${token}`).toString("base64");

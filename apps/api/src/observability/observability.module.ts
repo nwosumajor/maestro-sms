@@ -1,4 +1,5 @@
 import { Global, Module } from "@nestjs/common";
+import { envOr } from "../common/env";
 import { APP_INTERCEPTOR } from "@nestjs/core";
 import { randomUUID } from "node:crypto";
 import { LoggerModule } from "nestjs-pino";
@@ -27,7 +28,7 @@ interface PrincipalReq extends IncomingMessage {
   imports: [
     LoggerModule.forRoot({
       pinoHttp: {
-        level: process.env.LOG_LEVEL ?? "info",
+        level: envOr("LOG_LEVEL", "info"),
         // Correlate across the BFF / CloudFront if it forwarded an id, else mint one.
         genReqId: (req: IncomingMessage, res: ServerResponse) => {
           const existing = (req.headers["x-request-id"] as string | undefined) ?? randomUUID();

@@ -244,9 +244,13 @@ variable "email_provider" {
 }
 
 variable "email_from" {
-  description = "From address for outbound email, on the verified sending domain (e.g. 'MAESTRO-SMS <no-reply@maestro-sms.com>')."
+  # NO DEFAULT. An empty string is not "unset" once it reaches the task: the app
+  # reads `EMAIL_FROM` as a VALUE, and "" is a value. This variable defaulting to
+  # "" is how a deployment ends up sending every email with a blank From, which
+  # the provider rejects and nobody here sees. Required when email_api_key is
+  # set; the API refuses to boot on a blank or placeholder sender anyway.
+  description = "From address for outbound email, on a sending domain VERIFIED with the provider (e.g. 'MAESTRO-SMS <no-reply@majormaestro.com>'). Required once email is enabled."
   type        = string
-  default     = ""
 }
 
 variable "sms_provider" {

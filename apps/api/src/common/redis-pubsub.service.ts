@@ -22,6 +22,7 @@
 // =============================================================================
 
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
+import { envOr } from "./env";
 import { randomUUID } from "node:crypto";
 import Redis, { type RedisOptions } from "ioredis";
 
@@ -50,8 +51,8 @@ export class RedisPubSubService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     const opts: RedisOptions = {
-      host: process.env.REDIS_HOST ?? "127.0.0.1",
-      port: Number(process.env.REDIS_PORT ?? 6379),
+      host: envOr("REDIS_HOST", "127.0.0.1"),
+      port: Number(envOr("REDIS_PORT", "6379")),
       ...(process.env.REDIS_PASSWORD ? { password: process.env.REDIS_PASSWORD } : {}),
       ...(process.env.REDIS_TLS === "true" ? { tls: {} } : {}),
       // Never let a transient outage throw into a request path; reconnect quietly.
