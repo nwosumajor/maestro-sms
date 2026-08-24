@@ -28,6 +28,7 @@ import {
   SUBSCRIPTION_STATUS,
   billedMonths,
   computeSubscriptionPriceMinor,
+  type ModuleOverrides,
   formatMoney,
   normalisePeriods,
   computeTrueUpMinor,
@@ -319,13 +320,20 @@ export class BillingService {
     // Quote with the operator-effective pricing so the screen matches checkout —
     // one quote per (tier × cycle × ALLOWED currency).
     const pricing = await this.planPricing.effectiveAll();
+    // The grid quotes what each tier would cost THIS school, add-ons included —
+    // and a tier that absorbs an add-on quotes lower for it, which is the
+    // upgrade argument making itself.
+    const quoteSub = await this.db.runAsTenantReadOnly(this.ctx(p), (tx) =>
+      tx.schoolSubscription.findFirst({ where: { schoolId: p.schoolId }, select: { overrides: true } }),
+    );
+    const quoteOverrides = (quoteSub?.overrides ?? undefined) as ModuleOverrides | undefined;
     const quotes = SELLABLE_TIERS.flatMap((plan) =>
       planCurrencies(plan).flatMap((currency) =>
         QUOTE_CYCLES.map((cycle) => ({
           plan,
           billingCycle: cycle,
           seats: billableSeats,
-          priceMinor: computeSubscriptionPriceMinor(plan, billableSeats, cycle, pricing[currency]),
+          priceMinor: computeSubscriptionPriceMinor(plan, billableSeats, cycle, pricing[currency], quoteOverrides),
           currency,
         })),
       ),
@@ -587,7 +595,17 @@ export class BillingService {
         // the same currentPeriodEnd — measured at four concurrent renewals
         // advancing the period by two. One charge cannot race itself.
         const periods = normalisePeriods(input.periods ?? 1);
-        const listMinor = computeSubscriptionPriceMinor(plan, seats, billingCycle, pricing) * periods;
+        // ADD-ONS RIDE THE CHARGE. A module force-enabled on top of the tier is
+        // a product the school is buying, not a comp — and `billableAddons`
+        // drops any that the tier being bought already includes, so upgrading
+        // ABSORBS an add-on rather than billing it twice.
+        const current = await tx.schoolSubscription.findFirst({
+          where: { schoolId: p.schoolId },
+          select: { overrides: true },
+        });
+        const overrides = (current?.overrides ?? undefined) as ModuleOverrides | undefined;
+        const listMinor =
+          computeSubscriptionPriceMinor(plan, seats, billingCycle, pricing, overrides) * periods;
         const grossMinor = promo ? Math.round((listMinor * (100 - promo.percentOff)) / 100) : listMinor;
         if (grossMinor <= 0) throw new BadRequestException("Nothing to charge for this plan");
 

@@ -403,6 +403,36 @@ conflicts with it, flag the conflict before proceeding.
   toggles); the AppShell nav hides modules not in the plan (modules ride the JWT
   session, set at login from `/auth/login`). Adding a module = a key in
   `@sms/types` + `@RequireModule` on its controller + a nav `module:` tag.
+- **TIERS REPACKAGED + ADD-ON SKUs (Aug 2026).** Each tier is now one sentence:
+  STANDARD (10) *teach, register, BILL*; PREMIUM (+9) *oversight, assessment,
+  engagement*; ULTIMATE (+6) *the whole pupil and the physical school*;
+  ENTERPRISE (+2) *running a school as a business* — payroll and the group
+  console. // GOTCHA: **FEES was in PREMIUM, so the entry tier could not raise an
+  invoice — and the take-rate is earned ONLY where fees are collected.** The
+  cheapest schools, of which there are most, generated no transaction revenue and
+  the module that would have earned it was the upsell. The entry tier is now
+  priced low DELIBERATELY and monetised by transactions. DOCUMENTS moved down for
+  coherence: `reportcard.controller.ts` was gated on DOCUMENTS, so a STANDARD
+  school had a gradebook it could record marks in and no way to print a report
+  card — it is gated on GRADEBOOK now. CBT joined INTEGRITY (one job seen twice)
+  and GAMES joined the engagement group; CERTIFICATE moved beside admissions and
+  alumni, where an ID card belongs in a pupil's lifecycle.
+  **ADD-ONS**: `MODULE_ADDON_PRICING` prices a single module per seat, billed
+  through `overrides.enabled` at checkout, on the quote grid AND on renewal —
+  before this, a per-school override was a free comp, not a product. Two rules
+  keep the funnel honest and both are test-enforced for EVERY module: an add-on
+  always costs MORE per module than the tier containing it, and by the THIRD
+  add-on the upgrade is cheaper. `billableAddons` never bills a module the tier
+  already includes, so an upgrade ABSORBS an add-on instead of stacking on it —
+  the likeliest way this would have gone wrong is an operator comping a module
+  and the override outliving the upgrade. `NOT_SOLD_SEPARATELY` (task, poll,
+  discussion, form) is a deliberate decision, not a gap: nobody buys a polls
+  module, pricing them credibly low made three cheaper than the upgrade, and
+  pricing them high enough to protect the ladder was a price nobody would pay —
+  so they stay tier sweeteners. // GOTCHA: `PLAN_PRICING` in code is the fallback
+  for a currency with no operator `plan_price` row and had drifted to about half
+  the live NGN prices, so opening a new currency would have quoted half price.
+  Realigned to ₦525/750/975/1,250.
 - **Self-serve BILLING ENGINE — BUILT** (`apps/api/src/billing`, `apps/web/.../billing`):
   turns the entitlement gate into recurring revenue. A school's principal/
   school_admin self-checks-out a tier (`@RequireStepUp`) at `/billing`; pricing is

@@ -463,9 +463,100 @@ export function computeSubscriptionGrossMinor(
   activeStudents: number,
   cycle: BillingCycle,
   pricing: PlanPricing = PLAN_PRICING,
+  /** Per-school overrides. Modules enabled ON TOP of the tier are billed as
+   *  add-ons at their own per-seat rate; omitted, this behaves exactly as
+   *  before, which is what every existing caller expects. */
+  overrides?: ModuleOverrides,
 ): number {
   const seats = Math.max(1, Math.floor(activeStudents));
-  return pricing[plan].perSeatMonthlyMinor * seats * CYCLE_MONTHS[cycle];
+  const perSeat = pricing[plan].perSeatMonthlyMinor + addonPerSeatMonthlyMinor(plan, overrides);
+  return perSeat * seats * CYCLE_MONTHS[cycle];
+}
+
+/**
+ * ADD-ON PRICING — buying ONE module without changing tier.
+ *
+ * `ModuleOverrides.enabled` could already force any module on for any school,
+ * and nothing charged for it: a per-school override was a free comp, not a
+ * product. So a school that wanted only the exam hall faced the whole jump from
+ * one tier to the next, for modules it would never open — and the operator's
+ * only alternative was to give it away.
+ *
+ * PRICED PER SEAT, like the tiers, so the same lever scales with the same thing
+ * and one school's bill is explainable in one sentence.
+ *
+ * // THE RULE THAT KEEPS THE FUNNEL HONEST: an add-on always costs MORE per
+ * module than the tier that contains it. If three add-ons were cheaper than the
+ * upgrade, every school would assemble its own tier and the ladder would stop
+ * meaning anything. Priced this way, ONE add-on is the cheapest route to one
+ * module, TWO is close, and by THREE the upgrade is plainly better — which is
+ * the behaviour worth encouraging, because a school on a higher tier churns
+ * less than one holding four unrelated add-ons.
+ *
+ * `assertAddonPricingBeatsUpgrade` in the test suite proves that for every
+ * module rather than trusting the numbers to stay right by hand.
+ */
+export const MODULE_ADDON_PRICING: Partial<Record<ModuleKey, number>> = {
+  // PREMIUM-tier modules. That tier adds five sellable modules for ₦225/seat
+  // (₦45 each), so an add-on at ₦80 makes the third one worse than upgrading.
+  [MODULES.WORKFLOW]: 8_000,
+  [MODULES.ANALYTICS]: 8_000,
+  [MODULES.INTEGRITY]: 8_000,
+  [MODULES.GAMES]: 8_000,
+  [MODULES.CBT]: 12_500,
+  // ULTIMATE-tier modules: the tier adds six for ₦225/seat (₦37.50 each).
+  // Hostel and transport are the two schools most often want on their own.
+  [MODULES.ADMISSIONS]: 12_500,
+  [MODULES.CERTIFICATE]: 10_000,
+  [MODULES.HOSTEL]: 12_500,
+  [MODULES.TRANSPORT]: 12_500,
+  [MODULES.DISCIPLINE]: 10_000,
+  [MODULES.ALUMNI]: 10_000,
+  // ENTERPRISE-tier modules: the tier adds two for ₦275/seat (₦137.50 each).
+  // Payroll alone replaces a separate system and is priced as such.
+  [MODULES.HR]: 20_000,
+  [MODULES.GROUP]: 20_000,
+};
+
+/**
+ * Deliberately NOT sold on their own — and this is a funnel decision, not an
+ * oversight.
+ *
+ * Tasks, polls, discussion and forms are small engagement tools. Nobody buys a
+ * polls module; pricing them individually low enough to be credible made three
+ * of them cheaper than the PREMIUM upgrade, which is exactly the assemble-your-
+ * own-tier behaviour add-ons must not create. Pricing them high enough to
+ * protect the ladder would have been a price no school would pay.
+ *
+ * So they stay tier sweeteners: the reason to move to PREMIUM rather than
+ * things to buy beside it. A school that wants them upgrades, which is the
+ * outcome worth having.
+ */
+export const NOT_SOLD_SEPARATELY: readonly ModuleKey[] = [
+  MODULES.TASK,
+  MODULES.POLL,
+  MODULES.DISCUSSION,
+  MODULES.FORM,
+];
+
+/**
+ * The modules a school is paying for ON TOP of its tier.
+ *
+ * Only `enabled` overrides that the plan does not already include. A module
+ * force-enabled and ALSO in the tier is not an add-on and must never be billed
+ * twice — that is the single most likely way this goes wrong, since an operator
+ * comping a module before an upgrade leaves the override behind.
+ */
+export function billableAddons(plan: Plan, overrides?: ModuleOverrides): ModuleKey[] {
+  const included = new Set(PLAN_MODULES[plan] ?? PLAN_MODULES[DEFAULT_PLAN]);
+  return [...new Set(overrides?.enabled ?? [])]
+    .filter((m) => !included.has(m))
+    .filter((m) => MODULE_ADDON_PRICING[m] !== undefined);
+}
+
+/** Pure: the per-seat monthly cost of a school's add-ons, in minor units. */
+export function addonPerSeatMonthlyMinor(plan: Plan, overrides?: ModuleOverrides): number {
+  return billableAddons(plan, overrides).reduce((sum, m) => sum + (MODULE_ADDON_PRICING[m] ?? 0), 0);
 }
 
 /** Pure: the CHARGED price for a cycle — gross minus the commitment discount
@@ -477,8 +568,12 @@ export function computeSubscriptionPriceMinor(
   activeStudents: number,
   cycle: BillingCycle,
   pricing: PlanPricing = PLAN_PRICING,
+  overrides?: ModuleOverrides,
 ): number {
-  return applyCycleDiscountMinor(computeSubscriptionGrossMinor(plan, activeStudents, cycle, pricing), cycle);
+  return applyCycleDiscountMinor(
+    computeSubscriptionGrossMinor(plan, activeStudents, cycle, pricing, overrides),
+    cycle,
+  );
 }
 
 /**

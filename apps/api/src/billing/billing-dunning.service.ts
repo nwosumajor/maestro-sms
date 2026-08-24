@@ -22,6 +22,7 @@ import {
   SUBSCRIPTION_STATUS,
   accrueSeatArrearsMinor,
   computeSubscriptionPriceMinor,
+  type ModuleOverrides,
   isBillingCycle,
   isCurrency,
   isPlan,
@@ -116,6 +117,8 @@ export class BillingDunningService {
         paystackAuthorizationEnc: true,
         arrearsAccruedAt: true,
         seatArrearsMinor: true,
+        // Needed to bill add-ons on the renewal, same as checkout does.
+        overrides: true,
       },
     });
 
@@ -324,6 +327,9 @@ export class BillingDunningService {
       billingCycle: string;
       paystackAuthorizationEnc: string | null;
       seatArrearsMinor: bigint | number;
+      // Add-ons renew with the subscription; without this the renewal charged
+      // the bare tier and handed the school a free module every period.
+      overrides?: unknown;
     },
     now: Date,
   ): Promise<"charged" | "failed" | "skipped"> {
@@ -347,7 +353,10 @@ export class BillingDunningService {
       const pricing = await this.pricing.effective(CURRENCIES.NGN);
       // Outstanding metered seat arrears ride the renewal charge (NGN path).
       const arrearsMinor = Math.max(0, toMinor(s.seatArrearsMinor));
-      const amountMinor = computeSubscriptionPriceMinor(plan, seats, cycle, pricing) + arrearsMinor;
+      // Add-ons renew with the subscription. A renewal that quietly dropped
+      // them would hand the school a free module every period.
+      const overrides = (s.overrides ?? undefined) as ModuleOverrides | undefined;
+      const amountMinor = computeSubscriptionPriceMinor(plan, seats, cycle, pricing, overrides) + arrearsMinor;
 
       // The charge needs a customer email — the school's first admin.
       const admin = await client.userRole.findFirst({
