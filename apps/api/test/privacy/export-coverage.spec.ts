@@ -39,6 +39,20 @@ function makeTx(notificationCount: number) {
           { id: "r-1", subjectId: "sub-1", termId: "t-1", total: 82, grade: "A", status: "PUBLISHED" },
         ]),
       },
+      // The bundle also carries what the school has WRITTEN about the pupil
+      // (remarks, trait ratings), their subject choices, who it records as their
+      // guardians, money held in their name, and their own consent and
+      // accommodation records. These cases are about the notification CAP, so
+      // the rest are empty — but they have to exist, because the bundle reads
+      // them. See every-student-table-is-accounted-for.spec.ts.
+      reportCardRemark: { findMany: jest.fn().mockResolvedValue([]) },
+      studentTraitRating: { findMany: jest.fn().mockResolvedValue([]) },
+      subjectSelection: { findMany: jest.fn().mockResolvedValue([]) },
+      parentChild: { findMany: jest.fn().mockResolvedValue([]) },
+      studentCreditEntry: { findMany: jest.fn().mockResolvedValue([]) },
+      studentVirtualAccount: { findMany: jest.fn().mockResolvedValue([]) },
+      integrityConsent: { findMany: jest.fn().mockResolvedValue([]) },
+      studentIntegrityExemption: { findMany: jest.fn().mockResolvedValue([]) },
     } as unknown as TenantTx,
     findMany,
   };

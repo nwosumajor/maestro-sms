@@ -1127,6 +1127,28 @@ bulk UPDATE that built the fixture (1,399 buffers to fetch 50 rows). VACUUM,
 re-measure, 0.60 ms. A benchmark must account for the churn the benchmark itself
 caused.
 
+### The bundle said COMPLETE and read 8 of the 33 tables keyed on a pupil
+`collectStudentBundle`'s `coverage` manifest exists to remove one ambiguity — a
+recipient cannot otherwise tell whether `medical: "(not included)"` means no
+record or no permission. The SAME ambiguity was left one level up: ten named
+sections, one exclusion, `complete: true`, and no mention that the school also
+holds, keyed on that pupil's own id, the class teacher's written REMARKS, ratings
+of their CHARACTER, subject choices, who it records as their guardians, money in
+their name, a bank account issued for them, their own consent records and their
+accessibility exemptions.
+Remarks and trait ratings are the sharpest case: OPINION data, which a right of
+access covers as squarely as fact, and which the family already reads on every
+report card — so withholding them protected nothing and made the bundle wrong.
+Now 18 sections and 9 excluded CATEGORIES, each with a reason a reader can act on
+("ask the school's data controller for X"). Live on a real pupil, the bundle
+gained their guardian link and their own consent record.
+Gate: `every-student-table-is-accounted-for.spec.ts` derives the student-keyed
+models from the Prisma schema — the way the RLS coverage meta-test derives its
+tables from `pg_class` rather than counting by hand — and fails unless each is
+either exported in a named section or excluded with a stated reason, AND that
+bucket is one the artifact actually declares. Validated by adding a new
+student-keyed model and watching it go red.
+
 ### The right to erasure reached the homework and not the birth certificate
 `reviewErasure` erased `Submission.fileKey` — assignment uploads — and nothing
 else. A child's birth certificate, immunisation record and passport photograph

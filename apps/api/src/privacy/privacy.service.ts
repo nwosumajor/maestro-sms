@@ -101,7 +101,22 @@ export class PrivacyService {
         medical = dec;
       }
     }
-    const [enrollments, attendance, invoices, documents, notifications, grades] = await Promise.all([
+    const [
+      enrollments,
+      attendance,
+      invoices,
+      documents,
+      notifications,
+      grades,
+      remarks,
+      traitRatings,
+      subjectSelections,
+      guardians,
+      credits,
+      virtualAccounts,
+      consents,
+      exemptions,
+    ] = await Promise.all([
       tx.enrollment.findMany({ where: { studentId } }),
       tx.attendanceRecord.findMany({ where: { studentId }, orderBy: { createdAt: "desc" } }),
       tx.invoice.findMany({ where: { studentId }, include: { lineItems: true, payments: true } }),
@@ -132,6 +147,29 @@ export class PrivacyService {
         where: { studentId, status: "PUBLISHED" },
         orderBy: { updatedAt: "desc" },
       }),
+      // WHAT THE SCHOOL HAS WRITTEN ABOUT THE CHILD.
+      //
+      // Remarks and trait ratings are OPINION data — a class teacher's written
+      // comment, a rating of a child's character — and a right of access covers
+      // opinions about the subject as squarely as it covers facts. The family
+      // already reads the remarks on every report card, so withholding them from
+      // the bundle protected nothing and made the bundle wrong.
+      tx.reportCardRemark.findMany({ where: { studentId }, orderBy: { updatedAt: "desc" } }),
+      tx.studentTraitRating.findMany({ where: { studentId }, orderBy: { updatedAt: "desc" } }),
+      // The subjects they offer, and who the school records as their guardians —
+      // a relationship held ABOUT the pupil, which they are entitled to see.
+      tx.subjectSelection.findMany({ where: { studentId } }),
+      tx.parentChild.findMany({ where: { studentId }, select: { id: true, parentId: true, createdAt: true } }),
+      // Money held in their name, and the account number issued for them.
+      tx.studentCreditEntry.findMany({ where: { studentId }, orderBy: { createdAt: "desc" } }),
+      tx.studentVirtualAccount.findMany({
+        where: { studentId },
+        select: { id: true, bankName: true, accountNumber: true, createdAt: true },
+      }),
+      // Consent and accommodation records — the pupil's own, and the two things
+      // a family is most likely to want proof of.
+      tx.integrityConsent.findMany({ where: { studentId } }),
+      tx.studentIntegrityExemption.findMany({ where: { studentId } }),
     ]);
 
     // A limit that was REACHED means there may be more; a limit that was not
@@ -154,6 +192,14 @@ export class PrivacyService {
       documents,
       notifications,
       grades,
+      remarks,
+      traitRatings,
+      subjectSelections,
+      guardians,
+      credits,
+      virtualAccounts,
+      consents,
+      exemptions,
       // What this bundle does and does NOT contain, stated IN the artifact. A
       // recipient cannot otherwise tell whether "medical": "(not included)"
       // means the pupil has no record or that the exporter could not read one.
@@ -178,17 +224,77 @@ export class PrivacyService {
           "documents",
           "notifications",
           "grades",
+          "remarks",
+          "traitRatings",
+          "subjectSelections",
+          "guardians",
+          "credits",
+          "virtualAccounts",
+          "consents",
+          "exemptions",
         ],
         // And what is NOT, with the reason. Integrity telemetry is about this
         // pupil and is deliberately not served to families here: the platform's
         // rule is that raw signals go to a teacher for human judgement, never to
         // a parent as a verdict (Golden Rule #8). Saying so beats omitting it
         // silently — a data subject can then ask the school for it directly.
+        // AND WHAT IS NOT, EVERY CATEGORY OF IT, WITH A REASON.
+        //
+        // This list used to name one exclusion while the bundle silently read 8
+        // of the 33 tables keyed on a pupil. `complete: true` beside a named
+        // section list reads as "this is everything", which is the ambiguity the
+        // manifest was written to remove — and it had simply been left one level
+        // up, at the level of whole categories rather than of fields.
+        //
+        // Everything below is a DECISION, not an omission, and
+        // `every-student-table-is-accounted-for.spec.ts` computes the set of
+        // student-keyed tables from the live schema and fails if one is neither
+        // exported nor named here. A new table cannot go missing quietly.
         excluded: [
           {
             section: "integritySignals",
             reason:
               "Assessment-integrity signals are held for human review by school staff and are not released through this bundle. Ask the school's data controller for them.",
+          },
+          {
+            section: "learningActivity",
+            reason:
+              "Coursework attempts, quiz attempts, lesson progress, live-lesson attendance, badges and CBT sittings are the working record of lessons in progress. The RESULTS that come out of them are in `grades`, which is what the pupil is assessed on. Ask the school's data controller for the underlying attempts.",
+          },
+          {
+            section: "boardingAndTransport",
+            reason:
+              "Hostel allocation, hostel attendance and exeat records are held by the boarding house. Ask the school's data controller for them.",
+          },
+          {
+            section: "examLogistics",
+            reason:
+              "Seat allocations and exam-hall attendance are operational scheduling records rather than a finding about the pupil. Ask the school's data controller for them.",
+          },
+          {
+            section: "meetings",
+            reason:
+              "Parent-teacher meeting bookings and requests are held against the guardian who made them. A guardian can see their own in the meetings area.",
+          },
+          {
+            section: "scholarshipApplications",
+            reason:
+              "A scholarship application is made by the family and visible to them in the scholarships area; it also carries a snapshot of signals about other pupils' rankings, so it is not reproduced here.",
+          },
+          {
+            section: "derivedSummaries",
+            reason:
+              "Attendance term rollups are recalculated from the attendance rows already included in this bundle, so they add nothing a reader cannot see.",
+          },
+          {
+            section: "erasureRequests",
+            reason:
+              "Requests made under this same right are governance records of the request itself, not data about the pupil. The school's data controller holds them.",
+          },
+          {
+            section: "crossSchoolCompetition",
+            reason:
+              "Cross-school arena consent is recorded per pupil; the arena itself holds only a pseudonymous handle and never the pupil's name.",
           },
         ],
         note: opts.includeMedical
