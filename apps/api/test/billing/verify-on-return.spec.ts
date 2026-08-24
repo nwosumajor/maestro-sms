@@ -112,9 +112,19 @@ describe("the checkout brings the school back", () => {
     // Matched against the SHARED resolver, not a copy of the env fallback:
     // twelve callers used to build this URL independently, and a caller that
     // drifted back to its own default would send a payer to localhost.
-    const hits = src.match(/callbackUrl: `\$\{publicWebUrl\(\)\}/g) ?? [];
-    expect(hits.length).toBe(2);
-    expect(src).toContain("/billing?verify=");
+    // EVERY Paystack subscription checkout, not a count of them.
+    //
+    // This asserted exactly two call sites, so adding a third checkout — the
+    // add-on purchase, which returns the payer the same way — failed a test
+    // about return URLs for having more of the thing it wants. A count is a
+    // statement about today's code; the property is that no checkout is missing
+    // one.
+    const inits = [...src.matchAll(/this\.paystack\.initialize\(\{([\s\S]*?)\}\)/g)].map((m) => m[1]);
+    expect(inits.length).toBeGreaterThanOrEqual(2);
+    for (const [i, body] of inits.entries()) {
+      expect([i, /callbackUrl: `\$\{publicWebUrl\(\)\}/.test(body)]).toEqual([i, true]);
+      expect([i, body.includes("/billing?verify=")]).toEqual([i, true]);
+    }
   });
 });
 

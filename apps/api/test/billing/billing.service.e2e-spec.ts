@@ -24,6 +24,7 @@ import { PrismaTenantService } from "../../src/foundation/prisma-tenant.service"
 import { AuditLogService } from "../../src/foundation/audit-log.service";
 import { PaystackService, type PaystackEvent } from "../../src/payments/paystack.service";
 import { StripeService } from "../../src/payments/stripe.service";
+import { AddonPricingService } from "../../src/billing/addon-pricing.service";
 import { PlanPricingService } from "../../src/billing/plan-pricing.service";
 import { ReferralService } from "../../src/billing/referral.service";
 import { GrowthService } from "../../src/billing/growth.service";
@@ -105,6 +106,10 @@ d("BillingService integration (per-seat checkout, webhook, dunning, RLS)", () =>
       new StripeService(),
       dunning,
       planPricing,
+      // Add-on pricing: a school can buy ONE module on top of its tier, and the
+      // service prices it. Real instance, so these cases exercise the same
+      // fallback-over-operator-rows resolution production uses.
+      new AddonPricingService(tenant, new AuditLogService() as never, { client: privileged } as never),
       new ReferralService(tenant, new AuditLogService() as never),
       new GrowthService(tenant, new AuditLogService() as never, { client: privileged } as never),
     );

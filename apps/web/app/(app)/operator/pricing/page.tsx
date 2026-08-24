@@ -20,7 +20,7 @@
 // a page whose sections have different permissions is a page half its viewers see
 // as broken.
 
-import type { PlanPriceDto, PlatformFeeConfig } from "@sms/types";
+import type { ModuleAddonPriceDto, PlanPriceDto, PlatformFeeConfig } from "@sms/types";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { hasPermission } from "@/lib/permissions";
@@ -30,6 +30,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
 import { PricingManager } from "@/components/operator/PricingManager";
+import { AddonPricingManager } from "@/components/operator/AddonPricingManager";
 import { PlatformFeeManager } from "@/components/operator/PlatformFeeManager";
 import { GrowthManager } from "@/components/operator/GrowthManager";
 import { PageHeader } from "@/components/shell/PageHeader";
@@ -45,8 +46,11 @@ export default async function OperatorPricingPage() {
   // the console rather than on a page of controls the API will refuse.
   if (!hasPermission(user.permissions, "platform.pricing.manage")) redirect("/operator");
 
-  const [pricing, platformFees, channels, promos, agents, commissions] = await Promise.all([
+  const [pricing, addonPricing, platformFees, channels, promos, agents, commissions] = await Promise.all([
     apiGet<PlanPriceDto[]>("/operator/pricing"),
+    // Add-on prices sit beside tier prices because they are the same decision
+    // seen twice: what a module is worth inside a bundle, and on its own.
+    apiGet<ModuleAddonPriceDto[]>("/operator/addon-pricing").then((r) => r ?? []),
     apiGet<PlatformFeeConfig>("/operator/platform-fees"),
     apiGet<{ enabled: string[]; all: string[]; labels: Record<string, { name: string; comingSoon: string }>; stranded: { id: string; name: string; currency: string }[]; readiness: { channel: string; enabled: boolean; configured: boolean; missing: string | null }[]; health: Record<string, { ok: boolean; at: string; detail: string }> }>("/operator/payment-channels"),
     // Growth reads need the privileged database; a 503 there must not blank the
@@ -93,6 +97,11 @@ export default async function OperatorPricingPage() {
         ) : (
           <PricingManager initial={pricing} />
         )}
+
+        {/* Add-on prices are shown whether or not TIER pricing could be read:
+            they are separate rows and a failure on one must not blank the
+            other, the same reasoning the growth reads above use. */}
+        {addonPricing.length > 0 && <AddonPricingManager initial={addonPricing} />}
 
         {platformFees && <PlatformFeeManager initial={platformFees} />}
 

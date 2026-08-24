@@ -1,4 +1,4 @@
-import type { BillingOverviewDto, ReferralInfoDto, Serialized } from "@sms/types";
+import type { AddonOfferDto, BillingOverviewDto, ReferralInfoDto, Serialized } from "@sms/types";
 import { hasPermission } from "@/lib/permissions";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
@@ -14,6 +14,7 @@ import { CreditVerifyBanner } from "@/components/billing/CreditVerifyBanner";
 import { ReferralPanel } from "@/components/billing/ReferralPanel";
 import { AutoRenewCard } from "@/components/billing/AutoRenewCard";
 import { TrueUpCard } from "@/components/billing/TrueUpCard";
+import { AddonShop } from "@/components/billing/AddonShop";
 import { MessageCreditsCard } from "@/components/billing/MessageCreditsCard";
 import { PageHeader } from "@/components/shell/PageHeader";
 
@@ -58,8 +59,11 @@ export default async function BillingPage({
   // rendered nothing. Redirecting is what the rest of the app does.
   if (!hasPermission(user.permissions, "billing.read")) redirect("/dashboard");
 
-  const [data, referral, credits] = await Promise.all([
+  const [data, addonOffers, referral, credits] = await Promise.all([
     apiGet<Overview>("/billing"),
+    // The add-on shop. Falls back to empty independently: a failure here must
+    // not blank the subscription overview beside it.
+    apiGet<Serialized<AddonOfferDto>[]>("/billing/addons").then((r) => r ?? []),
     apiGet<Serialized<ReferralInfoDto>>("/billing/referral"),
     apiGet<{ balance: number; bundles: { id: string; credits: number; priceMinor: number }[] }>("/billing/credits"),
   ]);
@@ -136,6 +140,10 @@ export default async function BillingPage({
                 canManage={canManage}
               />
             )}
+
+            {/* Below the plan comparison on purpose: a school should see what a
+                tier costs before it starts assembling one out of parts. */}
+            <AddonShop offers={addonOffers} canBuy={canManage} />
 
             <BillingCheckout
               quotes={data.quotes}

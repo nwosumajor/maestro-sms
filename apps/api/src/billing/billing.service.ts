@@ -16,6 +16,11 @@
 
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException, Optional} from "@nestjs/common";
 import {
+  type AddonOfferDto,
+  type ModuleKey,
+  addonProrationMinor,
+  PLAN_MODULES,
+  isModuleKey,
   BILLING_CYCLES,
   CURRENCIES,
   CYCLE_MONTHS,
@@ -64,6 +69,7 @@ import { StripeService, type StripeEvent } from "../payments/stripe.service";
 import { SYSTEM_ACTOR_ID } from "./billing.constants";
 import { BillingDunningService, type DunningResult } from "./billing-dunning.service";
 import { PlanPricingService } from "./plan-pricing.service";
+import { AddonPricingService, sellableAlone } from "./addon-pricing.service";
 import { countOnRollStudents } from "../common/student-scope";
 import { ReferralService, type ReferralGrant } from "./referral.service";
 import { encryptField } from "../foundation/field-crypto";
@@ -96,6 +102,7 @@ export class BillingService {
     private readonly stripe: StripeService,
     private readonly dunning: BillingDunningService,
     private readonly planPricing: PlanPricingService,
+    private readonly addonPricing: AddonPricingService,
     private readonly referrals: ReferralService,
     private readonly growth: GrowthService,
     // LAST and @Optional deliberately. DI always provides it in the running
@@ -367,6 +374,196 @@ export class BillingService {
   /** Start a checkout for the seat TRUE-UP quoted on the overview: the extra
    *  students enrolled since the last charge, priced for the time left. Applies
    *  seats-only on settlement (the period does not move). */
+/**
+   * Buy ONE module, on its own, without changing tier.
+   *
+   * Mirrors the seat top-up exactly — same rail selection, same currency
+   * refusals, same PENDING row voided if the gateway declines — because a
+   * second payment path that drifts from the first is how two charges start
+   * behaving differently for no reason anybody can name.
+   *
+   * PRORATED to the time left in the current period: a school buying the exam
+   * hall three weeks before renewal pays for three weeks. From the next renewal
+   * it is billed in full alongside everything else, which is already wired.
+   */
+/**
+   * The add-on shop: what this school could buy, what it would cost TODAY, and
+   * what it already has.
+   *
+   * Prorated in the quote, not just at checkout — a price that changes between
+   * the button and the receipt is the surest way to lose a sale and earn a
+   * support ticket.
+   */
+  async listAddonOffers(p: Principal): Promise<AddonOfferDto[]> {
+    const now = new Date();
+    const { sub, seats } = await this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => ({
+      sub: await tx.schoolSubscription.findFirst({ where: { schoolId: p.schoolId } }),
+      seats: await this.activeStudents(tx),
+    }));
+    const plan: Plan = sub && isPlan(sub.plan) ? sub.plan : DEFAULT_PLAN;
+    const cycle: BillingCycle = isBillingCycle(sub?.billingCycle ?? "") ? (sub!.billingCycle as BillingCycle) : BILLING_CYCLES.TERM;
+    const currency: Currency = isCurrency(sub?.currency ?? "") ? (sub!.currency as Currency) : CURRENCIES.NGN;
+    const overrides = (sub?.overrides ?? undefined) as ModuleOverrides | undefined;
+    const owned = new Set(overrides?.enabled ?? []);
+    const included = new Set(PLAN_MODULES[plan]);
+    const prices = await this.addonPricing.effective(currency);
+    return sellableAlone().map((module) => ({
+      module,
+      currency,
+      perSeatMonthlyMinor: prices[module] ?? 0,
+      // What it costs to switch on right now, for the rest of this period.
+      priceNowMinor: addonProrationMinor(prices[module], seats, cycle, sub?.currentPeriodEnd ?? null, now) ?? 0,
+      includedInPlan: included.has(module),
+      alreadyPurchased: owned.has(module) && !included.has(module),
+    }));
+  }
+
+  async initAddonCheckout(p: Principal, moduleKey: string): Promise<CheckoutInitResultDto> {
+    const now = new Date();
+    if (!isModuleKey(moduleKey)) throw new BadRequestException("Unknown module");
+    if (!sellableAlone().includes(moduleKey)) {
+      throw new BadRequestException("That module is not sold on its own — it comes with a plan");
+    }
+    const prep = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const sub = await tx.schoolSubscription.findFirst({ where: { schoolId: p.schoolId } });
+      if (!sub || !isPlan(sub.plan) || sub.status !== SUBSCRIPTION_STATUS.ACTIVE) {
+        throw new BadRequestException("Buying a module needs an active paid subscription");
+      }
+      // ALREADY HAVE IT is not an error worth a gateway round trip.
+      if (PLAN_MODULES[sub.plan as Plan].includes(moduleKey)) {
+        throw new BadRequestException("Your plan already includes that module");
+      }
+      const overrides = (sub.overrides ?? undefined) as ModuleOverrides | undefined;
+      if ((overrides?.enabled ?? []).includes(moduleKey)) {
+        throw new BadRequestException("That module is already on your subscription");
+      }
+      const seats = await this.activeStudents(tx);
+      const user = await tx.user.findFirst({ where: { id: p.userId }, select: { email: true } });
+      return { sub, seats, email: user?.email ?? "billing@school" };
+    });
+    const cycle: BillingCycle = isBillingCycle(prep.sub.billingCycle) ? prep.sub.billingCycle : BILLING_CYCLES.TERM;
+    const currency: Currency = isCurrency(prep.sub.currency ?? "") ? (prep.sub.currency as Currency) : CURRENCIES.NGN;
+    const rail = pickCardRail(
+      currency,
+      (await this.channels?.enabled()) ?? [PAYMENT_CHANNELS.PAYSTACK, PAYMENT_CHANNELS.STRIPE],
+    );
+    if (!rail) {
+      throw new ServiceUnavailableException(
+        `Online payment in ${currency} is not available yet — please contact support to arrange payment.`,
+      );
+    }
+    if (rail === PAYMENT_CHANNELS.PAYSTACK && !this.paystack.isConfigured()) {
+      throw new ServiceUnavailableException("Naira payments are not configured");
+    }
+    if (rail === PAYMENT_CHANNELS.STRIPE && !this.stripe.isConfigured()) {
+      throw new ServiceUnavailableException("USD payments are not configured");
+    }
+    const settleable = await this.channels?.billingAvailabilityFor(currency);
+    if (settleable && !settleable.available) {
+      throw new ServiceUnavailableException(`${currency} payments are not available yet. ${settleable.reason ?? ""}`.trim());
+    }
+
+    const prices = await this.addonPricing.effective(currency);
+    const amountMinor = addonProrationMinor(prices[moduleKey], prep.seats, cycle, prep.sub.currentPeriodEnd, now);
+    // NULL MEANS "not worth a charge": too close to renewal, or no price. Switch
+    // it on now and let the renewal bill it — a failed gateway charge for ₦40
+    // costs more goodwill than the ₦40 is worth.
+    if (amountMinor === null) {
+      await this.enableAddon(p.schoolId, moduleKey, "granted (too little time left in the period to charge)");
+      return { authorizationUrl: "", reference: "" };
+    }
+
+    const reference = `SUB-${p.schoolId.slice(0, 8)}-${Date.now()}`;
+    const paymentId = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const payment = await tx.platformSubscriptionPayment.create({
+        data: {
+          schoolId: p.schoolId,
+          plan: prep.sub.plan,
+          billingCycle: cycle,
+          seats: prep.seats,
+          amountMinor,
+          currency,
+          reference,
+          status: "PENDING",
+          kind: SUBSCRIPTION_PAYMENT_KINDS.ADDON,
+          addonModule: moduleKey,
+          initiatedById: p.userId,
+        },
+      });
+      await this.audit.record(
+        {
+          actorId: p.userId,
+          action: "billing.addon.init",
+          entity: "platform_subscription_payment",
+          entityId: payment.id,
+          schoolId: p.schoolId,
+          metadata: { module: moduleKey, amountMinor, currency, seats: prep.seats, legalVersion: LEGAL_DOCS_VERSION },
+        },
+        tx,
+      );
+      return payment.id;
+    });
+
+    let authorizationUrl: string;
+    try {
+      ({ authorizationUrl } =
+        rail === PAYMENT_CHANNELS.STRIPE
+          ? await this.stripe.createCheckoutSession({
+              email: prep.email,
+              amountMinor,
+              reference,
+              description: `SMS module — ${moduleKey} (to the end of the current period)`,
+              metadata: { kind: "subscription", schoolId: p.schoolId, paymentId, reference },
+            })
+          : await this.paystack.initialize({
+              email: prep.email,
+              amountMinor,
+              currency,
+              reference,
+              metadata: { kind: "subscription", schoolId: p.schoolId, paymentId, reference },
+              callbackUrl: `${publicWebUrl()}/billing?verify=${encodeURIComponent(reference)}`,
+            }));
+    } catch (err) {
+      await this.voidIntent(p.schoolId, paymentId, `Gateway refused: ${(err as Error).message}`);
+      throw err;
+    }
+    return { authorizationUrl, reference };
+  }
+
+  /**
+   * Switch a module on for a school, idempotently.
+   *
+   * Used by the paid path (webhook) and the free path (nothing worth charging).
+   * Idempotent because a gateway retries: adding the same module twice must
+   * leave one entry, not two, or `billableAddons` would bill it twice at the
+   * next renewal.
+   */
+  private async enableAddon(schoolId: string, moduleKey: ModuleKey, why: string): Promise<void> {
+    await this.db.runAsTenant({ schoolId, userId: SYSTEM_ACTOR_ID }, async (tx) => {
+      const sub = await tx.schoolSubscription.findFirst({ where: { schoolId } });
+      if (!sub) return;
+      const overrides = ((sub.overrides ?? {}) as ModuleOverrides) ?? {};
+      const enabled = [...new Set([...(overrides.enabled ?? []), moduleKey])];
+      const disabled = (overrides.disabled ?? []).filter((m) => m !== moduleKey);
+      await tx.schoolSubscription.update({
+        where: { id: sub.id },
+        data: { overrides: { enabled, disabled } as never },
+      });
+      await this.audit.record(
+        {
+          actorId: SYSTEM_ACTOR_ID,
+          action: "billing.addon.enabled",
+          entity: "school_subscription",
+          entityId: sub.id,
+          schoolId,
+          metadata: { module: moduleKey, why },
+        },
+        tx,
+      );
+    });
+    this.entitlements?.invalidate(schoolId);
+  }
+
   async initTrueUpCheckout(p: Principal): Promise<CheckoutInitResultDto> {
     const now = new Date();
     const prep = await this.db.runAsTenant(this.ctx(p), async (tx) => {
@@ -955,6 +1152,10 @@ export class BillingService {
       //   UPGRADE — restart from now (the unused time was credited at checkout),
       //            but NEVER below the period already paid for — see below.
       //   TRUEUP  — seats only: the period does not move.
+      //   ADDON   — one module switched on: the period does not move either. A
+      //             module bought three weeks before renewal was charged for
+      //             three weeks, so extending the period would hand the school
+      //             a free cycle for a part-period payment.
       const kind = payment.kind;
       const base =
         kind === SUBSCRIPTION_PAYMENT_KINDS.UPGRADE
@@ -967,7 +1168,8 @@ export class BillingService {
       // cannot promise a date settlement then disagrees with.
       const periods = normalisePeriods((payment as { billingPeriods?: number }).billingPeriods ?? 1);
       const computedEnd =
-        kind === SUBSCRIPTION_PAYMENT_KINDS.TRUEUP && sub?.currentPeriodEnd
+        (kind === SUBSCRIPTION_PAYMENT_KINDS.TRUEUP || kind === SUBSCRIPTION_PAYMENT_KINDS.ADDON) &&
+        sub?.currentPeriodEnd
           ? sub.currentPeriodEnd
           : addMonths(base, billedMonths(cycle, periods));
 
@@ -991,7 +1193,13 @@ export class BillingService {
 
       await tx.platformSubscriptionPayment.update({
         where: { id: payment.id },
-        data: { status: "PAID", paidAt: now, periodStart: kind === SUBSCRIPTION_PAYMENT_KINDS.TRUEUP ? now : base, periodEnd },
+        data: {
+          status: "PAID",
+          paidAt: now,
+          periodStart:
+            kind === SUBSCRIPTION_PAYMENT_KINDS.TRUEUP || kind === SUBSCRIPTION_PAYMENT_KINDS.ADDON ? now : base,
+          periodEnd,
+        },
       });
 
       const data = {
@@ -1003,10 +1211,11 @@ export class BillingService {
         ...(payment.arrearsMinor > 0 && sub
           ? { seatArrearsMinor: Math.max(0, toMinor(sub.seatArrearsMinor) - toMinor(payment.arrearsMinor)) }
           : {}),
-        // TRUEUP only tops seats up: plan/cycle/period/last-full-price stay —
-        // overwriting priceMinor with the small top-up would corrupt the next
-        // upgrade's proration credit.
-        ...(kind === SUBSCRIPTION_PAYMENT_KINDS.TRUEUP
+        // TRUEUP tops seats up and ADDON switches one module on: for both,
+        // plan/cycle/period/last-full-price stay put — overwriting priceMinor
+        // with a small part-period charge would corrupt the next upgrade's
+        // proration credit, which is computed from what was LAST PAID IN FULL.
+        ...(kind === SUBSCRIPTION_PAYMENT_KINDS.TRUEUP || kind === SUBSCRIPTION_PAYMENT_KINDS.ADDON
           ? {}
           : {
               plan,
@@ -1062,12 +1271,27 @@ export class BillingService {
         // counts on settle; agent commission accrues once per school (DB-unique).
         promoCode: payment.promoCode,
         agentId: kind === SUBSCRIPTION_PAYMENT_KINDS.TRUEUP ? null : (sub?.agentId ?? null),
+        // Carried out of the transaction so the override is written after the
+        // money is certainly recorded, never alongside it.
+        addonModule: kind === SUBSCRIPTION_PAYMENT_KINDS.ADDON ? payment.addonModule : null,
         chargedMinor: toMinor(payment.amountMinor),
         chargedCurrency: payment.currency,
       };
     });
 
     if (!applied) return { ok: true };
+
+    // AN ADD-ON IS SWITCHED ON ONLY AFTER THE MONEY LANDED, and only once.
+    //
+    // Outside the transaction deliberately, exactly like the notification below:
+    // `enableAddon` is idempotent (a set union), so a retried webhook adds the
+    // same module once and cannot double it — which matters, because a
+    // duplicated entry in `overrides.enabled` would be billed twice at renewal.
+    const addonModule = (applied as { addonModule?: string | null }).addonModule;
+    if (addonModule && isModuleKey(addonModule)) {
+      await this.enableAddon(schoolId, addonModule, `paid (${reference})`);
+    }
+
     // A mismatched settlement tells the payer it FAILED (never silence on money).
     const mismatch = (applied as { mismatch?: { recipientId: string; plan: string } }).mismatch;
     if (mismatch) {

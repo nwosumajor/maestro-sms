@@ -16,6 +16,7 @@ import type {
   AttentionQueueDto,
   PlatformDelegationDto,
   TenantPageDto, PlatformStaffInviteDto } from "@sms/types";
+import { CURRENCIES } from "@sms/types";
 import { z } from "zod";
 import {
   COUNTRIES,
@@ -52,6 +53,7 @@ import { OperatorDirectoryService } from "./operator-directory.service";
 import { PlatformAnalyticsService } from "./platform-analytics.service";
 import { PlatformAuditService, type PlatformAuditFilter } from "./platform-audit.service";
 import { PlanPricingService } from "../billing/plan-pricing.service";
+import { AddonPricingService } from "../billing/addon-pricing.service";
 import { PlatformFeeService } from "../billing/platform-fee.service";
 import { GrowthService } from "../billing/growth.service";
 import { GroupService } from "../group/group.service";
@@ -224,6 +226,21 @@ const subSchema = z.object({
   status: z.enum([SUBSCRIPTION_STATUS.ACTIVE, SUBSCRIPTION_STATUS.PAST_DUE, SUBSCRIPTION_STATUS.CANCELED]).optional(),
   currentPeriodEnd: z.string().datetime().nullable().optional(),
 });
+/** Add-on prices. Zero is allowed on purpose — an operator making one module
+ *  free for a promotion should not have to delete a row to do it. */
+const addonPricingSchema = z.object({
+  prices: z
+    .array(
+      z.object({
+        module: z.string().min(1).max(40),
+        perSeatMonthlyMinor: z.number().int().min(0),
+        currency: z.enum([CURRENCIES.NGN, CURRENCIES.USD]).default(CURRENCIES.NGN),
+      }),
+    )
+    .min(1)
+    .max(60),
+});
+
 const pricingSchema = z.object({
   prices: z
     .array(
@@ -252,6 +269,7 @@ export class OperatorController {
     private readonly analyticsSvc: PlatformAnalyticsService,
     private readonly auditSvc: PlatformAuditService,
     private readonly pricing: PlanPricingService,
+    private readonly addonPricing: AddonPricingService,
     private readonly platformFees: PlatformFeeService,
     private readonly channels: PaymentChannelService,
     private readonly paymentHealth: PaymentHealthService,
@@ -641,6 +659,25 @@ export class OperatorController {
   @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
   getPricing() {
     return this.pricing.list();
+  }
+
+  /** Add-on prices, one row per module the platform sells on its own. */
+  @Get("addon-pricing")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
+  getAddonPricing(@Query("currency") currency?: string) {
+    return this.addonPricing.list(currency === CURRENCIES.USD ? CURRENCIES.USD : CURRENCIES.NGN);
+  }
+
+  /** Set add-on prices. Step-up and audited for the same reason as tier prices:
+   *  it is platform-wide money configuration, and a typo here is a charge. */
+  @Put("addon-pricing")
+  @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_PRICING_MANAGE)
+  @RequireStepUp()
+  setAddonPricing(
+    @CurrentPrincipal() p: Principal,
+    @Body(new ZodValidationPipe(addonPricingSchema)) body: z.infer<typeof addonPricingSchema>,
+  ) {
+    return this.addonPricing.update(p, body.prices as Array<{ module: string; currency: string; perSeatMonthlyMinor: number }>);
   }
 
   /** Set per-tier prices. Step-up: platform-wide money configuration. Audited. */

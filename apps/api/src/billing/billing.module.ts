@@ -10,6 +10,7 @@ import { BillingDunningService } from "./billing-dunning.service";
 import { BillingDunningScheduler } from "./billing-dunning.scheduler";
 import { BillingDunningProcessor } from "./billing-dunning.processor";
 import { PlanPricingService } from "./plan-pricing.service";
+import { AddonPricingService } from "./addon-pricing.service";
 import { ReferralService } from "./referral.service";
 import { PlatformFeeService } from "./platform-fee.service";
 import { GrowthService } from "./growth.service";
@@ -39,6 +40,7 @@ import { SettlementModule } from "../fees/settlement.module";
     BillingDunningScheduler,
     BillingDunningProcessor,
     PlanPricingService,
+    AddonPricingService,
     ReferralService,
     PlatformFeeService,
     GrowthService,
@@ -48,6 +50,6 @@ import { SettlementModule } from "../fees/settlement.module";
   // tier prices, step-up gated) and the public pricing endpoint (landing page).
   // PlatformFeeService feeds the fees payment gateway (take-rate) + operator PUT.
   // GrowthService feeds operator promo/agent management + provisioning attribution.
-  exports: [BillingService, PlanPricingService, PlatformFeeService, GrowthService],
+  exports: [BillingService, PlanPricingService, AddonPricingService, PlatformFeeService, GrowthService],
 })
 export class BillingModule {}

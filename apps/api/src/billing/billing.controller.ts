@@ -196,6 +196,24 @@ export class BillingController {
     return this.referrals.ensureCode(p);
   }
 
+  /** The modules this school can buy on its own, with prices — the add-on shop.
+   *  Read-only, so `billing.read` is enough: a bursar comparing options should
+   *  not need the permission that spends money. */
+  @Get("addons")
+  @RequirePermission(BILLING_PERMISSIONS.BILLING_READ)
+  addons(@CurrentPrincipal() p: Principal) {
+    return this.billing.listAddonOffers(p);
+  }
+
+  /** Buy ONE module. Step-up like every other charge on this controller: it
+   *  takes money and changes what the school can reach. */
+  @Post("addons/:module/init")
+  @RequirePermission(BILLING_PERMISSIONS.BILLING_MANAGE)
+  @RequireStepUp()
+  buyAddon(@CurrentPrincipal() p: Principal, @Param("module") moduleKey: string): Promise<CheckoutInitResultDto> {
+    return this.billing.initAddonCheckout(p, moduleKey);
+  }
+
   /** Start a checkout for the seat true-up quoted on the overview. */
   @Post("true-up/init")
   @RequirePermission(BILLING_PERMISSIONS.BILLING_MANAGE)

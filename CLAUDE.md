@@ -70,9 +70,9 @@ conflicts with it, flag the conflict before proceeding.
   `permission`, `role_permission`, and the deliberate cross-tenant Ultimate arena
   pair (`ultimate_competition`, `ultimate_participant`).
   // GOTCHA: "global" is NOT the same as "unprotected", and calling them
-  RLS-EXEMPT undersold the posture. `plan_price`, `platform_fee_config`,
-  `promo_code`, `agent` and `school_group` have no `schoolId` AND have RLS
-  ENABLED with restrictive policies — app-role SELECT-only or deny-all, writes
+  RLS-EXEMPT undersold the posture. `plan_price`, `module_addon_price`,
+  `platform_fee_config`, `promo_code`, `agent` and `school_group` have no
+  `schoolId` AND have RLS ENABLED with restrictive policies — app-role SELECT-only or deny-all, writes
   through the privileged client. Only the seven above have no row security at
   all, and a new one cannot be added quietly.
 
@@ -433,6 +433,29 @@ conflicts with it, flag the conflict before proceeding.
   for a currency with no operator `plan_price` row and had drifted to about half
   the live NGN prices, so opening a new currency would have quoted half price.
   Realigned to ₦525/750/975/1,250.
+- **ADD-ON PURCHASE — BUILT, self-serve** (`AddonPricingService`,
+  `module_addon_price` + migration `20270103000000` + rls/111,
+  `platform_subscription_payment.addonModule`, `SUBSCRIPTION_PAYMENT_KINDS.ADDON`,
+  web `AddonShop` on /billing and `AddonPricingManager` on /operator/pricing).
+  A school buys ONE module without changing tier: `GET /billing/addons` quotes it,
+  `POST /billing/addons/:module/init` charges it (step-up), the webhook switches
+  the override on. Priced PER SEAT and PRORATED to the time left — buying three
+  weeks before renewal costs three weeks — then billed in full at every renewal,
+  which is wired through checkout, the quote grid AND auto-renew.
+  // GOTCHA: an ADDON payment must NOT move `currentPeriodEnd` (it is a
+  part-period charge; extending would hand over a free cycle) and must NOT
+  overwrite `priceMinor` (the next upgrade's proration credit is computed from
+  what was LAST PAID IN FULL). It behaves like TRUEUP on both counts.
+  // GOTCHA: `enableAddon` is a set union, because a gateway RETRIES — a
+  duplicated entry in `overrides.enabled` would be billed twice at renewal.
+  Verified live end to end: shop -> checkout -> signed webhook -> `/hostels` went
+  404 to 200 while `/alumni` stayed 404, period unchanged, replayed webhook left
+  one entry. Operator prices them on /operator/pricing, and each row SHOWS what
+  the module costs inside its tier and flags a price that undercuts the upgrade —
+  it warns rather than blocks, because a deliberate loss-leader is legitimate.
+- **THE TAKE-RATE IS ON**: `platform_fee_config` id `'fees'` (a SINGLETON — a row
+  with any other id is invisible to `PlatformFeeService`, which cost me a probe
+  to discover), 150bp capped at ₦2,000, borne by the PARENT.
 - **Self-serve BILLING ENGINE — BUILT** (`apps/api/src/billing`, `apps/web/.../billing`):
   turns the entitlement gate into recurring revenue. A school's principal/
   school_admin self-checks-out a tier (`@RequireStepUp`) at `/billing`; pricing is

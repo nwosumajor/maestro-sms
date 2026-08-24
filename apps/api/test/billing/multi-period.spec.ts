@@ -87,13 +87,25 @@ describe("settlement serialisation", () => {
     // under READ COMMITTED, so concurrent charges overwrite each other.
     const { readFileSync } = await import("node:fs");
     const { join } = await import("node:path");
-    const src = readFileSync(join(__dirname, "../../src/billing/billing.service.ts"), "utf8");
-    const lockAt = src.indexOf('FOR UPDATE`');
+    const whole = readFileSync(join(__dirname, "../../src/billing/billing.service.ts"), "utf8");
+    // SCOPED TO THE SETTLEMENT METHOD, not the whole file.
+    //
+    // This searched the file for the FIRST `findFirst({ where: { schoolId } })`
+    // and compared its offset to the lock's. Adding an unrelated helper that
+    // happened to contain the same line, earlier in the file, made the test
+    // report that the lock came after the read — when the lock was exactly where
+    // it had always been. A position test has to be bounded by the thing it is
+    // a statement about.
+    const from = whole.indexOf("async applySubscriptionPayment");
+    expect(from).toBeGreaterThan(-1);
+    const src = whole.slice(from);
+    const lockAt = src.indexOf("FOR UPDATE`");
     const readAt = src.indexOf("const sub = await tx.schoolSubscription.findFirst({ where: { schoolId } });");
     expect(lockAt).toBeGreaterThan(-1);
+    expect(readAt).toBeGreaterThan(-1);
     // The lock has to come FIRST — after the read it protects nothing.
     expect(lockAt).toBeLessThan(readAt);
-    expect(src.slice(lockAt - 200, lockAt)).toContain("school_subscription");
+    expect(src.slice(Math.max(0, lockAt - 200), lockAt)).toContain("school_subscription");
   });
 });
 

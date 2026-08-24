@@ -522,6 +522,26 @@ model PaymentChannelConfigRow {
   @@map("payment_channel_config")
 }
 
+/// Operator-set price for ONE module bought on its own, on top of a tier.
+///
+/// Same posture as `PlanPrice` and for the same reason: global, no schoolId, no
+/// tenant data, readable by the app role and writable only through the
+/// privileged client. `MODULE_ADDON_PRICING` in @sms/types is the fallback when
+/// no row exists, exactly as `PLAN_PRICING` is for tiers — so an unpriced module
+/// quotes the code default rather than zero.
+model ModuleAddonPrice {
+  /// A MODULES key (validated against @sms/types on write).
+  module              String
+  /// NGN | USD — one row per (module, currency).
+  currency            String   @default("NGN")
+  /// Per-seat (active student) monthly price, minor units.
+  perSeatMonthlyMinor Int
+  updatedAt           DateTime @updatedAt
+
+  @@id([module, currency])
+  @@map("module_addon_price")
+}
+
 model PlanPrice {
   /// STANDARD | PREMIUM | ULTIMATE | ENTERPRISE (validated against @sms/types PLANS).
   plan                String
@@ -592,6 +612,11 @@ model PlatformSubscriptionPayment {
   /// ever after. This table only ever grows.
   @@index([createdAt])
   @@map("platform_subscription_payment")
+  /// For a kind=ADDON payment: WHICH module was bought. Null for every other
+  /// kind. A column rather than metadata, because the webhook reads this row to
+  /// decide what to switch on, and a charge whose effect is inferred from free
+  /// text is a charge nobody can audit.
+  addonModule String?
 }
 
 /// TENANT-SCOPED: a person in a school. Email is globally unique so login is

@@ -677,6 +677,34 @@ export function prorationCreditMinor(
   return Math.min(lastPriceMinor, Math.round(lastPriceMinor * remainingPeriodRatio(cycle, periodEnd, now)));
 }
 
+/**
+ * Pure: what ONE add-on costs to buy mid-period — the module's per-seat rate for
+ * the seats a school has, prorated to the time left before renewal.
+ *
+ * PRORATED, NOT A FULL PERIOD. A school buying the exam hall three weeks before
+ * renewal should pay for three weeks; charging a full cycle for four days of use
+ * is the kind of bill that produces a chargeback rather than a renewal. From the
+ * next renewal it is billed in full with everything else.
+ *
+ * Returns null when there is nothing sensible to charge — no active period, no
+ * price, or an amount below the gateway's floor. Null means "give it to them for
+ * the rest of this period and start billing at renewal", which is both kinder
+ * and cheaper than a failed charge.
+ */
+export function addonProrationMinor(
+  perSeatMonthlyMinor: number | null | undefined,
+  seats: number,
+  cycle: BillingCycle,
+  periodEnd: Date | null,
+  now: Date,
+): number | null {
+  if (!perSeatMonthlyMinor || perSeatMonthlyMinor <= 0 || !periodEnd) return null;
+  const billableSeats = Math.max(1, Math.floor(seats));
+  const full = perSeatMonthlyMinor * billableSeats * CYCLE_MONTHS[cycle];
+  const amount = Math.round(full * remainingPeriodRatio(cycle, periodEnd, now));
+  return amount < MIN_CHARGE_MINOR ? null : amount;
+}
+
 /** Gateways refuse zero/near-zero charges — the floor for a credited upgrade. */
 export const MIN_CHARGE_MINOR = 10_000; // ₦100 in kobo
 
@@ -733,6 +761,9 @@ export const SUBSCRIPTION_PAYMENT_KINDS = {
   UPGRADE: "UPGRADE",
   /** Seat top-up: seats update; the period does NOT move. */
   TRUEUP: "TRUEUP",
+  /** A single module bought on its own: the override is added and the period
+   *  does NOT move. It renews with the subscription from then on. */
+  ADDON: "ADDON",
 } as const;
 export type SubscriptionPaymentKind = (typeof SUBSCRIPTION_PAYMENT_KINDS)[keyof typeof SUBSCRIPTION_PAYMENT_KINDS];
 

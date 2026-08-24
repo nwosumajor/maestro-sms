@@ -217,3 +217,29 @@ export interface MessageCreditLedgerPageDto {
    */
   hasMore: boolean;
 }
+
+
+/** One module's add-on price, as the operator console and the school's add-on
+ *  shop both read it. `isDefault` distinguishes a code fallback from an operator
+ *  decision — without it a screen cannot tell "never priced" from "priced the
+ *  same as the default". */
+export interface ModuleAddonPriceDto {
+  module: string;
+  currency: string;
+  perSeatMonthlyMinor: number;
+  isDefault: boolean;
+}
+
+
+/** One row of the school's add-on shop. `priceNowMinor` is the PRORATED cost to
+ *  switch it on today; `perSeatMonthlyMinor` is what it costs from renewal. Both
+ *  are shown, because a school comparing "now" against "ongoing" is exactly the
+ *  question a bursar asks. */
+export interface AddonOfferDto {
+  module: string;
+  currency: string;
+  perSeatMonthlyMinor: number;
+  priceNowMinor: number;
+  includedInPlan: boolean;
+  alreadyPurchased: boolean;
+}
