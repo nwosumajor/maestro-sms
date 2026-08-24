@@ -43,6 +43,13 @@ function makeService(opts: { failKeys?: string[] } = {}) {
       findFirst: jest.fn().mockResolvedValue({ id: "req-1", status: "PENDING", studentId: "pupil-1" }),
       update: jest.fn().mockResolvedValue({ id: "req-1", status: "APPROVED" }),
     },
+    // Erasure now also reaches the files the FAMILY supplied — a birth
+    // certificate or immunisation record, keyed on the pupil or on their
+    // admission application — and counts the school records it deliberately
+    // keeps. These cases are about the submission half, so the rest is empty.
+    admissionApplication: { findMany: jest.fn().mockResolvedValue([]) },
+    documentSubmission: { findMany: jest.fn().mockResolvedValue([]), updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+    document: { count: jest.fn().mockResolvedValue(0) },
     submission: {
       findMany: jest.fn().mockResolvedValue([
         { id: "s-1", fileKey: "k-1" },

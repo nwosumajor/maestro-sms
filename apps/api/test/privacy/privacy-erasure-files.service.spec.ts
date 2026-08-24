@@ -16,6 +16,13 @@ function make(opts: { withFiles?: { id: string; fileKey: string }[]; storageThro
       findFirst: jest.fn().mockResolvedValue({ id: "er1", studentId: "stu-1", status: "PENDING" }),
       update: jest.fn((a: { data: Record<string, unknown> }) => Promise.resolve({ id: "er1", ...a.data })),
     },
+    // Erasure now also reaches the files the FAMILY supplied — a birth
+    // certificate or immunisation record, keyed on the pupil or on their
+    // admission application — and counts the school records it deliberately
+    // keeps. These cases are about the submission half, so the rest is empty.
+    admissionApplication: { findMany: jest.fn().mockResolvedValue([]) },
+    documentSubmission: { findMany: jest.fn().mockResolvedValue([]), updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+    document: { count: jest.fn().mockResolvedValue(0) },
     submission: {
       findMany: jest.fn().mockResolvedValue(opts.withFiles ?? []),
       updateMany,

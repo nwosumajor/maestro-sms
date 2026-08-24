@@ -1127,6 +1127,29 @@ bulk UPDATE that built the fixture (1,399 buffers to fetch 50 rows). VACUUM,
 re-measure, 0.60 ms. A benchmark must account for the churn the benchmark itself
 caused.
 
+### The right to erasure reached the homework and not the birth certificate
+`reviewErasure` erased `Submission.fileKey` — assignment uploads — and nothing
+else. A child's birth certificate, immunisation record and passport photograph
+are supplied through `DocumentSubmission`, and stayed in object storage while the
+request read APPROVED and the audit row said the files were erased.
+Two ways they attach to one child and BOTH are needed: `STUDENT` (keyed on the
+pupil) and `ADMISSION_APPLICATION` (keyed on the application, reached through
+`convertedStudentId`, the link that exists so the two records are not orphans).
+No other path covered them either — `purgeRejected` sweeps REJECTED applications
+on a timer, so an ENROLLED pupil's supplied documents were reached by nothing.
+LATENT, not live: `document_submission` has no rows yet, so no real erasure has
+under-delivered. It would have gone wrong the first time a school used the
+supplied-documents flow, and the evidence would have been a regulator's question
+the school answered wrongly in good faith, from its own audit log.
+**WHAT IS KEPT IS NOW COUNTED AND EXPLAINED.** Document Vault entries (report
+cards, receipts, certificates) are the SCHOOL's record and stay, on the same
+reasoning as the retained submission row and grade — a defensible decision and a
+bad secret. The audit row carries `retainedVaultDocuments` + `retainedReason`,
+and the review screen now says so at the moment of signing rather than leaving it
+in a log somebody has to go and find. Live on a real pupil: `0 erased,
+6 school records retained`. Same rule as the exeat sweep and the alumni
+broadcast — report what you did NOT do.
+
 ### The replica answers a read only if it can answer it correctly
 The read/write split routes 103 paths to `DATABASE_REPLICA_URL`, and Terraform
 already provisions replicas and wires that variable into ECS — with nothing

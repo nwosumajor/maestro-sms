@@ -276,7 +276,7 @@ export class PrivacyService {
   }
 
   async reviewErasure(p: Principal, id: string, decision: "APPROVED" | "REJECTED", note?: string) {
-    const { updated, fileKeys } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+    const { updated, fileKeys, outcome } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const req = await tx.erasureRequest.findFirst({ where: { id } });
       if (!req) throw new NotFoundException("Request not found");
       if (req.status !== "PENDING") throw new ForbiddenException("Request is already reviewed");
@@ -292,6 +292,8 @@ export class PrivacyService {
       // ROW + grade are retained as the school's record; only the student-supplied
       // file blob is erased, consistent with the governed-deletion model.
       let fileKeys: string[] = [];
+      let suppliedKeys: string[] = [];
+      let retainedVaultDocs = 0;
       if (decision === "APPROVED") {
         const withFiles = await tx.submission.findMany({
           where: { studentId: req.studentId, fileKey: { not: null } },
@@ -304,13 +306,78 @@ export class PrivacyService {
             data: { fileKey: null, fileName: null, fileUploaded: false },
           });
         }
+
+        // AND THE FILES THE FAMILY THEMSELVES SUPPLIED.
+        //
+        // Erasure used to reach assignment uploads and nothing else. A child's
+        // birth certificate, immunisation record and passport photograph are
+        // supplied through `DocumentSubmission` — more sensitive than any
+        // homework PDF, and left in object storage while the request was marked
+        // APPROVED and the audit row said the files were erased.
+        //
+        // Two ways they attach to one child, and BOTH are needed:
+        //   STUDENT               keyed directly on the pupil;
+        //   ADMISSION_APPLICATION keyed on the application, which carries
+        //                         `convertedStudentId` once the pupil is
+        //                         enrolled — the link that already exists so the
+        //                         two records are not orphans of each other.
+        //
+        // The declined-applicant sweep does NOT cover these: it purges REJECTED
+        // applications on a timer, so an enrolled pupil's documents were reached
+        // by no path at all.
+        const applications = await tx.admissionApplication.findMany({
+          where: { convertedStudentId: req.studentId },
+          select: { id: true },
+        });
+        const subjectFilter = [
+          { subjectKind: "STUDENT", subjectId: req.studentId },
+          ...(applications.length > 0
+            ? [{ subjectKind: "ADMISSION_APPLICATION", subjectId: { in: applications.map((a) => a.id) } }]
+            : []),
+        ];
+        const supplied = await tx.documentSubmission.findMany({
+          where: { OR: subjectFilter, storageKey: { not: null } },
+          select: { id: true, storageKey: true },
+        });
+        suppliedKeys = supplied.map((d) => d.storageKey).filter((k): k is string => Boolean(k));
+        if (supplied.length > 0) {
+          await tx.documentSubmission.updateMany({
+            where: { id: { in: supplied.map((d) => d.id) } },
+            data: { storageKey: null, originalName: null, contentType: null, sizeBytes: null },
+          });
+        }
+
+        // WHAT IS DELIBERATELY KEPT IS COUNTED, NOT PASSED OVER IN SILENCE.
+        //
+        // Document Vault entries — report cards, receipts, certificates — are the
+        // SCHOOL's own record of the pupil, kept on the same reasoning as the
+        // submission row and the grade beside it. That is a defensible decision
+        // and a bad secret: a family asking "have you deleted my child's records"
+        // deserves to be told what remains and why, and a controller signing the
+        // request off should see it before they sign.
+        retainedVaultDocs = await tx.document.count({ where: { studentId: req.studentId } });
       }
 
       await this.log(tx, p, `privacy.erasure.${decision.toLowerCase()}`, id, {
         studentId: req.studentId,
-        ...(decision === "APPROVED" ? { erasedSubmissionFiles: fileKeys.length } : {}),
+        ...(decision === "APPROVED"
+          ? {
+              erasedSubmissionFiles: fileKeys.length,
+              erasedSuppliedDocuments: suppliedKeys.length,
+              retainedVaultDocuments: retainedVaultDocs,
+              retainedReason: retainedVaultDocs > 0 ? "school record (report cards, receipts, certificates)" : null,
+            }
+          : {}),
       });
-      return { updated, fileKeys };
+      return {
+        updated,
+        fileKeys: [...fileKeys, ...suppliedKeys],
+        outcome: {
+          erasedSubmissionFiles: fileKeys.length,
+          erasedSuppliedDocuments: suppliedKeys.length,
+          retainedVaultDocuments: retainedVaultDocs,
+        },
+      };
     });
 
     // Delete the bytes after the tx commits — and RECORD what did not go.
@@ -348,7 +415,15 @@ export class PrivacyService {
         // and losing that because the follow-up record failed would be worse.
         .catch(() => this.logger.error(`erasure ${id}: could not record ${failedKeys.length} failed deletes`));
     }
-    return updated;
+    // THE PERSON WHO SIGNED IT OFF IS TOLD WHAT HAPPENED.
+    //
+    // The audit row carries this either way, and that is the record a regulator
+    // would read. But the controller approving the request is the one who has to
+    // answer the family, and until now the screen simply refreshed: no count of
+    // what was erased and no mention that the school's own vault records remain.
+    // "Report what you did not do", at the moment of deciding rather than only in
+    // a log somebody has to go and look for.
+    return { ...updated, ...outcome, storageFailures: failedKeys.length };
   }
 
   // --- helpers ---------------------------------------------------------------

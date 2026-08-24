@@ -19,18 +19,49 @@ const VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline
 export function ErasureReview({ requests }: { requests: ErasureRequest[] }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState<string | null>(null);
+  const [msg, setMsg] = React.useState<string | null>(null);
 
   const review = async (id: string, decision: "APPROVED" | "REJECTED") => {
     setBusy(id);
+    setMsg(null);
     const res = await fetch(`/api/sms/privacy/erasure/${id}/review`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ decision }),
     });
     setBusy(null);
-    if (res.ok) router.refresh();
+    if (res.ok) {
+      // Say what actually happened. A refresh alone left the controller with no
+      // idea whether a birth certificate had been erased or a report card kept —
+      // and they are the person who has to answer the family.
+      const out = (await res.json().catch(() => null)) as {
+        erasedSubmissionFiles?: number;
+        erasedSuppliedDocuments?: number;
+        retainedVaultDocuments?: number;
+        storageFailures?: number;
+      } | null;
+      if (out && decision === "APPROVED") {
+        const erased = (out.erasedSubmissionFiles ?? 0) + (out.erasedSuppliedDocuments ?? 0);
+        const parts = [`${erased} file${erased === 1 ? "" : "s"} erased`];
+        if ((out.retainedVaultDocuments ?? 0) > 0) {
+          parts.push(
+            `${out.retainedVaultDocuments} school record${out.retainedVaultDocuments === 1 ? "" : "s"} retained ` +
+              `(report cards, receipts, certificates)`,
+          );
+        }
+        if ((out.storageFailures ?? 0) > 0) parts.push(`${out.storageFailures} could NOT be deleted — see the audit log`);
+        setMsg(parts.join("; ") + ".");
+      }
+      router.refresh();
+    }
   };
 
   return (
     <div className="space-y-2">
+      {/* What the decision actually did — including what it deliberately kept. */}
+      {msg && (
+        <p className="rounded-md border bg-muted/40 p-2 text-sm text-muted-foreground" role="status">
+          {msg}
+        </p>
+      )}
       {requests.map((r) => (
         <Card key={r.id}>
           <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
