@@ -1410,6 +1410,30 @@ Live: signed webhook to a DISABLED school -> HTTP 201, zero payments, ERROR
 logged, owner alerted (delivered, since the platform org is ACTIVE); school
 switched back on, same charge replayed -> POSTED.
 
+### Two surfaces the guard cannot reach, and both are now asked
+`PermissionGuard` sees HTTP requests. Two ways in are not HTTP-shaped and had
+their own answer to "may this tenant be here" — neither of which asked.
+**A WEBSOCKET UPGRADE** verifies the ws-ticket and expands roles to permissions;
+that is all. A ticket minted moments before the switch still opened a socket,
+and an ALREADY-OPEN one pushed live state for as long as it stayed connected,
+because a socket that never reconnects is never re-authorised. Hence TWO checks
+in `GameSocketGateway`: at the handshake, and inside `pushView` BEFORE the
+durable read — the socket's equivalent of the guard running per request. Closes
+4403 with `SCHOOL_SUSPENDED_CODE`; super_admin exempt at both, same reason as
+the guard. Measured live: the same ticket gets `NOT_FOUND` while the school is
+on, `SCHOOL_SUSPENDED` + close 4403 while it is off, and `NOT_FOUND` again once
+it is switched back on.
+**A SIGNED UPLOAD LINK** (`/public/documents/*`) is `@Public` and authorised by
+the token alone, so a family holding one issued before the switch went on
+sending a child's birth certificate into a school that could not open it — and
+was told each time that it had been received. All three routes resolve their
+subject through `subjectOf`, so the check lives there. // GOTCHA: the message is
+deliberately DIFFERENT from the bad-token one. A bad token is answered vaguely
+because the asker is unauthenticated and which-check-failed is information; this
+family holds a VALID link, the suspension is not a secret from them, and
+"not valid or has expired" sends them chasing a replacement that cannot help.
+The forged-token path still gets the vague message — verified live alongside.
+
 ## Repo workflow & gotchas
 - DB setup order: `prisma migrate deploy` → `pnpm --filter @sms/db rls` →
   `prisma db seed` (or `pnpm --filter @sms/db setup`). RLS lives in `prisma/rls/`,

@@ -40,6 +40,8 @@ import {
 } from "@sms/game-transport";
 import type { Principal } from "../integrity/integrity.foundation";
 import { verifyingSecrets } from "../auth/secrets";
+import { SchoolStatusService } from "../foundation/school-status.service";
+import { SCHOOL_SUSPENDED_CODE } from "@sms/types";
 import { RolePermissionsService } from "../foundation/role-permissions.service";
 import { GameService as DurableGameService } from "../game/game.service";
 import { RingService as DurableRingService } from "../game/ring.service";
@@ -65,6 +67,7 @@ export class GameSocketGateway implements OnApplicationShutdown {
     private readonly durableUltimate: UltimateService,
     private readonly events: GameEventsService,
     private readonly rolePerms: RolePermissionsService,
+    private readonly schoolStatus: SchoolStatusService,
   ) {}
 
   // One process-local instance per mode (the shared transport-agnostic core).
@@ -124,6 +127,24 @@ export class GameSocketGateway implements OnApplicationShutdown {
       } catch (err) {
         send({ type: "error", code: "UNAUTHORIZED", message: err instanceof AuthError ? err.message : "unauthorized" });
         socket.close(4401, "unauthorized");
+        return;
+      }
+
+      // A SWITCHED-OFF SCHOOL REACHES NOTHING, INCLUDING OVER A SOCKET.
+      //
+      // The PermissionGuard runs on HTTP requests; a WebSocket upgrade never
+      // touches it, so this path had its own answer to "is this tenant allowed
+      // to be here" — and did not ask. A ticket minted moments before the
+      // switch was thrown still opened a socket, and an ALREADY-OPEN one went
+      // on pushing live state indefinitely, because a socket that never
+      // reconnects is never re-authorised.
+      //
+      // super_admin is exempt here for the same reason it is exempt in the
+      // guard: the lever that switches a school back on must not live inside
+      // the thing it controls.
+      if (!principal.roles.includes("super_admin") && !(await this.schoolStatus.isActive(principal.schoolId))) {
+        send({ type: "error", code: SCHOOL_SUSPENDED_CODE, message: "This school's access is currently suspended." });
+        socket.close(4403, "school suspended");
         return;
       }
 
@@ -221,6 +242,17 @@ export class GameSocketGateway implements OnApplicationShutdown {
     const pushView = async (): Promise<void> => {
       if (closed) return;
       try {
+        // Re-asked on every push, not only at the handshake: this is the
+        // socket's equivalent of the guard running on every request, and it is
+        // what actually closes a connection that was already open when the
+        // school was switched off. Cached (15s, invalidated on the operator
+        // write), so it costs a map lookup on the ordinary path.
+        if (!p.roles.includes("super_admin") && !(await this.schoolStatus.isActive(p.schoolId))) {
+          send({ type: "error", code: SCHOOL_SUSPENDED_CODE, message: "This school's access is currently suspended." });
+          closed = true;
+          socket.close(4403, "school suspended");
+          return;
+        }
         const game = await reader.read(p, gameId);
         send({ type: "state", game });
       } catch (err) {

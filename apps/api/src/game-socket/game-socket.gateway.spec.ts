@@ -42,7 +42,7 @@ interface Getters {
   ultimate?: jest.Mock;
 }
 
-function setup(getters: Getters = {}) {
+function setup(getters: Getters = {}, schoolIsActive = true) {
   const events = new GameEventsService();
   const durableGames = { getGame: getters.game ?? jest.fn() };
   const durableRings = { getRing: getters.ring ?? jest.fn() };
@@ -57,6 +57,9 @@ function setup(getters: Getters = {}) {
     durableUltimate as never,
     events,
     { forRoles: jest.fn().mockResolvedValue([]) } as never,
+    // A socket is re-authorised on every push now: a switched-off school
+    // reaches nothing, and a WebSocket upgrade never touches PermissionGuard.
+    { isActive: jest.fn().mockResolvedValue(schoolIsActive) } as never,
   );
   const socket = new FakeSocket();
   const sent: Frame[] = [];
