@@ -1836,7 +1836,21 @@ queue (privileged client) → REVIEW/SHORTLIST/REJECT (no step-up) or AWARD
 (step-up). An AWARD disburses through the FEES ledger: a new
 `PaymentKind.SCHOLARSHIP` payment posted against the student's open invoice in
 their own school (capped at balance; invoice → PARTIALLY_PAID/PAID) — integer
-kobo, audited, `disbursementPaymentId` links back. Program CRUD + review + award
+kobo, audited, `disbursementPaymentId` links back. // GOTCHA: an award is denominated in the
+PLATFORM's currency and the invoice it lands on is the SCHOOL's, which is a
+free-form ISO code — and nothing compared them, so ₦50,000 (5,000,000 kobo)
+posted against a GBP invoice credited £50,000 and against a franc invoice
+5,000,000 francs, marking it PAID while the books recorded fifty thousand naira.
+`disburseFeesCredit` now refuses a mismatch BEFORE the write, the same guard
+`InvoiceSettlementService.applyOnlinePayment` makes for every gateway and for
+the same reason: a refusal leaves the invoice open and is recoverable, a posting
+is not. The award still stands (a decision is not thrown away over a posting
+problem) and the refusal logs at ERROR naming both currencies, because nothing
+revisits a settled invoice. The REVERSAL needed no change — it reads its amount
+off the credit payment row on the same invoice. Second defect on the same path:
+the family was told "the award has been credited against the student's school
+fees" whether or not anything posted; the message now follows the outcome, and
+the audit row carries WHY nothing posted rather than only `disbursed: 0`. Program CRUD + review + award
 all audited in the operator's own tenant. Verified: 8 scoping unit tests + the
 `scholarship_application` RLS cross-tenant case (coverage gate green) + live
 end-to-end (create→apply→consent-gate→submit→signals→cross-tenant review→award→

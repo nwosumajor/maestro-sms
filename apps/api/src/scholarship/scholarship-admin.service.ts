@@ -31,6 +31,22 @@ import { Inject } from "@nestjs/common";
 import { toMinor } from "../common/money";
 import { formatMoney } from "@sms/types";
 
+/**
+ * THE CURRENCY A SCHOLARSHIP IS DENOMINATED IN.
+ *
+ * A scholarship is funded by the PLATFORM, so its award is a platform figure —
+ * the operator console's field was literally called `nairaToKobo`. The invoice
+ * it lands on belongs to a SCHOOL, whose currency may be any of the catalogue.
+ * Nothing compared the two.
+ */
+const AWARD_CURRENCY = "NGN";
+
+/** What happened when an award tried to reach the fees ledger. */
+type DisbursementOutcome =
+  | { ok: true; paymentId: string; amountMinor: number }
+  | { ok: false; reason: "no_open_invoice" | "nothing_outstanding" }
+  | { ok: false; reason: "currency_mismatch"; invoiceCurrency: string };
+
 interface ProgramInput {
   title: string;
   description?: string | null;
@@ -263,7 +279,7 @@ export class ScholarshipAdminService {
       throw new BadRequestException("This application has already been finalised");
     }
 
-    let disbursement: { paymentId: string; amountMinor: number } | null = null;
+    let disbursement: DisbursementOutcome | null = null;
     let nextStatus: string = app.status;
     if (body.action === "REVIEW") nextStatus = "UNDER_REVIEW";
     else if (body.action === "SHORTLIST") nextStatus = "SHORTLISTED";
@@ -357,17 +373,45 @@ export class ScholarshipAdminService {
       if ((program?.awardKind ?? "FEES_CREDIT") === "FEES_CREDIT") {
         disbursement = await this.disburseFeesCredit(db, app.schoolId, app.studentId, awardMinor, app.id, p.userId);
       }
-      if (disbursement) {
+      if (disbursement?.ok) {
         await db.scholarshipApplication.update({ where: { id }, data: { disbursementPaymentId: disbursement.paymentId } });
       }
-      await this.auditOwn(p, "scholarship.award", id, { targetSchoolId: app.schoolId, studentId: app.studentId, awardMinor, position, disbursed: disbursement?.amountMinor ?? 0 });
+      // The audit row records WHY nothing was posted, not just that nothing was.
+      // "disbursed: 0" is the same entry for a family with no open invoice and
+      // for an award refused because it was denominated in another currency, and
+      // only one of those needs somebody to act.
+      await this.auditOwn(p, "scholarship.award", id, {
+        targetSchoolId: app.schoolId,
+        studentId: app.studentId,
+        awardMinor,
+        position,
+        disbursed: disbursement?.ok ? disbursement.amountMinor : 0,
+        notDisbursedReason: disbursement && !disbursement.ok ? disbursement.reason : null,
+      });
+      if (disbursement && !disbursement.ok && disbursement.reason === "currency_mismatch") {
+        // ERROR, not warn: an award has been granted and the money has not moved.
+        // Recoverable — the application stands and the credit can be posted by
+        // hand or after the award is re-denominated — but nothing else will
+        // notice, so it must be loud where the platform's logs are read.
+        this.logger.error(
+          `scholarship ${id}: award of ${formatMoney(awardMinor, AWARD_CURRENCY)} not posted — ` +
+            `the student's invoice is in ${disbursement.invoiceCurrency}, and a scholarship is ` +
+            `denominated in ${AWARD_CURRENCY}. Post the credit manually in the school's own currency.`,
+        );
+      }
       const posLabel = position === 1 ? "1st" : position === 2 ? "2nd" : "3rd";
       await this.notifyFamily(
         p,
         app.schoolId,
         app.studentId,
         `🎉 Scholarship AWARDED (${posLabel} position) — “${program?.title ?? "Scholarship"}”`,
-        `Congratulations on finishing in ${posLabel} position! The award has been credited against the student's school fees.`,
+        // Never promise a credit that did not post. "It has been credited" sent a
+        // family to check a balance that had not moved, and the two cases where
+        // it legitimately does not post — no open invoice, nothing outstanding —
+        // are good news that reads as a mistake when described wrongly.
+        disbursement?.ok
+          ? `Congratulations on finishing in ${posLabel} position! ${formatMoney(disbursement.amountMinor, AWARD_CURRENCY)} has been credited against the student's school fees.`
+          : `Congratulations on finishing in ${posLabel} position! The award has been granted; the school will apply it to the student's fees.`,
       );
       const [row] = await this.listApplicationById(db, id);
       return row;
@@ -821,6 +865,15 @@ export class ScholarshipAdminService {
   /** Post a SCHOLARSHIP payment against the student's most recent open invoice
    *  (capped at the outstanding balance so it never over-credits). Updates the
    *  invoice status. Returns null if there's no open invoice to credit. */
+  /**
+   * Post the award as a fees credit — or say why it could not.
+   *
+   * A NULL return used to mean "no open invoice", and the caller treated it the
+   * same as success: it told the family "the award has been credited against
+   * the student's school fees" either way. It now reports which of the three
+   * things happened, so the family is told the truth and the operator learns
+   * about the one case that needs a person.
+   */
   private async disburseFeesCredit(
     db: PrismaClient,
     schoolId: string,
@@ -828,13 +881,30 @@ export class ScholarshipAdminService {
     awardMinor: number,
     applicationId: string,
     actorId: string,
-  ): Promise<{ paymentId: string; amountMinor: number } | null> {
+  ): Promise<DisbursementOutcome> {
     const invoice = await db.invoice.findFirst({
       where: { schoolId, studentId, status: { in: ["ISSUED", "PARTIALLY_PAID"] } },
       include: { payments: true },
       orderBy: { createdAt: "desc" },
     });
-    if (!invoice) return null;
+    if (!invoice) return { ok: false, reason: "no_open_invoice" };
+    // THE CURRENCY MUST MATCH BEFORE ANYTHING POSTS.
+    //
+    // `awardMinor` is a platform figure in kobo; `invoice.currency` is the
+    // school's and can be any code in the catalogue. Posting 5,000,000 kobo
+    // (₦50,000) against a GBP invoice credits £50,000, and against a franc
+    // invoice — which has no minor unit at all — 5,000,000 francs. In every
+    // case the family's fees are cleared and the platform's books record an
+    // award a hundred or a thousand times smaller.
+    //
+    // This is the guard `InvoiceSettlementService.applyOnlinePayment` already
+    // makes for every gateway, and the reason it takes a REQUIRED currency:
+    // the comparison happens BEFORE the write, because a refusal leaves the
+    // invoice untouched and is recoverable, while a posting is not — nothing
+    // in the system revisits a settled invoice.
+    if (invoice.currency !== AWARD_CURRENCY) {
+      return { ok: false, reason: "currency_mismatch", invoiceCurrency: invoice.currency };
+    }
     // IDEMPOTENT ON THE APPLICATION, because the claim above cannot help across
     // a crash. If the process dies after this payment is written and before the
     // application records it, the row still reads QUALIFIED and the next award
@@ -860,12 +930,12 @@ export class ScholarshipAdminService {
       (pay) => pay.reference === `SCHOLARSHIP-REVERSAL:${applicationId}` && pay.status === "POSTED",
     );
     const outstanding = credited[reversed.length];
-    if (outstanding) return { paymentId: outstanding.id, amountMinor: outstanding.amountMinor };
+    if (outstanding) return { ok: true, paymentId: outstanding.id, amountMinor: outstanding.amountMinor };
     const paid = invoice.payments
       .filter((pay) => pay.status === "POSTED")
       .reduce((s, pay) => s + (pay.kind === "REFUND" ? -pay.amountMinor : pay.amountMinor), 0);
     const balance = Math.max(0, invoice.totalMinor - paid);
-    if (balance <= 0) return null;
+    if (balance <= 0) return { ok: false, reason: "nothing_outstanding" };
     const credit = Math.min(awardMinor, balance);
     const payment = await db.payment.create({
       data: {
@@ -885,7 +955,7 @@ export class ScholarshipAdminService {
       where: { id: invoice.id },
       data: { status: newPaid >= invoice.totalMinor ? "PAID" : "PARTIALLY_PAID" },
     });
-    return { paymentId: payment.id, amountMinor: credit };
+    return { ok: true, paymentId: payment.id, amountMinor: credit };
   }
 
   private async listApplicationById(db: PrismaClient, id: string): Promise<ScholarshipApplicationDto[]> {

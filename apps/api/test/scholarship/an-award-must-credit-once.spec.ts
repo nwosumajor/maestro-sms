@@ -39,7 +39,13 @@ function make(opts: { existingPayments?: Array<Record<string, unknown>>; claimCo
   const db = {
     invoice: {
       findFirst: jest.fn().mockResolvedValue({
-        id: "inv-1", totalMinor: 1_000_000, payments: opts.existingPayments ?? [],
+        // `currency` is NOT NULL DEFAULT 'NGN' on the invoice table, so a row
+        // without one models something the database cannot produce. It was
+        // missing here, and the currency guard added later (see
+        // an-award-in-the-wrong-currency) correctly read `undefined` as "not
+        // the award's currency" and refused to post — failing closed, which is
+        // the right behaviour and broke only this fixture.
+        id: "inv-1", currency: "NGN", totalMinor: 1_000_000, payments: opts.existingPayments ?? [],
       }),
       update: jest.fn().mockResolvedValue({}),
     },
@@ -79,7 +85,7 @@ describe("disbursing an award", () => {
     expect(created).toHaveLength(0);
     // Returns the payment that already exists, so the application still records
     // which one paid it rather than losing the link.
-    expect(out).toEqual({ paymentId: "pay-old", amountMinor: 500_000 });
+    expect(out).toEqual({ ok: true, paymentId: "pay-old", amountMinor: 500_000 });
   });
 
   it("credits again once the award has been TAKEN BACK", async () => {
