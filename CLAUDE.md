@@ -1412,6 +1412,31 @@ regional read replicas → Aurora write forwarding (still one writer) → tenant
 pinning. Multi-master is deliberately not on that list. See
 `docs/RUNBOOK-INCIDENT-RESPONSE.md` §5.x and §5.y.
 
+### A question bank outlives the teacher who wrote it
+Asked directly: a subject teacher builds CBT banks over years and resigns — does
+the school still have them? **Yes, and structurally rather than by luck: bank
+visibility is decided by the READER's role, never by the bank's author.**
+`listBanks` returns `{}` (every bank) to anyone school-wide or holding
+`cbt.review`; `getBankQuestions` shows the questions to the same people;
+`canTouchBank` returns true for school-wide roles BEFORE it looks at authorship.
+principal and school_admin hold both `cbt.manage` and `cbt.review`. Nothing on
+the read path joins the author's `user` row, so `status = EXITED` cannot hide a
+bank — and there is no FK from `createdById` to `user` at all, so even a hard
+delete could not cascade one away. **And the next teacher of the subject inherits
+it with no administrative act**, which is why a bank must name its subject.
+Verified live: bank authored by `teacher@demo.school`, that user set to EXITED,
+principal / school_admin / head_teacher each still list it and open its
+questions (HTTP 200).
+Pinned by `a-question-bank-outlives-its-author.spec.ts`, because a later tidy-up
+would break it without meaning to — adding `assertStillHere` to a read path, or
+joining the author to show a name, would each quietly remove a school's own exam
+material. Mutation-validated both ways.
+// GOTCHA: what WAS missing is that nobody was told. `StaffHandoverService` listed
+eleven duties and not the banks, so a school kept the material and had no idea it
+existed. Banks are now a twelfth entry — the only ASSET on a list of obligations,
+labelled "still readable by leadership" so the notice cannot be misread as a
+warning that access is at risk.
+
 ### A leaver's duties are named, never silently reassigned
 `StaffHandoverService` (`GET /hr/staff/:userId/handover`, `hr.read`; panel on
 `/hr/staff/[userId]`) lists what a member of staff still holds across ELEVEN

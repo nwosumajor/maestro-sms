@@ -430,7 +430,8 @@ export interface OpenDutyDto {
     | "MEETING_SLOT"
     | "HOSTEL"
     | "VEHICLE"
-    | "APPRAISAL_REVIEWER";
+    | "APPRAISAL_REVIEWER"
+    | "QUESTION_BANK";
   label: string;
   count: number;
   /** A few examples, for a handover conversation. Never the whole set. */

@@ -67,7 +67,7 @@ export class StaffHandoverService {
     const today = schoolToday(timezone);
     const user = (await tx.user.findFirst({ where: { id: userId }, select: { name: true } })) as { name: string } | null;
 
-    const [classes, subjects, lessons, covers, invigilations, tasks, cases, slots, hostels, vehicles, appraisals] =
+    const [classes, subjects, lessons, covers, invigilations, tasks, cases, slots, hostels, vehicles, appraisals, banks] =
       await Promise.all([
         tx.classTeacher.findMany({ where: { teacherId: userId }, select: { classId: true } }),
         tx.classSubjectTeacher.findMany({ where: { teacherId: userId }, select: { classId: true, subjectId: true } }),
@@ -94,6 +94,20 @@ export class StaffHandoverService {
           where: { reviewerId: userId, status: { not: "ACKNOWLEDGED" } },
           select: { id: true },
         }),
+        // QUESTION BANKS THEY AUTHORED.
+        //
+        // Not a duty — nobody has to turn up for a question bank — but the one
+        // thing on this list that is an ASSET rather than an obligation, and it
+        // belongs here for the same reason the rest do: the school should know
+        // what it has before the person who made it stops answering email.
+        //
+        // ACCESS IS NOT AT RISK and this notice does not imply it is: bank
+        // visibility is decided by the READER's role, so a principal or school
+        // admin sees every bank in the school whoever wrote it, and the next
+        // teacher of that subject inherits it automatically. What is at risk is
+        // that nobody KNOWS it exists — an exam bank for a subject whose author
+        // has gone is only findable by somebody who thinks to look.
+        tx.cbtQuestionBank.findMany({ where: { createdById: userId }, select: { name: true } }),
       ]);
 
     const classNames = await this.names(tx, [
@@ -129,6 +143,12 @@ export class StaffHandoverService {
         (cases as Array<{ complaint: { subject: string } }>).map((c) => c.complaint.subject), false),
       duty("HOSTEL", "Hostels they are warden of", hostels.map((h: { name: string }) => h.name), false),
       duty("VEHICLE", "Vehicles they drive", vehicles.map((v: { name: string }) => v.name), false),
+      duty(
+        "QUESTION_BANK",
+        "CBT question banks they wrote (still readable by leadership)",
+        banks.map((b: { name: string }) => b.name),
+        false,
+      ),
       duty("APPRAISAL_REVIEWER", "Appraisals they have not finished as reviewer",
         appraisals.map(() => "in progress"), false),
     ].filter((d) => d.count > 0);

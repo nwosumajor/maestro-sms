@@ -48,6 +48,12 @@ function makeService(rows: Partial<Record<string, unknown[]>> = {}) {
     hostel: table("hostel"),
     vehicle: table("vehicle"),
     appraisal: table("appraisal"),
+    // Question banks they wrote. Not a duty — nobody turns up for a question
+    // bank — but the one ASSET on the list, and the school should know it has
+    // it before the author stops answering email. Access is never at risk:
+    // bank visibility follows the READER's role, so leadership sees every bank
+    // whoever wrote it (see a-question-bank-outlives-its-author).
+    cbtQuestionBank: table("cbtQuestionBank"),
   } as unknown as TenantTx;
   const svc = Object.create(StaffHandoverService.prototype) as StaffHandoverService;
   Object.assign(svc, {
