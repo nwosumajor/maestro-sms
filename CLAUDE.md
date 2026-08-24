@@ -1076,6 +1076,28 @@ the same createdAt index: the scan is over the CALLER'S OWN inbox, not the table
 — 0.9 ms for an ordinary one. **Measure plans as `major_user` with
 `app.current_school_id` set, never as `postgres`.**
 
+### A list that grows with a school's LIFETIME, not its size
+`listInvoices` pages with `ORDER BY "createdAt" DESC, id DESC LIMIT n`, and
+nothing served that order — so the finance invoice list scanned every invoice the
+school had ever raised and top-N sorted it. Correct, and O(lifetime): fine in
+year one, slow in year five, and the growth is invisible because it tracks how
+long a school has been on the platform rather than how big it is.
+Measured as the APPLICATION role with RLS in force (never as `postgres`, which
+bypasses row security and plans differently), on 45,000 invoices across 2,001
+pupils: default finance page **40.1 ms / 986 buffers -> 0.10 ms / 4 buffers**;
+status-filtered 38.1 ms -> 0.19 ms. The new plan is O(page size) — it walks the
+index and stops at the limit. Migration `20270101000000`.
+// GOTCHA: ONE index, not two. A `(schoolId, status, createdAt DESC, id DESC)`
+variant was built and measured alongside and the planner NEVER chose it, not
+even for a status matching 200 of 45,000 rows where it should have won. An index
+nothing selects is storage and write amplification on a hot table, which is
+exactly what the three trigram indexes dropped in `20261228000000` were. Measure
+the variant before adding it.
+// GOTCHA: the first synthetic dataset gave ONE pupil all 5,000 invoices, and the
+parent's own list then seq-scanned — correctly, since the index had no
+selectivity. A volume test with an unrealistic DISTRIBUTION measures the wrong
+thing; redistributed across 2,001 pupils it is an index scan at 0.28 ms.
+
 ### The replica answers a read only if it can answer it correctly
 The read/write split routes 103 paths to `DATABASE_REPLICA_URL`, and Terraform
 already provisions replicas and wires that variable into ECS — with nothing

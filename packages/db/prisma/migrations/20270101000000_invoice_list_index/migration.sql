@@ -1,0 +1,28 @@
+-- The finance invoice list read every invoice the school had ever raised.
+--
+-- `listInvoices` pages with `ORDER BY "createdAt" DESC, id DESC LIMIT n`. With no
+-- index serving that order, Postgres scanned the whole table and top-N sorted it
+-- — correct, and O(the school's LIFETIME invoice count) on every page load. That
+-- is the shape that is fine for a year and slow in five: it grows with how long
+-- a school has been on the platform, not with how big the school is.
+--
+-- Measured as the APPLICATION role with RLS in force (never as postgres — a
+-- superuser bypasses row security and gets a different plan), on 45,000 invoices
+-- across 2,001 pupils:
+--
+--   default finance page   40.1 ms, 986 buffers   ->  0.10 ms, 4 buffers
+--   with a status filter   38.1 ms, 980 buffers   ->  0.19 ms, 52 buffers
+--
+-- The new plan is O(page size): it walks the index and stops at the limit.
+--
+-- ONE index, not two. A `("schoolId", status, "createdAt" DESC, id DESC)` variant
+-- was built and measured alongside, and the planner NEVER chose it — not even
+-- with a status matching 200 of 45,000 rows, where it should have won. An index
+-- nothing selects is storage and write amplification on a hot table for nothing,
+-- which is exactly what the three trigram indexes dropped in 20261228000000 were.
+--
+-- The DESC/DESC ordering matches the query's own ORDER BY so the scan needs no
+-- sort; a plain ascending index would still work (btrees read backwards) but this
+-- also serves the keyset cursor `(createdAt, id)` the pager uses.
+CREATE INDEX "invoice_schoolId_createdAt_id_idx"
+  ON "invoice" ("schoolId", "createdAt" DESC, "id" DESC);

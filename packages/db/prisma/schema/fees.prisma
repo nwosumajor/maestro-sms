@@ -110,6 +110,10 @@ model Invoice {
   @@index([schoolId, studentId])
   @@index([schoolId, status])
   @@map("invoice")
+  // Serves the paged finance list (ORDER BY createdAt DESC, id DESC) and its
+  // keyset cursor. Without it the list scanned every invoice the school had
+  // ever raised: 40 ms at 45,000 rows, growing with the school's lifetime.
+  @@index([schoolId, createdAt(sort: Desc), id(sort: Desc)])
 }
 
 model InvoiceLineItem {
