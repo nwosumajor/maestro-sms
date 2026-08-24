@@ -27,7 +27,14 @@ const traitsSchema = z.object({
     .max(60),
 });
 
-@RequireModule(MODULES.DOCUMENTS)
+// GRADEBOOK, not DOCUMENTS.
+//
+// A report card is the gradebook's OUTPUT. Gating it on the vault it happens to
+// be filed in meant a school with GRADEBOOK could record marks all term and not
+// print a report — the input included and the output withheld. The vault write
+// is best-effort and stays that way: a school without DOCUMENTS still gets the
+// PDF, it just does not get a stored copy to re-download.
+@RequireModule(MODULES.GRADEBOOK)
 @Controller("reportcards")
 export class ReportCardController {
   constructor(

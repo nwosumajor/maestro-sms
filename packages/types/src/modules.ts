@@ -93,30 +93,66 @@ export const PLANS = {
 export type Plan = (typeof PLANS)[keyof typeof PLANS];
 
 // Ordered low -> high; each tier is CUMULATIVE (includes everything below it).
+//
+// THE ENTRY TIER IS MONETISED BY TRANSACTIONS, NOT BY SUBSCRIPTION.
+//
+// FEES used to sit in PREMIUM, which meant a school on the entry tier could not
+// raise an invoice — and the platform's per-transaction revenue (the convenience
+// fee on the Paystack split) is earned only where fees are collected. So the
+// cheapest schools, the ones there are most of, generated NO transaction revenue
+// at all, and the module that would have earned it was the upsell. Billing is
+// also the stickiest data in the product: a school with two years of ledger here
+// does not migrate.
+//
+// DOCUMENTS moved down with it for a coherence reason rather than a commercial
+// one. Report cards and receipts are written INTO the vault by the gradebook and
+// the fees ledger, and `reportcard.controller.ts` is gated on DOCUMENTS — so a
+// STANDARD school had a gradebook it could record marks in and could not print a
+// report card from. A tier that includes the input and withholds the output is
+// not a tier, it is a bug with a price.
 const STANDARD_MODULES: ModuleKey[] = [
   MODULES.LMS, MODULES.GRADEBOOK, MODULES.ATTENDANCE, MODULES.TIMETABLE, MODULES.MESSAGING, MODULES.CALENDAR,
-  MODULES.SIS, MODULES.LIBRARY,
+  MODULES.SIS, MODULES.LIBRARY, MODULES.FEES, MODULES.DOCUMENTS,
 ];
+// OVERSIGHT, ASSESSMENT AND ENGAGEMENT — the tier a school buys when it wants to
+// know how it is doing and to hold the line on quality.
+//
+// CBT joins INTEGRITY here. They are one job seen twice — catching cheating in
+// coursework and running the exam itself — and they were three tiers apart, so a
+// school could buy the detection engine and not the exam hall it most applies
+// to. GAMES joins the engagement group (polls, discussion, forms) where it
+// belongs; bundling a games platform with payroll made ENTERPRISE impossible to
+// describe in a sentence.
 const PREMIUM_ADDS: ModuleKey[] = [
-  MODULES.FEES, MODULES.DOCUMENTS, MODULES.WORKFLOW, MODULES.ANALYTICS, MODULES.INTEGRITY,
-  MODULES.TASK, MODULES.POLL, MODULES.DISCUSSION, MODULES.FORM, MODULES.CERTIFICATE,
+  MODULES.WORKFLOW, MODULES.ANALYTICS, MODULES.INTEGRITY, MODULES.CBT,
+  MODULES.TASK, MODULES.POLL, MODULES.DISCUSSION, MODULES.FORM, MODULES.GAMES,
 ];
+// THE WHOLE PUPIL, AND THE PHYSICAL SCHOOL — the lifecycle from application to
+// alumnus, plus the buildings and vehicles it happens in. CERTIFICATE joins it:
+// an ID card is a step in that lifecycle, and it now sits beside the admissions
+// record that starts it and the alumni record that ends it rather than among the
+// engagement tools.
 const ULTIMATE_ADDS: ModuleKey[] = [
-  MODULES.ADMISSIONS, MODULES.HOSTEL, MODULES.TRANSPORT, MODULES.DISCIPLINE, MODULES.ALUMNI,
+  MODULES.ADMISSIONS, MODULES.CERTIFICATE, MODULES.HOSTEL, MODULES.TRANSPORT, MODULES.DISCIPLINE, MODULES.ALUMNI,
 ];
-// Group Console + CBT are bundled ONLY here — for every other tier they remain
-// pure paid add-ons (per-school overrides), part of Enterprise's premium pitch.
-const ENTERPRISE_ADDS: ModuleKey[] = [MODULES.HR, MODULES.GAMES, MODULES.GROUP, MODULES.CBT];
+// RUNNING A SCHOOL AS A BUSINESS: payroll, and oversight across campuses. Two
+// modules, one sentence. It used to be four that shared nothing — payroll, a
+// games platform, a multi-campus console and an exam hall — which meant a
+// single-campus school that wanted computer-based testing had to buy payroll and
+// a group console it would never open.
+const ENTERPRISE_ADDS: ModuleKey[] = [MODULES.HR, MODULES.GROUP];
 
 /** The module bundle each named tier includes (before per-school overrides). */
 export const PLAN_MODULES: Record<Plan, ModuleKey[]> = {
-  // Core teaching essentials for any school.
+  // Teach, register, bill. Everything a school needs to open on Monday, priced
+  // low on purpose — this tier earns through the fee-collection take-rate.
   STANDARD: STANDARD_MODULES,
-  // Adds money handling, engagement, and quality tooling.
+  // Oversight, assessment and engagement: know how you are doing, and hold the
+  // line on quality.
   PREMIUM: [...STANDARD_MODULES, ...PREMIUM_ADDS],
-  // Adds facilities + student-lifecycle modules.
+  // The whole pupil, and the physical school.
   ULTIMATE: [...STANDARD_MODULES, ...PREMIUM_ADDS, ...ULTIMATE_ADDS],
-  // The complete enterprise suite (HR/payroll + games + group console + CBT).
+  // Running a school as a business: payroll, and oversight across campuses.
   ENTERPRISE: [...STANDARD_MODULES, ...PREMIUM_ADDS, ...ULTIMATE_ADDS, ...ENTERPRISE_ADDS],
 };
 
@@ -334,10 +370,15 @@ export type MultiCurrencyPlanPricing = Partial<Record<Currency, PlanPricing>>;
  * checkout, the public landing page) reads the merged result.
  */
 export const PLAN_PRICING: PlanPricing = {
-  STANDARD: { perSeatMonthlyMinor: 20_000 }, // ₦200 / student / month
-  PREMIUM: { perSeatMonthlyMinor: 35_000 }, // ₦350 / student / month
-  ULTIMATE: { perSeatMonthlyMinor: 50_000 }, // ₦500 / student / month
-  ENTERPRISE: { perSeatMonthlyMinor: 75_000 }, // ₦750 / student / month
+  // ALIGNED WITH WHAT IS ACTUALLY CHARGED. These are the FALLBACK used when no
+  // operator `plan_price` row exists for a currency — and they had drifted far
+  // below the live NGN prices (₦200/350/500/750 against ₦525/750/975/1,250), so
+  // opening a NEW currency would have quoted roughly half the real price until
+  // somebody noticed. A default nobody reconciles is a default that undercharges.
+  STANDARD: { perSeatMonthlyMinor: 52_500 }, // ₦525 / student / month
+  PREMIUM: { perSeatMonthlyMinor: 75_000 }, // ₦750 / student / month
+  ULTIMATE: { perSeatMonthlyMinor: 97_500 }, // ₦975 / student / month
+  ENTERPRISE: { perSeatMonthlyMinor: 125_000 }, // ₦1,250 / student / month
 };
 
 /** USD defaults, in cents. */

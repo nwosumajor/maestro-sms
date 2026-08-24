@@ -6,6 +6,7 @@
 // and 503s when the privileged client is unconfigured.
 
 import { ServiceUnavailableException } from "@nestjs/common";
+import { PLAN_PRICING } from "@sms/types";
 import { PlatformAnalyticsService } from "../../src/operator/platform-analytics.service";
 import type { Principal } from "../../src/integrity/integrity.foundation";
 
@@ -86,11 +87,15 @@ describe("PlatformAnalyticsService", () => {
     expect(out.recentPayments[0].schoolName).toBe("Alpha");
 
     // --- extended decision-grade metrics ---
-    // s1 STANDARD active, 10 seats × ₦200/seat/mo (20000 kobo) = 200000 MRR; s2 no-sub = not paying.
-    expect(out.mrr.totalMinor).toBe(200000);
-    expect(out.mrr.byPlan.STANDARD).toBe(200000);
+    // s1 STANDARD active, 10 seats at the STANDARD per-seat rate; s2 no-sub = not
+    // paying. DERIVED from PLAN_PRICING rather than a typed-in figure — the rate
+    // moved when the code fallback was brought back in line with what is actually
+    // charged, and a hard-coded 200000 turned a pricing change into a failure in
+    // an analytics test that is not about pricing at all.
+    expect(out.mrr.totalMinor).toBe(10 * PLAN_PRICING.STANDARD.perSeatMonthlyMinor);
+    expect(out.mrr.byPlan.STANDARD).toBe(10 * PLAN_PRICING.STANDARD.perSeatMonthlyMinor);
     expect(out.mrr.payingSchools).toBe(1);
-    expect(out.mrr.arpaMinor).toBe(200000);
+    expect(out.mrr.arpaMinor).toBe(10 * PLAN_PRICING.STANDARD.perSeatMonthlyMinor);
     // funnel: 3 requests total, 1 approved, 2 provisioned schools, 1 paying.
     expect(out.funnel).toEqual({ requests: 3, approved: 1, provisioned: 2, paying: 1 });
     expect(out.risk).toEqual({ pastDue: 0, canceled: 0, atRiskMrrMinor: 0 });

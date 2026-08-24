@@ -13,7 +13,7 @@
 import { Pool } from "pg";
 import { randomUUID } from "node:crypto";
 import { prisma } from "@sms/db";
-import { MODULES } from "@sms/types";
+import { PLAN_MODULES, MODULES } from "@sms/types";
 import { OperatorService } from "../../src/operator/operator.service";
 import { ModuleEntitlementService } from "../../src/foundation/module-entitlement.service";
 import { PrismaTenantService } from "../../src/foundation/prisma-tenant.service";
@@ -80,12 +80,18 @@ d("Subscription / module entitlements (RLS, plan tiers, overrides)", () => {
   it("STANDARD tier excludes higher-tier modules; cache reflects the change at once", async () => {
     const sub = await svc.setSubscription(operator(), SA, { plan: "STANDARD" });
     expect(sub.plan).toBe("STANDARD");
-    expect(sub.modules).toContain(MODULES.LMS);
-    expect(sub.modules).not.toContain(MODULES.FEES); // FEES is PREMIUM+
-    expect(sub.modules).not.toContain(MODULES.HR); // HR is ENTERPRISE-only
+    // DERIVED from PLAN_MODULES, not a hand-picked module name. Naming one
+    // ("FEES is PREMIUM+") makes the test a statement about today's packaging
+    // rather than about the property, and it broke the moment fees moved into
+    // the entry tier — where it belongs, since the take-rate is earned there.
+    const standard = new Set(PLAN_MODULES.STANDARD);
+    const higherOnly = PLAN_MODULES.ENTERPRISE.filter((m) => !standard.has(m));
+    expect(higherOnly.length).toBeGreaterThan(0);
+    for (const m of PLAN_MODULES.STANDARD) expect(sub.modules).toContain(m);
+    for (const m of higherOnly) expect([m, sub.modules.includes(m)]).toEqual([m, false]);
     // The guard's path: isEnabled reads the (now invalidated → refreshed) cache.
-    expect(await entitlements.isEnabled(SA, MODULES.LMS)).toBe(true);
-    expect(await entitlements.isEnabled(SA, MODULES.FEES)).toBe(false);
+    expect(await entitlements.isEnabled(SA, PLAN_MODULES.STANDARD[0])).toBe(true);
+    expect(await entitlements.isEnabled(SA, higherOnly[0])).toBe(false);
   });
 
   it("per-school overrides force a module on (add-on) and off (removed)", async () => {

@@ -16,7 +16,7 @@
 import { Pool } from "pg";
 import { randomUUID } from "node:crypto";
 import { PrismaClient, prisma } from "@sms/db";
-import { MODULES, computeSubscriptionPriceMinor } from "@sms/types";
+import { FALLBACK_PLAN, PLAN_MODULES, MODULES, computeSubscriptionPriceMinor } from "@sms/types";
 import { BillingService } from "../../src/billing/billing.service";
 import { BillingDunningService } from "../../src/billing/billing-dunning.service";
 import { ModuleEntitlementService } from "../../src/foundation/module-entitlement.service";
@@ -226,9 +226,15 @@ d("BillingService integration (per-seat checkout, webhook, dunning, RLS)", () =>
     expect(sub?.status).toBe("PAST_DUE");
     expect(sub?.plan).toBe("STANDARD"); // purchased plan is preserved
 
-    // Effective entitlement is BASIC: LMS stays, FEES (a STANDARD module) is gone.
-    expect(await entitlements.isEnabled(SA, MODULES.LMS)).toBe(true);
-    expect(await entitlements.isEnabled(SA, MODULES.FEES)).toBe(false);
+    // Effective entitlement drops to the FLOOR: what the entry tier contains
+    // stays, what only a higher tier contains is gone. Derived rather than
+    // named — the previous version asserted "FEES is gone", which stopped being
+    // true when fees moved into the entry tier and said nothing about the
+    // property it was there to prove.
+    const floor = new Set(PLAN_MODULES[FALLBACK_PLAN]);
+    const paidOnly = PLAN_MODULES.ENTERPRISE.filter((m) => !floor.has(m));
+    expect(await entitlements.isEnabled(SA, PLAN_MODULES[FALLBACK_PLAN][0])).toBe(true);
+    expect(await entitlements.isEnabled(SA, paidOnly[0])).toBe(false);
   });
 
   it("a referred school's FIRST paid subscription rewards BOTH sides one free term — once", async () => {
