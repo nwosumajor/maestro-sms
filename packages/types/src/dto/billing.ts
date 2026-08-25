@@ -332,4 +332,14 @@ export interface AddonOfferDto {
   priceNowMinor: number;
   includedInPlan: boolean;
   alreadyPurchased: boolean;
+  /**
+   * Bought, and cancelled: still on until the period the school paid for runs
+   * out, and never charged again.
+   *
+   * A school could start a recurring charge in one click and had no way to stop
+   * it — the only exit was an operator hand-editing the overrides JSON.
+   */
+  cancelling: boolean;
+  /** When a cancelled add-on switches off. Null when it is not cancelling. */
+  activeUntil: Date | null;
 }

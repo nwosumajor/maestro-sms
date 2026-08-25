@@ -47,7 +47,7 @@
     },
     "DELETE /discipline/complaints/:p/assign/:p": {
       "kind": "ui",
-      "note": "reviewed: components/discipline/DisciplineRoom.tsx \u2014 the \u00d7 on each resolver badge, since being a resolver is what grants access to the case's evidence"
+      "note": "reviewed: components/discipline/DisciplineRoom.tsx — the × on each resolver badge, since being a resolver is what grants access to the case's evidence"
     },
     "DELETE /discussion/comments/:p": {
       "kind": "ui",
@@ -75,7 +75,7 @@
     },
     "DELETE /guardians/:p/:p": {
       "kind": "ui",
-      "note": "reviewed: components/sis/UnlinkGuardian.tsx, on the GuardianLinks card of the pupil's record \u2014 the card that shows a wrong link is where it is undone"
+      "note": "reviewed: components/sis/UnlinkGuardian.tsx, on the GuardianLinks card of the pupil's record — the card that shows a wrong link is where it is undone"
     },
     "DELETE /hostels/:p": {
       "kind": "ui",
@@ -307,7 +307,7 @@
     },
     "GET /auth/refresh": {
       "kind": "system",
-      "note": "Auth.js session refresh \u2014 called by the session layer, never by a person"
+      "note": "Auth.js session refresh — called by the session layer, never by a person"
     },
     "GET /billing": {
       "kind": "ui",
@@ -319,7 +319,7 @@
     },
     "GET /billing/payments/:p/receipt.pdf": {
       "kind": "ui",
-      "note": "Receipt link on the /billing payment history \u2014 a subscription purchase produced no filable document before this"
+      "note": "Receipt link on the /billing payment history — a subscription purchase produced no filable document before this"
     },
     "GET /billing/referral": {
       "kind": "ui",
@@ -351,7 +351,7 @@
     },
     "GET /cbt/exams/:p/answer-key.pdf": {
       "kind": "ui",
-      "note": "Answer key PDF \u2014 EDITORS ONLY, 404 for a reviewer; audited separately from the paper"
+      "note": "Answer key PDF — EDITORS ONLY, 404 for a reviewer; audited separately from the paper"
     },
     "GET /cbt/exams/:p/integrity": {
       "kind": "ui",
@@ -367,7 +367,7 @@
     },
     "GET /cbt/exams/:p/paper.pdf": {
       "kind": "ui",
-      "note": "Printable question paper (no answers) on the CBT staff panel \u2014 for an offline sitting, moderation or a paper archive"
+      "note": "Printable question paper (no answers) on the CBT staff panel — for an offline sitting, moderation or a paper archive"
     },
     "GET /cbt/exams/:p/results": {
       "kind": "ui",
@@ -659,7 +659,7 @@
     },
     "GET /fees/settlement/banks": {
       "kind": "ui",
-      "note": "SettlementAccountCard bank picker \u2014 the real gateway bank list, replacing ten hard-coded codes"
+      "note": "SettlementAccountCard bank picker — the real gateway bank list, replacing ten hard-coded codes"
     },
     "GET /forms": {
       "kind": "ui",
@@ -707,7 +707,7 @@
     },
     "GET /health": {
       "kind": "system",
-      "note": "liveness probe \u2014 infrastructure, not a screen"
+      "note": "liveness probe — infrastructure, not a screen"
     },
     "GET /hostels": {
       "kind": "ui",
@@ -895,7 +895,7 @@
     },
     "GET /hr/staff/:p/handover": {
       "kind": "ui",
-      "note": "HandoverPanel on /hr/staff/[userId] \u2014 what a leaver still holds"
+      "note": "HandoverPanel on /hr/staff/[userId] — what a leaver still holds"
     },
     "GET /hr/staff/checklists": {
       "kind": "ui",
@@ -931,7 +931,7 @@
     },
     "GET /invoices/:p/pay/availability": {
       "kind": "ui",
-      "note": "pre-flight before the payer clicks \u2014 PayOnlineButton on /fees/[id]"
+      "note": "pre-flight before the payer clicks — PayOnlineButton on /fees/[id]"
     },
     "GET /invoices/:p/payments": {
       "kind": "ui",
@@ -963,7 +963,7 @@
     },
     "GET /library/loans/:p/fine/receipt": {
       "kind": "ui",
-      "note": "Re-print a paid fine's receipt from the library loans list. payFine was the only source of it and refuses a second call, so closing the dialog lost the receipt permanently \u2014 for money the school had taken."
+      "note": "Re-print a paid fine's receipt from the library loans list. payFine was the only source of it and refuses a second call, so closing the dialog lost the receipt permanently — for money the school had taken."
     },
     "GET /library/report": {
       "kind": "ui",
@@ -1003,11 +1003,11 @@
     },
     "GET /members/scan/history/:p": {
       "kind": "ui",
-      "note": "reviewed: components/sis/MovementLog.tsx on the pupil record \u2014 the gate/library/exam scan log, which was written on every scan and read by nothing"
+      "note": "reviewed: components/sis/MovementLog.tsx on the pupil record — the gate/library/exam scan log, which was written on every scan and read by nothing"
     },
     "GET /members/scan/today": {
       "kind": "internal",
-      "note": "The desk's own day, for the /scan console. Same member.scan gate and audit as the history read; no UI yet \u2014 the pupil-record view answers the question that mattered first."
+      "note": "The desk's own day, for the /scan console. Same member.scan gate and audit as the history read; no UI yet — the pupil-record view answers the question that mattered first."
     },
     "GET /messages/contacts": {
       "kind": "ui",
@@ -1027,7 +1027,7 @@
     },
     "GET /metrics": {
       "kind": "system",
-      "note": "Prometheus scrape \u2014 token-gated, not a screen"
+      "note": "Prometheus scrape — token-gated, not a screen"
     },
     "GET /my/learning": {
       "kind": "ui",
@@ -1039,7 +1039,7 @@
     },
     "GET /notifications/credits/ledger": {
       "kind": "ui",
-      "note": "MessageCreditsCard on /billing \u2014 the school's own credit history; previously only the operator could see where credits went"
+      "note": "MessageCreditsCard on /billing — the school's own credit history; previously only the operator could see where credits went"
     },
     "GET /notifications/deliveries/problems": {
       "kind": "ui",
@@ -1119,7 +1119,7 @@
     },
     "GET /operator/jobs": {
       "kind": "ui",
-      "note": "Background jobs console at /operator/jobs \u2014 every scheduled job, when it last ran, what it reported, and whether it is late. Thirteen jobs ran on timers with nothing recording that they had; a scheduler that stops does not error, it goes quiet."
+      "note": "Background jobs console at /operator/jobs — every scheduled job, when it last ran, what it reported, and whether it is late. Thirteen jobs ran on timers with nothing recording that they had; a scheduler that stops does not error, it goes quiet."
     },
     "GET /operator/message-credits": {
       "kind": "ui",
@@ -1131,7 +1131,7 @@
     },
     "GET /operator/message-credits/reconciliation": {
       "kind": "ui",
-      "note": "Reconciliation posture panel on /operator/message-credits \u2014 makes a discrepancy visible where credits are managed, not only in an owner email"
+      "note": "Reconciliation posture panel on /operator/message-credits — makes a discrepancy visible where credits are managed, not only in an owner email"
     },
     "GET /operator/onboarding-requests": {
       "kind": "ui",
@@ -1139,7 +1139,7 @@
     },
     "GET /operator/payment-channels": {
       "kind": "ui",
-      "note": "payment-rail switchboard \u2014 PaymentChannels card on /operator/pricing"
+      "note": "payment-rail switchboard — PaymentChannels card on /operator/pricing"
     },
     "GET /operator/payment-channels/currency-coverage": {
       "kind": "ui",
@@ -1147,11 +1147,11 @@
     },
     "GET /operator/payments": {
       "kind": "ui",
-      "note": "/operator/payments \u2014 cross-tenant subscription revenue ledger, period-filtered, totals per currency"
+      "note": "/operator/payments — cross-tenant subscription revenue ledger, period-filtered, totals per currency"
     },
     "GET /operator/payments/export.csv": {
       "kind": "ui",
-      "note": "Export CSV button on /operator/payments \u2014 carries exactly the query the table is showing"
+      "note": "Export CSV button on /operator/payments — carries exactly the query the table is showing"
     },
     "GET /operator/platform-delegations": {
       "kind": "ui",
@@ -1255,11 +1255,11 @@
     },
     "GET /public/careers": {
       "kind": "ui",
-      "note": "public careers INDEX \u2014 app/careers/page.tsx; lists only schools with an open vacancy"
+      "note": "public careers INDEX — app/careers/page.tsx; lists only schools with an open vacancy"
     },
     "GET /public/careers/:p": {
       "kind": "ui",
-      "note": "public jobs board for one school \u2014 app/careers/[slug]/page.tsx (unauthenticated)"
+      "note": "public jobs board for one school — app/careers/[slug]/page.tsx (unauthenticated)"
     },
     "GET /public/documents/checklist": {
       "kind": "ui",
@@ -1267,15 +1267,15 @@
     },
     "GET /public/plan-pricing": {
       "kind": "system",
-      "note": "public read (plan pricing, directory) \u2014 consumed by marketing pages"
+      "note": "public read (plan pricing, directory) — consumed by marketing pages"
     },
     "GET /public/schools": {
       "kind": "system",
-      "note": "public read (plan pricing, directory) \u2014 consumed by marketing pages"
+      "note": "public read (plan pricing, directory) — consumed by marketing pages"
     },
     "GET /public/schools/:p/branding": {
       "kind": "system",
-      "note": "public read (plan pricing, directory) \u2014 consumed by marketing pages"
+      "note": "public read (plan pricing, directory) — consumed by marketing pages"
     },
     "GET /quiz-sessions": {
       "kind": "ui",
@@ -1391,11 +1391,11 @@
     },
     "GET /students/:p/exit/preview": {
       "kind": "ui",
-      "note": "StudentExitDialog \u2014 classes and money owed shown to the approver BEFORE the exit is raised"
+      "note": "StudentExitDialog — classes and money owed shown to the approver BEFORE the exit is raised"
     },
     "GET /students/:p/guardians": {
       "kind": "ui",
-      "note": "reviewed: components/sis/GuardianLinks.tsx on the pupil's record \u2014 which parent ACCOUNT receives their notices"
+      "note": "reviewed: components/sis/GuardianLinks.tsx on the pupil's record — which parent ACCOUNT receives their notices"
     },
     "GET /students/:p/medical": {
       "kind": "ui",
@@ -1407,7 +1407,7 @@
     },
     "GET /students/:p/profile/completion": {
       "kind": "ui",
-      "note": "components/sis/ProfileReviewChain.tsx \u2014 status, missing fields and the reviewer's note"
+      "note": "components/sis/ProfileReviewChain.tsx — status, missing fields and the reviewer's note"
     },
     "GET /students/:p/virtual-account": {
       "kind": "ui",
@@ -1419,11 +1419,11 @@
     },
     "GET /students/exited": {
       "kind": "ui",
-      "note": "Leavers register on /admin/students \u2014 who has left and when. Paged; the list only ever grows."
+      "note": "Leavers register on /admin/students — who has left and when. Paged; the list only ever grows."
     },
     "GET /students/profile-reviews": {
       "kind": "ui",
-      "note": "components/sis/ProfileReviewQueue.tsx \u2014 the reviewer's queue"
+      "note": "components/sis/ProfileReviewQueue.tsx — the reviewer's queue"
     },
     "GET /subject-selections": {
       "kind": "ui",
@@ -1499,7 +1499,7 @@
     },
     "GET /timetable/cover/mine": {
       "kind": "ui",
-      "note": "components/timetable/MyCoverDuties.tsx \u2014 the teacher's own duty list"
+      "note": "components/timetable/MyCoverDuties.tsx — the teacher's own duty list"
     },
     "GET /timetable/entries": {
       "kind": "ui",
@@ -1527,7 +1527,7 @@
     },
     "GET /timetable/unstaffed": {
       "kind": "ui",
-      "note": "'Lessons with no teacher' card on /timetable \u2014 lessons whose regular teacher has left the school. A departure closes the account but not the timetable, and nothing else tells a school a class has nobody to teach it."
+      "note": "'Lessons with no teacher' card on /timetable — lessons whose regular teacher has left the school. A departure closes the account but not the timetable, and nothing else tells a school a class has nobody to teach it."
     },
     "GET /timetable/view": {
       "kind": "ui",
@@ -1595,7 +1595,7 @@
     },
     "GET /workflows/:p": {
       "kind": "ui",
-      "note": "reviewed: components/workflow/WorkflowChain.tsx \u2014 the 'Approval history' disclosure on each row of the approvals inbox. The previous note claimed app/(app)/admin/page.tsx built this path; that page only calls GET /workflows (the list), so the route in fact had NO reader."
+      "note": "reviewed: components/workflow/WorkflowChain.tsx — the 'Approval history' disclosure on each row of the approvals inbox. The previous note claimed app/(app)/admin/page.tsx built this path; that page only calls GET /workflows (the list), so the route in fact had NO reader."
     },
     "GET /workflows/approvers": {
       "kind": "ui",
@@ -1639,7 +1639,7 @@
     },
     "POST /academic/progression/run": {
       "kind": "system",
-      "note": "manual trigger for a SCHEDULED job \u2014 ops/runbook surface, not day-to-day UI"
+      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
     },
     "POST /academic/sessions": {
       "kind": "ui",
@@ -1679,7 +1679,7 @@
     },
     "POST /admin/sis/nudge/run": {
       "kind": "system",
-      "note": "manual trigger for a SCHEDULED job \u2014 ops/runbook surface, not day-to-day UI"
+      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
     },
     "POST /admin/students/import": {
       "kind": "ui",
@@ -1759,7 +1759,7 @@
     },
     "POST /attendance/rollup/refresh": {
       "kind": "system",
-      "note": "manual trigger for a SCHEDULED rollup \u2014 ops/runbook surface"
+      "note": "manual trigger for a SCHEDULED rollup — ops/runbook surface"
     },
     "POST /auth/change-password": {
       "kind": "ui",
@@ -1767,7 +1767,7 @@
     },
     "POST /auth/login": {
       "kind": "system",
-      "note": "Auth.js session layer (apps/web/lib/auth.ts) \u2014 the login PAGE is the surface; this is its plumbing"
+      "note": "Auth.js session layer (apps/web/lib/auth.ts) — the login PAGE is the surface; this is its plumbing"
     },
     "POST /billing/checkout/init": {
       "kind": "ui",
@@ -1779,11 +1779,11 @@
     },
     "POST /billing/dunning/run": {
       "kind": "system",
-      "note": "manual trigger for a SCHEDULED job \u2014 ops/runbook surface, not day-to-day UI"
+      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
     },
     "POST /billing/payments/verify": {
       "kind": "ui",
-      "note": "PaymentVerifyBanner on /billing?verify= \u2014 settles on return from the gateway instead of waiting for a webhook"
+      "note": "PaymentVerifyBanner on /billing?verify= — settles on return from the gateway instead of waiting for a webhook"
     },
     "POST /billing/referral/code": {
       "kind": "ui",
@@ -1791,7 +1791,7 @@
     },
     "POST /billing/stripe/webhook": {
       "kind": "system",
-      "note": "gateway callback \u2014 the caller is the payment provider"
+      "note": "gateway callback — the caller is the payment provider"
     },
     "POST /billing/true-up/init": {
       "kind": "ui",
@@ -1915,7 +1915,7 @@
     },
     "POST /classes/:p/enrollments/bulk": {
       "kind": "ui",
-      "note": "components/lms/BulkEnrol.tsx \u2014 stage pupils, then enrol in one write"
+      "note": "components/lms/BulkEnrol.tsx — stage pupils, then enrol in one write"
     },
     "POST /classes/:p/live": {
       "kind": "ui",
@@ -1935,7 +1935,7 @@
     },
     "POST /classes/:p/subjects/bulk": {
       "kind": "ui",
-      "note": "components/lms/BulkClassSubjects.tsx \u2014 attach several subjects at once"
+      "note": "components/lms/BulkClassSubjects.tsx — attach several subjects at once"
     },
     "POST /classes/:p/subjects/copy-to-arms": {
       "kind": "ui",
@@ -2047,7 +2047,7 @@
     },
     "POST /documents/:p/confirm": {
       "kind": "system",
-      "note": "reviewed: completes a PRESIGNED-PUT upload. The web does NOT call it \u2014 DocumentUpload.tsx uses create -> upload-bytes \u2014 and the previous note claiming a call in that file was simply wrong. Kept for large files that should not stream through the API; it now HEADs the object before confirming, so it cannot mark a document available that never arrived."
+      "note": "reviewed: completes a PRESIGNED-PUT upload. The web does NOT call it — DocumentUpload.tsx uses create -> upload-bytes — and the previous note claiming a call in that file was simply wrong. Kept for large files that should not stream through the API; it now HEADs the object before confirming, so it cannot mark a document available that never arrived."
     },
     "POST /documents/:p/upload-bytes": {
       "kind": "ui",
@@ -2071,7 +2071,7 @@
     },
     "POST /documents/submissions/:p/confirm": {
       "kind": "ui",
-      "note": "the office's own upload control in DocumentChecklist \u2014 for a certificate handed in at the desk rather than sent through the family's link"
+      "note": "the office's own upload control in DocumentChecklist — for a certificate handed in at the desk rather than sent through the family's link"
     },
     "POST /documents/submissions/:p/decide": {
       "kind": "ui",
@@ -2079,7 +2079,7 @@
     },
     "POST /documents/submissions/upload-url": {
       "kind": "ui",
-      "note": "the office's own upload control in DocumentChecklist \u2014 for a certificate handed in at the desk rather than sent through the family's link"
+      "note": "the office's own upload control in DocumentChecklist — for a certificate handed in at the desk rather than sent through the family's link"
     },
     "POST /documents/submissions/waive": {
       "kind": "ui",
@@ -2143,15 +2143,15 @@
     },
     "POST /fees/reconciliation/run": {
       "kind": "system",
-      "note": "manual trigger for a SCHEDULED job \u2014 ops/runbook surface, not day-to-day UI"
+      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
     },
     "POST /fees/reminders/run": {
       "kind": "system",
-      "note": "manual trigger for a SCHEDULED job \u2014 ops/runbook surface, not day-to-day UI"
+      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
     },
     "POST /fees/settlement/resolve": {
       "kind": "ui",
-      "note": "SettlementAccountCard 'Check account name' \u2014 reads back whose account it is before PUT /fees/settlement saves it"
+      "note": "SettlementAccountCard 'Check account name' — reads back whose account it is before PUT /fees/settlement saves it"
     },
     "POST /forms": {
       "kind": "ui",
@@ -2255,7 +2255,7 @@
     },
     "POST /hostels/exeats/overdue/run": {
       "kind": "ui",
-      "note": "'Check now' on the overdue-boarders card on /hostel \u2014 runs the late-back check for this school immediately. The hourly sweep is the mechanism; this exists so it can be verified rather than assumed."
+      "note": "'Check now' on the overdue-boarders card on /hostel — runs the late-back check for this school immediately. The hourly sweep is the mechanism; this exists so it can be verified rather than assumed."
     },
     "POST /hostels/fees/schedule": {
       "kind": "ui",
@@ -2323,7 +2323,7 @@
     },
     "POST /hr/exits/revoke-elapsed": {
       "kind": "ui",
-      "note": "'Close elapsed exits' on /hr \u2014 closes the account of anyone whose last working day has passed. The nightly sweep does the whole fleet; this is the same job for one school, on demand, so it can be verified rather than assumed."
+      "note": "'Close elapsed exits' on /hr — closes the account of anyone whose last working day has passed. The nightly sweep does the whole fleet; this is the same job for one school, on demand, so it can be verified rather than assumed."
     },
     "POST /hr/leave/requests": {
       "kind": "ui",
@@ -2407,7 +2407,7 @@
     },
     "POST /hr/staff/documents/reminders/run": {
       "kind": "system",
-      "note": "manual trigger for a SCHEDULED job \u2014 ops/runbook surface, not day-to-day UI"
+      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
     },
     "POST /integrity/exemptions": {
       "kind": "ui",
@@ -2415,7 +2415,7 @@
     },
     "POST /integrity/retention/run": {
       "kind": "system",
-      "note": "manual trigger for a SCHEDULED job \u2014 ops/runbook surface, not day-to-day UI"
+      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
     },
     "POST /invoices": {
       "kind": "ui",
@@ -2455,7 +2455,7 @@
     },
     "POST /invoices/issue-bulk": {
       "kind": "ui",
-      "note": "reviewed: the 'Issue N shown' button on the Draft filter in components/fees/InvoiceBrowser.tsx calls this \u2014 the batch end of a fee run, which otherwise had to be issued one invoice at a time"
+      "note": "reviewed: the 'Issue N shown' button on the Draft filter in components/fees/InvoiceBrowser.tsx calls this — the batch end of a fee run, which otherwise had to be issued one invoice at a time"
     },
     "POST /legal/acceptance": {
       "kind": "ui",
@@ -2535,7 +2535,7 @@
     },
     "POST /notifications/credits/verify": {
       "kind": "ui",
-      "note": "Settles a credit bundle on return from the gateway \u2014 /billing?verifyCredits=. Without it the purchase depended entirely on a webhook arriving."
+      "note": "Settles a credit bundle on return from the gateway — /billing?verifyCredits=. Without it the purchase depended entirely on a webhook arriving."
     },
     "POST /notifications/deliveries/recovery/run": {
       "kind": "ui",
@@ -2567,7 +2567,7 @@
     },
     "POST /operator/feedback/digest/run": {
       "kind": "system",
-      "note": "manual trigger for a SCHEDULED job \u2014 ops/runbook surface, not day-to-day UI"
+      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
     },
     "POST /operator/groups": {
       "kind": "ui",
@@ -2591,11 +2591,11 @@
     },
     "POST /operator/payment-channels/:p/test": {
       "kind": "ui",
-      "note": "\"Test connection\" on the PaymentChannels card \u2014 calls the gateway to prove a key works"
+      "note": "\"Test connection\" on the PaymentChannels card — calls the gateway to prove a key works"
     },
     "POST /operator/payment-channels/health/run": {
       "kind": "ui",
-      "note": "manual run of the daily payment-rail health check \u2014 PaymentChannels card"
+      "note": "manual run of the daily payment-rail health check — PaymentChannels card"
     },
     "POST /operator/platform-delegations": {
       "kind": "ui",
@@ -2659,7 +2659,7 @@
     },
     "POST /payments/mobile-money/callback/:p": {
       "kind": "system",
-      "note": "rail callback \u2014 the caller is the payment provider"
+      "note": "rail callback — the caller is the payment provider"
     },
     "POST /payments/mobile-money/charge": {
       "kind": "ui",
@@ -2667,11 +2667,11 @@
     },
     "POST /payments/mobile-money/recovery/run": {
       "kind": "system",
-      "note": "manual trigger for a SCHEDULED job \u2014 ops/runbook surface, not day-to-day UI"
+      "note": "manual trigger for a SCHEDULED job — ops/runbook surface, not day-to-day UI"
     },
     "POST /payments/webhook": {
       "kind": "system",
-      "note": "gateway callback \u2014 the caller is the payment provider"
+      "note": "gateway callback — the caller is the payment provider"
     },
     "POST /polls": {
       "kind": "ui",
@@ -2695,7 +2695,7 @@
     },
     "POST /privacy/archives/run-term-sweep": {
       "kind": "system",
-      "note": "manual trigger for a SCHEDULED job \u2014 ops/runbook surface"
+      "note": "manual trigger for a SCHEDULED job — ops/runbook surface"
     },
     "POST /privacy/compliance/breaches": {
       "kind": "ui",
@@ -2723,11 +2723,11 @@
     },
     "POST /public/admissions": {
       "kind": "system",
-      "note": "public intake (applications, careers, invites) \u2014 its own unauthenticated pages"
+      "note": "public intake (applications, careers, invites) — its own unauthenticated pages"
     },
     "POST /public/admissions/:p/pay/init": {
       "kind": "system",
-      "note": "public intake (applications, careers, invites) \u2014 its own unauthenticated pages"
+      "note": "public intake (applications, careers, invites) — its own unauthenticated pages"
     },
     "POST /public/biometric/:p/events": {
       "kind": "system",
@@ -2735,7 +2735,7 @@
     },
     "POST /public/careers/:p/apply": {
       "kind": "ui",
-      "note": "public job application (rate-limited, optional PDF CV) \u2014 components/careers/CareersApply.tsx"
+      "note": "public job application (rate-limited, optional PDF CV) — components/careers/CareersApply.tsx"
     },
     "POST /public/documents/:p/confirm": {
       "kind": "ui",
@@ -2747,19 +2747,19 @@
     },
     "POST /public/invite/accept": {
       "kind": "system",
-      "note": "public intake (applications, careers, invites) \u2014 its own unauthenticated pages"
+      "note": "public intake (applications, careers, invites) — its own unauthenticated pages"
     },
     "POST /public/onboarding-requests": {
       "kind": "system",
-      "note": "public intake (applications, careers, invites) \u2014 its own unauthenticated pages"
+      "note": "public intake (applications, careers, invites) — its own unauthenticated pages"
     },
     "POST /public/password-reset/confirm": {
       "kind": "system",
-      "note": "public intake (applications, careers, invites) \u2014 its own unauthenticated pages"
+      "note": "public intake (applications, careers, invites) — its own unauthenticated pages"
     },
     "POST /public/password-reset/request": {
       "kind": "system",
-      "note": "public intake (applications, careers, invites) \u2014 its own unauthenticated pages"
+      "note": "public intake (applications, careers, invites) — its own unauthenticated pages"
     },
     "POST /quiz-sessions": {
       "kind": "ui",
@@ -2931,7 +2931,7 @@
     },
     "POST /students/:p/documents/release": {
       "kind": "ui",
-      "note": "Release/withhold toggle on /students/leavers. Schools hold a transcript until the family settles what they owe; this records that decision. Gates transcripts, report cards and certificates \u2014 NOT the data-protection export, which is a right and not a collections lever."
+      "note": "Release/withhold toggle on /students/leavers. Schools hold a transcript until the family settles what they owe; this records that decision. Gates transcripts, report cards and certificates — NOT the data-protection export, which is a right and not a collections lever."
     },
     "POST /students/:p/exit": {
       "kind": "ui",
@@ -2943,15 +2943,15 @@
     },
     "POST /students/:p/profile/approve": {
       "kind": "ui",
-      "note": "components/sis/ProfileReviewChain.tsx \u2014 the school office's approve"
+      "note": "components/sis/ProfileReviewChain.tsx — the school office's approve"
     },
     "POST /students/:p/profile/submit": {
       "kind": "ui",
-      "note": "components/sis/ProfileReviewChain.tsx \u2014 the pupil/parent submit button"
+      "note": "components/sis/ProfileReviewChain.tsx — the pupil/parent submit button"
     },
     "POST /students/:p/profile/supervisor-review": {
       "kind": "ui",
-      "note": "components/sis/ProfileReviewChain.tsx \u2014 the supervisor's pass / ask-for-changes"
+      "note": "components/sis/ProfileReviewChain.tsx — the supervisor's pass / ask-for-changes"
     },
     "POST /students/:p/readmit": {
       "kind": "ui",
@@ -3347,7 +3347,7 @@
     },
     "PUT /payments/mobile-money/callback/:p": {
       "kind": "system",
-      "note": "rail callback \u2014 the caller is the payment provider"
+      "note": "rail callback — the caller is the payment provider"
     },
     "PUT /polls/:p": {
       "kind": "ui",
@@ -3395,7 +3395,7 @@
     },
     "PUT /students/exited/retention": {
       "kind": "ui",
-      "note": "Retention policy card on /students/leavers \u2014 how many years a leaver's record is kept before it is flagged for a human to review. Step-up gated; principal-tier, since it is a records-disposal policy."
+      "note": "Retention policy card on /students/leavers — how many years a leaver's record is kept before it is flagged for a human to review. Step-up gated; principal-tier, since it is a records-disposal policy."
     },
     "PUT /subjects/:p": {
       "kind": "ui",
@@ -3439,11 +3439,11 @@
     },
     "GET /billing/addons": {
       "kind": "ui",
-      "note": "the school's add-on shop on /billing \u2014 referenced by a literal path in apps/web"
+      "note": "the school's add-on shop on /billing — referenced by a literal path in apps/web"
     },
     "POST /billing/addons/:p/init": {
       "kind": "ui",
-      "note": "buy one module \u2014 the AddonShop button on /billing"
+      "note": "buy one module — the AddonShop button on /billing"
     },
     "GET /operator/addon-pricing": {
       "kind": "ui",
@@ -3451,7 +3451,11 @@
     },
     "PUT /operator/addon-pricing": {
       "kind": "ui",
-      "note": "operator sets add-on prices \u2014 AddonPricingManager on /operator/pricing"
+      "note": "operator sets add-on prices — AddonPricingManager on /operator/pricing"
+    },
+    "POST /billing/addons/:p/cancel": {
+      "kind": "ui",
+      "note": "stop renewing an add-on — the Cancel button beside it on /billing's AddonShop"
     }
   }
 }

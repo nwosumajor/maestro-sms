@@ -174,6 +174,41 @@ d("BillingService integration (per-seat checkout, webhook, dunning, RLS)", () =>
     expect(new Date(after!).getTime()).toBe(new Date(before!).getTime());
   });
 
+  it("a RENEWAL finally removes an add-on the school cancelled", async () => {
+    // Cancelling stops the BILLING at once (`billableAddons`) and deliberately
+    // leaves the module ON — the last charge covered this period. This is the
+    // other half: the renewal that rolls the period is what actually withdraws
+    // it. Without it a cancelled add-on stays enabled for ever, free, and the
+    // cancellation is a promise nobody kept.
+    //
+    // Driven through the REAL settlement path, not the pure helper: mutation-
+    // checked, and deleting the call left every pure case green.
+    await admin.query(
+      `UPDATE school_subscription SET overrides = $2::jsonb WHERE "schoolId" = $1`,
+      [SA, JSON.stringify({ enabled: ["hostel"], disabled: [], purchased: ["hostel"], cancelling: ["hostel"] })],
+    );
+    const REF_CANCEL = `SUB-cancel-${randomUUID().slice(0, 8)}`;
+    const amount = computeSubscriptionPriceMinor("STANDARD", 400, "TERM");
+    await admin.query(
+      `INSERT INTO platform_subscription_payment
+         (id,"schoolId",plan,"billingCycle",seats,"amountMinor",reference,status,"initiatedById","updatedAt")
+       VALUES ($1,$2,'STANDARD','TERM',400,$3,$4,'PENDING',$5,now())`,
+      [randomUUID(), SA, amount, REF_CANCEL, UA],
+    );
+    await billing.applySubscriptionPayment({
+      event: "charge.success",
+      data: { amount, reference: REF_CANCEL, metadata: { kind: "subscription", schoolId: SA } },
+    } as PaystackEvent);
+
+    // Read the JSON straight from the row: `subRow` selects the four columns its
+    // other cases need, and widening it would change every assertion in the file.
+    const raw = await admin.query(`SELECT overrides FROM school_subscription WHERE "schoolId" = $1`, [SA]);
+    const overrides = raw.rows[0].overrides as { enabled?: string[]; cancelling?: string[]; purchased?: string[] };
+    expect(overrides.enabled).not.toContain("hostel");
+    expect(overrides.purchased).not.toContain("hostel");
+    expect(overrides.cancelling).toEqual([]);
+  });
+
   it("a mismatched settlement NEVER activates: underpaid or wrong-currency → FAILED + audited", async () => {
     const expected = computeSubscriptionPriceMinor("STANDARD", 400, "TERM");
     const REF_UNDER = `SUB-under-${randomUUID().slice(0, 8)}`;

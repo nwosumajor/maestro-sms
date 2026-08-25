@@ -16,6 +16,8 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { postWithStepUp } from "@/lib/stepup";
 import { readApiError } from "@/lib/api-error";
+import { postSms } from "@/components/game/play-ui";
+import { shortDate } from "@/lib/format";
 import { useFormat } from "@/components/shell/RegionProvider";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -56,6 +58,19 @@ export function AddonShop({ offers, canBuy }: { offers: Serialized<AddonOfferDto
     }
   };
 
+  const cancel = async (module: string) => {
+    setBusy(module);
+    setMsg(null);
+    const res = await postSms(`billing/addons/${module}/cancel`, {});
+    setBusy(null);
+    if (!res.ok) {
+      setMsg(res.error ?? "Could not cancel that module.");
+      return;
+    }
+    setMsg("It will not be billed again. You keep it until the end of the period you have already paid for.");
+    router.refresh();
+  };
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -67,10 +82,40 @@ export function AddonShop({ offers, canBuy }: { offers: Serialized<AddonOfferDto
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
+        {/* WHAT YOU ALREADY PAY FOR, AND HOW TO STOP.
+            This was one flat sentence listing the modules, with no way out: a
+            school could start a recurring charge in a click and the only exit
+            was asking the operator to hand-edit its subscription. */}
         {owned.length > 0 && (
-          <p className="text-sm text-muted-foreground">
-            Already on your subscription: {owned.map((o) => LABEL.get(o.module) ?? o.module).join(", ")}.
-          </p>
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-muted-foreground">On your subscription</p>
+            {owned.map((o) => (
+              <div key={o.module} className="flex items-start justify-between gap-3 rounded-md border p-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium">{LABEL.get(o.module) ?? o.module}</div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {o.cancelling ? (
+                      // Cancelled says WHEN it stops. "Cancelled" on its own is
+                      // a worry rather than a decision — the school has paid to
+                      // the end of the period and keeps it until then.
+                      <>
+                        Cancelled · not billed again ·{" "}
+                        {o.activeUntil ? <>available until {shortDate(o.activeUntil)}</> : <>ends at your next renewal</>}
+                      </>
+                    ) : (
+                      <>{money(o.perSeatMonthlyMinor, o.currency)} per student / month, billed at each renewal</>
+                    )}
+                  </p>
+                </div>
+                {canBuy && !o.cancelling && (
+                  <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => cancel(o.module)}>
+                    {busy === o.module ? "…" : "Cancel"}
+                  </Button>
+                )}
+                {o.cancelling && <Badge variant="outline">ending</Badge>}
+              </div>
+            ))}
+          </div>
         )}
         <div className="grid gap-2 sm:grid-cols-2">
           {available.map((o) => (

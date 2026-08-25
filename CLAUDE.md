@@ -1796,6 +1796,61 @@ closed the window early and the test went red while the property it guards was
 untouched. Now anchored to the method by name — and mutation-validated, which
 the accidental version never was.
 
+### One field meaning two things, and a charge nobody could stop
+Asked whether the tier and modules are captured accurately and the flow is
+consistent. `resolveModules`, `PLAN_MODULES` and the `@RequireModule` gate are
+sound; three things around them were not, and all three were proved on the
+running stack before being touched.
+**AN OPERATOR PUT DELETED EVERY ADD-ON.** `setSubscription` read
+`input.overrides?.enabled ?? []` and WROTE IT ON EVERY CALL, while `status` and
+`currentPeriodEnd` — in the same object literal fifteen lines below — correctly
+treat an omitted field as "leave it alone". `plan` is required on every PUT, so
+any save that did not resend the toggles wiped every module the school had
+bought and every module the operator had comped. Live: ULTIMATE + a purchased
+hostel add-on, saved as `{plan:"PREMIUM"}`, came back `enabled: []`. The console
+always sends the toggles it last read so the UI never showed it — but that is
+also a LOST UPDATE: an add-on bought while the operator has the page open is
+erased by their next save. Now absent means unchanged; an EMPTY object still
+clears, because that is a decision; a NEW row still gets an empty set, because
+there is nothing to preserve.
+**`overrides.enabled` MEANT TWO DIFFERENT THINGS.** A module the school BOUGHT
+and a module the operator COMPED were stored identically, so they answered the
+delinquency question identically — and a school that stopped paying lost fifteen
+tier modules and KEPT every add-on it had ever bought. Live: ULTIMATE, 400 days
+past due, effective plan STANDARD, hostel still on. An add-on is billed AT
+RENEWAL and there had been no renewal. `ModuleOverrides.purchased` is the subset
+that was paid for, written only by the add-on settlement path;
+`overridesUnderDelinquency` drops those when `eff !== plan` and keeps the comps
+— a comp is the owner's decision about that school, not something the school
+failed to do, and dunning silently reversing it would surprise whoever made it.
+// The stored overrides are UNCHANGED: the withdrawal is a resolution rule, not
+a write, so paying restores the module with no repair step, exactly as paying
+restores the tier.
+**AND THERE WAS NO WAY OUT.** Nothing in the API removed a module from
+`overrides.enabled` — a school could start a recurring charge in ONE CLICK and
+the only exit was an operator hand-editing the subscription JSON. A recurring
+charge a customer cannot stop is not a product decision, it is a missing screen.
+`POST /billing/addons/:module/cancel` + `overrides.cancelling`: billing stops at
+once (`billableAddons` prices every quote, checkout and auto-renew, so excluding
+it there IS "stop billing me"), the module stays ON until `currentPeriodEnd`
+because the last charge covered that period, and the RENEWAL that rolls the
+period calls `dropCancelledAddons` and actually removes it. Buying it again
+cancels a pending cancellation, which is what pressing "buy" plainly means.
+// NO STEP-UP on the cancel, where the purchase has one — named in
+`step-up-is-consistent-within-a-permission` with the reason: re-authentication
+guards the act that COSTS money, and making the exit harder than the entrance is
+the direction that list exists to keep straight.
+// GOTCHA: the pure helpers all passed with the service still resolving against
+the raw overrides, and with the settlement path never calling
+`dropCancelledAddons`. Both were caught only by MUTATING THE FIX and watching a
+green suite stay green — so the delinquency rule is exercised through the real
+`ModuleEntitlementService` and the withdrawal through the real settlement path
+in `billing.service.e2e`. A test on a helper proves nothing about its callers.
+// GOTCHA while probing: changing `school_subscription.plan` directly in SQL and
+re-reading through the API shows the OLD plan for up to ten minutes — the
+entitlement cache is `CACHE_TTL_MS = 600_000` and only an application write
+invalidates it. The first version of this probe reported no bug for that reason.
+
 ### Two seconds on the busiest finance screen, and a ledger that could not say what was bought
 Asked whether the fees browser and the finance report are accurate AND efficient
 now, and for a ledger of everything a school pays the platform. Three findings.

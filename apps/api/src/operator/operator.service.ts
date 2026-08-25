@@ -98,9 +98,25 @@ export class OperatorService {
   ): Promise<SubscriptionDto> {
     if (!isPlan(input.plan)) throw new BadRequestException("plan must be one of STANDARD, PREMIUM, ULTIMATE, ENTERPRISE");
     const plan: Plan = input.plan;
-    const enabled = (input.overrides?.enabled ?? []).filter(isModuleKey);
-    const disabled = (input.overrides?.disabled ?? []).filter(isModuleKey);
-    const overrides: ModuleOverrides = { enabled, disabled };
+    // OMITTED MEANS UNCHANGED, exactly as `status` and `currentPeriodEnd` do
+    // fifteen lines below.
+    //
+    // This defaulted to `{enabled: [], disabled: []}` and wrote it every time,
+    // so a PUT that changed only the tier — or only the status, since `plan` is
+    // required on every call — SILENTLY DELETED every add-on the school had
+    // bought and every module the operator had comped. Proved live: a school on
+    // ULTIMATE with a purchased hostel add-on, saved as `{plan: "PREMIUM"}`,
+    // came back with `overrides.enabled: []`. The console always sends the
+    // toggles it last read, so the UI path never showed it — but that is also
+    // a lost update: an add-on bought while the operator has the page open is
+    // erased by their next save.
+    const requested: ModuleOverrides | undefined =
+      input.overrides === undefined
+        ? undefined
+        : {
+            enabled: (input.overrides.enabled ?? []).filter(isModuleKey),
+            disabled: (input.overrides.disabled ?? []).filter(isModuleKey),
+          };
 
     let status: SubscriptionStatus | undefined;
     if (input.status !== undefined) {
@@ -117,18 +133,44 @@ export class OperatorService {
     await this.db.runAsTenant({ schoolId, userId: p.userId }, async (tx) => {
       const school = await tx.school.findFirst({ where: { id: schoolId }, select: { id: true } });
       if (!school) throw new NotFoundException("School not found");
-      const existing = await tx.schoolSubscription.findFirst({ where: { schoolId }, select: { id: true } });
+      const existing = await tx.schoolSubscription.findFirst({ where: { schoolId }, select: { id: true, overrides: true } });
+      // WHICH OF THESE WERE BOUGHT IS NOT THE OPERATOR'S TO SAY.
+      //
+      // The console sends `enabled` and `disabled`; it has no notion of a
+      // PURCHASE, so a write that rebuilt the object from those two fields alone
+      // erased the `purchased` marker and quietly turned every paid add-on into
+      // a comp — which then survives delinquency for ever, the exact hole
+      // `overridesUnderDelinquency` exists to close. The marker is carried
+      // through for whatever the operator left enabled, and dropped only for a
+      // module they actually removed. Same for a pending cancellation.
+      const prior = ((existing?.overrides ?? {}) as ModuleOverrides) ?? {};
+      const overrides: ModuleOverrides | undefined =
+        requested === undefined
+          ? undefined
+          : {
+              ...requested,
+              purchased: (prior.purchased ?? []).filter((m) => (requested.enabled ?? []).includes(m)),
+              cancelling: (prior.cancelling ?? []).filter((m) => (requested.enabled ?? []).includes(m)),
+            };
       const data: Prisma.SchoolSubscriptionUncheckedUpdateInput = {
         plan,
-        overrides: overrides as unknown as Prisma.InputJsonValue,
+        ...(overrides !== undefined ? { overrides: overrides as unknown as Prisma.InputJsonValue } : {}),
         ...(status !== undefined ? { status } : {}),
         ...(currentPeriodEnd !== undefined ? { currentPeriodEnd } : {}),
       };
       if (existing) {
         await tx.schoolSubscription.update({ where: { id: existing.id }, data });
       } else {
+        // A NEW row has no overrides to preserve, so an omitted field is an
+        // empty set here rather than "leave it alone".
         await tx.schoolSubscription.create({
-          data: { schoolId, plan, overrides: overrides as unknown as Prisma.InputJsonValue, ...(status !== undefined ? { status } : {}), ...(currentPeriodEnd !== undefined ? { currentPeriodEnd } : {}) },
+          data: {
+            schoolId,
+            plan,
+            overrides: (requested ?? { enabled: [], disabled: [] }) as unknown as Prisma.InputJsonValue,
+            ...(status !== undefined ? { status } : {}),
+            ...(currentPeriodEnd !== undefined ? { currentPeriodEnd } : {}),
+          },
         });
       }
     });
@@ -143,7 +185,11 @@ export class OperatorService {
       entity: "school_subscription",
       entityId: schoolId,
       schoolId: p.schoolId,
-      metadata: { targetSchoolId: schoolId, plan, overrides, status, currentPeriodEnd },
+      // `requested` — what the operator ASKED for. The stored object also carries
+      // the purchase and cancellation markers, which are carried through rather
+      // than decided here, and recording them as though the operator set them
+      // would misattribute them.
+      metadata: { targetSchoolId: schoolId, plan, overrides: requested, status, currentPeriodEnd },
     });
     // Drop the cached entitlements so the new posture takes effect immediately.
     this.entitlements.invalidate(schoolId);

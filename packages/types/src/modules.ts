@@ -159,10 +159,34 @@ export const PLAN_MODULES: Record<Plan, ModuleKey[]> = {
 /** The lowest tier — the floor a delinquent school falls back to. */
 export const FALLBACK_PLAN: Plan = PLANS.STANDARD;
 
-/** Per-school deviations from the tier bundle (force-on / force-off). */
+/**
+ * Per-school deviations from the tier bundle (force-on / force-off).
+ *
+ * `enabled` CONFLATED TWO DIFFERENT THINGS and they behave differently:
+ *   - a module the school BOUGHT as an add-on, billed again at every renewal;
+ *   - a module the OPERATOR comped, a deliberate decision outside billing.
+ * Stored identically, they answered the delinquency question the same way — so
+ * a school that stopped paying lost fifteen tier modules and kept every add-on
+ * it had ever bought, indefinitely. `purchased` is the subset of `enabled` that
+ * was paid for, so the two can be told apart; anything in `enabled` and not in
+ * `purchased` is a comp and is deliberately NOT withdrawn by dunning.
+ */
 export interface ModuleOverrides {
   enabled?: ModuleKey[];
   disabled?: ModuleKey[];
+  /** Subset of `enabled` that the school BOUGHT. Written only by the add-on
+   *  settlement path — an operator toggle never marks a module purchased. */
+  purchased?: ModuleKey[];
+  /**
+   * Add-ons the school has cancelled: still ENABLED until the period they paid
+   * for ends, and never billed again.
+   *
+   * A school could start a recurring charge in one click and had no way to stop
+   * it — the only exit was an operator hand-editing this JSON. Cancelling does
+   * not switch the module off on the spot, because the last charge covered the
+   * period: it stops the renewal, and the renewal that follows drops it.
+   */
+  cancelling?: ModuleKey[];
 }
 
 /**
@@ -549,9 +573,56 @@ export const NOT_SOLD_SEPARATELY: readonly ModuleKey[] = [
  */
 export function billableAddons(plan: Plan, overrides?: ModuleOverrides): ModuleKey[] {
   const included = new Set(PLAN_MODULES[plan] ?? PLAN_MODULES[DEFAULT_PLAN]);
+  // A CANCELLED add-on is still enabled until the period it was paid for runs
+  // out, and is never charged again. Excluding it here is the whole of "stop
+  // billing me": the renewal quote, the checkout and the auto-renew charge all
+  // price through this one function.
+  const cancelling = new Set(overrides?.cancelling ?? []);
   return [...new Set(overrides?.enabled ?? [])]
     .filter((m) => !included.has(m))
+    .filter((m) => !cancelling.has(m))
     .filter((m) => MODULE_ADDON_PRICING[m] !== undefined);
+}
+
+/**
+ * Overrides with every CANCELLED add-on actually removed.
+ *
+ * Called when a renewal rolls the period over — the point at which the time the
+ * school paid for has run out. Cancelling stops the billing immediately
+ * (`billableAddons`); this is what finally switches the module off, and without
+ * it a cancelled add-on would stay enabled for ever, free.
+ */
+export function dropCancelledAddons(overrides?: ModuleOverrides | null): ModuleOverrides {
+  const cancelling = new Set(overrides?.cancelling ?? []);
+  if (cancelling.size === 0) return overrides ?? {};
+  return {
+    enabled: (overrides?.enabled ?? []).filter((m) => !cancelling.has(m)),
+    disabled: overrides?.disabled ?? [],
+    purchased: (overrides?.purchased ?? []).filter((m) => !cancelling.has(m)),
+    cancelling: [],
+  };
+}
+
+/**
+ * The overrides that survive a DELINQUENCY downgrade.
+ *
+ * When `effectivePlan` drops a school to the floor for non-payment it loses its
+ * tier's modules — and used to keep every add-on it had ever bought, because
+ * both live in `overrides.enabled` and nothing told them apart. The same
+ * non-payment revoking one entitlement and not the other is not a policy, it is
+ * an oversight: an add-on is billed at renewal, and there has been no renewal.
+ *
+ * An operator COMP is the opposite case and is deliberately kept. It is the
+ * platform owner's explicit decision about that school, not something the
+ * school failed to do, and dunning silently reversing it would surprise the
+ * person who made it.
+ */
+export function overridesUnderDelinquency(overrides?: ModuleOverrides | null): ModuleOverrides {
+  const purchased = new Set(overrides?.purchased ?? []);
+  return {
+    ...overrides,
+    enabled: (overrides?.enabled ?? []).filter((m) => !purchased.has(m)),
+  };
 }
 
 /** Pure: the per-seat monthly cost of a school's add-ons, in minor units. */

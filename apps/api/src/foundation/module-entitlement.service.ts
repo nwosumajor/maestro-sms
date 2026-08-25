@@ -26,6 +26,7 @@ import {
   isBillingCycle,
   isPlan,
   isSubscriptionStatus,
+  overridesUnderDelinquency,
   resolveModules,
   type BillingCycle,
   type ModuleKey,
@@ -147,11 +148,24 @@ export class ModuleEntitlementService implements OnModuleInit {
     // console (bounded 0..GRACE_DAYS_MAX at the API).
     const graceDays = row?.graceDays ?? null;
     const eff = effectivePlan(plan, status, currentPeriodEnd, graceDays ?? SUBSCRIPTION_GRACE_DAYS, new Date());
+    // DELINQUENCY REACHES THE ADD-ONS TOO.
+    //
+    // `eff !== plan` means the tier was dropped to the floor for non-payment.
+    // The school then lost fifteen tier modules and kept every add-on it had
+    // ever bought, because both were `overrides.enabled` entries and nothing
+    // distinguished them — proved live: ULTIMATE, 400 days past due, effective
+    // plan STANDARD, and the hostel add-on still on. An add-on is billed AT
+    // RENEWAL and there has been no renewal.
+    //
+    // A COMP survives, deliberately. It is the owner's decision about this
+    // school rather than something the school failed to do; see
+    // `overridesUnderDelinquency`.
+    const effectiveOverrides = eff === plan ? overrides : overridesUnderDelinquency(overrides);
     const value: Resolved = {
       plan,
       effectivePlan: eff,
       overrides,
-      modules: resolveModules(eff, overrides),
+      modules: resolveModules(eff, effectiveOverrides),
       status,
       billingCycle,
       currentPeriodEnd,

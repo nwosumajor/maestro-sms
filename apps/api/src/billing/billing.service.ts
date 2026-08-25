@@ -20,6 +20,7 @@ import {
   type ModuleKey,
   addonProrationMinor,
   PLAN_MODULES,
+  dropCancelledAddons,
   isModuleKey,
   BILLING_CYCLES,
   CURRENCIES,
@@ -405,6 +406,7 @@ export class BillingService {
     const currency: Currency = isCurrency(sub?.currency ?? "") ? (sub!.currency as Currency) : CURRENCIES.NGN;
     const overrides = (sub?.overrides ?? undefined) as ModuleOverrides | undefined;
     const owned = new Set(overrides?.enabled ?? []);
+    const cancelling = new Set(overrides?.cancelling ?? []);
     const included = new Set(PLAN_MODULES[plan]);
     const prices = await this.addonPricing.effective(currency);
     return sellableAlone().map((module) => ({
@@ -415,7 +417,58 @@ export class BillingService {
       priceNowMinor: addonProrationMinor(prices[module], seats, cycle, sub?.currentPeriodEnd ?? null, now) ?? 0,
       includedInPlan: included.has(module),
       alreadyPurchased: owned.has(module) && !included.has(module),
+      cancelling: cancelling.has(module) && owned.has(module),
+      // The date it actually stops. A cancelled add-on runs to the end of the
+      // period the last charge covered — saying "cancelled" without saying when
+      // is the difference between a decision and a worry.
+      activeUntil: cancelling.has(module) && owned.has(module) ? (sub?.currentPeriodEnd ?? null) : null,
     }));
+  }
+
+  /**
+   * STOP RENEWING AN ADD-ON.
+   *
+   * The school could buy one in a click and had NO way out: nothing in the API
+   * removed a module from `overrides.enabled`, so the only exit was an operator
+   * hand-editing the JSON. A recurring charge a customer cannot stop is not a
+   * product decision, it is a missing screen.
+   *
+   * It does NOT switch the module off on the spot. The last charge covered this
+   * period — prorated at purchase, in full at each renewal — so the school keeps
+   * what it paid for until `currentPeriodEnd`, and the renewal after that drops
+   * it. `billableAddons` stops charging immediately, which is the whole of
+   * "stop billing me"; every quote, checkout and auto-renew prices through it.
+   */
+  async cancelAddon(p: Principal, moduleKey: string): Promise<AddonOfferDto[]> {
+    if (!isModuleKey(moduleKey)) throw new BadRequestException("Unknown module");
+    await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const sub = await tx.schoolSubscription.findFirst({ where: { schoolId: p.schoolId } });
+      if (!sub) throw new BadRequestException("This school has no subscription");
+      const overrides = ((sub.overrides ?? {}) as ModuleOverrides) ?? {};
+      // 404-not-403 in spirit: a module the school never bought is not a thing
+      // it can cancel, and saying so is clearer than silently succeeding.
+      if (!(overrides.enabled ?? []).includes(moduleKey)) {
+        throw new BadRequestException("That module is not an add-on on this subscription");
+      }
+      const cancelling = [...new Set([...(overrides.cancelling ?? []), moduleKey])];
+      await tx.schoolSubscription.update({
+        where: { id: sub.id },
+        data: { overrides: { ...overrides, cancelling } as never },
+      });
+      await this.audit.record(
+        {
+          actorId: p.userId,
+          action: "billing.addon.cancelled",
+          entity: "school_subscription",
+          entityId: sub.id,
+          schoolId: p.schoolId,
+          metadata: { module: moduleKey, activeUntil: sub.currentPeriodEnd },
+        },
+        tx,
+      );
+    });
+    this.entitlements?.invalidate(p.schoolId);
+    return this.listAddonOffers(p);
   }
 
   async initAddonCheckout(p: Principal, moduleKey: string): Promise<CheckoutInitResultDto> {
@@ -543,11 +596,20 @@ export class BillingService {
       const sub = await tx.schoolSubscription.findFirst({ where: { schoolId } });
       if (!sub) return;
       const overrides = ((sub.overrides ?? {}) as ModuleOverrides) ?? {};
+      // A SET UNION, because a gateway RETRIES — a duplicated entry would be
+      // billed twice at renewal.
       const enabled = [...new Set([...(overrides.enabled ?? []), moduleKey])];
       const disabled = (overrides.disabled ?? []).filter((m) => m !== moduleKey);
+      // MARKED AS BOUGHT, not merely enabled. An operator comp and a paid add-on
+      // were indistinguishable in `enabled`, so dunning could not withdraw one
+      // and keep the other — see `overridesUnderDelinquency`.
+      const purchased = [...new Set([...(overrides.purchased ?? []), moduleKey])];
+      // Buying it again cancels a pending cancellation, which is what a school
+      // clicking "buy" plainly means.
+      const cancelling = (overrides.cancelling ?? []).filter((m) => m !== moduleKey);
       await tx.schoolSubscription.update({
         where: { id: sub.id },
-        data: { overrides: { enabled, disabled } as never },
+        data: { overrides: { enabled, disabled, purchased, cancelling } as never },
       });
       await this.audit.record(
         {
@@ -1223,6 +1285,16 @@ export class BillingService {
               currentPeriodEnd: periodEnd,
               priceMinor: payment.amountMinor,
               currency: payment.currency,
+              // A CANCELLED ADD-ON ACTUALLY GOES when the period it was paid
+              // for rolls over. `billableAddons` stopped charging for it the
+              // moment the school cancelled; this is the other half — without
+              // it the module would stay switched on for ever, free, and the
+              // cancellation would have been a promise nobody kept.
+              //
+              // Only on a charge that MOVES the period. A seat top-up and an
+              // add-on purchase leave `currentPeriodEnd` alone, so nothing has
+              // rolled over and nothing should be withdrawn.
+              ...(sub ? { overrides: dropCancelledAddons(sub.overrides as ModuleOverrides | null) as never } : {}),
             }),
         // Refresh the saved card on every successful charge (encrypted at rest)
         // so auto-renew always holds the most recent authorization.

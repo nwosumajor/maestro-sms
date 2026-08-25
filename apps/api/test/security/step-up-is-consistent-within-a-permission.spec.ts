@@ -71,6 +71,11 @@ const ALLOWED: Record<string, string> = {
   "POST /hr/employment/changes/:id/decide": "Maker-checker already: a different person decides, and the pay change itself goes through the salary path, which IS step-up gated at both ends.",
   "POST /operator/payment-channels/health/run": "Read-only probe of the payment gateways; changes nothing.",
   "POST /operator/payment-channels/:channel/test": "Sends a test call to a gateway; moves no money.",
+  "POST /billing/addons/:module/cancel":
+    "STOPS a recurring charge. Buying an add-on is step-up gated because it costs money; " +
+    "requiring re-authentication to stop one makes the exit harder than the entrance, which is " +
+    "the direction this list exists to keep straight. Reversible, audited, and it cannot increase " +
+    "what the school has.",
   "POST /operator/platform-delegations/:id/revoke": "TAKES authority away. The restrictive direction should never be harder than the permissive one.",
   "POST /scholarships/applications/:id/review": "Documented decision: REVIEW/SHORTLIST/REJECT carry no money; only AWARD does, and AWARD is gated.",
   "POST /scholarships/programs/:id/announce-exam": "Tells candidates when the exam is; carries no decision and no money.",

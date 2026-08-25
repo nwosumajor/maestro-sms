@@ -214,6 +214,23 @@ export class BillingController {
     return this.billing.initAddonCheckout(p, moduleKey);
   }
 
+  /**
+   * Stop renewing an add-on. The module stays on until the period the school
+   * paid for ends.
+   *
+   * NO STEP-UP, deliberately, where buying one has it. Re-authentication guards
+   * the act that COSTS money or GRANTS authority; requiring it to stop a charge
+   * makes the exit harder than the entrance, which is the direction this repo's
+   * own step-up rule says never to point it — "revoking authority should never
+   * be harder than granting it". Reversible, audited, and it cannot increase
+   * what the school has.
+   */
+  @Post("addons/:module/cancel")
+  @RequirePermission(BILLING_PERMISSIONS.BILLING_MANAGE)
+  cancelAddon(@CurrentPrincipal() p: Principal, @Param("module") moduleKey: string): Promise<AddonOfferDto[]> {
+    return this.billing.cancelAddon(p, moduleKey);
+  }
+
   /** Start a checkout for the seat true-up quoted on the overview. */
   @Post("true-up/init")
   @RequirePermission(BILLING_PERMISSIONS.BILLING_MANAGE)
