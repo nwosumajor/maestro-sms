@@ -64,6 +64,19 @@ const env = {
   // The storage stub signs presigned URLs with this; CI uses a dummy too.
   AUTH_SECRET: process.env.AUTH_SECRET ?? fromEnvFile("AUTH_SECRET") ?? "local-test-secret",
   DATA_ENCRYPTION_KEY: process.env.DATA_ENCRYPTION_KEY ?? fromEnvFile("DATA_ENCRYPTION_KEY") ?? "",
+  // ONE PROCESS HOLDS ALL 410 SUITES, so the heap is sized by the whole run
+  // rather than by any suite in it. `--runInBand` is not negotiable here (see
+  // below), and V8's default heap is derived from the machine's RAM — so this
+  // command, the one this repo tells you runs EVERYTHING, aborted with
+  // "Ineffective mark-compacts near heap limit" on a developer machine while
+  // passing on a larger CI runner. That failure names no test and looks like a
+  // broken change: measured, the run peaks around 2 GB and dies at a 2 GB
+  // default, and completes in 98 s at 6 GB. The several gates that walk all 440
+  // sources are what pushed it there, and more will be added.
+  //
+  // Set rather than defaulted-to: an operator with their own NODE_OPTIONS keeps
+  // it, because this is a floor for the common case, not a policy.
+  NODE_OPTIONS: process.env.NODE_OPTIONS ?? "--max-old-space-size=6144",
 };
 
 // --runInBand: these suites share one database and set per-tenant GUCs; running
