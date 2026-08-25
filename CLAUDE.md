@@ -1412,6 +1412,26 @@ regional read replicas → Aurora write forwarding (still one writer) → tenant
 pinning. Multi-master is deliberately not on that list. See
 `docs/RUNBOOK-INCIDENT-RESPONSE.md` §5.x and §5.y.
 
+### One request body of 339 was never validated
+"All API inputs validated at the boundary" is a stated convention and 334 of 339
+`@Body` parameters follow it. Four of the rest are deliberate: three gateway
+callbacks whose shape the PROVIDER owns (parsed defensively, settled from our own
+records, never from what the caller sent — a schema there would reject a rail's
+real payload and lose money) and the dev byte-upload stub.
+The fifth was ordinary: `POST /members/scan/:code` hand-checked `purpose` and did
+not check `note` at all. Measured live: `note: {a:1}` returned **HTTP 500** —
+`note?.trim()` on an object throws, so a client mistake became an internal error
+with a stack trace and a Sentry event — and a **90,000-character note returned
+201 and landed in `scan_event`**, append-only, on the busiest desk in the school,
+a table this codebase already sized at tens of millions of rows. Both 400 now,
+capped at 500 like every other note field, purposes taken from `SCAN_PURPOSES`.
+// GOTCHA worth keeping: the lesson is not "add a pipe". A hand-rolled check
+covers what its author was thinking about — `purpose` was validated because it
+drives a BRANCH, `note` was not because it is only STORED. Stored is where the
+damage was.
+Gate: `every-body-is-validated-at-the-boundary.spec.ts`, exemptions named with
+reasons and each required to name a file that still exists.
+
 ### A refusal must not confirm what it hides
 "Errors never leak cross-tenant existence — return 404, not 403" is a stated
 convention here and 97 refusals follow it. Three did not, and TWO WERE IN ONE

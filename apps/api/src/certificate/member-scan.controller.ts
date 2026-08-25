@@ -1,6 +1,8 @@
-import { BadRequestException, Body, Controller, Get, Param, Post , Query } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post , Query } from "@nestjs/common";
 import type { MemberScanDto, ScanRecordResultDto, ScanEventDto } from "@sms/types";
-import { isScanPurpose, MODULES, SIS_PERMISSIONS } from "@sms/types";
+import { MODULES, SCAN_PURPOSES, SIS_PERMISSIONS } from "@sms/types";
+import { z } from "zod";
+import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { RequireModule } from "../auth/require-module.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -14,6 +16,33 @@ import { MemberScanService } from "./member-scan.service";
 // STANDARD tier got a PREMIUM feature. Nothing breaks by adding it: a school
 // without the certificate module has never had an ID card to scan, and no live
 // school has a single scan_event.
+/**
+ * VALIDATED AT THE BOUNDARY, like the other 334 request bodies.
+ *
+ * This one was hand-checked: `purpose` was tested with `isScanPurpose` in the
+ * method body and `note` was not checked at all — passed through as
+ * `body.note ?? null`. Two consequences, both measured against the running
+ * service:
+ *
+ *   a note that is not a string      -> HTTP 500. `note?.trim()` on an object
+ *                                       throws, so a client's mistake became an
+ *                                       internal error, a Sentry event and a
+ *                                       stack trace, instead of a 400.
+ *   a note of 90,000 characters      -> HTTP 201, and 90,000 characters landed
+ *                                       in `scan_event` — an APPEND-ONLY table
+ *                                       on the busiest desk in the school, which
+ *                                       this codebase has already sized at tens
+ *                                       of millions of rows. There is no scan
+ *                                       note that needs more than a sentence.
+ *
+ * 500 matches the house style for a note field, and the enum comes from
+ * `SCAN_PURPOSES` rather than being restated here.
+ */
+const scanSchema = z.object({
+  purpose: z.enum(SCAN_PURPOSES),
+  note: z.string().max(500).nullish(),
+});
+
 @Controller("members")
 @RequireModule(MODULES.CERTIFICATE)
 export class MemberScanController {
@@ -59,12 +88,8 @@ export class MemberScanController {
   record(
     @CurrentPrincipal() p: Principal,
     @Param("code") code: string,
-    @Body() body: { purpose?: string; note?: string },
+    @Body(new ZodValidationPipe(scanSchema)) body: z.infer<typeof scanSchema>,
   ): Promise<ScanRecordResultDto> {
-    const purpose = body?.purpose;
-    if (!purpose || !isScanPurpose(purpose)) {
-      throw new BadRequestException("Unknown scan purpose");
-    }
-    return this.scan.record(p, code, purpose, body.note ?? null);
+    return this.scan.record(p, code, body.purpose, body.note ?? null);
   }
 }
