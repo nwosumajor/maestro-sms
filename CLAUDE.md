@@ -1796,6 +1796,43 @@ closed the window early and the test went red while the property it guards was
 untouched. Now anchored to the method by name — and mutation-validated, which
 the accidental version never was.
 
+### Two handlers, one URL, and the second one is dead
+`GradebookController` and `LmsContentController` BOTH declare `@Controller()`
+with no prefix, and both declared `POST submissions/:id/grade`. Nest maps both —
+the startup log shows the pair, one line apart — and Express answers with the
+FIRST, which is the LMS one. So `GradebookController.grade`, the platform's
+assessment-grade write, was **unreachable dead code**.
+The two take different BODIES and different PERMISSIONS, so the loser's callers
+do not get a diagnosable 404. They get somebody else's error. Measured live: a
+teacher holding `grade.write` posted the gradebook's own documented body and got
+`400 {"fieldErrors":{"grade":["Required"]}}` — an error about a field they never
+sent — and a principal without `content.write` got a bare 403 for a permission
+the endpoint they meant does not require. `grade.status` (DRAFT | PUBLISHED)
+could not be set through the API at all, which is why every one of the 16,200
+grades in the dev database is PUBLISHED: they are written by other paths.
+The LMS route MOVED, to `content/submissions/:id/grade` — that controller
+already namespaces everything else under `content/`, so the collision was this
+one route being the odd one out in its own file; it has exactly one caller, and
+the gradebook pair share a path with a GET that does not collide. After: the
+gradebook write answers 201 and reads back, and the LMS route still resolves
+(403 on the permission gate, not 404).
+// A PARAMETER'S NAME IS NOT PART OF THE URL. `:submissionId` and `:id` are the
+same route, and that is exactly why this was invisible to a reader — the two
+lines do not look alike.
+// GOTCHA, and my own first gate had it: `apiRoutes()` keys on the path AS
+WRITTEN, so the two were different strings and the gate PASSED with the defect
+still in place. Caught only by putting the collision back. It normalises through
+`normalisePath` now, and compares across FILES — one file legitimately declaring
+several methods on one path is not the shadowing case.
+// The surface registry claimed this route was "reached from GradingConsole.tsx".
+That file has never called it — the console posts `term-results`. So the record
+of how each route is reached asserted a screen that does not exist, for a route
+that could not work; a third instance of the class already recorded for the
+audit gate's fictional exemption.
+Gate: `no-two-routes-answer-the-same-url.spec.ts`, with an EMPTY allow-list on
+purpose — a second handler on one URL is not something to permit with a note, it
+is a handler that never runs.
+
 ### A hall, a date, a class — and no family ever heard of it
 Found by RUNNING a path that had never executed: `exam_sitting`, `exam_seat` and
 `exam_invigilator` all had zero rows, so the exam hall had never once been used

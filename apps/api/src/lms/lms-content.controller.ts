@@ -455,7 +455,28 @@ export class LmsContentController {
     return this.content.listSubmissions(p, id);
   }
 
-  @Post("submissions/:id/grade")
+  /**
+   * NAMESPACED UNDER `content/`, like every other route in this controller.
+   *
+   * It was `submissions/:id/grade` — and `GradebookController` declares
+   * `submissions/:submissionId/grade` on an equally prefixless `@Controller()`.
+   * Two handlers, one URL. Nest maps both and Express answers with the FIRST,
+   * which is this one, so the gradebook's own grading endpoint was UNREACHABLE
+   * DEAD CODE.
+   *
+   * Not theoretical: a teacher holding `grade.write` posting the gradebook's own
+   * documented body got `400 {"fieldErrors":{"grade":["Required"]}}` — an error
+   * about a field they never sent, from a handler they never meant to call —
+   * and a principal without `content.write` got a bare 403 for a permission the
+   * endpoint they wanted does not require. `grade.status` (DRAFT | PUBLISHED)
+   * could not be set through the API at all.
+   *
+   * This one moves rather than the gradebook's, because this controller already
+   * namespaces everything else under `content/` — the collision was this route
+   * being the odd one out in its own file — and because it has exactly one
+   * caller to update, where the gradebook pair share a path with a GET.
+   */
+  @Post("content/submissions/:id/grade")
   @RequirePermission(LMS_PERMISSIONS.CONTENT_WRITE)
   gradeSubmission(
     @CurrentPrincipal() p: Principal,

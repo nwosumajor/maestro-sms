@@ -295,7 +295,10 @@ function GradeRow({ sub, points, onGraded }: { sub: Submission; points: number |
   const [msg, setMsg] = React.useState<string | null>(null);
   const save = async () => {
     setBusy(true); setMsg(null);
-    const res = await post<Submission>(`/submissions/${sub.id}/grade`, { grade: Number(grade), feedback });
+    // `content/submissions/...`: this used to be `/submissions/:id/grade`, which
+    // collided with the gradebook's route of the same shape on an equally
+    // prefixless controller and silently shadowed it.
+    const res = await post<Submission>(`/content/submissions/${sub.id}/grade`, { grade: Number(grade), feedback });
     setBusy(false);
     if (res.ok) { setMsg("Saved."); onGraded(); } else setMsg(res.error ?? "Failed.");
   };

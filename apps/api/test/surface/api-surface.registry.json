@@ -2978,8 +2978,8 @@
       "note": "reviewed: the Add-selected button in components/lms/SubjectCatalogue.tsx calls this"
     },
     "POST /submissions/:p/grade": {
-      "kind": "ui",
-      "note": "reviewed: reached from components/gradebook/GradingConsole.tsx"
+      "kind": "internal",
+      "note": "The gradebook's assessment-grade write, and the ONLY way to set grade.status (DRAFT | PUBLISHED). No UI calls it: the registry claimed GradingConsole did and that file never has — the console posts term-results instead. Kept because it is now REACHABLE at all: an identically-pathed LMS route on another prefixless controller shadowed it until 2026-08, so a teacher posting its documented body got somebody else's 400."
     },
     "POST /tasks": {
       "kind": "ui",
@@ -3460,6 +3460,10 @@
     "POST /exams/:p/seat": {
       "kind": "ui",
       "note": "seat one sitting from its class — the 'Seat class' button on an unseated row in the /exams planner"
+    },
+    "POST /content/submissions/:p/grade": {
+      "kind": "ui",
+      "note": "grade an LMS content submission — the GradeRow save in components/lms/ContentDetail.tsx"
     }
   }
 }
