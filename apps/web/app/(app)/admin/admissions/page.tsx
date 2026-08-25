@@ -1,4 +1,4 @@
-import type { DocumentRequirementDto, Serialized } from "@sms/types";
+import type { AdmissionApplicationPageDto, DocumentRequirementDto, Serialized } from "@sms/types";
 import { hasPermission } from "@/lib/permissions";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -13,7 +13,13 @@ import { RequirementsEditor } from "@/components/documents/RequirementsEditor";
 
 export const dynamic = "force-dynamic";
 
-export default async function AdminAdmissionsPage() {
+const STATUSES = ["NEW", "REVIEWING", "ACCEPTED", "REJECTED"] as const;
+
+export default async function AdminAdmissionsPage({
+  searchParams,
+}: {
+  searchParams?: { status?: string; q?: string; page?: string };
+}) {
   const session = await auth();
   const user = session!.user;
   if (!hasPermission(user.permissions, "admission.review")) redirect("/dashboard");
@@ -24,8 +30,18 @@ export default async function AdminAdmissionsPage() {
   // Putting a child on the roll is a narrower authority than deciding their
   // application — hr_manager holds admission.review and must not hold this.
   const canEnrol = hasPermission(user.permissions, "class.write");
-  const [apps, formFee, requirements, classes] = await Promise.all([
-    apiGet<Application[]>("/admissions"),
+  const qs = new URLSearchParams();
+  for (const key of ["status", "q", "page"] as const) {
+    const v = searchParams?.[key];
+    if (v) qs.set(key, v);
+  }
+  const [appPage, formFee, requirements, classes] = await Promise.all([
+    // Every filter narrows the QUERY. The list is paged, so the family that
+    // applied first is reachable by status, by name or by stepping back a page
+    // — it used to be the 200 most recent and nothing else.
+    apiGet<Omit<Serialized<AdmissionApplicationPageDto>, "items"> & { items: Application[] }>(
+      `/admissions${qs.toString() ? `?${qs}` : ""}`,
+    ),
     apiGet<{ formFeeMinor: number }>("/admissions/settings/form-fee"),
     canManageDocs
       ? apiGet<Serialized<DocumentRequirementDto>[]>("/documents/requirements?scope=STUDENT_ADMISSION")
@@ -35,6 +51,28 @@ export default async function AdminAdmissionsPage() {
     // an empty picker rather than an error.
     canEnrol ? apiGet<{ id: string; name: string }[]>("/classes/mine") : Promise.resolve(null),
   ]);
+
+  const apps = appPage === null ? null : appPage.items;
+  const total = appPage?.total ?? 0;
+  const page = appPage?.page ?? 1;
+  const pageSize = appPage?.pageSize ?? 50;
+  // Counted in SQL, school-wide. NEW/REVIEWING is a family still waiting for an
+  // answer, and those are exactly the rows that age off a newest-first cap.
+  const undecided = appPage?.undecidedTotal ?? 0;
+  const filtered = Boolean(searchParams?.status || searchParams?.q);
+  const pageHref = (n: number) => {
+    const pr = new URLSearchParams();
+    if (searchParams?.status) pr.set("status", searchParams.status);
+    if (searchParams?.q) pr.set("q", searchParams.q);
+    if (n > 1) pr.set("page", String(n));
+    return pr.toString() ? `/admin/admissions?${pr}` : "/admin/admissions";
+  };
+  const filterHref = (st?: (typeof STATUSES)[number]) => {
+    const pr = new URLSearchParams();
+    if (st) pr.set("status", st);
+    if (searchParams?.q) pr.set("q", searchParams.q);
+    return pr.toString() ? `/admin/admissions?${pr}` : "/admin/admissions";
+  };
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="admin" permissions={user.permissions}>
@@ -57,6 +95,63 @@ export default async function AdminAdmissionsPage() {
             title="Documents asked of families"
           />
         )}
+        {/* School-wide, so it renders whatever the current filter shows — a
+            filter that happens to match nothing must not be able to hide the
+            fact that a family is still waiting for an answer. */}
+        {undecided > 0 && (
+          <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm text-amber-700 dark:text-amber-400">
+            {undecided} application{undecided === 1 ? "" : "s"} awaiting a decision
+            {filtered ? " (school-wide, not just this filter)" : ""}.{" "}
+            {!searchParams?.status && (
+              <Link href={filterHref("NEW")} className="underline underline-offset-2">
+                Show new
+              </Link>
+            )}
+          </div>
+        )}
+
+        {/* Every filter narrows the QUERY, never a page of results. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href={filterHref()}
+            className={`rounded-md border px-2.5 py-1 text-xs font-medium ${!searchParams?.status ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-accent"}`}
+          >
+            All
+          </Link>
+          {STATUSES.map((st) => (
+            <Link
+              key={st}
+              href={filterHref(st)}
+              className={`rounded-md border px-2.5 py-1 text-xs font-medium ${searchParams?.status === st ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-accent"}`}
+            >
+              {st}
+            </Link>
+          ))}
+        </div>
+
+        <form action="/admin/admissions" className="flex flex-wrap items-center gap-2">
+          {searchParams?.status && <input type="hidden" name="status" value={searchParams.status} />}
+          <input
+            type="search"
+            name="q"
+            aria-label="Search applications by child, applicant or email"
+            defaultValue={searchParams?.q ?? ""}
+            placeholder="Search by child, applicant or email…"
+            className="h-9 w-full max-w-sm rounded-md border border-border bg-background px-3 text-sm"
+          />
+          <button type="submit" className="h-9 rounded-md border border-border px-3 text-sm hover:bg-accent">
+            Search
+          </button>
+          {searchParams?.q && (
+            <Link
+              href={searchParams.status ? `/admin/admissions?status=${searchParams.status}` : "/admin/admissions"}
+              className="text-sm underline underline-offset-2"
+            >
+              Clear
+            </Link>
+          )}
+        </form>
+
         {/* A failed read used to render "No applications — none recorded for
             this school", and an admissions officer who believes that stops
             looking. A family waiting on a decision is the cost. */}
@@ -69,9 +164,39 @@ export default async function AdminAdmissionsPage() {
             </AlertDescription>
           </Alert>
         ) : apps.length === 0 ? (
-          <Alert variant="info"><AlertTitle>No applications</AlertTitle><AlertDescription>None recorded for this school.</AlertDescription></Alert>
+          filtered ? (
+            <Alert variant="info">
+              <AlertTitle>No applications match this filter</AlertTitle>
+              <AlertDescription>Clear it to see the school&apos;s full admissions history.</AlertDescription>
+            </Alert>
+          ) : (
+            <Alert variant="info"><AlertTitle>No applications</AlertTitle><AlertDescription>None recorded for this school.</AlertDescription></Alert>
+          )
         ) : (
           <AdmissionsReview apps={apps} classes={classes ?? []} canEnrol={canEnrol} />
+        )}
+
+        {/* What is SHOWN out of what MATCHES. A truncated list reads as the
+            complete queue, and an admissions officer who believes it stops
+            looking — with a family waiting on the other side. */}
+        {total > 0 && (
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span>
+              Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}
+              {filtered ? " matching" : ""}
+            </span>
+            {total > pageSize && (
+              <span className="flex items-center gap-3">
+                {page > 1 && (
+                  <Link href={pageHref(page - 1)} className="underline underline-offset-2">Previous</Link>
+                )}
+                <span>Page {page} of {Math.max(1, Math.ceil(total / pageSize))}</span>
+                {page * pageSize < total && (
+                  <Link href={pageHref(page + 1)} className="underline underline-offset-2">Next</Link>
+                )}
+              </span>
+            )}
+          </div>
         )}
       </div>
     </AppShell>

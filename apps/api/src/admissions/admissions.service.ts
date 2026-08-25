@@ -26,7 +26,9 @@ import { Prisma } from "@sms/db";
 import { SchoolRegionService } from "../foundation/school-region.service";
 import {
   ADMISSION_REVIEW_CHAIN,
+  ADMISSION_UNDECIDED,
   type AdmissionApplicationDto,
+  type AdmissionApplicationPageDto,
   type AdmissionApprovalDto,
   type AdmissionDetails,
   type AdmissionStage,
@@ -92,6 +94,16 @@ interface AppRow {
   formFeePaidAt: Date | null;
   convertedStudentId?: string | null;
   createdAt: Date;
+}
+
+/** One screen of applications. A record is paged, never truncated. */
+const ADMISSION_PAGE_SIZE = 50;
+
+interface AdmissionListOpts {
+  status?: "NEW" | "REVIEWING" | "ACCEPTED" | "REJECTED";
+  /** Matches the child's name, the applicant's name, or their email. */
+  q?: string;
+  page?: number;
 }
 
 @Injectable()
@@ -286,11 +298,55 @@ export class AdmissionsService {
     return { formFeeMinor: feeMinor };
   }
 
-  async list(p: Principal): Promise<AdmissionApplicationDto[]> {
-    const rows = await this.db.runAsTenant(this.ctx(p), (tx) =>
-      tx.admissionApplication.findMany({ orderBy: { createdAt: "desc" }, take: 200 }),
-    );
-    return (rows as unknown as AppRow[]).map((r) => this.toDto(r));
+  /**
+   * A page of this school's applications, filtered IN SQL.
+   *
+   * It was `take: 200` newest-first with no filter and no page, on a permanent
+   * table. An application still NEW or REVIEWING is one nobody has answered, so
+   * it AGES — and newest-first drops the oldest, which is to say the family
+   * that has been waiting longest is the one the screen cannot show. The page's
+   * own comment already said "a family waiting on a decision is the cost"; that
+   * reasoning had been applied to a failed read and never to the cap.
+   */
+  async list(p: Principal, opts: AdmissionListOpts = {}): Promise<AdmissionApplicationPageDto> {
+    const page = Math.max(1, Math.floor(opts.page ?? 1));
+    const pageSize = ADMISSION_PAGE_SIZE;
+    const needle = opts.q?.trim();
+    const where = {
+      ...(opts.status ? { status: opts.status } : {}),
+      // An admissions officer looks a family up by any of the names or the
+      // address they wrote on the form.
+      ...(needle
+        ? {
+            OR: [
+              { childName: { contains: needle, mode: "insensitive" as const } },
+              { applicantName: { contains: needle, mode: "insensitive" as const } },
+              { applicantEmail: { contains: needle, mode: "insensitive" as const } },
+            ],
+          }
+        : {}),
+    };
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const [rows, total, undecidedTotal] = await Promise.all([
+        tx.admissionApplication.findMany({
+          where,
+          orderBy: { createdAt: "desc" },
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+        }),
+        tx.admissionApplication.count({ where }),
+        // School-wide, NOT narrowed by the filter: a search must not be able to
+        // hide the fact that a family is still waiting.
+        tx.admissionApplication.count({ where: { status: { in: [...ADMISSION_UNDECIDED] } } }),
+      ]);
+      return {
+        items: (rows as unknown as AppRow[]).map((r) => this.toDto(r)),
+        total,
+        page,
+        pageSize,
+        undecidedTotal,
+      };
+    });
   }
 
   async get(p: Principal, id: string): Promise<AdmissionApplicationDto> {

@@ -1778,6 +1778,22 @@ RLS; `schoolId,status` for the count), so no migration.
 Third instance of the class already recorded for approvals, leave and
 assessments: **filtering in memory still only ever sees the rows that survived
 the cap.**
+**AND ITS SIBLING HAD IT TOO.** Rather than stop at the one that hurt — the
+mistake this repo keeps recording — the class was swept: of the 128 tables the
+app role cannot DELETE from, 27 had a list read with a hard cap. `GET /admissions`
+was byte-for-byte the same shape, `findMany({ orderBy: { createdAt: "desc" },
+take: 200 })`, no filter, no page, no total. An application still NEW or
+REVIEWING is one nobody has answered, so it ages the same way an unanswered
+chargeback does, and newest-first drops the OLDEST — the family that applied
+FIRST was the one the screen could not show. Measured on 251 seeded
+applications: **200 rows, ZERO undecided visible**, and a NEW application from
+400 days earlier reachable by nothing, on a page whose own comment already said
+"a family waiting on a decision is the cost" — reasoning that had been applied
+to a failed read and never to the cap. There was no status filter at all, so
+"what is still waiting on us" had no answer short of reading every card. Now
+`AdmissionApplicationPageDto` with `undecidedTotal` counted in SQL and
+school-wide, `q` over child / applicant / email, and the same
+filtered-empty-vs-load-failure distinction.
 
 ### Six gates each grew their own route extractor, and five were wrong
 `apps/api/test/support/api-routes.ts` is now the ONE answer to "what routes does

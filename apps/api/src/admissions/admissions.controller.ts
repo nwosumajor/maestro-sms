@@ -1,8 +1,8 @@
-import { Body, Controller, Get, Param, Post, Put, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Put, UseGuards, Query } from "@nestjs/common";
 import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
 import { RateLimitGuard } from "../common/rate-limit.guard";
-import type { AdmissionApplicationDto } from "@sms/types";
+import type { AdmissionApplicationDto, AdmissionApplicationPageDto } from "@sms/types";
 import { z } from "zod";
 import { ADMISSION_PERMISSIONS, FEES_PERMISSIONS, LMS_PERMISSIONS } from "@sms/types";
 import { RequireStepUp } from "../auth/require-stepup.decorator";
@@ -60,6 +60,15 @@ const examSchema = z.object({
 const payInitSchema = z.object({ schoolSlug: z.string().min(1).max(80) });
 const formFeeSchema = z.object({ feeMinor: z.number().int().min(0).max(100_000_000) });
 
+// Validated at the boundary. `status` is the enum the row can hold, so an
+// unknown value is a 400 rather than a filter that silently matches nothing and
+// reads to an admissions officer as "no applications".
+const listQuerySchema = z.object({
+  status: z.enum(["NEW", "REVIEWING", "ACCEPTED", "REJECTED"]).optional(),
+  q: z.string().trim().max(120).optional(),
+  page: z.coerce.number().int().positive().max(10_000).optional(),
+});
+
 @RequireModule(MODULES.ADMISSIONS)
 @Controller()
 export class AdmissionsController {
@@ -108,8 +117,11 @@ export class AdmissionsController {
 
   @Get("admissions")
   @RequirePermission(ADMISSION_PERMISSIONS.ADMISSION_REVIEW)
-  list(@CurrentPrincipal() p: Principal): Promise<AdmissionApplicationDto[]> {
-    return this.admissions.list(p);
+  list(
+    @CurrentPrincipal() p: Principal,
+    @Query(new ZodValidationPipe(listQuerySchema)) query: z.infer<typeof listQuerySchema>,
+  ): Promise<AdmissionApplicationPageDto> {
+    return this.admissions.list(p, query);
   }
 
   @Get("admissions/:id")
