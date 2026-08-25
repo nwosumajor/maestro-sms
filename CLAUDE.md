@@ -1796,6 +1796,45 @@ closed the window early and the test went red while the property it guards was
 untouched. Now anchored to the method by name — and mutation-validated, which
 the accidental version never was.
 
+### Four zeros on a report card, for a term that had not started
+Found by RUNNING a path that had never executed: `report_card_remark` and
+`student_trait_rating` both had zero rows, so nothing had ever printed a card
+carrying either. Driving it end to end — record 20 trait ratings, write both
+remarks, generate the PDF, extract the text — showed the traits and remarks are
+RIGHT (grouped as the catalogue groups them, scale spelled out, each remark
+attributed by name). The attendance block was not.
+```
+if (d.daysOpened > 0) doc.text(`Times school opened: ${d.daysOpened}`)   // hidden at 0
+doc.text(`Present: 0  Late: 0  Absent: 0  Excused: 0`)                   // ALWAYS printed
+if (total)            doc.text(`Attendance rate: …%`)                    // hidden at 0
+```
+The two figures that give the zeros their meaning are suppressed in exactly the
+case where the zeros mislead, and the FOUR BARE ZEROS are left standing alone.
+The code's own comment six lines above states the principle it then breaks:
+"'Times school opened' is the denominator a parent reads the attendance against
+— without it 'present: 46' says nothing." **Four zeros are a statement about the
+CHILD; no register is a statement about the SCHOOL**, and a parent reads the
+first. Live on a real pupil: a term running 2026-09-07 to 2026-12-18, card
+generated 2026-08-25 — before the term had begun — printed
+`Present: 0 Late: 0 Absent: 0 Excused: 0` and nothing else.
+Three states now, all three verified live: no register at all → "No attendance
+has been recorded for this term."; register taken and this pupil in none of it →
+"Times school opened: 5 … No attendance was recorded for this student, though
+the register was taken on 5 days" (a different fact, and one the school can act
+on); any record at all → the counts and the rate exactly as before.
+// The wording deliberately does NOT say the school failed to open.
+`daysOpened` is also zero before a term begins and when no class could be
+resolved for the pupil, so asserting anything about the school would be
+inventing a fact to replace a missing one.
+// SIBLING CHECK, and the PDF was the outlier: `getStudentSummary` already
+returns `percent: null` at zero and says why in a comment ("would read as
+'never attended'"), and the /attendance page hides the whole card behind
+`summary.total > 0`. The one surface that got it wrong is the one that LEAVES
+THE BUILDING — printed, filed in the vault, and emailed to guardians.
+// The suite that caught nothing here is the one that reads the PDF back
+(`reportcard-pdf.spec.ts`); every other report-card test checks the numbers
+going IN. Its own header already says why that gap exists.
+
 ### One school's currency stopped metering the whole fleet
 Found immediately after making seat arrears visible, by asking what happens when
 the accrual FAILS. The dunning sweep's per-school guard — added after the

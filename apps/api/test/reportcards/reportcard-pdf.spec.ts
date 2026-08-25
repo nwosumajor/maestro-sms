@@ -191,6 +191,50 @@ describe("attendance", () => {
     expect(t.indexOf("Times school opened")).toBeLessThan(t.indexOf("Present: 46"));
   });
 
+  it("does NOT print four zeros when no register has been taken", async () => {
+    // A STATEMENT ABOUT THE CHILD versus a statement about the school.
+    //
+    // "Times school opened" and "Attendance rate" were both suppressed when
+    // they would be zero — correctly, there is nothing to say — while
+    // "Present: 0  Late: 0  Absent: 0  Excused: 0" printed unconditionally. So
+    // the two figures that give the zeros their meaning vanished in precisely
+    // the case where the zeros mislead, and a parent read "my child was never
+    // present" off a term that had not started.
+    //
+    // Live before this: a real pupil, term 2026-09-07 to 2026-12-18, card
+    // generated 2026-08-25 — four zeros and nothing else.
+    const t = textOf(await render({ att: { PRESENT: 0, ABSENT: 0, LATE: 0, EXCUSED: 0 }, daysOpened: 0 }));
+    expect(t).toContain("No attendance has been recorded for this term.");
+    expect(t).not.toMatch(/Present: 0/);
+    // And it does not claim the school failed to open: `daysOpened` is also
+    // zero before a term begins, and when no class could be resolved.
+    expect(t).not.toContain("Times school opened");
+  });
+
+  it("says the register WAS taken when the pupil is simply in none of it", async () => {
+    // A different fact from the one above, and one the school can act on.
+    const t = textOf(await render({ att: { PRESENT: 0, ABSENT: 0, LATE: 0, EXCUSED: 0 }, daysOpened: 5 }));
+    expect(t).toContain("Times school opened: 5");
+    expect(t).toContain("No attendance was recorded for this student");
+    expect(t).toContain("the register was taken on 5 days");
+    expect(t).not.toMatch(/Present: 0/);
+  });
+
+  it("still prints the counts and the rate the moment there is one record", async () => {
+    // The fix must not hide real attendance. One present day out of one.
+    const t = textOf(await render({ att: { PRESENT: 1, ABSENT: 0, LATE: 0, EXCUSED: 0 }, daysOpened: 5 }));
+    expect(t).toContain("Present: 1");
+    expect(t).toContain("Attendance rate: 100%");
+    expect(t).not.toContain("No attendance");
+  });
+
+  it("counts LATE as attended, and EXCUSED as neither", async () => {
+    // Unchanged by the fix, and worth pinning beside it: the rate is
+    // (present + late) / everything recorded.
+    const t = textOf(await render({ att: { PRESENT: 6, ABSENT: 2, LATE: 2, EXCUSED: 0 }, daysOpened: 10 }));
+    expect(t).toContain("Attendance rate: 80%");
+  });
+
   it("prints when the next term begins — the only date about the future", async () => {
     expect(textOf(await render())).toContain("Next term begins: 2027-01-06");
   });

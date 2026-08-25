@@ -678,9 +678,40 @@ export class ReportCardService {
         day(d.nextTermBegins) ? `Next term begins: ${day(d.nextTermBegins)}` : null,
       ].filter(Boolean);
       if (frame.length > 0) doc.text(frame.join("    "), startX);
-      doc.text(`Present: ${d.att.PRESENT}    Late: ${d.att.LATE}    Absent: ${d.att.ABSENT}    Excused: ${d.att.EXCUSED}`, startX);
+      // FOUR ZEROS ARE A STATEMENT ABOUT THE CHILD; NO REGISTER IS A STATEMENT
+      // ABOUT THE SCHOOL.
+      //
+      // "Times school opened" and "Attendance rate" are both suppressed when
+      // they would be zero — correctly, there is nothing to say — while
+      // "Present: 0  Late: 0  Absent: 0  Excused: 0" printed unconditionally.
+      // So the two figures that give the zeros their meaning vanished in
+      // precisely the case where the zeros mislead, and the comment six lines
+      // above says why that matters: the denominator is what "present: 46" is
+      // read against. A parent seeing four zeros reads "my child was never
+      // present"; the truth is usually that no register has been taken yet.
+      //
+      // Live on a real pupil before this: a term running 2026-09-07 to
+      // 2026-12-18, generated on 2026-08-25 — before it had started — printed
+      // four zeros and nothing else.
       const total = d.att.PRESENT + d.att.LATE + d.att.ABSENT + d.att.EXCUSED;
-      if (total) doc.text(`Attendance rate: ${Math.round(((d.att.PRESENT + d.att.LATE) / total) * 100)}%`, startX);
+      if (total > 0) {
+        doc.text(`Present: ${d.att.PRESENT}    Late: ${d.att.LATE}    Absent: ${d.att.ABSENT}    Excused: ${d.att.EXCUSED}`, startX);
+        doc.text(`Attendance rate: ${Math.round(((d.att.PRESENT + d.att.LATE) / total) * 100)}%`, startX);
+      } else if (d.daysOpened > 0) {
+        // The register WAS taken and this pupil is in none of it. A different
+        // fact from the one below, and one the school can act on.
+        doc.text(
+          `No attendance was recorded for this student, though the register was taken on ${d.daysOpened} ` +
+            `day${d.daysOpened === 1 ? "" : "s"}.`,
+          startX,
+        );
+      } else {
+        // Says nothing about the child OR the school beyond what is known. It
+        // does not claim the school failed to open — `daysOpened` is also zero
+        // when the term has not begun, or when no class could be resolved for
+        // this pupil.
+        doc.text("No attendance has been recorded for this term.", startX);
+      }
 
       // SKILLS AND BEHAVIOUR — printed beside the marks, never mixed into them.
       // Grouped as the catalogue groups them, with the scale spelled out
