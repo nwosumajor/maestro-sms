@@ -131,7 +131,7 @@ d("DisputesService chargeback lifecycle (real Postgres)", () => {
   it("charge.dispute.create -> OPEN row linked to the payment, finance notified, audited", async () => {
     await svc.applyDisputeEvent(disputeEvent({ event: "charge.dispute.create", disputeId: D1 }));
 
-    const list = await svc.list(staffA());
+    const list = (await svc.list(staffA())).items;
     expect(list).toHaveLength(1);
     expect(list[0]).toMatchObject({
       gatewayDisputeId: D1,
@@ -159,17 +159,17 @@ d("DisputesService chargeback lifecycle (real Postgres)", () => {
 
   it("a retried create never duplicates (gatewayDisputeId idempotency)", async () => {
     await svc.applyDisputeEvent(disputeEvent({ event: "charge.dispute.create", disputeId: D1 }));
-    expect(await svc.list(staffA())).toHaveLength(1);
+    expect((await svc.list(staffA())).items).toHaveLength(1);
   });
 
   it("cross-tenant: the other school's staff sees nothing and gets 404 by id", async () => {
-    expect(await svc.list(staffB())).toHaveLength(0);
-    const [mine] = await svc.list(staffA());
+    expect((await svc.list(staffB())).items).toHaveLength(0);
+    const [mine] = (await svc.list(staffA())).items;
     await expect(svc.get(staffB(), mine.id)).rejects.toMatchObject({ status: 404 });
   });
 
   it("respond() moves OPEN -> RESPONDED with the note, and only from OPEN", async () => {
-    const [mine] = await svc.list(staffA());
+    const [mine] = (await svc.list(staffA())).items;
     const updated = await svc.respond(staffA(), mine.id, "Receipt + enrollment record uploaded to Paystack");
     expect(updated.status).toBe("RESPONDED");
     expect(updated.responseNote).toContain("Receipt");
@@ -180,7 +180,7 @@ d("DisputesService chargeback lifecycle (real Postgres)", () => {
     await svc.applyDisputeEvent(
       disputeEvent({ event: "charge.dispute.resolve", disputeId: D1, resolution: "declined" }),
     );
-    const won = (await svc.list(staffA())).find((x) => x.gatewayDisputeId === D1);
+    const won = (await svc.list(staffA())).items.find((x) => x.gatewayDisputeId === D1);
     expect(won).toMatchObject({ status: "WON", resolution: "declined" });
     expect(won!.resolvedAt).not.toBeNull();
 
@@ -190,7 +190,7 @@ d("DisputesService chargeback lifecycle (real Postgres)", () => {
     await svc.applyDisputeEvent(
       disputeEvent({ event: "charge.dispute.resolve", disputeId: D2, resolution: "merchant-accepted" }),
     );
-    const lost = (await svc.list(staffA())).find((x) => x.gatewayDisputeId === D2);
+    const lost = (await svc.list(staffA())).items.find((x) => x.gatewayDisputeId === D2);
     expect(lost).toMatchObject({ status: "LOST", resolution: "merchant-accepted" });
 
     const notif = await admin.query(
@@ -216,7 +216,7 @@ d("DisputesService chargeback lifecycle (real Postgres)", () => {
 
     // Already 2 dispute rows exist (D1 + the LOST one); pushing to the
     // threshold must escalate.
-    for (let i = (await escalating.list(staffA())).length; i < DISPUTE_ALERT_THRESHOLD; i++) {
+    for (let i = (await escalating.list(staffA())).items.length; i < DISPUTE_ALERT_THRESHOLD; i++) {
       await escalating.applyDisputeEvent(
         disputeEvent({ event: "charge.dispute.create", disputeId: "disp-" + randomUUID() }),
       );
@@ -264,7 +264,7 @@ d("DisputesService chargeback lifecycle (real Postgres)", () => {
       },
     } as never);
 
-    const row = (await stripeSvc.list(staffA())).find((x) => x.gatewayDisputeId === DP);
+    const row = (await stripeSvc.list(staffA())).items.find((x) => x.gatewayDisputeId === DP);
     expect(row).toMatchObject({
       status: "OPEN",
       currency: "USD",
@@ -285,20 +285,73 @@ d("DisputesService chargeback lifecycle (real Postgres)", () => {
       type: "charge.dispute.closed",
       data: { object: { id: DP, amount: 9_900, currency: "usd", status: "won", charge: "ch_test_1" } },
     } as never);
-    const closed = (await stripeSvc.list(staffA())).find((x) => x.gatewayDisputeId === DP);
+    const closed = (await stripeSvc.list(staffA())).items.find((x) => x.gatewayDisputeId === DP);
     expect(closed).toMatchObject({ status: "WON", resolution: "won" });
+  });
+
+  it("a school past the old 200-row cap can still find, count and reach an OPEN dispute", async () => {
+    // The list was `take: 200` ordered newest-first with no filter, and the page
+    // counted OPEN ones by filtering that array in memory. Disputes that stay
+    // OPEN are the ones nobody has answered — they AGE — so newest-first drops
+    // exactly the rows the count exists to surface. Measured on a real school
+    // with 251 disputes: the old query returned 200 rows containing ZERO open
+    // ones while a dispute sat unanswered past its evidence deadline, which is
+    // lost by default, which is money.
+    const OLD = "disp-old-" + randomUUID();
+    await admin.query(
+      `INSERT INTO payment_dispute (id,"schoolId","gatewayDisputeId","transactionReference","amountMinor",currency,status,"dueAt","createdAt","updatedAt")
+       VALUES (gen_random_uuid(),$1,$2,'REF-OLD-OPEN',250000,'NGN','OPEN', now() - interval '300 days', now() - interval '400 days', now())`,
+      [SA, OLD],
+    );
+    // 250 newer, resolved disputes stacked on top of it.
+    await admin.query(
+      `INSERT INTO payment_dispute (id,"schoolId","gatewayDisputeId","transactionReference","amountMinor",currency,status,"createdAt","updatedAt")
+       SELECT gen_random_uuid(),$1,'bulk-'||g,'REF-'||g,10000,'NGN','WON', now() - (g || ' hours')::interval, now()
+       FROM generate_series(1,250) g`,
+      [SA],
+    );
+
+    const first = await svc.list(staffA());
+    // The old cap is genuinely exceeded, so this is a real test of the boundary.
+    expect(first.total).toBeGreaterThan(200);
+    // Page one cannot contain it — that is the point, and why a filter is needed.
+    expect(first.items.some((x) => x.gatewayDisputeId === OLD)).toBe(false);
+    // ...and yet it is COUNTED, because openTotal is SQL and school-wide.
+    expect(first.openTotal).toBeGreaterThanOrEqual(1);
+
+    // Reachable by status,
+    const open = await svc.list(staffA(), { status: "OPEN" });
+    expect(open.items.some((x) => x.gatewayDisputeId === OLD)).toBe(true);
+    // by reference,
+    const found = await svc.list(staffA(), { q: "REF-OLD-OPEN" });
+    expect(found.items.map((x) => x.gatewayDisputeId)).toContain(OLD);
+    // and by paging to the end.
+    const last = await svc.list(staffA(), { page: Math.ceil(first.total / first.pageSize) });
+    expect(last.items.length).toBeGreaterThan(0);
+
+    // A filter narrows `total` but must NEVER narrow the school-wide open count,
+    // or a search would be able to hide the fact that something is waiting.
+    const won = await svc.list(staffA(), { status: "WON" });
+    expect(won.total).toBeLessThan(first.total);
+    expect(won.openTotal).toBe(first.openTotal);
+
+    // Still tenant-scoped with a filter applied — a search must AND onto the
+    // caller's scope, never replace it.
+    const other = await svc.list(staffB(), { q: "REF-OLD-OPEN" });
+    expect(other.items).toEqual([]);
+    expect(other.openTotal).toBe(0);
   });
 
   it("STRIPE: an unmappable dispute (no schoolId metadata) is dropped, never guessed", async () => {
     const stripeStub = { getCharge: jest.fn().mockResolvedValue({ metadata: {} }) };
     const tenant = new PrismaTenantService() as never;
     const dropSvc = new DisputesService(tenant, new AuditLogService(), notifications, { client: null } as never, stripeStub as never);
-    const before = (await dropSvc.list(staffA())).length;
+    const before = (await dropSvc.list(staffA())).items.length;
     const res = await dropSvc.applyStripeDisputeEvent({
       type: "charge.dispute.created",
       data: { object: { id: "dp_unmapped", amount: 100, currency: "usd", charge: "ch_unknown" } },
     } as never);
     expect(res).toEqual({ ok: true });
-    expect((await dropSvc.list(staffA())).length).toBe(before);
+    expect((await dropSvc.list(staffA())).items.length).toBe(before);
   });
 });

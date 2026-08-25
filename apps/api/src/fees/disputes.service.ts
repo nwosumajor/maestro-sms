@@ -31,7 +31,7 @@
 
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { DISPUTE_ALERT_THRESHOLD, DISPUTE_ALERT_WINDOW_DAYS, formatMoney} from "@sms/types";
-import type { PaymentDisputeDto } from "@sms/types";
+import type { DisputeStatus, PaymentDisputeDto, PaymentDisputePageDto } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -86,6 +86,16 @@ type DisputeRow = {
   resolvedAt: Date | null;
   createdAt: Date;
 };
+
+/** One screen of disputes. A record is paged, never truncated. */
+const DISPUTE_PAGE_SIZE = 50;
+
+interface DisputeListOpts {
+  status?: DisputeStatus;
+  /** Matches either reference the row carries. */
+  q?: string;
+  page?: number;
+}
 
 @Injectable()
 export class DisputesService {
@@ -489,10 +499,48 @@ export class DisputesService {
   // Staff surface (fee.manage)
   // ---------------------------------------------------------------------------
 
-  async list(p: Principal): Promise<PaymentDisputeDto[]> {
+  /**
+   * A page of this school's disputes, filtered IN SQL.
+   *
+   * The old shape was `take: 200` with no filter and no page, on a table whose
+   * history is permanent by design (rls/78 grants no DELETE). Filtering the
+   * result in memory — which is what the page did to count OPEN ones — still
+   * only ever sees the rows that survived the cap, and since disputes are
+   * ordered newest-first the ones it dropped were the OLDEST unanswered ones.
+   * That is backwards: an OPEN dispute gets more urgent as it ages, and past
+   * its evidence deadline it is lost by default.
+   */
+  async list(p: Principal, opts: DisputeListOpts = {}): Promise<PaymentDisputePageDto> {
+    const page = Math.max(1, Math.floor(opts.page ?? 1));
+    const pageSize = DISPUTE_PAGE_SIZE;
+    const needle = opts.q?.trim();
+    const where = {
+      ...(opts.status ? { status: opts.status } : {}),
+      // A finance officer looks a dispute up by the reference the gateway gave
+      // them, which may be either of the two the row carries.
+      ...(needle
+        ? {
+            OR: [
+              { transactionReference: { contains: needle, mode: "insensitive" as const } },
+              { gatewayDisputeId: { contains: needle, mode: "insensitive" as const } },
+            ],
+          }
+        : {}),
+    };
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
-      const rows = await tx.paymentDispute.findMany({ orderBy: { createdAt: "desc" }, take: 200 });
-      return rows.map((r: DisputeRow) => this.toDto(r));
+      const [rows, total, openTotal] = await Promise.all([
+        tx.paymentDispute.findMany({
+          where,
+          orderBy: { createdAt: "desc" },
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+        }),
+        tx.paymentDispute.count({ where }),
+        // School-wide, NOT narrowed by the filter: the banner answers "is
+        // anything waiting on us", which a search must not be able to change.
+        tx.paymentDispute.count({ where: { status: "OPEN" } }),
+      ]);
+      return { items: rows.map((r: DisputeRow) => this.toDto(r)), total, page, pageSize, openTotal };
     });
   }
 

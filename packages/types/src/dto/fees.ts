@@ -192,6 +192,32 @@ export interface PaymentDisputeDto {
   createdAt: Date;
 }
 
+/**
+ * A page of disputes, plus the school-wide count of OPEN ones.
+ *
+ * The list was the most-recent 200 with no filter and no way past them, on a
+ * table the controller's own comment calls permanent — rls/78 grants no DELETE.
+ * Worse than the truncation was what the page did with it: the "N open disputes
+ * awaiting a response" banner was a MEMORY filter over those 200, ordered
+ * newest-first. Disputes that stay OPEN are the ones nobody has answered, they
+ * age, and ordering newest-first drops the oldest off the end — so the rows the
+ * count existed to surface were exactly the rows it could not see. An unanswered
+ * dispute is lost by default, which is money.
+ *
+ * `openTotal` is therefore counted in SQL and is school-wide — deliberately NOT
+ * narrowed by the current filter, because it answers "is anything waiting on
+ * us", not "how many did I just search for".
+ */
+export interface PaymentDisputePageDto {
+  items: PaymentDisputeDto[];
+  /** Matching the filter, not the page. */
+  total: number;
+  page: number;
+  pageSize: number;
+  /** OPEN disputes school-wide, whatever the current filter is. */
+  openTotal: number;
+}
+
 /** A student's dedicated NUBAN (virtual bank account) for fee transfers. */
 export interface VirtualAccountDto {
   studentId: string;

@@ -1746,6 +1746,39 @@ the TypeScript duplicate-attribute error caught it. The gate reads each tag to i
 matching `>` at brace depth zero, and strips COMMENTS first (a JSDoc block
 documenting `<input type="datetime-local">` is not a control anyone can fix).
 
+### The banner counting unanswered chargebacks could not see the old ones
+`GET /fees/disputes` was `take: 200` ordered newest-first, with no filter, no
+paging and no total — on a table the controller's own comment calls permanent
+(rls/78 grants no DELETE). The truncation was not the worst of it. The page
+computed its warning banner as a MEMORY filter over those 200 rows:
+`disputes?.filter((d) => d.status === "OPEN").length`. A dispute stays OPEN
+precisely because nobody has answered it, so OPEN rows AGE — and newest-first
+drops the oldest off the end. **The rows the count existed to surface were
+exactly the rows it could not see**, and the page's own subtitle says an
+unanswered dispute is "lost by default", which is money.
+Measured on a real school seeded to 251 disputes: the old query returned **200
+rows containing ZERO open ones**, while a dispute sat OPEN with an evidence
+deadline of 2025-10-29 — not in the 200, and reachable by no filter the product
+offered. After: banner "1 open dispute", footer "Showing 1–50 of 251", both
+matching the database exactly.
+`list` now filters IN SQL (`status`, `q` over either reference the row carries)
+and pages, returning `PaymentDisputePageDto`. // GOTCHA: `openTotal` is counted
+in SQL and is deliberately SCHOOL-WIDE, never narrowed by the current filter —
+verified live, `?status=WON` shows "Showing 1–50 of 250" while the banner still
+reads 1 and says "(school-wide, not just this filter)". A count that a search can
+change is a count a search can hide, and the banner answers "is anything waiting
+on us", not "how many did I just search for". The banner also renders ABOVE the
+empty/error branches, so a filter matching nothing cannot suppress it.
+Two states that must not be confused, both live-verified: an unmatched filter
+says "No disputes match this filter", and an invalid `status` is a 400 that
+renders the LOAD-FAILURE card — never "No disputes recorded", which is a
+statement about money a finance officer acts on. Indexes already covered it
+(`schoolId,createdAt` Index Scan Backward, 0.126 ms/50 rows as `major_user` under
+RLS; `schoolId,status` for the count), so no migration.
+Third instance of the class already recorded for approvals, leave and
+assessments: **filtering in memory still only ever sees the rows that survived
+the cap.**
+
 ### Six gates each grew their own route extractor, and five were wrong
 `apps/api/test/support/api-routes.ts` is now the ONE answer to "what routes does
 this API declare". Six gates had each written their own, and five took the FIRST
