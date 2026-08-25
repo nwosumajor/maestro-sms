@@ -6,6 +6,9 @@
 // the private copies it replaced.
 // =============================================================================
 
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
+
 import { apiRoutes, controllerPrefixAt, joinRoute } from "./api-routes";
 
 const routes = apiRoutes();
@@ -68,5 +71,42 @@ describe("the shared route extractor", () => {
     expect(joinRoute("", "health")).toBe("/health");
     expect(joinRoute("students/:studentId", "")).toBe("/students/:studentId");
     expect(controllerPrefixAt(`@Controller("a")\nx\n@Controller("b")\ny`, 0)).toBe("a");
+  });
+
+  it("is the only place that resolves a route's controller prefix", () => {
+    // The finding this file exists for was SEVEN copies of one idea, five of
+    // them wrong. `surface/extract.ts` had it RIGHT and wrote down exactly why
+    // it mattered — and the five siblings were left broken anyway, one carrying
+    // a named audit exemption for a route that does not exist. So the rule is
+    // enforced rather than remembered.
+    //
+    // What is banned is BUILDING A PREFIX: capturing the @Controller argument
+    // to join onto a route path. A bare existence check is fine and stays —
+    // webhook-targets uses one to fail loudly on a file it cannot read.
+    const BUILDS_A_PREFIX = "@Controller\\(\\s*";
+    const roots = [join(__dirname, ".."), join(__dirname, "../../src")];
+    const offenders: string[] = [];
+    let scanned = 0;
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir)) {
+        if (entry === "node_modules" || entry === ".next") continue;
+        const full = join(dir, entry);
+        if (statSync(full).isDirectory()) {
+          walk(full);
+          continue;
+        }
+        if (!full.endsWith(".ts")) continue;
+        if (full.endsWith("api-routes.ts")) continue; // the one place
+        scanned += 1;
+        if (readFileSync(full, "utf8").includes(BUILDS_A_PREFIX)) {
+          offenders.push(full.slice(full.indexOf("apps/")));
+        }
+      }
+    };
+    for (const r of roots) walk(r);
+    // A walk that finds no files produces no offenders and passes while
+    // covering nothing — the failure mode this repo has a whole gate about.
+    expect(scanned).toBeGreaterThan(300);
+    expect(offenders).toEqual([]);
   });
 });

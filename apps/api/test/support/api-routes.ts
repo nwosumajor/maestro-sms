@@ -39,7 +39,7 @@ import { join } from "node:path";
 
 export const API_SRC = join(__dirname, "../../src");
 
-const ROUTE = /@(Get|Post|Put|Patch|Delete)\(\s*(?:["'`]([^"'`]*)["'`])?\s*\)/g;
+const ROUTE = /@(Get|Post|Put|Patch|Delete|All)\(\s*(?:["'`]([^"'`]*)["'`])?\s*\)/g;
 const CONTROLLER = /@Controller\(\s*(?:["'`]([^"'`]*)["'`])?\s*\)/g;
 
 export interface ApiRoute {

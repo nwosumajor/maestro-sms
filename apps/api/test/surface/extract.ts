@@ -16,6 +16,8 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
+import { apiRoutes } from "../support/api-routes";
+
 export interface ApiRoute {
   /** "GET /fees/:id" — the stable key used by the registry. */
   key: string;
@@ -25,14 +27,6 @@ export interface ApiRoute {
   file: string;
 }
 
-function walk(dir: string, out: string[] = []): string[] {
-  for (const entry of readdirSync(dir)) {
-    const full = join(dir, entry);
-    if (statSync(full).isDirectory()) walk(full, out);
-    else if (full.endsWith(".controller.ts")) out.push(full);
-  }
-  return out;
-}
 
 /**
  * Normalise a path so `/fees/:id` and `/fees/:invoiceId` compare equal.
@@ -58,9 +52,10 @@ export function normalisePath(p: string): string {
 /**
  * Every route the API serves.
  *
- * ONE FILE CAN DECLARE MORE THAN ONE @Controller, and two do: the public
+ * ONE FILE CAN DECLARE MORE THAN ONE @Controller, and three do: the public
  * careers board lives beside the HR recruitment controller, and the public
- * biometric intake beside HR attendance — deliberately, so those routes sit at
+ * biometric intake beside HR attendance, and the school-wide profile-review
+ * list beside the per-pupil SIS routes — deliberately, so those routes sit at
  * /public/* outside their module's prefix and gate. Taking the FIRST
  * @Controller in the file as the prefix for every route in it therefore filed
  * `GET /public/careers/:slug` under `GET /hr/recruitment/:p`, and the registry
@@ -70,31 +65,19 @@ export function normalisePath(p: string): string {
  *
  * So the prefix is resolved by POSITION: each route decorator belongs to the
  * last @Controller declared above it.
+ *
+ * That resolution now lives in ONE place, `test/support/api-routes.ts`. This
+ * file had it right and five sibling gates each carried a broken copy of the
+ * same idea — including one whose named audit exemption was written against
+ * `POST /hr/recruitment/:slug/apply`, a route that does not exist. Finding a
+ * bug, writing down exactly why it matters, fixing it in the file in front of
+ * you and leaving the siblings is the defect this repo keeps rediscovering.
  */
 export function extractRoutes(srcDir: string): ApiRoute[] {
-  const routes: ApiRoute[] = [];
-  for (const file of walk(srcDir)) {
-    const src = readFileSync(file, "utf8");
-    const controllers = [...src.matchAll(/@Controller\(\s*(?:["'`]([^"'`]*)["'`])?/g)].map((c) => ({
-      at: c.index ?? 0,
-      base: c[1] ?? "",
-    }));
-    /** The prefix of the nearest @Controller ABOVE this decorator. */
-    const baseFor = (at: number) => {
-      let base = "";
-      for (const c of controllers) {
-        if (c.at > at) break;
-        base = c.base;
-      }
-      return base;
-    };
-    // Handles @Get(), @Get("x"), and decorators split across lines.
-    for (const m of src.matchAll(/@(Get|Post|Put|Patch|Delete|All)\(\s*(?:["'`]([^"'`]*)["'`])?\s*\)/g)) {
-      const method = m[1].toUpperCase();
-      const path = normalisePath([baseFor(m.index ?? 0), m[2] ?? ""].filter(Boolean).join("/"));
-      routes.push({ key: `${method} ${path}`, method, path, file: file.slice(srcDir.length + 1) });
-    }
-  }
+  const routes: ApiRoute[] = apiRoutes(srcDir).map((r) => {
+    const path = normalisePath(r.path);
+    return { key: `${r.method} ${path}`, method: r.method, path, file: r.file.slice(srcDir.length + 1) };
+  });
   // Two decorators can produce the same key (the mobile-money callback is POST
   // and PUT on one path, by design). Dedupe on the key.
   const seen = new Map<string, ApiRoute>();

@@ -1816,10 +1816,28 @@ call. The fail-OPEN direction is the one that matters: `POST /hr/recruitment/
 real it arrives PRE-EXEMPTED from the audit gate by an entry written years
 earlier for something else. `it("exempts only routes that exist")` now makes a
 fictional key impossible.
-`public-routes-are-rate-limited` already resolved this correctly — it was written
-after the mis-keying bit once, on the biometric endpoint. **Fixing the gate where
-it hurt and leaving five siblings is the defect class this repo keeps finding in
-its application code, committed in the gates themselves.**
+**IT WAS SEVEN COPIES, NOT SIX, AND THE RIGHT ONE WAS ALREADY THERE.**
+`test/surface/extract.ts` — not a `.spec.ts`, so the first sweep missed it —
+already resolved the prefix by POSITION and documented the bug in detail,
+naming `GET /public/careers/:slug` filed under `GET /hr/recruitment/:p` and
+calling those "exactly the routes a surface gate is most for". Somebody found
+it, wrote down precisely why it mattered, fixed the file in front of them, and
+left the five siblings plus the audit gate's fictional exemption untouched.
+`public-routes-are-rate-limited` was fixed the same way, separately, after the
+same bug bit on the biometric endpoint. **Fixing the gate where it hurt and
+leaving the siblings is the defect class this repo keeps finding in its
+application code, committed twice over in the gates themselves.**
+`extract.ts` now DELEGATES its walking and prefix resolution to the shared
+extractor (route set identical before and after: 863 keys, none added, none
+lost) and its own dead walker is gone. The rule is enforced rather than
+remembered: `api-routes.spec.ts` fails if any file outside the shared module
+captures the `@Controller` ARGUMENT to build a path — a bare existence check
+stays legal, because `webhook-targets` uses one to fail loudly on a file it
+cannot read. Mutation-validated by adding an eighth copy and watching it be
+named. // GOTCHA: `extract.ts`'s prose said "and two do" when THREE files
+declare two controllers — `sis.controller.ts` was the third, which is how
+`GET /students/profile-reviews` came to be read as
+`GET /students/:studentId/profile-reviews`.
 // GOTCHA, and my first shared version had it: a block taken from "this route
 decorator to the next" reads only what is written BELOW. `@Public()` is written
 ABOVE `@Post(...)`, so `isPublic` was false for the careers intake, the biometric
