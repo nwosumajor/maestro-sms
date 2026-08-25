@@ -1796,6 +1796,36 @@ closed the window early and the test went red while the property it guards was
 untouched. Now anchored to the method by name — and mutation-validated, which
 the accidental version never was.
 
+### A hall, a date, a class — and no family ever heard of it
+Found by RUNNING a path that had never executed: `exam_sitting`, `exam_seat` and
+`exam_invigilator` all had zero rows, so the exam hall had never once been used
+end to end.
+`GET /exams/mine` — what a pupil and a parent read — returns **SEATS**. So an
+unseated sitting is invisible to everyone it is for. And seating existed ONLY
+per schedule (`POST /exams/schedules/:id/seat`) while the planner's own form
+offers **"No schedule" as its first and default option**. So the ordinary way to
+add one exam produced a sitting with a hall, a date, a time and a class that
+NOTHING in the product could seat and no family could see — while the staff
+planner listed it as complete, with an invigilator rostered against it.
+Live before: sitting created without a schedule, `POST /exams/:id/seat` → 404,
+`/exams/mine` empty for both the pupil and their parent. After: `{"seated":true,
+"seatedStudents":1}` and both read "Mathematics Paper 1 seat 1"; a replay says
+"This sitting is already seated."
+`autoSeatSchedule` now takes `{ scheduleId } | { id }` — one seater, so the two
+paths cannot drift on capacity, ordering or idempotency — and `seatSitting`
+reports the OUTCOME rather than a fixed success, naming why nothing happened in
+the words of the thing to fix ("no class attached", "nobody enrolled", "already
+seated"). Idempotent, because a pupil told seat 14 must not later find
+themselves in seat 31.
+// THE BADGE WAS THE OTHER HALF. The planner already said "not seated" — in a
+neutral outline, beside "no invigilator" — which a school reads as tidying-up
+rather than as "nobody has been told". It now names the consequence ("not seated
+— no student can see this exam") and the row carries the one-click fix; a
+sitting with no class says THAT instead, since there is nothing to seat from.
+// The pattern is the one this repo keeps meeting from the other side: the staff
+surface looks finished, the family surface is silent, and nothing connects them.
+Same shape as the report-card zeros directly above.
+
 ### Four zeros on a report card, for a term that had not started
 Found by RUNNING a path that had never executed: `report_card_remark` and
 `student_trait_rating` both had zero rows, so nothing had ever printed a card

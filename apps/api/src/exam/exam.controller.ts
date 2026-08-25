@@ -160,6 +160,23 @@ export class ExamController {
     return this.exams.seatSchedule(p, id);
   }
 
+  /**
+   * Seat ONE sitting from its class roster.
+   *
+   * Seating was only ever offered per SCHEDULE while the planner's form defaults
+   * to "No schedule" — so the ordinary way to add a single exam produced a
+   * sitting nothing could seat, and an unseated sitting is invisible to every
+   * pupil and parent in its class (`/exams/mine` reads seats). Idempotent.
+   */
+  @Post(":id/seat")
+  @RequirePermission(EXAM_PERMISSIONS.EXAM_MANAGE)
+  seatSitting(
+    @CurrentPrincipal() p: Principal,
+    @Param("id") id: string,
+  ): Promise<{ seated: boolean; seatedStudents: number; unseated: number; reason: string | null }> {
+    return this.exams.seatSitting(p, id);
+  }
+
   /** Day-of RELEASE (open) an approved CBT-backed sitting — exam.release only. */
   @Post(":id/release")
   @RequirePermission(EXAM_PERMISSIONS.EXAM_RELEASE)

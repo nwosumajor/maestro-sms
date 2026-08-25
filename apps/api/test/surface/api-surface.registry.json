@@ -3456,6 +3456,10 @@
     "POST /billing/addons/:p/cancel": {
       "kind": "ui",
       "note": "stop renewing an add-on — the Cancel button beside it on /billing's AddonShop"
+    },
+    "POST /exams/:p/seat": {
+      "kind": "ui",
+      "note": "seat one sitting from its class — the 'Seat class' button on an unseated row in the /exams planner"
     }
   }
 }

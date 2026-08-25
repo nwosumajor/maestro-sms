@@ -93,7 +93,7 @@ export class ExamService {
       // screen to notice. It goes on the audit row.
       let autoUnseated = 0;
       if (approved) {
-        const outcome = await this.autoSeatSchedule(tx, req.schoolId, scheduleId);
+        const outcome = await this.autoSeatSchedule(tx, req.schoolId, { scheduleId });
         autoSeated = outcome.seatedCount;
         autoUnseated = outcome.overflow.reduce((n, o) => n + o.unseated, 0);
       }
@@ -781,10 +781,20 @@ export class ExamService {
    * bulk createMany per sitting) — bounded by the schedule size, never per-student
    * fan-out. Returns how many sittings were seated. Runs inside the reactor tx.
    */
+  /**
+   * `where` names the sittings to seat: a whole SCHEDULE, or ONE sitting.
+   *
+   * It only ever took a scheduleId, and there was no other seat endpoint — so a
+   * sitting created outside a schedule could never be seated, and an unseated
+   * sitting is INVISIBLE to every pupil and parent in its class, because
+   * `myExams` reads seats. The planner's own form offers "No schedule" as its
+   * first and default option, so the ordinary way to add one exam produced
+   * exactly that: a hall, a date, a time, a class, and nobody told.
+   */
   private async autoSeatSchedule(
     tx: TenantTx,
     schoolId: string,
-    scheduleId: string,
+    where: { scheduleId: string } | { id: string },
   ): Promise<{
     seatedCount: number;
     seatedStudents: number;
@@ -797,7 +807,7 @@ export class ExamService {
     // could only ever seat online exams, so an exam officer still hand-seated
     // every paper hall one dropdown at a time.
     const sittings = (await tx.examSitting.findMany({
-      where: { scheduleId },
+      where,
       select: { id: true, cbtExamId: true, classId: true, capacity: true },
     })) as Array<{ id: string; cbtExamId: string | null; classId: string | null; capacity: number }>;
     const empty = { seatedCount: 0, seatedStudents: 0, overflow: [], reasons: { alreadySeated: 0, noClass: 0, emptyClass: 0 } };
@@ -898,7 +908,7 @@ export class ExamService {
       const sched = await tx.examSchedule.findFirst({ where: { id: scheduleId }, select: { id: true } });
       if (!sched) throw new NotFoundException("Schedule not found");
       const total = (await tx.examSitting.count({ where: { scheduleId } })) as number;
-      const outcome = await this.autoSeatSchedule(tx, p.schoolId, scheduleId);
+      const outcome = await this.autoSeatSchedule(tx, p.schoolId, { scheduleId });
       const seated = outcome.seatedCount;
       const unseatedStudents = outcome.overflow.reduce((n, o) => n + o.unseated, 0);
       // Name the halls that came up short, so the officer can open another one.
@@ -935,6 +945,61 @@ export class ExamService {
         })),
         skippedReasons: outcome.reasons,
       };
+    });
+  }
+
+  /**
+   * Seat ONE sitting from its class roster.
+   *
+   * Seating existed only per SCHEDULE, and the planner's form defaults to "No
+   * schedule" — so the ordinary way to add a single exam produced a sitting
+   * that could never be seated. That is not a cosmetic gap: `myExams` reads
+   * SEATS, so an unseated sitting is invisible to every pupil and parent in its
+   * class while the staff planner shows it complete. The school believes the
+   * exam is published and the family has never heard of it.
+   *
+   * Idempotent, like the schedule version: an already-seated sitting is skipped
+   * rather than renumbered, because a pupil who has been told seat 14 must not
+   * find themselves in seat 31.
+   */
+  async seatSitting(
+    p: Principal,
+    sittingId: string,
+  ): Promise<{ seated: boolean; seatedStudents: number; unseated: number; reason: string | null }> {
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const sitting = (await tx.examSitting.findFirst({
+        where: { id: sittingId },
+        select: { id: true, title: true, classId: true, cbtExamId: true },
+      })) as { id: string; title: string; classId: string | null; cbtExamId: string | null } | null;
+      // 404-not-403: a sitting in another school is not one this caller may
+      // learn the existence of.
+      if (!sitting) throw new NotFoundException("Sitting not found");
+      const outcome = await this.autoSeatSchedule(tx, p.schoolId, { id: sittingId });
+      const unseated = outcome.overflow.reduce((n, o) => n + o.unseated, 0);
+      // WHY NOTHING HAPPENED, in the words of the thing the officer must fix.
+      // "Seated 0" on its own sends somebody hunting through a roster.
+      const reason =
+        outcome.seatedCount > 0
+          ? null
+          : outcome.reasons.alreadySeated > 0
+            ? "This sitting is already seated."
+            : outcome.reasons.noClass > 0
+              ? "This sitting has no class attached, so there is no roster to seat from."
+              : outcome.reasons.emptyClass > 0
+                ? "The class attached to this sitting has nobody enrolled."
+                : "Nothing to seat.";
+      await this.audit.record(
+        {
+          actorId: p.userId,
+          action: "exam.sitting.seat",
+          entity: "exam_sitting",
+          entityId: sittingId,
+          schoolId: p.schoolId,
+          metadata: { seated: outcome.seatedCount, seatedStudents: outcome.seatedStudents, unseated, reasons: outcome.reasons },
+        },
+        tx,
+      );
+      return { seated: outcome.seatedCount > 0, seatedStudents: outcome.seatedStudents, unseated, reason };
     });
   }
 

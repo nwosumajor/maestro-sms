@@ -521,7 +521,16 @@ function SittingRow({
           <div className="mt-1 flex flex-wrap items-center gap-1.5">
             {clash && <Badge variant="destructive">{clash}</Badge>}
             {s.invigilators === 0 && <Badge variant="outline">no invigilator</Badge>}
-            {s.seated === 0 && <Badge variant="outline">not seated</Badge>}
+            {/* NOT SEATED IS NOT A DETAIL — IT MEANS NOBODY HAS BEEN TOLD.
+                `/exams/mine` reads SEATS, so an unseated sitting is invisible to
+                every pupil and parent in its class while this planner shows it
+                complete. The badge said "not seated" and left the consequence to
+                be inferred; a school reads that as tidying-up. */}
+            {s.seated === 0 && (
+              <Badge variant="destructive">
+                {s.classId ? "not seated — no student can see this exam" : "not seated — no class attached"}
+              </Badge>
+            )}
             {s.cbtExamId &&
               (s.released ? (
                 <Badge variant="default">Released · {s.submitted}/{s.started} submitted</Badge>
@@ -536,6 +545,30 @@ function SittingRow({
           {canRelease && s.cbtExamId && s.cbtStatus === "PUBLISHED" && !s.released && (
             <Button size="sm" disabled={busy} onClick={() => run(() => postSms(`exams/${s.id}/release`, {}), "Exam released — students can sit now.")}>
               Release
+            </Button>
+          )}
+          {/* SEATING ONE SITTING. It was only ever offered per SCHEDULE, while the
+              form below defaults to "No schedule" — so the ordinary way to add a
+              single exam produced a sitting nothing could seat and no family
+              could see. Idempotent: safe to press twice. */}
+          {s.seated === 0 && s.classId && !frozen && (
+            <Button
+              size="sm"
+              disabled={busy}
+              onClick={() =>
+                run(async () => {
+                  const res = await postSms<{ seated: boolean; seatedStudents: number; unseated: number; reason: string | null }>(
+                    `exams/${s.id}/seat`,
+                    {},
+                  );
+                  // Reports the OUTCOME rather than announcing a fixed success —
+                  // the same correction the schedule-wide seater already carries.
+                  if (res.ok && res.data && !res.data.seated) return { ok: false, error: res.data.reason ?? "Nothing to seat." };
+                  return res;
+                }, "Seated — the class can now see this exam, with their seat numbers.")
+              }
+            >
+              Seat class
             </Button>
           )}
           <Button size="sm" variant="outline" onClick={onExpand}>
