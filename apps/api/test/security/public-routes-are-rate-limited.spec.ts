@@ -19,10 +19,11 @@
 // written down here so that instinct meets an argument.
 // =============================================================================
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-const API_SRC = join(__dirname, "../../src");
+import { apiRoutes } from "../support/api-routes";
+
 
 const ALLOWED: Record<string, string> = {
   "POST /payments/webhook":
@@ -73,45 +74,13 @@ interface Row { key: string; limited: boolean }
  * The run is bounded by contiguous decorator/comment lines instead.
  */
 function publicRoutes(): Row[] {
-  const out: Row[] = [];
-  for (const file of walk(API_SRC)) {
-    const lines = readFileSync(file, "utf8").split("\n");
-    // The NEAREST @Controller above each route, not the first in the file.
-    // Several files hold two controllers — `attendance.controller.ts` has the
-    // staff one and the public biometric one — and taking the first reported
-    // the biometric route under the wrong prefix, so its exemption did not
-    // match and a genuinely-exempt route looked like an offender. This repo has
-    // made that mistake before; it is in the notes as "surface gate
-    // multi-controller".
-    const prefixAt = (line: number): string => {
-      let found = "";
-      for (let j = 0; j <= line; j++) {
-        const m = /@Controller\(\s*["'`]([^"'`]*)["'`]\s*\)/.exec(lines[j]);
-        if (m) found = m[1];
-      }
-      return found;
-    };
-    for (const [i, l] of lines.entries()) {
-      const m = /^\s*@(Get|Post|Put|Patch|Delete)\(\s*(?:["'`]([^"'`]*)["'`])?\s*\)\s*$/.exec(l);
-      if (!m) continue;
-      const run: string[] = [];
-      for (let j = i - 1; j >= 0; j--) {
-        const t = lines[j].trim();
-        if (!(t.startsWith("@") || t.startsWith("//") || t.startsWith("*") || t.startsWith("/*") || t === "")) break;
-        run.push(lines[j]);
-      }
-      for (let k = i + 1; k < lines.length; k++) {
-        const t = lines[k].trim();
-        if (!(t.startsWith("@") || t.startsWith("//"))) break;
-        run.push(lines[k]);
-      }
-      const block = [...run, l].join("\n");
-      if (!block.includes("@Public()")) continue;
-      const path = ("/" + [prefixAt(i), m[2] ?? ""].filter(Boolean).join("/")).replace(/\/+/g, "/");
-      out.push({ key: `${m[1].toUpperCase()} ${path}`, limited: block.includes("RateLimitGuard") });
-    }
-  }
-  return out;
+  // The shared extractor resolves each route against its OWN @Controller and
+  // reads the whole decorator run, above the route as well as below — `@Public()`
+  // is written above `@Post(...)`. This gate had both of those right in a private
+  // copy; five sibling gates did not, so the logic moved to one place.
+  return apiRoutes()
+    .filter((r) => r.isPublic)
+    .map((r) => ({ key: r.key, limited: r.block.includes("RateLimitGuard") }));
 }
 
 describe("every unauthenticated route", () => {

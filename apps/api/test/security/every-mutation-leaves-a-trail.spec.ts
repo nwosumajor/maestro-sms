@@ -5,7 +5,7 @@
 // nothing verified it. Extracting all 502 mutating routes, resolving each to the
 // service method it calls, and following delegation, found one real gap:
 //
-//   POST /hr/attendance/:slug/events  ->  ingestDeviceEvents
+//   POST /public/biometric/:slug/events  ->  ingestDeviceEvents
 //
 // A biometric terminal posts an HMAC-signed batch and `staff_attendance` rows
 // are created for real members of staff. Every OTHER write in that same service
@@ -32,8 +32,9 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
+import { apiRoutes } from "../support/api-routes";
+
 const API_SRC = join(__dirname, "../../src");
-const ROUTE = /@(Get|Post|Put|Patch|Delete)\(\s*(?:["'`]([^"'`]*)["'`])?\s*\)/g;
 const CALL = /return\s+this\.(\w+)\.(\w+)\(|await\s+this\.(\w+)\.(\w+)\(/;
 const AUDIT = /this\.audit\.record|auditLog\.create|workflowAuditLog\.create|this\.log\(|this\.auditOwn\(|audit: this\.audit/;
 // Both shapes: a helper on this service, AND a method on an injected one —
@@ -59,7 +60,7 @@ const ALLOWED: Record<string, string> = {
   "POST /messages/threads/:id/reply": "The message itself is the record, with its author and timestamp; a second copy adds nothing.",
   "POST /transport/locations": "Continuous GPS pings from a vehicle. The location rows are the record and an audit row per ping would be larger than the data.",
   "POST /public/onboarding-requests": "Unauthenticated: there is no actor. The onboarding request row is the record, and provisioning from it IS audited.",
-  "POST /hr/recruitment/:slug/apply": "Unauthenticated job application; the applicant row is the record.",
+  "POST /public/careers/:slug/apply": "Unauthenticated job application; the applicant row is the record.",
   "POST /public/documents/upload-url": "Mints an upload capability for a family holding a signed link; the CONFIRM that accepts the bytes is what matters and is recorded on the submission row.",
   "POST /documents/submissions/upload-url": "Mints an upload capability for a signed-in uploader; the submission row records who supplied what.",
   "POST /discipline/complaints/:id/evidence/presign": "Same — the evidence row records who attached what.",
@@ -158,13 +159,13 @@ function auditsIn(file: string, method: string, depth = 0, seen = new Set<string
 
 describe("every mutating route", () => {
   const routes: Array<{ key: string; method: string; file: string }> = [];
-  for (const f of FILES.filter((x) => x.endsWith(".controller.ts"))) {
-    const src = readFileSync(f, "utf8");
-    const prefix = /@Controller\(\s*["'`]([^"'`]*)["'`]\s*\)/.exec(src)?.[1] ?? "";
-    const hits = [...src.matchAll(ROUTE)];
-    for (const [i, m] of hits.entries()) {
-      if (m[1] === "Get") continue;
-      const block = src.slice(m.index!, hits[i + 1]?.index ?? src.length);
+  const declared = apiRoutes();
+  for (const r of declared) {
+    {
+      if (r.method === "GET") continue;
+      const f = r.file;
+      // Decorator questions read `block`; what the handler CALLS reads `body`.
+      const block = r.body;
       // A MANUAL SWEEP TRIGGER IS RECORDED IN THE JOB-RUNS CATALOGUE.
       //
       // `this.jobRuns.record("fee.reconcile", "MANUAL", () => svc.sweep())`
@@ -177,8 +178,7 @@ describe("every mutating route", () => {
       if (!c) continue;
       const prop = c[1] ?? c[3];
       const target = classFile.get(injected(f).get(prop) ?? "");
-      const path = ("/" + [prefix, m[2] ?? ""].filter(Boolean).join("/")).replace(/\/+/g, "/");
-      routes.push({ key: `${m[1].toUpperCase()} ${path}`, method: c[2] ?? c[4], file: target ?? "" });
+      routes.push({ key: r.key, method: c[2] ?? c[4], file: target ?? "" });
     }
   }
 
@@ -196,6 +196,18 @@ describe("every mutating route", () => {
   it("records the biometric ingestion that was the one real gap", () => {
     const f = classFile.get("StaffAttendanceService") ?? classFile.get("AttendanceService") ?? "";
     expect([f !== "", auditsIn(f, "ingestDeviceEvents")]).toEqual([true, true]);
+  });
+
+  it("exempts only routes that exist", () => {
+    // The fictional `POST /hr/recruitment/:slug/apply` sat here for months. It
+    // matched because the extractor took the FIRST @Controller in a file, so the
+    // public careers route was filed under the recruitment prefix — two bugs
+    // pointing the same way. An exemption naming a route nobody can call is a
+    // decision recorded about nothing, and worse, it lies in wait: the day that
+    // path exists for real it arrives already exempt from this gate.
+    const real = new Set(apiRoutes().map((r) => r.key));
+    const fictional = Object.keys(ALLOWED).filter((k) => !real.has(k));
+    expect(fictional).toEqual([]);
   });
 
   it("gives every exemption a reason", () => {

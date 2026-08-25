@@ -1746,6 +1746,55 @@ the TypeScript duplicate-attribute error caught it. The gate reads each tag to i
 matching `>` at brace depth zero, and strips COMMENTS first (a JSDoc block
 documenting `<input type="datetime-local">` is not a control anyone can fix).
 
+### Six gates each grew their own route extractor, and five were wrong
+`apps/api/test/support/api-routes.ts` is now the ONE answer to "what routes does
+this API declare". Six gates had each written their own, and five took the FIRST
+`@Controller` in a file as the prefix for every route in it — three files declare
+two — so four routes were filed under a path nobody can call:
+`POST /public/careers/:slug/apply` read as `POST /hr/recruitment/:slug/apply`,
+`POST /public/biometric/:slug/events` as `POST /hr/attendance/:slug/events`, and
+`GET /students/profile-reviews` as `GET /students/:studentId/profile-reviews`.
+**Two bugs were cancelling out, which is worse than either alone.**
+`every-mutation-leaves-a-trail` carries NAMED EXEMPTIONS keyed on the route, and
+one was written against the fictional `POST /hr/recruitment/:slug/apply`. It
+matched only because the extractor was broken in the same direction. That list is
+the record of which mutations deliberately go unaudited, and it named a route
+that does not exist while a real PUBLIC write went past under a borrowed name —
+and the file's own header comment misnamed the biometric endpoint the same way,
+so the one real gap this gate ever found is recorded under a path you cannot
+call. The fail-OPEN direction is the one that matters: `POST /hr/recruitment/
+:slug/apply` is a plausible authenticated route, and the day somebody adds it for
+real it arrives PRE-EXEMPTED from the audit gate by an entry written years
+earlier for something else. `it("exempts only routes that exist")` now makes a
+fictional key impossible.
+`public-routes-are-rate-limited` already resolved this correctly — it was written
+after the mis-keying bit once, on the biometric endpoint. **Fixing the gate where
+it hurt and leaving five siblings is the defect class this repo keeps finding in
+its application code, committed in the gates themselves.**
+// GOTCHA, and my first shared version had it: a block taken from "this route
+decorator to the next" reads only what is written BELOW. `@Public()` is written
+ABOVE `@Post(...)`, so `isPublic` was false for the careers intake, the biometric
+ingestion and the payment webhook — the three routes any gate asking about public
+routes exists to look at (19 detected, should be 26). Decorator ORDER is a style
+choice a reader makes freely; a gate that depends on it goes quiet when somebody
+swaps two lines. Hence TWO fields: `block` is the decorator RUN walked both ways
+and answers `@Public`/`@RequirePermission`/`@RequireStepUp`; `body` is the
+handler and answers what it CALLS. Conflating them made the audit gate extract
+ZERO routes and still report no offenders — caught only by its own
+"extracted a believable number" guard, which is why every such gate has one.
+Permissions are returned SPLIT: `@RequirePermission(A, B)` grants on either, and
+reading the argument list as one opaque string made such a route compare equal to
+nothing but itself. Proved by making `SCHOLARSHIP_PERMISSIONS.APPLY` step-up-
+gated: `POST /scholarships/applications/:id/decision` is flagged now and its
+three single-permission siblings were flagged before — it alone was invisible.
+LATENT, not live: no multi-permission route currently shares a permission with a
+step-up-gated one. The prefix bug WAS live.
+Related, and separately clean: every permission that gates an endpoint is granted
+to some role (nothing unreachable), and the seven granted but gating no route are
+enforced in a SERVICE (`attendance.amend.review`, `cbt.review`,
+`subject.selection.approve`) or as CHAIN DATA in `STAFF_REQUEST_CHAIN`
+(`workflow.review.head`/`.hr`) — a deliberate pattern, not an orphan.
+
 ### The accident gate now covers every test tree, and the HAYSTACK not just the needle
 `assertions-that-match-by-accident.spec.ts` scanned only `apps/api/test` and
 flagged numeric needles shorter than four characters. CI went red on

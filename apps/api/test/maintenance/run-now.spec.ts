@@ -25,6 +25,8 @@
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+
+import { controllerPrefixAt } from "../support/api-routes";
 import * as types from "@sms/types";
 import { SCHEDULED_JOBS } from "../../src/maintenance/job-runs.service";
 
@@ -45,11 +47,16 @@ const CONTROLLERS = walk(SRC).map((f) => ({ file: f, src: readFileSync(f, "utf8"
 function allPostPaths(): Set<string> {
   const paths = new Set<string>();
   for (const { src } of CONTROLLERS) {
-    const prefix = src.match(/@Controller\("([^"]*)"\)/)?.[1] ?? "";
     for (const m of src.matchAll(/@Post\("([^"]*)"\)/g)) {
-      paths.add([prefix, m[1]].filter(Boolean).join("/"));
+      paths.add([controllerPrefixAt(src, m.index!), m[1]].filter(Boolean).join("/"));
     }
-    if (/@Post\(\)/.test(src) && prefix) paths.add(prefix);
+    // A bare @Post() serves the controller's own path. Each occurrence resolves
+    // against its own controller — the original took the file's first one, and
+    // a file may declare two.
+    for (const m of src.matchAll(/@Post\(\)/g)) {
+      const at = controllerPrefixAt(src, m.index!);
+      if (at) paths.add(at);
+    }
   }
   return paths;
 }
@@ -88,8 +95,8 @@ describe("the catalogue cannot name an endpoint that does not exist", () => {
     for (const j of withManual) {
       let decorators: string | null = null;
       for (const { src } of CONTROLLERS) {
-        const prefix = src.match(/@Controller\("([^"]*)"\)/)?.[1] ?? "";
         for (const m of src.matchAll(/@Post\("([^"]*)"\)/g)) {
+          const prefix = controllerPrefixAt(src, m.index!);
           if ([prefix, m[1]].filter(Boolean).join("/") !== j.manual.path) continue;
           const from = src.indexOf(m[0]);
           decorators = src.slice(from, from + 400);

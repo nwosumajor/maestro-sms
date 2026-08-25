@@ -26,6 +26,8 @@
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+
+import { controllerPrefixAt, joinRoute } from "../support/api-routes";
 import { normalisePath } from "./extract";
 
 const API_SRC = join(__dirname, "../../src");
@@ -51,14 +53,15 @@ function apiReturnTypes(): Map<string, string> {
   const out = new Map<string, string>();
   for (const file of files(API_SRC, (f) => f.endsWith(".controller.ts"))) {
     const src = readFileSync(file, "utf8");
-    const prefix = /@Controller\(\s*["'`]([^"'`]*)["'`]\s*\)/.exec(src)?.[1] ?? "";
     // A @Get decorator, then (skipping other decorators) the method signature.
     for (const m of src.matchAll(/@Get\(\s*(?:["'`]([^"'`]*)["'`])?\s*\)([\s\S]{0,600}?)\)\s*:\s*Promise<([^>]+(?:<[^>]*>)?[^>]*)>/g)) {
       const sub = m[1] ?? "";
       const ret = m[3];
       // Only the first signature after the decorator, never one further down.
       if (/@(Get|Post|Put|Patch|Delete)\(/.test(m[2])) continue;
-      const path = normalisePath("/" + [prefix, sub].filter(Boolean).join("/"));
+      // The NEAREST @Controller above this route, never the first in the file —
+      // three files declare two controllers.
+      const path = normalisePath(joinRoute(controllerPrefixAt(src, m.index!), sub));
       out.set(`GET ${path}`, ret.trim());
     }
   }

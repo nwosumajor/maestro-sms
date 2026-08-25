@@ -26,17 +26,20 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
+import { controllerPrefixAt, joinRoute } from "../support/api-routes";
+
 const WEB_ROUTE = join(__dirname, "../../../web/app/api/webhooks/[...path]/route.ts");
 
 /** The route a controller actually serves: @Controller prefix + @Post path. */
 function actualRoute(controllerFile: string, postPath: string): string {
   const src = readFileSync(join(__dirname, "../../src", controllerFile), "utf8");
-  const prefix = src.match(/@Controller\(\s*(?:"([^"]*)")?\s*\)/);
-  if (!prefix) throw new Error(`no @Controller in ${controllerFile}`);
-  const base = prefix[1] ?? "";
+  if (!/@Controller\(/.test(src)) throw new Error(`no @Controller in ${controllerFile}`);
   // Prove the handler is really declared at the path we are assembling from.
   expect(src).toContain(`@Post("${postPath}")`);
-  return `/${[base, postPath].filter(Boolean).join("/")}`;
+  // Resolved against the controller this handler sits under, not the first one
+  // in the file — a file may declare two.
+  const base = controllerPrefixAt(src, src.indexOf(`@Post("${postPath}")`));
+  return joinRoute(base, postPath);
 }
 
 describe("webhook passthrough targets", () => {

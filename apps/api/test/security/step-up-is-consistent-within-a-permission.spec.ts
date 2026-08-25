@@ -31,11 +31,11 @@
 // permission with a gated one is EITHER gated too OR named here with a reason.
 // =============================================================================
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-const API_SRC = join(__dirname, "../../src");
-const ROUTE = /@(Get|Post|Put|Patch|Delete)\(\s*(?:["'`]([^"'`]*)["'`])?\s*\)/g;
+import { apiRoutes } from "../support/api-routes";
+
 
 /**
  * Routes that share a permission with a step-up-gated sibling and legitimately
@@ -89,24 +89,17 @@ function walk(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-interface Row { key: string; perm: string; stepUp: boolean }
+interface Row { key: string; perms: string[]; stepUp: boolean }
 
+// Routes come from the ONE shared extractor, which resolves each against its own
+// @Controller and splits `@RequirePermission(A, B)` into its arguments. Reading
+// that argument list as a single opaque string made such a route compare equal
+// to nothing but itself, so a route could have been quietly exempted from this
+// consistency rule by having a second permission added to its decorator.
 function routes(): Row[] {
-  const out: Row[] = [];
-  for (const file of walk(API_SRC)) {
-    const src = readFileSync(file, "utf8");
-    const prefix = /@Controller\(\s*["'`]([^"'`]*)["'`]\s*\)/.exec(src)?.[1] ?? "";
-    const hits = [...src.matchAll(ROUTE)];
-    for (const [i, m] of hits.entries()) {
-      if (m[1] === "Get") continue;
-      const block = src.slice(m.index!, hits[i + 1]?.index ?? src.length);
-      const perm = /@RequirePermission\(([^)]*)\)/.exec(block)?.[1]?.trim() ?? "";
-      if (!perm) continue;
-      const path = ("/" + [prefix, m[2] ?? ""].filter(Boolean).join("/")).replace(/\/+/g, "/");
-      out.push({ key: `${m[1].toUpperCase()} ${path}`, perm, stepUp: /@RequireStepUp\(/.test(block) });
-    }
-  }
-  return out;
+  return apiRoutes()
+    .filter((r) => r.method !== "GET" && r.permissions.length > 0)
+    .map((r) => ({ key: r.key, perms: r.permissions, stepUp: r.stepUp }));
 }
 
 describe("step-up, within a single permission", () => {
@@ -119,10 +112,10 @@ describe("step-up, within a single permission", () => {
   });
 
   it("is either applied to every route of that permission, or the exception is named", () => {
-    const gated = new Set(all.filter((r) => r.stepUp).map((r) => r.perm));
+    const gated = new Set(all.filter((r) => r.stepUp).flatMap((r) => r.perms));
     const offenders = all
-      .filter((r) => !r.stepUp && gated.has(r.perm) && !(r.key in ALLOWED))
-      .map((r) => `${r.key}  (shares ${r.perm} with a step-up-gated route)`);
+      .filter((r) => !r.stepUp && r.perms.some((p) => gated.has(p)) && !(r.key in ALLOWED))
+      .map((r) => `${r.key}  (shares ${r.perms.filter((p) => gated.has(p)).join(", ")} with a step-up-gated route)`);
     expect(offenders).toEqual([]);
   });
 
