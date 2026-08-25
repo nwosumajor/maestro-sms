@@ -94,7 +94,13 @@ export function Awards({ classId, canManage }: { classId: string; canManage: boo
                     </div>
                   </div>
                   {canManage && (
-                    <Button size="sm" variant="ghost" className="h-7 px-2 text-destructive" onClick={() => revoke(a.id)}>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 px-2 text-destructive"
+                      aria-label={`Revoke ${m.label}${canManage ? ` from ${a.studentName}` : ""}`}
+                      onClick={() => revoke(a.id)}
+                    >
                       ✕
                     </Button>
                   )}

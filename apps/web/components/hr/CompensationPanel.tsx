@@ -120,7 +120,13 @@ export function CompensationPanel({ userId, initial }: { userId: string; initial
                 </Badge>
                 <span className="font-medium">{c.name}</span>
                 <span className="ml-auto tabular-nums">{money(c.amountMinor)}/mo</span>
-                <Button size="sm" variant="ghost" className="h-7 px-2 text-destructive" onClick={() => remove(c.id)}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2 text-destructive"
+                  aria-label={`Remove ${c.name}`}
+                  onClick={() => remove(c.id)}
+                >
                   ✕
                 </Button>
               </li>

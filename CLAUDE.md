@@ -1746,6 +1746,31 @@ the TypeScript duplicate-attribute error caught it. The gate reads each tag to i
 matching `>` at brace depth zero, and strips COMMENTS first (a JSDoc block
 documenting `<input type="datetime-local">` is not a control anyone can fix).
 
+### Thirteen controls that remove something and announce nothing
+`every-control-has-a-name` covered text ENTRY — `<input>`, `<select>`,
+`<textarea>` — and said nothing about the controls people PRESS. Of 1,009
+pressable controls (91 `<button>`, 648 shadcn `<Button>`, plus links), **13 had
+no accessible name at all**: eight `✕` buttons that REMOVE a record (an invoice
+line, a pay component, a duty assignment, an award, a lesson block, an
+instalment, a biometric device, a device enrolment), `↑`/`↓` for reordering
+lesson blocks, and `P`/`L`/`A` on the STAFF ATTENDANCE register.
+A screen reader announces `✕` as "multiplication sign" and `P` as "P": the user
+is told a control exists and not what it does, and every one of the eight
+destroys something. The register case is worse than cosmetic — three
+single-letter buttons per row, repeated down a list of staff, with nothing
+saying which person the row belongs to.
+Each label now names WHAT it acts on, because a label is heard OUT of visual
+context: "Remove instalment 2", "Mark Demo HR Clerk present", "Unassign Gate
+duty from Demo Driver" — never a bare "Remove", which is the same problem one
+word longer. The gate now asks the same question of `button`/`Button`, with
+`ui/button.tsx` exempt for the reason `ui/input.tsx` already is: a primitive
+FORWARDS children, and a name hard-coded there would be wrong on every caller.
+// GOTCHA, and it made my first scan useless: stripping `{...}` expressions to
+find "text" deletes the very thing that names most buttons — `{s.userName}`,
+`{open ? "Hide" : "Show"}`. That reported 32 offenders, nearly all false. A
+rendered expression IS a name; what announces nothing is an icon, an
+`aria-hidden` span, or a bare symbol. Counting those properly gives 13.
+
 ### The staff page showed "Staff member" where a name should be
 The type-safety spine says a read controller annotates its return type
 (`: Promise<XDto>`) "so a service that drops/mistypes a field fails to compile".

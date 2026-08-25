@@ -153,7 +153,13 @@ export function DutyRoster({ staff, canWrite }: { staff: StaffOption[]; canWrite
                   {d.startTime}–{d.endTime}
                 </span>
                 {canWrite && (
-                  <Button size="sm" variant="ghost" className="ml-auto h-7 px-2 text-destructive" onClick={() => unassign(d.id)}>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="ml-auto h-7 px-2 text-destructive"
+                    aria-label={`Unassign ${d.title} from ${d.userName ?? "this staff member"}`}
+                    onClick={() => unassign(d.id)}
+                  >
                     ✕
                   </Button>
                 )}

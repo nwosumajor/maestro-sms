@@ -139,3 +139,84 @@ describe("every text control can be named by a screen reader", () => {
     expect(total).toBeGreaterThan(150);
   });
 });
+
+// =============================================================================
+// The same question, asked of the controls people PRESS
+// =============================================================================
+// The gate above covers text entry. It said nothing about buttons, and 13 of
+// them had no accessible name at all: eight `✕` buttons that REMOVE something
+// (a fee line, a pay component, a duty, an award, a lesson block, an
+// instalment, a biometric device, an enrolment), `↑`/`↓` for reordering, and
+// `P`/`L`/`A` on the staff attendance register.
+//
+// A screen reader announces `✕` as "multiplication sign" and `P` as "P". The
+// user is told a control exists and not what it does — and every one of the
+// eight destroys a record. Each label now names WHAT it acts on, because the
+// label is heard out of visual context: "Remove instalment 2", not "Remove".
+// =============================================================================
+
+/** The children of an element opening at `at`, or "" for a self-closing tag. */
+function childrenOf(src: string, at: number, tag: string, open: string): string {
+  if (open.trimEnd().endsWith("/>")) return "";
+  let depth = 0;
+  let i = at;
+  while (i < src.length) {
+    const nextOpen = src.indexOf(`<${tag}`, i);
+    const nextClose = src.indexOf(`</${tag}>`, i);
+    if (nextClose === -1) return "";
+    if (nextOpen !== -1 && nextOpen < nextClose) {
+      depth += 1;
+      i = nextOpen + 1;
+    } else {
+      depth -= 1;
+      if (depth === 0) return src.slice(at + open.length, nextClose);
+      i = nextClose + 1;
+    }
+  }
+  return "";
+}
+
+/** Does this markup announce any words to a screen reader? */
+function announcesText(children: string): boolean {
+  // Anything explicitly hidden from assistive tech announces nothing.
+  const visible = children
+    .replace(/<(\w+)[^>]*aria-hidden[^>]*>[\s\S]*?<\/\1>/g, " ")
+    .replace(/<[^>]*aria-hidden[^>]*\/?>/g, " ");
+  // A quoted string with real words (a ternary's arms, say).
+  if (/["'`][^"'`]*[A-Za-z]{2,}[^"'`]*["'`]/.test(visible)) return true;
+  // A rendered expression — `{s.name}` puts SOMETHING there.
+  if (/\{[^{}]*\w+[^{}]*\}/.test(visible)) return true;
+  // Bare text between tags.
+  return /[A-Za-z]{2,}/.test(visible.replace(/<[^>]*>/g, " "));
+}
+
+/** The shadcn Button forwards children, exactly as Input/Textarea forward props. */
+const PRESSABLE_PRIMITIVES = ["components/ui/button.tsx"];
+const PRESSABLE = ["button", "Button"];
+
+describe("every control you can press can be named by a screen reader", () => {
+  const silent: string[] = [];
+  let total = 0;
+
+  for (const file of files) {
+    if (PRESSABLE_PRIMITIVES.some((q) => file.endsWith(q))) continue;
+    const src = withoutComments(readFileSync(file, "utf8"));
+    for (const tagName of PRESSABLE) {
+      for (const { at, tag } of controlTags(src, tagName)) {
+        total += 1;
+        if (/aria-label|aria-labelledby|\btitle=/.test(tag)) continue;
+        if (announcesText(childrenOf(src, at, tagName, tag))) continue;
+        silent.push(`${file.slice(WEB.length + 1)}: ${tag.replace(/\s+/g, " ").slice(0, 70)}`);
+      }
+    }
+  }
+
+  it("has no button a screen reader would announce as unlabelled", () => {
+    expect(silent).toEqual([]);
+  });
+
+  it("actually parsed something, rather than matching nothing", () => {
+    // Same blind spot as above: a parser finding no buttons would pass for ever.
+    expect(total).toBeGreaterThan(500);
+  });
+});

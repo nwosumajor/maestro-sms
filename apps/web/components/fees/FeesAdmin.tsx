@@ -140,7 +140,7 @@ export function FeesAdmin({ students, items }: { students: Student[]; items: Fee
                   <Input placeholder="Amount" inputMode="decimal" value={l.amountMajor} onChange={(e) => setLine(i, { amountMajor: e.target.value })} className="w-28" />
                   <Input type="number" min={1} value={l.quantity} onChange={(e) => setLine(i, { quantity: Math.max(1, Number(e.target.value)) })} className="w-16" />
                   {lines.length > 1 && (
-                    <Button type="button" size="sm" variant="ghost" onClick={() => setLines((xs) => xs.filter((_, idx) => idx !== i))}>✕</Button>
+                    <Button type="button" size="sm" variant="ghost" aria-label={`Remove invoice line ${i + 1}`} onClick={() => setLines((xs) => xs.filter((_, idx) => idx !== i))}>✕</Button>
                   )}
                 </div>
               ))}

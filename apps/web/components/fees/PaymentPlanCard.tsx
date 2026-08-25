@@ -125,6 +125,7 @@ export function PaymentPlanCard({
                   <button
                     type="button"
                     className="text-sm text-muted-foreground hover:text-destructive"
+                    aria-label={`Remove instalment ${i + 1}`}
                     onClick={() => setRows(rows.filter((_, j) => j !== i))}
                   >
                     ✕

@@ -115,13 +115,13 @@ export function AttendanceAdmin({
                   )}
                   {canWrite && (
                     <span className="ml-auto inline-flex gap-1">
-                      <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => mark(r.userId, "PRESENT")}>
+                      <Button size="sm" variant="ghost" className="h-7 px-2" aria-label={`Mark ${r.userName} present`} onClick={() => mark(r.userId, "PRESENT")}>
                         P
                       </Button>
-                      <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => mark(r.userId, "LATE")}>
+                      <Button size="sm" variant="ghost" className="h-7 px-2" aria-label={`Mark ${r.userName} late`} onClick={() => mark(r.userId, "LATE")}>
                         L
                       </Button>
-                      <Button size="sm" variant="ghost" className="h-7 px-2 text-destructive" onClick={() => mark(r.userId, "ABSENT")}>
+                      <Button size="sm" variant="ghost" className="h-7 px-2 text-destructive" aria-label={`Mark ${r.userName} absent`} onClick={() => mark(r.userId, "ABSENT")}>
                         A
                       </Button>
                     </span>
@@ -356,7 +356,7 @@ export function BiometricAdmin({ staff, canWrite }: { staff: { userId: string; u
                   {d.lastSeenAt ? `last seen ${new Date(d.lastSeenAt).toLocaleString()}` : "never seen"}
                 </span>
                 {canWrite && (
-                  <Button size="sm" variant="ghost" className="h-7 px-2 text-destructive" onClick={async () => { await req("DELETE", `/hr/attendance/devices/${d.id}`); void load(); }}>
+                  <Button size="sm" variant="ghost" className="h-7 px-2 text-destructive" aria-label={`Remove device ${d.name}`} onClick={async () => { await req("DELETE", `/hr/attendance/devices/${d.id}`); void load(); }}>
                     ✕
                   </Button>
                 )}
@@ -389,7 +389,7 @@ export function BiometricAdmin({ staff, canWrite }: { staff: { userId: string; u
                   <span className="font-mono text-xs">{e.deviceUserId}</span>
                   <span>→ {e.userName ?? "Staff"}</span>
                   {canWrite && (
-                    <Button size="sm" variant="ghost" className="h-6 px-2 text-destructive" onClick={async () => { await req("DELETE", `/hr/attendance/enrollments/${e.id}`); void load(); }}>
+                    <Button size="sm" variant="ghost" className="h-6 px-2 text-destructive" aria-label={`Remove enrolment ${e.deviceUserId} for ${e.userName ?? "staff"}`} onClick={async () => { await req("DELETE", `/hr/attendance/enrollments/${e.id}`); void load(); }}>
                       ✕
                     </Button>
                   )}

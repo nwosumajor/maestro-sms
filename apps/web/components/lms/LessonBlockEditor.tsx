@@ -113,7 +113,7 @@ export function LessonBlockEditor({
               />
             )}
             <div className="ml-auto flex items-center gap-1">
-              <Button type="button" size="sm" variant="ghost" className="h-7 px-2" onClick={() => move(i, -1)} disabled={i === 0}>
+              <Button type="button" size="sm" variant="ghost" className="h-7 px-2" aria-label={`Move block ${i + 1} up`} onClick={() => move(i, -1)} disabled={i === 0}>
                 ↑
               </Button>
               <Button
@@ -121,12 +121,13 @@ export function LessonBlockEditor({
                 size="sm"
                 variant="ghost"
                 className="h-7 px-2"
+                aria-label={`Move block ${i + 1} down`}
                 onClick={() => move(i, 1)}
                 disabled={i === blocks.length - 1}
               >
                 ↓
               </Button>
-              <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-destructive" onClick={() => remove(i)}>
+              <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-destructive" aria-label={`Remove block ${i + 1}`} onClick={() => remove(i)}>
                 ✕
               </Button>
             </div>
