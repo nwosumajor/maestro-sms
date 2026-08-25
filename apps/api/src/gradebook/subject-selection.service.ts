@@ -40,6 +40,25 @@ import {
 
 const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal"]);
 
+/**
+ * Can this caller SEE selections beyond their own or their supervisees'?
+ *
+ * Shared by `list` and `review` so the two cannot drift. They had drifted:
+ * `list` shows every selection to a school-wide role OR an approver, while
+ * `review` refused anyone without `subject.selection.approve` with a 404. A
+ * principal is school-wide and deliberately does NOT hold that permission — so
+ * they saw a pending queue on their own screen, pressed Approve, and were told
+ * the selection does not exist. Live: `list` 200 with the row, `review` 404.
+ *
+ * A 404 is right for somebody who cannot see the record; it is the rule that
+ * stops a refusal confirming what it hides. It is wrong for somebody the
+ * product has already shown it to — that denies what it has already shown, and
+ * reads as a broken screen rather than as a boundary.
+ */
+function seesEverySelection(p: Principal): boolean {
+  return p.roles.some((r) => SCHOOL_WIDE_ROLES.has(r)) || p.permissions.includes(LMS_PERMISSIONS.SUBJECT_SELECTION_APPROVE);
+}
+
 interface SelectionRow {
   id: string;
   sessionId: string;
@@ -247,9 +266,7 @@ export class SubjectSelectionService {
    *  all. Others see nothing. */
   async list(p: Principal): Promise<SubjectSelectionDto[]> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const wide =
-        p.roles.some((r) => SCHOOL_WIDE_ROLES.has(r)) ||
-        p.permissions.includes(LMS_PERMISSIONS.SUBJECT_SELECTION_APPROVE);
+      const wide = seesEverySelection(p);
       const where = wide
         ? {}
         : p.roles.includes("student")
@@ -281,10 +298,16 @@ export class SubjectSelectionService {
 
       let data: Record<string, unknown>;
       let fromStatus: string;
+      // WHO MAY BE TOLD WHY, as against who may only be told nothing. A caller
+      // who can already read this row in `list` gets a reason; everybody else
+      // gets the same "not found" they would get for another school's record.
+      const visible = seesEverySelection(p) || row.supervisorId === p.userId;
       if (row.status === "PENDING_SUPERVISOR") {
-        // Stage 1: ONLY the named class supervisor. 404 (not 403) for anyone
-        // else — don't reveal whose queue it sits in.
-        if (row.supervisorId !== p.userId) throw new NotFoundException("Selection not found");
+        // Stage 1: ONLY the named class supervisor.
+        if (row.supervisorId !== p.userId) {
+          if (!visible) throw new NotFoundException("Selection not found");
+          throw new ForbiddenException("This is with the class supervisor for the first approval.");
+        }
         fromStatus = "PENDING_SUPERVISOR";
         data =
           input.action === "APPROVE"
@@ -294,7 +317,14 @@ export class SubjectSelectionService {
         // Stage 2: school_admin / head_teacher — and never the same person who
         // passed stage 1 (separation of duties).
         if (!p.permissions.includes(LMS_PERMISSIONS.SUBJECT_SELECTION_APPROVE)) {
-          throw new NotFoundException("Selection not found");
+          // NOT a 404 for somebody looking at it on their own screen. A
+          // principal is school-wide and deliberately does not hold this
+          // permission — the final approval belongs to a school administrator
+          // or head teacher — so say that rather than deny the record exists.
+          if (!visible) throw new NotFoundException("Selection not found");
+          throw new ForbiddenException(
+            "The final approval is given by a school administrator or head teacher.",
+          );
         }
         if (row.supervisorActedById === p.userId) {
           throw new ForbiddenException("A different person must give the final approval");
@@ -306,6 +336,14 @@ export class SubjectSelectionService {
           reviewNote: input.note ?? null,
         };
       } else {
+        // A TERMINAL STATUS IS STILL INFORMATION. This threw the status at
+        // anybody, with no visibility check at all — and the route gate is
+        // `class.read`, which every teacher holds. So any teacher could put an
+        // id in and learn that a selection exists and has been APPROVED, for a
+        // pupil in a class that is nothing to do with them. Live before this:
+        // a teacher whose own list returned ZERO rows got
+        // `409 This selection is already APPROVED`.
+        if (!visible) throw new NotFoundException("Selection not found");
         throw new ConflictException(`This selection is already ${row.status}`);
       }
 

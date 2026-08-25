@@ -1796,6 +1796,32 @@ closed the window early and the test went red while the property it guards was
 untouched. Now anchored to the method by name — and mutation-validated, which
 the accidental version never was.
 
+### Told it does not exist, on the screen that is showing it
+Found by RUNNING a path that had never executed: `subject_selection` had zero
+rows, so the pick → supervisor → admin chain had never been driven.
+`list` shows every selection to a school-wide role OR to a holder of
+`subject.selection.approve`. `review` refused anyone without that permission
+with a **404**. A PRINCIPAL is school-wide and deliberately does NOT hold it —
+the final approval belongs to a school administrator or head teacher — so the
+most senior person in the school saw a pending queue ON THEIR OWN SCREEN,
+pressed Approve, and was told the selection does not exist. Live: `list` 200
+with the row, `review` 404.
+**404-not-403 is the right rule, and this is its other edge.** It exists so a
+refusal cannot CONFIRM what it hides; it must equally not DENY what the product
+has already shown, which reads as a broken screen rather than as a boundary and
+sends somebody to support instead of to the right colleague. One predicate,
+`seesEverySelection`, now decides both — SHARED with `list` so the two cannot
+drift again, which is exactly how they drifted.
+// AND THE TERMINAL BRANCH LEAKED. `else throw new ConflictException("This
+selection is already " + status)` ran with NO visibility check at all, behind a
+route gated on `class.read` — which every teacher holds. Live before this: a
+teacher whose own list returned ZERO rows put the id in and got
+`409 This selection is already APPROVED`, about a pupil in a class that is
+nothing to do with them. A terminal status is still information.
+// After, all three measured live: principal → 403 naming who may approve;
+teacher → 404, byte-identical to a selection that does not exist; school admin →
+201.
+
 ### The only report cards carrying a promotion line were the ones with bad news
 Found by RUNNING a path that had never executed: `promotion_batch` had zero
 rows. Staged a real end-of-session batch for 30 pupils, one RETAINed, and the
