@@ -87,6 +87,28 @@ interface QuestionInput {
   markGuide?: string | null;
 }
 
+/**
+ * What a script actually scored: its objective part plus every theory mark a
+ * human has awarded.
+ *
+ * `cbt_sitting.score` holds the OBJECTIVE part only — deliberately, because it
+ * is written when the candidate submits and theory is marked later. `provisional`
+ * exists to say "not final yet". The bug this function exists to prevent is what
+ * happened once marking FINISHED: `provisional` went false and the objective-only
+ * number was then presented as the final score, which is exactly what the
+ * comment on `markingProgress` forbids. Measured live on a 2-question paper —
+ * 1 objective + a 10-mark theory answer marked 8 — the candidate had scored 9
+ * of 11 and was shown 1 of 11, on their own results screen.
+ *
+ * `recordGrades` had it right all along and computed the same sum itself, so the
+ * FILED grade was correct (49.09/60 = 9/11 scaled) while every human-facing
+ * number disagreed with it. Hence one function, named, that a third caller will
+ * find.
+ */
+export function scriptScore(objective: number | null, theoryMarks: number): number {
+  return (objective ?? 0) + theoryMarks;
+}
+
 @Injectable()
 export class CbtService {
   constructor(
@@ -1367,14 +1389,23 @@ export class CbtService {
       // Before counting anything: close the sittings whose time is up, so the
       // page reports what IS rather than what was left open.
       await this.expireOverdueSittings(tx, p, exam);
-      const unmarked = await tx.cbtTheoryAnswer.findMany({
-        where: { examId, marksAwarded: null },
-        select: { sittingId: true },
+      // EVERY theory row, not only the unmarked ones: the awarded marks are part
+      // of what each script scored, and reading only the nulls is what left this
+      // table showing the objective part as though it were the total.
+      const theoryRows = await tx.cbtTheoryAnswer.findMany({
+        where: { examId },
+        select: { sittingId: true, marksAwarded: true },
       });
-      const provisionalSittings = new Set(unmarked.map((t) => t.sittingId));
+      const provisionalSittings = new Set(
+        theoryRows.filter((t) => t.marksAwarded === null).map((t) => t.sittingId),
+      );
+      const theoryBySitting = new Map<string, number>();
+      for (const t of theoryRows) {
+        theoryBySitting.set(t.sittingId, (theoryBySitting.get(t.sittingId) ?? 0) + (t.marksAwarded ?? 0));
+      }
       const sittings = await tx.cbtSitting.findMany({
         where: { examId },
-        orderBy: provisionalSittings.size > 0 ? { submittedAt: "asc" } : { score: "desc" },
+        orderBy: { submittedAt: "asc" },
       });
       const students = await tx.user.findMany({
         where: { id: { in: sittings.map((s) => s.studentId) } },
@@ -1382,20 +1413,29 @@ export class CbtService {
       });
       const nameOf = new Map(students.map((s) => [s.id, s.name]));
       await this.log(tx, p, "cbt.exam.results_read", examId, { sittings: sittings.length });
+      const rows = sittings.map((s) => ({
+        provisional: provisionalSittings.has(s.id),
+        sittingId: s.id,
+        studentId: s.studentId,
+        studentName: nameOf.get(s.studentId) ?? "Student",
+        status: s.status,
+        // The TRUE score. This used to be the stored objective part, so a table
+        // sorted by it ranked candidates strongest on theory LAST — the precise
+        // inversion the note above says ordering by submission time avoids while
+        // marking is in progress. Avoiding it during, and then producing it
+        // after, is worse than never claiming a ranking at all.
+        score: scriptScore(s.score, theoryBySitting.get(s.id) ?? 0),
+        total: s.total,
+        startedAt: s.startedAt,
+        submittedAt: s.submittedAt,
+      }));
+      // Sorted HERE, not in SQL: the theory marks live in another table, so the
+      // database cannot order by what a script actually scored.
+      if (provisionalSittings.size === 0) rows.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
       return {
         exam: await this.toExamDto(tx, exam, p),
         provisional: provisionalSittings.size > 0,
-        rows: sittings.map((s) => ({
-          provisional: provisionalSittings.has(s.id),
-          sittingId: s.id,
-          studentId: s.studentId,
-          studentName: nameOf.get(s.studentId) ?? "Student",
-          status: s.status,
-          score: s.score,
-          total: s.total,
-          startedAt: s.startedAt,
-          submittedAt: s.submittedAt,
-        })),
+        rows,
       };
     });
   }
@@ -1654,9 +1694,11 @@ export class CbtService {
         const order = (sg.questionIds as unknown as string[]) ?? [];
         // The paper's ceiling for THIS script (papers are sampled per sitting).
         const paperMax = order.reduce((n, qid) => n + (maxOf.get(qid) ?? 1), 0);
-        const objective = sg.score ?? 0;
-        const theoryMarks = marksBySitting.get(sg.id) ?? 0;
-        return { studentId: sg.studentId, raw: objective + theoryMarks, paperMax };
+        // The same definition the candidate's screen and the results table use.
+        // This path was always right; they were not, and one named function is
+        // what stops that happening again.
+        const raw = scriptScore(sg.score, marksBySitting.get(sg.id) ?? 0);
+        return { studentId: sg.studentId, raw, paperMax };
       });
       // The school's own exam maximum, resolved in the same tx that built the plan.
       const examMax =
@@ -2085,7 +2127,11 @@ export class CbtService {
       startedAt: sitting.startedAt,
       deadline: new Date(deadline),
       submittedAt: sitting.submittedAt,
-      score: finished ? sitting.score : null,
+      // The objective part PLUS every theory mark awarded so far. Partial marks
+      // are included while `provisional` is true — that flag is what says the
+      // number is not final, and showing a lower figure would be less true, not
+      // safer.
+      score: finished ? scriptScore(sitting.score, theoryRows.reduce((n, r) => n + (r.marksAwarded ?? 0), 0)) : null,
       total: finished ? sitting.total : null,
       answers: (sitting.answers as Record<string, number> | null) ?? {},
       answersReleased: released,

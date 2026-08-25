@@ -104,8 +104,22 @@ describe("coherence with the CBT push", () => {
     // The rule these two now share: a mark is written for a pupil who did the
     // thing, and for nobody else.
     const cbt = readFileSync(join(__dirname, "../../src/cbt/cbt.service.ts"), "utf8");
-    const plan = cbt.slice(cbt.indexOf("const sittings = await tx.cbtSitting.findMany"), cbt.indexOf("const rows = sittings.map"));
-    expect(plan).toMatch(/status: \{ in: \[/);
-    expect(cbt).toMatch(/const rows = sittings\.map/);
+    // ANCHORED TO THE METHOD, not to file order.
+    //
+    // This used to slice from the first `const sittings = await
+    // tx.cbtSitting.findMany` to the first `const rows = sittings.map` — a
+    // window that spanned TWO methods, so it caught recordExamGrades' status filter
+    // only because examResults, which comes first, happened not to declare a
+    // `rows` const of its own. The day examResults did, the window closed early
+    // and this went red while the property it guards was untouched. A fixed
+    // window borrowing evidence from a neighbour is the mistake this repo has
+    // now made several times; bound it to the thing being asserted.
+    const start = cbt.indexOf("async recordExamGrades(");
+    expect(start).toBeGreaterThan(-1);
+    const next = cbt.indexOf("\n  async ", start + 1);
+    const method = cbt.slice(start, next === -1 ? cbt.length : next);
+    expect(method).toMatch(/cbtSitting\.findMany/);
+    expect(method).toMatch(/status: \{ in: \[/);
+    expect(method).toMatch(/const rows = sittings\.map/);
   });
 });

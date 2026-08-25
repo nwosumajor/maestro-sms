@@ -1746,6 +1746,56 @@ the TypeScript duplicate-attribute error caught it. The gate reads each tag to i
 matching `>` at brace depth zero, and strips COMMENTS first (a JSDoc block
 documenting `<input type="datetime-local">` is not a control anyone can fix).
 
+### A theory mark that was awarded, recorded, and then not shown
+Found by RUNNING a path that had never executed: `cbt_theory_answer` had zero
+rows, so the whole theory-question flow — author, sit, answer, mark, record —
+had never once been exercised. Driving it end to end on the live stack found a
+defect no test or sweep would have.
+`cbt_sitting.score` holds a script's OBJECTIVE part only. That is deliberate: it
+is written when the candidate submits, and theory is marked later by a human;
+`provisional` says "not final yet", and `markingProgress` states the rule —
+while any theory answer is unmarked the stored score "is only its objective part
+and **must not be presented as final**". The moment marking FINISHED,
+`provisional` went false and that same objective-only number WAS presented as
+final. Measured live on a 1-objective + one 10-mark-theory paper, marked 8/10:
+the candidate scored **9 of 11 and was shown 1 of 11**, on their own results
+screen and on the staff results table.
+**The record was right and every human-facing number was wrong**, which is the
+worst shape for this: `recordGrades` computed `objective + theoryMarks` itself
+and filed 49.09/60 (9/11 scaled to the school's exam component), so nothing
+downstream was corrupt and nothing would ever have surfaced the contradiction.
+Only the two READ paths disagreed with the grade in the child's own record.
+The results table was the sharper half. It orders by score once marking
+completes, and its own comment explains why it deliberately does NOT before: "a
+ranking built on half-marked scripts actively inverts — the candidates strongest
+on theory sit at the bottom". Ranking on the objective part AFTER marking
+produces precisely that inversion, having gone to the trouble of avoiding it
+during. It now sorts in Node on the true score, because the theory marks live in
+another table and SQL cannot order by them.
+One named `scriptScore(objective, theoryMarks)` is now the single definition,
+called by the candidate view, the results table AND `recordGrades` — the path
+that was always right — so a fourth reader finds it rather than inventing a
+fourth answer. // GOTCHA: the candidate view ALREADY read the theory rows,
+`marksAwarded` included, to compute `provisional` — the marks were in hand and
+simply not added. // GOTCHA: a test on the helper proves nothing about the
+views; both display paths are exercised through the real service and
+mutation-validated separately, the same seam as the audit-partition processor.
+Partial marks ARE counted while provisional — `provisional` is what says the
+figure is not final, and showing a lower number would be less true, not safer.
+// The answer key does NOT leak: the candidate's payload carries
+`answerIndex: null` with `answersReleased: false`, and `markGuide` is absent
+entirely. Checked, because `"answerIndex" in q` looked alarming and was the
+wrong test.
+// GOTCHA the fix exposed, and another instance of the fixed-window class:
+`lms-apply-only-participants` asserted "CBT writes only for candidates who SAT"
+by slicing from the FIRST `const sittings = await tx.cbtSitting.findMany` to the
+FIRST `const rows = sittings.map`. That window spanned TWO METHODS and caught
+`recordExamGrades`' status filter only because `examResults`, which comes first
+in the file, happened not to declare a `rows` const of its own. Giving it one
+closed the window early and the test went red while the property it guards was
+untouched. Now anchored to the method by name — and mutation-validated, which
+the accidental version never was.
+
 ### The safety net nobody was told about
 `audit_log` is RANGE-partitioned by month with a DEFAULT partition, so an INSERT
 can never fail for want of one — and that safety net IS the risk: when a month
