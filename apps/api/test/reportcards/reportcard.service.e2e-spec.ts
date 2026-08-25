@@ -16,6 +16,7 @@ import { GRADE_COMPONENTS } from "@sms/types";
 // singleton) + TEST_ADMIN_URL (superuser, to seed). Skips otherwise.
 // =============================================================================
 
+import zlib from "node:zlib";
 import { Pool } from "pg";
 import { randomUUID } from "node:crypto";
 import { prisma } from "@sms/db";
@@ -33,6 +34,44 @@ import type { Principal } from "../../src/integrity/integrity.foundation";
 const APP_URL = process.env.TEST_DATABASE_URL;
 const ADMIN_URL = process.env.TEST_ADMIN_URL;
 const d = APP_URL && ADMIN_URL ? describe : describe.skip;
+
+/**
+ * The visible text of a PDFKit document — the same inflate-and-glue the
+ * `reportcard-pdf` suite uses, kept here so a card's CONTENT can be asserted
+ * against a real database rather than against a hand-built argument.
+ */
+function pdfText(pdf: Buffer): string {
+  const out: string[] = [];
+  let i = 0;
+  for (;;) {
+    const s = pdf.indexOf("\nstream", i);
+    if (s === -1) break;
+    let from = s + 7;
+    while (pdf[from] === 0x0d || pdf[from] === 0x0a) from += 1;
+    const e = pdf.indexOf("endstream", from);
+    if (e === -1) break;
+    i = e + 9;
+    let raw: string;
+    try {
+      raw = zlib.inflateSync(pdf.subarray(from, e)).toString("latin1");
+    } catch {
+      continue; // fonts and images are not deflated content streams
+    }
+    // PDFKit splits one line into several hex runs wherever the font kerns, so
+    // the runs are glued back together before anything is searched for.
+    let line = "";
+    for (const m of raw.matchAll(/\[((?:<[0-9A-Fa-f]*>|[-\d.\s])*)\]\s*TJ|\((?:[^()\\]|\\.)*\)\s*Tj/g)) {
+      const chunk = m[0];
+      for (const hex of chunk.matchAll(/<([0-9A-Fa-f]+)>/g)) {
+        line += (hex[1].match(/../g) ?? []).map((b) => String.fromCharCode(parseInt(b, 16))).join("");
+      }
+      for (const lit of chunk.matchAll(/\(((?:[^()\\]|\\.)*)\)/g)) line += lit[1];
+    }
+    if (line) out.push(line);
+    out.push(raw.replace(/[^\x20-\x7e]+/g, " "));
+  }
+  return out.join("\n");
+}
 
 d("ReportCardService generate() persists to the Document Vault (real Postgres)", () => {
   let admin: Pool;
@@ -94,6 +133,97 @@ d("ReportCardService generate() persists to the Document Vault (real Postgres)",
     // The app-role Prisma singleton must be closed or the jest worker hangs
     // on its open pool (CI runs workers in parallel — nobody else closes it).
     await prisma.$disconnect();
+  });
+
+  // =========================================================================
+  // THE ONLY CARDS CARRYING A PROMOTION LINE WERE THE ONES WITH BAD NEWS
+  // =========================================================================
+  // The report card is where a family learns the end-of-session outcome — the
+  // platform sends no notification for it, deliberately, because the card is
+  // the artefact designed to carry it.
+  //
+  // The lookup filtered on `sourceClassId: enrolment.classId`, and `enrolment`
+  // is the pupil's ACTIVE one. Approving a promotion marks the source enrolment
+  // PROMOTED and opens a new ACTIVE one in the TARGET class — so for a pupil who
+  // WAS promoted the source class no longer matched and the line never printed.
+  // A pupil who was RETAINED stays ACTIVE in the source class, so theirs did.
+  //
+  // Measured live on a real batch of 30: the retained pupil's card read "TO
+  // REPEAT THE CLASS" and all 29 promoted cards said nothing at all. A DEMOTE
+  // moves the pupil too, so it was silent for the same reason.
+  //
+  // The PDF suite already covers `promotionLine` — it renders whatever it is
+  // handed. The defect was in COMPUTING it, so this drives the real query
+  // against a real database: a test on the view proves nothing about the lookup.
+  describe("the end-of-session decision on the card", () => {
+    const SOURCE = randomUUID();
+    const TARGET = randomUUID();
+    const SESSION = randomUUID();
+    const TERM = randomUUID();
+
+    beforeAll(async () => {
+      await admin.query(`INSERT INTO class (id,"schoolId",name,code,"updatedAt") VALUES ($1,$2,'JSS1 A',$3,now()),($4,$2,'JSS2 A',$5,now())`, [SOURCE, SA, "s-" + SOURCE.slice(0, 8), TARGET, "t-" + TARGET.slice(0, 8)]);
+      await admin.query(`INSERT INTO academic_session (id,"schoolId",name,"isCurrent","updatedAt") VALUES ($1,$2,'2026/2027',true,now())`, [SESSION, SA]);
+      await admin.query(
+        `INSERT INTO term (id,"schoolId","sessionId",name,sequence,"isCurrent","startDate","endDate","updatedAt")
+         VALUES ($1,$2,$3,'Third Term',3,true,now() - interval '80 days', now() - interval '1 day', now())`,
+        [TERM, SA, SESSION],
+      );
+      // The pupil has MOVED: their source enrolment is PROMOTED and their live
+      // one is in the target class — exactly what approval leaves behind.
+      await admin.query(`INSERT INTO enrollment (id,"schoolId","classId","studentId",status) VALUES ($1,$2,$3,$4,'PROMOTED'),($5,$2,$6,$4,'ACTIVE')`, [randomUUID(), SA, SOURCE, STUDENT, randomUUID(), TARGET]);
+      await admin.query(
+        `INSERT INTO promotion_batch (id,"schoolId","termId","sourceClassId","targetClassId","studentIds",decisions,status,"initiatedById","updatedAt")
+         VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,'APPROVED',$8,now())`,
+        [randomUUID(), SA, TERM, SOURCE, TARGET, JSON.stringify([STUDENT]), JSON.stringify([]), PRINCIPAL],
+      );
+    });
+
+    afterAll(async () => {
+      for (const t of ["promotion_batch", "enrollment", "term", "academic_session", "class"]) {
+        await admin.query(`DELETE FROM ${t} WHERE "schoolId" = $1`, [SA]);
+      }
+    });
+
+    it("tells a PROMOTED pupil they were promoted, though they have left the source class", async () => {
+      const { buffer } = await reportCards.generate(principal(), STUDENT, TERM);
+      expect(pdfText(buffer)).toContain("PROMOTED TO JSS2 A");
+    });
+
+    it("still tells a RETAINED pupil, who never moved", async () => {
+      await admin.query(`UPDATE promotion_batch SET decisions = $2::jsonb WHERE "schoolId" = $1`, [
+        SA,
+        JSON.stringify([{ studentId: STUDENT, outcome: "RETAIN" }]),
+      ]);
+      const { buffer } = await reportCards.generate(principal(), STUDENT, TERM);
+      expect(pdfText(buffer)).toContain("TO REPEAT THE CLASS");
+    });
+
+    it("tells a DEMOTED pupil, who moved DOWN and was silent for the same reason", async () => {
+      await admin.query(`UPDATE promotion_batch SET decisions = $2::jsonb WHERE "schoolId" = $1`, [
+        SA,
+        JSON.stringify([{ studentId: STUDENT, outcome: "DEMOTE", targetClassId: SOURCE }]),
+      ]);
+      const { buffer } = await reportCards.generate(principal(), STUDENT, TERM);
+      expect(pdfText(buffer)).toContain("TRANSFERRED TO A LOWER CLASS");
+    });
+
+    it("says NOTHING while the batch is only staged — an approval is what decides", async () => {
+      await admin.query(`UPDATE promotion_batch SET status = 'PENDING' WHERE "schoolId" = $1`, [SA]);
+      const { buffer } = await reportCards.generate(principal(), STUDENT, TERM);
+      const t = pdfText(buffer);
+      expect(t).not.toContain("PROMOTED TO");
+      expect(t).not.toContain("TO REPEAT THE CLASS");
+      expect(t).not.toContain("TRANSFERRED TO A LOWER CLASS");
+    });
+
+    it("says nothing about a pupil the batch never named", async () => {
+      // An absent line is honest; a computed one would be the system awarding a
+      // year it has no standing to award.
+      await admin.query(`UPDATE promotion_batch SET status = 'APPROVED', "studentIds" = '[]'::jsonb WHERE "schoolId" = $1`, [SA]);
+      const { buffer } = await reportCards.generate(principal(), STUDENT, TERM);
+      expect(pdfText(buffer)).not.toContain("PROMOTED TO");
+    });
   });
 
   it("PRINCIPAL generates it -> a REAL Document Vault row exists that the STUDENT can retrieve themselves", async () => {

@@ -1796,6 +1796,53 @@ closed the window early and the test went red while the property it guards was
 untouched. Now anchored to the method by name — and mutation-validated, which
 the accidental version never was.
 
+### The only report cards carrying a promotion line were the ones with bad news
+Found by RUNNING a path that had never executed: `promotion_batch` had zero
+rows. Staged a real end-of-session batch for 30 pupils, one RETAINed, and the
+maker-checker worked exactly as written — the maker's own approval was refused,
+a different admin's landed, 29 enrolments moved to the target class and the
+retained pupil stayed ACTIVE in the source. Then the report cards.
+**The report card is where a family learns the outcome** — the platform sends no
+notification for a promotion, deliberately, because the card is the artefact
+designed to carry it. The lookup filtered on `sourceClassId: enrolment.classId`,
+and `enrolment` is the pupil's ACTIVE one. Approval marks the source enrolment
+PROMOTED and opens a new ACTIVE one in the TARGET class — so for a pupil who was
+promoted the source class no longer matched and the line never printed. A pupil
+who was RETAINED never moves, so theirs did. Measured live: the retained pupil's
+card read `TO REPEAT THE CLASS` and all 29 promoted cards said **nothing at
+all**. A DEMOTE moves the pupil too, so it was silent for the same reason.
+Now found by MEMBERSHIP of the batch — still narrowed to the TERM and to
+APPROVED, so a staged or rejected batch prints nothing and another term's
+decision cannot leak onto the card. Live after: `PROMOTED TO VOL JSS2 A` on both
+promoted pupils, `TO REPEAT THE CLASS` still on the retained one.
+// A TEST PINNED THE OPPOSITE BELIEF, and its reasoning was exactly backwards:
+"a promotion batch is a decision taken about the class the pupil is in now;
+keying it on a HISTORICAL class would silently drop the line". Keying it on the
+CURRENT class is what dropped it. `promotion_batch` had zero rows when that was
+written, so nothing had ever contradicted it — a plausible-sounding belief
+pinned by an assertion, which is worse than no test because it defends the bug.
+Replaced with the corrected property, and the behavioural cases now run against
+a REAL DATABASE in `reportcard.service.e2e-spec.ts` (promoted / retained /
+demoted / staged-not-approved / not-in-the-batch), mutation-validated by putting
+`sourceClassId` back.
+// The PDF suite already covered `promotionLine` — it renders whatever it is
+handed. The defect was in COMPUTING it. A test on the view proves nothing about
+the lookup, the same seam as the CBT score.
+### A registry note that named a file which never existed
+Same pass, smaller: `api-surface.registry.json` DECLARES how each route is
+reached, because runtime-built paths cannot be detected — sound, and it makes
+every note an unverified claim. 163 of them name a source file, so that half IS
+checkable. One named `components/careers/CareersApply.tsx` for the PUBLIC job
+application; the form lives in `components/public/CareersBoard.tsx` and the
+named file has never existed.
+Worth more than tidiness: a stale note is how a dead route hides — the gradebook
+grade write was recorded as "reached from GradingConsole.tsx" while another
+controller shadowed it on the same URL. Gate added; mutation-validated.
+// GOTCHA: the corrected note first EXPLAINED the fix by naming the dead file,
+and the gate flagged its own explanation — the trap
+`money-is-not-divided-by-a-hundred` strips comments for. A note says where a
+route IS reached from; a filename that no longer exists does not belong in it.
+
 ### Two handlers, one URL, and the second one is dead
 `GradebookController` and `LmsContentController` BOTH declare `@Controller()`
 with no prefix, and both declared `POST submissions/:id/grade`. Nest maps both —

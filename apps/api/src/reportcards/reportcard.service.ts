@@ -396,9 +396,30 @@ export class ReportCardService {
       // an absent line is honest, a computed one would be the system awarding a
       // year it has no standing to award.
       let promotionLine: string | null = null;
-      if (term && enrolment) {
+      if (term) {
+        // FOUND BY THE PUPIL'S MEMBERSHIP OF THE BATCH, not by the class they are
+        // in now.
+        //
+        // This filtered on `sourceClassId: enrolment.classId`, and `enrolment` is
+        // the pupil's ACTIVE one. Approving a promotion marks the source
+        // enrolment PROMOTED and opens a new ACTIVE one in the TARGET class — so
+        // for a pupil who WAS promoted the source class no longer matches and the
+        // line never printed. A pupil who was RETAINED stays ACTIVE in the source
+        // class, so theirs did.
+        //
+        // The asymmetry is the whole defect: THE ONLY CARDS CARRYING A PROMOTION
+        // LINE WERE THE ONES WITH BAD NEWS. Measured live on a batch of 30 — the
+        // retained pupil's card read "TO REPEAT THE CLASS" and all 29 promoted
+        // cards said nothing at all.
+        //
+        // A DEMOTE moves the pupil too, so it was silent for the same reason.
+        //
+        // The batch is still narrowed by TERM and by APPROVED, so a staged or
+        // rejected batch prints nothing and a decision from another term cannot
+        // leak onto this card. `studentIds` is the batch's own record of who was
+        // in it, which is what the outcome was decided about.
         const batches = (await tx.promotionBatch.findMany({
-          where: { sourceClassId: enrolment.classId, termId: term.id, status: "APPROVED" },
+          where: { termId: term.id, status: "APPROVED" },
           select: { studentIds: true, decisions: true, targetClassId: true, targetClass: { select: { name: true } } },
           orderBy: { createdAt: "desc" },
         })) as Array<{

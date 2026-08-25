@@ -94,12 +94,31 @@ describe("the printed report card", () => {
     );
   });
 
-  it("still finds a promotion decision by the pupil's CURRENT class", () => {
-    // Deliberately NOT changed. A promotion batch is a decision taken about the
-    // class the pupil is in now; keying it on a historical class would silently
-    // drop the "PROMOTED TO ..." line from the end-of-year card.
+  it("finds a promotion decision by MEMBERSHIP of the batch, not by any class", () => {
+    // THIS TEST USED TO ASSERT THE OPPOSITE, and its reasoning was exactly
+    // backwards: "a promotion batch is a decision taken about the class the
+    // pupil is in now; keying it on a historical class would silently drop the
+    // 'PROMOTED TO …' line."
+    //
+    // Keying it on the CURRENT class is what dropped the line. Approving a batch
+    // marks the source enrolment PROMOTED and opens a new ACTIVE one in the
+    // TARGET class, so a promoted pupil's current class is no longer the
+    // batch's `sourceClassId` and nothing matched. A RETAINED pupil never moves,
+    // so theirs did — which is the whole defect: THE ONLY CARDS CARRYING A
+    // PROMOTION LINE WERE THE ONES WITH BAD NEWS.
+    //
+    // Measured on a real batch of 30: the retained pupil read "TO REPEAT THE
+    // CLASS" and all 29 promoted cards said nothing. `promotion_batch` had zero
+    // rows when the belief above was written, so nothing had ever contradicted
+    // it. The behavioural cases now live in `reportcard.service.e2e-spec.ts`,
+    // against a real database.
     const src = read("reportcards/reportcard.service.ts");
-    expect(src).toMatch(/where: \{ sourceClassId: enrolment\.classId, termId: term\.id, status: "APPROVED" \}/);
+    const at = src.indexOf("tx.promotionBatch.findMany");
+    const call = src.slice(at, src.indexOf("orderBy", at));
+    expect(call).toMatch(/termId: term\.id/);
+    expect(call).toMatch(/status: "APPROVED"/);
+    // Never again narrowed by a class the pupil may have left.
+    expect(call).not.toMatch(/sourceClassId/);
   });
 
   it("counts register days from that class too, not the destination's", () => {

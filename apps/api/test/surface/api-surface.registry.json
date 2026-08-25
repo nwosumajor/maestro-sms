@@ -2735,7 +2735,7 @@
     },
     "POST /public/careers/:p/apply": {
       "kind": "ui",
-      "note": "public job application (rate-limited, optional PDF CV) — components/careers/CareersApply.tsx"
+      "note": "public job application — the apply form in components/public/CareersBoard.tsx, posted through the public BFF proxy. (It previously named a careers-folder component that has never existed.)"
     },
     "POST /public/documents/:p/confirm": {
       "kind": "ui",

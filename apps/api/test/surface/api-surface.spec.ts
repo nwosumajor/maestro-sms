@@ -32,7 +32,7 @@
 // each one — and this is what stops it decaying.
 // =============================================================================
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { extractRoutes } from "./extract";
 
@@ -57,7 +57,46 @@ const routes = extractRoutes(API_SRC);
  */
 const UNCLASSIFIED_BUDGET = 0;
 
+/** Source files a registry note claims a route is reached from. */
+function claimedFiles(note: string): string[] {
+  return note.match(/(?:components|app|lib)\/[A-Za-z0-9_\-./[\]()]+\.tsx?/g) ?? [];
+}
+
 describe("every API route has a decided answer to 'how is this reached?'", () => {
+  // A NOTE THAT NAMES A FILE MUST NAME ONE THAT EXISTS.
+  //
+  // This registry deliberately DECLARES rather than detects, because paths are
+  // built at runtime and no static analysis can follow them. That is right, and
+  // it makes each note an unverified claim — so the part of a claim that CAN be
+  // checked should be. 163 notes name a source file; one named
+  // `components/careers/CareersApply.tsx`, which has never existed (the public
+  // job application is posted from `components/public/CareersBoard.tsx`).
+  //
+  // Worth more than tidiness: a stale note is how a dead route hides. The
+  // gradebook's `POST /submissions/:id/grade` was recorded as "reached from
+  // GradingConsole.tsx" while another controller shadowed it on the same URL —
+  // a route that could not work, recorded as reachable, pointing at a screen
+  // that never called it.
+  // // GOTCHA while writing this: the corrected note first EXPLAINED the fix by
+  // naming the dead file, and the gate flagged its own explanation — the same
+  // trap `money-is-not-divided-by-a-hundred` strips comments for. A note says
+  // where a route IS reached from; a filename that no longer exists does not
+  // belong in it, however well meant.
+  it("names only source files that exist", () => {
+    const web = join(__dirname, "..", "..", "..", "web");
+    const missing: string[] = [];
+    let named = 0;
+    for (const [key, entry] of Object.entries(registry.routes)) {
+      for (const f of claimedFiles(entry.note ?? "")) {
+        named += 1;
+        if (!existsSync(join(web, f))) missing.push(`${key} -> ${f}`);
+      }
+    }
+    // A scan that finds no claims would pass covering nothing.
+    expect(named).toBeGreaterThan(100);
+    expect(missing).toEqual([]);
+  });
+
   it("has a registry entry for every route the API serves", () => {
     // A NEW endpoint fails here. That is the whole mechanism: you cannot add a
     // route without saying how a human reaches it, or why none can.
