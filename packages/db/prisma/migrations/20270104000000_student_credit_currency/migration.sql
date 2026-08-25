@@ -1,0 +1,27 @@
+-- A CREDIT BALANCE IS A NUMBER OF MINOR UNITS, AND NOTHING SAID OF WHAT.
+--
+-- `student_credit_entry` recorded `deltaMinor` with no currency, while every
+-- row that feeds it or spends it carries one: an overpayment is in the source
+-- INVOICE's currency, a dedicated-account transfer is in the CHARGE's, and
+-- applying credit spends it into the TARGET invoice's. Invoices carry their own
+-- currency per row -- a school can bill USD through Stripe alongside its local
+-- currency -- so the ledger silently mixed units and the balance was a sum over
+-- two different kinds of money.
+--
+-- Measured live: $100.00 of overpayment on a USD invoice became a credit of
+-- 10,000 and was applied to a naira bill as 10,000 kobo -- 100 naira, about a
+-- thousandth of it, with the family's screen reporting success. The reverse is
+-- worse: 100,000 naira of overpayment is 10,000,000 kobo and would credit
+-- $100,000.00 against a USD invoice.
+--
+-- NULLABLE deliberately. Rows written before this column existed cannot say
+-- what currency they were in, and the school's own currency is the only
+-- assumption the data supports -- it is the one `initPrepay` has always raised
+-- its charges in. A backfill would record that guess as though it were a fact;
+-- NULL plus a named resolver says what is actually known.
+--
+-- No new index. `student_credit_entry_schoolId_studentId_idx` already serves
+-- the per-pupil read, and a pupil's ledger is a handful of rows -- an index the
+-- planner would never choose is write amplification, which is what the three
+-- trigram indexes dropped in 20261228000000 were.
+ALTER TABLE "student_credit_entry" ADD COLUMN "currency" TEXT;

@@ -211,6 +211,10 @@ export class VirtualAccountsService {
       va.studentId,
       event.data.amount,
       event.data.reference,
+      // The CHARGE's currency, exactly as the invoice branch above passes it.
+      // A dedicated NUBAN settles in naira whatever the school's own currency
+      // is, so inheriting the school's would have mislabelled every one.
+      (event.data.currency ?? "").toUpperCase(),
     );
     if (!credited) return { ok: true }; // gateway retry
     // The EVENT's currency, not a hard-coded NGN: a bank transfer in another

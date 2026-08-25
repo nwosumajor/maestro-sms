@@ -244,15 +244,30 @@ export interface PaymentPlanDto {
 export interface CreditEntryDto {
   id: string;
   deltaMinor: number;
+  /** The currency these minor units are in — resolved, never null on the wire. */
+  currency: string;
   reason: string;
   reference: string | null;
   note: string | null;
   createdAt: Date;
 }
 
+/**
+ * A pupil's fee credit, SPLIT BY CURRENCY.
+ *
+ * There is no FX rate in this platform, so credit in one currency cannot be
+ * spent on an invoice in another and a single total would be a sum over two
+ * kinds of money. `balanceMinor` is the balance in `currency` (the school's
+ * own) — which is the whole of it for the schools that bill in one currency —
+ * and `balances` carries every bucket the ledger holds. A reader may only put a
+ * currency symbol in front of a figure it took from `balances`.
+ */
 export interface CreditBalanceDto {
   studentId: string;
+  /** The school's own currency: what `balanceMinor` is denominated in. */
+  currency: string;
   balanceMinor: number;
+  balances: Array<{ currency: string; balanceMinor: number }>;
   entries: CreditEntryDto[];
 }
 

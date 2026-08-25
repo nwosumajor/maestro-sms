@@ -1796,6 +1796,61 @@ closed the window early and the test went red while the property it guards was
 untouched. Now anchored to the method by name — and mutation-validated, which
 the accidental version never was.
 
+### A credit balance was a number, with nothing said of what money it was
+Found by RUNNING a path that had never executed: `student_credit_entry` had
+zero rows, so prepay, overpayment and apply-credit had never once been
+exercised end to end. `deltaMinor` was recorded with NO currency, while every
+row that feeds or spends it carries one — an OVERPAYMENT is in the source
+INVOICE's currency, a dedicated-account transfer is in the CHARGE's, APPLIED
+spends into the TARGET invoice's — and invoices carry their own currency PER
+ROW, because the platform bills USD through Stripe alongside a school's local
+currency. So the balance was a sum over two kinds of money.
+Measured live on the running stack: two guardians raced to settle one $100 USD
+invoice (`applyOnlinePayment` reads the status and then writes, so a genuine
+race still overpays — the manual path refuses an over-balance payment, which is
+why this is the ONLY way in), the $100 excess moved to credit as `10000`, and
+applying it to a naira bill credited **10,000 KOBO — ₦100 against $100**, about
+a thousandth of it, with `{"appliedMinor":10000}` and a PARTIALLY_PAID invoice
+reporting success to the family. The reverse is worse: ₦100,000 of overpayment
+is 10,000,000 kobo and would credit **$100,000.00**.
+// GOTCHA, and the reason this is a gate rather than four fixed call sites:
+**it was not that nobody had thought about it.** `initPrepay` raises its charge
+in the school's own currency and says why in a comment — "crediting a ledger in
+one currency from a charge in another is a balance that silently drifts". One
+producer of four, and neither of the two consumers. The dedicated-account
+handler is the sharpest case: it passes `event.data.currency` to
+`applyOnlinePayment` on the branch where an open invoice exists, and passed
+nothing at all to the credit branch four lines below.
+`student_credit_entry.currency` (migration `20270104000000`) is NULLABLE and
+NULL means the SCHOOL's own currency — rows written before the column cannot
+say what they were, and that is the only assumption the data supports; a
+backfill would record the guess as a fact. // GOTCHA: `creditCurrencyWhere`
+must match NULL **for the school's currency and no other**, or every historical
+row becomes unspendable — a family's money still on the screen with no invoice
+able to take it. `CreditBalanceDto` now carries `currency` + `balances[]`;
+`balanceMinor` stays the school's-currency figure, so a single-currency school
+reads exactly what it read before. Credit is spendable only on an invoice in
+its own currency: there is no FX rate here and inventing one to spend a balance
+would be worse than refusing, the same decision
+`school.paymentApprovalThresholdMinor` records. The refusal DISTINGUISHES "no
+credit" from "no credit in THIS currency", because the second is visible on the
+pupil's other invoice and would otherwise be reported as a bug.
+// GOTCHA on the same panel, found while fixing it: `CreditPanel` was handed
+`currency={inv.currency}` and rendered the one balance under it — the same
+ledger read `$100.00` on a dollar invoice and `₦100.00` on a naira one, for one
+pupil on one afternoon — AND labelled the top-up box with the invoice's
+currency while `initPrepay` charges in the SCHOOL's, inviting a parent to type
+dollars and be charged naira.
+Gate: `every-credit-row-says-what-money-it-is.spec.ts` fails on any
+`studentCreditEntry` write with no currency, reading each `data` block to its
+matching paren rather than a fixed window. It asks about the WRITE, not the
+read: a read that forgets renders a wrong symbol, a write that forgets destroys
+the fact for ever. Mutation-validated three ways — drop the filter, drop the
+stamp, break the NULL case — each caught by the test written for it.
+LIVE-VERIFIED after: same probe, $300 overpaid -> a USD credit row, the naira
+`balanceMinor` reads 0, and applying to the naira invoice is a 400 naming the
+reason with the invoice left ISSUED and no payment written.
+
 ### The safety net nobody was told about
 `audit_log` is RANGE-partitioned by month with a DEFAULT partition, so an INSERT
 can never fail for want of one — and that safety net IS the risk: when a month

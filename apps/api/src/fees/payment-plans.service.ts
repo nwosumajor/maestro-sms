@@ -17,6 +17,19 @@ import { PAYMENT_CHANNELS, formatMoney } from "@sms/types";
 // maker-checker path) — deliberately: no money LEAVES the school, it moves
 // from one student ledger bucket to another, staff-initiated and audited.
 // Actual outbound refunds still go through maker-checker unchanged.
+//
+// EVERY ENTRY CARRIES ITS CURRENCY, and the balance is asked one currency at a
+// time. `deltaMinor` on its own is a number of minor units and nothing said of
+// what: an OVERPAYMENT is in the source INVOICE's currency, a dedicated-account
+// transfer is in the CHARGE's, and APPLIED spends into the TARGET invoice's.
+// Invoices carry their own currency per row — a school bills USD through Stripe
+// alongside its local currency — so a single summed balance mixed two kinds of
+// money. Measured live: $100.00 of overpayment became a credit of 10,000 and
+// went onto a naira bill as ₦100, with every screen reporting success.
+// `initPrepay` alone had seen this and says so in a comment ("crediting a
+// ledger in one currency from a charge in another is a balance that silently
+// drifts") — it raises its charge in the school's currency, which fixes ONE of
+// the four producers and neither of the two consumers.
 // =============================================================================
 
 import { BadRequestException, Inject, Injectable, NotFoundException, ServiceUnavailableException, Optional} from "@nestjs/common";
@@ -43,6 +56,27 @@ import { publicWebUrl } from "../common/public-url";
 // last survivor of the 31 that were removed, missed because it is a plain array
 // while the gate only matched `new Set([...])`.
 const STAFF_WIDE = ["accountant", "school_admin", "principal"];
+
+/**
+ * The currency a ledger entry is in. NULL means the school's own currency:
+ * rows written before the column existed cannot say what they were, and that is
+ * the only assumption the data supports — it is the one `initPrepay` has always
+ * raised its charges in. Named rather than inlined so the two readers and the
+ * export cannot each decide it differently.
+ */
+export function creditEntryCurrency(entryCurrency: string | null, schoolCurrency: string): string {
+  return entryCurrency ?? schoolCurrency;
+}
+
+/**
+ * Rows in ONE currency. A NULL row belongs to the school's own currency and to
+ * no other, so the school's currency is the one case that must also match NULL
+ * — writing `{ currency }` alone would make every historical row unspendable,
+ * which is a family's money stuck on a screen that says they have it.
+ */
+export function creditCurrencyWhere(currency: string, schoolCurrency: string): { currency: string } | { OR: Array<{ currency: string | null }> } {
+  return currency === schoolCurrency ? { OR: [{ currency }, { currency: null }] } : { currency };
+}
 
 @Injectable()
 export class PaymentPlansService {
@@ -190,14 +224,33 @@ export class PaymentPlansService {
   // ---------------------------------------------------------------------------
 
   async creditBalance(p: Principal, studentId: string): Promise<CreditBalanceDto> {
+    const { currency } = await this.region.forSchool(p.schoolId);
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       if (!(await this.canSeeStudent(tx, p, studentId))) throw new NotFoundException("Not found");
-      return this.balanceInTx(tx, studentId);
+      return this.balanceInTx(tx, studentId, currency);
     });
   }
 
-  private async balanceInTx(tx: TenantTx, studentId: string): Promise<CreditBalanceDto> {
-    const agg = await tx.studentCreditEntry.aggregate({ where: { studentId }, _sum: { deltaMinor: true } });
+  /**
+   * The ledger, split by currency. `balanceMinor` stays the SCHOOL's-currency
+   * balance, so a school that bills in one currency — nearly all of them — reads
+   * exactly what it read before; `balances` is what a mixed-currency ledger
+   * needs, and is the only figure a reader may put a currency symbol in front of.
+   */
+  private async balanceInTx(tx: TenantTx, studentId: string, schoolCurrency: string): Promise<CreditBalanceDto> {
+    // Grouped in the DATABASE. One row per currency, not one per entry: this is
+    // a sum, and hydrating a pupil's whole ledger to add it up in Node is the
+    // habit `counting in Node` exists to name.
+    const grouped = await tx.studentCreditEntry.groupBy({
+      by: ["currency"],
+      where: { studentId },
+      _sum: { deltaMinor: true },
+    });
+    const byCurrency = new Map<string, number>();
+    for (const g of grouped as Array<{ currency: string | null; _sum: { deltaMinor: number | null } }>) {
+      const c = creditEntryCurrency(g.currency, schoolCurrency);
+      byCurrency.set(c, (byCurrency.get(c) ?? 0) + (g._sum.deltaMinor ?? 0));
+    }
     const entries = await tx.studentCreditEntry.findMany({
       where: { studentId },
       orderBy: { createdAt: "desc" },
@@ -205,10 +258,18 @@ export class PaymentPlansService {
     });
     return {
       studentId,
-      balanceMinor: agg._sum.deltaMinor ?? 0,
-      entries: entries.map((e: { id: string; deltaMinor: number; reason: string; reference: string | null; note: string | null; createdAt: Date }) => ({
+      currency: schoolCurrency,
+      balanceMinor: byCurrency.get(schoolCurrency) ?? 0,
+      // A ZERO bucket is still reported when it has rows, because "you have no
+      // credit in dollars" and "there is no dollar ledger" are different answers
+      // to a parent asking where their money went.
+      balances: [...byCurrency.entries()]
+        .map(([currency, balanceMinor]) => ({ currency, balanceMinor }))
+        .sort((a, b) => (a.currency === schoolCurrency ? -1 : b.currency === schoolCurrency ? 1 : a.currency.localeCompare(b.currency))),
+      entries: entries.map((e: { id: string; deltaMinor: number; currency: string | null; reason: string; reference: string | null; note: string | null; createdAt: Date }) => ({
         id: e.id,
         deltaMinor: e.deltaMinor,
+        currency: creditEntryCurrency(e.currency, schoolCurrency),
         reason: e.reason,
         reference: e.reference,
         note: e.note,
@@ -263,6 +324,11 @@ export class PaymentPlansService {
           schoolId,
           studentId,
           deltaMinor: event.data.amount,
+          // From the SIGNED event — what the gateway says it charged, not what
+          // `initPrepay` asked for. Same discipline as `applyOnlinePayment`:
+          // a checkout opened before a region change comes back in the OLD
+          // currency, and the entry must say so rather than inherit today's.
+          currency: (event.data.currency ?? "").toUpperCase() || undefined,
           reason: "PREPAYMENT",
           reference: event.data.reference,
           note: "Online prepayment",
@@ -295,13 +361,23 @@ export class PaymentPlansService {
     return { ok: true };
   }
 
-  /** Webhook helper (dedicated-account transfers with no open invoice). */
-  async addCreditFromTransfer(schoolId: string, studentId: string, amountMinor: number, reference: string): Promise<boolean> {
+  /** Webhook helper (dedicated-account transfers with no open invoice).
+   *  `currency` is REQUIRED rather than defaulted: the caller had it in hand —
+   *  it passes the same field to `applyOnlinePayment` two lines above, on the
+   *  branch where an open invoice exists — and a required parameter is a search
+   *  for every caller that was relying on a default. */
+  async addCreditFromTransfer(
+    schoolId: string,
+    studentId: string,
+    amountMinor: number,
+    reference: string,
+    currency: string,
+  ): Promise<boolean> {
     return this.db.runAsTenant({ schoolId, userId: SYSTEM_ACTOR_ID }, async (tx) => {
       const already = await tx.studentCreditEntry.findFirst({ where: { reference }, select: { id: true } });
       if (already) return false;
       await tx.studentCreditEntry.create({
-        data: { schoolId, studentId, deltaMinor: amountMinor, reason: "PREPAYMENT", reference, note: "Bank transfer (dedicated account) — no open invoice" },
+        data: { schoolId, studentId, deltaMinor: amountMinor, currency, reason: "PREPAYMENT", reference, note: "Bank transfer (dedicated account) — no open invoice" },
       });
       return true;
     });
@@ -310,10 +386,11 @@ export class PaymentPlansService {
   /** Staff applies the student's credit balance to an open invoice: one
    *  APPLIED ledger entry + one CREDIT payment row, atomically. */
   async applyCreditToInvoice(p: Principal, invoiceId: string): Promise<{ appliedMinor: number }> {
+    const { currency: schoolCurrency } = await this.region.forSchool(p.schoolId);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const inv = await tx.invoice.findFirst({
         where: { id: invoiceId },
-        select: { studentId: true, totalMinor: true, status: true, reference: true },
+        select: { studentId: true, totalMinor: true, status: true, reference: true, currency: true },
       });
       if (!inv) throw new NotFoundException("Invoice not found");
       if (inv.status !== "ISSUED" && inv.status !== "PARTIALLY_PAID") {
@@ -321,15 +398,34 @@ export class PaymentPlansService {
       }
       const paid = await this.paidMinor(tx, invoiceId);
       const invoiceBalance = inv.totalMinor - paid;
-      const agg = await tx.studentCreditEntry.aggregate({ where: { studentId: inv.studentId }, _sum: { deltaMinor: true } });
+      // ONLY credit in THIS INVOICE'S currency. Minor units of one currency are
+      // not minor units of another and there is no FX rate in this platform —
+      // inventing one to spend a balance would be worse than refusing, the same
+      // decision `school.paymentApprovalThresholdMinor` records. A pupil can
+      // legitimately hold both (a USD invoice overpaid, a naira bill open).
+      const agg = await tx.studentCreditEntry.aggregate({
+        where: { studentId: inv.studentId, ...creditCurrencyWhere(inv.currency, schoolCurrency) },
+        _sum: { deltaMinor: true },
+      });
       const credit = agg._sum.deltaMinor ?? 0;
       const apply = Math.min(invoiceBalance, credit);
-      if (apply <= 0) throw new BadRequestException("No credit balance to apply");
+      if (apply <= 0) {
+        // Which of the two it is MATTERS to the person reading it: "none at all"
+        // is the end of the matter, "none in dollars" is a balance they can see
+        // on the pupil's other invoice and would otherwise report as a bug.
+        const all = await tx.studentCreditEntry.aggregate({ where: { studentId: inv.studentId }, _sum: { deltaMinor: true } });
+        throw new BadRequestException(
+          (all._sum.deltaMinor ?? 0) > 0
+            ? `No ${inv.currency} credit balance to apply — this pupil's credit is in another currency and cannot be converted`
+            : "No credit balance to apply",
+        );
+      }
       await tx.studentCreditEntry.create({
         data: {
           schoolId: p.schoolId,
           studentId: inv.studentId,
           deltaMinor: -apply,
+          currency: inv.currency,
           reason: "APPLIED",
           reference: invoiceId,
           note: `Applied to invoice ${inv.reference}`,
@@ -360,7 +456,7 @@ export class PaymentPlansService {
           entity: "invoice",
           entityId: invoiceId,
           schoolId: p.schoolId,
-          metadata: { appliedMinor: apply },
+          metadata: { appliedMinor: apply, currency: inv.currency },
         },
         tx,
       );
@@ -375,7 +471,7 @@ export class PaymentPlansService {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const inv = await tx.invoice.findFirst({
         where: { id: invoiceId },
-        select: { studentId: true, totalMinor: true, reference: true },
+        select: { studentId: true, totalMinor: true, reference: true, currency: true },
       });
       if (!inv) throw new NotFoundException("Invoice not found");
       const paid = await this.paidMinor(tx, invoiceId);
@@ -398,6 +494,9 @@ export class PaymentPlansService {
           schoolId: p.schoolId,
           studentId: inv.studentId,
           deltaMinor: excess,
+          // The excess is money paid against THIS invoice, so it is in THIS
+          // invoice's currency — not the school's, which may be a different one.
+          currency: inv.currency,
           reason: "OVERPAYMENT",
           reference: invoiceId,
           note: `Moved from invoice ${inv.reference}`,
@@ -411,7 +510,7 @@ export class PaymentPlansService {
           entity: "invoice",
           entityId: invoiceId,
           schoolId: p.schoolId,
-          metadata: { movedMinor: excess },
+          metadata: { movedMinor: excess, currency: inv.currency },
         },
         tx,
       );

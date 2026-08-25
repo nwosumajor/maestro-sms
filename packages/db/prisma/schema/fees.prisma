@@ -333,6 +333,12 @@ model StudentCreditEntry {
   /// DB FK to user; no Prisma relation (lean User model).
   studentId   String  @db.Uuid
   deltaMinor  Int
+  /// The currency these minor units are in — the currency of the invoice or the
+  /// charge the entry came from, NOT the school's. NULL means the school's own
+  /// currency: rows written before this column existed cannot say what they
+  /// were, and the school's currency is the only assumption the data supports
+  /// (it is the one `initPrepay` has always raised its charges in).
+  currency    String?
   /// PREPAYMENT | OVERPAYMENT | APPLIED | REFUNDED
   reason      String
   /// Gateway reference / payment id — the idempotency key for webhook credits.
