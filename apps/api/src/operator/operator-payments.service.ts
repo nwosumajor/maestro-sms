@@ -29,6 +29,7 @@ import type {
   OperatorCreditPurchaseDto,
   OperatorFeeRevenueDto,
   OperatorPaymentPageDto,
+  OperatorSeatArrearsDto,
   OperatorPaymentRowDto,
   OperatorRevenueTotalDto,
   Plan,
@@ -237,7 +238,7 @@ export class OperatorPaymentsService {
     const page = Math.max(1, filters.page ?? 1);
     const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(1, filters.pageSize ?? 25));
 
-    const [rows, total, totals, feeRevenue, credits] = await Promise.all([
+    const [rows, total, totals, feeRevenue, credits, seatArrears] = await Promise.all([
       this.client().platformSubscriptionPayment.findMany({
         where,
         orderBy: { createdAt: "desc" },
@@ -248,6 +249,7 @@ export class OperatorPaymentsService {
       this.totals(where),
       this.feeRevenue(filters),
       this.creditPurchases(filters),
+      this.seatArrears(),
     ]);
 
     const [names, initiators] = await Promise.all([
@@ -265,7 +267,64 @@ export class OperatorPaymentsService {
       feeRevenue,
       creditPurchases: credits.rows,
       creditRevenue: credits.totals,
+      seatArrears,
     };
+  }
+
+  /**
+   * WHAT THE PLATFORM IS OWED FOR SEATS IT HAS ALREADY CARRIED.
+   *
+   * A school buys a seat count and its roll grows mid-period. The nightly sweep
+   * meters the difference in seat-days onto `seatArrearsMinor`, and it is
+   * collected when the school tops up or, automatically, on its next renewal.
+   * Until then it is earned, unbilled revenue — and it appeared on no revenue
+   * screen. The attention queue flagged WHICH schools had some without ever
+   * saying how much, and nothing added it up, so "what are we owed?" had no
+   * answer anywhere in the product.
+   *
+   * NOT filtered by the date range. This is a POSITION — what is owed right
+   * now — and narrowing it to a reporting window would answer a question nobody
+   * asked with a number that looks like the one they did.
+   *
+   * `stranded` is the part no automatic path will ever collect. Every
+   * collection point refuses cross-currency arithmetic, which is right — there
+   * is no FX rate here and inventing one to move a debt would be worse than the
+   * debt. But a school that moved from a naira tier to USD-priced ENTERPRISE
+   * leaves its naira arrears behind, skipped by the top-up and by every renewal,
+   * silently and for ever. Naming it is the fix; converting it is not.
+   */
+  private async seatArrears(): Promise<OperatorSeatArrearsDto[]> {
+    const rows = await this.client().$queryRaw<
+      Array<{ currency: string; amountMinor: number; schools: number; strandedMinor: number; strandedSchools: number }>
+    >(Prisma.sql`
+      SELECT
+        COALESCE(s.currency, ${PLATFORM_HOME_CURRENCY})                                   AS currency,
+        COALESCE(SUM(s."seatArrearsMinor"), 0)::float8                                    AS "amountMinor",
+        count(*)::int                                                                     AS schools,
+        COALESCE(SUM(s."seatArrearsMinor") FILTER (WHERE p.currency IS NOT NULL
+                 AND p.currency <> COALESCE(s.currency, ${PLATFORM_HOME_CURRENCY})), 0)::float8 AS "strandedMinor",
+        count(*) FILTER (WHERE p.currency IS NOT NULL
+                 AND p.currency <> COALESCE(s.currency, ${PLATFORM_HOME_CURRENCY}))::int  AS "strandedSchools"
+      FROM "school_subscription" s
+      -- The currency of the school's LAST settled charge: what its next one will
+      -- be raised in, and therefore what the arrears must match to be collected.
+      LEFT JOIN LATERAL (
+        SELECT currency FROM "platform_subscription_payment" pp
+        WHERE pp."schoolId" = s."schoolId" AND pp.status = 'PAID'
+        ORDER BY pp."paidAt" DESC NULLS LAST LIMIT 1
+      ) p ON true
+      WHERE s."seatArrearsMinor" > 0
+      GROUP BY 1
+    `);
+    return rows
+      .map((r) => ({
+        currency: r.currency,
+        amountMinor: Math.round(Number(r.amountMinor)),
+        schools: Number(r.schools),
+        strandedMinor: Math.round(Number(r.strandedMinor)),
+        strandedSchools: Number(r.strandedSchools),
+      }))
+      .sort((a, b) => b.amountMinor - a.amountMinor);
   }
 
   /**

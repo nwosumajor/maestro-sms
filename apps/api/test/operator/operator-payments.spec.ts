@@ -50,6 +50,7 @@ function makeService(opts: {
             // and are read on every list() — a fixture without them makes the
             // whole screen throw, not just its own section.
             messageCreditEntry: { findMany: creditFindMany, groupBy: creditGroupBy },
+            schoolSubscription: { findMany: jest.fn().mockResolvedValue([]) },
             user: { findMany: jest.fn().mockResolvedValue([]) },
             $queryRaw: queryRaw,
           },
@@ -63,6 +64,53 @@ const paid = (currency: string, sum: number, n: number) => ({
   status: "PAID",
   _sum: { amountMinor: sum },
   _count: { _all: n },
+});
+
+describe("metered seat growth that has not been billed", () => {
+  // A school buys a seat count and its roll grows mid-period; the sweep meters
+  // the difference. It is earned revenue that appeared on no revenue screen —
+  // the attention queue said WHICH schools had some and never how much, and
+  // nothing added it up, so "what are we owed?" had no answer.
+  const arrears = (over: Record<string, unknown> = {}) => ({
+    currency: "NGN",
+    amountMinor: 4_182_500,
+    schools: 3,
+    strandedMinor: 0,
+    strandedSchools: 0,
+    ...over,
+  });
+
+  it("is a POSITION, not a period figure — the date filter does not touch it", async () => {
+    // What is owed right now. Narrowing it to a reporting window would answer a
+    // question nobody asked with a number that looks like the one they did.
+    const { svc, queryRaw } = makeService({ feeRows: [] });
+    queryRaw.mockResolvedValue([arrears()]);
+    await svc.list(OPERATOR, { from: "2026-07-01", to: "2026-07-31" });
+    // Two raw statements run: the take-rate one carries the range, the arrears
+    // one carries no date at all.
+    const sql = queryRaw.mock.calls.map((c) => JSON.stringify(c[0])).join("\n");
+    expect(sql).toContain("seatArrearsMinor");
+    const arrearsCall = queryRaw.mock.calls.find((c) => JSON.stringify(c[0]).includes("seatArrearsMinor"));
+    expect(JSON.stringify(arrearsCall?.[0])).not.toContain("2026-07-01");
+  });
+
+  it("names the part no automatic path will ever collect", async () => {
+    // Every collection point refuses cross-currency arithmetic — rightly, there
+    // is no rate here. A school that moved to a USD tier leaves its naira
+    // arrears behind, skipped by the top-up and by every renewal, for ever.
+    const { svc, queryRaw } = makeService({ feeRows: [] });
+    queryRaw.mockResolvedValue([arrears({ strandedMinor: 990_000, strandedSchools: 1 })]);
+    const out = await svc.list(OPERATOR, {});
+    expect(out.seatArrears[0]).toMatchObject({ strandedMinor: 990_000, strandedSchools: 1 });
+    // And it is NOT converted into the total's currency or netted off it.
+    expect(out.seatArrears[0].amountMinor).toBe(4_182_500);
+  });
+
+  it("says nothing when nothing is owed", async () => {
+    const { svc, queryRaw } = makeService({ feeRows: [] });
+    queryRaw.mockResolvedValue([]);
+    expect((await svc.list(OPERATOR, {})).seatArrears).toEqual([]);
+  });
 });
 
 describe("the take-rate on fee collection — the other half of the income", () => {

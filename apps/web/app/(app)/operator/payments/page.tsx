@@ -185,6 +185,45 @@ export default async function OperatorPaymentsPage({
               )}
             </div>
 
+            {/* WHAT WE ARE OWED AND HAVE NOT BILLED.
+                A school buys a seat count and its roll grows mid-period; the
+                nightly sweep meters the difference and it is collected at the
+                next top-up or renewal. Until then it is earned revenue on no
+                revenue screen — the attention queue said WHICH schools had some
+                and never how much, and nothing added it up. */}
+            {data.seatArrears.length > 0 && (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base">Metered seat growth, not yet billed</CardTitle>
+                  <CardDescription>
+                    Students carried above the seats each school paid for. Collected automatically at their next
+                    renewal, or sooner if they top up. A position as at today — the date filter above does not apply.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="flex flex-wrap gap-6">
+                  {data.seatArrears.map((a) => (
+                    <div key={a.currency}>
+                      <p className="text-2xl font-semibold tabular-nums">{money(a.amountMinor, a.currency)}</p>
+                      <p className="text-xs text-muted-foreground">
+                        across {a.schools} school{a.schools === 1 ? "" : "s"} ({a.currency})
+                      </p>
+                      {a.strandedMinor > 0 && (
+                        // No automatic path will ever collect this: every
+                        // collection point refuses cross-currency arithmetic,
+                        // and these schools now renew in a different currency.
+                        // There is no rate here to convert with, so the only
+                        // honest thing to do is say so.
+                        <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                          {money(a.strandedMinor, a.currency)} of it will never be collected automatically —{" "}
+                          {a.strandedSchools} school{a.strandedSchools === 1 ? "" : "s"} now renew in another currency
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+
             {/* MESSAGE-CREDIT BUNDLES — the third thing a school pays us for,
                 and until now on no screen in the product. Their own list, not
                 rows in the subscription table: a bundle has no plan, no seats

@@ -257,6 +257,35 @@ export interface OperatorCreditPurchaseDto {
   paidAt: Date;
 }
 
+/**
+ * Seat growth that has been METERED and not yet charged, per currency.
+ *
+ * A school pays for a seat count and its roll grows mid-period; the nightly
+ * sweep accrues the difference as seat-days into
+ * `school_subscription.seatArrearsMinor`, and it is collected either when the
+ * school tops up voluntarily or automatically on its next renewal.
+ *
+ * Until then it is REVENUE THE PLATFORM HAS EARNED AND NOT BILLED, and it
+ * appeared on no revenue screen — the operator's attention queue flagged which
+ * schools had some, without ever saying how much, and nothing anywhere added it
+ * up. "What are we owed?" had no answer.
+ *
+ * `strandedMinor` is the part no automatic path will ever collect: the
+ * collection points refuse cross-currency arithmetic (rightly — there is no FX
+ * rate in this platform), so arrears metered in a currency the school no longer
+ * renews in are skipped by the top-up and by every renewal, silently and for
+ * ever. Naming it is the whole fix; converting it would be inventing a rate.
+ */
+export interface OperatorSeatArrearsDto {
+  currency: string;
+  /** Metered, unbilled, across every school billing in this currency. */
+  amountMinor: number;
+  schools: number;
+  /** Of the above, the part whose school now renews in a DIFFERENT currency. */
+  strandedMinor: number;
+  strandedSchools: number;
+}
+
 /** The operator payments screen: one page of rows + totals for the WHOLE filter,
  *  not just the visible page. */
 export interface OperatorPaymentPageDto {
@@ -273,6 +302,9 @@ export interface OperatorPaymentPageDto {
   creditPurchases: OperatorCreditPurchaseDto[];
   /** Those purchases totalled per currency, over the whole date range. */
   creditRevenue: Array<{ currency: string; amountMinor: number; purchases: number; credits: number }>;
+  /** Metered seat growth not yet billed. A POSITION, not a period figure — it
+   *  is what is owed right now, so the date filter does not apply to it. */
+  seatArrears: OperatorSeatArrearsDto[];
 }
 
 // --- message credits: the school's own ledger ------------------------------ //

@@ -1796,6 +1796,55 @@ closed the window early and the test went red while the property it guards was
 untouched. Now anchored to the method by name — and mutation-validated, which
 the accidental version never was.
 
+### Earned, unbilled, and on no screen
+Asked to verify that a lapsed school falls to the STANDARD floor and is
+reinstated on payment, and to trace how the owner recovers the money when a
+school pays for 400 seats and enrols 500 more a week later. **Both mechanisms
+work**; what was missing was any way to SEE the second one's money.
+**THE LAPSE CYCLE IS CORRECT** — driven end to end on the stack:
+paid ENTERPRISE 27 modules `/hr` 200 → period lapses, the nightly sweep flips
+PAST_DUE and grace KEEPS the tier (`/hr` still 200) → past grace, effective
+STANDARD, 10 modules, `/hr` 404 and `/fees` 200 → paid again, ACTIVE ENTERPRISE,
+`/hr` 200. Two properties make it safe and both are now pinned: the PURCHASED
+plan is never overwritten, so paying restores the tier with no repair step and
+nothing to re-resolve; and the reinstatement quote is priced at the CURRENT roll
+(901 seats), not the 400 it lapsed on. // The floor deliberately keeps FEES —
+cutting a delinquent school off from collecting money is how it stays
+delinquent, and fees is where the take-rate is earned. // `effectivePlan`
+returns the full tier for an ACTIVE subscription WHATEVER the period says, so
+the sweep is load-bearing: expiry is not self-executing, which is why that job
+counting and reporting its failures matters.
+**THE SEAT METER IS CORRECT TOO.** 400 paid, 901 on roll: `accrueSeatArrears`
+meters 501 seat-days a night onto `seatArrearsMinor`, and the top-up charges the
+metered past PLUS forward cover for the time left. Live, after one sweep over a
+7-day window: forward ₦1,645,986.44 + arrears ₦146,125.20 = **₦1,792,111.64**,
+which is exactly what `TrueUpCard` renders; settling it took seats 400 → 901,
+arrears → 0, and left `currentPeriodEnd` UNTOUCHED — a top-up buys seats, not
+time. Unsettled, the same arrears ride the next renewal automatically. The meter
+runs backwards ON PURPOSE: a forward-only quote SHRINKS as the term runs down,
+so delay used to be worth money to the school.
+**WHAT WAS WRONG WAS THE VISIBILITY.** The attention queue flagged which schools
+had arrears and **never said how much** — a fact an owner can do nothing with,
+since whether to ring a school about unbilled growth is a decision about an
+amount, and the amount was already on the row. And nothing anywhere ADDED IT UP,
+so "what are we owed?" had no answer in the product. `OperatorSeatArrearsDto` on
+the revenue ledger, per currency, beside subscriptions and the take-rate. Live:
+`901 pupils against 400 billed seats — NGN 146,125.20 metered and not yet
+billed`, and `[{currency:"NGN",amountMinor:14612520,schools:1}]`.
+// It is a POSITION, not a period figure — what is owed RIGHT NOW — so the
+ledger's date filter deliberately does not touch it. Narrowing it to a reporting
+window would answer a question nobody asked with a number that looks like the
+one they did.
+// GOTCHA, and the reason `strandedMinor` exists: **part of this debt can never
+be collected automatically.** Every collection point refuses cross-currency
+arithmetic — the renewal guards on `arrearsCurrency === currency`, and it is
+RIGHT to: there is no FX rate in this platform and inventing one to move a debt
+would be worse than the debt. But ENTERPRISE is USD-priced, so a school moving
+up from a naira tier leaves its naira arrears behind, skipped by the top-up and
+by every renewal, silently and for ever. The fix is to NAME it, not to convert
+it: the ledger reports how much of each currency's arrears belongs to a school
+that now renews in a different one.
+
 ### One field meaning two things, and a charge nobody could stop
 Asked whether the tier and modules are captured accurately and the flow is
 consistent. `resolveModules`, `PLAN_MODULES` and the `@RequireModule` gate are

@@ -25,9 +25,11 @@ import { Prisma } from "@sms/db";
 import {
   DEFAULT_PLAN,
   PLAN_PRICING,
+  PLATFORM_HOME_CURRENCY,
   SUBSCRIPTION_GRACE_DAYS,
   SUBSCRIPTION_STATUS,
   effectivePlan,
+  formatMoney,
   isPlan,
   type AttentionKind,
   type AttentionQueueDto,
@@ -38,6 +40,7 @@ import {
 } from "@sms/types";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import { headcountBySchool } from "./operator-people";
+import { toMinor } from "../common/money";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -89,6 +92,10 @@ export class OperatorAttentionService {
           graceDays: true,
           seats: true,
           seatArrearsMinor: true,
+          // Which money the arrears are IN. Not decoration: the collection paths
+          // refuse cross-currency arithmetic, so arrears in a currency the
+          // school no longer renews in are collected by NOTHING.
+          currency: true,
         },
       }),
       headcountBySchool(client, ids),
@@ -163,10 +170,22 @@ export class OperatorAttentionService {
           add("TRIAL_ENDING", `Trial ends in ${daysLeft} day${daysLeft === 1 ? "" : "s"}; never paid`, 2);
         }
       }
-      if ((sub?.seatArrearsMinor ?? 0) > 0) {
+      const arrearsMinor = Math.max(0, toMinor(sub?.seatArrearsMinor));
+      if (arrearsMinor > 0) {
         // Already computed by the dunning sweep; it was never surfaced anywhere the
         // owner would look, so uncollected growth sat invisible until renewal.
-        add("SEAT_ARREARS", `${head.students} pupils against ${sub?.seats ?? 0} billed seats — arrears accruing`, 2);
+        //
+        // AND IT NEVER SAID HOW MUCH. "arrears accruing" is a fact an owner can
+        // do nothing with: whether to ring a school about unbilled growth is a
+        // decision about an amount, and the amount was the one thing the line
+        // left out. It is on the row already.
+        const arrearsCurrency = sub?.currency ?? PLATFORM_HOME_CURRENCY;
+        add(
+          "SEAT_ARREARS",
+          `${head.students} pupils against ${sub?.seats ?? 0} billed seats — ` +
+            `${formatMoney(arrearsMinor, arrearsCurrency)} metered and not yet billed`,
+          2,
+        );
       }
 
       // --- adoption ------------------------------------------------------------
