@@ -1,21 +1,7 @@
 import {
   Delete, Body, Controller, Get, Param, Post, Put, Query, Res, StreamableFile, BadRequestException} from "@nestjs/common";
 import type { Response } from "express";
-import type {
-  MessageCreditBalancePageDto,
-  OperatorPaymentPageDto,
-  MessageCreditLedgerEntryDto,
-  OperatorAdminAppointmentDto,
-  OperatorBillingAlertDto,
-  OperatorStudentDto,
-  OperatorUserDto,
-  PlatformAnalyticsDto,
-  PlatformAuditPageDto,
-  SubscriptionDto,
-  TenantNameDto,
-  AttentionQueueDto,
-  PlatformDelegationDto,
-  TenantPageDto, PlatformStaffInviteDto } from "@sms/types";
+import type { AttentionQueueDto, MessageCreditBalancePageDto, MessageCreditLedgerEntryDto, ModuleAddonPriceDto, OnboardingRequestDto, OperatorAdminAppointmentDto, OperatorBillingAlertDto, OperatorPaymentPageDto, OperatorStudentDto, OperatorUserDto, PlanPriceDto, PlatformAnalyticsDto, PlatformAuditPageDto, PlatformDelegationDto, PlatformStaffInviteDto, SubscriptionDto, TenantNameDto, TenantPageDto } from "@sms/types";
 import { CURRENCIES } from "@sms/types";
 import { z } from "zod";
 import {
@@ -657,14 +643,14 @@ export class OperatorController {
   /** Effective per-tier pricing (defaults + operator overrides). */
   @Get("pricing")
   @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
-  getPricing() {
+  getPricing(): Promise<PlanPriceDto[]> {
     return this.pricing.list();
   }
 
   /** Add-on prices, one row per module the platform sells on its own. */
   @Get("addon-pricing")
   @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
-  getAddonPricing(@Query("currency") currency?: string) {
+  getAddonPricing(@Query("currency") currency?: string): Promise<ModuleAddonPriceDto[]> {
     return this.addonPricing.list(currency === CURRENCIES.USD ? CURRENCIES.USD : CURRENCIES.NGN);
   }
 
@@ -1039,7 +1025,7 @@ export class OperatorController {
   // --- public onboarding-request review (super_admin) ------------------------
   @Get("onboarding-requests")
   @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_ONBOARDING_REVIEW)
-  onboardingRequests(@CurrentPrincipal() p: Principal) {
+  onboardingRequests(@CurrentPrincipal() p: Principal): Promise<OnboardingRequestDto[]> {
     return this.provisioning.listOnboardingRequests(p);
   }
 

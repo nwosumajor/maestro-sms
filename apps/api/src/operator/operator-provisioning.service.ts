@@ -26,7 +26,7 @@ import {
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import { Prisma, type PrismaClient } from "@sms/db";
-import type { MisplacedPlatformRoleDto, PlatformStaffDutyDto, PlatformStaffInviteDto } from "@sms/types";
+import type { MisplacedPlatformRoleDto, OnboardingRequestDto, PlatformStaffDutyDto, PlatformStaffInviteDto } from "@sms/types";
 import { MAX_SCHOOL_SLUG_LENGTH, defaultSessionFor, generateCalendar, pickOpeningTerm, countryProfile } from "@sms/types";
 import { allocateSchoolSlug } from "../foundation/login-email";
 import {
@@ -524,9 +524,20 @@ export class OperatorProvisioningService {
 
   // --- public onboarding-request review (global table; privileged client) -----
   /** List prospective-school onboarding requests (super_admin review queue). */
-  async listOnboardingRequests(_p: Principal) {
+  async listOnboardingRequests(_p: Principal): Promise<OnboardingRequestDto[]> {
     const db = this.client();
-    return db.onboardingRequest.findMany({ orderBy: { createdAt: "desc" }, take: 200 });
+    const rows = await db.onboardingRequest.findMany({ orderBy: { createdAt: "desc" }, take: 200 });
+    // `desiredModules` is a JSON column, so Prisma types it `JsonValue` while the
+    // DTO promises `string[] | null` and the web reads it as one. Narrowing is
+    // the stated convention for a JSON read; doing it with a RUNTIME check
+    // rather than a blind cast, because a cast would only move the lie — the
+    // column can hold anything a past writer put there.
+    return rows.map((r) => ({
+      ...r,
+      desiredModules: Array.isArray(r.desiredModules)
+        ? r.desiredModules.filter((m): m is string => typeof m === "string")
+        : null,
+    }));
   }
 
   /** Mark an onboarding request REVIEWING / APPROVED / REJECTED (audited). */

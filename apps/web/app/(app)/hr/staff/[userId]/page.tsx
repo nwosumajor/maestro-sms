@@ -47,7 +47,19 @@ export default async function StaffDetailPage({ params }: { params: { userId: st
     // somebody hands in their notice.
     canWrite ? apiGet<Serialized<StaffHandoverDto>>(`/hr/staff/${userId}/handover`) : Promise.resolve(null),
   ]);
-  const name = checklists?.[0]?.userName ?? documents?.[0]?.userName ?? training?.[0]?.userName ?? appraisals?.[0]?.userName ?? cases?.[0]?.userName ?? "Staff member";
+  // The employment record is where a name comes from; it hangs off `user`. The
+  // five lists below are a fallback for a record this reader cannot see, never
+  // the primary source — scavenging the title from whichever of them happened
+  // to have a row showed the literal "Staff member" to anyone with none, which
+  // is every newly-recorded employee.
+  const name =
+    employee?.user?.name ??
+    checklists?.[0]?.userName ??
+    documents?.[0]?.userName ??
+    training?.[0]?.userName ??
+    appraisals?.[0]?.userName ??
+    cases?.[0]?.userName ??
+    "Staff member";
 
   return (
     <AppShell schoolName={user.schoolName} userName={user.name ?? "User"} active="hr" permissions={user.permissions}>

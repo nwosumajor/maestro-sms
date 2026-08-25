@@ -5,14 +5,7 @@ import type { RawBodyRequest } from "@nestjs/common";
 import type { Request, Response } from "express";
 import { z } from "zod";
 import { FEES_PERMISSIONS, INVOICE_STATUSES, PAYMENT_METHODS } from "@sms/types";
-import type {
-  FeeItemDto,
-  FeeReportDto,
-  InvoicePageDto,
-  InvoiceSummaryDto,
-  InvoiceDetailDto,
-  PendingPaymentDto,
-} from "@sms/types";
+import type { CreditBalanceDto, FeeItemDto, FeeReportDto, InvoiceAdjustmentDto, InvoiceDetailDto, InvoicePageDto, InvoiceSummaryDto, LateFeeConfigDto, PaymentPlanDto, PendingPaymentDto, SettlementAccountDto, VirtualAccountDto } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { RequireStepUp } from "../auth/require-stepup.decorator";
 import { Public } from "../auth/public.decorator";
@@ -147,7 +140,7 @@ export class FeesController {
   // --- adjustments (maker-checker discounts/waivers) ---
   @Get("invoices/:id/adjustments")
   @RequirePermission(FEES_PERMISSIONS.FEE_MANAGE)
-  adjustments(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+  adjustments(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<InvoiceAdjustmentDto[]> {
     return this.feeOps.listAdjustments(p, id);
   }
 
@@ -175,7 +168,7 @@ export class FeesController {
   // --- late-fee policy ---
   @Get("fees/late-fee-config")
   @RequirePermission(FEES_PERMISSIONS.FEE_MANAGE)
-  lateFeeConfig(@CurrentPrincipal() p: Principal) {
+  lateFeeConfig(@CurrentPrincipal() p: Principal): Promise<LateFeeConfigDto> {
     return this.feeOps.getLateFeeConfig(p);
   }
 
@@ -223,7 +216,7 @@ export class FeesController {
   /** The invoice's payment plan with derived tranche states (scoped read). */
   @Get("invoices/:id/plan")
   @RequirePermission(FEES_PERMISSIONS.FEE_READ)
-  getPlan(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+  getPlan(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<PaymentPlanDto | null> {
     return this.paymentPlans.getPlan(p, id);
   }
 
@@ -241,7 +234,7 @@ export class FeesController {
   /** A student's credit balance + ledger (self / guardian / staff). */
   @Get("students/:id/credit")
   @RequirePermission(FEES_PERMISSIONS.FEE_READ)
-  credit(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+  credit(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<CreditBalanceDto> {
     return this.paymentPlans.creditBalance(p, id);
   }
 
@@ -275,7 +268,7 @@ export class FeesController {
   /** A student's dedicated NUBAN — self / guardian / staff (404-not-403). */
   @Get("students/:id/virtual-account")
   @RequirePermission(FEES_PERMISSIONS.FEE_READ)
-  virtualAccount(@CurrentPrincipal() p: Principal, @Param("id") id: string) {
+  virtualAccount(@CurrentPrincipal() p: Principal, @Param("id") id: string): Promise<VirtualAccountDto | null> {
     return this.virtualAccounts.getForStudent(p, id);
   }
 
@@ -324,7 +317,7 @@ export class FeesController {
    *  account number). Finance staff only. */
   @Get("fees/settlement")
   @RequirePermission(FEES_PERMISSIONS.FEE_MANAGE)
-  settlement(@CurrentPrincipal() p: Principal) {
+  settlement(@CurrentPrincipal() p: Principal): Promise<SettlementAccountDto> {
     return this.gateway.getSettlement(p);
   }
 

@@ -16,7 +16,7 @@ import { Body, Controller, Get, Headers, Param, Post, Put, Req, Res } from "@nes
 import type { RawBodyRequest } from "@nestjs/common";
 import type { Request, Response } from "express";
 import { BILLING_CYCLES, CURRENCIES, BILLING_PERMISSIONS, MAX_BILLING_PERIODS, PLANS } from "@sms/types";
-import type { BillingOverviewDto, CheckoutInitResultDto, ReferralInfoDto } from "@sms/types";
+import type { AddonOfferDto, BillingOverviewDto, CheckoutInitResultDto, ReferralInfoDto, SubscriptionDto } from "@sms/types";
 import { z } from "zod";
 import { Public } from "../auth/public.decorator";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -73,7 +73,7 @@ export class BillingController {
    *  cached entitlement resolution, no payments/quotes). */
   @Get("status")
   @RequirePermission(BILLING_PERMISSIONS.BILLING_READ)
-  status(@CurrentPrincipal() p: Principal) {
+  status(@CurrentPrincipal() p: Principal): Promise<SubscriptionDto> {
     return this.billing.getStatus(p);
   }
 
@@ -201,7 +201,7 @@ export class BillingController {
    *  not need the permission that spends money. */
   @Get("addons")
   @RequirePermission(BILLING_PERMISSIONS.BILLING_READ)
-  addons(@CurrentPrincipal() p: Principal) {
+  addons(@CurrentPrincipal() p: Principal): Promise<AddonOfferDto[]> {
     return this.billing.listAddonOffers(p);
   }
 

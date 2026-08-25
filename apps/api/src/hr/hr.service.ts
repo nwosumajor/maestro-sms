@@ -92,10 +92,16 @@ export class HrService {
         { actorId: p.userId, action: "hr.employee.list", entity: "employee", entityId: p.schoolId, schoolId: p.schoolId, metadata: { count: employees.length } },
         tx,
       );
-      return employees.map((e) => ({
-        ...this.decorate(e, p.schoolId),
-        user: byId.get(e.userId) ?? null,
-      }));
+      return employees.map((e) => {
+        // Exactly the DTO's shape — `{ name, email }`. The `id` is fetched to
+        // build the lookup and does not belong on the wire; leaving it on made
+        // this read disagree with the single one about the same field.
+        const u = byId.get(e.userId);
+        return {
+          ...this.decorate(e, p.schoolId),
+          user: u ? { name: u.name, email: u.email } : null,
+        };
+      });
     });
   }
 
@@ -107,7 +113,21 @@ export class HrService {
         { actorId: p.userId, action: "hr.employee.read", entity: "employee", entityId: e.id, schoolId: p.schoolId },
         tx,
       );
-      return this.decorate(e, p.schoolId);
+      // `employee` HAS NO NAME OF ITS OWN — it hangs off `user`, exactly as the
+      // list read says two methods above. The list joined it and this one did
+      // not, so `EmployeeDto.user` was declared, populated on one path and
+      // absent on the other. The staff detail page then had no name to show and
+      // scavenged one from whichever of five unrelated lists happened to carry a
+      // row (checklists, documents, training, appraisals, discipline) — falling
+      // back to the literal "Staff member" for anyone with none of them, which
+      // is every newly-recorded employee. Found by annotating this handler's
+      // return type: the compiler compared what the service returns against
+      // what the DTO promises, which is the whole point of the type spine.
+      const user = await tx.user.findFirst({
+        where: { id: userId },
+        select: { name: true, email: true },
+      });
+      return { ...this.decorate(e, p.schoolId), user: user ?? null };
     });
   }
 

@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Post, Put } from "@nestjs/common";
 import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
-import type { EmployeeDto, SelfProfileDto } from "@sms/types";
+import type { EmployeeDto, OrgNodeDto, SelfProfileDto } from "@sms/types";
 import { z } from "zod";
 import { HR_PERMISSIONS } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -71,7 +71,7 @@ export class HrController {
 
   @Get("org")
   @RequirePermission(HR_PERMISSIONS.HR_READ)
-  org(@CurrentPrincipal() p: Principal) {
+  org(@CurrentPrincipal() p: Principal): Promise<OrgNodeDto[]> {
     return this.hr.org(p);
   }
 
@@ -83,7 +83,7 @@ export class HrController {
 
   @Get("employees/:userId")
   @RequirePermission(HR_PERMISSIONS.HR_READ)
-  get(@CurrentPrincipal() p: Principal, @Param("userId") userId: string) {
+  get(@CurrentPrincipal() p: Principal, @Param("userId") userId: string): Promise<EmployeeDto> {
     return this.hr.getEmployee(p, userId);
   }
 

@@ -66,7 +66,13 @@ function makeService(row: Record<string, unknown> = employeeRow()) {
       findMany: jest.fn(async () => [row]),
       findFirst: jest.fn(async () => row),
     },
-    user: { findMany: jest.fn(async () => [{ id: "staff-1", name: "A Teacher", email: "t@demo.school" }]) },
+    user: {
+      findMany: jest.fn(async () => [{ id: "staff-1", name: "A Teacher", email: "t@demo.school" }]),
+      // The single read joins the user too now — `employee` has no name of its
+      // own. A stub that answers only the list models a database that cannot
+      // exist, and would have hidden whether the single read is equally clean.
+      findFirst: jest.fn(async () => ({ name: "A Teacher", email: "t@demo.school" })),
+    },
     auditLog: { create: jest.fn(async () => ({})) },
   } as unknown as TenantTx;
   const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
@@ -123,6 +129,10 @@ describe("the single-employee read", () => {
   it("is clean too — it shares the mapper", async () => {
     const row = await makeService().getEmployee(hr, "staff-1");
     expect(Object.keys(row).filter((k) => k.endsWith("Enc"))).toEqual([]);
+    // It carries the person's NAME and nothing more of the user row: the read
+    // that feeds the staff page must identify them without widening what a
+    // reader of one employment record learns about the account behind it.
+    expect(row.user).toEqual({ name: "A Teacher", email: "t@demo.school" });
   });
 });
 

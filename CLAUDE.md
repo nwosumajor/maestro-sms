@@ -1746,6 +1746,37 @@ the TypeScript duplicate-attribute error caught it. The gate reads each tag to i
 matching `>` at brace depth zero, and strips COMMENTS first (a JSDoc block
 documenting `<input type="datetime-local">` is not a control anyone can fix).
 
+### The staff page showed "Staff member" where a name should be
+The type-safety spine says a read controller annotates its return type
+(`: Promise<XDto>`) "so a service that drops/mistypes a field fails to compile".
+**83 of 360 GET routes had no annotation at all** — 10 more are binary/CSV
+streams, where a DTO would be wrong. For 15 of those 83 the WEB nonetheless
+asserted a named DTO through `apiGet<T>`, which is an unchecked cast: a contract
+the consumer relies on and the producer never promised, and one the
+`wire-shape-agrees` gate has to SKIP because it can only compare handlers that
+declare something.
+Annotating them is a CHECK, not documentation. Twelve were annotated; eleven
+compiled, and the twelfth failed immediately: `GET /hr/employees/:userId`
+returned a shape with no `user`, while `EmployeeDto.user` is declared
+`{ name, email } | null`. **`employee` has no name of its own — it hangs off
+`user`** — and `listEmployees` says exactly that in a comment and joins it, two
+methods above a `getEmployee` that did not. Sibling asymmetry with the correct
+one written FIRST and its reasoning recorded beside it.
+The cost was on screen. With no name on the record, the staff detail page
+scavenged one from whichever of five UNRELATED lists happened to carry a row —
+checklists, documents, training, appraisals, discipline — and fell back to the
+literal `"Staff member"`. Measured live before the fix: `hr@demo.school` and
+`board@demo.school`, real employees holding none of those five, BOTH rendered
+"Staff member" as the page title. Every newly-recorded employee reads that way.
+// GOTCHA: the LIST was wrong too, in the other direction — it attached the
+whole user row including `id`, which `EmployeeDto.user` does not declare. Both
+reads now return exactly `{ name, email }`, so the test can assert AGREEMENT
+rather than either read alone.
+// GOTCHA worth keeping: the mutation that removes the join again does not fail
+a test — it fails to COMPILE, because the annotation is now the guard. The test
+covers what the annotation cannot express: that the single read and the list
+read say the same thing about the same field.
+
 ### The banner counting unanswered chargebacks could not see the old ones
 `GET /fees/disputes` was `take: 200` ordered newest-first, with no filter, no
 paging and no total — on a table the controller's own comment calls permanent

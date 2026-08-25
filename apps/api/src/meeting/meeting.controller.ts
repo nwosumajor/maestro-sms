@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, Param, Post, Query } from "@nestjs/commo
 import { z } from "zod";
 import { MEETING_PERMISSIONS , MEETING_REQUEST_TOPICS} from "@sms/types";
 import { MEETING_PROVIDERS } from "@sms/types";
-import type { MeetingSlotDto, MeetingBookingDto } from "@sms/types";
+import type { MeetingBookingDto, MeetingRequestDto, MeetingSlotDto } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
@@ -98,7 +98,7 @@ export class MeetingController {
    *  every one for leadership. `?open=1` narrows to those still awaiting. */
   @Get("requests")
   @RequirePermission(MEETING_PERMISSIONS.MEETING_REQUEST_READ)
-  listRequests(@CurrentPrincipal() p: Principal, @Query("open") open?: string) {
+  listRequests(@CurrentPrincipal() p: Principal, @Query("open") open?: string): Promise<MeetingRequestDto[]> {
     return this.requests.list(p, { open: open === "1" });
   }
 
