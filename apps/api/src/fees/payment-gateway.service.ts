@@ -102,10 +102,21 @@ export class PaymentGatewayService {
   ): Promise<{ available: boolean; reason: string | null }> {
     const currency = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const inv = await tx.invoice.findFirst({ where: { id: invoiceId }, select: { studentId: true, currency: true } });
-      if (!inv) throw new ForbiddenException("Invoice not found");
-      // Same visibility rule as starting a payment — a pre-flight must not be a
-      // way to probe invoices you cannot see.
-      if (!(await this.canPay(tx, p, inv.studentId))) throw new ForbiddenException("Not your invoice");
+      // 404 AND THE SAME MESSAGE FOR BOTH BRANCHES, which is what the rule
+      // actually requires. The doc comment above this method already promised
+      // "404 for an invoice the caller cannot see, matching every other read
+      // here" — and thirteen sites in this module do exactly that, including one
+      // forty lines below in this very file, with its own note explaining why.
+      // These two were missed when that one was fixed.
+      //
+      // Two things were wrong and only one of them is the status. "Invoice not
+      // found" carrying a 403, beside "Not your invoice" also carrying a 403,
+      // means the MESSAGE distinguishes an id that exists in the school from one
+      // that does not — so making them both 403 was never going to be enough.
+      // Identical status, identical text: the two cases must be indistinguishable
+      // or the check is a probe.
+      if (!inv) throw new NotFoundException("Invoice not found");
+      if (!(await this.canPay(tx, p, inv.studentId))) throw new NotFoundException("Invoice not found");
       return inv.currency;
     });
     // No switchboard wired (unit wirings): fail OPEN, exactly as the gate does.
@@ -607,8 +618,9 @@ export class PaymentGatewayService {
     // read its currency to pick the gateway to verify against.
     const currency = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const inv = await tx.invoice.findFirst({ where: { id: invoiceId }, select: { studentId: true, currency: true } });
-      if (!inv) throw new ForbiddenException("Invoice not found");
-      if (!(await this.canPay(tx, p, inv.studentId))) throw new ForbiddenException("Not your invoice");
+      // Same rule as every other invoice read here: 404, same message both ways.
+      if (!inv) throw new NotFoundException("Invoice not found");
+      if (!(await this.canPay(tx, p, inv.studentId))) throw new NotFoundException("Invoice not found");
       return inv.currency;
     });
 

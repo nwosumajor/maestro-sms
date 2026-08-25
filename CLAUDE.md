@@ -1412,6 +1412,23 @@ regional read replicas → Aurora write forwarding (still one writer) → tenant
 pinning. Multi-master is deliberately not on that list. See
 `docs/RUNBOOK-INCIDENT-RESPONSE.md` §5.x and §5.y.
 
+### A refusal must not confirm what it hides
+"Errors never leak cross-tenant existence — return 404, not 403" is a stated
+convention here and 97 refusals follow it. Three did not, and TWO WERE IN ONE
+FILE, forty lines above a sibling that got it right and carried a comment saying
+why — someone fixed one of three, wrote the reason down, and left the others.
+// GOTCHA: **two things were wrong and only one of them was the status.**
+`ForbiddenException("Invoice not found")` is self-contradicting — the 403
+confirms the record exists while the text denies it. But the branch beside it
+said "Not your invoice", ALSO a 403, so the MESSAGE separated an id that exists
+in the school from one that does not. Making both 403 would never have been
+enough: the pair must be indistinguishable in status AND in wording, or the check
+is a probe. Live, a parent asking about another family's real invoice and about a
+random uuid now gets byte-identical `404 {"message":"Invoice not found"}`.
+Gate: `a-refusal-must-not-confirm-what-it-hides.spec.ts` refuses a 403 whose
+message says "not found", and any refusal beginning "not your" — a message naming
+a record's OWNER tells the caller the record is real.
+
 ### A gate that walks must say it scanned something
 This repo leans hard on gates that walk the source tree, derive a set of
 offenders and assert it is EMPTY. They share one silent failure: **a walk that
