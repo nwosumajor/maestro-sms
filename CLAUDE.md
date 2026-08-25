@@ -1746,6 +1746,36 @@ the TypeScript duplicate-attribute error caught it. The gate reads each tag to i
 matching `>` at brace depth zero, and strips COMMENTS first (a JSDoc block
 documenting `<input type="datetime-local">` is not a control anyone can fix).
 
+### The safety net nobody was told about
+`audit_log` is RANGE-partitioned by month with a DEFAULT partition, so an INSERT
+can never fail for want of one — and that safety net IS the risk: when a month
+goes un-provisioned nothing breaks, rows just pile into DEFAULT, and per the
+service's own comment they "must be migrated into a real partition before one
+can be added for their month", which gets harder the longer nobody looks.
+`AuditPartitionService` provisions three months ahead daily, counts the DEFAULT
+partition afterwards and logs at ERROR when it is non-empty. All correct. But
+the OPERATOR'S JOBS CONSOLE decides its "Partial" badge from a NUMERIC `failed`
+in the stored run summary — an opt-in convention, so a job reporting none
+renders healthy for ever. This job reported none, so **the one condition the
+sweep exists to detect flagged nothing**; `defaultRows` did reach the console,
+in the text position used for ordinary chatter beside every green row.
+**TWO SEAMS, and fixing the first alone would have looked right and changed
+nothing.** The service computes the result, but what the PROCESSOR returns is
+what gets stored — and it mapped the result field by field, dropping `failed` on
+the floor. A unit test on the service would have gone green over a console still
+showing the row as healthy, which is why the test drives the real processor.
+Third instance of one lesson, after the retention and dunning sweeps: **a count
+nobody surfaces is a count nobody acts on**, and both siblings got `failed`
+while this one did not.
+LATENT, not live: the job runs daily, partitions reach 2026-11, and
+`audit_log_default` is empty. What was broken is the telling, not the doing —
+verified by writing an audit row dated outside every partition range, watching
+it land in `audit_log_default`, and reading it back through the service's own
+query. // GOTCHA: partitions are created by a JOB, not by the migration that
+made them — the migration covers a fixed window and its comments name the job
+twice. A partitioned table whose extender stops is a bug with a start date, the
+same shape as a payroll pack that hard-codes one tax year.
+
 ### Thirteen controls that remove something and announce nothing
 `every-control-has-a-name` covered text ENTRY — `<input>`, `<select>`,
 `<textarea>` — and said nothing about the controls people PRESS. Of 1,009

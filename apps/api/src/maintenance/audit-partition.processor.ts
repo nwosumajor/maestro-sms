@@ -21,12 +21,19 @@ export class AuditPartitionProcessor extends WorkerHost {
     super();
   }
 
-  async process(job: Job): Promise<{ ensured: number; defaultRows: number }> {
+  /**
+   * What this returns IS the stored run summary, and the operator's jobs console
+   * reads its "Partial" badge from a numeric `failed` there. The service
+   * computes that; this method used to drop it on the floor while mapping the
+   * result, so the one condition the sweep exists to detect — rows piling into
+   * the DEFAULT partition — reached the console as ordinary text beside every
+   * green row and flagged nothing.
+   */
+  async process(job: Job): Promise<{ ensured: number; defaultRows: number; failed: number }> {
     return this.runs.record("maintenance.auditPartition", "SCHEDULE", async () => {
-      if (job.name !== AUDIT_PARTITION_JOB) return { ensured: 0, defaultRows: 0 };
+      if (job.name !== AUDIT_PARTITION_JOB) return { ensured: 0, defaultRows: 0, failed: 0 };
       const r = await this.partitions.ensureUpcoming();
-      return { ensured: r.ensured.length, defaultRows: r.defaultRows };
-  
+      return { ensured: r.ensured.length, defaultRows: r.defaultRows, failed: r.failed };
     });
   }
 }

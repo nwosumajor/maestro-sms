@@ -25,6 +25,21 @@ export interface AuditPartitionResult {
   /** Rows sitting in the DEFAULT partition — should be 0. Non-zero means a month
    *  went un-provisioned and needs manual attention (see logs). */
   defaultRows: number;
+  /**
+   * The same number, under the name the operator's jobs console reads.
+   *
+   * `JobRunsService` derives a run's "Partial" badge from a numeric `failed` in
+   * the stored summary — an opt-in convention, so a job that does not report one
+   * gets `null` and always renders healthy. This job did not, so THE ONE
+   * CONDITION IT EXISTS TO DETECT was unflagged: rows piling into the DEFAULT
+   * partition showed up only as ordinary summary text beside every green row.
+   * Exactly what was already fixed for the retention and dunning sweeps — a
+   * count nobody surfaces is a count nobody acts on — and this sibling did not
+   * get it. Rows in DEFAULT genuinely are "items left as they were": they must
+   * be moved before a partition can be added for their month, and that gets
+   * harder the longer nobody looks.
+   */
+  failed: number;
   skipped?: "no-privileged-client";
 }
 
@@ -39,7 +54,7 @@ export class AuditPartitionService {
     const client = this.privileged.client;
     if (!client) {
       this.logger.warn("No privileged DB client — audit partition maintenance DISABLED (no-op).");
-      return { ensured: [], defaultRows: 0, skipped: "no-privileged-client" };
+      return { ensured: [], defaultRows: 0, failed: 0, skipped: "no-privileged-client" };
     }
 
     const ensured: string[] = [];
@@ -68,6 +83,6 @@ export class AuditPartitionService {
       );
     }
     this.logger.log(`Audit partitions ensured: ${ensured.join(", ")} (default rows: ${defaultRows}).`);
-    return { ensured, defaultRows };
+    return { ensured, defaultRows, failed: defaultRows };
   }
 }
