@@ -185,9 +185,84 @@ export default async function OperatorPaymentsPage({
               )}
             </div>
 
+            {/* MESSAGE-CREDIT BUNDLES — the third thing a school pays us for,
+                and until now on no screen in the product. Their own list, not
+                rows in the subscription table: a bundle has no plan, no seats
+                and no period, and empty columns read as missing data rather
+                than as inapplicable ones. */}
+            {(data.creditRevenue.length > 0 || data.creditPurchases.length > 0) && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Message credits</CardTitle>
+                  <CardDescription>
+                    Bundles bought by schools over the selected DATE RANGE — the other filters describe subscription
+                    payments and do not apply here. Totals cover the whole range; the list below shows the most recent{" "}
+                    {data.creditPurchases.length}.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex flex-wrap gap-6">
+                    {data.creditRevenue.map((t) => (
+                      <div key={t.currency}>
+                        <p className="text-2xl font-semibold tabular-nums">{money(t.amountMinor, t.currency)}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {t.purchases} purchase{t.purchases === 1 ? "" : "s"} · {t.credits.toLocaleString()} credits (
+                          {t.currency})
+                        </p>
+                      </div>
+                    ))}
+                    {data.creditRevenue.length === 0 && (
+                      <p className="text-sm text-muted-foreground">No priced purchases in this period.</p>
+                    )}
+                  </div>
+                  {data.creditPurchases.length > 0 && (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b text-left text-muted-foreground">
+                            <th className="py-2 pr-4 font-medium">Date paid</th>
+                            <th className="py-2 pr-4 font-medium">School</th>
+                            <th className="py-2 pr-4 font-medium">Region</th>
+                            <th className="py-2 pr-4 font-medium">Purpose</th>
+                            <th className="py-2 pr-4 font-medium">Amount</th>
+                            <th className="py-2 pr-4 font-medium">Reference</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {data.creditPurchases.map((r) => (
+                            <tr key={r.id} className="border-b last:border-0">
+                              <td className="py-2 pr-4 whitespace-nowrap">{shortDate(r.paidAt)}</td>
+                              <td className="py-2 pr-4">{r.schoolName}</td>
+                              <td className="py-2 pr-4 whitespace-nowrap">{r.region.country ?? "—"}</td>
+                              <td className="py-2 pr-4">
+                                {r.credits.toLocaleString()} message credits
+                                {r.bundleId ? ` · ${r.bundleId} bundle` : ""}
+                              </td>
+                              <td className="py-2 pr-4 tabular-nums whitespace-nowrap">
+                                {r.amountMinor != null && r.currency ? (
+                                  money(r.amountMinor, r.currency)
+                                ) : (
+                                  // NOT zero. A purchase settled before the
+                                  // amount was recorded is unknown, and printing
+                                  // 0.00 would understate the books rather than
+                                  // admit the gap.
+                                  <span className="text-muted-foreground">not recorded</span>
+                                )}
+                              </td>
+                              <td className="py-2 pr-4 font-mono text-xs">{r.reference ?? "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
             <Card>
               <CardHeader>
-                <CardTitle>Payments</CardTitle>
+                <CardTitle>Subscription payments</CardTitle>
                 <CardDescription>
                   {data.total} matching payment{data.total === 1 ? "" : "s"} · page {data.page} of{" "}
                   {Math.max(1, Math.ceil(data.total / data.pageSize))}. Subscription totals above cover the whole
@@ -203,29 +278,66 @@ export default async function OperatorPaymentsPage({
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="border-b text-left text-muted-foreground">
-                          <th className="py-2 pr-4 font-medium">Date</th>
+                          {/* DATE PAID leads, not the checkout date. A book is
+                              kept on the day the money arrived: a charge started
+                              on the 31st and settled on the 1st belongs to the
+                              new month, and this column headed "Date" used to
+                              show the 31st. */}
+                          <th className="py-2 pr-4 font-medium">Date paid</th>
                           <th className="py-2 pr-4 font-medium">School</th>
-                          <th className="py-2 pr-4 font-medium">Plan</th>
-                          <th className="py-2 pr-4 font-medium">Cycle</th>
-                          <th className="py-2 pr-4 font-medium">Kind</th>
+                          <th className="py-2 pr-4 font-medium">Region</th>
+                          <th className="py-2 pr-4 font-medium">Purpose</th>
                           <th className="py-2 pr-4 font-medium">Seats</th>
                           <th className="py-2 pr-4 font-medium">Amount</th>
                           <th className="py-2 pr-4 font-medium">Status</th>
-                          <th className="py-2 pr-4 font-medium">Period</th>
+                          <th className="py-2 pr-4 font-medium">Covers</th>
                           <th className="py-2 pr-4 font-medium">Reference</th>
                         </tr>
                       </thead>
                       <tbody>
                         {data.rows.map((r) => (
-                          <tr key={r.id} className="border-b last:border-0">
-                            <td className="py-2 pr-4 whitespace-nowrap">{shortDate(r.createdAt)}</td>
-                            <td className="py-2 pr-4">{r.schoolName}</td>
-                            <td className="py-2 pr-4">{r.plan}</td>
-                            <td className="py-2 pr-4">{r.billingCycle}</td>
-                            <td className="py-2 pr-4">{r.kind}</td>
+                          <tr key={r.id} className="border-b align-top last:border-0">
+                            <td className="py-2 pr-4 whitespace-nowrap">
+                              {r.paidAt ? (
+                                shortDate(r.paidAt)
+                              ) : (
+                                // NOT a date paid. Saying "—" and showing when
+                                // the checkout was started underneath is the
+                                // difference between "not yet" and a wrong date.
+                                <span className="text-muted-foreground">not paid</span>
+                              )}
+                              <div className="text-xs text-muted-foreground">started {shortDate(r.createdAt)}</div>
+                            </td>
+                            <td className="py-2 pr-4">
+                              <div>{r.schoolName}</div>
+                              {r.initiatedBy && (
+                                <div className="text-xs text-muted-foreground">by {r.initiatedBy.name}</div>
+                              )}
+                            </td>
+                            <td className="py-2 pr-4 whitespace-nowrap">
+                              <div>{r.region.country ?? "—"}</div>
+                              {/* The school's OWN currency, which is not always
+                                  the one it was charged in. */}
+                              <div className="text-xs text-muted-foreground">books in {r.region.currency}</div>
+                            </td>
+                            <td className="py-2 pr-4">
+                              <div>{r.purpose}</div>
+                              <div className="text-xs text-muted-foreground">
+                                {r.plan} · {r.billingCycle} · {r.kind}
+                              </div>
+                            </td>
                             <td className="py-2 pr-4 tabular-nums">{r.seats}</td>
                             <td className="py-2 pr-4 tabular-nums whitespace-nowrap">
                               {money(r.amountMinor, r.currency)}
+                              {r.arrearsMinor > 0 && (
+                                // Arrears are INCLUDED in the amount, not extra.
+                                // Money that was already owed is not new revenue
+                                // and a ledger that does not say so overstates
+                                // the month it lands in.
+                                <div className="text-xs text-muted-foreground">
+                                  incl. {money(r.arrearsMinor, r.currency)} arrears
+                                </div>
+                              )}
                             </td>
                             <td className="py-2 pr-4">
                               <Badge variant={STATE[r.status]?.variant ?? "outline"}>
@@ -233,9 +345,30 @@ export default async function OperatorPaymentsPage({
                               </Badge>
                             </td>
                             <td className="py-2 pr-4 whitespace-nowrap">
-                              {r.periodEnd ? shortDate(r.periodEnd) : "—"}
+                              {/* THE TENOR: what the money bought, start to end.
+                                  Only the end date was shown, so a five-year
+                                  purchase and a one-month renewal were
+                                  indistinguishable. A charge that buys no time
+                                  (a seat top-up, an add-on) says so rather than
+                                  borrowing the subscription's window. */}
+                              {r.periodStart && r.periodEnd ? (
+                                <>
+                                  <div>
+                                    {shortDate(r.periodStart)} → {shortDate(r.periodEnd)}
+                                  </div>
+                                  <div className="text-xs text-muted-foreground">
+                                    {r.tenorDays} days
+                                    {r.billingPeriods > 1 ? ` · ${r.billingPeriods} cycles` : ""}
+                                  </div>
+                                </>
+                              ) : (
+                                <span className="text-muted-foreground">no period</span>
+                              )}
                             </td>
-                            <td className="py-2 pr-4 font-mono text-xs">{r.reference}</td>
+                            <td className="py-2 pr-4 font-mono text-xs">
+                              <div>{r.reference}</div>
+                              {r.promoCode && <div className="text-muted-foreground">promo {r.promoCode}</div>}
+                            </td>
                           </tr>
                         ))}
                       </tbody>

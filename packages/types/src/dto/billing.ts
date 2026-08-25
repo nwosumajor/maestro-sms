@@ -132,6 +132,15 @@ export interface PlanPriceUpdateDto {
 // --- operator: cross-tenant subscription revenue --------------------------- //
 
 /** One subscription payment, as the platform's finance desk sees it. */
+/**
+ * One line of the platform's revenue ledger.
+ *
+ * It used to carry the plan, the cycle and the kind as three raw enum codes and
+ * a single period END — so a finance reader could not tell WHAT was sold (every
+ * add-on read "ADDON", though the row records which module), WHERE the school
+ * is, or HOW LONG the money bought. Everything below the divider was already on
+ * the row in the database and simply never left the API.
+ */
 export interface OperatorPaymentRowDto {
   id: string;
   schoolId: string;
@@ -148,6 +157,31 @@ export interface OperatorPaymentRowDto {
   periodEnd: Date | null;
   paidAt: Date | null;
   createdAt: Date;
+
+  // --- what a ledger has to say to be one ---------------------------------
+  /** What this charge was FOR, in a sentence (`describePlatformCharge`). */
+  purpose: string;
+  /**
+   * Where the school is, and what money IT keeps its own books in.
+   *
+   * NOT the same as `currency`, which is what this CHARGE was raised in — a
+   * Ghanaian school can be billed in USD, and a ledger that shows only the
+   * charge currency cannot tell you that.
+   */
+  region: { country: string | null; currency: string; timezone: string | null };
+  /** How long the money bought, in days, when the charge moved the period. */
+  tenorDays: number | null;
+  /** How many CYCLES this one charge bought (5 years = one row, not five). */
+  billingPeriods: number;
+  /** For an ADDON: the module key bought. Null for every other kind. */
+  addonModule: string | null;
+  /** Promo code applied to this charge, if any. */
+  promoCode: string | null;
+  /** Seat arrears INCLUDED in `amountMinor` — money that was owed, not new. */
+  arrearsMinor: number;
+  /** Who at the school started the checkout. A charge nobody can attribute is
+   *  a charge nobody can answer a question about. */
+  initiatedBy: { name: string; email: string } | null;
 }
 
 /**
@@ -198,6 +232,31 @@ export interface OperatorFeeRevenueDto {
   collectedMinor: number;
 }
 
+/**
+ * A message-credit bundle a school bought from the platform.
+ *
+ * The OTHER thing a school pays the platform for. It is not a subscription —
+ * there is no plan, no seats and no period, so it is a separate list rather
+ * than a row wearing a subscription's empty columns — but it is money a school
+ * paid us, and a ledger that omits it is not a ledger of what schools paid.
+ */
+export interface OperatorCreditPurchaseDto {
+  id: string;
+  schoolId: string;
+  schoolName: string;
+  region: { country: string | null; currency: string };
+  /** Bundle key from MESSAGE_CREDIT_BUNDLES; null on rows written before the
+   *  purchase price was recorded at all. */
+  bundleId: string | null;
+  credits: number;
+  /** What was paid. Null on a purchase settled before this was persisted — a
+   *  different statement from zero, and the screen says so. */
+  amountMinor: number | null;
+  currency: string | null;
+  reference: string | null;
+  paidAt: Date;
+}
+
 /** The operator payments screen: one page of rows + totals for the WHOLE filter,
  *  not just the visible page. */
 export interface OperatorPaymentPageDto {
@@ -209,6 +268,11 @@ export interface OperatorPaymentPageDto {
   totals: OperatorRevenueTotalDto[];
   /** Fee-collection take-rate over the same date range, per currency. */
   feeRevenue: OperatorFeeRevenueDto[];
+  /** Message-credit bundles bought over the same DATE RANGE. Newest first,
+   *  capped — the totals beside them cover the whole range. */
+  creditPurchases: OperatorCreditPurchaseDto[];
+  /** Those purchases totalled per currency, over the whole date range. */
+  creditRevenue: Array<{ currency: string; amountMinor: number; purchases: number; credits: number }>;
 }
 
 // --- message credits: the school's own ledger ------------------------------ //

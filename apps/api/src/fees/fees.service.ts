@@ -401,6 +401,22 @@ export class FeesService {
       //
       // It costs nothing: same scan, one small grouping, one round trip — and
       // a school billing in one currency gets exactly one row back.
+      //
+      // THE `net` CTE IS UNCORRELATED, AND THAT IS WORTH 1.8 SECONDS.
+      //
+      // It used to end `AND p."invoiceId" IN (SELECT id FROM billable)`, which
+      // made the planner nested-loop `payment_invoiceId_idx` once PER INVOICE.
+      // Measured as `major_user` with the tenant GUC set (never as `postgres`,
+      // which bypasses RLS and plans differently), on ten years of a real
+      // secondary school — 185,413 invoices, 156,537 payments:
+      //
+      //   IN-subquery    2,394 ms   185,413 index lookups, spilling to disk
+      //   uncorrelated     571 ms   one hash aggregate over the school's payments
+      //
+      // This report is billing-wide by definition — a parent gets `scope: "none"`
+      // — so there is no narrow case to preserve, unlike `invoiceSummary`, which
+      // branches on scope for exactly that reason. RLS already confines
+      // `payment` to this school; the subquery was never doing the scoping.
       const rows = (await tx.$queryRaw`
         WITH billable AS (
           SELECT id, currency, "totalMinor", "dueDate" FROM "invoice"
@@ -410,7 +426,7 @@ export class FeesService {
           SELECT p."invoiceId",
                  SUM(CASE WHEN p.kind = 'REFUND' THEN -p."amountMinor" ELSE p."amountMinor" END) AS paid
             FROM "payment" p
-           WHERE p.status = 'POSTED' AND p."invoiceId" IN (SELECT id FROM billable)
+           WHERE p.status = 'POSTED'
            GROUP BY p."invoiceId"
         ),
         bal AS (
@@ -581,7 +597,8 @@ export class FeesService {
       };
       // Scope first: a parent's summary must cover only their children.
       let studentFilter = Prisma.sql``;
-      if (!this.isBillingWide(p)) {
+      const wide = this.isBillingWide(p);
+      if (!wide) {
         const ids = await this.visibleStudentIds(tx, p);
         if (ids.length === 0) return none;
         // = ANY(ARRAY[...]) rather than IN (...): with Prisma.join, `IN (a,b,c)::uuid[]`
@@ -591,6 +608,31 @@ export class FeesService {
         studentFilter = Prisma.sql`AND i."studentId" = ANY(ARRAY[${Prisma.join(ids)}]::uuid[])`;
       }
 
+      // THE PAYMENT AGGREGATE IS CHOSEN BY SCOPE, and the difference is 2.3
+      // SECONDS on every load of /fees and /admin.
+      //
+      // `IN (SELECT id FROM billable)` made the planner nested-loop the payment
+      // index once PER INVOICE. Measured as `major_user` with the tenant GUC set
+      // (never as `postgres`), on ten years of a real secondary school —
+      // 185,413 invoices, 156,537 payments:
+      //
+      //   whole school, IN-subquery  2,280 ms   185,413 index lookups, 712k buffers, spilling to disk
+      //   whole school, uncorrelated   542 ms   one hash aggregate over the school's payments
+      //   one family,   IN-subquery      5 ms   the loop is over a handful of invoices
+      //   one family,   uncorrelated   228 ms   aggregating the WHOLE school to answer about one child
+      //
+      // Neither form wins both, so the scope the method already knows picks
+      // one. RLS confines `payment` to this school either way; the subquery was
+      // never doing the scoping, only the planner's arm-twisting.
+      //
+      // // GOTCHA: covering indexes were built and measured alongside
+      // (`payment (invoiceId) INCLUDE (amountMinor, kind) WHERE status='POSTED'`
+      // and an invoice equivalent) and the planner NEVER chose the invoice one;
+      // the pair moved 542 ms to 448 ms, inside the noise. An index nothing
+      // selects is storage and write amplification on the two hottest tables in
+      // the product — the same conclusion as the three trigram indexes dropped
+      // in 20261228000000. Neither is added.
+      const paidScope = wide ? Prisma.sql`` : Prisma.sql` AND p."invoiceId" IN (SELECT id FROM billable)`;
       // GROUPED BY CURRENCY — one extra column on the same scan.
       const rows = (await tx.$queryRaw`
         WITH billable AS (
@@ -602,7 +644,7 @@ export class FeesService {
           SELECT p."invoiceId",
                  SUM(CASE WHEN p.kind = 'REFUND' THEN -p."amountMinor" ELSE p."amountMinor" END) AS amt
           FROM payment p
-          WHERE p.status = 'POSTED' AND p."invoiceId" IN (SELECT id FROM billable)
+          WHERE p.status = 'POSTED'${paidScope}
           GROUP BY p."invoiceId"
         )
         SELECT

@@ -23,6 +23,9 @@ function makeService(opts: {
   schools?: Array<{ id: string; name: string }>;
   /** Rows the take-rate aggregate comes back with, one per currency. */
   feeRows?: Array<Record<string, unknown>>;
+  /** Message-credit purchases and their per-currency totals. */
+  creditRows?: Array<Record<string, unknown>>;
+  creditTotals?: Array<Record<string, unknown>>;
   noClient?: boolean;
 }) {
   const groupBy = jest.fn().mockResolvedValue(opts.grouped ?? []);
@@ -30,6 +33,8 @@ function makeService(opts: {
   const count = jest.fn().mockResolvedValue((opts.rows ?? []).length);
   const schoolFindMany = jest.fn().mockResolvedValue(opts.schools ?? []);
   const queryRaw = jest.fn().mockResolvedValue(opts.feeRows ?? []);
+  const creditFindMany = jest.fn().mockResolvedValue(opts.creditRows ?? []);
+  const creditGroupBy = jest.fn().mockResolvedValue(opts.creditTotals ?? []);
   const audit = { record: jest.fn() };
   const svc = Object.create(OperatorPaymentsService.prototype) as OperatorPaymentsService;
   Object.assign(svc, {
@@ -41,11 +46,16 @@ function makeService(opts: {
         : {
             platformSubscriptionPayment: { groupBy, findMany, count },
             school: { findMany: schoolFindMany },
+            // Message-credit purchases are the third revenue line on this page
+            // and are read on every list() — a fixture without them makes the
+            // whole screen throw, not just its own section.
+            messageCreditEntry: { findMany: creditFindMany, groupBy: creditGroupBy },
+            user: { findMany: jest.fn().mockResolvedValue([]) },
             $queryRaw: queryRaw,
           },
     },
   });
-  return { svc, groupBy, findMany, count, schoolFindMany, queryRaw, audit };
+  return { svc, groupBy, findMany, count, schoolFindMany, queryRaw, creditFindMany, creditGroupBy, audit };
 }
 
 const paid = (currency: string, sum: number, n: number) => ({

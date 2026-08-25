@@ -10,7 +10,7 @@
 
 import { BadRequestException, forwardRef, Inject, Injectable, Logger, ServiceUnavailableException, Optional} from "@nestjs/common";
 import { MESSAGE_CREDIT_BUNDLES, CURRENCIES,
-  PAYMENT_CHANNELS, MESSAGE_CREDIT_LOW_THRESHOLD, type MessageCreditLedgerPageDto } from "@sms/types";
+  PAYMENT_CHANNELS, MESSAGE_CREDIT_LOW_THRESHOLD, PLATFORM_HOME_CURRENCY, type MessageCreditLedgerPageDto } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -196,6 +196,15 @@ export class MessageCreditsService {
           deltaCredits: bundle.credits,
           reason: "PURCHASE",
           reference: event.data.reference,
+          // WHAT WAS ACTUALLY PAID, from the signed event — not the bundle's
+          // list price. The two are compared four lines above so a short
+          // payment cannot credit a bundle, and after that check the figure was
+          // discarded: the platform sold something and kept no record of the
+          // money, so this revenue line could not appear on its own ledger and
+          // could not be recovered from its own database.
+          amountMinor: event.data.amount,
+          currency: (event.data.currency ?? PLATFORM_HOME_CURRENCY).toUpperCase(),
+          bundleId: bundle.id,
         },
       });
     });

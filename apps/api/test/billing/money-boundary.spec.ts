@@ -98,9 +98,17 @@ describe("no cast may smuggle a bigint past the typechecker", () => {
     // `x.amountMinor as number` compiles and then throws at serialisation. This
     // is the shape that broke /operator/payments; the fix is toMinor(), which
     // is checked. Named files so a failure says exactly where to look.
+    //
+    // COMMENTS STRIPPED FIRST. A scan that reads prose fails on the explanation
+    // of its own rule: a file that documents why it does NOT write
+    // `.amountMinor as number` was reported as writing it. Its sibling
+    // `money-is-not-divided-by-a-hundred` already strips them and says why —
+    // this one did not, and went red on a comment.
+    const stripComments = (src: string) =>
+      src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
     const offenders: string[] = [];
     for (const file of sourceFiles(join(__dirname, "../../src"))) {
-      const src = readFileSync(file, "utf8");
+      const src = stripComments(readFileSync(file, "utf8"));
       for (const field of BIGINT_FIELDS) {
         // `(row.amountMinor as number)` — an assertion straight to number.
         const bad = new RegExp(`\\.${field}\\s+as\\s+number\\b`);

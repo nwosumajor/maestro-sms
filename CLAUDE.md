@@ -1796,6 +1796,73 @@ closed the window early and the test went red while the property it guards was
 untouched. Now anchored to the method by name — and mutation-validated, which
 the accidental version never was.
 
+### Two seconds on the busiest finance screen, and a ledger that could not say what was bought
+Asked whether the fees browser and the finance report are accurate AND efficient
+now, and for a ledger of everything a school pays the platform. Three findings.
+**THE SUMMARY WAS 2.3 SECONDS AND THE LIST WAS 0.6 MILLISECONDS.** Measured as
+`major_user` with the tenant GUC set (never as `postgres`), on ten years of a
+real secondary school — 185,413 invoices, 156,537 payments. The invoice LIST is
+fine: `Index Scan`, **0.58 ms**, the `20270101000000` index earning its keep. The
+SUMMARY above it and the receivables REPORT were not: **2,280 ms** and
+**2,394 ms**, on every load of /fees, /admin and /fees/reports. One cause, in
+both: `AND p."invoiceId" IN (SELECT id FROM billable)` made the planner
+nested-loop `payment_invoiceId_idx` **once per invoice** — 185,413 index
+lookups, 712k buffers, spilling to disk. RLS already confines `payment` to the
+school; the subquery was never doing the scoping, only twisting the planner's
+arm. Uncorrelated: **542 ms** and **571 ms**. Over HTTP at that volume the page
+reads now go 455 ms and 816 ms.
+// GOTCHA: NEITHER FORM WINS BOTH SCOPES, so `invoiceSummary` branches on the
+one it already knows. Whole school: IN-subquery 2,280 ms, uncorrelated 542 ms.
+ONE FAMILY: IN-subquery **5 ms**, uncorrelated **228 ms** — aggregating the
+whole school to answer about one child. `financeReport` needs no branch: a
+parent gets `scope: "none"`, so it is billing-wide by definition.
+// GOTCHA: covering indexes were BUILT and MEASURED alongside
+(`payment (invoiceId) INCLUDE (amountMinor, kind) WHERE status='POSTED'` plus an
+invoice equivalent) and the planner never chose the invoice one; the pair moved
+542 ms to 448 ms, inside the noise. Neither is added — an index nothing selects
+is write amplification on the two hottest tables in the product, the same
+conclusion as the three trigram indexes dropped in `20261228000000`.
+**A LEDGER LINE WHOSE PURPOSE YOU HAVE TO INFER.** `/operator/payments` is the
+owner's record of what every school has paid, and it showed the plan, the cycle
+and the kind as three columns of raw enum codes plus a single period END. So it
+could not say WHAT was sold — every add-on read `ADDON` though the row carries
+`addonModule`, and a five-year purchase was indistinguishable from a one-month
+renewal because `billingPeriods` never left the API — nor WHERE the school is,
+nor HOW LONG the money bought, nor WHEN it was paid: the column headed "Date"
+was `createdAt`, **the moment checkout STARTED**, so a charge begun on the 31st
+and settled on the 1st was filed in the wrong month. Every one of those facts
+was already on the row and none reached the screen. Now: `describePlatformCharge`
+(pure, shared by table and CSV so they cannot drift) writes the sentence; the row
+carries `region` (country NAME + the school's OWN currency, which is NOT the
+charge currency — a Ghanaian school can be billed in USD), `tenorDays` with
+`periodStart → periodEnd`, `billingPeriods`, `promoCode`, `arrearsMinor`
+(INCLUDED in the amount, so a ledger that stays silent reports settled debt as
+new revenue) and who initiated it. // A charge that buys NO time — a seat top-up,
+an add-on — reports `tenorDays: null` and says so, rather than borrowing the
+subscription's window and counting the same tenor twice across two rows.
+**AND THE PLATFORM SOLD SOMETHING AND KEPT NO RECORD OF THE MONEY.**
+Message-credit bundles are sold through Paystack like any other charge.
+`applyPurchase` read the amount off the signed event, compared it to the bundle
+price so a short payment could never credit a bundle — **and then discarded it**,
+writing a row carrying the credits granted and nothing about the money. Two
+consequences: the revenue ledger reads `platform_subscription_payment`, which a
+bundle never touches, so this line appeared on NO screen in the product; and
+since the figure was never persisted it could not be recovered from our own
+database at all, only from the gateway's. `message_credit_entry.amountMinor /
+currency / bundleId` (migration `20270106000000`, all NULLABLE — a SEND is not a
+payment, and a purchase settled before the column cannot say what it was; NULL
+means "not a recorded payment", which the screen prints as "not recorded" rather
+than 0.00). Shown as its OWN list beside the subscriptions, not rows in that
+table: a bundle has no plan, seats or period, and empty columns read as missing
+data rather than inapplicable ones. Partial index on `("createdAt") WHERE reason
+= 'PURCHASE'`, because that table grows with every message SENT, not with the
+number of purchases.
+// GOTCHA: `money-boundary`'s bigint gate went red on the COMMENT explaining why
+the new code does not write `.amountMinor as number`. Its sibling
+`money-is-not-divided-by-a-hundred` already strips comments and says why — "a
+scan that reads prose fails on the explanation of its own fix". This one did
+not. Fixed there, and mutation-validated: the real cast is still caught.
+
 ### A total that added two currencies, on six screens at once
 The user asked whether the accountant's and the platform owner's dashboards
 report naira and dollar fees accurately. They did not, and the reasoning had

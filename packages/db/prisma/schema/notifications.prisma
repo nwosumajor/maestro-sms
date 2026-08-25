@@ -34,6 +34,22 @@ model MessageCreditEntry {
   channel      String?
   /// Gateway reference (purchases — the idempotency key) or notificationId (sends).
   reference    String?
+  /// PURCHASE ONLY: WHAT THE SCHOOL PAID, and in what.
+  ///
+  /// The platform sells message-credit bundles through Paystack and recorded
+  /// only how many CREDITS it granted — the amount received was read off the
+  /// gateway event, checked against the bundle price, and thrown away. So money
+  /// a school genuinely paid the platform existed in Paystack's records and
+  /// nowhere in ours, which is why the operator's revenue ledger could not show
+  /// it. Null on sends, adjustments and checkpoints, and on purchases made
+  /// before this column existed.
+  amountMinor  Int?
+  currency     String?
+  /// PURCHASE ONLY: which bundle from MESSAGE_CREDIT_BUNDLES was bought. The
+  /// credits alone do not say — two bundles can grant the same count at
+  /// different prices, and a ledger line whose product is inferred is one
+  /// nobody can audit.
+  bundleId     String?
   /// The MESSAGING provider's own id for the message this credit paid for
   /// (Twilio's SID). Without it a debit cannot be tied to a real send, so the
   /// platform could never check its own charges against what the provider

@@ -786,3 +786,61 @@ export function effectivePlan(
   const cutoff = new Date(currentPeriodEnd.getTime() + grace * 24 * 60 * 60 * 1000);
   return now > cutoff ? FALLBACK_PLAN : plan;
 }
+
+// ---------------------------------------------------------------------------
+// What a platform charge was FOR, in a sentence
+// ---------------------------------------------------------------------------
+/**
+ * A human description of one platform-subscription payment.
+ *
+ * The operator's revenue ledger rendered `plan`, `billingCycle` and `kind` as
+ * three columns of raw enum codes — `ENTERPRISE`, `TERM`, `TRUEUP` — and left a
+ * finance reader to reconstruct what was actually sold. Worse for an add-on:
+ * every one read `ADDON`, and the row carries `addonModule` saying WHICH module
+ * was bought, which nothing displayed. A ledger line whose purpose you have to
+ * infer is a ledger line nobody can audit.
+ *
+ * PURE, and shared: the ledger table, the CSV export and any receipt must say
+ * the same thing about the same row, and three call sites writing their own
+ * sentence is how they stop agreeing.
+ */
+export function describePlatformCharge(input: {
+  kind: string;
+  plan: string;
+  billingCycle: string;
+  /** How many cycles this one charge bought. 1 is the ordinary case. */
+  billingPeriods?: number;
+  /** Set only on an ADDON charge: the module that was bought. */
+  addonModule?: string | null;
+  seats?: number;
+  promoCode?: string | null;
+}): string {
+  const cycle = input.billingCycle?.toLowerCase() || "period";
+  const periods = Math.max(1, input.billingPeriods ?? 1);
+  const span = periods > 1 ? `${periods} ${cycle}s` : `1 ${cycle}`;
+  const seats = typeof input.seats === "number" && input.seats > 0 ? ` · ${input.seats} seats` : "";
+  const promo = input.promoCode ? ` · promo ${input.promoCode}` : "";
+  const moduleLabel = input.addonModule
+    ? MODULE_CATALOG.find((m) => m.key === input.addonModule)?.label ?? input.addonModule
+    : null;
+
+  switch (input.kind) {
+    case SUBSCRIPTION_PAYMENT_KINDS.RENEWAL:
+      return `${input.plan} subscription · ${span}${seats}${promo}`;
+    case SUBSCRIPTION_PAYMENT_KINDS.UPGRADE:
+      // An upgrade RESTARTS the period from now, having credited the unused
+      // time at checkout — worth saying, because the tenor beside it will not
+      // line up with the previous row's and that looks like an error otherwise.
+      return `Plan change to ${input.plan} · ${span} from today${seats}${promo}`;
+    case SUBSCRIPTION_PAYMENT_KINDS.TRUEUP:
+      // A true-up moves SEATS and never the period, so its tenor is the
+      // subscription's existing one rather than anything this charge bought.
+      return `Seat top-up on ${input.plan}${seats ? ` · now ${input.seats} seats` : ""} · period unchanged`;
+    case SUBSCRIPTION_PAYMENT_KINDS.ADDON:
+      return moduleLabel
+        ? `Add-on: ${moduleLabel} · prorated to the current period${promo}`
+        : `Module add-on · prorated to the current period${promo}`;
+    default:
+      return `${input.plan} · ${input.kind}${seats}${promo}`;
+  }
+}

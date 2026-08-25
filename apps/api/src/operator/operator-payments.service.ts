@@ -26,13 +26,14 @@ import { Prisma } from "@sms/db";
 import type {
   BillingCycle,
   Currency,
+  OperatorCreditPurchaseDto,
   OperatorFeeRevenueDto,
   OperatorPaymentPageDto,
   OperatorPaymentRowDto,
   OperatorRevenueTotalDto,
   Plan,
 } from "@sms/types";
-import { CURRENCIES, isCurrency } from "@sms/types";
+import { CURRENCIES, COUNTRIES, PLATFORM_HOME_CURRENCY, describePlatformCharge, isCurrency } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -43,10 +44,21 @@ import {
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import { toMinor } from "../common/money";
 
+/** What the ledger needs to know about a school, beyond its name. */
+interface SchoolFacts {
+  name: string;
+  country: string | null;
+  currency: string;
+  timezone: string | null;
+}
+
 const MAX_PAGE_SIZE = 100;
 /** A CSV export is for the books, so it may be large — but not unbounded, or one
  *  click builds the whole lifetime of the platform in memory. */
 const MAX_EXPORT_ROWS = 20_000;
+/** Credit purchases shown beside the subscription page. The totals cover the
+ *  whole range, so this is a preview and never the whole answer. */
+const CREDIT_PURCHASE_PREVIEW = 50;
 
 export interface PaymentFilters {
   /** Inclusive ISO dates (YYYY-MM-DD) against createdAt. */
@@ -172,13 +184,51 @@ export class OperatorPaymentsService {
     return [...byCurrency.values()].sort((a, b) => b.paidMinor - a.paidMinor);
   }
 
-  private async nameMap(schoolIds: string[]): Promise<Map<string, string>> {
+  /**
+   * Name AND REGION, for the page's schools only.
+   *
+   * A ledger that says which school paid and not WHERE it is cannot answer the
+   * first question a finance desk asks of a cross-border book. The region is
+   * also not derivable from the charge: `currency` on the row is what the
+   * CHARGE was raised in, and a Ghanaian school can be billed in USD.
+   *
+   * One query for the page, sized by pageSize and never by the fleet — the same
+   * discipline the operator tenant list already applies.
+   */
+  private async schoolMap(schoolIds: string[]): Promise<Map<string, SchoolFacts>> {
     if (schoolIds.length === 0) return new Map();
-    const schools = await this.client().school.findMany({
+    const schools = (await this.client().school.findMany({
       where: { id: { in: schoolIds } },
-      select: { id: true, name: true },
-    });
-    return new Map(schools.map((s: { id: string; name: string }) => [s.id, s.name]));
+      select: { id: true, name: true, country: true, currency: true, timezone: true },
+    })) as Array<{ id: string; name: string; country: string | null; currency: string | null; timezone: string | null }>;
+    return new Map(
+      schools.map((s) => [
+        s.id,
+        {
+          name: s.name,
+          // The country's NAME, not its ISO code: a ledger read by a finance
+          // desk should not need the catalogue open beside it. An unrecognised
+          // code falls back to itself rather than to null — "ZZ" is more use
+          // than a blank.
+          country: s.country ? (COUNTRIES[s.country]?.name ?? s.country) : null,
+          // A school with no region set is on the platform's home country, and
+          // that is what every other resolver in the product assumes too.
+          currency: s.currency ?? PLATFORM_HOME_CURRENCY,
+          timezone: s.timezone ?? null,
+        },
+      ]),
+    );
+  }
+
+  /** Who at the school started these checkouts. One query for the page. */
+  private async initiatorMap(userIds: string[]): Promise<Map<string, { name: string; email: string }>> {
+    const ids = [...new Set(userIds.filter(Boolean))];
+    if (ids.length === 0) return new Map();
+    const users = (await this.client().user.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, name: true, email: true },
+    })) as Array<{ id: string; name: string; email: string }>;
+    return new Map(users.map((u) => [u.id, { name: u.name, email: u.email }]));
   }
 
   /** One page of payments plus totals for the whole filter. Audited. */
@@ -187,7 +237,7 @@ export class OperatorPaymentsService {
     const page = Math.max(1, filters.page ?? 1);
     const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(1, filters.pageSize ?? 25));
 
-    const [rows, total, totals, feeRevenue] = await Promise.all([
+    const [rows, total, totals, feeRevenue, credits] = await Promise.all([
       this.client().platformSubscriptionPayment.findMany({
         where,
         orderBy: { createdAt: "desc" },
@@ -197,18 +247,106 @@ export class OperatorPaymentsService {
       this.client().platformSubscriptionPayment.count({ where }),
       this.totals(where),
       this.feeRevenue(filters),
+      this.creditPurchases(filters),
     ]);
 
-    const names = await this.nameMap([...new Set(rows.map((r: { schoolId: string }) => r.schoolId))]);
+    const [names, initiators] = await Promise.all([
+      this.schoolMap([...new Set(rows.map((r: { schoolId: string }) => r.schoolId))]),
+      this.initiatorMap(rows.map((r: { initiatedById?: string }) => r.initiatedById ?? "")),
+    ]);
     await this.record(p, "platform.revenue.read", { ...filters, returned: rows.length });
 
     return {
-      rows: rows.map((r: Record<string, unknown>) => this.toRow(r, names)),
+      rows: rows.map((r: Record<string, unknown>) => this.toRow(r, names, initiators)),
       page,
       pageSize,
       total,
       totals,
       feeRevenue,
+      creditPurchases: credits.rows,
+      creditRevenue: credits.totals,
+    };
+  }
+
+  /**
+   * THE THIRD THING A SCHOOL PAYS US FOR.
+   *
+   * Subscriptions are one line and the fee take-rate is another; message-credit
+   * bundles are a third, and they appeared on NO screen in this product. They
+   * do not touch `platform_subscription_payment` — settlement writes a tenant
+   * `message_credit_entry` — so the revenue ledger could not see them, and
+   * until `20270106000000` the AMOUNT was never persisted at all, only the
+   * credits granted. A ledger of what schools paid that omits a product we sell
+   * is not a ledger of what schools paid.
+   *
+   * A SEPARATE LIST, not rows in the subscription table. A bundle has no plan,
+   * no seats and no period; giving it a row with those columns empty would
+   * invite a reader to think the data was missing rather than inapplicable.
+   *
+   * Only the DATE RANGE applies, for the reason `feeRevenue` gives: plan and
+   * subscription status describe subscriptions and mean nothing here.
+   */
+  private async creditPurchases(filters: PaymentFilters): Promise<{
+    rows: OperatorCreditPurchaseDto[];
+    totals: Array<{ currency: string; amountMinor: number; purchases: number; credits: number }>;
+  }> {
+    const range = this.range(filters.from, filters.to);
+    const where: Record<string, unknown> = { reason: "PURCHASE" };
+    if (range) where.createdAt = range;
+    const [rows, grouped] = await Promise.all([
+      this.client().messageCreditEntry.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        // Bounded like every other list here. The totals beside it cover the
+        // whole range, so the cap never becomes a wall in front of the money.
+        take: CREDIT_PURCHASE_PREVIEW,
+      }) as Promise<Array<Record<string, unknown>>>,
+      this.client().messageCreditEntry.groupBy({
+        by: ["currency"],
+        where,
+        _sum: { amountMinor: true, deltaCredits: true },
+        _count: { _all: true },
+      }) as unknown as Promise<
+        Array<{ currency: string | null; _sum: { amountMinor: number | null; deltaCredits: number | null }; _count: { _all: number } }>
+      >,
+    ]);
+    const names = await this.schoolMap([...new Set(rows.map((r) => r.schoolId as string))]);
+    return {
+      rows: rows.map((r) => {
+        const school = names.get(r.schoolId as string);
+        return {
+          id: r.id as string,
+          schoolId: r.schoolId as string,
+          schoolName: school?.name ?? "—",
+          region: { country: school?.country ?? null, currency: school?.currency ?? PLATFORM_HOME_CURRENCY },
+          bundleId: (r.bundleId as string | null) ?? null,
+          credits: (r.deltaCredits as number) ?? 0,
+          // THROUGH `toMinor`, even though this column is an Int rather than the
+          // BigInt on the subscription table. `money-boundary` refuses
+          // `.amountMinor as number` anywhere in the API and is right to: it
+          // cannot tell which model a field name belongs to, and the day one of
+          // these widens the cast would compile and throw at serialisation.
+          // NULL is preserved — a purchase settled before the amount was
+          // recorded is unknown, which is not zero.
+          amountMinor: r.amountMinor == null ? null : toMinor(r.amountMinor as bigint | number),
+          currency: (r.currency as string | null) ?? null,
+          reference: (r.reference as string | null) ?? null,
+          paidAt: r.createdAt as Date,
+        };
+      }),
+      totals: grouped
+        // A row with no currency is a purchase settled before the amount was
+        // recorded. It is counted nowhere rather than being folded into a
+        // currency it never said it was — the same rule the credit ledger and
+        // the fee report follow.
+        .filter((g) => g.currency)
+        .map((g) => ({
+          currency: g.currency as string,
+          amountMinor: Number(g._sum.amountMinor ?? 0),
+          purchases: g._count._all,
+          credits: Number(g._sum.deltaCredits ?? 0),
+        }))
+        .sort((a, b) => b.amountMinor - a.amountMinor),
     };
   }
 
@@ -266,34 +404,55 @@ export class OperatorPaymentsService {
       orderBy: { createdAt: "desc" },
       take: MAX_EXPORT_ROWS,
     });
-    const names = await this.nameMap([...new Set(rows.map((r: { schoolId: string }) => r.schoolId))]);
+    const [names, initiators] = await Promise.all([
+      this.schoolMap([...new Set(rows.map((r: { schoolId: string }) => r.schoolId))]),
+      this.initiatorMap(rows.map((r: { initiatedById?: string }) => r.initiatedById ?? "")),
+    ]);
     await this.record(p, "platform.revenue.export", { ...filters, returned: rows.length });
 
+    // THE EXPORT CARRIES WHAT THE SCREEN CARRIES. An export that is a subset of
+    // the page is the one a reconciliation actually runs against, so a column
+    // missing here is a question nobody can answer from the books.
     const header = [
-      "Date", "School", "Reference", "Plan", "Cycle", "Kind",
-      "Seats", "Amount (minor)", "Currency", "Status", "Period start", "Period end", "Paid at",
+      "Date paid", "Date started", "School", "Country", "School currency", "Purpose",
+      "Reference", "Plan", "Cycle", "Periods", "Kind", "Add-on module", "Seats",
+      "Amount (minor)", "Currency", "Arrears (minor)", "Promo", "Status",
+      "Period start", "Period end", "Tenor (days)", "Initiated by",
     ];
     const lines = [header.map((h) => csvCell(h)).join(",")];
     for (const raw of rows) {
-      const r = this.toRow(raw as Record<string, unknown>, names);
+      const r = this.toRow(raw as Record<string, unknown>, names, initiators);
       lines.push(
         [
+          // THE DATE THE MONEY ARRIVED comes first, because that is the date a
+          // book is kept on. The checkout date is beside it and is not the same
+          // thing — a charge started on the 31st and settled on the 1st belongs
+          // to the new month.
+          r.paidAt?.toISOString().slice(0, 10) ?? "",
           r.createdAt.toISOString().slice(0, 10),
           r.schoolName,
+          r.region.country ?? "",
+          r.region.currency,
+          r.purpose,
           r.reference,
           r.plan,
           r.billingCycle,
+          String(r.billingPeriods),
           r.kind,
+          r.addonModule ?? "",
           String(r.seats),
           // The MINOR-unit integer, deliberately. A spreadsheet that divides by
           // 100 is wrong for a zero-decimal currency, so the export ships the
           // exact stored figure next to its currency and lets the reader decide.
           String(r.amountMinor),
           r.currency,
+          String(r.arrearsMinor),
+          r.promoCode ?? "",
           r.status,
           r.periodStart?.toISOString().slice(0, 10) ?? "",
           r.periodEnd?.toISOString().slice(0, 10) ?? "",
-          r.paidAt?.toISOString() ?? "",
+          r.tenorDays == null ? "" : String(r.tenorDays),
+          r.initiatedBy ? `${r.initiatedBy.name} <${r.initiatedBy.email}>` : "",
         ]
           .map((c) => csvCell(c))
           .join(","),
@@ -303,24 +462,56 @@ export class OperatorPaymentsService {
     return { csv: lines.join("\n"), filename: `platform-revenue-${stamp}.csv` };
   }
 
-  private toRow(r: Record<string, unknown>, names: Map<string, string>): OperatorPaymentRowDto {
+  private toRow(
+    r: Record<string, unknown>,
+    names: Map<string, SchoolFacts>,
+    initiators: Map<string, { name: string; email: string }>,
+  ): OperatorPaymentRowDto {
     const schoolId = r.schoolId as string;
+    const school = names.get(schoolId);
+    const periodStart = (r.periodStart as Date | null) ?? null;
+    const periodEnd = (r.periodEnd as Date | null) ?? null;
+    const kind = (r.kind as string) ?? "RENEWAL";
+    const plan = r.plan as Plan;
+    const billingCycle = r.billingCycle as BillingCycle;
+    const billingPeriods = (r.billingPeriods as number) ?? 1;
+    const addonModule = (r.addonModule as string | null) ?? null;
+    const promoCode = (r.promoCode as string | null) ?? null;
+    const seats = (r.seats as number) ?? 0;
     return {
       id: r.id as string,
       schoolId,
-      schoolName: names.get(schoolId) ?? "—",
+      schoolName: school?.name ?? "—",
       reference: r.reference as string,
-      plan: r.plan as Plan,
-      billingCycle: r.billingCycle as BillingCycle,
-      kind: (r.kind as string) ?? "RENEWAL",
-      seats: (r.seats as number) ?? 0,
+      plan,
+      billingCycle,
+      kind,
+      seats,
       amountMinor: toMinor(r.amountMinor as bigint | number | null),
       currency: (isCurrency(r.currency as string) ? r.currency : CURRENCIES.NGN) as Currency,
       status: r.status as string,
-      periodStart: (r.periodStart as Date | null) ?? null,
-      periodEnd: (r.periodEnd as Date | null) ?? null,
+      periodStart,
+      periodEnd,
       paidAt: (r.paidAt as Date | null) ?? null,
       createdAt: r.createdAt as Date,
+      purpose: describePlatformCharge({ kind, plan, billingCycle, billingPeriods, addonModule, seats, promoCode }),
+      region: {
+        country: school?.country ?? null,
+        currency: school?.currency ?? PLATFORM_HOME_CURRENCY,
+        timezone: school?.timezone ?? null,
+      },
+      // Only when the charge actually MOVED the period. A true-up and an add-on
+      // buy no time — reporting the subscription's existing tenor against them
+      // would double-count the same window across two rows of the book.
+      tenorDays:
+        periodStart && periodEnd
+          ? Math.max(0, Math.round((periodEnd.getTime() - periodStart.getTime()) / 86_400_000))
+          : null,
+      billingPeriods,
+      addonModule,
+      promoCode,
+      arrearsMinor: toMinor(r.arrearsMinor as bigint | number | null),
+      initiatedBy: initiators.get((r.initiatedById as string) ?? "") ?? null,
     };
   }
 
