@@ -41,7 +41,10 @@ const WEB = join(__dirname, "../..");
  * tenant-money site that looks similar.
  */
 const ALLOWED: Record<string, string> = {
-  // Basis points are hundredths BY DEFINITION — not money being scaled.
+  // Basis points are hundredths BY DEFINITION — not money being scaled. This is
+  // now the ONLY 100 in that file: the exemption had also been covering a
+  // `minor / 100` money formatter, which is exactly what a file-level exemption
+  // written for one reason does to a second thing that arrives later.
   "components/operator/GrowthManager.tsx": "commissionBp / 100 converts basis points to a percentage",
   "components/operator/PlatformFeeManager.tsx": "platform fees are quoted and stored in the platform's own NGN",
   "components/operator/PricingManager.tsx": "plan prices are the platform's own billing, per stated currency",

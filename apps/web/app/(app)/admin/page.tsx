@@ -6,7 +6,7 @@ import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
 import { AppShell } from "@/components/shell/AppShell";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { money } from "@/lib/format";
+import { money, regionOf } from "@/lib/format";
 import { PageHeader } from "@/components/shell/PageHeader";
 
 export const dynamic = "force-dynamic";
@@ -19,6 +19,8 @@ export default async function AdminPage() {
   const user = session!.user;
   // Staff gate: the Admin area is for roles that can manage something.
   if (!hasPermission(user.permissions, "fee.manage")) redirect("/dashboard");
+  // The SCHOOL's region, not the platform's — see lib/format.ts.
+  const region = regionOf(user);
 
   const [students, classes, invoices, workflows] = await Promise.all([
     // The COUNT, not the roster. This tile counting `.length` of /students is why
@@ -41,7 +43,17 @@ export default async function AdminPage() {
   // administrator every fee is collected and nothing is waiting on them. /dashboard
   // was fixed this way already; this page kept the false zeros.
   const feesUnknown = invoices === null;
-  const currency = invoices?.currency ?? "NGN";
+  // The SCHOOL's currency, which the API now answers with. It used to be the
+  // literal "NGN" on both sides — the summary hard-coded it and this page
+  // defaulted to it — so a Ghanaian school's outstanding total was labelled in
+  // naira on the administrator's own overview.
+  const currency = invoices?.currency ?? region.currency;
+  // Money the school holds in some OTHER currency. Named, never added: a
+  // USD-billing school had cents summed into its kobo before the API split
+  // these, and there is no rate in this platform to add them with.
+  const otherCurrencies = (invoices?.byCurrency ?? []).filter(
+    (b) => b.currency !== currency && (b.outstandingMinor !== 0 || b.collectedMinor !== 0),
+  );
   const pendingApprovals = workflows?.total ?? 0;
 
   /** An em dash where a number cannot be established. */
@@ -57,6 +69,12 @@ export default async function AdminPage() {
     { label: "Approvals pending", value: num(pendingApprovals, workflows === null), href: "/workflows" },
   ];
   const anyFigureMissing = students === null || classes === null || feesUnknown || workflows === null;
+  const otherCurrencyNote =
+    otherCurrencies.length > 0
+      ? `Also held in ${otherCurrencies
+          .map((b) => `${money(b.outstandingMinor, b.currency)} outstanding (${b.currency})`)
+          .join(", ")} — shown apart because there is no exchange rate here to add them with.`
+      : null;
 
   const actions = ([
     { label: "New invoice", href: "/fees", perm: "fee.manage", desc: "Bill a student for fees" },
@@ -97,6 +115,10 @@ export default async function AdminPage() {
             Some figures below could not be loaded and show as &ldquo;—&rdquo;. That is a failure to read them, not
             a zero — do not treat a dash as &ldquo;nothing outstanding&rdquo;.
           </div>
+        )}
+
+        {otherCurrencyNote && (
+          <div className="rounded-md border bg-muted/40 px-4 py-2 text-sm text-muted-foreground">{otherCurrencyNote}</div>
         )}
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">

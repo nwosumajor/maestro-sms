@@ -26,7 +26,7 @@
 // =============================================================================
 
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
-import { STUDENT_EXIT_CHAIN, formatMoney } from "@sms/types";
+import { PLATFORM_HOME_CURRENCY, STUDENT_EXIT_CHAIN, formatMoney } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -50,11 +50,15 @@ export interface StudentExitPreviewDto {
   studentId: string;
   studentName: string;
   classNames: string[];
-  /** Money still owed. A SIGNAL for the approver, never a block — a school that
-   *  cannot release a leaver because of a debt has an NDPR problem, not a
-   *  collections one. */
+  /** Money still owed IN `currency`, the school's own. A SIGNAL for the
+   *  approver, never a block — a school that cannot release a leaver because of
+   *  a debt has an NDPR problem, not a collections one. */
   outstandingMinor: number;
   currency: string;
+  /** Every currency the pupil owes in, the school's own first and always
+   *  present. The single figure used to be a sum across all of them wearing the
+   *  school's currency as a label. */
+  outstandingByCurrency: Array<{ currency: string; outstandingMinor: number }>;
   /** Library books still out. SURFACED, never auto-closed — see the note in
    *  preview(). */
   unreturnedBooks: string[];
@@ -195,16 +199,47 @@ export class StudentExitService {
       });
       // One aggregate, never a row-by-row hydrate: an invoice list grows with
       // the pupil's whole time at the school and nothing here needs the rows.
-      const owed = await tx.invoice.aggregate({
+      //
+      // GROUPED BY CURRENCY. An invoice carries its own — a family billed in
+      // dollars through the Stripe rail alongside the school's local currency —
+      // so the ungrouped version added cents to kobo and then LABELLED the sum
+      // with the school's currency, on the screen where somebody signs off a
+      // pupil's departure and the family's last chance to settle.
+      const school = await tx.school.findFirst({ where: { id: p.schoolId }, select: { currency: true } });
+      const schoolCurrency = school?.currency ?? PLATFORM_HOME_CURRENCY;
+      const owed = (await tx.invoice.groupBy({
+        by: ["currency"],
         // Billable states only — DRAFT is not owed yet and CANCELLED never was.
         where: { studentId, status: { in: ["ISSUED", "PARTIALLY_PAID"] } },
         _sum: { totalMinor: true },
-      });
-      const paid = await tx.payment.aggregate({
+      })) as unknown as Array<{ currency: string; _sum: { totalMinor: number | null } }>;
+      const paid = (await tx.payment.groupBy({
+        by: ["invoiceId"],
         where: { invoice: { studentId }, status: "POSTED", kind: "PAYMENT" },
         _sum: { amountMinor: true },
-      });
-      const school = await tx.school.findFirst({ where: { id: p.schoolId }, select: { currency: true } });
+      })) as unknown as Array<{ invoiceId: string; _sum: { amountMinor: number | null } }>;
+      // A payment has no currency of its own, so map each back to its invoice.
+      const invoiceCurrency = new Map(
+        (
+          (await tx.invoice.findMany({
+            where: { studentId, status: { in: ["ISSUED", "PARTIALLY_PAID"] } },
+            select: { id: true, currency: true },
+          })) as Array<{ id: string; currency: string }>
+        ).map((i) => [i.id, i.currency]),
+      );
+      const balances = new Map<string, number>();
+      for (const o of owed) balances.set(o.currency, (balances.get(o.currency) ?? 0) + (o._sum.totalMinor ?? 0));
+      for (const pmt of paid) {
+        const c = invoiceCurrency.get(pmt.invoiceId);
+        if (!c) continue; // a payment on a settled or cancelled invoice — not owed
+        balances.set(c, (balances.get(c) ?? 0) - (pmt._sum.amountMinor ?? 0));
+      }
+      // The school's own currency leads and is always present, even at zero:
+      // `outstandingMinor` is what the approval screen and the exit workflow
+      // read as "what this family owes us".
+      const outstandingByCurrency = [schoolCurrency, ...[...balances.keys()].filter((c) => c !== schoolCurrency).sort()].map(
+        (currency) => ({ currency, outstandingMinor: Math.max(0, balances.get(currency) ?? 0) }),
+      );
 
       // BOOKS STILL OUT.
       //
@@ -232,8 +267,9 @@ export class StudentExitService {
         studentId,
         studentName: student.name,
         classNames: (enrolments as Array<{ class: { name: string } | null }>).map((e) => e.class?.name ?? "—"),
-        outstandingMinor: Math.max(0, (owed._sum?.totalMinor ?? 0) - (paid._sum?.amountMinor ?? 0)),
-        currency: school?.currency ?? "NGN",
+        outstandingMinor: outstandingByCurrency[0].outstandingMinor,
+        currency: schoolCurrency,
+        outstandingByCurrency,
         unreturnedBooks: titles.map((t) => t.title),
         alreadyExited: student.status === "EXITED",
       };
@@ -401,6 +437,7 @@ export class StudentExitService {
         select: { leaverRetentionYears: true, currency: true },
       });
       const years = school?.leaverRetentionYears ?? 0;
+      const leaverCurrency = school?.currency ?? PLATFORM_HOME_CURRENCY;
       const now = Date.now();
 
       // WHAT EACH LEAVER STILL OWES.
@@ -408,11 +445,16 @@ export class StudentExitService {
       // TWO grouped queries for the whole page, not two per row: this list is
       // paged but a school's leavers only ever grow, and a per-row balance is
       // the shape that turns a fast page into a slow one three years in.
+      //
+      // AND BY CURRENCY. The list renders one figure per leaver under one
+      // symbol, so a pupil billed in dollars alongside the school's own currency
+      // had cents added to kobo — the same defect as the exit preview above, in
+      // the list that feeds the bursar's chase.
       const ids = rows.slice(0, take).map((r) => r.id);
       const [billed, paid] = ids.length
         ? await Promise.all([
             tx.invoice.groupBy({
-              by: ["studentId"],
+              by: ["studentId", "currency"],
               where: { studentId: { in: ids }, status: { in: ["ISSUED", "PARTIALLY_PAID"] } },
               _sum: { totalMinor: true },
             }),
@@ -423,14 +465,17 @@ export class StudentExitService {
             }),
           ])
         : [[], []];
-      // Payments group by invoice, so map them back to the pupil.
+      // Payments group by invoice, so map them back to the pupil AND to the
+      // currency the invoice was raised in — a payment has neither of its own.
       const invoices = ids.length
         ? await tx.invoice.findMany({
             where: { studentId: { in: ids } },
-            select: { id: true, studentId: true },
+            select: { id: true, studentId: true, currency: true },
           })
         : [];
-      const studentOfInvoice = new Map(invoices.map((i) => [i.id, i.studentId]));
+      const studentOfInvoice = new Map(
+        (invoices as Array<{ id: string; studentId: string; currency: string }>).map((i) => [i.id, i]),
+      );
 
       // WHY THEY LEFT.
       //
@@ -459,13 +504,30 @@ export class StudentExitService {
       for (const e of exitRows as Array<{ studentId: string; status: string; statusReason: string | null }>) {
         if (!reasonOf.has(e.studentId)) reasonOf.set(e.studentId, { kind: e.status, reason: e.statusReason });
       }
+      // Keyed on pupil AND currency, so two kinds of money never meet.
       const owedBy = new Map<string, number>();
-      for (const b of billed as Array<{ studentId: string; _sum: { totalMinor: number | null } }>) {
-        owedBy.set(b.studentId, (owedBy.get(b.studentId) ?? 0) + (b._sum.totalMinor ?? 0));
+      const key = (studentId: string, currency: string) => `${studentId}|${currency}`;
+      for (const b of billed as Array<{ studentId: string; currency: string; _sum: { totalMinor: number | null } }>) {
+        owedBy.set(key(b.studentId, b.currency), (owedBy.get(key(b.studentId, b.currency)) ?? 0) + (b._sum.totalMinor ?? 0));
       }
       for (const pmt of paid as Array<{ invoiceId: string; _sum: { amountMinor: number | null } }>) {
-        const sid = studentOfInvoice.get(pmt.invoiceId);
-        if (sid) owedBy.set(sid, (owedBy.get(sid) ?? 0) - (pmt._sum.amountMinor ?? 0));
+        const inv = studentOfInvoice.get(pmt.invoiceId);
+        if (!inv) continue;
+        const k = key(inv.studentId, inv.currency);
+        owedBy.set(k, (owedBy.get(k) ?? 0) - (pmt._sum.amountMinor ?? 0));
+      }
+      const owedByStudent = new Map<string, Array<{ currency: string; outstandingMinor: number }>>();
+      for (const [k, minor] of owedBy) {
+        const [studentId, currency] = k.split("|");
+        const owedMinor = Math.max(0, minor);
+        if (owedMinor === 0) continue;
+        (owedByStudent.get(studentId) ?? owedByStudent.set(studentId, []).get(studentId)!).push({
+          currency,
+          outstandingMinor: owedMinor,
+        });
+      }
+      for (const list of owedByStudent.values()) {
+        list.sort((a, b) => (a.currency === leaverCurrency ? -1 : b.currency === leaverCurrency ? 1 : a.currency.localeCompare(b.currency)));
       }
 
       return {
@@ -485,7 +547,12 @@ export class StudentExitService {
             // Never negative: an overpayment is a credit, not a debt, and
             // showing "owes -5,000" on a leavers page is how a bursar chases
             // somebody who owes nothing.
-            outstandingMinor: Math.max(0, owedBy.get(r.id) ?? 0),
+            //
+            // The headline is the SCHOOL's own currency; anything else the
+            // pupil owes is listed beside it rather than added into it.
+            outstandingMinor:
+              owedByStudent.get(r.id)?.find((b) => b.currency === leaverCurrency)?.outstandingMinor ?? 0,
+            outstandingByCurrency: owedByStudent.get(r.id) ?? [],
             docsReleased: r.docsReleasedAt != null,
             exitKind: reasonOf.get(r.id)?.kind ?? null,
             exitReason: reasonOf.get(r.id)?.reason ?? null,

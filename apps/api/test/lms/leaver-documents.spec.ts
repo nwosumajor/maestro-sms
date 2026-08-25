@@ -115,7 +115,16 @@ describe("the debt shown on the leavers page", () => {
   it("is never negative — an overpayment is a credit, not a debt", () => {
     // "Owes -5,000" on a leavers page is how a bursar chases somebody who owes
     // nothing.
-    expect(list).toMatch(/Math\.max\(0, owedBy\.get\(r\.id\) \?\? 0\)/);
+    //
+    // Anchored to the PROPERTY rather than to one expression. This used to pin
+    // the literal `Math.max(0, owedBy.get(r.id) ?? 0)`, and grouping the
+    // balance by currency moved the clamp one line without weakening it — the
+    // test went red while what it guards was untouched, which is the fixed-text
+    // failure mode this repo keeps recording.
+    expect(list).toMatch(/Math\.max\(0, minor\)/); // clamped where the balance is built
+    // and the row reads the clamped map, never the raw signed one.
+    expect(list).toMatch(/outstandingMinor: *\n? *owedByStudent\.get\(r\.id\)/);
+    expect(list).not.toMatch(/outstandingMinor: owedBy\.get\(/);
   });
 
   it("counts only billable invoices", () => {

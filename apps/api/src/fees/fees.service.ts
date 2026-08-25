@@ -16,7 +16,11 @@ import { Prisma } from "@sms/db";
 import {
   effectivePaymentApprovalThresholdMinor,
   PAYMENT_APPROVAL_WINDOW_HOURS,
+  PLATFORM_HOME_CURRENCY,
   paymentNeedsApproval,
+  type FeeCurrencyReportDto,
+  type FeeReportDto,
+  type InvoiceSummaryDto,
   type InvoiceStatusValue,
   type PaymentMethodValue, formatMoney } from "@sms/types";
 import {
@@ -384,9 +388,22 @@ export class FeesService {
       // days <= 0 / <= 30 / <= 60 / else ladder this replaces. Written out in
       // full rather than generated: a helper emitting two columns can only
       // alias one of them, and a mislabelled money column is silent.
+      // GROUPED BY CURRENCY, in the same one pass.
+      //
+      // An invoice carries its own currency and a payment inherits its
+      // invoice's, so the ungrouped `SUM("totalMinor")` this replaces added
+      // kobo to cents and the page put one symbol in front of the result. The
+      // group console had already worked this out for its cross-campus totals
+      // ("a payment carries no currency of its own — it inherits its INVOICE's
+      // ... precisely the assumption that made the old totals wrong") and the
+      // school's own receivables report, which is the screen an accountant
+      // actually reconciles against, was left as it was.
+      //
+      // It costs nothing: same scan, one small grouping, one round trip — and
+      // a school billing in one currency gets exactly one row back.
       const rows = (await tx.$queryRaw`
         WITH billable AS (
-          SELECT id, "totalMinor", "dueDate" FROM "invoice"
+          SELECT id, currency, "totalMinor", "dueDate" FROM "invoice"
           WHERE status IN ('ISSUED', 'PARTIALLY_PAID', 'PAID')
         ),
         net AS (
@@ -397,13 +414,15 @@ export class FeesService {
            GROUP BY p."invoiceId"
         ),
         bal AS (
-          SELECT b."totalMinor",
+          SELECT b.currency,
+                 b."totalMinor",
                  COALESCE(n.paid, 0) AS paid,
                  b."totalMinor" - COALESCE(n.paid, 0) AS balance,
                  (${today}::date - b."dueDate") AS days
             FROM billable b LEFT JOIN net n ON n."invoiceId" = b.id
         )
         SELECT
+          currency,
           COALESCE(SUM("totalMinor"), 0)::float8 AS "invoicedMinor",
           COALESCE(SUM(paid), 0)::float8         AS "collectedMinor",
           count(*) FILTER (WHERE balance > 0 AND days <= 0)::int AS "currentCount",
@@ -414,24 +433,61 @@ export class FeesService {
           COALESCE(SUM(balance) FILTER (WHERE balance > 0 AND days > 30 AND days <= 60), 0)::float8 AS "d31_60Minor",
           count(*) FILTER (WHERE balance > 0 AND days > 60)::int AS "d60plusCount",
           COALESCE(SUM(balance) FILTER (WHERE balance > 0 AND days > 60), 0)::float8 AS "d60plusMinor"
-        FROM bal`) as Array<Record<string, number>>;
-      const r = rows[0] ?? {};
-      const n = (k: string) => Number(r[k] ?? 0);
-      const invoiced = n("invoicedMinor");
-      const collected = n("collectedMinor");
+        FROM bal GROUP BY currency`) as Array<Record<string, number | string>>;
+      // Pending approvals carry the currency of the invoice they sit on — the
+      // maker-checker threshold is judged in the school's own money, so a
+      // figure labelled with the wrong currency here misstates the control.
       const pending = (await tx.$queryRaw`
-        SELECT count(*)::int AS count, COALESCE(SUM("amountMinor"), 0)::float8 AS "amountMinor"
-          FROM "payment" WHERE status = 'PENDING_APPROVAL'`) as Array<{ count: number; amountMinor: number }>;
+        SELECT i.currency, count(*)::int AS count, COALESCE(SUM(p."amountMinor"), 0)::float8 AS "amountMinor"
+          FROM "payment" p JOIN "invoice" i ON i.id = p."invoiceId"
+         WHERE p.status = 'PENDING_APPROVAL' GROUP BY i.currency`) as Array<{ currency: string; count: number; amountMinor: number }>;
+
+      const schoolCurrency = (await tx.school.findFirst({ where: { id: p.schoolId }, select: { currency: true } }))?.currency
+        ?? PLATFORM_HOME_CURRENCY;
+      const byCurrency: FeeCurrencyReportDto[] = rows.map((raw) => {
+        const n = (k: string) => Number(raw[k] ?? 0);
+        const invoiced = n("invoicedMinor");
+        const collected = n("collectedMinor");
+        return {
+          currency: String(raw.currency ?? schoolCurrency),
+          totals: { invoicedMinor: invoiced, collectedMinor: collected, outstandingMinor: invoiced - collected },
+          aging: {
+            current: { count: n("currentCount"), amountMinor: n("currentMinor") },
+            d1_30: { count: n("d1_30Count"), amountMinor: n("d1_30Minor") },
+            d31_60: { count: n("d31_60Count"), amountMinor: n("d31_60Minor") },
+            d60plus: { count: n("d60plusCount"), amountMinor: n("d60plusMinor") },
+          },
+        };
+      });
+      // The school's own currency FIRST and always present, even at zero: the
+      // headline block is what the page reads, and a school that happens to
+      // have raised only dollar invoices this term must not have a USD figure
+      // promoted into the position its staff read as "our money".
+      const empty: FeeCurrencyReportDto = {
+        currency: schoolCurrency,
+        totals: { invoicedMinor: 0, collectedMinor: 0, outstandingMinor: 0 },
+        aging: {
+          current: { count: 0, amountMinor: 0 },
+          d1_30: { count: 0, amountMinor: 0 },
+          d31_60: { count: 0, amountMinor: 0 },
+          d60plus: { count: 0, amountMinor: 0 },
+        },
+      };
+      const home = byCurrency.find((b) => b.currency === schoolCurrency) ?? empty;
+      const ordered = [home, ...byCurrency.filter((b) => b.currency !== schoolCurrency).sort((a, b) => a.currency.localeCompare(b.currency))];
       return {
         scope: "school" as const,
-        totals: { invoicedMinor: invoiced, collectedMinor: collected, outstandingMinor: invoiced - collected },
-        aging: {
-          current: { count: n("currentCount"), amountMinor: n("currentMinor") },
-          d1_30: { count: n("d1_30Count"), amountMinor: n("d1_30Minor") },
-          d31_60: { count: n("d31_60Count"), amountMinor: n("d31_60Minor") },
-          d60plus: { count: n("d60plusCount"), amountMinor: n("d60plusMinor") },
+        currency: schoolCurrency,
+        totals: home.totals,
+        aging: home.aging,
+        byCurrency: ordered,
+        pendingApprovals: {
+          count: pending.find((x) => x.currency === schoolCurrency)?.count ?? 0,
+          amountMinor: Number(pending.find((x) => x.currency === schoolCurrency)?.amountMinor ?? 0),
+          byCurrency: pending
+            .map((x) => ({ currency: x.currency, count: Number(x.count), amountMinor: Number(x.amountMinor) }))
+            .sort((a, b) => (a.currency === schoolCurrency ? -1 : b.currency === schoolCurrency ? 1 : a.currency.localeCompare(b.currency))),
         },
-        pendingApprovals: { count: Number(pending[0]?.count ?? 0), amountMinor: Number(pending[0]?.amountMinor ?? 0) },
       };
     });
   }
@@ -512,15 +568,22 @@ export class FeesService {
    * school's lifetime kobo total overflows int4, and int8 comes back as BigInt which
    * the JSON layer cannot serialize. float8 is exact well past any real total.
    */
-  async invoiceSummary(
-    p: Principal,
-  ): Promise<{ outstandingMinor: number; collectedMinor: number; overdueCount: number; currency: string }> {
+  async invoiceSummary(p: Principal): Promise<InvoiceSummaryDto> {
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      const schoolCurrency =
+        (await tx.school.findFirst({ where: { id: p.schoolId }, select: { currency: true } }))?.currency ?? PLATFORM_HOME_CURRENCY;
+      const none: InvoiceSummaryDto = {
+        outstandingMinor: 0,
+        collectedMinor: 0,
+        overdueCount: 0,
+        currency: schoolCurrency,
+        byCurrency: [{ currency: schoolCurrency, outstandingMinor: 0, collectedMinor: 0, overdueCount: 0 }],
+      };
       // Scope first: a parent's summary must cover only their children.
       let studentFilter = Prisma.sql``;
       if (!this.isBillingWide(p)) {
         const ids = await this.visibleStudentIds(tx, p);
-        if (ids.length === 0) return { outstandingMinor: 0, collectedMinor: 0, overdueCount: 0, currency: "NGN" };
+        if (ids.length === 0) return none;
         // = ANY(ARRAY[...]) rather than IN (...): with Prisma.join, `IN (a,b,c)::uuid[]`
         // applies the cast to the LAST element only and Postgres rejects it
         // (42883, uuid = uuid[]). Only the parent-scoped path builds this clause, so
@@ -528,9 +591,10 @@ export class FeesService {
         studentFilter = Prisma.sql`AND i."studentId" = ANY(ARRAY[${Prisma.join(ids)}]::uuid[])`;
       }
 
+      // GROUPED BY CURRENCY — one extra column on the same scan.
       const rows = (await tx.$queryRaw`
         WITH billable AS (
-          SELECT i.id, i."totalMinor", i."dueDate", i.status
+          SELECT i.id, i.currency, i."totalMinor", i."dueDate", i.status
           FROM invoice i
           WHERE i.status IN ('ISSUED', 'PARTIALLY_PAID', 'PAID')
           ${studentFilter}
@@ -542,6 +606,7 @@ export class FeesService {
           GROUP BY p."invoiceId"
         )
         SELECT
+          b.currency,
           COALESCE(SUM(b."totalMinor" - COALESCE(pd.amt, 0)), 0)::float8 AS "outstandingMinor",
           COALESCE(SUM(COALESCE(pd.amt, 0)), 0)::float8                  AS "collectedMinor",
           COUNT(*) FILTER (
@@ -551,16 +616,24 @@ export class FeesService {
           )::int AS "overdueCount"
         FROM billable b
         LEFT JOIN paid pd ON pd."invoiceId" = b.id
-      `) as Array<{ outstandingMinor: number; collectedMinor: number; overdueCount: number }>;
+        GROUP BY b.currency
+      `) as Array<{ currency: string; outstandingMinor: number; collectedMinor: number; overdueCount: number }>;
 
-      const r = rows[0] ?? { outstandingMinor: 0, collectedMinor: 0, overdueCount: 0 };
+      const byCurrency = rows.map((r) => ({
+        currency: r.currency || schoolCurrency,
+        outstandingMinor: Math.round(Number(r.outstandingMinor)),
+        collectedMinor: Math.round(Number(r.collectedMinor)),
+        overdueCount: Number(r.overdueCount),
+      }));
+      // The school's own currency is the headline and is always present, even at
+      // zero — the tiles on /admin and /fees read it as "our money", and
+      // promoting a USD figure into that slot because it happened to be the only
+      // one this term would be the same wrong answer in a new place.
+      const home = byCurrency.find((b) => b.currency === schoolCurrency) ?? none.byCurrency[0];
       return {
-        outstandingMinor: Math.round(r.outstandingMinor),
-        collectedMinor: Math.round(r.collectedMinor),
-        overdueCount: r.overdueCount,
-        // The ledger is single-currency per school in practice; USD invoices are a
-        // per-invoice rail, so the headline figure follows the school's default.
-        currency: "NGN",
+        ...home,
+        currency: schoolCurrency,
+        byCurrency: [home, ...byCurrency.filter((b) => b.currency !== schoolCurrency).sort((a, b) => a.currency.localeCompare(b.currency))],
       };
     });
   }

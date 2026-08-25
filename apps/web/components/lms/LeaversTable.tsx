@@ -33,8 +33,13 @@ export type Leaver = {
   exitedAt: string | null;
   retentionDueAt: string | null;
   dueForReview: boolean;
-  /** What they still owe. The figure the principal decides against. */
+  /** What they still owe IN THE SCHOOL'S OWN CURRENCY. The figure the principal
+   *  decides against. */
   outstandingMinor: number;
+  /** Every currency they owe in. A pupil billed in dollars alongside the
+   *  school's own currency had cents added to kobo and the sum printed under
+   *  one symbol, on the screen where a transcript is released or withheld. */
+  outstandingByCurrency: Array<{ currency: string; outstandingMinor: number }>;
   docsReleased: boolean;
   /** Why they left — captured at the exit and, until now, never shown again. */
   exitKind: string | null;
@@ -152,9 +157,9 @@ export function LeaversTable({
                     figure, and putting them on different screens is how a
                     transcript gets released to somebody who owes a term's fees. */}
                 <td className="px-3 py-2">
-                  {r.outstandingMinor > 0 ? (
+                  {r.outstandingByCurrency.length > 0 ? (
                     <span className="font-medium text-destructive">
-                      {money(r.outstandingMinor, currency)}
+                      {r.outstandingByCurrency.map((b) => money(b.outstandingMinor, b.currency)).join(" · ")}
                     </span>
                   ) : (
                     <span className="text-muted-foreground">Nothing owed</span>

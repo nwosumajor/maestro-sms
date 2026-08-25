@@ -47,6 +47,11 @@ d("FeesService.financeReport aging + totals (real Postgres)", () => {
   const REFUNDED = randomUUID(); // 25_000  -80 days   25_000 - 25_000      d60plus, bal 25_000
   const DRAFT = randomUUID(); //    99_000  +5 days    —                    EXCLUDED
   const CANCELLED = randomUUID(); // 88_000 -5 days    —                    EXCLUDED
+  // A DOLLAR invoice on the USD-via-Stripe rail: $500 billed, $200 paid, 45
+  // days overdue. Its minor units are CENTS. Summed into the naira figures — as
+  // they were before the aggregate was grouped — it read as 50,000 kobo of
+  // extra billing and put 30,000 kobo into the 31-60 bucket.
+  const USD_D45 = randomUUID();
 
   const staff = (): Principal => ({ userId: STAFF, schoolId: SA, roles: ["accountant"], permissions: ["fee.read"] });
   const parent = (): Principal => ({ userId: randomUUID(), schoolId: SA, roles: ["parent"], permissions: ["fee.read"] });
@@ -60,11 +65,11 @@ d("FeesService.financeReport aging + totals (real Postgres)", () => {
     ] as const) {
       await admin.query(`INSERT INTO "user" (id,"schoolId",email,name,"passwordHash","updatedAt") VALUES ($1,$2,$3,$4,'x',now())`, [u, SA, u + "@fr", name]);
     }
-    const inv = async (id: string, ref: string, total: number, dueSql: string, status: string) =>
+    const inv = async (id: string, ref: string, total: number, dueSql: string, status: string, currency = "NGN") =>
       admin.query(
-        `INSERT INTO invoice (id,"schoolId","studentId",reference,status,"totalMinor","dueDate","createdById","updatedAt")
-         VALUES ($1,$2,$3,$4,$5::"InvoiceStatus",$6,${dueSql},$7,now())`,
-        [id, SA, STUDENT, ref, status, total, STAFF],
+        `INSERT INTO invoice (id,"schoolId","studentId",reference,status,currency,"totalMinor","dueDate","createdById","updatedAt")
+         VALUES ($1,$2,$3,$4,$5::"InvoiceStatus",$6,$7,${dueSql},$8,now())`,
+        [id, SA, STUDENT, ref, status, currency, total, STAFF],
       );
     // `now() + interval` lands on a DATE column, so the day arithmetic is exact.
     await inv(CURRENT, "FR-CURRENT", 100_000, "now() + interval '10 days'", "ISSUED");
@@ -75,6 +80,7 @@ d("FeesService.financeReport aging + totals (real Postgres)", () => {
     await inv(REFUNDED, "FR-REFUNDED", 25_000, "now() - interval '80 days'", "ISSUED");
     await inv(DRAFT, "FR-DRAFT", 99_000, "now() + interval '5 days'", "DRAFT");
     await inv(CANCELLED, "FR-CANCELLED", 88_000, "now() - interval '5 days'", "CANCELLED");
+    await inv(USD_D45, "FR-USD-D45", 50_000, "now() - interval '45 days'", "PARTIALLY_PAID", "USD");
 
     const pay = async (invoiceId: string, amount: number, kind: string, status = "POSTED") =>
       admin.query(
@@ -90,6 +96,11 @@ d("FeesService.financeReport aging + totals (real Postgres)", () => {
     // A PENDING_APPROVAL payment must NOT count as collected — it is reported
     // separately so staff can see money parked awaiting a second pair of eyes.
     await pay(D15, 9_000, "PAYMENT", "PENDING_APPROVAL");
+    await pay(USD_D45, 20_000, "PAYMENT"); // $200 of the $500
+    // A dollar payment awaiting approval too — the maker-checker threshold is
+    // judged in the school's own money, so a figure here under the wrong
+    // currency misstates the control rather than merely misprinting it.
+    await pay(USD_D45, 1_500, "PAYMENT", "PENDING_APPROVAL");
 
     const tenant = new PrismaTenantService() as never;
     const auditLog = new AuditLogService();
@@ -132,6 +143,8 @@ d("FeesService.financeReport aging + totals (real Postgres)", () => {
   it("the aging outstanding reconciles with the headline outstanding", async () => {
     const r = await fees.financeReport(staff());
     if (r.scope !== "school") throw new Error("expected school scope");
+    // Within ONE currency. Reconciling across currencies would be adding cents
+    // to kobo, which is the defect these figures were split to avoid.
     const summed =
       r.aging.current.amountMinor + r.aging.d1_30.amountMinor + r.aging.d31_60.amountMinor + r.aging.d60plus.amountMinor;
     // The two are computed by different expressions over the same rows; if the
@@ -142,7 +155,51 @@ d("FeesService.financeReport aging + totals (real Postgres)", () => {
   it("reports money parked awaiting approval separately from collected", async () => {
     const r = await fees.financeReport(staff());
     if (r.scope !== "school") throw new Error("expected school scope");
-    expect(r.pendingApprovals).toEqual({ count: 1, amountMinor: 9_000 });
+    // The headline stays the school's own currency; the dollar one is beside it,
+    // not added to it.
+    expect(r.pendingApprovals).toEqual({
+      count: 1,
+      amountMinor: 9_000,
+      byCurrency: [
+        { currency: "NGN", count: 1, amountMinor: 9_000 },
+        { currency: "USD", count: 1, amountMinor: 1_500 },
+      ],
+    });
+  });
+
+  // ===========================================================================
+  // THE CURRENCY SPLIT
+  // ===========================================================================
+
+  it("keeps the DOLLAR invoice out of every naira figure", async () => {
+    const r = await fees.financeReport(staff());
+    if (r.scope !== "school") throw new Error("expected school scope");
+    // Unchanged by the arrival of a $500 bill: exactly the point. Before the
+    // aggregate was grouped, invoiced went to 365,000 and the 31-60 bucket to
+    // 50,000 — cents counted as kobo, on the screen an accountant reconciles.
+    expect(r.currency).toBe("NGN");
+    expect(r.totals.invoicedMinor).toBe(315_000);
+    expect(r.aging.d31_60).toEqual({ count: 1, amountMinor: 20_000 });
+  });
+
+  it("reports the dollar ledger as its own block, aging and all", async () => {
+    const r = await fees.financeReport(staff());
+    if (r.scope !== "school") throw new Error("expected school scope");
+    const usd = r.byCurrency.find((b) => b.currency === "USD");
+    expect(usd?.totals).toEqual({ invoicedMinor: 50_000, collectedMinor: 20_000, outstandingMinor: 30_000 });
+    expect(usd?.aging.d31_60).toEqual({ count: 1, amountMinor: 30_000 });
+    expect(usd?.aging.current).toEqual({ count: 0, amountMinor: 0 });
+  });
+
+  it("puts the school's OWN currency first, and never promotes another into that slot", async () => {
+    const r = await fees.financeReport(staff());
+    if (r.scope !== "school") throw new Error("expected school scope");
+    // The page reads `totals`/`aging` as "our money". If a school happened to
+    // raise only dollar invoices this term, a naive "first row wins" would put
+    // USD there and every tile would silently change meaning.
+    expect(r.byCurrency[0].currency).toBe("NGN");
+    expect(r.byCurrency[0].totals).toEqual(r.totals);
+    expect(r.byCurrency.map((b) => b.currency)).toEqual(["NGN", "USD"]);
   });
 
   it("returns numbers, never a BigInt — the JSON layer cannot serialize one", async () => {

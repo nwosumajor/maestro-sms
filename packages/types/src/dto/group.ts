@@ -104,6 +104,16 @@ export interface GroupOverviewDto {
 export interface GroupTrendPointDto {
   /** YYYY-MM. */
   month: string;
+  /**
+   * Collected that month, in the campus's OWN currency — see `trendCurrency`.
+   *
+   * It used to sum `payment.amountMinor` across every currency, in the same
+   * file whose `moneyByCampus` joins through to the invoice and explains why:
+   * "a payment carries no currency of its own — it inherits its INVOICE's ...
+   * precisely the assumption that made the old totals wrong". One line drawn
+   * on a chart cannot be two currencies, so this one is restricted rather than
+   * split; the per-currency figures are on the campus's money block.
+   */
   collectedMinor: number;
   attendancePct: number | null;
 }
@@ -127,6 +137,8 @@ export interface GroupSchoolDetailDto {
   classes: number;
   /** Last 6 months, oldest first. */
   trend: GroupTrendPointDto[];
+  /** The currency `trend[].collectedMinor` is drawn in: the campus's own. */
+  trendCurrency: string;
   /** Invoice counts by status — where the money is stuck. */
   invoicesByStatus: Record<string, number>;
   money: GroupMoneyDto[];

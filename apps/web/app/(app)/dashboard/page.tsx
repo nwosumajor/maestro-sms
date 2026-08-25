@@ -241,13 +241,23 @@ export default async function DashboardPage() {
       sub: isFamily ? "your record" : "school-wide",
       href: linkIf("attendance.read", "/attendance"),
     });
-  if (overview?.fees && can("fee.read"))
+  if (overview?.fees && can("fee.read")) {
+    // THE SCHOOL'S OWN CURRENCY. Bare `money()` falls back to the platform's,
+    // so every school's headline fee figure on the first screen after login was
+    // printed in naira. `overview.fees.*` are the school-currency figures; any
+    // other currency the ledger holds is named in the subtitle rather than
+    // folded into the number, because there is no rate here to fold it with.
+    const f = overview.fees;
+    const other = f.byCurrency.filter((b) => b.currency !== f.currency && b.outstandingMinor !== 0);
     stats.push({
       label: "Fees outstanding",
-      value: money(overview.fees.outstandingMinor),
-      sub: `${money(overview.fees.collectedMinor)} collected`,
+      value: money(f.outstandingMinor, f.currency),
+      sub:
+        `${money(f.collectedMinor, f.currency)} collected` +
+        (other.length > 0 ? ` · also ${other.map((b) => money(b.outstandingMinor, b.currency)).join(" · ")}` : ""),
       href: linkIf("fee.read", "/fees"),
     });
+  }
   if (overview?.grades?.averagePct != null && isFamily)
     stats.push({
       label: "Grade average",

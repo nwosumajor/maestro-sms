@@ -57,10 +57,16 @@ d("AnalyticsService.overview grade-band aggregate (real Postgres)", () => {
   // DRAFT + CANCELLED are excluded from the aggregate entirely; the
   // PENDING_APPROVAL payment must never count; the REFUND subtracts.
   const invoices = [
-    { ref: "INV-1", student: S1, total: 50_000, status: "ISSUED" }, // payments: +20k POSTED, -5k REFUND, 7,777 PENDING_APPROVAL
-    { ref: "INV-2", student: S2, total: 30_000, status: "PAID" }, // payment: +30k POSTED
-    { ref: "INV-3", student: S2, total: 999_999, status: "DRAFT" }, // excluded
-    { ref: "INV-4", student: S1, total: 888_888, status: "CANCELLED" }, // excluded
+    { ref: "INV-1", student: S1, total: 50_000, status: "ISSUED", currency: "NGN" }, // payments: +20k POSTED, -5k REFUND, 7,777 PENDING_APPROVAL
+    { ref: "INV-2", student: S2, total: 30_000, status: "PAID", currency: "NGN" }, // payment: +30k POSTED
+    { ref: "INV-3", student: S2, total: 999_999, status: "DRAFT", currency: "NGN" }, // excluded
+    { ref: "INV-4", student: S1, total: 888_888, status: "CANCELLED", currency: "NGN" }, // excluded
+    // A DOLLAR invoice for the parent's own child, on the USD-via-Stripe rail
+    // this platform bills international families through. $100 billed, $40
+    // paid. Its minor units are CENTS: added to the naira line above it would
+    // read as 10,000 kobo of extra billing and 4,000 kobo of extra collection,
+    // which is exactly what the ungrouped aggregate did.
+    { ref: "INV-5", student: S1, total: 10_000, status: "ISSUED", currency: "USD" },
   ];
 
   // Two extra students exist ONLY to give the demographics aggregate variety
@@ -122,9 +128,9 @@ d("AnalyticsService.overview grade-band aggregate (real Postgres)", () => {
     for (const inv of invoices) {
       invoiceIds[inv.ref] = randomUUID();
       await admin.query(
-        `INSERT INTO invoice (id,"schoolId","studentId",reference,status,"totalMinor","dueDate","createdById","updatedAt")
-         VALUES ($1,$2,$3,$4,$5,$6,now(),$7,now())`,
-        [invoiceIds[inv.ref], SA, inv.student, inv.ref, inv.status, inv.total, STAFF],
+        `INSERT INTO invoice (id,"schoolId","studentId",reference,status,currency,"totalMinor","dueDate","createdById","updatedAt")
+         VALUES ($1,$2,$3,$4,$5,$6,$7,now(),$8,now())`,
+        [invoiceIds[inv.ref], SA, inv.student, inv.ref, inv.status, inv.currency, inv.total, STAFF],
       );
     }
     const payments = [
@@ -132,6 +138,7 @@ d("AnalyticsService.overview grade-band aggregate (real Postgres)", () => {
       { inv: "INV-1", amount: 5_000, kind: "REFUND", status: "POSTED" },
       { inv: "INV-1", amount: 7_777, kind: "PAYMENT", status: "PENDING_APPROVAL" }, // must not count
       { inv: "INV-2", amount: 30_000, kind: "PAYMENT", status: "POSTED" },
+      { inv: "INV-5", amount: 4_000, kind: "PAYMENT", status: "POSTED" }, // $40 against the $100 bill
     ];
     for (const pay of payments) {
       await admin.query(
@@ -183,14 +190,52 @@ d("AnalyticsService.overview grade-band aggregate (real Postgres)", () => {
 
   it("fees school-wide (staff): sums billable invoices + POSTED payments only; DRAFT/CANCELLED/PENDING_APPROVAL excluded, REFUND subtracts", async () => {
     const out = await svc.overview(staff());
-    // Billable: INV-1 (50k) + INV-2 (30k). Collected: 20k - 5k refund + 30k = 45k.
-    expect(out.fees).toEqual({ invoicedMinor: 80_000, collectedMinor: 45_000, outstandingMinor: 35_000, invoices: 2 });
+    // The headline figures are the SCHOOL'S OWN CURRENCY and nothing else.
+    // Billable NGN: INV-1 (50k) + INV-2 (30k). Collected: 20k - 5k refund + 30k.
+    // The $100 invoice is NOT in these numbers — before the aggregate was
+    // grouped it added 10,000 to invoiced and 4,000 to collected, as though
+    // cents were kobo.
+    expect(out.fees).toEqual({
+      currency: "NGN",
+      invoicedMinor: 80_000,
+      collectedMinor: 45_000,
+      outstandingMinor: 35_000,
+      invoices: 2,
+      byCurrency: [
+        { currency: "NGN", invoicedMinor: 80_000, collectedMinor: 45_000, outstandingMinor: 35_000, invoices: 2 },
+        { currency: "USD", invoicedMinor: 10_000, collectedMinor: 4_000, outstandingMinor: 6_000, invoices: 1 },
+      ],
+    });
   });
 
-  it("fees family-scoped (parent): only their own child's invoices", async () => {
+  it("fees family-scoped (parent): only their own child's invoices, still split by currency", async () => {
     const out = await svc.overview(parent());
     // S1 only: INV-1 (50k billable; CANCELLED INV-4 excluded). Collected: 20k - 5k.
-    expect(out.fees).toEqual({ invoicedMinor: 50_000, collectedMinor: 15_000, outstandingMinor: 35_000, invoices: 1 });
+    // Plus their DOLLAR bill, reported as dollars.
+    expect(out.fees).toEqual({
+      currency: "NGN",
+      invoicedMinor: 50_000,
+      collectedMinor: 15_000,
+      outstandingMinor: 35_000,
+      invoices: 1,
+      byCurrency: [
+        { currency: "NGN", invoicedMinor: 50_000, collectedMinor: 15_000, outstandingMinor: 35_000, invoices: 1 },
+        { currency: "USD", invoicedMinor: 10_000, collectedMinor: 4_000, outstandingMinor: 6_000, invoices: 1 },
+      ],
+    });
+  });
+
+  it("the CSV names the currency on every money row", async () => {
+    // A board pack that says "Invoiced (minor) 80000" and leaves the reader to
+    // guess is a figure nobody can reconcile — and for a school billing in two
+    // currencies it was not a guess anybody could make.
+    const { csv } = await svc.overviewCsv(staff());
+    // Cells are quoted by the shared formula-injection guard.
+    expect(csv).toContain('"Fees","Invoiced (minor, NGN)","80000"');
+    expect(csv).toContain('"Fees","Invoiced (minor, USD)","10000"');
+    expect(csv).toContain('"Fees","Collected (minor, USD)","4000"');
+    // The unlabelled row must not come back.
+    expect(csv).not.toContain('"Invoiced (minor)"');
   });
 
   it("demographics (staff): buckets in Postgres — merges raw genders, blank state → Unknown, NULL DOB → Unknown age band", async () => {

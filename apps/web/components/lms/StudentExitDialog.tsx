@@ -27,6 +27,8 @@ type Preview = {
   classNames: string[];
   outstandingMinor: number;
   currency: string;
+  /** Every currency the pupil owes in, the school's own first. */
+  outstandingByCurrency: Array<{ currency: string; outstandingMinor: number }>;
   unreturnedBooks: string[];
   alreadyExited: boolean;
 };
@@ -133,8 +135,17 @@ export function StudentExitDialog({
                   </div>
                   <div className="flex justify-between gap-4 border-b border-border px-3 py-2">
                     <dt className="text-muted-foreground">Fees still outstanding</dt>
+                    {/* Every currency the pupil owes in, listed. The single
+                        figure this replaces summed them and wore the school's
+                        currency as a label — on the screen where somebody signs
+                        off a departure and the family's last chance to settle. */}
                     <dd className="text-right font-medium">
-                      {money(preview.outstandingMinor, preview.currency)}
+                      {preview.outstandingByCurrency.some((b) => b.outstandingMinor > 0)
+                        ? preview.outstandingByCurrency
+                            .filter((b) => b.outstandingMinor > 0)
+                            .map((b) => money(b.outstandingMinor, b.currency))
+                            .join(" · ")
+                        : money(0, preview.currency)}
                     </dd>
                   </div>
                   {/* Books are NOT closed by the exit — a pupil leaving does not
@@ -159,7 +170,9 @@ export function StudentExitDialog({
                   </p>
                 )}
 
-                {preview.outstandingMinor > 0 && (
+                {/* ANY currency, not just the school's own: a family that owes
+                    only dollars owes money, and the approver must be told. */}
+                {preview.outstandingByCurrency.some((b) => b.outstandingMinor > 0) && (
                   // A SIGNAL, never a block. A school that cannot release a
                   // leaver over a debt has a data-protection problem, not a
                   // collections one — so this informs the approver and stops

@@ -208,6 +208,10 @@ model Payment {
   // Write cost of carrying it, measured over 21,600 inserts (median of 3):
   // 1,697ms -> 1,766ms, about +4%.
   @@index([invoiceId])
+  // The take-rate report. PARTIAL on `platformFeeMinor > 0 AND status = 'POSTED'`,
+  // which Prisma cannot express — declared here for visibility and created by
+  // migration `20270105000000_platform_fee_revenue_index`, which carries the
+  // measurement (60.0ms -> 12.7ms on 404,517 payments over five years).
   @@map("payment")
 }
 

@@ -174,6 +174,30 @@ export interface OperatorRevenueTotalDto {
   abandonedCount: number;
 }
 
+/**
+ * What the platform earned from FEE COLLECTION, per currency.
+ *
+ * The take-rate (`platform_fee_config`: flat + basis points, capped, borne by
+ * the parent) is computed at checkout and stamped onto every settled online
+ * payment as `payment.platformFeeMinor`. It was WRITTEN and read by nothing —
+ * no DTO, no endpoint, no screen mentioned the column — so the revenue lever
+ * the whole fee rail exists to earn was invisible to the person who set its
+ * rate. Subscriptions had a ledger; the other half of the platform's income
+ * did not.
+ *
+ * A payment carries no currency of its own: it inherits its INVOICE's, which is
+ * why this joins rather than assuming.
+ */
+export interface OperatorFeeRevenueDto {
+  currency: string;
+  /** The platform's cut, in minor units of `currency`. */
+  feeMinor: number;
+  /** Settled payments that carried a cut — not every payment does. */
+  payments: number;
+  /** What the parents paid in total, for the rate this cut represents. */
+  collectedMinor: number;
+}
+
 /** The operator payments screen: one page of rows + totals for the WHOLE filter,
  *  not just the visible page. */
 export interface OperatorPaymentPageDto {
@@ -183,6 +207,8 @@ export interface OperatorPaymentPageDto {
   total: number;
   /** Totals over every row matching the filter, split by currency. */
   totals: OperatorRevenueTotalDto[];
+  /** Fee-collection take-rate over the same date range, per currency. */
+  feeRevenue: OperatorFeeRevenueDto[];
 }
 
 // --- message credits: the school's own ledger ------------------------------ //

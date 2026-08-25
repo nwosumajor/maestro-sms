@@ -29,11 +29,17 @@ export default async function FinanceReportsPage() {
   ]);
   if (!r || r.scope !== "school") redirect("/fees");
 
-  const ageRows: [string, Bucket][] = [
-    ["Current (not overdue)", r.aging!.current],
-    ["1–30 days overdue", r.aging!.d1_30],
-    ["31–60 days overdue", r.aging!.d31_60],
-    ["60+ days overdue", r.aging!.d60plus],
+  // ONE BLOCK PER CURRENCY, the school's own first. An invoice carries its own
+  // currency, so the ungrouped totals this replaces added kobo to cents and
+  // every figure on the page was drawn under the platform's currency whatever
+  // the school billed in. Nearly every school has exactly one block and the page
+  // looks unchanged.
+  const blocks = r.byCurrency ?? [];
+  const ageRowsOf = (b: (typeof blocks)[number]): [string, Bucket][] => [
+    ["Current (not overdue)", b.aging.current],
+    ["1–30 days overdue", b.aging.d1_30],
+    ["31–60 days overdue", b.aging.d31_60],
+    ["60+ days overdue", b.aging.d60plus],
   ];
 
   return (
@@ -96,34 +102,52 @@ export default async function FinanceReportsPage() {
           <CardContent><FeeReminderButton /></CardContent>
         </Card>
 
-        <div className="grid gap-4 sm:grid-cols-3">
-          <Card><CardHeader><CardDescription>Invoiced</CardDescription><CardTitle className="text-2xl">{money(r.totals!.invoicedMinor)}</CardTitle></CardHeader></Card>
-          <Card><CardHeader><CardDescription>Collected</CardDescription><CardTitle className="text-2xl">{money(r.totals!.collectedMinor)}</CardTitle></CardHeader></Card>
-          <Card><CardHeader><CardDescription>Outstanding</CardDescription><CardTitle className="text-2xl">{money(r.totals!.outstandingMinor)}</CardTitle></CardHeader></Card>
-        </div>
+        {blocks.map((b) => (
+          <div key={b.currency} className="space-y-4">
+            {blocks.length > 1 && (
+              <h2 className="text-sm font-semibold text-muted-foreground">
+                {b.currency}
+                {b.currency === r.currency ? " (the school's own currency)" : ""}
+              </h2>
+            )}
+            <div className="grid gap-4 sm:grid-cols-3">
+              <Card><CardHeader><CardDescription>Invoiced</CardDescription><CardTitle className="text-2xl">{money(b.totals.invoicedMinor, b.currency)}</CardTitle></CardHeader></Card>
+              <Card><CardHeader><CardDescription>Collected</CardDescription><CardTitle className="text-2xl">{money(b.totals.collectedMinor, b.currency)}</CardTitle></CardHeader></Card>
+              <Card><CardHeader><CardDescription>Outstanding</CardDescription><CardTitle className="text-2xl">{money(b.totals.outstandingMinor, b.currency)}</CardTitle></CardHeader></Card>
+            </div>
 
-        <Card>
-          <CardHeader><CardTitle className="text-base">Receivables aging</CardTitle></CardHeader>
-          <CardContent className="p-0">
-            <table className="w-full text-sm">
-              <tbody>
-                {ageRows.map(([label, b]) => (
-                  <tr key={label} className="border-b border-border last:border-0">
-                    <td className="px-4 py-2.5">{label}</td>
-                    <td className="px-4 py-2.5 text-muted-foreground">{b.count} invoice{b.count === 1 ? "" : "s"}</td>
-                    <td className="px-4 py-2.5 text-right font-medium">{money(b.amountMinor)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </CardContent>
-        </Card>
+            <Card>
+              <CardHeader><CardTitle className="text-base">Receivables aging{blocks.length > 1 ? ` · ${b.currency}` : ""}</CardTitle></CardHeader>
+              <CardContent className="p-0">
+                <table className="w-full text-sm">
+                  <tbody>
+                    {ageRowsOf(b).map(([label, bucket]) => (
+                      <tr key={label} className="border-b border-border last:border-0">
+                        <td className="px-4 py-2.5">{label}</td>
+                        <td className="px-4 py-2.5 text-muted-foreground">{bucket.count} invoice{bucket.count === 1 ? "" : "s"}</td>
+                        <td className="px-4 py-2.5 text-right font-medium">{money(bucket.amountMinor, b.currency)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </CardContent>
+            </Card>
+          </div>
+        ))}
 
-        {r.pendingApprovals!.count > 0 && (
+        {(r.pendingApprovals?.byCurrency ?? []).filter((x) => x.count > 0).length > 0 && (
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Awaiting approval (maker-checker)</CardTitle>
-              <CardDescription>{r.pendingApprovals!.count} payment(s), {money(r.pendingApprovals!.amountMinor)}</CardDescription>
+              <CardDescription>
+                {/* The threshold is judged in the school's OWN money, so a
+                    figure here labelled with the wrong currency misstates the
+                    control rather than merely misprinting it. */}
+                {r.pendingApprovals!.byCurrency
+                  .filter((x) => x.count > 0)
+                  .map((x) => `${x.count} payment${x.count === 1 ? "" : "s"}, ${money(x.amountMinor, x.currency)}`)
+                  .join(" · ")}
+              </CardDescription>
             </CardHeader>
           </Card>
         )}

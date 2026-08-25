@@ -13,6 +13,7 @@
 import { BadRequestException, Injectable, Logger, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { Inject } from "@nestjs/common";
 import { prisma } from "@sms/db";
+import { PLATFORM_HOME_CURRENCY } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -147,18 +148,48 @@ export class GrowthService {
     return this.client().promoCode.findFirst({ where: { id } });
   }
 
+  /**
+   * Agents with what they are owed, PER CURRENCY.
+   *
+   * `agent_commission` has carried a `currency` column since it was created,
+   * because a subscription settles in naira through Paystack or in dollars
+   * through Stripe and the commission accrues on that charge. The aggregate
+   * grouped by `["agentId", "status"]` and dropped it, so an agent with one
+   * Nigerian school and one American one had kobo added to cents — the same
+   * defect the operator revenue ledger beside this one refuses by design ("money
+   * is NEVER summed across currencies ... the shape of the answer is what stops
+   * the mistake being reintroduced"). This is a payout figure: somebody is paid
+   * it.
+   *
+   * Grouping by one more column costs nothing — same scan, same round trip.
+   */
   async listAgents() {
     const client = this.client();
     const agents = await client.agent.findMany({ orderBy: { createdAt: "desc" } });
-    const sums = await client.agentCommission.groupBy({
-      by: ["agentId", "status"],
-      _sum: { amountMinor: true },
+    // reason: groupBy's generated overload cannot express a three-column `by`
+    // here; the argument shape is correct and the RESULT is typed on the line
+    // below — the same treatment `OperatorPaymentsService.totals` uses.
+    const groupBy = client.agentCommission.groupBy as unknown as (
+      args: Record<string, unknown>,
+    ) => Promise<Array<{ agentId: string; status: string; currency: string; _sum: { amountMinor: number | null } }>>;
+    const sums = await groupBy({ by: ["agentId", "status", "currency"], _sum: { amountMinor: true } });
+    return agents.map((a) => {
+      const mine = sums.filter((s) => s.agentId === a.id);
+      const byCurrency = [...new Set(mine.map((s) => s.currency))]
+        .sort()
+        .map((currency) => ({
+          currency,
+          accruedMinor: mine.find((s) => s.currency === currency && s.status === "ACCRUED")?._sum.amountMinor ?? 0,
+          paidOutMinor: mine.find((s) => s.currency === currency && s.status === "PAID_OUT")?._sum.amountMinor ?? 0,
+        }));
+      // An agent with no commissions still reads as a row, in the platform's own
+      // currency — an empty list would render as nothing at all where a zero
+      // belongs.
+      return {
+        ...a,
+        byCurrency: byCurrency.length > 0 ? byCurrency : [{ currency: PLATFORM_HOME_CURRENCY, accruedMinor: 0, paidOutMinor: 0 }],
+      };
     });
-    return agents.map((a) => ({
-      ...a,
-      accruedMinor: sums.find((s) => s.agentId === a.id && s.status === "ACCRUED")?._sum.amountMinor ?? 0,
-      paidOutMinor: sums.find((s) => s.agentId === a.id && s.status === "PAID_OUT")?._sum.amountMinor ?? 0,
-    }));
   }
 
   async createAgent(p: Principal, input: { name: string; email: string; code: string; commissionBp: number }) {

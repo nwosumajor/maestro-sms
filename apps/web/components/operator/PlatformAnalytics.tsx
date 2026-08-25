@@ -58,7 +58,15 @@ export function PlatformAnalytics({ data }: { data: Serialized<PlatformAnalytics
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Kpi label="Monthly recurring revenue" value={money(data.mrr.totalMinor)} sub={`${data.mrr.payingSchools} paying schools`} />
         <Kpi label="Avg revenue / school" value={money(data.mrr.arpaMinor)} sub="per month (ARPA)" />
-        <Kpi label="Revenue · all time" value={money(data.revenue.paidTotalMinor)} sub={`${money(data.revenue.last30dMinor)} last 30d`} />
+        {/* HOME CURRENCY, named rather than defaulted: these figures deliberately
+            EXCLUDE money taken in other currencies, which lives per-currency on
+            /operator/payments. Saying so on the card is the difference between a
+            figure that is understated and one that is wrong. */}
+        <Kpi
+          label={`Revenue · all time (${data.revenue.currency})`}
+          value={money(data.revenue.paidTotalMinor, data.revenue.currency)}
+          sub={`${money(data.revenue.last30dMinor, data.revenue.currency)} last 30d · other currencies on the payments ledger`}
+        />
         <Kpi label="Customer schools" value={data.schools.total.toLocaleString()} sub={`${data.people.students.toLocaleString()} students · ${data.people.staff.toLocaleString()} staff`} />
       </div>
 
@@ -215,7 +223,11 @@ export function PlatformAnalytics({ data }: { data: Serialized<PlatformAnalytics
                       <tr key={i} className="border-b border-border/50">
                         <td className="py-1.5 pr-3">{pay.schoolName}</td>
                         <td className="py-1.5 pr-3 text-muted-foreground">{pay.plan}</td>
-                        <td className="tnum py-1.5 pr-3 text-right font-medium">{money(pay.amountMinor)}</td>
+                        {/* THE ROW'S OWN CURRENCY. This preview lists individual
+                            payments, so a dollar renewal legitimately appears in
+                            it — and rendered under a naira sign until the row
+                            started carrying the currency it was charged in. */}
+                        <td className="tnum py-1.5 pr-3 text-right font-medium">{money(pay.amountMinor, pay.currency)}</td>
                         <td className="py-1.5 text-muted-foreground">{shortDate(pay.createdAt)}</td>
                       </tr>
                     ))}

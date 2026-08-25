@@ -76,7 +76,11 @@ export default async function GroupSchoolPage({ params }: { params: { schoolId: 
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">Last six months</CardTitle>
-                <CardDescription>Collections and attendance, month by month.</CardDescription>
+                <CardDescription>
+                  Collections and attendance, month by month. Collections are the campus&apos;s own currency
+                  ({s.trendCurrency}) — one line cannot be two currencies, and anything billed in another is on the
+                  money figures above.
+                </CardDescription>
               </CardHeader>
               <CardContent className="p-0">
                 <table className="w-full text-sm">
@@ -92,7 +96,9 @@ export default async function GroupSchoolPage({ params }: { params: { schoolId: 
                       <tr key={t.month} className="border-b last:border-0">
                         <td className="px-4 py-2.5">{t.month}</td>
                         <td className="tnum px-4 py-2.5 text-right">
-                          {money(t.collectedMinor, s.money[0]?.currency ?? "NGN")}
+                          {/* The currency the API restricted the trend TO, not
+                              whichever money block happened to sort first. */}
+                          {money(t.collectedMinor, s.trendCurrency)}
                         </td>
                         <td className="tnum px-4 py-2.5 text-right">
                           {t.attendancePct == null ? (

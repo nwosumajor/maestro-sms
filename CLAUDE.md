@@ -1796,6 +1796,85 @@ closed the window early and the test went red while the property it guards was
 untouched. Now anchored to the method by name — and mutation-validated, which
 the accidental version never was.
 
+### A total that added two currencies, on six screens at once
+The user asked whether the accountant's and the platform owner's dashboards
+report naira and dollar fees accurately. They did not, and the reasoning had
+already been written down THREE times in this codebase by somebody who had met
+the same bug elsewhere:
+- `group.service.ts`: "a payment carries no currency of its own — it inherits
+  its INVOICE's. So the collected figures join through to the invoice rather
+  than assuming NGN, **which is precisely the assumption that made the old
+  totals wrong**."
+- `operator-payments.service.ts`: "money is NEVER summed across currencies …
+  **the shape of the answer is what stops the mistake being reintroduced**."
+- `platform-analytics.service.ts`: "kobo added to cents … **a bug with a start
+  date**."
+Each was fixed where it hurt. Six siblings were live:
+**ACCOUNTANT.** `invoiceSummary` (/fees and /admin) summed every currency AND
+returned the literal `currency: "NGN"` — so a Ghanaian school read its own
+receivables labelled in naira. `AnalyticsService`'s fees block was an ungrouped
+SUM, rendered by a KPI card calling bare `money()` **directly above a chart that
+had already been corrected to the school's currency** — one page disagreeing
+with itself. `financeReport` (/fees/reports) summed totals, four aging buckets
+and pending approvals. The analytics CSV exported `Invoiced (minor)` with no
+currency at all, into a board pack.
+**PLATFORM OWNER.** `listAgents` grouped commissions by `["agentId","status"]`
+and dropped the `currency` column the table has always carried — a PAYOUT
+figure, kobo plus cents. The operator dashboard's six-month revenue TREND added
+every currency **twenty-five lines below the loop that deliberately does not**,
+and `recentPayments` shipped an amount with no currency for the screen to guess
+at. `student-exit` summed a leaver's invoices two ways, on the screen where a
+transcript is released or withheld. The group console's per-campus monthly trend
+summed across currencies **in the same file whose `moneyByCampus` gets it right
+and says why**.
+Fix: every aggregate now returns a currency with the money. The SCHOOL's own
+currency leads and is ALWAYS PRESENT even at zero — the tiles read that slot as
+"our money", and promoting a USD figure into it because it happened to be the
+only one this term is the same wrong answer in a new place. `byCurrency` carries
+the rest; nothing is converted, because there is no FX rate here and inventing
+one would be worse, the decision `school.paymentApprovalThresholdMinor` already
+records. A single-currency school — nearly all of them — reads exactly what it
+read before. Efficiency: grouping is one more column on the same scan, one round
+trip, no new query.
+**THE TAKE-RATE WAS WRITTEN AND READ BY NOTHING.** `payment.platformFeeMinor` is
+stamped on every settled online payment by the settlement path, and the string
+appears in ZERO web files, ZERO DTOs and ZERO endpoints — the owner who sets the
+rate had no way to see what it earned. Subscriptions had a ledger; the lever the
+whole fee rail exists to monetise did not. Now `OperatorFeeRevenueDto`, per
+currency (joining through the invoice), on /operator/payments. Only the DATE
+RANGE of the filter applies: plan, status and school search describe SUBSCRIPTION
+payments, and reinterpreting them would move the figure for reasons its label
+does not explain. Measured as `postgres` — correct HERE and only here, because
+this read runs on the PRIVILEGED client which bypasses RLS — on 404,517 payments
+over five years: 30-day report **60.0 ms Parallel Seq Scan -> 12.7 ms Bitmap
+Index Scan** with a PARTIAL index on `("createdAt") WHERE platformFeeMinor > 0
+AND status = 'POSTED'` (migration `20270105000000`). The LIFETIME figure still
+seq-scans at 80 ms and correctly so — it wants most of the table — which is
+recorded rather than papered over, because that one grows with the platform's
+age. // GOTCHA: the first fixture packed 400k payments into a 120-hour window,
+so a 30-day range selected nearly all of them and measured the wrong thing;
+redistributed over five years it is 1.2% of the table. Same trap as the invoice
+index.
+Gate: `a-money-total-says-what-currency-it-is.spec.ts`, and **it found the
+sixth and seventh sites itself** (the group trend and the leavers list) after I
+had written a false exemption claiming the leaver balance was already
+per-invoice. // GOTCHA, three false negatives, each caught ONLY by mutating the
+fix the gate exists for: (1) matching `GROUP BY … currency` missed `GROUP BY 1,
+2`, which three of them write; (2) reading "everything before the first FROM"
+reads the first CTE, not the answer — `financeReport` opens `WITH billable AS
+(SELECT id, currency, …)`, so deleting the currency from the final SELECT left
+it green; (3) the per-invoice escape hatch matched a `net` CTE's internal
+`GROUP BY invoiceId` inside every statement, so the hatch covered everything.
+It now walks to the LAST `SELECT` at paren depth zero. // GOTCHA on the Prisma
+half: `groupBy` is aliased through `as unknown as (args) => Promise<Array<{ …
+currency … }>>` because the generated overload cannot express a three-column
+`by` — so reading the call after `x.groupBy(` reads the TYPE ANNOTATION, which
+names `currency` whatever the `by` list says. Aliases are resolved to where they
+are INVOKED. Exemptions are COUNTED, not named: a bare file-level pass is what
+let `money-is-not-divided-by-a-hundred`'s GrowthManager entry — granted for
+`commissionBp / 100` — quietly cover a `minor / 100` money formatter that landed
+later. That formatter is gone too.
+
 ### A credit balance was a number, with nothing said of what money it was
 Found by RUNNING a path that had never executed: `student_credit_entry` had
 zero rows, so prepay, overpayment and apply-credit had never once been

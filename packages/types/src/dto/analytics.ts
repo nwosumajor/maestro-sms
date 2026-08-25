@@ -23,7 +23,32 @@ export interface AnalyticsOverviewDto {
     total: number;
     ratePct: number | null;
   };
-  fees?: { invoicedMinor: number; collectedMinor: number; outstandingMinor: number; invoices: number };
+  /**
+   * Fees, in the SCHOOL's own currency, with every other currency beside it.
+   *
+   * The top-level figures used to be an ungrouped SUM over every billable
+   * invoice, so a school billing USD alongside its local currency had cents
+   * added to its kobo — and the KPI card rendering them called bare `money()`,
+   * which labels every school's total in naira. (The chart directly beneath it
+   * had already been fixed to use the school's currency; the card above it had
+   * not, which is how one page came to disagree with itself.)
+   */
+  fees?: {
+    /** The school's own currency: what the four figures below are denominated in. */
+    currency: string;
+    invoicedMinor: number;
+    collectedMinor: number;
+    outstandingMinor: number;
+    invoices: number;
+    /** Every currency the billable set holds, the school's own first. */
+    byCurrency: Array<{
+      currency: string;
+      invoicedMinor: number;
+      collectedMinor: number;
+      outstandingMinor: number;
+      invoices: number;
+    }>;
+  };
   /** Published-grade distribution by band (A≥70 · B 60–69 · C 50–59 · D 45–49 · F<45). */
   /**
    * The distribution over the SCHOOL'S OWN grade scale — one entry per band it

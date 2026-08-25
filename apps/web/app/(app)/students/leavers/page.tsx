@@ -30,6 +30,9 @@ type Leaver = {
   retentionDueAt: string | null;
   dueForReview: boolean;
   outstandingMinor: number;
+  /** Per currency — a pupil can owe in more than one, and there is no rate here
+   *  to add them with. */
+  outstandingByCurrency: Array<{ currency: string; outstandingMinor: number }>;
   docsReleased: boolean;
   exitKind: string | null;
   exitReason: string | null;

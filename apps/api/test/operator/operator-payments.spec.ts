@@ -21,12 +21,15 @@ function makeService(opts: {
   grouped?: Array<Record<string, unknown>>;
   rows?: Array<Record<string, unknown>>;
   schools?: Array<{ id: string; name: string }>;
+  /** Rows the take-rate aggregate comes back with, one per currency. */
+  feeRows?: Array<Record<string, unknown>>;
   noClient?: boolean;
 }) {
   const groupBy = jest.fn().mockResolvedValue(opts.grouped ?? []);
   const findMany = jest.fn().mockResolvedValue(opts.rows ?? []);
   const count = jest.fn().mockResolvedValue((opts.rows ?? []).length);
   const schoolFindMany = jest.fn().mockResolvedValue(opts.schools ?? []);
+  const queryRaw = jest.fn().mockResolvedValue(opts.feeRows ?? []);
   const audit = { record: jest.fn() };
   const svc = Object.create(OperatorPaymentsService.prototype) as OperatorPaymentsService;
   Object.assign(svc, {
@@ -38,10 +41,11 @@ function makeService(opts: {
         : {
             platformSubscriptionPayment: { groupBy, findMany, count },
             school: { findMany: schoolFindMany },
+            $queryRaw: queryRaw,
           },
     },
   });
-  return { svc, groupBy, findMany, count, schoolFindMany, audit };
+  return { svc, groupBy, findMany, count, schoolFindMany, queryRaw, audit };
 }
 
 const paid = (currency: string, sum: number, n: number) => ({
@@ -49,6 +53,55 @@ const paid = (currency: string, sum: number, n: number) => ({
   status: "PAID",
   _sum: { amountMinor: sum },
   _count: { _all: n },
+});
+
+describe("the take-rate on fee collection — the other half of the income", () => {
+  // `payment.platformFeeMinor` is stamped onto every settled online fee payment
+  // by the settlement path. It was WRITTEN AND READ BY NOTHING: no DTO, no
+  // endpoint and no screen in the product mentioned the column, so the owner
+  // who sets the rate had no way to see what it earned. Subscriptions had a
+  // ledger; the lever the whole fee rail exists to monetise did not.
+  it("comes back per currency, like every other money figure here", async () => {
+    const { svc } = makeService({
+      feeRows: [
+        { currency: "NGN", feeMinor: 4_812_500, payments: 3_210, collectedMinor: 320_833_333 },
+        { currency: "GHS", feeMinor: 91_400, payments: 61, collectedMinor: 6_093_333 },
+      ],
+    });
+    const out = await svc.list(OPERATOR, {});
+    expect(out.feeRevenue.map((f) => [f.currency, f.feeMinor])).toEqual([
+      ["NGN", 4_812_500],
+      ["GHS", 91_400],
+    ]);
+    // A payment inherits its INVOICE's currency; assuming naira would have
+    // reported a Ghanaian school's cedi cut as naira and added it to the naira
+    // line. Nothing carries the sum.
+    expect(JSON.stringify(out.feeRevenue)).not.toContain(String(4_812_500 + 91_400));
+  });
+
+  it("takes the DATE RANGE from the filter and nothing else", async () => {
+    // The other filters describe SUBSCRIPTION payments — a plan, a subscription
+    // status, a school search over the subscription ledger — and mean nothing
+    // to a fee take-rate. Quietly reinterpreting them would make this figure
+    // move for reasons its own label does not explain.
+    const { svc, queryRaw } = makeService({ feeRows: [] });
+    await svc.list(OPERATOR, { from: "2026-07-01", to: "2026-07-31", plan: "ULTIMATE", status: "FAILED" });
+    const sql = JSON.stringify(queryRaw.mock.calls[0]?.[0] ?? {});
+    expect(sql).not.toContain("ULTIMATE");
+    expect(sql).not.toContain("FAILED");
+    // The range IS applied — and `to` covers the whole of its last day, which
+    // for a month-end report is the busiest day in it.
+    expect(sql).toContain("2026-07-01T00:00:00.000Z");
+    expect(sql).toContain("2026-07-31T23:59:59.999Z");
+  });
+
+  it("says nothing rather than zero when no cut was taken", async () => {
+    // An empty list renders as "no fee-collection revenue in this period",
+    // which is a different statement from "we earned 0.00" under a currency
+    // symbol the platform picked for itself.
+    const { svc } = makeService({ feeRows: [] });
+    expect((await svc.list(OPERATOR, {})).feeRevenue).toEqual([]);
+  });
 });
 
 describe("operator revenue ledger", () => {

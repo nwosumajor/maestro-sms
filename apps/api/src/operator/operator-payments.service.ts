@@ -21,9 +21,12 @@
 
 import { Inject, Injectable, ServiceUnavailableException } from "@nestjs/common";
 import { csvCell } from "../common/csv";
+// VALUE import: Prisma.sql only resolves as a value, not a type (CLAUDE.md).
+import { Prisma } from "@sms/db";
 import type {
   BillingCycle,
   Currency,
+  OperatorFeeRevenueDto,
   OperatorPaymentPageDto,
   OperatorPaymentRowDto,
   OperatorRevenueTotalDto,
@@ -184,7 +187,7 @@ export class OperatorPaymentsService {
     const page = Math.max(1, filters.page ?? 1);
     const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(1, filters.pageSize ?? 25));
 
-    const [rows, total, totals] = await Promise.all([
+    const [rows, total, totals, feeRevenue] = await Promise.all([
       this.client().platformSubscriptionPayment.findMany({
         where,
         orderBy: { createdAt: "desc" },
@@ -193,6 +196,7 @@ export class OperatorPaymentsService {
       }),
       this.client().platformSubscriptionPayment.count({ where }),
       this.totals(where),
+      this.feeRevenue(filters),
     ]);
 
     const names = await this.nameMap([...new Set(rows.map((r: { schoolId: string }) => r.schoolId))]);
@@ -204,7 +208,54 @@ export class OperatorPaymentsService {
       pageSize,
       total,
       totals,
+      feeRevenue,
     };
+  }
+
+  /**
+   * THE OTHER HALF OF THE PLATFORM'S INCOME.
+   *
+   * Subscriptions are only one revenue line. The take-rate on fee collection —
+   * `platform_fee_config`, flat + basis points, capped, borne by the parent —
+   * is computed at checkout and stamped onto every settled online payment as
+   * `payment.platformFeeMinor`. That column was written by the settlement path
+   * and READ BY NOTHING: no DTO, no endpoint and no screen in the product
+   * mentioned it, so the owner who sets the rate had no way to see what it
+   * earned. An instance of "written, never read" on the revenue lever the fee
+   * rail exists for.
+   *
+   * PER CURRENCY, joining through the invoice, because a payment carries no
+   * currency of its own — assuming naira here would report a Ghanaian school's
+   * cedi cut as naira and add it to the naira line.
+   *
+   * Only the DATE RANGE of the filter applies. The other filters (plan, status,
+   * school search) describe SUBSCRIPTION payments and mean nothing here, and
+   * silently reinterpreting them would make this figure move for reasons its
+   * label does not explain.
+   */
+  private async feeRevenue(filters: PaymentFilters): Promise<OperatorFeeRevenueDto[]> {
+    const range = this.range(filters.from, filters.to);
+    const rows = await this.client().$queryRaw<
+      Array<{ currency: string; feeMinor: number; payments: number; collectedMinor: number }>
+    >(Prisma.sql`
+      SELECT i.currency,
+             COALESCE(SUM(p."platformFeeMinor"), 0)::float8 AS "feeMinor",
+             count(*)::int                                  AS payments,
+             COALESCE(SUM(p."amountMinor"), 0)::float8      AS "collectedMinor"
+        FROM "payment" p JOIN "invoice" i ON i.id = p."invoiceId"
+       WHERE p.status = 'POSTED' AND p."platformFeeMinor" > 0
+         ${range?.gte ? Prisma.sql`AND p."createdAt" >= ${range.gte}` : Prisma.sql``}
+         ${range?.lte ? Prisma.sql`AND p."createdAt" <= ${range.lte}` : Prisma.sql``}
+       GROUP BY i.currency
+    `);
+    return rows
+      .map((r) => ({
+        currency: r.currency,
+        feeMinor: Math.round(Number(r.feeMinor)),
+        payments: Number(r.payments),
+        collectedMinor: Math.round(Number(r.collectedMinor)),
+      }))
+      .sort((a, b) => b.feeMinor - a.feeMinor);
   }
 
   /** The same filter as a CSV for the books. Audited, formula-guarded. */

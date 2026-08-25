@@ -79,7 +79,18 @@ export default async function AnalyticsPage({
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {att && <Kpi label="Attendance rate" value={att.ratePct != null ? `${att.ratePct}%` : "—"} sub={`${att.total.toLocaleString()} records`} />}
           {gr && <Kpi label="Average grade" value={gr.averagePct != null ? `${gr.averagePct}%` : "—"} sub={`${gr.graded.toLocaleString()} graded`} />}
-          {fees && <Kpi label="Fees collected" value={money(fees.collectedMinor)} sub={`${money(fees.outstandingMinor)} outstanding`} />}
+          {fees && (
+            <Kpi
+              // THE SCHOOL'S OWN CURRENCY. This card called bare `money()`, which
+              // labels every school's total in naira — directly above a chart
+              // that had already been corrected to `region.currency`, so one page
+              // disagreed with itself. `fees.*` are now the school-currency
+              // figures and `fees.byCurrency` carries anything else.
+              label="Fees collected"
+              value={money(fees.collectedMinor, fees.currency)}
+              sub={`${money(fees.outstandingMinor, fees.currency)} outstanding`}
+            />
+          )}
           {o?.operations?.students !== undefined && <Kpi label="Students" value={o.operations.students.toLocaleString()} sub={o.operations.classes !== undefined ? `${o.operations.classes} classes` : undefined} />}
         </div>
 
@@ -149,24 +160,44 @@ export default async function AnalyticsPage({
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Fees</CardTitle>
-                <CardDescription>{fees.invoices.toLocaleString()} billable invoices.</CardDescription>
+                {/* The count across EVERY currency — a count is currency-
+                    independent, and reporting only the school-currency one under
+                    a card that now draws two blocks understates the page's own
+                    subject. Each block still names its own count. */}
+                <CardDescription>
+                  {fees.byCurrency.reduce((n, f) => n + f.invoices, 0).toLocaleString()} billable invoices.
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 {/* toMajor, never /100 — the CFA franc has no minor unit, so
                     dividing showed a Senegalese school a hundredth of what it had
                     invoiced. And the currency travels with the value: the chart
                     used to label every school's money in naira. */}
-                <RCBars
-                  money
-                  currency={region.currency}
-                  locale={region.locale}
-                  height={180}
-                  data={[
-                    { label: "Invoiced", value: toMajor(fees.invoicedMinor, region.currency), color: RC.primaryFaint },
-                    { label: "Collected", value: toMajor(fees.collectedMinor, region.currency), color: RC.primary },
-                    { label: "Outstanding", value: toMajor(fees.outstandingMinor, region.currency), color: RC.amber },
-                  ]}
-                />
+                {/* ONE CHART PER CURRENCY. A school billing USD alongside its
+                    own currency had cents added to its kobo and the sum drawn
+                    as one bar — the figures are not comparable and there is no
+                    rate here to make them so, so they are drawn apart. Nearly
+                    every school has exactly one, and renders exactly as before. */}
+                {fees.byCurrency.map((f) => (
+                  <div key={f.currency} className="space-y-1">
+                    {fees.byCurrency.length > 1 && (
+                      <p className="text-xs font-medium text-muted-foreground">
+                        {f.currency} · {f.invoices.toLocaleString()} invoices
+                      </p>
+                    )}
+                    <RCBars
+                      money
+                      currency={f.currency}
+                      locale={region.locale}
+                      height={180}
+                      data={[
+                        { label: "Invoiced", value: toMajor(f.invoicedMinor, f.currency), color: RC.primaryFaint },
+                        { label: "Collected", value: toMajor(f.collectedMinor, f.currency), color: RC.primary },
+                        { label: "Outstanding", value: toMajor(f.outstandingMinor, f.currency), color: RC.amber },
+                      ]}
+                    />
+                  </div>
+                ))}
               </CardContent>
             </Card>
           )}

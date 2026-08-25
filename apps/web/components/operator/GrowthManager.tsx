@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { formatMoney } from "@sms/types";
 import { shortDate } from "@/lib/format";
 
 interface Promo {
@@ -30,8 +31,12 @@ interface AgentRow {
   code: string;
   commissionBp: number;
   active: boolean;
-  accruedMinor: number;
-  paidOutMinor: number;
+  /** Commissions PER CURRENCY. A subscription settles in naira through Paystack
+   *  or in dollars through Stripe, and the commission accrues on that charge —
+   *  the aggregate behind this used to drop the currency, so an agent with one
+   *  Nigerian school and one American one had kobo added to cents on a figure
+   *  somebody is actually paid. */
+  byCurrency: Array<{ currency: string; accruedMinor: number; paidOutMinor: number }>;
 }
 interface CommissionRow {
   id: string;
@@ -43,8 +48,13 @@ interface CommissionRow {
   agent: { name: string; code: string };
 }
 
-const naira = (minor: number, currency = "NGN") =>
-  new Intl.NumberFormat("en-NG", { style: "currency", currency }).format(minor / 100);
+// SCALED BY THE CURRENCY, never by a literal 100. This divided by 100 and was
+// covered by a file-level exemption in `money-is-not-divided-by-a-hundred`
+// granted for something else entirely — `commissionBp / 100`, which is basis
+// points and genuinely correct. An exemption written for one reason had quietly
+// come to cover a second, different thing in the same file. `formatMoney` asks
+// Intl how many minor units the currency has.
+const cash = (minor: number, currency: string) => formatMoney(minor, currency, "en-NG");
 
 export function GrowthManager({
   promos,
@@ -151,7 +161,10 @@ export function GrowthManager({
                     <span className="font-medium">{a.name}</span>{" "}
                     <span className="font-mono text-xs">{a.code}</span>{" "}
                     <span className="text-muted-foreground">
-                      · {a.commissionBp / 100}% · accrued {naira(a.accruedMinor)} · paid {naira(a.paidOutMinor)}
+                      · {a.commissionBp / 100}% ·{" "}
+                      {a.byCurrency
+                        .map((c) => `accrued ${cash(c.accruedMinor, c.currency)} · paid ${cash(c.paidOutMinor, c.currency)}`)
+                        .join(" · ")}
                     </span>{" "}
                     {!a.active && <Badge variant="outline">disabled</Badge>}
                   </span>
@@ -207,7 +220,7 @@ export function GrowthManager({
                   <span>
                     <span className="font-medium">{c.agent.name}</span>{" "}
                     <span className="text-muted-foreground">
-                      · {c.schoolName} · {naira(c.amountMinor, c.currency)} · {shortDate(c.createdAt)}
+                      · {c.schoolName} · {cash(c.amountMinor, c.currency)} · {shortDate(c.createdAt)}
                     </span>{" "}
                     <Badge variant={c.status === "PAID_OUT" ? "secondary" : "default"}>
                       {c.status === "PAID_OUT" ? "Paid out" : "Accrued"}

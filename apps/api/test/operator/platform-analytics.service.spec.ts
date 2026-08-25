@@ -107,6 +107,46 @@ describe("PlatformAnalyticsService", () => {
     expect(out.demographics.gender).toEqual({ Male: 1, Female: 1 });
   });
 
+  it("keeps a DOLLAR payment out of both the headline AND the chart", async () => {
+    // The headline figures already filtered to the home currency and explained
+    // at length why ("kobo added to cents ... a bug with a start date"). The
+    // six-month revenue TREND, twenty-five lines below, added every currency —
+    // so one screen reported a total that excluded USD and drew a bar chart
+    // beside it that folded USD cents into naira kobo. Sibling asymmetry, with
+    // the reasoning already written next to the half that was right.
+    const client = makeClient();
+    const now = new Date();
+    client.platformSubscriptionPayment.findMany.mockResolvedValue([
+      { schoolId: "s1", plan: "STANDARD", amountMinor: 500000, currency: "NGN", status: "PAID", createdAt: now },
+      { schoolId: "s1", plan: "ENTERPRISE", amountMinor: 249900, currency: "USD", status: "PAID", createdAt: now },
+    ]);
+    const { service } = makeService(client);
+    const out = await service.overview(owner);
+
+    expect(out.revenue.paidTotalMinor).toBe(500000); // naira only
+    expect(out.revenue.currency).toBe("NGN"); // and it SAYS so
+    // `payments` counts every paid payment, which is why naming the currency of
+    // the money figures matters: the two are deliberately different populations.
+    expect(out.revenue.payments).toBe(2);
+
+    const thisMonth = out.growth[out.growth.length - 1];
+    expect(thisMonth.revenueMinor).toBe(500000); // was 749900 — cents as kobo
+  });
+
+  it("gives each recent payment the currency it was charged in", async () => {
+    // The preview lists INDIVIDUAL payments, so a dollar renewal belongs in it
+    // — it just has to say it is dollars. The row carried the figure and no
+    // currency, so the screen rendered it under a naira sign.
+    const client = makeClient();
+    const now = new Date();
+    client.platformSubscriptionPayment.findMany.mockResolvedValue([
+      { schoolId: "s1", plan: "ENTERPRISE", amountMinor: 249900, currency: "USD", status: "PAID", createdAt: now },
+    ]);
+    const { service } = makeService(client);
+    const out = await service.overview(owner);
+    expect(out.recentPayments[0]).toMatchObject({ amountMinor: 249900, currency: "USD" });
+  });
+
   it("excludes the platform org from the school query", async () => {
     const client = makeClient();
     const { service } = makeService(client);

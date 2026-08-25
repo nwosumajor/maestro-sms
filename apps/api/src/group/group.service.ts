@@ -21,6 +21,7 @@ import type {
 } from "@sms/types";
 // VALUE import: Prisma.sql only resolves as a value, not a type (CLAUDE.md).
 import { Prisma } from "@sms/db";
+import { PLATFORM_HOME_CURRENCY } from "@sms/types";
 import { headcountBySchool } from "../operator/operator-people";
 import {
   AUDIT_LOG_SERVICE,
@@ -330,7 +331,7 @@ export class GroupService {
 
     const school = await client.school.findFirst({
       where: { id: schoolId },
-      select: { id: true, name: true, slug: true, status: true },
+      select: { id: true, name: true, slug: true, status: true, currency: true },
     });
     if (!school) throw new NotFoundException("Not found");
 
@@ -348,12 +349,18 @@ export class GroupService {
       client.invoice.groupBy({ by: ["status"], where: { schoolId }, _count: { _all: true } }),
       this.moneyByCampus([schoolId], monthStart, now),
       // Monthly collection, grouped in SQL rather than by pulling payments back.
-      client.$queryRaw<Array<{ month: Date; total: number }>>(Prisma.sql`
-        SELECT date_trunc('month', p."paidAt") AS month, SUM(p."amountMinor")::float8 AS total
-        FROM payment p
+      // ONE LINE ON A CHART IS ONE CURRENCY. This summed `amountMinor` across
+      // every currency the campus bills in — twenty lines below `moneyByCampus`,
+      // which joins through to the invoice for exactly this reason and says so.
+      // A trend cannot be split without becoming several charts, so it is
+      // RESTRICTED to the campus's own currency and the DTO names which; the
+      // per-currency figures are on the money block beside it.
+      client.$queryRaw<Array<{ month: Date; currency: string; total: number }>>(Prisma.sql`
+        SELECT date_trunc('month', p."paidAt") AS month, i.currency, SUM(p."amountMinor")::float8 AS total
+        FROM payment p JOIN invoice i ON i.id = p."invoiceId"
         WHERE p."schoolId" = ${schoolId}::uuid AND p.status = 'POSTED' AND p.kind = 'PAYMENT'
           AND p."paidAt" >= ${trendFrom}
-        GROUP BY 1 ORDER BY 1
+        GROUP BY 1, 2 ORDER BY 1
       `),
       client.$queryRaw<Array<{ month: Date; present: number; total: number }>>(Prisma.sql`
         SELECT date_trunc('month', s.date) AS month,
@@ -368,7 +375,10 @@ export class GroupService {
 
     const head = headcounts.get(schoolId) ?? { students: 0, staff: 0, parents: 0 };
     const key = (d: Date) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
-    const paidBy = new Map(monthlyPaid.map((r) => [key(new Date(r.month)), r.total]));
+    const trendCurrency = school.currency ?? PLATFORM_HOME_CURRENCY;
+    const paidBy = new Map(
+      monthlyPaid.filter((r) => r.currency === trendCurrency).map((r) => [key(new Date(r.month)), r.total]),
+    );
     const attBy = new Map(monthlyAtt.map((r) => [key(new Date(r.month)), r]));
     const trend: GroupTrendPointDto[] = [];
     for (let i = 5; i >= 0; i--) {
@@ -406,6 +416,7 @@ export class GroupService {
       parents: head.parents,
       classes,
       trend,
+      trendCurrency,
       invoicesByStatus: Object.fromEntries(
         (invoiceStatuses as Array<{ status: string; _count: { _all: number } }>).map((r) => [r.status, r._count._all]),
       ),

@@ -180,10 +180,14 @@ export class PlatformAnalyticsService {
       paidTotalMinor += toMinor(pay.amountMinor);
       if (pay.createdAt.getTime() >= since30) last30dMinor += toMinor(pay.amountMinor);
     }
+    // The PREVIEW carries every currency — it is a list of individual payments,
+    // not a total, so a dollar renewal belongs in it. What it must not do is
+    // omit the currency and let the screen choose one, which is what it did.
     const recentPayments = payments.slice(0, 10).map((pay) => ({
       schoolName: schoolName.get(pay.schoolId) ?? "—",
       plan: pay.plan,
       amountMinor: toMinor(pay.amountMinor),
+      currency: pay.currency ?? HOME_CURRENCY,
       status: pay.status,
       createdAt: pay.createdAt,
     }));
@@ -221,6 +225,13 @@ export class PlatformAnalyticsService {
       if (i !== undefined) buckets[i].students += m.count;
     }
     for (const pay of payments) {
+      // HOME CURRENCY ONLY, exactly as the headline figures above. This loop
+      // added every currency into one bar while the totals twenty-five lines
+      // up deliberately did not, and said why at length — so the same screen
+      // reported one number that excluded USD and a chart beside it that
+      // silently folded USD cents into naira kobo. Sibling asymmetry, with the
+      // reasoning already written down next to the half that was correct.
+      if ((pay.currency ?? HOME_CURRENCY) !== HOME_CURRENCY) continue;
       const i = bucketOf.get(keyFor(pay.createdAt));
       if (i !== undefined) buckets[i].revenueMinor += toMinor(pay.amountMinor);
     }
@@ -250,7 +261,10 @@ export class PlatformAnalyticsService {
       schoolsByPlan,
       schoolsByStatus,
       people: { students: studentTotal, staff: staffTotal },
-      revenue: { paidTotalMinor, payments: payments.length, last30dMinor },
+      // `payments` counts EVERY paid payment, including other currencies, while
+      // the two money figures are home-currency only — say which currency they
+      // are in rather than leaving the screen to guess.
+      revenue: { paidTotalMinor, payments: payments.length, last30dMinor, currency: HOME_CURRENCY },
       onboardingPipeline,
       recentPayments,
       mrr: {

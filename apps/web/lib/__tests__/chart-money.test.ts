@@ -70,15 +70,27 @@ describe("labelling it", () => {
 });
 
 describe("the page that draws it", () => {
-  it("converts by currency and passes the school's region to the chart", async () => {
+  it("converts by currency and labels each block with the currency it is", async () => {
     const { readFileSync } = await import("node:fs");
     const { join } = await import("node:path");
     const page = readFileSync(join(__dirname, "../../app/(app)/analytics/page.tsx"), "utf8")
       .replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
-    expect(page).toMatch(/toMajor\(fees\.invoicedMinor, region\.currency\)/);
-    expect(page).toMatch(/currency=\{region\.currency\}/);
-    // The thing that was there before must not come back.
+    // STRONGER than the original assertion, which required `region.currency`.
+    // The aggregate is now split by currency, so a bar must be converted and
+    // labelled with the currency of the BLOCK it draws — `region.currency` on a
+    // dollar block would be the same bug wearing the fix's clothes.
+    expect(page).toMatch(/toMajor\(f\.invoicedMinor, f\.currency\)/);
+    expect(page).toMatch(/toMajor\(f\.collectedMinor, f\.currency\)/);
+    expect(page).toMatch(/toMajor\(f\.outstandingMinor, f\.currency\)/);
+    expect(page).toMatch(/currency=\{f\.currency\}/);
+    // And the KPI card above the chart, which used to call bare `money()` and
+    // so labelled every school's total in naira while the chart beside it was
+    // already correct.
+    expect(page).toMatch(/money\(fees\.collectedMinor, fees\.currency\)/);
+    expect(page).toMatch(/money\(fees\.outstandingMinor, fees\.currency\)/);
+    // The things that were there before must not come back.
     expect(page).not.toMatch(/Minor \/ 100|invoicedMinor \/ 100/);
+    expect(page).not.toMatch(/money\(fees\.\w+Minor\)/);
   });
 
   it("no chart hard-codes a currency symbol", async () => {

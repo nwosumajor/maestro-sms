@@ -6,13 +6,23 @@ export interface InvoicePageDto {
   nextCursor: string | null;
 }
 
-/** The headline figures on the fees page. Money in integer minor units. */
+/**
+ * The headline figures on the fees page. Money in integer minor units.
+ *
+ * `currency` is the SCHOOL's own and `outstandingMinor`/`collectedMinor` are
+ * denominated in it. It used to be the literal `"NGN"` with a comment saying
+ * "the ledger is single-currency per school in practice" — wrong twice over: a
+ * Ghanaian school's total was labelled in naira, and a school that also bills
+ * USD had cents added to its kobo. `byCurrency` carries every currency the
+ * ledger holds, the school's own first and always present.
+ */
 export interface InvoiceSummaryDto {
   outstandingMinor: number;
   collectedMinor: number;
   /** Billable invoices past their due date with a balance still owing. */
   overdueCount: number;
   currency: string;
+  byCurrency: Array<{ currency: string; outstandingMinor: number; collectedMinor: number; overdueCount: number }>;
 }
 
 export interface InvoiceListItemDto {
@@ -80,16 +90,44 @@ export interface FeeReportBucketDto {
   amountMinor: number;
 }
 
-export interface FeeReportDto {
-  scope: "school" | "none";
-  totals?: { invoicedMinor: number; collectedMinor: number; outstandingMinor: number };
-  aging?: {
+export interface FeeTotalsDto {
+  invoicedMinor: number;
+  collectedMinor: number;
+  outstandingMinor: number;
+}
+
+/** Everything the receivables report says about ONE currency. */
+export interface FeeCurrencyReportDto {
+  currency: string;
+  totals: FeeTotalsDto;
+  aging: {
     current: FeeReportBucketDto;
     d1_30: FeeReportBucketDto;
     d31_60: FeeReportBucketDto;
     d60plus: FeeReportBucketDto;
   };
-  pendingApprovals?: { count: number; amountMinor: number };
+}
+
+/**
+ * Receivables aging + collection, SPLIT BY CURRENCY.
+ *
+ * An invoice carries its own currency (a school bills USD through Stripe
+ * alongside its local currency) and a payment inherits its invoice's, so a
+ * single `SUM("totalMinor")` adds kobo to cents and the screen puts one symbol
+ * in front of the result. `totals`/`aging` are the SCHOOL's-currency block —
+ * unchanged for the schools that bill in one currency, which is nearly all of
+ * them — and `byCurrency` carries every block the ledger holds, the school's
+ * first.
+ */
+export interface FeeReportDto {
+  scope: "school" | "none";
+  /** The school's own currency: what `totals` and `aging` are denominated in. */
+  currency?: string;
+  totals?: FeeTotalsDto;
+  aging?: FeeCurrencyReportDto["aging"];
+  byCurrency?: FeeCurrencyReportDto[];
+  /** `amountMinor` is the school's-currency figure; `byCurrency` has the rest. */
+  pendingApprovals?: { count: number; amountMinor: number; byCurrency: Array<{ currency: string; count: number; amountMinor: number }> };
 }
 
 /** The school's fee SETTLEMENT posture (Paystack split). Never carries the

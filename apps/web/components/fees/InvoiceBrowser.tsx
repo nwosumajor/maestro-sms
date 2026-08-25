@@ -144,6 +144,17 @@ export function InvoiceBrowser({
                 <p className="text-xs text-muted-foreground">past due</p>
               </div>
             )}
+            {/* Money billed in another currency, shown APART rather than added.
+                The API used to hand back one figure labelled "NGN" whatever the
+                school's own currency was, with any USD invoices summed into it. */}
+            {summary.byCurrency
+              .filter((b) => b.currency !== summary.currency && (b.outstandingMinor !== 0 || b.collectedMinor !== 0))
+              .map((b) => (
+                <div key={b.currency}>
+                  <p className="text-2xl font-semibold tabular-nums">{money(b.outstandingMinor, b.currency)}</p>
+                  <p className="text-xs text-muted-foreground">outstanding ({b.currency})</p>
+                </div>
+              ))}
             {canManage && (
               <Link href="/fees/reports" className="ml-auto text-sm text-muted-foreground underline hover:text-foreground">
                 reports →

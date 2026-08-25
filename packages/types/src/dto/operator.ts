@@ -69,6 +69,9 @@ export interface PlatformRevenueEntryDto {
   schoolName: string;
   plan: string;
   amountMinor: number;
+  /** What money `amountMinor` is. The row carried the figure and not the
+   *  currency, so a dollar renewal rendered in the preview under a naira sign. */
+  currency: string;
   status: string;
   createdAt: Date;
 }
@@ -85,8 +88,14 @@ export interface PlatformAnalyticsDto {
   schoolsByStatus: Record<string, number>;
   /** People across all customer schools. */
   people: { students: number; staff: number };
-  /** Revenue from PAID platform-subscription payments (all time). */
-  revenue: { paidTotalMinor: number; payments: number; last30dMinor: number };
+  /**
+   * Revenue from PAID platform-subscription payments (all time), in the
+   * PLATFORM'S HOME currency only — anything sold in another currency is real
+   * revenue and belongs on the per-currency ledger at /operator/payments, never
+   * added into this figure. `currency` names it rather than leaving the reader
+   * to infer it from the DTO's own header comment.
+   */
+  revenue: { paidTotalMinor: number; payments: number; last30dMinor: number; currency: string };
   /** Onboarding intake pipeline (public requests) keyed by status. */
   onboardingPipeline: Record<string, number>;
   /** The most recent platform-subscription payments (newest first, capped). */
@@ -95,7 +104,14 @@ export interface PlatformAnalyticsDto {
   // --- decision-grade SaaS metrics (super_admin) ---
   /** Monthly recurring revenue: normalised per-seat run-rate of ACTIVE subscriptions. */
   mrr: { totalMinor: number; byPlan: Record<string, number>; arpaMinor: number; payingSchools: number };
-  /** Monthly trend (chronological, last ~6 months) for growth + revenue charts. */
+  /**
+   * Monthly trend (chronological, last ~6 months) for growth + revenue charts.
+   *
+   * `revenueMinor` is the HOME currency, matching `revenue` above. It used to
+   * add every currency — twenty-five lines below the loop that deliberately
+   * does not, and which explains at length why: "kobo added to cents ... a bug
+   * with a start date". Same bug, same start date, on the chart beside it.
+   */
   growth: { month: string; schools: number; students: number; revenueMinor: number }[];
   /** Acquisition funnel: public requests → approved → provisioned schools → paying. */
   funnel: { requests: number; approved: number; provisioned: number; paying: number };

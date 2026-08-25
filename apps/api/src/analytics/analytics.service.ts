@@ -12,6 +12,7 @@ import { ON_ROLL_STUDENT } from "../common/student-scope";
 import { csvCell } from "../common/csv";
 import type { AnalyticsOverviewDto } from "@sms/types";
 import { normalizeGender,
+  PLATFORM_HOME_CURRENCY,
   resolveGradeBands,
 } from "@sms/types";
 // VALUE import: Prisma.sql only resolves as a value, not a type (CLAUDE.md).
@@ -25,8 +26,9 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 
-/** One row of the fees aggregate — computed entirely in Postgres. */
+/** One row of the fees aggregate — one per CURRENCY, computed in Postgres. */
 interface FeeAggRow {
+  currency: string;
   invoicedMinor: number;
   collectedMinor: number;
   invoices: number;
@@ -150,11 +152,16 @@ export class AnalyticsService {
     }
     if (o.fees) {
       // Minor units are the ledger's truth; a rounded major unit in a board pack is
-      // how a reconciliation goes missing.
-      rows.push(["Fees", "Invoiced (minor)", o.fees.invoicedMinor]);
-      rows.push(["Fees", "Collected (minor)", o.fees.collectedMinor]);
-      rows.push(["Fees", "Outstanding (minor)", o.fees.outstandingMinor]);
-      rows.push(["Fees", "Invoices", o.fees.invoices]);
+      // how a reconciliation goes missing. So is a minor unit with no currency
+      // beside it: this exported "Invoiced (minor) 4500000" and left the reader
+      // to guess, which for a school billing in two currencies was not a guess
+      // anybody could make. One block per currency, named in the metric.
+      for (const f of o.fees.byCurrency) {
+        rows.push(["Fees", `Invoiced (minor, ${f.currency})`, f.invoicedMinor]);
+        rows.push(["Fees", `Collected (minor, ${f.currency})`, f.collectedMinor]);
+        rows.push(["Fees", `Outstanding (minor, ${f.currency})`, f.outstandingMinor]);
+        rows.push(["Fees", `Invoices (${f.currency})`, f.invoices]);
+      }
     }
     if (o.grades) {
       // Whatever bands the school's scale defines — a WAEC school exports nine
@@ -230,29 +237,64 @@ export class AnalyticsService {
       // BigInt (which the JSON layer can't serialize). float8 is exact for
       // integers up to 2^53 — identical semantics to the old JS reduce.
       if (p.permissions.includes("fee.read")) {
+        // GROUPED BY CURRENCY. An invoice carries its own — a school bills USD
+        // through Stripe alongside its local currency — and a payment inherits
+        // its invoice's, so the ungrouped sum this replaces added kobo to
+        // cents. Grouping is free: the same one scan and one round trip, and a
+        // single-currency school gets exactly one row back.
+        //
+        // The correlated sub-selects had to become a JOIN for that: three
+        // scalar sub-queries cannot each be grouped by a column of the outer
+        // row, and a LEFT JOIN keeps a currency that has been invoiced and not
+        // yet paid — an INNER one would drop precisely the currency an
+        // accountant is looking for.
         const feesSql = Prisma.sql`
           WITH billable AS (
-            SELECT id, "totalMinor" FROM "invoice"
+            SELECT id, currency, "totalMinor" FROM "invoice"
             WHERE status NOT IN ('DRAFT', 'CANCELLED')
             ${staff ? Prisma.sql`` : Prisma.sql`AND "studentId" = ANY(${studentIds ?? []}::uuid[])`}
+          ), net AS (
+            SELECT p."invoiceId",
+                   SUM(CASE WHEN p.kind = 'REFUND' THEN -p."amountMinor" ELSE p."amountMinor" END) AS paid
+              FROM "payment" p
+             WHERE p.status = 'POSTED' AND p."invoiceId" IN (SELECT id FROM billable)
+             GROUP BY p."invoiceId"
           )
           SELECT
-            (SELECT COALESCE(SUM("totalMinor"), 0) FROM billable)::float8 AS "invoicedMinor",
-            (SELECT count(*) FROM billable)::int AS invoices,
-            (SELECT COALESCE(SUM(CASE WHEN p.kind = 'REFUND' THEN -p."amountMinor" ELSE p."amountMinor" END), 0)
-               FROM "payment" p
-              WHERE p.status = 'POSTED' AND p."invoiceId" IN (SELECT id FROM billable))::float8 AS "collectedMinor"
+            b.currency,
+            COALESCE(SUM(b."totalMinor"), 0)::float8      AS "invoicedMinor",
+            count(*)::int                                 AS invoices,
+            COALESCE(SUM(COALESCE(n.paid, 0)), 0)::float8 AS "collectedMinor"
+          FROM billable b LEFT JOIN net n ON n."invoiceId" = b.id
+          GROUP BY b.currency
         `;
         // A family with no scoped students yet: skip the query, zeros are right.
         const skip = !staff && (!studentIds || studentIds.length === 0);
-        const [row]: FeeAggRow[] = skip
-          ? [{ invoicedMinor: 0, collectedMinor: 0, invoices: 0 }]
-          : await tx.$queryRaw<FeeAggRow[]>(feesSql);
+        const rows: FeeAggRow[] = skip ? [] : await tx.$queryRaw<FeeAggRow[]>(feesSql);
+        const schoolCurrency = (await this.regions?.forSchool(p.schoolId))?.currency ?? PLATFORM_HOME_CURRENCY;
+        const byCurrency = rows.map((r) => ({
+          currency: r.currency || schoolCurrency,
+          invoicedMinor: Number(r.invoicedMinor),
+          collectedMinor: Number(r.collectedMinor),
+          outstandingMinor: Number(r.invoicedMinor) - Number(r.collectedMinor),
+          invoices: Number(r.invoices),
+        }));
+        // The school's own currency leads and is always present, even at zero:
+        // the KPI card reads the top-level figures as "our money", so a foreign
+        // currency must never be promoted into that slot.
+        const home = byCurrency.find((b) => b.currency === schoolCurrency) ?? {
+          currency: schoolCurrency,
+          invoicedMinor: 0,
+          collectedMinor: 0,
+          outstandingMinor: 0,
+          invoices: 0,
+        };
         out.fees = {
-          invoicedMinor: row.invoicedMinor,
-          collectedMinor: row.collectedMinor,
-          outstandingMinor: row.invoicedMinor - row.collectedMinor,
-          invoices: row.invoices,
+          ...home,
+          byCurrency: [
+            home,
+            ...byCurrency.filter((b) => b.currency !== schoolCurrency).sort((a, b) => a.currency.localeCompare(b.currency)),
+          ],
         };
       }
 

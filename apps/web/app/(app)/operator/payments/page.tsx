@@ -149,13 +149,50 @@ export default async function OperatorPaymentsPage({
               )}
             </div>
 
+            {/* THE OTHER HALF OF THE PLATFORM'S INCOME.
+                The take-rate on fee collection is stamped onto every settled
+                online payment as `payment.platformFeeMinor` — and until now was
+                read by nothing at all: no DTO, no endpoint, no screen. The
+                person who sets the rate could not see what it earned. Per
+                currency for the same reason the subscription totals are: a
+                payment inherits its INVOICE's currency, and kobo plus cents is
+                not money in any currency. */}
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {data.feeRevenue.length === 0 ? (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">No fee-collection revenue in this period</CardTitle>
+                    <CardDescription>
+                      The take-rate applies to ONLINE fee payments only, and only where a rate is configured.
+                    </CardDescription>
+                  </CardHeader>
+                </Card>
+              ) : (
+                data.feeRevenue.map((f) => (
+                  <Card key={f.currency}>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-base">Fee take-rate ({f.currency})</CardTitle>
+                      <CardDescription>Our cut of school fees collected online.</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-2xl font-semibold tabular-nums">{money(f.feeMinor, f.currency)}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        on {money(f.collectedMinor, f.currency)} across {f.payments} payment{f.payments === 1 ? "" : "s"}
+                      </p>
+                    </CardContent>
+                  </Card>
+                ))
+              )}
+            </div>
+
             <Card>
               <CardHeader>
                 <CardTitle>Payments</CardTitle>
                 <CardDescription>
                   {data.total} matching payment{data.total === 1 ? "" : "s"} · page {data.page} of{" "}
-                  {Math.max(1, Math.ceil(data.total / data.pageSize))}. Totals above cover the whole filter, not just
-                  this page.
+                  {Math.max(1, Math.ceil(data.total / data.pageSize))}. Subscription totals above cover the whole
+                  filter, not just this page; the fee take-rate follows the DATE RANGE only, since plan, status and
+                  school search describe subscription payments and mean nothing to it.
                 </CardDescription>
               </CardHeader>
               <CardContent>
