@@ -99,6 +99,16 @@ describe("the shape, wherever it appears next", () => {
     "components/workflow/WorkflowInbox.tsx", // approver-options picker
   ];
 
+  it("scanned something — this gate can otherwise pass by finding nothing", () => {
+    // THE FAILURE EVERY SOURCE-SCANNING GATE SHARES. The check above asserts an
+    // EMPTY offender list, so a walk that returns no files passes with a green
+    // tick while covering nothing at all — a moved directory, a changed
+    // extension, a renamed root. Demonstrated on this repo by pointing one
+    // gate's walk at a directory holding no `.ts` files: every assertion still
+    // passed. The magnitude is the only thing that can tell "clean" from "blind".
+    expect(walk("components").length).toBeGreaterThan(50);
+  });
+
   it("no NEW component turns a non-ok response straight into an empty array", () => {
     // The exact expression that caused all four defects: a ternary on `ok` whose
     // failure branch is `[]`. It reads as a safe default and is an assertion.

@@ -260,6 +260,10 @@ describe("every scheduled processor reports what it did", () => {
 
   it("none declares Promise<void> — a void processor files an empty summary", () => {
     const voids = processors().filter((p) => p.returns === "void").map((p) => p.key);
+    // A walk that finds nothing produces no offenders and passes with a green
+    // tick. The magnitude is the only thing that tells "clean" from "blind" —
+    // see a-gate-must-not-pass-by-finding-nothing.
+    expect(processors().length).toBeGreaterThan(3);
     expect(voids).toEqual([]);
   });
 

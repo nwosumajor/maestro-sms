@@ -92,6 +92,10 @@ describe("nowhere new starts handing out places unguarded", () => {
         return gates && !CLAIM.test(src);
       })
       .map((p) => p.slice(SRC.length + 1));
+    // A walk that finds nothing produces no offenders and passes with a green
+    // tick. The magnitude is the only thing that tells "clean" from "blind" —
+    // see a-gate-must-not-pass-by-finding-nothing.
+    expect(walk(SRC).length).toBeGreaterThan(50);
     expect(offenders).toEqual([]);
   });
 });

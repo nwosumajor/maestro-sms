@@ -1412,6 +1412,25 @@ regional read replicas → Aurora write forwarding (still one writer) → tenant
 pinning. Multi-master is deliberately not on that list. See
 `docs/RUNBOOK-INCIDENT-RESPONSE.md` §5.x and §5.y.
 
+### A gate that walks must say it scanned something
+This repo leans hard on gates that walk the source tree, derive a set of
+offenders and assert it is EMPTY. They share one silent failure: **a walk that
+finds no files produces no offenders and passes with a green tick while covering
+nothing** — a moved directory, a changed extension, a renamed root.
+Demonstrated rather than argued: pointing `csv-injection`'s walk at a directory
+with no `.ts` files left every assertion green, so the spreadsheet-formula guard
+could have been deleted from every export in the product without that gate
+noticing. It had already happened twice for real, in different disguises —
+`platform-org-not-a-school`'s 200-character window silently covering 2 routes
+instead of 3, and `every-mutation-leaves-a-trail` resolving methods by NAME so
+`this.db.runAsTenant(...)` matched a `runAsTenant` that happened to audit (green
+for the wrong reason: deleting the audit call it existed for did not fail it).
+Sixteen gates walked without a magnitude assertion; all sixteen now have one.
+`a-gate-must-not-pass-by-finding-nothing.spec.ts` enforces the rule on every
+future gate, and holds itself to it — validated by writing a new blind gate and
+watching it go red, and by re-running the csv-injection experiment, which now
+fails as it should.
+
 ### The dashboard headcount counted children who had left
 Swept every aggregate with no `where` — 73 of them. Most are reference data
 bounded by a school's STRUCTURE (subjects, periods, rooms, classes, terms) and

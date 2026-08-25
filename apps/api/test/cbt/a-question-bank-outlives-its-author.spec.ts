@@ -156,6 +156,10 @@ describe("what the database itself guarantees", () => {
       })
       .join("\n");
     const cascades = sql.match(/cbt_question_bank[\s\S]{0,200}?createdById[\s\S]{0,120}?ON DELETE CASCADE/gi) ?? [];
+    // A walk that finds nothing produces no offenders and passes with a green
+    // tick. The magnitude is the only thing that tells "clean" from "blind" —
+    // see a-gate-must-not-pass-by-finding-nothing.
+    expect(sql.length).toBeGreaterThan(10000);
     expect(cascades).toEqual([]);
   });
 });

@@ -132,6 +132,10 @@ describe("an absence is asserted on the field, not by searching for a number", (
   }
 
   it("no spec proves an absence with a needle shorter than four characters", () => {
+    // A walk that finds nothing produces no offenders and passes with a green
+    // tick. The magnitude is the only thing that tells "clean" from "blind" —
+    // see a-gate-must-not-pass-by-finding-nothing.
+    expect(ROOTS.flatMap((r) => specs(r)).length).toBeGreaterThan(50);
     expect(offenders).toEqual([]);
   });
 

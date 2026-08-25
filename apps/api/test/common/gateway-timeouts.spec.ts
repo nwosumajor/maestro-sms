@@ -113,6 +113,10 @@ describe("no call leaves the building without a deadline", () => {
       .filter((p) => !p.endsWith(join("common", "http.ts")))
       .filter((p) => /(?<![.\w])fetch\s*\(/.test(readFileSync(p, "utf8")))
       .map((p) => p.slice(SRC.length + 1));
+    // A walk that finds nothing produces no offenders and passes with a green
+    // tick. The magnitude is the only thing that tells "clean" from "blind" —
+    // see a-gate-must-not-pass-by-finding-nothing.
+    expect(walk(SRC).length).toBeGreaterThan(50);
     expect(offenders).toEqual([]);
   });
 

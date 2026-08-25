@@ -103,6 +103,10 @@ describe("pages that are PRERENDERED, and why they cannot be", () => {
         return !/export const dynamic\s*=\s*"force-dynamic"|no-store|noStore\(|export const revalidate|\bauth\(\)|headers\(\)|cookies\(\)|searchParams/.test(src);
       })
       .map((p) => p.slice(appDir.length + 1));
+    // A walk that finds nothing produces no offenders and passes with a green
+    // tick. The magnitude is the only thing that tells "clean" from "blind" —
+    // see a-gate-must-not-pass-by-finding-nothing.
+    expect(walkPages(appDir).length).toBeGreaterThan(20);
     expect(offenders).toEqual([]);
   });
 });

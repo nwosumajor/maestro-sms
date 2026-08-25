@@ -97,6 +97,16 @@ describe("one definition, so the tenth cannot go missing again", () => {
     return out;
   }
 
+  it("scanned something — this gate can otherwise pass by finding nothing", () => {
+    // THE FAILURE EVERY SOURCE-SCANNING GATE SHARES. The check above asserts an
+    // EMPTY offender list, so a walk that returns no files passes with a green
+    // tick while covering nothing at all — a moved directory, a changed
+    // extension, a renamed root. Demonstrated on this repo by pointing one
+    // gate's walk at a directory holding no `.ts` files: every assertion still
+    // passed. The magnitude is the only thing that can tell "clean" from "blind".
+    expect(walk("src").length).toBeGreaterThan(100);
+  });
+
   it("no file rolls its own formula guard", () => {
     // The tell is the character class every copy used. If a new export needs
     // this, it imports it — that is the whole point of the file it lives in.
