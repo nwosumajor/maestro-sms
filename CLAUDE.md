@@ -1796,6 +1796,42 @@ closed the window early and the test went red while the property it guards was
 untouched. Now anchored to the method by name — and mutation-validated, which
 the accidental version never was.
 
+### One school's currency stopped metering the whole fleet
+Found immediately after making seat arrears visible, by asking what happens when
+the accrual FAILS. The dunning sweep's per-school guard — added after the
+retention sweep taught the lesson — was applied to the dunning loop and NOT to
+the seat-arrears accrual sitting directly above it, which stayed inside one
+try/catch around the whole fleet.
+So the first school that threw abandoned every school after it; the failure was
+a single `warn` naming nobody; and `DunningResult.failed`, which the operator's
+jobs console reads to decide its "Partial" badge, knew nothing about it at all.
+REACHABLE, and proved on the stack rather than argued: a school sold in a
+currency `CURRENCIES` supports but which has no `plan_price` rows makes
+`PlanPricingService.effective` REFUSE — deliberately, because quoting a tier at
+zero is worse than saying the market is not open. Two schools, one of them GHS:
+**both accrued nothing** and the sweep returned `{"failed":0}`. Every night, for
+the whole fleet, on the one number that records revenue earned and not yet
+billed. After: `{"failed":1,"arrearsFailed":1}`, the naira school metered
+normally, the log naming `school=7994fa41… No plan pricing for GHS`, and the
+jobs console reading `lastFailed: 1` where it read 0.
+// `failed` counts SCHOOLS, not incidents — a `Set`, because one school can now
+fail both halves and must be reported once. `arrearsFailed` breaks out the
+accrual half, because the two are not the same event: a school whose dunning
+threw was NOT flipped and NOT reminded, while one whose accrual threw was
+handled correctly and merely went unmetered. Reporting them as one number sends
+an operator to the wrong place.
+// The failed school's `arrearsAccruedAt` is deliberately NOT advanced, so the
+next sweep meters its whole window rather than losing it — the failure costs a
+night's visibility, never the money.
+// A fleet-wide seat-query failure still aborts the accrual, which is right, but
+now returns EVERY school as failed rather than warning once: that is what
+actually happened.
+// GOTCHA: `one-school-must-not-end-the-sweep` asserted the literal source
+`failed += 1` and went red on a change that made the count STRONGER — the
+fixed-text failure mode this repo keeps recording, this time firing on an
+improvement. Re-anchored to the property (schools counted once, accrual
+included).
+
 ### Earned, unbilled, and on no screen
 Asked to verify that a lapsed school falls to the STANDARD floor and is
 reinstated on payment, and to trace how the owner recovers the money when a

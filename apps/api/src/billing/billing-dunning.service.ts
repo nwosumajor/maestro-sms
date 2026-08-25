@@ -54,8 +54,18 @@ export interface DunningResult {
   reminded: number;
   pastDue: number;
   scanned: number;
-  /** Subscriptions whose dunning threw. They were NOT flipped and NOT reminded. */
+  /**
+   * SCHOOLS this run could not fully process — dunning threw, or the seat-arrears
+   * accrual did, or both (counted once).
+   *
+   * The operator's jobs console reads this to decide its "Partial" badge, so a
+   * failure it cannot see is a failure nobody acts on. The accrual used to be
+   * outside it entirely.
+   */
   failed: number;
+  /** Of those, the ones whose SEAT METERING threw. They were dunned correctly;
+   *  their seat growth simply went unmetered and is picked up next sweep. */
+  arrearsFailed: number;
   /** Lapsed schools reported to the platform owners in the red alert. */
   alerted: number;
   /** Saved-card renewal charges attempted / declined this sweep. */
@@ -88,7 +98,7 @@ export class BillingDunningService {
     if (!client) {
       this.logger.warn("Dunning sweep requested but no privileged DB — skipping.");
       return {
-        reminded: 0, pastDue: 0, scanned: 0, failed: 0, alerted: 0,
+        reminded: 0, pastDue: 0, scanned: 0, failed: 0, arrearsFailed: 0, alerted: 0,
         autoRenewCharged: 0, autoRenewFailed: 0, abandoned: 0, skipped: "NO_DB",
       };
     }
@@ -126,7 +136,7 @@ export class BillingDunningService {
     // seat-days ABOVE the billed count since the last stamp. The stamp advances
     // every sweep (even at zero extra) so a later surge accrues only from its
     // own window, never from an ancient baseline.
-    await this.accrueSeatArrears(client, subs, now);
+    const arrearsFailedSchools = await this.accrueSeatArrears(client, subs, now);
 
     let reminded = 0;
     let pastDue = 0;
@@ -140,7 +150,11 @@ export class BillingDunningService {
     // same way the next night. The attendance rollup and the late-fee sweep
     // already guard per item; this did not. Counted and returned, because the
     // job-runs catalogue is where an operator finds out.
-    let failed = 0;
+    // A SCHOOL, not an incident: one school can fail both halves of the sweep and
+    // must be reported once. `failed` is what the operator's jobs console reads
+    // to decide its "Partial" badge, so it has to mean "schools this run could
+    // not fully process" — the accrual half was invisible to it entirely.
+    const failedSchools = new Set<string>(arrearsFailedSchools);
     for (const s of subs) {
       if (!s.currentPeriodEnd) continue;
       try {
@@ -184,7 +198,7 @@ export class BillingDunningService {
         );
       }
       } catch (err) {
-        failed += 1;
+        failedSchools.add(s.schoolId);
         this.logger.error(`dunning failed for school ${s.schoolId}: ${(err as Error).message}`);
       }
     }
@@ -201,7 +215,22 @@ export class BillingDunningService {
     );
     // `failed` is RETURNED, not merely logged: a sweep that reports "12 scanned,
     // 3 reminded" while four schools threw reads as a quiet night.
-    return { reminded, pastDue, scanned: subs.length, failed, alerted, autoRenewCharged, autoRenewFailed, abandoned };
+    return {
+      reminded,
+      pastDue,
+      scanned: subs.length,
+      failed: failedSchools.size,
+      // Broken out because the two failures are not the same event: a school
+      // whose dunning threw was NOT flipped and NOT reminded, while one whose
+      // accrual threw was handled correctly and simply had its seat growth left
+      // unmetered. Reporting them as one number would tell an operator to look
+      // in the wrong place.
+      arrearsFailed: arrearsFailedSchools.length,
+      alerted,
+      autoRenewCharged,
+      autoRenewFailed,
+      abandoned,
+    };
   }
 
   /**
@@ -246,6 +275,28 @@ export class BillingDunningService {
     }
   }
 
+  /**
+   * Meter seat growth, ONE SCHOOL AT A TIME.
+   *
+   * Returns the schools whose accrual threw, so the sweep can count them.
+   *
+   * This loop used to sit inside a single try/catch: the first school that threw
+   * abandoned every school after it, the failure was a single warn line naming
+   * nobody, and `DunningResult.failed` — which is what the operator's jobs
+   * console reads to decide its "Partial" badge — knew nothing about it. So the
+   * console showed a clean green run while the platform metered no seat growth
+   * at all.
+   *
+   * Reachable, and proved rather than theorised: a school sold in a currency
+   * `CURRENCIES` supports but which has no `plan_price` rows makes
+   * `PlanPricingService.effective` refuse — deliberately, since quoting a tier
+   * at zero is worse than saying the market is not open. Live, two schools, one
+   * of them GHS: BOTH accrued nothing and the sweep returned `failed: 0`.
+   *
+   * Third instance of the same lesson, after the retention and dunning sweeps —
+   * and this one is the loop directly ABOVE the per-school guard those fixes
+   * added, which is how it was missed.
+   */
   private async accrueSeatArrears(
     client: NonNullable<PrivilegedDatabaseService["client"]>,
     subs: Array<{
@@ -258,7 +309,8 @@ export class BillingDunningService {
       arrearsAccruedAt: Date | null;
     }>,
     now: Date,
-  ): Promise<void> {
+  ): Promise<string[]> {
+    const failedSchools: string[] = [];
     try {
       // ON-ROLL seats per school, counted IN THE DATABASE.
       //
@@ -287,27 +339,41 @@ export class BillingDunningService {
 
       for (const s of subs) {
         if (!isPlan(s.plan) || s.seats == null || s.seats <= 0) continue; // never seat-billed (trial/comp)
-        if (!s.arrearsAccruedAt) {
-          // Baseline stamp — accrual starts from the NEXT sweep.
-          await client.schoolSubscription.update({ where: { id: s.id }, data: { arrearsAccruedAt: now } });
-          continue;
-        }
-        const windowEnd = s.currentPeriodEnd && s.currentPeriodEnd < now ? s.currentPeriodEnd : now;
-        const elapsedMs = windowEnd.getTime() - s.arrearsAccruedAt.getTime();
-        const currency: Currency = isCurrency(s.currency ?? "") ? (s.currency as Currency) : CURRENCIES.NGN;
-        const pricing = await this.pricing.effective(currency);
-        const accrued = accrueSeatArrearsMinor(s.plan, s.seats, seatCount.get(s.schoolId) ?? 0, elapsedMs, pricing);
-        await client.schoolSubscription.update({
-          where: { id: s.id },
-          data: { arrearsAccruedAt: now, ...(accrued > 0 ? { seatArrearsMinor: { increment: accrued } } : {}) },
-        });
-        if (accrued > 0) {
-          this.logger.log(`seat arrears accrued school=${s.schoolId} +${accrued} minor (${currency})`);
+        try {
+          if (!s.arrearsAccruedAt) {
+            // Baseline stamp — accrual starts from the NEXT sweep.
+            await client.schoolSubscription.update({ where: { id: s.id }, data: { arrearsAccruedAt: now } });
+            continue;
+          }
+          const windowEnd = s.currentPeriodEnd && s.currentPeriodEnd < now ? s.currentPeriodEnd : now;
+          const elapsedMs = windowEnd.getTime() - s.arrearsAccruedAt.getTime();
+          const currency: Currency = isCurrency(s.currency ?? "") ? (s.currency as Currency) : CURRENCIES.NGN;
+          const pricing = await this.pricing.effective(currency);
+          const accrued = accrueSeatArrearsMinor(s.plan, s.seats, seatCount.get(s.schoolId) ?? 0, elapsedMs, pricing);
+          await client.schoolSubscription.update({
+            where: { id: s.id },
+            data: { arrearsAccruedAt: now, ...(accrued > 0 ? { seatArrearsMinor: { increment: accrued } } : {}) },
+          });
+          if (accrued > 0) {
+            this.logger.log(`seat arrears accrued school=${s.schoolId} +${accrued} minor (${currency})`);
+          }
+        } catch (e) {
+          // NAMED, not counted only. A count says four failed and never which,
+          // and the one failing every night is the one worth fixing. The stamp
+          // is deliberately NOT advanced, so tomorrow's sweep meters this
+          // school's whole window rather than losing it.
+          failedSchools.push(s.schoolId);
+          this.logger.error(`seat-arrears accrual failed school=${s.schoolId}: ${(e as Error).message}`);
         }
       }
     } catch (e) {
-      this.logger.warn(`seat-arrears accrual failed: ${(e as Error).message}`);
+      // The fleet-wide seat query itself. Genuinely fatal for the accrual, so it
+      // still aborts — but it is reported as EVERY school failing rather than as
+      // a warning nobody reads, because that is what actually happened.
+      this.logger.error(`seat-arrears accrual could not start: ${(e as Error).message}`);
+      return subs.map((s) => s.schoolId);
     }
+    return failedSchools;
   }
 
   /**

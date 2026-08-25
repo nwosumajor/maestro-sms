@@ -65,8 +65,33 @@ describe("a fleet-wide sweep", () => {
     // success while skipping four schools is worse than one that fails loudly.
     expect(RETENTION).toMatch(/failed \+= 1/);
     expect(RETENTION).toMatch(/return \{ schools: results, failed,/);
-    expect(DUNNING).toMatch(/failed \+= 1/);
-    expect(DUNNING).toMatch(/scanned: subs\.length, failed,/);
+    // DUNNING counts SCHOOLS, not incidents.
+    //
+    // This asserted the literal `failed += 1` and went red when the counter
+    // became a Set — the fixed-text failure mode this repo keeps recording,
+    // firing on a change that made the count STRONGER rather than weaker. The
+    // sweep now has two ways to fail a school (its dunning, or its seat-arrears
+    // accrual) and one that fails both must be reported once, which an
+    // increment cannot express.
+    expect(DUNNING).toMatch(/failedSchools\.add\(s\.schoolId\)/);
+    expect(DUNNING).toMatch(/failed: failedSchools\.size/);
+  });
+
+  it("counts the SEAT-ARREARS accrual too — it used to be outside the tally", () => {
+    // The accrual loop sits ABOVE the per-school guard and was left inside a
+    // single try/catch: one school it could not price abandoned every school
+    // after it, and `failed` knew nothing, so the jobs console showed a clean
+    // green run while the platform metered no seat growth at all. Proved live
+    // with a GHS school and an ordinary naira one — both accrued nothing.
+    const body = loopBody(DUNNING, "for (const s of subs) {");
+    // The accrual's own loop, which comes first in the file.
+    expect(DUNNING).toMatch(/failedSchools\.push\(s\.schoolId\)/);
+    expect(DUNNING).toMatch(/seat-arrears accrual failed school=/);
+    // And its failures reach the returned result.
+    expect(DUNNING).toMatch(/arrearsFailed: arrearsFailedSchools\.length/);
+    expect(DUNNING).toMatch(/new Set<string>\(arrearsFailedSchools\)/);
+    // The dunning loop is still guarded per school (unchanged property).
+    expect(body).toMatch(/catch \(err\)/);
   });
 
   it("declares the count on the result TYPE, so a caller cannot ignore it silently", () => {
