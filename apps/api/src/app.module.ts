@@ -6,6 +6,7 @@ import { PrivilegedDatabaseModule } from "./common/privileged-database.module";
 import { ObservabilityModule } from "./observability/observability.module";
 import { MetricsService } from "./observability/metrics.service";
 import { ReplicaRouterService } from "./foundation/replica-router.service";
+import { NoStoreMiddleware } from "./common/no-store.middleware";
 import { MetricsMiddleware } from "./observability/metrics.middleware";
 import { IntegrityModule } from "./integrity/integrity.module";
 import { LmsModule } from "./lms/lms.module";
@@ -159,6 +160,9 @@ export class AppModule implements NestModule, OnModuleInit {
     // PermissionGuard fills with the real actor when impersonating, and that
     // AuditLogService reads. Middleware wraps next(), which is what makes the
     // store propagate through the request's whole async continuation.
-    consumer.apply(RequestContextMiddleware, MetricsMiddleware).forRoutes("*");
+    // NoStoreMiddleware sets a header, so it must run before anything can send
+    // a response — it is cheap and unconditional, and ordering it here means a
+    // short-circuiting guard cannot skip it.
+    consumer.apply(NoStoreMiddleware, RequestContextMiddleware, MetricsMiddleware).forRoutes("*");
   }
 }

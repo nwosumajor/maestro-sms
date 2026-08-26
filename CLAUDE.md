@@ -1432,6 +1432,45 @@ damage was.
 Gate: `every-body-is-validated-at-the-boundary.spec.ts`, exemptions named with
 reasons and each required to name a file that still exists.
 
+### A tenant's data is not somebody else's cache entry
+`NoStoreMiddleware` (`common/no-store.middleware.ts`) + the `/api/sms/*` proxy.
+Every authenticated response went out with **no `Cache-Control` header at all**,
+and a `Vary` naming only Next's RSC headers — not `Cookie`. Measured live:
+`/students`, `/invoices`, `/notifications`, `/analytics/overview` and
+`/hr/employees` all 200 with `cache-control: null`. A 200 GET carrying no
+freshness information is HEURISTICALLY CACHEABLE by a shared cache (RFC 9111
+§4.2.2), and without `Vary: Cookie` a URL is the whole key.
+**LATENT AT OUR EDGE, and checked rather than assumed**: CloudFront runs
+`Managed-CachingDisabled` as its ONE behaviour (no `ordered_cache_behavior` at
+all) and the shipped nginx has no `proxy_cache`. So nothing this platform
+operates was caching. What that does NOT cover is everything past the edge,
+which the platform does not own: **a school's own network proxy**, keyed on the
+URL alone, serving one teacher's `/students` to the next; and the browser's disk
+cache and back-button after sign-out on a device this product is DESIGNED to
+share — the `/scan` gate desk with its always-focused scanner input, and the
+attendance kiosk. Golden Rule #7, and nothing is lost by it while nothing is
+caching.
+**TWO PLACES, and the second is the one the browser sees.** The BFF proxy
+REBUILDS the header set from scratch (`const out = { "Content-Type": ct }`) and
+its own comment already states the principle — "a proxy that rebuilds headers
+owns them" — which is why it re-adds `X-Content-Type-Options`. Whatever it does
+not name does not arrive, so the API's header alone would have changed nothing.
+Live after: `private, no-store` and `Vary: …, Cookie` on all five.
+// THE PUBLIC PROXY DELIBERATELY DIFFERS, and both sides now say so. Everything
+through `/api/public/*` is the school directory, plan pricing and vacancy
+listings — identical for every caller, personal to nobody — so it is the one
+surface a CDN could usefully cache. The API sets the restrictive default at the
+source; that proxy does not carry it across. Stated in both files because the
+alternative is a comment claiming coverage the running system does not give,
+which is the failure this repo keeps finding in its own notes.
+// The gate pins the premise as well as the fix: that CloudFront's only
+behaviour is still `CachingDisabled`, that nginx still has no `proxy_cache`, and
+that no `@Public` controller has grown a `StreamableFile` — because the public
+proxy would both corrupt a byte response (`res.text()`) and leave it cacheable.
+It also re-asserts the header set the rebuild already carried, since the point
+of that rebuild was a stored-XSS hole and every broken CSV export.
+
+
 ### The clock stopped and the family was never told
 `reviewErasure` (`privacy/privacy.service.ts`). Found by RUNNING a path that had
 never executed: `erasure_request` had zero rows, so the NDPR right-to-erasure

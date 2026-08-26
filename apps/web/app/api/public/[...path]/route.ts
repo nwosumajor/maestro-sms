@@ -28,6 +28,15 @@ async function proxy(req: NextRequest, ctx: { params: { path: string[] } }) {
   // Same posture as the authenticated proxy: this returns data, never a page.
   // No public route serves bytes today, which is exactly why it is worth
   // pinning now rather than after one does.
+  //
+  // AND DELIBERATELY NO `Cache-Control`, unlike the authenticated proxy beside
+  // it, which sets `private, no-store` because everything through there is one
+  // tenant's data. Everything through HERE is the school directory, plan
+  // pricing and vacancy listings — identical for every caller, personal to
+  // nobody — so it is the one surface a CDN could usefully cache. The API sets
+  // a restrictive default at the source and this proxy does not carry it
+  // across; if a public route ever starts returning something personal, that
+  // decision has to be revisited here.
   return new NextResponse(await res.text(), {
     status: res.status,
     headers: {

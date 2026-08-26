@@ -73,6 +73,20 @@ async function proxy(req: NextRequest, ctx: { params: { path: string[] } }) {
   // again, the document cannot execute or reach anything of ours. The app's own
   // pages are not served from here and are unaffected.
   out["Content-Security-Policy"] = "default-src 'none'; sandbox";
+  // AND THIS RESPONSE IS NOT SOMEBODY ELSE'S CACHE ENTRY.
+  //
+  // Same reasoning as the nosniff line above, and the same reason it is
+  // repeated here: the API sets it too, but this proxy REBUILDS the header set
+  // from scratch, so whatever it does not name does not reach the browser.
+  // Everything through here is one tenant's data, fetched with that user's
+  // bearer token, and it went out with no `Cache-Control` and a `Vary` that
+  // named only Next's RSC headers. A 200 GET with no freshness information is
+  // heuristically cacheable by a shared cache; a school's own network proxy
+  // keyed on the URL alone would serve one teacher's `/students` to the next.
+  // Nearer to hand: the browser's disk cache and back-button after sign-out, on
+  // the shared scan desk and attendance kiosk this product ships.
+  out["Cache-Control"] = "private, no-store";
+  out["Vary"] = "Cookie";
 
   // Text/JSON pass through as text; binary (e.g. report-card PDFs) as bytes.
   if (ct.includes("json") || ct.includes("text") || ct.includes("html")) {
