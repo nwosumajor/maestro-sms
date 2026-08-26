@@ -73,8 +73,16 @@ export class TwilioChannelProvider implements NotificationChannelProvider {
       // swapped for its own ISO code exactly as `formatMoneyPdf` already does
       // for a PDF. It never touches a NAME: a pupil called `Ṣadé` is sent as
       // `Ṣadé` at whatever that costs.
-      const text = toSmsSafe(`${req.title}\n${req.body}`);
-      const cost = smsCost(text);
+      //
+      // SMS ONLY. WhatsApp rides the same Messages API and is a DIFFERENT
+      // product: billed per CONVERSATION rather than per segment, and it
+      // renders Unicode natively. Folding `₦` to `NGN ` there degrades the
+      // message a family reads and saves nothing — GSM-7 is a constraint of the
+      // SMS wire, not of Twilio.
+      const isSms = req.channel !== "WHATSAPP";
+      const raw = `${req.title}\n${req.body}`;
+      const text = isSms ? toSmsSafe(raw) : raw;
+      const cost = isSms ? smsCost(text) : null;
       const body = new URLSearchParams({
         To: `${prefix}${req.target}`,
         From: `${prefix}${from}`,
@@ -114,10 +122,15 @@ export class TwilioChannelProvider implements NotificationChannelProvider {
       // school paid and what the send cost — invisible until it is recorded.
       // Twilio's own count is authoritative; ours is the fallback when the
       // response does not carry one.
-      const segments = Number(json?.num_segments) || cost.segments;
+      // Segments are an SMS notion. Reporting one for WhatsApp would put a
+      // number into the exposure figure that the provider never billed —
+      // undefined is not 1, the same rule the field's own doc states.
+      const segments = cost ? Number(json?.num_segments) || cost.segments : undefined;
       this.logger.log(
         `[sent] ${req.channel} -> ${req.target}${json?.sid ? ` (${json.sid})` : ""}` +
-          ` ${cost.encoding} ${segments} segment${segments === 1 ? "" : "s"}`,
+          (cost && segments !== undefined
+            ? ` ${cost.encoding} ${segments} segment${segments === 1 ? "" : "s"}`
+            : ""),
       );
       return { ok: true, providerRef: json?.sid, segments };
     } catch (err) {

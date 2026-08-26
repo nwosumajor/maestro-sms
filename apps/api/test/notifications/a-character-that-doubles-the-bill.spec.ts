@@ -12,6 +12,7 @@
 // =============================================================================
 
 import { formatMoney, isGsm7, smsCost, toSmsSafe } from "@sms/types";
+import { TwilioChannelProvider } from "../../src/notifications/twilio-channel.provider";
 
 const feeNotice = (currency: string, locale: string, student = "Adaeze Okonkwo") =>
   `Payment received\nWe received ${formatMoney(2_500_000, currency, locale)} for ${student}. ` +
@@ -70,6 +71,37 @@ describe("a character that doubles the bill", () => {
     // And since it is UCS-2 regardless, the symbol is left as the nicer form.
     expect(safe).toContain("₦");
     expect(smsCost(safe).encoding).toBe("UCS-2");
+  });
+
+  it("is an SMS rule, not a Twilio rule — WhatsApp is left alone", async () => {
+    // WhatsApp rides the same Messages API and is billed per CONVERSATION, not
+    // per segment, and renders Unicode natively. Folding ₦ to NGN there
+    // degrades what a family reads and saves nothing.
+    process.env.TWILIO_ACCOUNT_SID = "ACtest";
+    process.env.TWILIO_AUTH_TOKEN = "tok";
+    process.env.TWILIO_FROM = "+15550000000";
+    const sent: string[] = [];
+    const original = global.fetch;
+    global.fetch = (async (_u: string, init: { body?: unknown }) => {
+      sent.push(new URLSearchParams(String(init.body)).get("Body") ?? "");
+      return { ok: true, status: 201, json: async () => ({ sid: "SM1", num_segments: "1" }) };
+    }) as unknown as typeof fetch;
+    try {
+      const provider = new TwilioChannelProvider();
+      const body = `We received ${formatMoney(2_500_000, "NGN", "en-NG")} for Adaeze.`;
+      const whatsapp = await provider.deliver({
+        channel: "WHATSAPP", target: "+2348000000000", title: "Payment received", body,
+      });
+      await provider.deliver({
+        channel: "SMS", target: "+2348000000000", title: "Payment received", body,
+      });
+      expect(sent[0]).toContain("₦25,000.00");
+      expect(sent[1]).toContain("NGN 25,000.00");
+      // And no segment count is invented for a channel that has none.
+      expect(whatsapp.segments).toBeUndefined();
+    } finally {
+      global.fetch = original;
+    }
   });
 
   it("normalises typographic punctuation, which no reader will notice", () => {

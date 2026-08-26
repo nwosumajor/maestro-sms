@@ -2131,6 +2131,13 @@ ways (stop normalising the spaces; always apply the symbol swap).
 // GOTCHA in my own test, not the code: 80 `€` is EXACTLY 160 septets and 81 is
 two segments — the extension table costs two septets each. I asserted 2 for 80
 and the implementation was right.
+// GOTCHA I INTRODUCED AND CAUGHT BY TESTING A CONSEQUENCE OF MY OWN CHANGE:
+WhatsApp rides the SAME Twilio Messages API and went through the same fold. It
+is a different product — billed per CONVERSATION, not per segment, and it
+renders Unicode natively — so folding `₦` to `NGN ` there degraded what a family
+reads and saved nothing. GSM-7 is a constraint of the SMS WIRE, not of Twilio,
+and a shared transport is not a shared billing model. SMS only now, and a
+WhatsApp send reports `segments: undefined` rather than inventing a 1.
 
 ### A child whose name the report card could not print
 Found by RUNNING a path with a name this market actually uses. Renaming a pupil
