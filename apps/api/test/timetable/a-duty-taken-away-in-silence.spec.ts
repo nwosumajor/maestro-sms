@@ -23,6 +23,7 @@
 // method, so a reliever is told the same thing whichever way the duty vanished.
 // =============================================================================
 
+import { schoolToday } from "@sms/types";
 import { LessonCoverService } from "../../src/timetable/lesson-cover.service";
 import { TimetableService } from "../../src/timetable/timetable.service";
 import type { Principal, TenantContext, TenantTx } from "../../src/integrity/integrity.foundation";
@@ -83,6 +84,9 @@ describe("taking a cover lesson off somebody", () => {
 });
 
 describe("deleting the lesson the cover was attached to", () => {
+  /** East of UTC, where the server's day and the school's day differ. */
+  const SCHOOL_TZ = "Asia/Singapore";
+
   function makeTimetable(covers: Array<{ coveringTeacherId: string; date: Date }>) {
     const announce = jest.fn().mockResolvedValue(undefined);
     const tx = {
@@ -97,7 +101,16 @@ describe("deleting the lesson the cover was attached to", () => {
     Object.assign(svc, {
       db: { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) },
       audit: { record: jest.fn() },
-      cover: { announceCoverWithdrawn: announce },
+      // The REAL `coversAheadInTx`, not a stub that returns the rows: the
+      // "still AHEAD" property moved onto LessonCoverService (so both
+      // withdrawal paths share one definition of ahead), and stubbing it away
+      // would leave that property asserted against nothing.
+      cover: {
+        announceCoverWithdrawn: announce,
+        coversAheadInTx: LessonCoverService.prototype.coversAheadInTx.bind({
+          region: { inTx: async () => ({ timezone: SCHOOL_TZ }) },
+        }),
+      },
     });
     return { svc, announce, tx };
   }
@@ -119,12 +132,18 @@ describe("deleting the lesson the cover was attached to", () => {
     expect(announce.mock.calls[0][1]).toMatchObject({ coveringTeacherId: "t1", subject: "Maths", className: "JSS1 A" });
   });
 
-  it("asks only about cover still AHEAD", async () => {
+  it("asks only about cover still AHEAD, on the SCHOOL's day", async () => {
     // A cover date that has passed is history; announcing it is noise on the one
     // channel that has to stay worth reading.
+    //
+    // It used to compare against `new Date(new Date().toISOString().slice(0,10))`
+    // — the SERVER's UTC day — while every other cover read resolves the
+    // school's timezone. East of UTC that is YESTERDAY, so deleting a lesson
+    // told a teacher a lesson they had already taught was cancelled.
     const { svc, tx } = makeTimetable([]);
     await svc.deleteEntry(staff, "e1");
-    expect((tx.lessonCover.findMany as jest.Mock).mock.calls[0][0].where.date).toHaveProperty("gte");
+    const gte = (tx.lessonCover.findMany as jest.Mock).mock.calls[0][0].where.date.gte as Date;
+    expect(gte.toISOString()).toBe(schoolToday(SCHOOL_TZ).toISOString());
   });
 
   it("records how many assignments the cascade removed", async () => {

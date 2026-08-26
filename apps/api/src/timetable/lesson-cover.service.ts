@@ -20,6 +20,7 @@ import {
   type Principal,
   type TenantContext,
   type TenantDatabase,
+  type TenantTx,
 } from "../integrity/integrity.foundation";
 import { NotificationService } from "../notifications/notification.service";
 import { SchoolRegionService } from "../foundation/school-region.service";
@@ -337,6 +338,33 @@ export class LessonCoverService {
    * Omitting them also used to build `new Date("undefinedT00:00:00.000Z")` — an
    * Invalid Date, which Prisma rejects with a 500.
    */
+  /**
+   * The cover assignments for a timetable entry that are still AHEAD, on the
+   * SCHOOL's calendar day.
+   *
+   * Lives HERE, beside `announceCoverWithdrawn`, because both paths that
+   * withdraw a duty must agree about what "ahead" means — and they did not.
+   * `TimetableService.deleteEntry` computed it as
+   * `new Date(new Date().toISOString().slice(0, 10))`, the SERVER's UTC day,
+   * while every other cover read resolves the school's timezone. East of UTC
+   * that includes YESTERDAY: at 07:00 in Singapore the UTC day is still the
+   * day before, so deleting a lesson told a teacher that a lesson they had
+   * already taught was cancelled — precisely the noise the "only future cover
+   * is announced" rule exists to prevent, on the one channel that has to stay
+   * worth reading.
+   */
+  async coversAheadInTx(
+    tx: TenantTx,
+    schoolId: string,
+    timetableEntryId: string,
+  ): Promise<Array<{ coveringTeacherId: string; date: Date }>> {
+    const { timezone } = await this.region.inTx(tx, schoolId);
+    return (await tx.lessonCover.findMany({
+      where: { timetableEntryId, date: { gte: schoolToday(timezone) } },
+      select: { coveringTeacherId: true, date: true },
+    })) as Array<{ coveringTeacherId: string; date: Date }>;
+  }
+
   async myDuties(p: Principal, from?: string, to?: string): Promise<MyCoverDutyDto[]> {
     const { timezone } = await this.region.forSchool(p.schoolId);
     // Already a Date at UTC midnight of the school's calendar day.

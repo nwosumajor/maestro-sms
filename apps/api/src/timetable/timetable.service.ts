@@ -557,12 +557,11 @@ export class TimetableService {
         select: { id: true, subject: true, classId: true },
       });
       if (!existing) throw new NotFoundException("Timetable entry not found");
-      // Read the cover BEFORE the cascade removes it.
-      const today = new Date(new Date().toISOString().slice(0, 10));
-      const covers = (await tx.lessonCover.findMany({
-        where: { timetableEntryId: id, date: { gte: today } },
-        select: { coveringTeacherId: true, date: true },
-      })) as Array<{ coveringTeacherId: string; date: Date }>;
+      // Read the cover BEFORE the cascade removes it, and ask the cover service
+      // which of them are still AHEAD — it owns the notice, so it owns the
+      // definition of ahead. This used to compute the SERVER's UTC day here,
+      // which east of UTC is yesterday.
+      const covers = await this.cover.coversAheadInTx(tx, p.schoolId, id);
       const className =
         ((await tx.class.findFirst({ where: { id: existing.classId }, select: { name: true } })) as { name: string } | null)
           ?.name ?? "";

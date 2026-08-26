@@ -11,7 +11,9 @@
 
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import PDFDocument from "pdfkit";
+import { schoolToday } from "@sms/types";
 import { BrandingService } from "../branding/branding.service";
+import { SchoolRegionService } from "../foundation/school-region.service";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -50,6 +52,7 @@ export class LetterService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly branding: BrandingService,
+    private readonly region: SchoolRegionService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -97,7 +100,16 @@ export class LetterService {
       };
     });
     const logo = await this.branding.getLogoBytes(p.schoolId).catch(() => null);
-    const buffer = await this.render(t, data.school, data.ref, data.facts, logo);
+    // THE SCHOOL'S calendar day, not the server's. The letter says "as at the
+    // date of this letter" and is handed to banks, embassies and other schools,
+    // so the date is the CONTENT, not a label — an earlier sweep classified the
+    // remaining `toISOString()` uses as "labelling a document, not keying a
+    // record", which is the right test for a filename and the wrong one here.
+    // In UTC a letter issued at 07:00 in Singapore is dated YESTERDAY, and one
+    // issued at 21:00 in Toronto is dated TOMORROW.
+    const { timezone } = await this.region.forSchool(p.schoolId);
+    const issuedOn = schoolToday(timezone).toISOString().slice(0, 10);
+    const buffer = await this.render(t, data.school, data.ref, data.facts, logo, issuedOn);
     return { buffer, filename: `${t.toLowerCase()}-letter-${userId.slice(0, 8)}.pdf` };
   }
 
@@ -140,7 +152,14 @@ export class LetterService {
     }
   }
 
-  private render(t: LetterType, school: string, ref: string, f: LetterFacts, logo: Buffer | null): Promise<Buffer> {
+  private render(
+    t: LetterType,
+    school: string,
+    ref: string,
+    f: LetterFacts,
+    logo: Buffer | null,
+    issuedOn: string,
+  ): Promise<Buffer> {
     return new Promise<Buffer>((resolve, reject) => {
       const doc = createPdfDocument({ size: "A4", margin: 60 });
       const chunks: Buffer[] = [];
@@ -161,7 +180,7 @@ export class LetterService {
 
       doc.fontSize(10).fillColor("#444");
       doc.text(`Ref: ${ref}`, 60, 135);
-      doc.text(`Date: ${new Date().toISOString().slice(0, 10)}`, 60, 150);
+      doc.text(`Date: ${issuedOn}`, 60, 150);
 
       doc.moveDown(3).fillColor("#000").fontSize(13).text(TITLES[t], 60, 190, { align: "center", underline: true });
       doc.moveDown(1.5).fontSize(11).text("TO WHOM IT MAY CONCERN", { align: "left" });

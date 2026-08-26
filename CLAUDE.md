@@ -2075,6 +2075,46 @@ snapshot taken immediately after a probe reports the PREVIOUS probe's reads.
 Settle 12-18 s, and divide by the number of requests rather than trusting one.
 
 
+### A letter dated a day early, and a duty withdrawn for a lesson already taught
+An earlier sweep moved "today" onto the SCHOOL's calendar day across the
+register, the gate scan, the term lock and the rest, and recorded that the
+remaining `toISOString()` uses "label a document; they do not key a record".
+That is the right test for a CSV filename and the wrong one for two of them.
+**THE LETTER DATE IS THE CONTENT, NOT A LABEL.** `LetterService` prints `Date:`
+on an official letter that says *"They remain in our employment AS AT THE DATE OF
+THIS LETTER"* — handed to banks, embassies and other schools — and computed it as
+`new Date().toISOString().slice(0, 10)`. In UTC a letter issued at 07:00 in
+Singapore is dated YESTERDAY and one issued at 21:00 in Toronto is dated
+TOMORROW. Measured live on the running stack: with the school on `Asia/Singapore`
+the letter now prints **2026-08-27 while the server's UTC day is 2026-08-26**;
+with the timezone unset (the platform's home) it prints the same date it always
+did, so nothing moves for anyone already live.
+**AND ONE OF THE "SIX" WAS NOT LABELLING ANYTHING AT ALL.**
+`TimetableService.deleteEntry` FILTERED which relievers get told their duty was
+withdrawn — `date >= new Date(new Date().toISOString().slice(0, 10))` — while
+every other cover read resolves the school's timezone. East of UTC that day is
+YESTERDAY, so deleting a lesson told a teacher that a lesson they had ALREADY
+TAUGHT was cancelled: precisely the noise its own comment says the rule exists to
+prevent, "on the one channel that has to stay worth reading". Classified as a
+harmless label by a sweep that counted it among the six; it never was one.
+// THE RULE MOVED TO WHERE THE NOTICE LIVES. `LessonCoverService
+.coversAheadInTx` is now the one definition of "ahead", beside
+`announceCoverWithdrawn` — the two withdrawal paths already shared one notice and
+did NOT share one calendar, which is exactly how they drifted.
+// GOTCHA: the existing spec stubbed the cover service, so moving the call made
+five tests fail with "coversAheadInTx is not a function" — the suite doing its
+job. Its `asks only about cover still AHEAD` case asserted on a query
+`deleteEntry` no longer makes, so the fixture now binds the REAL method with a
+stubbed region and the case asserts WHICH day: stubbing it away would have left
+the property asserted against nothing.
+// GOTCHA in my own test, not the code: the letter body is JUSTIFIED, so pdfkit
+positions each word separately and the extracted content stream carries
+`AdaOkonkwo` with no space. Compare with whitespace stripped.
+// LEFT ALONE, deliberately: the other five are genuine labels — a CSV filename,
+"printed"/"generated" footers — and `exam.service.ts` prints its stamp with an
+explicit "UTC" suffix, which is honest rather than wrong. Full ISO timestamps
+(`exportedAt`, `producedAt`, `cutoff`) are INSTANTS and correct as UTC.
+
 ### The cap bounding what a parent pays was a naira figure, in every currency
 `platform_fee_config` was a SINGLETON keyed `id='fees'` carrying `flatMinor` and
 `capMinor` in minor units with NO currency at all — its own validation messages
