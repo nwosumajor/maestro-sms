@@ -1432,6 +1432,54 @@ damage was.
 Gate: `every-body-is-validated-at-the-boundary.spec.ts`, exemptions named with
 reasons and each required to name a file that still exists.
 
+### Is it accurate and efficient? — measured, and one of the answers was no
+Asked of the funds-by-department report the moment it shipped. Both halves were
+worth asking, and both found something.
+**ACCURATE — after a leak was closed.** Reconciled against the raw tables and
+the figures matched exactly. Then the two cases the reconciliation could not see
+were CREATED rather than reasoned about: an invoice carrying a posted payment
+and NO line items, and one whose lines are waived to zero. Both had no
+denominator to apportion by, so both dropped the payment on the floor —
+**₦5,000 seeded live and the collected figure did not move.** A finance report
+quietly worth less than the bank. A `stranded` arm surfaces them as
+UNATTRIBUTED, a number somebody can go and look into rather than one that is
+simply absent.
+// GOTCHA: **the unit tests asserted the SQL's TEXT and could not catch a
+comma.** A missing one after the `paid` CTE shipped a 42601 into a running stack
+with every assertion green. `revenue-by-source.e2e-spec.ts` EXECUTES the query
+against a real Postgres and reconciles: per-department billed, a mixed bill's
+payment split 60/40, the stranded payment counted, a CANCELLED invoice excluded,
+and the totals equal to the rows that produced them.
+// GOTCHA, the same trap this file already records: a backtick inside an SQL
+comment CLOSES the template literal. Written down once and walked into again.
+**EFFICIENT — no, and then better.** Measured as `major_user` with the tenant
+GUC set, on ten years of a school (60,015 invoices, 72,271 lines, 45,141
+payments): the shipped query was **1,328 ms**. It aggregated line items by
+(invoice, source) and then re-aggregated to per-invoice — 180,000 intermediate
+rows to return four. Grouping the final result directly by (currency, source)
+and joining per-invoice scalars gives **725 ms**; the `stranded` arm costs 520
+of the remaining 1,197 ms and STAYS, because the alternative is the leak above.
+// THINGS THAT LOOKED BETTER AND MEASURED WORSE, all rejected on numbers rather
+than taste: a WINDOW FUNCTION instead of the second aggregate (2,522 ms); a
+`scoped` CTE referenced three times, which materialised (2,655 ms); an anti-join
+with a correlated EXISTS over the CTE (2,394 ms).
+// GOTCHA in my own fixture: the first volume seed gave EVERY invoice three
+sources, making every invoice mixed. That is not a school — it is the worst
+case. Reshaped to ~85% single-source and the honest numbers are the ones above.
+The same trap as the pupil who was given all 5,000 invoices.
+// AND AN INDEX I HAD JUST SHIPPED WAS DEAD. `(schoolId, source) WHERE source IS
+NOT NULL` was added on the assumption that grouping by source would use it. The
+plan never mentions it and `pg_stat_user_indexes` reports **zero scans** — the
+report GROUPS BY source and never FILTERS on it. Dropped in `20270109000000`.
+Two covering indexes were then built and measured — about a tenth, and the
+`payment` one never chosen at all — and NOT added, the same conclusion the
+invoice-list index reached.
+// WHERE THE CEILING IS: an ordinary school reads in tens of milliseconds; this
+is O(the school's LIFETIME) and will grow with its age, because the collected
+figure needs each invoice's own total to apportion against. `from`/`to` brings
+ten years to 826 ms for one session.
+
+
 ### Funds separated by the part of the school that raised them
 `FEE_SOURCES` / `invoice_line_item.source` (migration `20270108000000`),
 `FeesService.revenueBySource`, `GET /fees/revenue-by-source` (`fee.manage`),

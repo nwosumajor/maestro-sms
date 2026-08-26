@@ -102,6 +102,15 @@ describe("the report", () => {
     expect(src).toMatch(/SELECT i\.currency/);
   });
 
+  it("groups the final result directly, not through a per-(invoice, source) pass", () => {
+    // The shape is the performance. Aggregating by (invoice, source) and then
+    // re-aggregating produced 180,000 intermediate rows to return four —
+    // measured at 1,328 ms against 687 ms for this. Anchored on the join that
+    // makes it possible: per-invoice scalars joined in, not built up.
+    expect(src).toMatch(/JOIN inv ON inv\."invoiceId" = li\."invoiceId"/);
+    expect(src).toMatch(/MIN\(COALESCE\(li\."source"/);
+  });
+
   it("counts an unattributed line as its own bucket, never as tuition", () => {
     expect(src).toContain("'UNATTRIBUTED'");
     expect(src).not.toMatch(/COALESCE\(li\."source", 'TUITION'\)/);
@@ -109,6 +118,14 @@ describe("the report", () => {
 
   it("treats a REFUND as subtracting, like the invoice balance does", () => {
     expect(src).toMatch(/kind = 'REFUND' THEN -pm\."amountMinor"/);
+  });
+
+  it("counts money paid against a bill the apportionment cannot reach", () => {
+    // No line items at all, or lines waived to zero. Both used to drop the
+    // payment on the floor — seeded live, ₦5,000 vanished from the collected
+    // figure. A finance report quietly worth less than the bank.
+    expect(src).toMatch(/stranded AS \(/);
+    expect(src).toMatch(/COALESCE\(inv\.inv_total, 0\) = 0/);
   });
 
   it("excludes CANCELLED invoices — an unissued bill is not revenue", () => {
@@ -119,6 +136,6 @@ describe("the report", () => {
     // A payment settles an invoice, not a line. Saying nothing would let a
     // convention read as a measurement.
     expect(src).toMatch(/mixed_collected/);
-    expect(src).toMatch(/source_count > 1/);
+    expect(src).toMatch(/inv\.min_src <> inv\.max_src/);
   });
 });

@@ -1,0 +1,12 @@
+-- An index nothing selects.
+--
+-- Shipped one migration earlier on the assumption that grouping by source would
+-- use it. Measured as `major_user` with RLS in force on 60,015 invoices and
+-- 72,271 line items: the plan never mentions it and `pg_stat_user_indexes`
+-- reports zero scans. The report GROUPS BY source and never FILTERS on it, so
+-- there is nothing for it to narrow.
+--
+-- Same conclusion as the three trigram indexes dropped in 20261228000000 and
+-- the invoice variant rejected in 20270101000000: on the hottest table in the
+-- product, an index nothing chooses is storage and write amplification.
+DROP INDEX IF EXISTS "invoice_line_item_schoolId_source_idx";

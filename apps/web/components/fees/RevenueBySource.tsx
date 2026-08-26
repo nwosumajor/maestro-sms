@@ -52,7 +52,8 @@ export function RevenueBySource({ reports }: { reports: Report[] }) {
                           {s.label}
                           {s.source === "UNATTRIBUTED" && (
                             <span className="block text-xs text-muted-foreground">
-                              raised before departments were recorded — not counted as any one of them
+                              charges raised before departments were recorded, and any payment received against a bill
+                              with nothing on it — counted here rather than as any one department
                             </span>
                           )}
                         </td>
