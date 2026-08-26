@@ -28,6 +28,8 @@ import {
   PLANS,
   PLAN_MODULES,
   PLAN_PRICING,
+  PLAN_PRICING_BY_CURRENCY,
+  MODULE_ADDON_PRICING_BY_CURRENCY,
   addonPerSeatMonthlyMinor,
   billableAddons,
   NOT_SOLD_SEPARATELY,
@@ -51,6 +53,108 @@ function tierStepFor(m: ModuleKey): { plan: Plan; stepMinor: number; adds: numbe
   }
   return null;
 }
+
+// =============================================================================
+// The SAME two invariants, for EVERY currency the platform ships prices for
+// =============================================================================
+// The invariants below were proved against PLAN_PRICING and MODULE_ADDON_PRICING
+// — both NAIRA — and that is exactly how the USD hole survived: tier prices had
+// been per-currency since dual-currency billing shipped, and the add-on table
+// was one bare number for every market. A USD school was quoted HOSTEL at 12,500
+// cents ($125/seat/month) against a $0.65 ULTIMATE tier.
+//
+// A ladder proven in one currency is not a ladder.
+// =============================================================================
+describe("the pricing ladder holds in every currency the platform ships", () => {
+  const currencies = Object.keys(MODULE_ADDON_PRICING_BY_CURRENCY);
+
+  it("ships add-on prices for exactly the currencies it ships tier prices for", () => {
+    // A currency with tiers and no add-ons quotes add-ons at another currency's
+    // figures — or, once `effective` refuses, cannot sell them at all.
+    expect(currencies.length).toBeGreaterThanOrEqual(2);
+    expect(currencies.sort()).toEqual(Object.keys(PLAN_PRICING_BY_CURRENCY).sort());
+  });
+
+  for (const currency of currencies) {
+    const tiers = PLAN_PRICING_BY_CURRENCY[currency as "NGN"];
+    const addons = MODULE_ADDON_PRICING_BY_CURRENCY[currency];
+
+    const stepFor = (m: ModuleKey) => {
+      for (let i = 1; i < LADDER.length; i++) {
+        const below = new Set(PLAN_MODULES[LADDER[i - 1]]);
+        if (!PLAN_MODULES[LADDER[i]].includes(m) || below.has(m)) continue;
+        return {
+          plan: LADDER[i],
+          stepMinor: tiers[LADDER[i]].perSeatMonthlyMinor - tiers[LADDER[i - 1]].perSeatMonthlyMinor,
+          adds: PLAN_MODULES[LADDER[i]].filter((x) => !below.has(x)).length,
+        };
+      }
+      return null;
+    };
+
+    it(`${currency}: prices every module the naira table prices`, () => {
+      // A module priced in one currency and not another is a module a school in
+      // that market cannot buy, silently.
+      expect(Object.keys(addons).sort()).toEqual(Object.keys(MODULE_ADDON_PRICING).sort());
+    });
+
+    it(`${currency}: an add-on always costs MORE than the same module inside its tier`, () => {
+      const cheap: string[] = [];
+      for (const m of Object.keys(addons) as ModuleKey[]) {
+        const t = stepFor(m);
+        if (!t) continue;
+        const perModuleInTier = t.stepMinor / t.adds;
+        if ((addons[m] ?? 0) <= perModuleInTier) {
+          cheap.push(`${m}: add-on ${addons[m]} <= ${perModuleInTier} inside ${t.plan}`);
+        }
+      }
+      expect(cheap).toEqual([]);
+    });
+
+    it(`${currency}: never costs MORE than the whole tier that contains it`, () => {
+      // THE INVARIANT THAT WAS MISSING, and the reason the naira-in-dollars bug
+      // survived a gate written to protect this ladder. Both rules above only
+      // catch a price that is too LOW — an add-on that undercuts the upgrade.
+      // A naira figure applied to a USD tier is absurdly HIGH, so it satisfies
+      // "costs more than its share" and "three beat the upgrade" trivially, and
+      // both went green while HOSTEL was quoted at 192x the tier containing it.
+      //
+      // Buying ONE module must never cost more than buying the entire plan that
+      // includes it. Mutation-validated by pointing USD at the kobo table.
+      const dear: string[] = [];
+      for (const m of Object.keys(addons) as ModuleKey[]) {
+        const t = stepFor(m);
+        if (!t) continue;
+        const wholeTier = tiers[t.plan].perSeatMonthlyMinor;
+        if ((addons[m] ?? 0) > wholeTier) {
+          dear.push(`${m}: add-on ${addons[m]} > ${wholeTier} for all of ${t.plan}`);
+        }
+      }
+      expect(dear).toEqual([]);
+    });
+
+    it(`${currency}: makes the UPGRADE the better buy by the third add-on`, () => {
+      const worse: string[] = [];
+      for (let i = 1; i < LADDER.length; i++) {
+        const below = new Set(PLAN_MODULES[LADDER[i - 1]]);
+        const added = PLAN_MODULES[LADDER[i]].filter(
+          (m) => !below.has(m) && addons[m] !== undefined,
+        );
+        if (added.length < 3) continue;
+        const threeCheapest = added
+          .map((m) => addons[m] as number)
+          .sort((a, b) => a - b)
+          .slice(0, 3)
+          .reduce((a, b) => a + b, 0);
+        const step = tiers[LADDER[i]].perSeatMonthlyMinor - tiers[LADDER[i - 1]].perSeatMonthlyMinor;
+        if (threeCheapest <= step) {
+          worse.push(`${LADDER[i]}: three add-ons ${threeCheapest} <= upgrade ${step}`);
+        }
+      }
+      expect(worse).toEqual([]);
+    });
+  }
+});
 
 describe("what an add-on costs against the tier that contains it", () => {
   const priced = Object.keys(MODULE_ADDON_PRICING) as ModuleKey[];

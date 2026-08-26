@@ -17,6 +17,7 @@ import {
   CURRENCIES,
   MODULES,
   MODULE_ADDON_PRICING,
+  MODULE_ADDON_PRICING_BY_CURRENCY,
   NOT_SOLD_SEPARATELY,
   PLANS,
   PLAN_MODULES,
@@ -68,20 +69,43 @@ export class AddonPricingService implements OnModuleInit {
     });
   }
 
-  /** Effective add-on prices for one currency: operator rows over code defaults. */
+  /**
+   * Effective add-on prices for one currency: operator rows over code defaults.
+   *
+   * // SECURITY-ADJACENT, and the same rule `PlanPricingService.effective`
+   * states: a currency with no prices is REFUSED, never quoted at another
+   * currency's figures. This fell back to `MODULE_ADDON_PRICING` — the KOBO
+   * table — for every currency, so a USD school was quoted HOSTEL at 12,500
+   * cents ($125/seat/month) against a $0.65 tier. Refusing names the fix;
+   * quoting a naira number in dollars does not.
+   */
   async effective(currency: Currency = CURRENCIES.NGN): Promise<Table> {
     const { byCurrency } = await this.resolve();
-    return byCurrency[currency] ?? { ...MODULE_ADDON_PRICING };
+    const table = byCurrency[currency] ?? MODULE_ADDON_PRICING_BY_CURRENCY[currency];
+    if (!table) {
+      throw new ServiceUnavailableException(
+        `No add-on pricing for ${currency}. Set prices for it in the operator pricing console before selling add-ons in this currency.`,
+      );
+    }
+    return { ...table };
   }
 
   /** Operator console + the school's own add-on shop. */
   async list(currency: Currency = CURRENCIES.NGN): Promise<ModuleAddonPriceDto[]> {
     const { byCurrency, overridden } = await this.resolve();
     const table = byCurrency[currency] ?? {};
+    const defaults = MODULE_ADDON_PRICING_BY_CURRENCY[currency];
+    if (!defaults && Object.keys(table).length === 0) {
+      throw new ServiceUnavailableException(
+        `No add-on pricing for ${currency}. Set prices for it in the operator pricing console before selling add-ons in this currency.`,
+      );
+    }
     return sellableAlone().map((module) => ({
       module,
       currency,
-      perSeatMonthlyMinor: table[module] ?? MODULE_ADDON_PRICING[module] ?? 0,
+      // `?? 0` is deliberately gone: a module the table does not price is a gap
+      // to fill, and quoting it FREE is the one answer that costs money.
+      perSeatMonthlyMinor: table[module] ?? defaults?.[module] ?? 0,
       isDefault: !overridden.has(`${module}:${currency}`),
     }));
   }
@@ -139,10 +163,17 @@ export class AddonPricingService implements OnModuleInit {
   private async resolve(): Promise<{ byCurrency: Record<string, Table>; overridden: Set<string> }> {
     const now = Date.now();
     if (this.cache && now - this.cache.at < CACHE_TTL_MS) return this.cache;
-    const byCurrency: Record<string, Table> = {
-      [CURRENCIES.NGN]: { ...MODULE_ADDON_PRICING },
-      [CURRENCIES.USD]: { ...MODULE_ADDON_PRICING },
-    };
+    // SEEDED PER CURRENCY. This read
+    //     [CURRENCIES.NGN]: { ...MODULE_ADDON_PRICING },
+    //     [CURRENCIES.USD]: { ...MODULE_ADDON_PRICING },
+    // — the SAME kobo table under both keys. Not an omission: somebody wrote USD
+    // out and gave it naira figures. `module_addon_price` has no rows, so that
+    // was what every school actually got, and a USD school was quoted HOSTEL at
+    // 12,500 cents — $125 per seat per month against a $0.65 ULTIMATE tier.
+    // Measured live on a provisioned school.
+    const byCurrency: Record<string, Table> = Object.fromEntries(
+      Object.entries(MODULE_ADDON_PRICING_BY_CURRENCY).map(([c, table]) => [c, { ...table }]),
+    );
     const overridden = new Set<string>();
     // The APP role may read this table (rls/111), so no privileged client is
     // needed for the read path — quotes and renewals run on the ordinary client.

@@ -543,6 +543,60 @@ export const MODULE_ADDON_PRICING: Partial<Record<ModuleKey, number>> = {
 };
 
 /**
+ * USD defaults, in cents — the same ladder, priced for the USD tier table.
+ *
+ * // GOTCHA, and it is the third instance of a class this repo already records
+ * under "A NAIRA CONSTANT IS NOT A RULE FOR EVERY SCHOOL": tier prices have been
+ * per-currency since dual-currency billing shipped, and the ADD-ON table beside
+ * them was a bare number applied to whatever the school is billed in. Every
+ * comment above it is denominated in naira. `module_addon_price` is keyed
+ * `(module, currency)` and has no rows, so EVERY currency fell through to the
+ * kobo figures: a USD school was quoted HOSTEL at 12,500 cents — **$125 per seat
+ * per month against a $0.65 ULTIMATE tier**, roughly 192x the tier that contains
+ * it. Measured live on a provisioned school.
+ *
+ * `PlanPricingService.effective()` already refuses a currency it has no prices
+ * for, and its comment says why: "quoting a tier at zero, OR SILENTLY AT THE
+ * NAIRA PRICE, is worse than saying the market is not open yet." The add-on
+ * service one file over did exactly that. Sibling asymmetry, with the correct
+ * one written first and its reasoning recorded beside it.
+ *
+ * These figures preserve BOTH ladder invariants against `PLAN_PRICING_USD`, and
+ * `add-ons-never-undercut-the-upgrade` now proves them for every shipped
+ * currency rather than for naira alone — which is how the USD hole survived.
+ * They are a structural default, the same standing `PLAN_PRICING_USD` has: an
+ * operator `module_addon_price` row overrides them per currency.
+ */
+export const MODULE_ADDON_PRICING_USD: Partial<Record<ModuleKey, number>> = {
+  // PREMIUM adds five sellable modules for 15c/seat (3c each).
+  [MODULES.WORKFLOW]: 6,
+  [MODULES.ANALYTICS]: 6,
+  [MODULES.INTEGRITY]: 6,
+  [MODULES.GAMES]: 6,
+  [MODULES.CBT]: 9,
+  // ULTIMATE adds six for 20c/seat (3.33c each).
+  [MODULES.ADMISSIONS]: 9,
+  [MODULES.CERTIFICATE]: 7,
+  [MODULES.HOSTEL]: 9,
+  [MODULES.TRANSPORT]: 9,
+  [MODULES.DISCIPLINE]: 7,
+  [MODULES.ALUMNI]: 7,
+  // ENTERPRISE adds two for 40c/seat (20c each).
+  [MODULES.HR]: 30,
+  [MODULES.GROUP]: 30,
+};
+
+/** Add-on prices per currency, mirroring {@link PLAN_PRICING_BY_CURRENCY}. NGN
+ *  and USD are guaranteed present; a new market is another key AND a row. */
+export const MODULE_ADDON_PRICING_BY_CURRENCY: Record<string, Partial<Record<ModuleKey, number>>> & {
+  NGN: Partial<Record<ModuleKey, number>>;
+  USD: Partial<Record<ModuleKey, number>>;
+} = {
+  NGN: MODULE_ADDON_PRICING,
+  USD: MODULE_ADDON_PRICING_USD,
+};
+
+/**
  * Deliberately NOT sold on their own — and this is a funnel decision, not an
  * oversight.
  *

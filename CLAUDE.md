@@ -2075,6 +2075,65 @@ snapshot taken immediately after a probe reports the PREVIOUS probe's reads.
 Settle 12-18 s, and divide by the number of requests rather than trusting one.
 
 
+### A naira figure, quoted in dollars, on the add-on price list
+Asked to review the public -> onboarding -> payment flow for easy onboarding and
+revenue generation. Driving it end to end as a prospect (public submission ->
+operator queue -> provision -> invite -> billing -> checkout) found the funnel
+itself SOUND, and one defect on the price list.
+Tier prices have been per-currency since dual-currency billing shipped:
+`PLAN_PRICING_BY_CURRENCY` in code, `plan_price` keyed `(plan, currency)` in the
+database, and `PlanPricingService.effective()` REFUSES a currency it has no
+prices for — its own comment saying why: *"quoting a tier at zero, **or silently
+at the naira price**, is worse than saying the market is not open yet."*
+**THE ADD-ON TABLE BESIDE IT WAS ONE BARE NUMBER FOR EVERY MARKET**, every
+comment above it denominated in naira (`₦225/seat`, `₦45 each`, `an add-on at
+₦80`) — and `AddonPricingService.resolve()` did not merely omit USD, it wrote it
+out explicitly and handed it the kobo table:
+```
+[CURRENCIES.NGN]: { ...MODULE_ADDON_PRICING },
+[CURRENCIES.USD]: { ...MODULE_ADDON_PRICING },   // the SAME figures
+```
+`module_addon_price` is keyed `(module, currency)` and has NO ROWS, so that seed
+is what every school actually got. Measured live on a provisioned school: a USD
+school was quoted HOSTEL at **12,500 cents — $125 per seat per month against a
+$0.65 ULTIMATE tier**, about 192x the tier that contains it. Per seat: $56,250 a
+month for one module at 450 pupils. Nobody buys that, so the add-on lever — a
+built revenue mechanism with a shop, proration and renewal billing behind it —
+was simply DEAD in USD, silently. Third instance of the class this file already
+records under "A NAIRA CONSTANT IS NOT A RULE FOR EVERY SCHOOL".
+Live after, same school: **$125.00 -> $0.06** per seat per month; the naira
+school reads ₦80/₦125 exactly as before.
+// **THE GATE COULD NOT SEE IT, AND THAT IS THE REAL LESSON.**
+`add-ons-never-undercut-the-upgrade` proves two invariants — an add-on costs more
+than its share of the tier, and by the third the upgrade wins — and BOTH ONLY
+CATCH A PRICE THAT IS TOO LOW. A naira figure in a USD tier is absurdly HIGH, so
+it satisfies both trivially: pointing USD at the kobo table left the suite GREEN.
+Found by mutation-testing the fix rather than by reading. The missing invariant
+is now there — **one module never costs more than the WHOLE tier that contains
+it** — and every invariant runs for every shipped currency, since a ladder proven
+in one currency is not a ladder.
+// `effective()` now REFUSES an unpriced currency instead of falling back, the
+rule its sibling already followed; `list()`'s `?? 0` is gone too, because
+quoting a module FREE is the one answer that costs money.
+// THE USD FIGURES ARE A STRUCTURAL DEFAULT, the same standing `PLAN_PRICING_USD`
+has — chosen to satisfy both invariants against the USD tier table, and an
+operator `module_addon_price` row overrides them per currency. Worth the owner
+confirming as prices; they are correct as a ladder.
+// GOTCHA: a test on the pure table proves nothing about the RESOLVER that seeds
+it, and the seed was where this lived — so the spec drives the real
+`AddonPricingService` with no operator rows, and is mutation-validated by
+restoring the exact shipped line.
+// CHECKED AND SOUND, so it is not re-litigated: provisioning stamps only
+`country` + `calendarTemplate` and leaves timezone/locale/currency NULL — correct,
+because `resolveRegion` falls back to `countryProfile(school.country)`, so a
+Ghanaian school resolves to GHS rather than to the platform's naira. The trial
+stamps `currentPeriodEnd = now + 30d` so dunning can eventually fire; the
+onboarding request auto-APPROVES on provision; and the email chain is complete —
+acknowledgement to the applicant, alert to the owner, "is now live" to the
+ORIGINAL contact and a welcome + 7-day set-password invite to the new admin, with
+a temp password as the fallback. A brand-new school with no pupils quotes at a
+floor of ONE seat, so a per-seat plan can never check out at zero.
+
 ### A birth certificate the school erased, still ticked off as held
 The right-to-erasure fix that reached supplied documents was recorded here as
 LATENT — `document_submission` had no rows, so it had never run. Driving the
