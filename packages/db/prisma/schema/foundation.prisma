@@ -483,8 +483,13 @@ model LegalAcceptance {
 /// row ⇒ DEFAULT_PLATFORM_FEE in @sms/types (ZERO — fail-safe: nobody is
 /// charged until the operator opts in). See rls/71_platform_fee_rls.sql.
 model PlatformFeeConfig {
-  id        String   @id
-  /// Flat component, minor units (kobo).
+  id        String
+  /// The currency these figures are DENOMINATED IN. `flatMinor`/`capMinor` are
+  /// minor units of THIS currency, not of the platform's home one — the take-rate
+  /// rides the Paystack split and Paystack settles NGN/GHS/ZAR/KES/USD. A
+  /// currency with no row charges NOTHING (see PlatformFeeService).
+  currency  String   @default("NGN")
+  /// Flat component, minor units of `currency`.
   flatMinor Int      @default(0)
   /// Percentage component in basis points (100 bp = 1%).
   percentBp Int      @default(0)
@@ -494,6 +499,8 @@ model PlatformFeeConfig {
   /// via school.paymentFeeBearer).
   bearer    String   @default("PARENT")
   updatedAt DateTime @updatedAt
+
+  @@id([id, currency])
 
   @@map("platform_fee_config")
 }

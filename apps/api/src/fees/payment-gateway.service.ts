@@ -245,7 +245,10 @@ export class PaymentGatewayService {
     // the invoice; SCHOOL bearer: the card is charged the invoice and the fee
     // comes out of the school's settlement. Either way the platform's cut is the
     // gateway split's transaction_charge — it never transits the school's bank.
-    const cfg = await this.platformFees.effective();
+    // The INVOICE's currency, not the platform's. `flatMinor`/`capMinor` are
+    // minor units of whatever currency the config was set in, so asking for the
+    // wrong one applied a naira cap to a cedi payment — see PlatformFeeService.
+    const cfg = await this.platformFees.effective(currency);
     const splitTo = usdRail ? undefined : subaccount;
     const feeMinor = splitTo ? computePlatformFeeMinor(balance, cfg) : 0;
     const bearer: PlatformFeeBearer =
@@ -289,9 +292,11 @@ export class PaymentGatewayService {
 
   /** The school's fee-settlement posture (never the full account number). */
   async getSettlement(p: Principal): Promise<SettlementAccountDto> {
-    const cfg = await this.platformFees.effective();
     // What this school can actually do, worked out BEFORE the form is drawn.
     const region = await this.region.forSchool(p.schoolId);
+    // The fee this school's payers would actually be charged, in the school's
+    // own currency — a naira config says nothing about a cedi school.
+    const cfg = await this.platformFees.effective(region.currency);
     const country = paystackCountry(region.country);
     const blockedReason = paystackSettlementBlocker(region.country);
     // Ask the account what it can charge rather than trusting the static list.

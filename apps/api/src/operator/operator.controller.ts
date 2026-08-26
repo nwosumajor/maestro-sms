@@ -2,7 +2,9 @@ import {
   Delete, Body, Controller, Get, Param, Post, Put, Query, Res, StreamableFile, BadRequestException} from "@nestjs/common";
 import type { Response } from "express";
 import type { AttentionQueueDto, MessageCreditBalancePageDto, MessageCreditLedgerEntryDto, ModuleAddonPriceDto, OnboardingRequestDto, OperatorAdminAppointmentDto, OperatorBillingAlertDto, OperatorPaymentPageDto, OperatorStudentDto, OperatorUserDto, PlanPriceDto, PlatformAnalyticsDto, PlatformAuditPageDto, PlatformDelegationDto, PlatformStaffInviteDto, SubscriptionDto, TenantNameDto, TenantPageDto } from "@sms/types";
-import { CURRENCIES } from "@sms/types";
+import { CURRENCIES,
+  PAYSTACK_CURRENCIES,
+} from "@sms/types";
 import { z } from "zod";
 import {
   COUNTRIES,
@@ -23,7 +25,7 @@ import {
   CHANNEL_LABELS,
   type PaymentChannel,
 } from "@sms/types";
-import { boundedInt, narrowStatus, pageNumber } from "../common/status-filter";
+import { boundedInt, narrowStatus, pageNumber, narrowCurrency } from "../common/status-filter";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { RequireStepUp } from "../auth/require-stepup.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -185,6 +187,9 @@ const groupMembersSchema = z.object({ schoolIds: z.array(z.string().uuid()).max(
 const groupDirectorsSchema = z.object({ emails: z.array(z.string().email()).max(10) });
 
 const platformFeeSchema = z.object({
+  // The currency these figures are denominated in. Omitted = the platform's
+  // home currency, which is what the historical singleton held.
+  currency: z.enum(PAYSTACK_CURRENCIES).optional(),
   flatMinor: z.number().int().min(0),
   percentBp: z.number().int().min(0),
   capMinor: z.number().int().min(0).nullish(),
@@ -778,8 +783,10 @@ export class OperatorController {
   /** The platform's convenience fee on online fee collection (take-rate). */
   @Get("platform-fees")
   @RequirePermission(OPERATOR_PERMISSIONS.PLATFORM_TENANTS_READ)
-  getPlatformFees() {
-    return this.platformFees.effective();
+  getPlatformFees(@Query("currency") currency?: string) {
+    // Narrowed like every other query filter — an unrecognised currency must not
+    // silently answer with the naira config, which is the defect being fixed.
+    return this.platformFees.effective(narrowCurrency(currency));
   }
 
   // --- subscription revenue ledger — the platform's own finance desk ---------
@@ -917,7 +924,8 @@ export class OperatorController {
     @CurrentPrincipal() p: Principal,
     @Body(new ZodValidationPipe(platformFeeSchema)) body: z.infer<typeof platformFeeSchema>,
   ) {
-    return this.platformFees.update(p, { ...body, capMinor: body.capMinor ?? null });
+    const { currency, ...cfg } = body;
+    return this.platformFees.update(p, { ...cfg, capMinor: body.capMinor ?? null }, currency ?? undefined);
   }
 
   // --- growth: promo codes + agents/commissions (owner-only writes) ----------

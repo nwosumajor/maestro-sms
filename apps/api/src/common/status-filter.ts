@@ -1,3 +1,4 @@
+import { PAYSTACK_CURRENCIES } from "@sms/types";
 // =============================================================================
 // A filter nobody validated answers a question nobody asked
 // =============================================================================
@@ -186,4 +187,22 @@ export function dateWindow(
     throw new BadRequestException(`${fields.from} must not be after ${fields.to}`);
   }
   return { from: gte, to: lte };
+}
+
+/**
+ * A currency a query string may name, or the platform's home currency.
+ *
+ * Same posture as {@link narrowStatus}: an unrecognised value is REFUSED with
+ * the allowed set named, never quietly answered in another currency. The
+ * take-rate config is denominated per currency, and answering a `?currency=GHS`
+ * with the naira figures is exactly the defect that made the fee cap 100x too
+ * generous in Ghana.
+ */
+export function narrowCurrency(value: string | undefined, fallback = "NGN"): string {
+  if (value === undefined || value.trim() === "") return fallback;
+  const v = value.trim().toUpperCase();
+  if (!(PAYSTACK_CURRENCIES as readonly string[]).includes(v)) {
+    throw new BadRequestException(`currency must be one of ${PAYSTACK_CURRENCIES.join(", ")}`);
+  }
+  return v;
 }

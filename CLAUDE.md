@@ -2075,6 +2075,54 @@ snapshot taken immediately after a probe reports the PREVIOUS probe's reads.
 Settle 12-18 s, and divide by the number of requests rather than trusting one.
 
 
+### The cap bounding what a parent pays was a naira figure, in every currency
+`platform_fee_config` was a SINGLETON keyed `id='fees'` carrying `flatMinor` and
+`capMinor` in minor units with NO currency at all — its own validation messages
+saying "(kobo)". The take-rate rides the Paystack split, and Paystack settles
+NGN, GHS, ZAR, KES and USD, so the same kobo figures were applied to all of them.
+Measured against the LIVE row (150bp capped at 200,000):
+```
+NGN 150,000 invoice -> parent pays NGN 2,000    the cap binds, as intended
+GHS   5,000 invoice -> parent pays GHS    75    "cap" is GHS 2,000 — never binds
+KES  75,000 invoice -> parent pays KES 1,125    "cap" is KES 2,000 — never binds
+ZAR  15,000 invoice -> parent pays ZAR   225    "cap" is ZAR 2,000 — never binds
+```
+**The cap is the ONLY thing bounding a convenience fee, and the fee is borne by
+the PARENT by default.** In every non-naira currency it sits 12x to 100x above
+the intended ceiling, so it is effectively disabled and the full 150bp is charged
+uncapped. `flatMinor` is worse if ever set: a ₦100 flat becomes GH₵100 a
+transaction. Fourth instance of "A NAIRA CONSTANT IS NOT A RULE FOR EVERY SCHOOL".
+Keyed `(id, currency)` now (migration `20270111000000`), exactly like `plan_price`
+and `module_addon_price`. The existing row backfills as NGN, so every live
+Nigerian school is charged precisely what it was.
+// **THE FAIL-SAFE POINTS AT ZERO, AND THAT IS THE WHOLE POINT.** A currency with
+no row charges NOTHING — which is what this service's own header already promised
+for a MISSING ROW ("fail-safe: no school is charged until the operator opts in"),
+applied one level too shallow. The rule this repo already states: an unset CONTROL
+tightens, an unset CHARGE goes to zero, because a charge that guesses bills a
+family. Converting instead would need an FX rate this platform does not have.
+// THE LEVER STILL EARNS: `GET/PUT /operator/platform-fees?currency=` and a
+currency selector on the operator card, so the owner states the ceiling in the
+school's own money. Live: setting GHS to 150bp/GH₵20 took a GH₵5,000 invoice from
+**GH₵75.00 uncapped to GH₵20.00**, with NGN untouched at ₦2,000.
+// All three consumers now name the currency they are CHARGING IN — invoice
+checkout (the invoice's own currency), the settlement-posture card and the
+ADMISSION FORM FEE, which resolved the school's currency four lines BELOW the
+fee it had already computed in naira.
+// GOTCHA found by driving the operator PUT rather than reading it: `update()`
+ended `return this.effective()` with no argument, so saving a cedi rate echoed
+the NAIRA row back — `PUT {currency:"GHS",capMinor:2000}` answered `capMinor
+200000`, which reads to an operator as a save that did not take. The GET beside
+it was already right. The audit row now carries the currency too: "set to 150bp
+capped at 2,000" says nothing about which market once there is more than one.
+// The operator card was naira-only in three separate ways — `/100`, `en-NG`,
+and a "Flat (₦)" label — while editing the one config applied to every currency.
+It scales by `minorUnits(currency)` now, so a zero-decimal currency is not 100x
+wrong, and the preview is in the currency being priced.
+// GOTCHA: `?currency=` goes through a `narrowCurrency` narrower beside
+`narrowStatus`, because answering an unrecognised currency with the naira config
+is the defect itself in a new place. Live: `?currency=XOF` -> 400 naming the set.
+
 ### A naira figure, quoted in dollars, on the add-on price list
 Asked to review the public -> onboarding -> payment flow for easy onboarding and
 revenue generation. Driving it end to end as a prospect (public submission ->

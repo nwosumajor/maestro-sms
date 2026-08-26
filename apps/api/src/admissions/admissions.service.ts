@@ -225,12 +225,15 @@ export class AdmissionsService {
     feeMinor: number,
     subaccount: string | null,
   ): Promise<{ authorizationUrl: string; reference: string; amountMinor: number }> {
-    const cfg = await this.platformFees.effective();
-    const platformTake = subaccount ? computePlatformFeeMinor(feeMinor, cfg) : 0;
     const reference = `ADM-${applicationId.slice(0, 8)}-${Date.now()}`;
     // The SCHOOL's currency — the admission fee is the school's money, and
     // `school.admissionFormFeeMinor` is denominated in it.
     const { currency } = await this.region.forSchool(schoolId);
+    // Resolved BEFORE the take-rate, because the take-rate is denominated in
+    // that same currency. It used to be computed above this line against the
+    // naira config whatever the school billed in.
+    const cfg = await this.platformFees.effective(currency);
+    const platformTake = subaccount ? computePlatformFeeMinor(feeMinor, cfg) : 0;
     await this.channels?.assertEnabled(PAYMENT_CHANNELS.PAYSTACK);
     const { authorizationUrl } = await this.paystack.initialize({
       email,
