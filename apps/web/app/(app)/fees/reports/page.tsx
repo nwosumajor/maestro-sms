@@ -1,5 +1,6 @@
-import type { FeeReportBucketDto, FeeReportDto, LateFeeConfigDto, Serialized, SettlementAccountDto } from "@sms/types";
+import type { FeeReportBucketDto, FeeReportDto, FeeSourceReportDto, LateFeeConfigDto, Serialized, SettlementAccountDto } from "@sms/types";
 import { SettlementAccountCard } from "@/components/fees/SettlementAccountCard";
+import { RevenueBySource } from "@/components/fees/RevenueBySource";
 import { LateFeeConfigCard } from "@/components/fees/LateFeeConfigCard";
 import { hasPermission } from "@/lib/permissions";
 import Link from "next/link";
@@ -22,10 +23,11 @@ export default async function FinanceReportsPage() {
   const user = session!.user;
   if (!hasPermission(user.permissions, "fee.read")) redirect("/dashboard");
   const canManage = hasPermission(user.permissions, "fee.manage");
-  const [r, settlement, lateFee] = await Promise.all([
+  const [r, settlement, lateFee, bySource] = await Promise.all([
     apiGet<Report>("/fees/reports"),
     canManage ? apiGet<SettlementAccountDto>("/fees/settlement") : Promise.resolve(null),
     canManage ? apiGet<LateFeeConfigDto>("/fees/late-fee-config") : Promise.resolve(null),
+    canManage ? apiGet<Serialized<FeeSourceReportDto>[]>("/fees/revenue-by-source") : Promise.resolve(null),
   ]);
   if (!r || r.scope !== "school") redirect("/fees");
 
@@ -55,6 +57,9 @@ export default async function FinanceReportsPage() {
           </div>
         </div>
 
+        {/* `?? []` would turn a FAILED read into "the school earned nothing",
+            which is a statement about money. A null read renders nothing. */}
+        {bySource && <RevenueBySource reports={bySource} />}
         {settlement && <SettlementAccountCard initial={settlement} />}
         {lateFee && <LateFeeConfigCard initial={lateFee} />}
 

@@ -1432,6 +1432,53 @@ damage was.
 Gate: `every-body-is-validated-at-the-boundary.spec.ts`, exemptions named with
 reasons and each required to name a file that still exists.
 
+### Funds separated by the part of the school that raised them
+`FEE_SOURCES` / `invoice_line_item.source` (migration `20270108000000`),
+`FeesService.revenueBySource`, `GET /fees/revenue-by-source` (`fee.manage`),
+`RevenueBySource` on /fees/reports. Asked for: what boarding, transport, the
+library and academic fees each bring in, separated.
+Hostel rent, transport fares, library fines and tuition all land on the SAME
+`invoice_line_item` table — deliberately, so a family gets ONE bill and ONE
+balance rather than four. The cost was that "what did boarding bring in this
+term?" had no answer anywhere in the product.
+// GOTCHA, and it decided the whole design: **the only thing that LOOKED like an
+answer was the line's `description`, and attributing money by it would have been
+worse than having no report.** Hostel writes `input.description ?? "Hostel
+rent"` and transport `input.description ?? "Transport fare"` — OPERATOR-SUPPLIED
+FREE TEXT. Proved on the running stack by raising the two runs with the
+descriptions a real bursar would type, "Boarding — Michaelmas" and "Bus pass —
+Michaelmas": neither contains the word Hostel or Transport, and both are
+attributed correctly, because the source is RECORDED BY THE MODULE THAT RAISES
+THE CHARGE and never inferred afterwards. Six creation sites, all stamped;
+`funds-by-department.spec.ts` fails on a seventh that forgets.
+**BILLED IS EXACT; COLLECTED IS A STATED CONVENTION.** A payment settles an
+INVOICE, not a line, so on a bill mixing tuition and rent a part payment does
+not say which part it paid. Each posted payment is apportioned pro rata by line
+amount, and `mixedCollectedMinor` reports how much of the figure rests on that.
+// GOTCHA: I wrote that mixing was rare — "most invoices carry one department,
+since the hostel and transport runs raise their own" — and the live data said
+otherwise within a minute of the first probe: paying ₦2,300 on one hostel
+invoice returned ₦1,500 hostel and ₦800 transport, because the runs APPEND to a
+family's existing DRAFT invoice when there is one and only raise their own when
+there is not. That is the right product behaviour, and it makes mixing ordinary:
+**19 invoices carrying more than one department against 25 that did not.** So
+the apportioned share is a material number the page states, not a footnote about
+a corner case. A plausible sentence corrected by a measurement.
+// PER CURRENCY, one table each, never summed — invoices carry their own
+currency per row and this platform bills USD through Stripe beside a school's
+local rail. Live: NGN and USD reported separately.
+// A line written before this column existed is `UNATTRIBUTED`, its own row, and
+NOT folded into tuition: `COALESCE(source, 'TUITION')` would have put invented
+figures into a finance report and nothing on the page could have shown it. Live
+on the demo tenant the whole history reads "Not attributed", which is true.
+// ADJUSTMENTS get their OWN source rather than negative-tuition: a department's
+billed figure should not move because somebody granted a waiver against a mixed
+invoice, and "what did we give away?" is a question a bursar asks directly. Late
+fees likewise — charged by the sweep, not by any department. CANCELLED invoices
+are excluded (an unissued bill is not revenue) and a REFUND subtracts, exactly
+as the invoice balance treats it.
+
+
 ### The person driving the bus does not need to know what each family pays
 `canSeeFare` (`transport.service.ts`), `TransportAssignmentDto.fareMinor:
 number | null`. Probed the two roles this project scopes most tightly — the

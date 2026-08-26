@@ -11,7 +11,7 @@
 
 import { ConflictException, BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@sms/db";
-import { schoolToday, TRANSPORT_PERMISSIONS, FEES_PERMISSIONS } from "@sms/types";
+import { schoolToday, TRANSPORT_PERMISSIONS, FEES_PERMISSIONS, FEE_SOURCES } from "@sms/types";
 import type {
   RouteStopDto,
   TransportAssignmentDto,
@@ -848,7 +848,7 @@ export class TransportService {
           invoicesCreated++;
         }
         await tx.invoiceLineItem.create({
-          data: { schoolId, invoiceId: invoice.id, description: lineDescription, amountMinor: fare, quantity: 1 },
+          data: { schoolId, invoiceId: invoice.id, description: lineDescription, amountMinor: fare, quantity: 1, source: FEE_SOURCES.TRANSPORT },
         });
         await tx.invoice.update({ where: { id: invoice.id }, data: { totalMinor: { increment: fare } } });
         totalBilledMinor += fare;

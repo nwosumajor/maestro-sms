@@ -6,7 +6,7 @@ import type { RawBodyRequest } from "@nestjs/common";
 import type { Request, Response } from "express";
 import { z } from "zod";
 import { FEES_PERMISSIONS, INVOICE_STATUSES, PAYMENT_METHODS } from "@sms/types";
-import type { CreditBalanceDto, FeeItemDto, FeeReportDto, InvoiceAdjustmentDto, InvoiceDetailDto, InvoicePageDto, InvoiceSummaryDto, LateFeeConfigDto, PaymentPlanDto, PendingPaymentDto, SettlementAccountDto, VirtualAccountDto } from "@sms/types";
+import type { CreditBalanceDto, FeeItemDto, FeeReportDto, InvoiceAdjustmentDto, InvoiceDetailDto, InvoicePageDto, InvoiceSummaryDto, LateFeeConfigDto, PaymentPlanDto, PendingPaymentDto, SettlementAccountDto, VirtualAccountDto, FeeSourceReportDto } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { RequireStepUp } from "../auth/require-stepup.decorator";
 import { Public } from "../auth/public.decorator";
@@ -412,6 +412,23 @@ export class FeesController {
   }
 
   /** Receivables aging + collection summary (billing-wide staff). */
+  /**
+   * What each part of the school brought in — hostel, transport, library and
+   * academic fees, separated, per currency.
+   *
+   * `fee.manage`, like the finance report it sits beside: this is revenue by
+   * department, not a family's own bill.
+   */
+  @Get("fees/revenue-by-source")
+  @RequirePermission(FEES_PERMISSIONS.FEE_MANAGE)
+  revenueBySource(
+    @CurrentPrincipal() p: Principal,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+  ): Promise<FeeSourceReportDto[]> {
+    return this.fees.revenueBySource(p, { from, to });
+  }
+
   @Get("fees/reports")
   @RequirePermission(FEES_PERMISSIONS.FEE_READ)
   reports(@CurrentPrincipal() p: Principal): Promise<FeeReportDto> {

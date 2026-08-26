@@ -33,8 +33,7 @@ import {
   effectivePaymentApprovalThresholdMinor,
   type InvoiceAdjustmentDto,
   type LateFeeConfigDto,
-  type LateFeeConfigInput,
-} from "@sms/types";
+  type LateFeeConfigInput, FEE_SOURCES } from "@sms/types";
 
 /**
  * The library's home-currency default, quoted here so the settings screen can
@@ -262,6 +261,11 @@ export class FeeOpsService {
           description: `${row.kind === "WAIVER" ? "Waiver" : "Discount"}: ${row.reason}`,
           amountMinor: -row.amountMinor,
           quantity: 1,
+          // Its OWN source, never the source it reduces. A waiver is not
+          // negative tuition — a department's billed figure should not move
+          // because somebody granted a discount against a mixed invoice, and
+          // "what did we give away?" is a question a bursar asks directly.
+          source: FEE_SOURCES.ADJUSTMENT,
         },
       });
       // DECREMENT, never assign a total computed from an earlier read. The claim
@@ -523,6 +527,8 @@ export class FeeOpsService {
                     description: `${LATE_FEE_MARKER} (overdue past ${school.lateFeeGraceDays} days)`,
                     amountMinor: school.lateFeeFlatMinor,
                     quantity: 1,
+                    // Charged by the sweep, not by any one department.
+                    source: FEE_SOURCES.LATE_FEE,
                   },
                 });
                 await tx.invoice.update({

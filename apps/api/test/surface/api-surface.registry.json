@@ -649,6 +649,10 @@
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"
     },
+    "GET /fees/revenue-by-source": {
+      "kind": "ui",
+      "note": "Revenue separated by department — RevenueBySource on /fees/reports"
+    },
     "GET /fees/reports": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"

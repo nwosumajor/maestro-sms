@@ -21,7 +21,7 @@ import { NotificationService } from "../notifications/notification.service";
 import { csvCell } from "../common/csv";
 import { Prisma } from "@sms/db";
 import type { BookLoanDto, FineReceiptDto, LibraryBookDto, LibraryReportDto } from "@sms/types";
-import { formatMoney, effectiveLibraryFinePerDayMinor } from "@sms/types";
+import { formatMoney, effectiveLibraryFinePerDayMinor, FEE_SOURCES } from "@sms/types";
 import type { PaymentMethodValue } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -454,7 +454,7 @@ export class LibraryService {
       });
     }
     await tx.invoiceLineItem.create({
-      data: { schoolId: p.schoolId, invoiceId: invoice.id, description, amountMinor: fineMinor, quantity: 1 },
+      data: { schoolId: p.schoolId, invoiceId: invoice.id, description, amountMinor: fineMinor, quantity: 1, source: FEE_SOURCES.LIBRARY },
     });
     await tx.invoice.update({ where: { id: invoice.id }, data: { totalMinor: { increment: fineMinor } } });
     await this.log(tx, p, "library.fine.billed", loan.id, { fineMinor, daysLate, invoiceId: invoice.id });

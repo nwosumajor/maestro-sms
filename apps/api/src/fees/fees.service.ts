@@ -22,7 +22,8 @@ import {
   type FeeReportDto,
   type InvoiceSummaryDto,
   type InvoiceStatusValue,
-  type PaymentMethodValue, formatMoney } from "@sms/types";
+  type PaymentMethodValue, formatMoney, FEE_SOURCES, FEE_SOURCE_LABELS } from "@sms/types";
+import type { FeeSourceReportDto, FeeSource } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -35,6 +36,7 @@ import {
 import { NotificationService } from "../notifications/notification.service";
 import { PaystackService } from "../payments/paystack.service";
 import { SchoolRegionService } from "../foundation/school-region.service";
+import { dateWindow } from "../common/status-filter";
 
 /** Roles that see ALL billing rows in the tenant. */
 /** Invoices per page. One issue run for a class is ~30-40 rows, so a page shows a
@@ -195,6 +197,9 @@ export class FeesService {
           description: l.description,
           amountMinor: l.amountMinor,
           quantity: l.quantity ?? 1,
+          // The school's own catalogue. Hostel, transport and library raise
+          // their charges through their own services and stamp their own.
+          source: FEE_SOURCES.TUITION,
         })),
       });
       await this.log(tx, p, "fee.invoice.create", "invoice", invoice.id, {
@@ -374,6 +379,121 @@ export class FeesService {
    * would read the DB session's timezone and silently move every bucket
    * boundary by a day. Same expression as before, so the buckets do not shift.
    */
+  /**
+   * What each part of the school brought in, separated.
+   *
+   * Hostel rent, transport fares, library fines and tuition all land on the
+   * same line-item table so a family gets ONE bill — which left "what did
+   * boarding bring in this term?" with no answer. Each line now carries the
+   * source the raising module stamped on it.
+   *
+   * PER CURRENCY, and never summed across. Invoices carry their own currency
+   * per row (this platform bills USD through Stripe beside a school's local
+   * rail), so a single figure would be kobo added to cents — the mistake this
+   * codebase has now recorded in eight places.
+   *
+   * BILLED is exact: it is the line items themselves. COLLECTED is not, and the
+   * shape says so. A payment settles an INVOICE, not a line, so on an invoice
+   * mixing tuition and hostel rent a part payment does not say which part it
+   * paid. Each posted payment is apportioned across its invoice's lines pro
+   * rata by amount, the ordinary convention for an unallocated receipt, and
+   * exact wherever an invoice carries one department.
+   *
+   * // GOTCHA: mixing is COMMON. The hostel and transport runs APPEND to a
+   * family's existing DRAFT invoice when there is one — right, since the point
+   * is one bill per family — so measured on real data 19 invoices carried more
+   * than one department against 25 that did not. `mixedCollectedMinor` is
+   * therefore a material share, not a footnote, and is reported so a convention
+   * is never read as a measurement.
+   */
+  async revenueBySource(p: Principal, range?: { from?: string; to?: string }): Promise<FeeSourceReportDto[]> {
+    if (!this.isBillingWide(p)) return [];
+    const window = dateWindow(range?.from, range?.to);
+    return this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const rows = (await tx.$queryRaw`
+        WITH lines AS (
+          SELECT li."invoiceId",
+                 COALESCE(li."source", 'UNATTRIBUTED') AS source,
+                 SUM(li."amountMinor"::numeric * li.quantity) AS line_total,
+                 COUNT(*)::int AS line_count
+          FROM "invoice_line_item" li
+          GROUP BY 1, 2
+        ),
+        inv AS (
+          SELECT l."invoiceId",
+                 SUM(l.line_total) AS inv_total,
+                 COUNT(*)::int AS source_count
+          FROM lines l
+          GROUP BY 1
+        ),
+        paid AS (
+          -- A REFUND subtracts, exactly as the invoice balance treats it.
+          SELECT pm."invoiceId",
+                 SUM(CASE WHEN pm.kind = 'REFUND' THEN -pm."amountMinor"::numeric ELSE pm."amountMinor"::numeric END) AS paid_total
+          FROM "payment" pm
+          WHERE pm.status = 'POSTED'
+          GROUP BY 1
+        )
+        SELECT i.currency,
+               l.source,
+               SUM(l.line_total)::float8 AS billed,
+               SUM(l.line_total * COALESCE(pd.paid_total, 0) / NULLIF(inv.inv_total, 0))::float8 AS collected,
+               SUM(CASE WHEN inv.source_count > 1
+                        THEN l.line_total * COALESCE(pd.paid_total, 0) / NULLIF(inv.inv_total, 0)
+                        ELSE 0 END)::float8 AS mixed_collected,
+               SUM(l.line_count)::int AS line_count
+        FROM lines l
+        JOIN inv ON inv."invoiceId" = l."invoiceId"
+        JOIN "invoice" i ON i.id = l."invoiceId"
+        LEFT JOIN paid pd ON pd."invoiceId" = l."invoiceId"
+        WHERE i.status <> 'CANCELLED'
+          ${window.from ? Prisma.sql`AND i."createdAt" >= ${window.from}` : Prisma.empty}
+          ${window.to ? Prisma.sql`AND i."createdAt" <= ${window.to}` : Prisma.empty}
+        GROUP BY 1, 2
+        ORDER BY 1, 3 DESC
+      `) as Array<{
+        currency: string;
+        source: string;
+        billed: number;
+        collected: number | null;
+        mixed_collected: number | null;
+        line_count: number;
+      }>;
+
+      const byCurrency = new Map<string, FeeSourceReportDto>();
+      for (const r of rows) {
+        const entry =
+          byCurrency.get(r.currency) ??
+          ({
+            currency: r.currency,
+            sources: [],
+            billedMinor: 0,
+            collectedMinor: 0,
+            outstandingMinor: 0,
+            mixedCollectedMinor: 0,
+          } satisfies FeeSourceReportDto);
+        const billed = Math.round(r.billed);
+        const collected = Math.round(r.collected ?? 0);
+        entry.sources.push({
+          source: r.source,
+          label: FEE_SOURCE_LABELS[r.source as FeeSource] ?? "Not attributed",
+          billedMinor: billed,
+          collectedMinor: collected,
+          // Never negative: a source over-collected through apportionment on a
+          // mixed invoice would otherwise read as a debt owed TO the family.
+          outstandingMinor: Math.max(0, billed - collected),
+          lineCount: r.line_count,
+        });
+        entry.billedMinor += billed;
+        entry.collectedMinor += collected;
+        entry.outstandingMinor += Math.max(0, billed - collected);
+        entry.mixedCollectedMinor += Math.round(r.mixed_collected ?? 0);
+        byCurrency.set(r.currency, entry);
+      }
+      return [...byCurrency.values()];
+    });
+  }
+
   async financeReport(p: Principal) {
     if (!this.isBillingWide(p)) return { scope: "none" as const };
     return this.db.runAsTenant(this.ctx(p), async (tx) => {

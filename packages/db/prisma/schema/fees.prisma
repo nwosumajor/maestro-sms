@@ -129,6 +129,12 @@ model InvoiceLineItem {
   amountMinor Int
   quantity    Int    @default(1)
 
+  /// Which part of the school raised this charge — see `FEE_SOURCES`.
+  /// NULLABLE, and null means "raised before sources were recorded", NOT
+  /// tuition: folding unattributed history into the academic figure would make
+  /// a wrong number that nobody could see. The report shows it as its own row.
+  source String?
+
   createdAt DateTime @default(now())
 
   school  School  @relation(fields: [schoolId], references: [id])

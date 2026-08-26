@@ -21,7 +21,7 @@ import type {
   HostelRoomDto,
   HostelSummaryDto,
 } from "@sms/types";
-import { HOSTEL_PERMISSIONS } from "@sms/types";
+import { HOSTEL_PERMISSIONS, FEE_SOURCES } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -921,6 +921,9 @@ export class HostelService {
             description: lineDescription,
             amountMinor: rent,
             quantity: 1,
+            // Recorded by the module that raises the charge. The description
+            // beside it is free text a bursar may reword; this is not.
+            source: FEE_SOURCES.HOSTEL,
           },
         });
         await tx.invoice.update({ where: { id: invoice.id }, data: { totalMinor: { increment: rent } } });
