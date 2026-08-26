@@ -1432,6 +1432,31 @@ damage was.
 Gate: `every-body-is-validated-at-the-boundary.spec.ts`, exemptions named with
 reasons and each required to name a file that still exists.
 
+### A register for a day that has not happened
+`markAttendance` guarded the PAST — a term that has ended is read-only — and the
+future not at all. `daysSince` goes NEGATIVE for a future date, so such a
+register was not even "stale" and went straight through the maker-checker
+branch. Measured live: marking a pupil ABSENT on **2026-09-10, 2027-06-01 and
+2030-01-15 all answered 201.**
+Two costs on their own. An ABSENT or LATE mark NOTIFIES THE GUARDIANS, so a
+family could be told their child missed a day that has not come; and attendance
+feeds the rate printed on the report card, where a future absence is simply a
+wrong figure about a child.
+**AND IT UNDERMINED THE PARTITIONING BUILT ALONGSIDE IT.**
+`attendance_record` is RANGE-partitioned by month with partitions provisioned
+three months ahead, so a mistyped year lands in the DEFAULT partition — **two of
+those three did** — and the service's own comment says those rows "must be
+migrated into a real partition before one can be added for their month". One
+typo in a date field created work that only a DBA can undo.
+Measured after: all three refused with 400 and a sentence naming the fix, the
+DEFAULT partition back to zero.
+// TODAY is still allowed — `< 0`, not `<= 0` — because taking today's register
+is what the product is for. Against the SCHOOL's day (`schoolNow`), not the
+server's: a register taken on a Singapore morning is not tomorrow.
+// The check runs BEFORE the staleness branch, so a future date can never be
+routed into maker-checker on the strength of a negative day count.
+
+
 ### An archive labelled with a term that held every term
 `SchoolArchiveService.windowFor` + the manifest's `scopedSections` /
 `snapshotSections` (format version 2). Found by checking a claim I had just

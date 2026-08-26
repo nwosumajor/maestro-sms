@@ -108,6 +108,34 @@ export class AttendanceService {
     // was for part of every day — pushing an ordinary correction into
     // maker-checker a day early.
     const schoolNow = schoolToday((await this.region.forSchool(p.schoolId)).timezone);
+
+    // A REGISTER CANNOT BE TAKEN FOR A DAY THAT HAS NOT HAPPENED.
+    //
+    // There was a guard for the past — a term that has ended is read-only — and
+    // none at all for the future. `daysSince` goes NEGATIVE for a future date,
+    // so such a register was not even "stale" and went straight through:
+    // measured live, marking a pupil ABSENT on 2027-06-01 and on 2030-01-15
+    // both answered 201.
+    //
+    // Two costs. An ABSENT or LATE mark notifies the guardians, so a family
+    // could be told their child missed a day that has not come. And attendance
+    // feeds the rate on the report card, where a future absence is simply a
+    // wrong figure about a child.
+    //
+    // It also protects the partitioning: `attendance_record` is RANGE-
+    // partitioned by month with partitions provisioned three months ahead, so a
+    // mistyped year lands in the DEFAULT partition — measured, two of those
+    // three did — and those rows must be migrated out by hand before a real
+    // partition can ever be created for their month.
+    //
+    // TODAY is allowed, which is the ordinary case. The school's own day, not
+    // the server's: a register taken on a Singapore morning is not tomorrow.
+    if (this.daysSince(date, schoolNow) < 0) {
+      throw new BadRequestException(
+        "A register cannot be taken for a date in the future. Check the date and try again.",
+      );
+    }
+
     const stale = this.daysSince(date, schoolNow) > STALE_REGISTER_DAYS;
 
     // MAKER-CHECKER on a STALE register (>7 days old): a plain teacher's edit is
