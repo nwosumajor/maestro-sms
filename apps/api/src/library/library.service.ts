@@ -32,6 +32,7 @@ import {
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
+import { dateWindow } from "../common/status-filter";
 
 type Json = Record<string, string>;
 
@@ -665,9 +666,11 @@ export class LibraryService {
   /** Tally issued/returned/overdue + fine totals over an optional window. */
   async report(p: Principal, opts: { from?: string; to?: string } = {}): Promise<LibraryReportDto> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const issuedRange: Record<string, Date> = {};
-      if (opts.from) issuedRange.gte = new Date(opts.from);
-      if (opts.to) issuedRange.lte = new Date(opts.to);
+      const window = dateWindow(opts.from, opts.to);
+      const issuedRange: Record<string, Date> = {
+        ...(window.from ? { gte: window.from } : {}),
+        ...(window.to ? { lte: window.to } : {}),
+      };
       // Counted and summed IN POSTGRES. This used to pull every loan row and every
       // book row into Node to add them up — two unbounded reads that grow with the
       // school's entire lending history, on a page whose whole output is eight

@@ -23,7 +23,7 @@ import {
   CHANNEL_LABELS,
   type PaymentChannel,
 } from "@sms/types";
-import { narrowStatus, pageNumber } from "../common/status-filter";
+import { boundedInt, narrowStatus, pageNumber } from "../common/status-filter";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { RequireStepUp } from "../auth/require-stepup.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -109,7 +109,7 @@ function auditFilter(q: Record<string, string>): PlatformAuditFilter {
     entity: q.entity || undefined,
     from: q.from || undefined,
     to: q.to || undefined,
-    limit: q.limit ? Number(q.limit) : undefined,
+    limit: boundedInt(q.limit, { field: "limit" }),
     cursor: q.cursor || undefined,
   };
 }

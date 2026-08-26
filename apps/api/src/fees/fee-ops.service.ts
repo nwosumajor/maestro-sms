@@ -58,6 +58,7 @@ import { PrivilegedDatabaseService } from "../common/privileged-database.service
 import { FeesService } from "./fees.service";
 import { currencyDecimals, formatMoney, resolveRegion, schoolToday, toMajor } from "@sms/types";
 import { BrandingService } from "../branding/branding.service";
+import { dateWindow } from "../common/status-filter";
 
 export const FEE_OPS_QUEUE = "fee-ops";
 export const LATE_FEE_JOB = "fee-late-fee-sweep";
@@ -694,9 +695,13 @@ export class FeeOpsService {
 
   /** Every POSTED payment in [from,to] as formula-guarded CSV (fee.manage). */
   async journalCsv(p: Principal, from: string, to: string): Promise<{ csv: string; filename: string }> {
+    const window = dateWindow(from, to);
     const rows = await this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       const pays = await tx.payment.findMany({
-        where: { status: "POSTED", paidAt: { gte: new Date(from), lte: new Date(`${to}T23:59:59.999Z`) } },
+        // The controller hand-rolled a `^\d{4}-\d{2}-\d{2}$` check and this
+        // built the Dates again from the raw strings — one rule, stated twice,
+        // for one export. The helper states it once.
+        where: { status: "POSTED", paidAt: { gte: window.from, lte: window.to } },
         include: { invoice: { select: { reference: true, studentId: true, currency: true } } },
         orderBy: { paidAt: "asc" },
         take: 10_000,

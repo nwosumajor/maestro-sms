@@ -8,6 +8,7 @@ import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { FormService } from "./form.service";
+import { boundedInt } from "../common/status-filter";
 
 const fieldSchema = z.object({
   key: z.string().min(1).max(60),
@@ -33,7 +34,7 @@ export class FormController {
   @Get()
   @RequirePermission(FORM_PERMISSIONS.FORM_RESPOND)
   list(@CurrentPrincipal() p: Principal, @Query("cursor") cursor?: string, @Query("limit") limit?: string): Promise<PageDto<FormDto>> {
-    return this.forms.listForms(p, { cursor, limit: limit ? Number(limit) : undefined });
+    return this.forms.listForms(p, { cursor, limit: boundedInt(limit, { field: "limit" }) });
   }
 
   @Post()

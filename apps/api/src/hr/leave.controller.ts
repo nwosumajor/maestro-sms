@@ -19,8 +19,14 @@ const typeSchema = z.object({
 const registerQuerySchema = z.object({
   status: z.enum(["PENDING", "APPROVED", "REJECTED", "CANCELLED"]).optional(),
   q: z.string().max(120).optional(),
-  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  // A WINDOW, deliberately looser than the date-only `startDate`/`endDate`
+  // below. Those record a DAY — a leave date is a day, not an instant, and
+  // narrowing them is correct. A filter is a different question, and this one
+  // refused `?from=2026-08-01T00:00:00Z` while every other dated list accepted
+  // it. `dateWindow` in the service is the single answer; the schema only
+  // keeps a length bound so a megabyte of query string never reaches it.
+  from: z.string().max(40).optional(),
+  to: z.string().max(40).optional(),
   page: z.coerce.number().int().min(1).max(10_000).optional(),
 });
 const requestSchema = z.object({

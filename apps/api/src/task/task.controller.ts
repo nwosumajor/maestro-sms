@@ -8,6 +8,7 @@ import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { TaskService } from "./task.service";
+import { boundedInt } from "../common/status-filter";
 
 const createSchema = z.object({
   title: z.string().min(1).max(200),
@@ -32,7 +33,7 @@ export class TaskController {
   @Get()
   @RequirePermission(TASK_PERMISSIONS.TASK_PARTICIPATE)
   list(@CurrentPrincipal() p: Principal, @Query("cursor") cursor?: string, @Query("limit") limit?: string): Promise<PageDto<TaskDto>> {
-    return this.tasks.listTasks(p, { cursor, limit: limit ? Number(limit) : undefined });
+    return this.tasks.listTasks(p, { cursor, limit: boundedInt(limit, { field: "limit" }) });
   }
 
   @Post()

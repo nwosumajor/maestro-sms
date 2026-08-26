@@ -1432,6 +1432,57 @@ damage was.
 Gate: `every-body-is-validated-at-the-boundary.spec.ts`, exemptions named with
 reasons and each required to name a file that still exists.
 
+### The window a caller typed, the window the query used
+`dateFilter` / `dateWindow` / `boundedInt` (`apps/api/src/common/status-filter.ts`)
+finish the job `narrowStatus` and `pageNumber` started: a `?status=` was made to
+refuse a value it could not read, and the DATES and NUMBERS beside it were still
+guessing. One input class, failing in both directions at once.
+**Answered 500 to a typo** (`new Date("abc")` -> Invalid Date -> Prisma):
+`/analytics/overview`, `/attendance/by-class`, `/exams`, `/library/report`,
+`/security/audit` and `/hr/leave/calendar` — the last invisible to the first
+probe because it ran as a principal, who does not hold `hr.leave.manage`. **A
+permission is not a validator**, and a route nobody can reach with the wrong
+credentials is not a route nobody can reach. `?limit=abc` and `?days=abc` did the
+same through `Math.min(Math.max(Number(x) ?? D, 1), MAX)`, which looks like it
+clamps and does not: `??` never fires for NaN, so the default is unreachable and
+`take: NaN` reaches the database.
+**Answered 200 with the wrong figure**, which is worse. `/operator/payments` —
+the platform owner's revenue ledger — tested `/^\d{4}-\d{2}-\d{2}$/` itself
+and SILENTLY DROPPED anything else, so `?from=2026-08-01T00:00:00Z` (not a typo:
+the shape `toISOString()` produces, which is what any script or export sends)
+returned the ALL-TIME total under an August caption. Measured live: **17
+payments and NGN 25,700,236.64 for a window holding 15 and NGN 20,698,312.50**.
+That file's own header says these filters live in the URL precisely so a finance
+query can be "bookmarked, shared with an accountant" — which makes a hand-held
+URL a first-class input, not an edge case. `/alumni?year=abc` dropped the year
+the same way, and `hr/attendance/summary` reported the CURRENT month under the
+year asked for — via a comment saying the service "treats NaN as not given",
+written while fixing a 500 on a call with NO parameters. **That fix closed one
+hole and opened a quieter one.**
+**THREE SIBLINGS ALREADY REFUSED, and each said something different** — "Invalid
+window", "Invalid date range", "from/to must be YYYY-MM-DD". Correct three
+times, in three wordings, which is the shape that precedes a fourth being
+written with no check at all; the journal CSV stated the rule twice for one
+export, once in the controller and again in the service. All now say one thing,
+and it names both accepted shapes.
+// GOTCHA: a date-only **body** field is deliberately NOT widened. A date of
+birth, a due date, a last working day are DAYS, and `@db.Date is a DAY, not an
+instant` is already a rule here. Only the 12 list FILTERS take a window.
+// GOTCHA: `dateWindow` also refuses a BACKWARDS window. `from` after `to`
+matches nothing and renders as "no payments in that period" — true of the query
+and false of the world, the same confident-false-statement the whole file is
+about.
+// GOTCHA in the gate: `new Date(from.getTime() + N)` is a legitimate use of an
+already-parsed Date, and flagging it hides the real offender underneath while
+teaching the next person to exempt it. Bounded with a negative lookahead;
+mutation-validated three ways.
+// GOTCHA in a TEST, not the code: `a-leave-record-that-fell-off-the-end`
+asserted `w.startDate.lte` equalled a specific millisecond. Both leave columns
+are `@db.Date`, so snapping a date-only `to` to end-of-day selects exactly the
+same rows — the test pinned an implementation detail and went red over a change
+that alters nothing it exists to protect. It asserts the property now.
+
+
 ### A page number nobody validated turned a typo into an incident
 `narrowStatus` / `pageNumber` (`apps/api/src/common/status-filter.ts`) are the ONE
 place a query-string filter becomes a value the database sees. Every paged list

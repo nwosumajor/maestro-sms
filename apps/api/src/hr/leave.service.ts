@@ -32,6 +32,7 @@ import {
 } from "../integrity/integrity.foundation";
 import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService, type FinalizedRequest } from "../workflow/workflow-hooks.service";
+import { dateWindow } from "../common/status-filter";
 
 interface LeavePayload {
   leaveTypeId: string;
@@ -174,8 +175,12 @@ export class LeaveService implements OnModuleInit {
 
   /** Approved leave overlapping [from, to] — the "who's out" coverage view. */
   async calendar(p: Principal, fromISO?: string, toISO?: string): Promise<LeaveRequestDto[]> {
-    const from = fromISO ? new Date(fromISO) : new Date();
-    const to = toISO ? new Date(toISO) : new Date(Date.now() + 60 * 86_400_000);
+    // Unguarded, `new Date("abc")` here was a 500 — the probe that found the
+    // other six missed this one only because it ran as a principal, who does
+    // not hold hr.leave.manage. A permission is not a validator.
+    const asked = dateWindow(fromISO, toISO);
+    const from = asked.from ?? new Date();
+    const to = asked.to ?? new Date(Date.now() + 60 * 86_400_000);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const rows = await tx.leaveRequest.findMany({
         where: { status: "APPROVED", startDate: { lte: to }, endDate: { gte: from } },
@@ -228,12 +233,13 @@ export class LeaveService implements OnModuleInit {
           return { items: [], total: 0, page: Math.max(1, Math.floor(opts.page ?? 1)), pageSize: LEAVE_PAGE_SIZE };
         }
       }
+      const listWindow = dateWindow(opts.from, opts.to);
       const where = {
         ...(opts.status ? { status: opts.status } : {}),
         ...(userIds ? { userId: { in: userIds } } : {}),
         // Overlap, not containment — see above.
-        ...(opts.to ? { startDate: { lte: new Date(opts.to) } } : {}),
-        ...(opts.from ? { endDate: { gte: new Date(opts.from) } } : {}),
+        ...(listWindow.to ? { startDate: { lte: listWindow.to } } : {}),
+        ...(listWindow.from ? { endDate: { gte: listWindow.from } } : {}),
       };
       const page = Math.max(1, Math.floor(opts.page ?? 1));
       const [rows, total] = await Promise.all([

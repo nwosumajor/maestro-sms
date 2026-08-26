@@ -43,6 +43,7 @@ import { SchoolRegionService } from "../foundation/school-region.service";
 import { assertStillHere } from "../common/still-here";
 import { lockPerson } from "../common/person-lock";
 import { asDuplicateConflict } from "../common/unique-violation";
+import { dateFilter, dateWindow } from "../common/status-filter";
 
 /** How many upcoming exams a personal list will return. A student sits a dozen a
  *  term; a parent of several children a few dozen. Well clear of real use, but it
@@ -415,12 +416,14 @@ export class ExamService {
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       const where: Record<string, unknown> = {};
       if (filter.scheduleId) where.scheduleId = filter.scheduleId;
-      if (filter.date) {
-        where.date = new Date(`${filter.date}T00:00:00.000Z`);
-      } else if (filter.from || filter.to) {
+      const day = dateFilter(filter.date, "date");
+      const window = dateWindow(filter.from, filter.to);
+      if (day) {
+        where.date = day;
+      } else if (window.from || window.to) {
         where.date = {
-          ...(filter.from ? { gte: new Date(`${filter.from}T00:00:00.000Z`) } : {}),
-          ...(filter.to ? { lte: new Date(`${filter.to}T00:00:00.000Z`) } : {}),
+          ...(window.from ? { gte: window.from } : {}),
+          ...(window.to ? { lte: window.to } : {}),
         };
       }
       if (filter.hall) where.hall = { equals: filter.hall, mode: "insensitive" };

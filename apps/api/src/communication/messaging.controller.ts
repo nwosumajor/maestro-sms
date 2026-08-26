@@ -9,6 +9,7 @@ import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { MessagingService } from "./messaging.service";
+import { boundedInt } from "../common/status-filter";
 
 const threadSchema = z.object({
   recipientId: z.string().uuid(),
@@ -36,14 +37,14 @@ export class MessagingController {
     @Query("cursor") cursor?: string,
     @Query("limit") limit?: string,
   ): Promise<PageDto<ThreadSummaryDto>> {
-    return this.messaging.listThreads(p, { cursor, limit: limit ? Number(limit) : undefined });
+    return this.messaging.listThreads(p, { cursor, limit: boundedInt(limit, { field: "limit" }) });
   }
 
   /** Full-text search across the caller's own messages (GIN-indexed). */
   @Get("search")
   @RequirePermission(COMMUNICATION_PERMISSIONS.MESSAGE_READ)
   search(@CurrentPrincipal() p: Principal, @Query("q") q: string, @Query("limit") limit?: string) {
-    return this.messaging.searchMessages(p, q ?? "", limit ? Number(limit) : undefined);
+    return this.messaging.searchMessages(p, q ?? "", boundedInt(limit, { field: "limit" }));
   }
 
   @Get("threads/:id")

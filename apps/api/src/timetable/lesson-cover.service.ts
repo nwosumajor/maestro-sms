@@ -25,6 +25,7 @@ import { NotificationService } from "../notifications/notification.service";
 import { SchoolRegionService } from "../foundation/school-region.service";
 import { assertStillHere } from "../common/still-here";
 import { lockPerson } from "../common/person-lock";
+import { dateWindow } from "../common/status-filter";
 
 const DOW = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"] as const;
 const MAX_WINDOW_DAYS = 62;
@@ -66,11 +67,9 @@ export class LessonCoverService {
   /** Every lesson within [from,to] whose regular teacher is on APPROVED leave
    *  that day, with any cover already assigned. Staff-wide read. */
   async lessonsNeedingCover(p: Principal, from: string, to: string): Promise<CoverLessonDto[]> {
-    const start = new Date(`${from}T00:00:00.000Z`);
-    const end = new Date(`${to}T00:00:00.000Z`);
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) {
-      throw new BadRequestException("Invalid date range");
-    }
+    const asked = dateWindow(from, to);
+    const start = asked.from ?? new Date();
+    const end = asked.to ?? new Date();
     if ((end.getTime() - start.getTime()) / 86_400_000 > MAX_WINDOW_DAYS) {
       throw new BadRequestException(`Window too large (max ${MAX_WINDOW_DAYS} days)`);
     }

@@ -8,6 +8,7 @@ import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { AlumniService } from "./alumni.service";
+import { boundedInt } from "../common/status-filter";
 
 const baseSchema = {
   name: z.string().min(1).max(200),
@@ -30,7 +31,7 @@ export class AlumniController {
   @Get()
   @RequirePermission(ALUMNI_PERMISSIONS.ALUMNI_MANAGE)
   list(@CurrentPrincipal() p: Principal, @Query("year") year?: string, @Query("q") q?: string): Promise<AlumnusDto[]> {
-    return this.alumni.list(p, { year: year ? Number(year) : undefined, q });
+    return this.alumni.list(p, { year: boundedInt(year, { field: "year", min: 1900, max: 2200 }), q });
   }
 
   @Post()

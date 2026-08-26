@@ -8,6 +8,7 @@ import { RequireModule } from "../auth/require-module.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import type { Principal } from "../integrity/integrity.foundation";
 import { MemberScanService } from "./member-scan.service";
+import { boundedInt } from "../common/status-filter";
 
 // The scan desk reads the QR printed on an ID CARD, which is what the
 // certificate module produces — so it is gated on the same module rather than
@@ -62,7 +63,7 @@ export class MemberScanController {
     @Param("memberId") memberId: string,
     @Query("days") days?: string,
   ): Promise<ScanEventDto[]> {
-    return this.scan.history(p, memberId, days ? Number(days) : undefined);
+    return this.scan.history(p, memberId, boundedInt(days, { field: "days", max: 3650 }));
   }
 
   /** The desk's own day. */

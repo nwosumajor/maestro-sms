@@ -11,6 +11,7 @@ import {
   type TenantContext,
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
+import { dateWindow } from "../common/status-filter";
 
 const STAFF = new Set(["school_admin", "principal", "accountant", "hr_clerk", "board", "teacher"]);
 /** Default calendar window when the caller doesn't name one. */
@@ -73,11 +74,13 @@ export class EventsService {
    */
   async listEvents(p: Principal, opts: { from?: string; to?: string } = {}) {
     const staff = p.roles.some((r) => STAFF.has(r));
-    const from = opts.from ? new Date(opts.from) : new Date(Date.now() - 7 * 86_400_000);
-    const to = opts.to ? new Date(opts.to) : new Date(from.getTime() + DEFAULT_WINDOW_DAYS * 86_400_000);
-    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to < from) {
-      throw new BadRequestException("Invalid window");
-    }
+    // Shared with every other dated list. This one refused correctly and said
+    // "Invalid window"; two siblings said "Invalid date range" and "from/to
+    // must be YYYY-MM-DD"; six more did not refuse at all. Three hand-rolled
+    // right answers is the shape that precedes a fourth being forgotten.
+    const asked = dateWindow(opts.from, opts.to);
+    const from = asked.from ?? new Date(Date.now() - 7 * 86_400_000);
+    const to = asked.to ?? new Date(from.getTime() + DEFAULT_WINDOW_DAYS * 86_400_000);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       // A row is a candidate when it starts before the window ends AND either
       // does not recur (its own end is in range) or its series may still reach

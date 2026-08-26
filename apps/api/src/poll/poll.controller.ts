@@ -8,6 +8,7 @@ import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { PollService } from "./poll.service";
+import { boundedInt } from "../common/status-filter";
 
 const createSchema = z.object({
   question: z.string().min(1).max(300),
@@ -33,7 +34,7 @@ export class PollController {
   @Get()
   @RequirePermission(POLL_PERMISSIONS.POLL_VOTE)
   list(@CurrentPrincipal() p: Principal, @Query("cursor") cursor?: string, @Query("limit") limit?: string): Promise<PageDto<PollDto>> {
-    return this.polls.listPolls(p, { cursor, limit: limit ? Number(limit) : undefined });
+    return this.polls.listPolls(p, { cursor, limit: boundedInt(limit, { field: "limit" }) });
   }
 
   @Post()

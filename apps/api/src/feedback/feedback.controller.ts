@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, Post, Query, UseGuards } from "@nestjs/co
 import { z } from "zod";
 import { OPERATOR_PERMISSIONS, FEEDBACK_BULK_MAX, FEEDBACK_KINDS, FEEDBACK_STATUSES } from "@sms/types";
 import type { FeedbackStatsDto, FeedbackThreadDto, MyFeedbackDto, PageDto, PlatformFeedbackDto } from "@sms/types";
-import { narrowStatus } from "../common/status-filter";
+import { boundedInt, narrowStatus } from "../common/status-filter";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
@@ -73,7 +73,7 @@ export class FeedbackController {
     // answered as though unfiltered — every item, under the label they picked.
     return this.feedback.listAll(p, {
       cursor,
-      limit: limit ? Number(limit) : undefined,
+      limit: boundedInt(limit, { field: "limit" }),
       status: narrowStatus(status, FEEDBACK_STATUSES),
       kind,
     });

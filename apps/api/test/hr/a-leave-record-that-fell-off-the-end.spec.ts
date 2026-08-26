@@ -94,8 +94,16 @@ describe("reading leave that is not recent", () => {
     const { service, where } = makeService([row(1)]);
     await service.listRegister(hr, { from: "2025-03-01", to: "2025-03-31" });
     const w = where() as { startDate: { lte: Date }; endDate: { gte: Date } };
-    expect(w.startDate.lte).toEqual(new Date("2025-03-31"));
-    expect(w.endDate.gte).toEqual(new Date("2025-03-01"));
+    // The PROPERTY, not the millisecond. Both columns are `@db.Date`, so a
+    // bound anywhere inside the day selects the same rows — this used to assert
+    // `new Date("2025-03-31")` exactly, and went red when the shared date
+    // helper started snapping a date-only `to` to the end of its day, which
+    // changes nothing about which leave the register shows.
+    const day = (d: Date) => d.toISOString().slice(0, 10);
+    expect(day(w.startDate.lte)).toBe("2025-03-31");
+    expect(day(w.endDate.gte)).toBe("2025-03-01");
+    // Leave that STARTS on the last day of the window is inside it.
+    expect(w.startDate.lte >= new Date("2025-03-31T00:00:00.000Z")).toBe(true);
   });
 });
 

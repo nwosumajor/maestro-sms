@@ -8,6 +8,7 @@ import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { SecurityService } from "./security.service";
+import { boundedInt } from "../common/status-filter";
 
 const requestSchema = z.object({
   permission: z.string().min(1).max(80),
@@ -49,7 +50,7 @@ export class SecurityController {
       entity,
       from,
       to,
-      limit: limit ? Number(limit) : undefined,
+      limit: boundedInt(limit, { field: "limit" }),
       cursor,
     });
   }

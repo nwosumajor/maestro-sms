@@ -1,5 +1,5 @@
 import { BadRequestException, Body, Controller, Get, Headers, Param, Patch, Post, Put, Query, Req, Res } from "@nestjs/common";
-import { narrowStatus } from "../common/status-filter";
+import { boundedInt, narrowStatus } from "../common/status-filter";
 import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
 import type { RawBodyRequest } from "@nestjs/common";
@@ -437,13 +437,13 @@ export class FeesController {
     // so the filter was ignored and every invoice came back under whatever
     // label the user picked. Same reasoning, same module, opposite behaviour.
     const parsed = narrowStatus(status, INVOICE_STATUSES);
-    const n = limit ? Number(limit) : undefined;
+    const n = boundedInt(limit, { field: "limit" });
     return this.fees.listInvoices(p, {
       studentId,
       status: parsed,
       q,
       cursor,
-      limit: Number.isFinite(n) ? n : undefined,
+      limit: n,
     }) as Promise<InvoicePageDto>;
   }
 

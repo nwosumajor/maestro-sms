@@ -25,6 +25,7 @@ import {
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
+import { dateWindow } from "../common/status-filter";
 
 /** One row of the fees aggregate — one per CURRENCY, computed in Postgres. */
 interface FeeAggRow {
@@ -104,13 +105,13 @@ export class AnalyticsService {
       return x;
     };
     // An explicit range wins — it is the most specific thing the caller said.
-    if (range?.from && range?.to) {
-      return {
-        from: new Date(`${range.from}T00:00:00.000Z`),
-        to: end(new Date(`${range.to}T00:00:00.000Z`)),
-        label: `${range.from} – ${range.to}`,
-        termId: null,
-      };
+    // // GOTCHA: built with a bare `new Date(...)`, this answered 500 to
+    // `?from=abc&to=abc` AND to `?from=2026-08-01T00:00:00Z` — a real date in
+    // the other standard shape. The label below states the period back to the
+    // reader, and a period this class cannot read is one it must not label.
+    const asked = dateWindow(range?.from, range?.to);
+    if (asked.from && asked.to) {
+      return { from: asked.from, to: asked.to, label: `${range?.from} – ${range?.to}`, termId: null };
     }
     const term = (await tx.term.findFirst({
       where: range?.termId ? { id: range.termId } : { isCurrent: true },

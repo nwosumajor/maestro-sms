@@ -8,6 +8,7 @@ import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { DiscussionService } from "./discussion.service";
+import { boundedInt } from "../common/status-filter";
 
 const groupSchema = z.object({
   name: z.string().min(1).max(160),
@@ -43,7 +44,7 @@ export class DiscussionController {
   @Get("search")
   @RequirePermission(DISCUSSION_PERMISSIONS.DISCUSSION_PARTICIPATE)
   search(@CurrentPrincipal() p: Principal, @Query("q") q: string, @Query("limit") limit?: string) {
-    return this.discussion.searchPosts(p, q ?? "", limit ? Number(limit) : undefined);
+    return this.discussion.searchPosts(p, q ?? "", boundedInt(limit, { field: "limit" }));
   }
 
   @Get("groups/:id/posts")

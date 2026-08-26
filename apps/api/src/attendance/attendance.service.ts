@@ -30,6 +30,7 @@ import { NotificationService } from "../notifications/notification.service";
 import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 import { SchoolRegionService } from "../foundation/school-region.service";
+import { dateWindow } from "../common/status-filter";
 
 // junior_admin is the operational tier that owns attendance (CLAUDE.md) and holds
 // attendance.write; without a class relationship to fall back on it would be
@@ -250,12 +251,13 @@ export class AttendanceService {
       await this.assertCanAccessStudent(tx, p, studentId);
       // An optional window so a reader can ask for one school year out of five
       // rather than paging back through all of them.
+      const window = dateWindow(opts.from, opts.to);
       const sessionWhere =
-        opts.from || opts.to
+        window.from || window.to
           ? {
               date: {
-                ...(opts.from ? { gte: new Date(`${opts.from}T00:00:00.000Z`) } : {}),
-                ...(opts.to ? { lte: new Date(`${opts.to}T00:00:00.000Z`) } : {}),
+                ...(window.from ? { gte: window.from } : {}),
+                ...(window.to ? { lte: window.to } : {}),
               },
             }
           : undefined;
@@ -564,10 +566,11 @@ export class AttendanceService {
       // Default window: the current term, so this agrees with the report card and
       // with the analytics page rather than quietly using a different period.
       const termStart = await this.currentTermStart(tx, p.schoolId);
+      const asked = dateWindow(opts.from, opts.to);
       const from =
         term?.startDate ??
-        (opts.from ? new Date(`${opts.from}T00:00:00.000Z`) : (termStart ?? new Date(Date.now() - 30 * 86_400_000)));
-      const to = term?.endDate ?? (opts.to ? new Date(`${opts.to}T00:00:00.000Z`) : new Date());
+        (asked.from ? asked.from : (termStart ?? new Date(Date.now() - 30 * 86_400_000)));
+      const to = term?.endDate ?? (asked.to ?? new Date());
 
       // An ENDED term is immutable under the term lock, so its rollup can be read
       // instead of scanning the registers — the whole point of building it. The

@@ -23,7 +23,7 @@ import {
   FEES_PERMISSIONS,
   BILLING_PERMISSIONS,
 } from "@sms/types";
-import { pageNumber } from "../common/status-filter";
+import { boundedInt, pageNumber } from "../common/status-filter";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
@@ -99,8 +99,8 @@ export class NotificationController {
     @Query("limit") limit?: string,
   ): Promise<DeliveryProblemsDto> {
     return this.notifications.deliveryProblems(p, {
-      days: days ? Number(days) : undefined,
-      limit: limit ? Number(limit) : undefined,
+      days: boundedInt(days, { field: "days", max: 90 }),
+      limit: boundedInt(limit, { field: "limit" }),
     });
   }
 

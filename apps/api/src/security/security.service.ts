@@ -24,6 +24,7 @@ import {
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
+import { dateWindow } from "../common/status-filter";
 
 const MAX_MINUTES = 480; // an elevation can last at most 8 hours
 // A HANDOVER covers absence — a trip, a term of leave — so it is measured in days
@@ -82,10 +83,13 @@ export class SecurityService {
       if (f.actorId) where.actorId = f.actorId;
       if (f.action) where.action = { contains: f.action };
       if (f.entity) where.entity = f.entity;
-      if (f.from || f.to) {
+      // `new Date(f.from)` unguarded answered 500 to `?from=abc` — a typo in a
+      // bookmarked audit query became a Sentry alert with a stack trace.
+      const window = dateWindow(f.from, f.to);
+      if (window.from || window.to) {
         where.createdAt = {
-          ...(f.from ? { gte: new Date(f.from) } : {}),
-          ...(f.to ? { lte: new Date(f.to) } : {}),
+          ...(window.from ? { gte: window.from } : {}),
+          ...(window.to ? { lte: window.to } : {}),
         };
       }
       const pageSize = Math.min(Math.max(f.limit ?? 50, 1), 200);

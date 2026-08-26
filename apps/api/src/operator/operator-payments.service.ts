@@ -44,6 +44,7 @@ import {
 } from "../integrity/integrity.foundation";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import { toMinor } from "../common/money";
+import { dateWindow } from "../common/status-filter";
 
 /** What the ledger needs to know about a school, beyond its name. */
 interface SchoolFacts {
@@ -102,10 +103,16 @@ export class OperatorPaymentsService {
    * day of the period.
    */
   private range(from?: string, to?: string): { gte?: Date; lte?: Date } | undefined {
-    const out: { gte?: Date; lte?: Date } = {};
-    if (from && /^\d{4}-\d{2}-\d{2}$/.test(from)) out.gte = new Date(`${from}T00:00:00.000Z`);
-    if (to && /^\d{4}-\d{2}-\d{2}$/.test(to)) out.lte = new Date(`${to}T23:59:59.999Z`);
-    return out.gte || out.lte ? out : undefined;
+    // // GOTCHA: this used to test the date-only shape itself and SILENTLY DROP
+    // anything else — so `?from=2026-08-01T00:00:00Z`, a perfectly good date in
+    // the other standard format, returned the ALL-TIME total under an August
+    // caption. Measured live: NGN 25,700,236.64 across 17 payments for a window
+    // that held a fraction of it. The header above this class says these
+    // filters live in the URL precisely so a finance query can be bookmarked
+    // and shared with an accountant, which makes a hand-held URL a first-class
+    // input rather than an edge case.
+    const { from: gte, to: lte } = dateWindow(from, to);
+    return gte || lte ? { ...(gte ? { gte } : {}), ...(lte ? { lte } : {}) } : undefined;
   }
 
   private async where(filters: PaymentFilters): Promise<Record<string, unknown>> {

@@ -11,6 +11,7 @@ import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { DocumentsService } from "./documents.service";
 import { safeDownloadType, safeFilename } from "./safe-content-type";
+import { boundedInt } from "../common/status-filter";
 
 const createSchema = z.object({
   studentId: z.string().uuid().nullish(),
@@ -98,12 +99,12 @@ export class DocumentsController {
     @Query("limit") limit?: string,
   ): Promise<DocumentPageDto> {
     const t = type && DOCUMENT_TYPES.includes(type as never) ? (type as never) : undefined;
-    const n = limit ? Number(limit) : undefined;
+    const n = boundedInt(limit, { field: "limit" });
     return this.documents.listDocuments(p, {
       studentId,
       type: t,
       cursor,
-      limit: Number.isFinite(n) ? n : undefined,
+      limit: n,
     }) as Promise<DocumentPageDto>;
   }
 

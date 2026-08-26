@@ -8,6 +8,7 @@ import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { DisciplineService } from "./discipline.service";
+import { boundedInt } from "../common/status-filter";
 
 const fileSchema = z.object({
   subject: z.string().min(1).max(200),
@@ -33,7 +34,7 @@ export class DisciplineController {
     @Query("cursor") cursor?: string,
     @Query("limit") limit?: string,
   ): Promise<PageDto<DisciplineComplaintDto>> {
-    return this.discipline.list(p, { cursor, limit: limit ? Number(limit) : undefined });
+    return this.discipline.list(p, { cursor, limit: boundedInt(limit, { field: "limit" }) });
   }
 
   /** Relationship-scoped people the caller may file against, for the picker. */

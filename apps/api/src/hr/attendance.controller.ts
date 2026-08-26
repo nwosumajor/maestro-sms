@@ -20,6 +20,7 @@ import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { StaffAttendanceService } from "./attendance.service";
+import { boundedInt } from "../common/status-filter";
 
 const markSchema = z.object({
   userId: z.string().uuid(),
@@ -79,13 +80,15 @@ export class StaffAttendanceController {
     @Query("year") year?: string,
     @Query("month") month?: string,
   ): Promise<AttendanceSummaryDto> {
-    // `Number(undefined)` is NaN, which the service treats as "not given". Left
-    // as a bare Number() this endpoint answered 500 to a call with no
-    // parameters — the first thing anyone tries.
+    // // GOTCHA: this used to read `Number(year)` and let the SERVICE treat NaN
+    // as "not given" — a fix for a 500 on a call with no parameters at all,
+    // which closed that hole and opened a quieter one: `?year=abc` reported the
+    // CURRENT month under the year the caller asked for. Absent still means
+    // absent; unreadable is now a refusal.
     return this.attendance.summary(
       p,
-      year === undefined ? undefined : Number(year),
-      month === undefined ? undefined : Number(month),
+      boundedInt(year, { field: "year", min: 1900, max: 2200 }),
+      boundedInt(month, { field: "month", min: 1, max: 12 }),
     );
   }
 
