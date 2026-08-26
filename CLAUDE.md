@@ -2075,6 +2075,53 @@ snapshot taken immediately after a probe reports the PREVIOUS probe's reads.
 Settle 12-18 s, and divide by the number of requests rather than trusting one.
 
 
+### A birth certificate the school erased, still ticked off as held
+The right-to-erasure fix that reached supplied documents was recorded here as
+LATENT — `document_submission` had no rows, so it had never run. Driving the
+whole path for the first time (define requirement -> signed upload -> confirm ->
+verify -> erasure -> read back) proved it works: `erasedSuppliedDocuments: 2`,
+storage keys and original names cleared, bytes gone from disk. That half is now
+VERIFIED rather than asserted.
+**WHAT IT NEVER TOLD WAS THE CONSUMING SIDE.** The row kept `status: UPLOADED`,
+and `SATISFYING_STATUSES` treats that as "the school has it". Measured live: after
+a school erased a child's birth certificate at the family's request, its own
+paperwork screen went on reporting `birth_certificate` as **SATISFIED** — while
+clicking the row answered **404 "This submission has no file"**. Two surfaces
+disagreeing about one fact, and because the requirement never returned to
+`outstanding`, nobody would ever be asked for it again: the other four were
+chased and that one was not.
+// THE OUTLIER WAS THE CHECKLIST, and two siblings had already got it right —
+the download refuses with a stated reason, and `promote` guards
+`if (!s.storageKey) continue` before carrying a document onto a pupil's
+permanent record. Both anticipated a row whose bytes are gone; the screen that
+counts the paperwork did not.
+`ERASED` is now its own status and is deliberately NOT in `SATISFYING_STATUSES`.
+// IT MUST NOT READ AS "THE FAMILY NEVER SENT IT" — REJECTED means the school
+looked and refused, PENDING means the upload never finished, and neither
+describes a file the school held and gave up. Hence a distinct value the screen
+labels "Erased at request" rather than folding it into an existing one; whether
+to ask for the document a second time is the school's decision to take, not
+something the product should imply by putting it back on a chase list unmarked.
+The dead "Open" link is gone with it.
+Live, the whole cycle: outstanding 5 -> **4** once supplied and verified ->
+**back to 5** after erasure, status `ERASED`, opening it 404. Before, it stayed
+at 4 with a 404 behind it.
+// GOTCHA: the pure helpers passed with the SERVICE never writing the status —
+the seam this repo keeps recording. The existing `an-erasure-that-left-the-birth-
+certificate` spec drives the real service and asserts the exact `data` object,
+so it went red on the change and is where the status is pinned. Mutation-
+validated both halves (drop the write; put `ERASED` into the satisfying set).
+// Also checked while there, and clean: cross-tenant reads AND writes on a
+submission are 404 and byte-identical to a random uuid; the file is reachable
+only by a holder of `student.profile.write`, so a teacher, another family and
+the pupil themselves all get 403.
+// NOT FIXED, and recorded rather than quietly left: `confirm`, `decide` and
+`waive` all call `toSubmissionDto(row, new Map(), new Map())`, so
+`requirementLabel` and `verifiedByName` are ALWAYS null on those three
+responses — `decide` is the very action that SETS the verifier and cannot name
+them. Latent only because `DocumentChecklist` calls `router.refresh()` and
+ignores the body; a caller that rendered the response would show a blank label.
+
 ### One invisible character, and the SMS bill doubles
 An SMS is billed by the SEGMENT: GSM-7 holds 160 characters (153 once
 concatenated), and a message carrying ONE character outside that alphabet is

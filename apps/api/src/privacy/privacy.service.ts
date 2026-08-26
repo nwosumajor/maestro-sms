@@ -449,7 +449,16 @@ export class PrivacyService {
         if (supplied.length > 0) {
           await tx.documentSubmission.updateMany({
             where: { id: { in: supplied.map((d) => d.id) } },
-            data: { storageKey: null, originalName: null, contentType: null, sizeBytes: null },
+            // The STATUS moves too. Clearing the bytes and leaving the row
+            // reading UPLOADED made the school's checklist report a document it
+            // had just erased as still in hand — and never ask for it again.
+            data: {
+              storageKey: null,
+              originalName: null,
+              contentType: null,
+              sizeBytes: null,
+              status: "ERASED",
+            },
           });
         }
 

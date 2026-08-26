@@ -131,7 +131,19 @@ describe("what an approved erasure actually removes", () => {
     const t = makeService({ suppliedByStudent: ["x.pdf"] });
     await approve(t.svc);
     expect(t.suppliedUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { storageKey: null, originalName: null, contentType: null, sizeBytes: null } }),
+      expect.objectContaining({
+        // The STATUS moves with the bytes. Leaving it UPLOADED made the
+        // school's own checklist report an erased birth certificate as still
+        // in hand, and never ask for it again — see
+        // a-document-erased-is-not-a-document-held.
+        data: {
+          storageKey: null,
+          originalName: null,
+          contentType: null,
+          sizeBytes: null,
+          status: "ERASED",
+        },
+      }),
     );
   });
 

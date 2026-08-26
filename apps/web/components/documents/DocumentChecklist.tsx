@@ -29,6 +29,7 @@ const STATUS_STYLE: Record<string, string> = {
   REJECTED: "bg-rose-500/15 text-rose-600 dark:text-rose-400",
   WAIVED: "bg-muted text-muted-foreground",
   PENDING: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+  ERASED: "bg-muted text-muted-foreground",
 };
 
 const STATUS_WORD: Record<string, string> = {
@@ -37,6 +38,10 @@ const STATUS_WORD: Record<string, string> = {
   REJECTED: "Refused",
   WAIVED: "Waived",
   PENDING: "Not finished",
+  // The family exercised a right; the school no longer holds the file. It must
+  // not read as "never sent" — the requirement is outstanding again, and
+  // whether to ask for it a second time is the school's decision to take.
+  ERASED: "Erased at request",
 };
 
 export function DocumentChecklist({
@@ -200,7 +205,10 @@ export function DocumentChecklist({
                 <div className="ml-auto flex gap-2">
                   {/* Only a real file can be opened. A waiver has no bytes by
                       definition, and a refused one had its bytes thrown away. */}
-                  {s.status !== "WAIVED" && s.status !== "REJECTED" && s.status !== "PENDING" && (
+                  {s.status !== "WAIVED" &&
+                    s.status !== "REJECTED" &&
+                    s.status !== "PENDING" &&
+                    s.status !== "ERASED" && (
                     <a
                       className="text-sm underline underline-offset-4"
                       href={`/api/sms/documents/submissions/${s.id}/file`}

@@ -44,10 +44,34 @@ export type SubmissionSubject = (typeof SUBMISSION_SUBJECTS)[number];
  * school office; without it a registrar's outstanding list can never reach zero
  * and stops being read. It is a recorded decision, not a delete.
  */
-export const SUBMISSION_STATUSES = ["PENDING", "UPLOADED", "VERIFIED", "REJECTED", "WAIVED"] as const;
+export const SUBMISSION_STATUSES = [
+  "PENDING",
+  "UPLOADED",
+  "VERIFIED",
+  "REJECTED",
+  "WAIVED",
+  // The file was erased at the subject's request. The ROW stays — it is the
+  // record that the school once held this and no longer does — but the bytes
+  // are gone and the requirement is no longer met.
+  "ERASED",
+] as const;
 export type SubmissionStatus = (typeof SUBMISSION_STATUSES)[number];
 
 /** Statuses that SATISFY a requirement — i.e. stop it being outstanding. */
+/**
+ * Statuses that mean the school HAS the document.
+ *
+ * `ERASED` is deliberately not among them. A right-to-erasure approval clears
+ * the bytes, and the checklist went on reporting the requirement as satisfied —
+ * so a school's own paperwork screen said it held a child's birth certificate it
+ * had itself erased, while clicking the row answered "This submission has no
+ * file". Two surfaces disagreeing about one fact.
+ *
+ * The requirement returning to OUTSTANDING is the truthful state. What it must
+ * not do is read as "the family never sent it", which is why the status is its
+ * own value and the screen labels it — a signal for a human to decide whether
+ * to ask again, not an instruction to chase (Golden Rule #8's posture).
+ */
 export const SATISFYING_STATUSES: readonly SubmissionStatus[] = ["UPLOADED", "VERIFIED", "WAIVED"];
 
 /**
