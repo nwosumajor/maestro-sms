@@ -246,7 +246,11 @@ export function TransportManager({
                 {assignments.map((a) => (
                   <tr key={a.id} className="border-b border-border/50">
                     <td className="py-1 pr-3">{a.passengerName}</td><td className="py-1 pr-3">{a.routeName}</td>
-                    <td className="py-1 pr-3">{money(a.fareMinor)}</td>
+                    <td className="py-1 pr-3">
+                      {/* Null for a reader who may not see what a family pays —
+                          a driver holds transport.read and nothing else. */}
+                      {a.fareMinor === null ? <span className="text-muted-foreground">—</span> : money(a.fareMinor)}
+                    </td>
                     {canManage && <td className="py-1"><Button variant="outline" size="sm" disabled={busy} onClick={() => run(() => postSms(`transport/assignments/${a.id}/cancel`, {}), "Cancelled.")}>Cancel</Button></td>}
                   </tr>
                 ))}

@@ -11,7 +11,7 @@
 
 import { ConflictException, BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@sms/db";
-import { schoolToday } from "@sms/types";
+import { schoolToday, TRANSPORT_PERMISSIONS, FEES_PERMISSIONS } from "@sms/types";
 import type {
   RouteStopDto,
   TransportAssignmentDto,
@@ -391,7 +391,7 @@ export class TransportService {
         },
       });
       await this.log(tx, p, "transport.assign", a.id, { routeId: input.routeId, passengerId: input.passengerId });
-      return this.assignmentDto(tx, a.id);
+      return this.assignmentDto(tx, p, a.id);
     }),
     );
   }
@@ -420,7 +420,7 @@ export class TransportService {
           alerts.push({ guardianId: l.parentId, routeName: route.name, studentName: student?.name ?? "your child" });
         }
       }
-      return this.assignmentDto(tx, assignmentId);
+      return this.assignmentDto(tx, p, assignmentId);
     });
     for (const al of alerts) {
       try {
@@ -446,7 +446,7 @@ export class TransportService {
       if (a.status !== "ACTIVE") throw new BadRequestException("Assignment is not active");
       await tx.transportAssignment.update({ where: { id }, data: { status: "CANCELLED" } });
       await this.log(tx, p, "transport.assign.cancel", id, { routeId: a.routeId, passengerId: a.passengerId });
-      return this.assignmentDto(tx, id);
+      return this.assignmentDto(tx, p, id);
     });
   }
 
@@ -480,6 +480,7 @@ export class TransportService {
           routeById.get(a.routeId) ?? null,
           a.stopId ? (stopById.get(a.stopId) ?? null) : null,
           nameById.get(a.passengerId) ?? "",
+          canSeeFare(p),
         ),
       );
     });
@@ -936,12 +937,12 @@ export class TransportService {
     };
   }
 
-  private async assignmentDto(tx: TenantTx, id: string): Promise<TransportAssignmentDto> {
+  private async assignmentDto(tx: TenantTx, p: Principal, id: string): Promise<TransportAssignmentDto> {
     const a = await tx.transportAssignment.findFirstOrThrow({ where: { id } });
     const route = await tx.transportRoute.findFirst({ where: { id: a.routeId }, select: { name: true, fareMode: true, flatFareMinor: true } });
     const stop = a.stopId ? await tx.routeStop.findFirst({ where: { id: a.stopId }, select: { name: true, fareMinor: true } }) : null;
     const passenger = await tx.user.findFirst({ where: { id: a.passengerId }, select: { name: true } });
-    return mapAssignmentDto(a, route, stop, passenger?.name ?? "");
+    return mapAssignmentDto(a, route, stop, passenger?.name ?? "", canSeeFare(p));
   }
 
   private async tripDto(tx: TenantTx, id: string): Promise<TransportTripDto> {
@@ -1047,13 +1048,32 @@ export class TransportService {
  *  passenger's fare (flat route fare, or their stop's fare) is computed here with
  *  no extra query — supporting both the single (assignmentDto) and batched
  *  (listAssignments) paths without a per-row fan-out. */
+/**
+ * Who may read what a family is charged for a seat.
+ *
+ * Whoever RUNS transport (they set the fares) or reads FEES (it is their job).
+ * A driver holds `transport.read` and neither of those — the only role in the
+ * map that does — and driving a bus does not require knowing what each child's
+ * family pays.
+ */
+function canSeeFare(p: Principal): boolean {
+  return (
+    p.permissions.includes(TRANSPORT_PERMISSIONS.TRANSPORT_MANAGE) ||
+    p.permissions.includes(FEES_PERMISSIONS.FEE_READ)
+  );
+}
+
 function mapAssignmentDto(
   a: { id: string; routeId: string; stopId: string | null; passengerId: string; passengerType: string; status: string },
   route: { name: string; fareMode: string; flatFareMinor: number } | null,
   stop: { name: string; fareMinor: number } | null,
   passengerName: string,
+  /** REQUIRED: a required parameter is a search for every caller that was
+   *  shipping the fare without deciding whether the reader may see it. */
+  showFare: boolean,
 ): TransportAssignmentDto {
-  const fareMinor = !route ? 0 : route.fareMode === "FLAT" ? route.flatFareMinor : (stop?.fareMinor ?? 0);
+  const fare = !route ? 0 : route.fareMode === "FLAT" ? route.flatFareMinor : (stop?.fareMinor ?? 0);
+  const fareMinor = showFare ? fare : null;
   return {
     id: a.id,
     routeId: a.routeId,

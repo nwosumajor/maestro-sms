@@ -1432,6 +1432,33 @@ damage was.
 Gate: `every-body-is-validated-at-the-boundary.spec.ts`, exemptions named with
 reasons and each required to name a file that still exists.
 
+### The person driving the bus does not need to know what each family pays
+`canSeeFare` (`transport.service.ts`), `TransportAssignmentDto.fareMinor:
+number | null`. Probed the two roles this project scopes most tightly — the
+driver ("read-only own vehicle") and the warden ("their own hostel") — and the
+ROW scoping is right, measured rather than assumed: the demo school has 6
+vehicles and 30 seat assignments, the driver drives 3 and sees exactly the 15 on
+those; 6 hostels and 19 allocations, the warden runs 3 and sees 11. Parents,
+students and teachers get 403.
+What every one of those 15 rows carried was `fareMinor` — what that child's
+family is charged for the seat. Fares vary per stop and per route, so it is a
+comparison BETWEEN FAMILIES, shown to the one role scoped to reading a vehicle.
+**THE WARDEN IS THE CONTRAST THAT MAKES THIS A BOUNDARY AND NOT A MATTER OF
+TASTE.** They see `rentMinor` on their boarders and that is CORRECT: they hold
+`hostel.manage`, and allocating a room IS setting the rent. The driver holds
+`transport.read` and nothing else — and is the ONLY role in the whole map that
+reads transport without either managing it or reading fees, which is what the
+gate asserts rather than a hand-kept list of who is allowed.
+Live after: the driver's 15 rows come back with `fareMinor: null` and their
+names, routes, stops and statuses unchanged — everything the job needs; the head
+driver still sees 30 rows at ₦800.00. `showFare` is a REQUIRED parameter on the
+mapper, so every caller had to decide rather than inherit the old answer.
+// The same probe is worth repeating on any role added to `transport.read` or
+`hostel.read`: scoping the ROWS correctly is the easy half, and it is the FIELDS
+on a correctly-scoped row that go unexamined. The scan desk already had this
+right — "ROSTER-level fields only, never medical/PII" — and it is the same rule.
+
+
 ### A final month the school had already paid, paid again
 `computeFinalSettlement` (`@sms/types/payroll.ts`) + `ExitService.initiate`.
 The settlement pays `base × day / daysInMonth` for the leaver's final month, and

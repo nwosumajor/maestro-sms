@@ -49,7 +49,24 @@ export interface TransportAssignmentDto {
   passengerType: string;
   status: string;
   /** Fare this passenger owes (flat route fare, or their stop's fare). */
-  fareMinor: number;
+  /**
+   * What the family is charged for this seat — NULL for a caller who may not
+   * see it.
+   *
+   * // GOTCHA: this was always a number, and a DRIVER holds `transport.read`
+   * and nothing else. The row scoping is right — measured live, a driver sees
+   * exactly the 15 assignments on the 3 vehicles they drive, out of 30 on 6 —
+   * but every one of those rows carried the fare, so the person driving the bus
+   * could read what each child's family pays. Fares vary per stop and per
+   * route, so that is a comparison between families, to the one role this
+   * project scopes to "read-only own vehicle".
+   *
+   * The WARDEN is the contrast that makes the boundary clear rather than a
+   * matter of taste: they see `rentMinor` on their boarders and that is
+   * correct, because they hold `hostel.manage` and allocating a room IS setting
+   * the rent. The driver manages nothing.
+   */
+  fareMinor: number | null;
 }
 
 export interface TransportFeeRunDto {
