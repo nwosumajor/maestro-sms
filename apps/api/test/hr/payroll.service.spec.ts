@@ -222,6 +222,7 @@ describe("computeFinalSettlement (exit, pure)", () => {
       lastWorkingDay: "2026-06-15",
       leaveDaysRemaining: 6,
       loanOutstandingMinor: 5_000_000,
+      finalMonthAlreadyPaid: false,
     });
     expect(s.proRataMinor).toBe(15_000_000); // 15/30 × 300k
     expect(s.leavePayoutMinor).toBe(6_000_000); // 6 × (300k/30)
@@ -230,12 +231,57 @@ describe("computeFinalSettlement (exit, pure)", () => {
     expect(s.loanUnrecoveredMinor).toBe(0);
     expect(s.netMinor).toBe(16_000_000);
   });
+  it("pays NOTHING more for a final month payroll has already paid", () => {
+    // Most schools run payroll before month end. On the 25th, a leaver whose
+    // last day is the 28th has already had the WHOLE month; paying 28/31 of it
+    // again is a second ₦270,967.74 on a ₦300k salary — about 90% over. The
+    // arithmetic was right when payroll had not run and silently doubled when
+    // it had, with nothing distinguishing the two.
+    const same = {
+      baseMinor: 30_000_000,
+      lastWorkingDay: "2026-08-28",
+      leaveDaysRemaining: 6,
+      loanOutstandingMinor: 0,
+    };
+    const unpaid = computeFinalSettlement({ ...same, finalMonthAlreadyPaid: false });
+    const paid = computeFinalSettlement({ ...same, finalMonthAlreadyPaid: true });
+
+    expect(unpaid.proRataMinor).toBe(27_096_774); // 28/31 × 300k
+    expect(paid.proRataMinor).toBe(0);
+    // Leave payout is NOT month-bound and survives either way.
+    expect(paid.leavePayoutMinor).toBe(6_000_000);
+    expect(paid.grossMinor).toBe(6_000_000);
+    expect(paid.netMinor).toBe(6_000_000);
+    // And the settlement SAYS which case it was, because "pro rata: 0.00" on
+    // an approver's screen otherwise reads as "worked no days".
+    expect(paid.finalMonthAlreadyPaid).toBe(true);
+    expect(unpaid.finalMonthAlreadyPaid).toBe(false);
+  });
+
+  it("recovers less of a loan when the month was already paid, and reports the residue", () => {
+    // Recovery is clamped at the gross, so a smaller gross recovers less — you
+    // cannot take back money you are not paying. The residue must be visible,
+    // not quietly written off.
+    const s = computeFinalSettlement({
+      baseMinor: 30_000_000,
+      lastWorkingDay: "2026-08-28",
+      leaveDaysRemaining: 2,
+      loanOutstandingMinor: 10_000_000,
+      finalMonthAlreadyPaid: true,
+    });
+    expect(s.grossMinor).toBe(2_000_000);
+    expect(s.loanRecoveredMinor).toBe(2_000_000);
+    expect(s.loanUnrecoveredMinor).toBe(8_000_000);
+    expect(s.netMinor).toBe(0);
+  });
+
   it("clamps loan recovery at the gross (net never negative; residue reported)", () => {
     const s = computeFinalSettlement({
       baseMinor: 10_000_000,
       lastWorkingDay: "2026-02-28", // 28/28 of Feb
       leaveDaysRemaining: 0,
       loanOutstandingMinor: 99_000_000,
+      finalMonthAlreadyPaid: false,
     });
     expect(s.grossMinor).toBe(10_000_000);
     expect(s.loanRecoveredMinor).toBe(10_000_000);

@@ -261,8 +261,27 @@ export function computeFullPayslip(input: {
 
 /** The computed exit settlement, snapshotted (encrypted) onto the exit record. */
 export interface FinalSettlement {
-  /** Days worked in the final month / days in that month × monthly basic. */
+  /** Days worked in the final month / days in that month × monthly basic.
+   *  ZERO when that month's payroll has already been paid — see
+   *  `finalMonthAlreadyPaid`. */
   proRataMinor: number;
+  /**
+   * Whether the final month had ALREADY been paid when this was computed.
+   *
+   * // GOTCHA: this used to be assumed false and never asked. A school that
+   * runs payroll on the 25th — which is most of them — paid a member of staff
+   * leaving on the 28th their FULL monthly salary through payroll and then a
+   * 28/31 pro-rata again in the settlement: on ₦300,000 a month that is
+   * ₦270,967.74 of a second payment for a month already discharged, about 90%
+   * over. The arithmetic was right for the case where payroll had not run and
+   * silently doubled for the case where it had, with nothing distinguishing
+   * them.
+   *
+   * Carried on the settlement rather than only applied, because the figure is
+   * SNAPSHOTTED encrypted onto the exit record and an approver reading "pro
+   * rata: 0.00" needs to know it means "already paid" and not "worked no days".
+   */
+  finalMonthAlreadyPaid: boolean;
   leaveDaysRemaining: number;
   /** leaveDaysRemaining × (basic / 30). */
   leavePayoutMinor: number;
@@ -284,11 +303,21 @@ export function computeFinalSettlement(input: {
   lastWorkingDay: string; // YYYY-MM-DD
   leaveDaysRemaining: number;
   loanOutstandingMinor: number;
+  /**
+   * Has a FINALIZED MONTHLY payroll run for the final month already produced a
+   * payslip for this person? REQUIRED, deliberately: a required parameter is a
+   * search for every caller that was relying on the old assumption — the same
+   * trick that found the Paystack currency sites and the payment-approval
+   * threshold ones.
+   */
+  finalMonthAlreadyPaid: boolean;
 }): FinalSettlement {
   const base = Math.max(0, Math.round(input.baseMinor));
   const d = new Date(`${input.lastWorkingDay}T00:00:00.000Z`);
   const daysInMonth = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
-  const proRataMinor = Math.round((base * d.getUTCDate()) / daysInMonth);
+  // Nothing further is owed for a month the school has already paid in full.
+  // Leave payout and loan recovery still apply — those are not month-bound.
+  const proRataMinor = input.finalMonthAlreadyPaid ? 0 : Math.round((base * d.getUTCDate()) / daysInMonth);
   const leaveDaysRemaining = Math.max(0, input.leaveDaysRemaining);
   const leavePayoutMinor = Math.round((base / 30) * leaveDaysRemaining);
   const grossMinor = proRataMinor + leavePayoutMinor;
@@ -296,6 +325,7 @@ export function computeFinalSettlement(input: {
   const loanRecoveredMinor = Math.min(loanOutstandingMinor, grossMinor);
   return {
     proRataMinor,
+    finalMonthAlreadyPaid: input.finalMonthAlreadyPaid,
     leaveDaysRemaining,
     leavePayoutMinor,
     grossMinor,

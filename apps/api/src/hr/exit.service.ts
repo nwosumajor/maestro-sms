@@ -88,11 +88,45 @@ export class ExitService {
       const loans = await tx.staffLoan.findMany({ where: { userId: input.userId, status: "ACTIVE" } });
       const loanOutstandingMinor = loans.reduce((s, l) => s + Number(decryptField(l.balanceEnc, p.schoolId)), 0);
 
+      // HAS THE FINAL MONTH ALREADY BEEN PAID?
+      //
+      // The settlement pays `base × day / daysInMonth` for the final month, and
+      // nothing used to ask whether payroll had already covered it. Most schools
+      // run payroll before month end: on the 25th, a leaver whose last day is the
+      // 28th had already been paid the WHOLE month, and the settlement then paid
+      // 28/31 of it again — on ₦300,000 that is a second ₦270,967.74 for a month
+      // already discharged.
+      //
+      // MONTHLY only, and FINALIZED only. A THIRTEENTH or BONUS run pays base
+      // without being salary FOR that month (its own comment says so), and a
+      // DRAFT run has paid nobody — treating either as payment would swing the
+      // error the other way and short the leaver.
+      const lastDay = new Date(`${input.lastWorkingDay}T00:00:00.000Z`);
+      // Two reads: `Payslip` carries `payrollRunId` as a scalar with a DB-level
+      // FK and no Prisma relation — the documented pattern here that keeps the
+      // models lean — so the run cannot be filtered through from the payslip.
+      const monthRuns = await tx.payrollRun.findMany({
+        where: {
+          runType: "MONTHLY",
+          status: "FINALIZED",
+          periodYear: lastDay.getUTCFullYear(),
+          periodMonth: lastDay.getUTCMonth() + 1,
+        },
+        select: { id: true },
+      });
+      const paidRun = monthRuns.length
+        ? await tx.payslip.findFirst({
+            where: { userId: input.userId, payrollRunId: { in: monthRuns.map((r) => r.id) } },
+            select: { id: true },
+          })
+        : null;
+
       const settlement = computeFinalSettlement({
         baseMinor: base,
         lastWorkingDay: input.lastWorkingDay,
         leaveDaysRemaining,
         loanOutstandingMinor,
+        finalMonthAlreadyPaid: Boolean(paidRun),
       });
       const row = await tx.staffExit.create({
         data: {

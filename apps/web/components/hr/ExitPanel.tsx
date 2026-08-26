@@ -149,7 +149,14 @@ export function ExitPanel({
               )}
             </div>
             <div className="mt-2 grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
-              <span>Pro-rata final month: {money(e.settlement.proRataMinor)}</span>
+              {/* "Pro-rata final month: 0.00" reads as "worked no days" unless the
+                  reason is said. The settlement carries which case it was. */}
+              <span>
+                Pro-rata final month: {money(e.settlement.proRataMinor)}
+                {e.settlement.finalMonthAlreadyPaid && (
+                  <span className="text-amber-700 dark:text-amber-500"> — that month's payroll already paid in full</span>
+                )}
+              </span>
               <span>
                 Leave payout ({e.settlement.leaveDaysRemaining}d): {money(e.settlement.leavePayoutMinor)}
               </span>

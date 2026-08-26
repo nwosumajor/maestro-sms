@@ -1432,6 +1432,45 @@ damage was.
 Gate: `every-body-is-validated-at-the-boundary.spec.ts`, exemptions named with
 reasons and each required to name a file that still exists.
 
+### A final month the school had already paid, paid again
+`computeFinalSettlement` (`@sms/types/payroll.ts`) + `ExitService.initiate`.
+The settlement pays `base × day / daysInMonth` for the leaver's final month, and
+**nothing asked whether payroll had already covered it.** Most schools run
+payroll before month end. On the 25th, a member of staff whose last working day
+is the 28th has already received the WHOLE month — and the settlement then paid
+28/31 of it AGAIN: on a ₦300,000 salary a second **₦270,967.74** for a month
+already discharged, about 90% over. The arithmetic was correct for the case
+where payroll had not run and silently doubled for the case where it had, with
+nothing in the input distinguishing them.
+`finalMonthAlreadyPaid` is now a REQUIRED parameter — a required parameter is a
+search for every caller relying on the old assumption, the same trick that found
+the Paystack currency sites and the payment-approval threshold ones. It is
+detected from the data, not asked of the user: a FINALIZED **MONTHLY** run for
+the last working day's month that produced a payslip for **this person**.
+// EACH OF THOSE FOUR NARROWINGS IS LOAD-BEARING, and three of them fail SAFE in
+the direction that shorts the leaver, which is the worse direction:
+**MONTHLY** — a THIRTEENTH or BONUS run pays base without being salary FOR that
+month (the schema comment says so); **FINALIZED** — a DRAFT run has paid nobody;
+**this person's payslip** — a run existing is not the same as the leaver being
+in it, and somebody who joined on the 26th is in no August run; **the LAST
+WORKING DAY's month** — not today's, since an exit is often initiated in the
+month after the one being settled.
+// Accrued leave is NOT month-bound and survives either way. Loan recovery is
+clamped at the gross, so a zeroed pro-rata recovers LESS and leaves more owed —
+correct (you cannot take back money you are not paying) and already reported by
+`loanUnrecoveredMinor`, which is why that field mattered.
+// The flag rides on the SNAPSHOT, not just the calculation, because the
+settlement is frozen encrypted onto the exit record and an approver reading
+"Pro-rata final month: 0.00" would otherwise read it as "worked no days". The
+panel says "that month's payroll already paid in full" beside it.
+// GOTCHA in the test, not the code: `Payslip.payrollRunId` is a scalar with a
+DB-level FK and NO Prisma relation — the documented pattern here that keeps the
+models lean — so the run cannot be filtered through from the payslip. Two reads.
+// The pure helper is tested beside the other payroll maths and the SERVICE is
+tested separately, because a test on a helper proves nothing about its caller —
+the seam that hid the CBT score and the report-card promotion-line bugs.
+
+
 ### A statutory clock that nobody was watching
 `BreachDeadlineService` + `breach-clock.ts` (`privacy/`, migration
 `20270107000000`, `SCHEDULED_JOBS` key `privacy.breachDeadline`, manual
