@@ -23,7 +23,7 @@ import {
   CHANNEL_LABELS,
   type PaymentChannel,
 } from "@sms/types";
-import { narrowStatus } from "../common/status-filter";
+import { narrowStatus, pageNumber } from "../common/status-filter";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { RequireStepUp } from "../auth/require-stepup.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -437,8 +437,8 @@ export class OperatorController {
       q: q?.trim() || undefined,
       plan: plan && isPlan(plan) ? plan : undefined,
       billing: billing && isSubscriptionStatus(billing) ? billing : undefined,
-      page: page ? Number(page) : undefined,
-      pageSize: pageSize ? Number(pageSize) : undefined,
+      page: pageNumber(page),
+      pageSize: pageNumber(pageSize, "pageSize"),
     });
   }
 
@@ -467,7 +467,7 @@ export class OperatorController {
       billing: narrowStatus(billing, Object.values(SUBSCRIPTION_STATUS), "billing"),
       status: narrowStatus(status, ["ACTIVE", "DISABLED"] as const, "status"),
       sort: sort === "recent" ? "recent" : undefined,
-      page: page ? Number(page) : undefined,
+      page: pageNumber(page),
     });
   }
 
@@ -820,8 +820,8 @@ export class OperatorController {
       plan: q.plan,
       currency: q.currency,
       q: q.q,
-      page: q.page ? Number(q.page) : undefined,
-      pageSize: q.pageSize ? Number(q.pageSize) : undefined,
+      page: pageNumber(q.page),
+      pageSize: pageNumber(q.pageSize, "pageSize"),
     };
   }
 
@@ -838,8 +838,8 @@ export class OperatorController {
   ): Promise<MessageCreditBalancePageDto> {
     return this.credits.listBalances(p, {
       q,
-      page: page ? Number(page) : undefined,
-      pageSize: pageSize ? Number(pageSize) : undefined,
+      page: pageNumber(page),
+      pageSize: pageNumber(pageSize, "pageSize"),
     });
   }
 

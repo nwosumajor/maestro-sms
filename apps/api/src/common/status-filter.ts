@@ -49,3 +49,35 @@ export function narrowStatus<T extends string>(
   }
   return v as T;
 }
+
+/**
+ * A page number or page size from a query string, or a refusal.
+ *
+ * `page ? Number(page) : 1` is the shape this replaces, and it has three
+ * failure modes, all of which reached the database:
+ *
+ *   `?page=abc`     -> NaN      -> `skip: NaN`      -> PrismaClientValidationError
+ *   `?page=1e999`   -> Infinity -> `skip: Infinity` -> the same
+ *   `?pageSize=1e9` -> a take nobody meant
+ *
+ * Measured live: `?page=abc` on `/students/exited`, `/operator/tenants` and
+ * `/operator/payments` each returned **500 Internal server error** — and,
+ * through the observability spine, raised a Sentry event. A query-string typo
+ * on the platform owner's own console became an error-tracking alert with a
+ * stack trace, where the caller needed one sentence telling them what to type.
+ *
+ * A 400 is also what this API already does everywhere it uses Zod:
+ * `/workflows`, `/admissions`, `/assessments` and `/fees/disputes` all answer
+ * `z.coerce.number().int().min(1)` with a 400. The hand-rolled sites were the
+ * outliers, not the rule.
+ */
+export function pageNumber(value: string | undefined | null, field = "page", max = 1_000_000): number | undefined {
+  const v = value?.trim();
+  // Absent means "the caller did not ask" — the handler's own default applies.
+  if (!v) return undefined;
+  const n = Number(v);
+  if (!Number.isSafeInteger(n) || n < 1 || n > max) {
+    throw new BadRequestException(`${field} must be a whole number between 1 and ${max}`);
+  }
+  return n;
+}

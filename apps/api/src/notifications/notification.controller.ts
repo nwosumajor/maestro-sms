@@ -23,6 +23,7 @@ import {
   FEES_PERMISSIONS,
   BILLING_PERMISSIONS,
 } from "@sms/types";
+import { pageNumber } from "../common/status-filter";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
@@ -137,12 +138,14 @@ export class NotificationController {
     @Query("type") type?: string,
     @Query("q") q?: string,
   ): Promise<NotificationInboxDto> {
-    const n = limit ? Number(limit) : undefined;
-    const pg = page ? Number(page) : undefined;
+    // This one guarded with `Number.isFinite`, which is why it never 500'd —
+    // but a typo'd page then SILENTLY became page 1, so the inbox answered a
+    // question the caller did not ask and showed them the top of a list they
+    // were paging through. Refusing says what happened; the guard hid it.
     return this.notifications.listMine(p, {
       unreadOnly: unread === "1" || unread === "true",
-      limit: Number.isFinite(n) ? n : undefined,
-      page: Number.isFinite(pg) ? pg : undefined,
+      limit: pageNumber(limit, "limit"),
+      page: pageNumber(page),
       type: type?.trim() || undefined,
       q: q?.trim() || undefined,
     });
@@ -256,8 +259,8 @@ export class NotificationController {
   ) {
     return this.credits.ledger(
       p,
-      page ? Number(page) : 1,
-      pageSize ? Number(pageSize) : 25,
+      pageNumber(page) ?? 1,
+      pageNumber(pageSize, "pageSize") ?? 25,
     );
   }
 

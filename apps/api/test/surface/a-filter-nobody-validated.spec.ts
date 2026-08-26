@@ -28,6 +28,9 @@ import { apiRoutes } from "../support/api-routes";
 
 const API_SRC = join(__dirname, "..", "..", "src");
 
+const stripComments = (src: string) =>
+  src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+
 /**
  * A route whose `status` is deliberately unvalidated, with the reason.
  *
@@ -54,6 +57,61 @@ function statusFilters(): Array<{ key: string; file: string; body: string }> {
     .filter((r) => /@Query\(\s*["']status["']\s*\)/.test(r.body))
     .map((r) => ({ key: r.key, file: r.file.split("/src/")[1] ?? r.file, body: r.body }));
 }
+
+describe("every list that pages", () => {
+  // `page ? Number(page) : 1` turns a typo into NaN, and NaN reaches Prisma as
+  // `skip: NaN` — a PrismaClientValidationError, a 500, and (through the
+  // observability spine) a Sentry event. Measured live: `?page=abc` on
+  // `/students/exited`, `/operator/tenants` and `/operator/payments` each
+  // answered 500. `?page=1e999` did the same by way of Infinity.
+  //
+  // A 400 is also what this API already does wherever it uses Zod — /workflows,
+  // /admissions, /assessments and /fees/disputes all answer
+  // `z.coerce.number().int().min(1)` with one. The hand-rolled sites were the
+  // outliers, not the rule.
+  // COMMENTS STRIPPED. A gate that reads prose fails on the explanation of its
+  // own rule — the trap `money-is-not-divided-by-a-hundred` already strips for,
+  // and which caught this file twice while it was being written: a comment
+  // saying "`Number(page)` on a typo is NaN" was read as a `Number(page)` call.
+  const paging = apiRoutes(API_SRC)
+    .filter((r) => r.method === "GET")
+    .filter((r) => /@Query\(\s*["'](page|pageSize)["']\s*\)/.test(r.body))
+    .map((r) => ({ key: r.key, file: r.file.split("/src/")[1] ?? r.file, body: stripComments(r.body) }));
+
+  it("found the paged lists at all", () => {
+    expect(paging.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("never hands a raw Number() straight to the query", () => {
+    // WHOLE CONTROLLER FILES, not just route bodies.
+    //
+    // The first version scanned each handler's own body and missed
+    // `/operator/payments` entirely: its parse lives in a private
+    // `paymentFilters(q)` helper further down the file, so the route body had
+    // nothing to flag. It kept 500-ing on `?page=abc` while the gate reported
+    // the class closed — a gate passing by looking in the wrong place, which is
+    // the failure mode `a-gate-must-not-pass-by-finding-nothing` names.
+    //
+    // // GOTCHA: `pageNumber(page)` CONTAINS the substring `Number(page)`, so
+    // the obvious pattern flagged every site the fix had just corrected. The
+    // lookbehind is what makes it a call to `Number` rather than the tail of
+    // another identifier.
+    const RAW = /(?<![A-Za-z_$])Number\(\s*[A-Za-z_$][\w.$]*\.?(page|pageSize)\s*\)/i;
+    const files = [...new Set(apiRoutes(API_SRC).map((r) => r.file))];
+    expect(files.length).toBeGreaterThan(30);
+    const raw = files
+      .filter((f) => RAW.test(stripComments(readFileSync(f, "utf8"))))
+      .map((f) => f.split("/src/")[1] ?? f);
+    expect(raw).toEqual([]);
+  });
+
+  it("parses through the shared helper, or through Zod's coercion", () => {
+    const unparsed = paging
+      .filter((r) => !/pageNumber\(|ZodValidationPipe|z\.coerce/.test(r.body))
+      .map((r) => `${r.key}  (${r.file})`);
+    expect(unparsed).toEqual([]);
+  });
+});
 
 describe("every list that narrows on a status", () => {
   const filters = statusFilters();

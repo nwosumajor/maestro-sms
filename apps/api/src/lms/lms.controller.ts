@@ -5,6 +5,7 @@ import { RequireModule } from "../auth/require-module.decorator";
 import type { AcademicSessionDto, ClassDto, ClassEligibilityDto, ClassInfoDto, ClassOverviewDto, ClassSubjectDto, IdNameDto, PromotionBatchDto, SchoolHolidayDto, SubjectDto, UserWithEmailDto } from "@sms/types";
 import { z } from "zod";
 import { LMS_PERMISSIONS, SIS_PERMISSIONS } from "@sms/types";
+import { pageNumber } from "../common/status-filter";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
@@ -546,7 +547,9 @@ export class LmsController {
     @Query("page") page?: string,
     @Query("pageSize") pageSize?: string,
   ) {
-    return this.exits.listExited(p, page ? Number(page) : 1, pageSize ? Number(pageSize) : 25);
+    // `Number(page)` on a typo is NaN, and NaN reaches Prisma as `skip: NaN`.
+    // Live before this: `?page=abc` answered 500 and raised a Sentry event.
+    return this.exits.listExited(p, pageNumber(page) ?? 1, pageNumber(pageSize, "pageSize") ?? 25);
   }
 
   /**

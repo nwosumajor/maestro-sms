@@ -1432,6 +1432,37 @@ damage was.
 Gate: `every-body-is-validated-at-the-boundary.spec.ts`, exemptions named with
 reasons and each required to name a file that still exists.
 
+### A page number nobody validated turned a typo into an incident
+`narrowStatus` / `pageNumber` (`apps/api/src/common/status-filter.ts`) are the ONE
+place a query-string filter becomes a value the database sees. Every paged list
+parsed its own: `page: q.page ? Number(q.page) : undefined`. `Number("abc")` is
+`NaN` and `Number("1e999")` is `Infinity` — neither is falsy, so both sailed past
+the guard, reached Prisma as `skip: NaN`, and came back **HTTP 500 "Internal
+server error"** with a stack trace and a Sentry event. Measured live before:
+`/students/exited`, `/operator/tenants`, `/operator/payments`,
+`/operator/payments/export.csv`, `/notifications`, `/operator/directory` and the
+message-credit ledger all 500 on `?page=abc`. After: **400 naming the range**, on
+all seven, with the unparameterised call unchanged.
+A 500 is the wrong answer TWICE. It tells the caller nothing they can act on —
+the fix is "1", and the message says "Internal server error" — and it spends an
+alert: a 5xx is what pages somebody, so a mistyped URL in a bookmark bar is
+indistinguishable from the database being down. The same reasoning already
+governs `narrowStatus`: an unrecognised `status` is refused with the allowed
+values NAMED, never silently ignored, because a filter that quietly matches
+everything reports a number the user believes is filtered.
+// GOTCHA: **the gate passed while `/operator/payments` was still 500-ing.** It
+scanned each route handler's BODY, and that route's parse lives in a private
+`paymentFilters(q)` helper further down the file — the handler body had nothing
+to flag. A gate looking in the wrong place is the failure
+`a-gate-must-not-pass-by-finding-nothing` names, one directory over. It scans
+whole controller FILES now, mutation-validated by restoring the helper's
+`Number(q.page)` and watching it go red.
+// GOTCHA: `pageNumber(page)` CONTAINS the substring `Number(page)`, so the
+obvious pattern flagged every site the fix had just corrected. The lookbehind is
+what makes it a call to `Number` rather than the tail of another identifier —
+the same trap as the comment-stripping one three gates over, where a gate went
+red on a comment EXPLAINING the defect it exists for.
+
 ### A refusal must not confirm what it hides
 "Errors never leak cross-tenant existence — return 404, not 403" is a stated
 convention here and 97 refusals follow it. Three did not, and TWO WERE IN ONE
