@@ -10,8 +10,9 @@
 
 import { Body, Controller, Get, Param, Post, Put, Query } from "@nestjs/common";
 import { z } from "zod";
-import { SCHOLARSHIP_PERMISSIONS, WORKFLOW_PERMISSIONS } from "@sms/types";
+import { SCHOLARSHIP_APPLICATION_STATUSES, SCHOLARSHIP_PERMISSIONS, WORKFLOW_PERMISSIONS } from "@sms/types";
 import type { ScholarshipApplicationDto } from "@sms/types";
+import { narrowStatus } from "../common/status-filter";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { RequireStepUp } from "../auth/require-stepup.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -178,7 +179,10 @@ export class ScholarshipController {
     @Query("status") status?: string,
     @Query("programId") programId?: string,
   ) {
-    return this.admin.listApplications(p, { status, programId });
+    return this.admin.listApplications(p, {
+      status: narrowStatus(status, SCHOLARSHIP_APPLICATION_STATUSES),
+      programId,
+    });
   }
 
   /** Non-award decisions: REVIEW / SHORTLIST / REJECT. */

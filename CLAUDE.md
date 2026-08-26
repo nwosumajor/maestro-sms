@@ -1796,6 +1796,40 @@ closed the window early and the test went red while the property it guards was
 untouched. Now anchored to the method by name — and mutation-validated, which
 the accidental version never was.
 
+### A filter nobody validated answers a question nobody asked
+`/fees/disputes` was fixed for this once and the reasoning was written down: "an
+invalid `status` is a 400 that renders the LOAD-FAILURE card — never 'No disputes
+recorded', which is a statement about money a finance officer acts on". SIX
+siblings kept the old behaviour, one of them three hundred lines below that fix
+in the same controller. An unrecognised value failed in one of two ways, and
+both are worse than an error:
+```
+passed into the query   -> matches NOTHING    -> "no boarders are signed out"
+dropped to undefined    -> matches EVERYTHING -> the whole ledger, "filtered"
+```
+Measured live, each before and after: `/invoices?status=OVERDUE` — the obvious
+guess — returned **all 14 invoices** under that label; `/library/loans?status=OUT`
+turned **26 loans into 0**; `/hostels/exeats` turned **one overdue boarder into
+none**, which is a safety statement about a child made by a typo; and
+`/operator/feedback`, `/operator/directory` (three filters in one object) and
+`/hostels/incidents` all answered as though unfiltered or empty.
+ONE helper, `narrowStatus` (`common/status-filter.ts`), not six hand-rolled
+checks — this repo already records what the alternative costs ("the CSV formula
+guard existed 9× under 4 names"), and a control written six times will be right
+five times. It refuses with the ALLOWED VALUES NAMED (`status must be one of
+ISSUED, RETURNED`), because "invalid status" sends somebody to read the source.
+// AN EMPTY STRING IS NOT AN ERROR. A cleared dropdown submits one, and refusing
+it would turn a validation fix into a broken "show me everything" — the way this
+kind of fix usually goes wrong. Absent, empty and whitespace all mean no filter;
+everything else must be exact.
+// TWO DELIBERATE EXEMPTIONS, kept in the author's own words rather than
+overruled: `/cbt/exams/all` ("this is a filter, not a command, and an empty list
+is the honest answer" — staff-only exam admin, not a claim about a child or
+money) and `/classes/:classId/content`, whose status can only NARROW within what
+the caller may already see.
+Gate: `a-filter-nobody-validated.spec.ts` finds every GET taking `@Query("status")`
+and requires it to go through the shared narrower or be exempted with a reason.
+
 ### Told it does not exist, on the screen that is showing it
 Found by RUNNING a path that had never executed: `subject_selection` had zero
 rows, so the pick → supervisor → admin chain had never been driven.

@@ -23,6 +23,7 @@ import {
   CHANNEL_LABELS,
   type PaymentChannel,
 } from "@sms/types";
+import { narrowStatus } from "../common/status-filter";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { RequireStepUp } from "../auth/require-stepup.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
@@ -456,9 +457,15 @@ export class OperatorController {
   ): Promise<SchoolDirectoryPageDto> {
     return this.directorySvc.listDirectory(p, {
       q: q?.trim() || undefined,
-      plan: plan && isPlan(plan) ? plan : undefined,
-      billing: billing && isSubscriptionStatus(billing) ? billing : undefined,
-      status: status === "ACTIVE" || status === "DISABLED" ? status : undefined,
+      // FOUR FILTERS, ALL OF WHICH USED TO BE DROPPED SILENTLY. An unrecognised
+      // plan, billing status or school status became `undefined`, so the
+      // directory answered as though UNFILTERED — every school on the platform,
+      // under whatever the operator had picked. `sort` is different: there is
+      // one alternative to the default and "not recent" genuinely means the
+      // default, so it stays a coalesce.
+      plan: narrowStatus(plan, Object.values(PLANS), "plan"),
+      billing: narrowStatus(billing, Object.values(SUBSCRIPTION_STATUS), "billing"),
+      status: narrowStatus(status, ["ACTIVE", "DISABLED"] as const, "status"),
       sort: sort === "recent" ? "recent" : undefined,
       page: page ? Number(page) : undefined,
     });

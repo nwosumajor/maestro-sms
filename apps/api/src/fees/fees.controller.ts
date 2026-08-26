@@ -1,4 +1,5 @@
 import { BadRequestException, Body, Controller, Get, Headers, Param, Patch, Post, Put, Query, Req, Res } from "@nestjs/common";
+import { narrowStatus } from "../common/status-filter";
 import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
 import type { RawBodyRequest } from "@nestjs/common";
@@ -429,7 +430,13 @@ export class FeesController {
     @Query("cursor") cursor?: string,
     @Query("limit") limit?: string,
   ): Promise<InvoicePageDto> {
-    const parsed = status && INVOICE_STATUSES.includes(status as never) ? (status as never) : undefined;
+    // `/fees/disputes`, three hundred lines below in this same controller,
+    // already refuses an unrecognised status: "a 400 that renders the
+    // LOAD-FAILURE card — never 'No disputes recorded', which is a statement
+    // about money a finance officer acts on". This DROPPED it to `undefined`,
+    // so the filter was ignored and every invoice came back under whatever
+    // label the user picked. Same reasoning, same module, opposite behaviour.
+    const parsed = narrowStatus(status, INVOICE_STATUSES);
     const n = limit ? Number(limit) : undefined;
     return this.fees.listInvoices(p, {
       studentId,

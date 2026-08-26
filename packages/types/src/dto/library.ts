@@ -1,5 +1,17 @@
 // Library Management response DTOs (server form; Date fields are Date).
 
+/**
+ * The two states a loan can be in.
+ *
+ * Exported so the list endpoint can REFUSE anything else. It used to pass the
+ * caller's string straight into the query, so `?status=OUT` — a plausible guess
+ * — matched nothing and the page reported that the school has no books on loan.
+ * A filter nobody validated is a filter that answers a question nobody asked.
+ */
+export const BOOK_LOAN_STATUSES = ["ISSUED", "RETURNED"] as const;
+export type BookLoanStatus = (typeof BOOK_LOAN_STATUSES)[number];
+
+
 export interface LibraryBookDto {
   id: string;
   title: string;

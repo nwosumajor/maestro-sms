@@ -1,7 +1,8 @@
 import { RequireModule } from "../auth/require-module.decorator";
-import { Delete, Body, Controller, Get, Param, Post, Put, Query, Res, StreamableFile } from "@nestjs/common";
+import { BadRequestException, Delete, Body, Controller, Get, Param, Post, Put, Query, Res, StreamableFile } from "@nestjs/common";
 import type { Response } from "express";
-import { LIBRARY_PERMISSIONS, MODULES, PAYMENT_METHODS } from "@sms/types";
+import { BOOK_LOAN_STATUSES, LIBRARY_PERMISSIONS, MODULES, PAYMENT_METHODS } from "@sms/types";
+import { narrowStatus } from "../common/status-filter";
 import type { BookLoanDto, FineReceiptDto, LibraryBookDto, LibraryReportDto } from "@sms/types";
 import { z } from "zod";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -77,7 +78,9 @@ export class LibraryController {
   @Get("loans")
   @RequirePermission(LIBRARY_PERMISSIONS.LIBRARY_READ)
   loans(@CurrentPrincipal() p: Principal, @Query("borrowerId") borrowerId?: string, @Query("status") status?: string): Promise<BookLoanDto[]> {
-    return this.library.listLoans(p, { borrowerId, status });
+    // Live: `?status=OUT` — a plausible guess — turned 26 loans into 0, with a
+    // 200, so the page reported that the school has no books on loan.
+    return this.library.listLoans(p, { borrowerId, status: narrowStatus(status, BOOK_LOAN_STATUSES) });
   }
 
   /** Issue: librarians (library.manage) to anyone; students (library.borrow) self only. */

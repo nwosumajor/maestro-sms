@@ -1,6 +1,7 @@
 import { RequireModule } from "../auth/require-module.decorator";
-import { Body, Controller, Delete, Get, Param, Post, Put, Query } from "@nestjs/common";
-import { HOSTEL_PERMISSIONS, MODULES } from "@sms/types";
+import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Put, Query } from "@nestjs/common";
+import { EXEAT_STATUSES, HOSTEL_PERMISSIONS, MODULES } from "@sms/types";
+import { narrowStatus } from "../common/status-filter";
 import type {
   HostelAllocationDto,
   HostelAttendanceDto,
@@ -82,8 +83,11 @@ const incidentSchema = z.object({
   title: z.string().min(1).max(200),
   description: z.string().max(2000).nullish(),
 });
+/** The three states an incident can be in. Named once, so the LIST filter and
+ *  the UPDATE body cannot disagree about what is valid. */
+const INCIDENT_STATUSES = ["OPEN", "IN_PROGRESS", "RESOLVED"] as const;
 const incidentUpdateSchema = z.object({
-  status: z.enum(["OPEN", "IN_PROGRESS", "RESOLVED"]).optional(),
+  status: z.enum(INCIDENT_STATUSES).optional(),
   resolutionNote: z.string().max(2000).nullish(),
 });
 
@@ -241,7 +245,11 @@ export class HostelController {
     @Query("hostelId") hostelId?: string,
     @Query("status") status?: string,
   ): Promise<HostelExeatDto[]> {
-    return this.hostel.listExeats(p, { hostelId, status });
+    // The value went straight into the query, so a status that does not exist
+    // matched nothing and the page reported that NO BOARDER IS SIGNED OUT —
+    // a safety statement about children, made by a typo. Live: with one pupil
+    // away and overdue, a bogus status returned an empty list and a 200.
+    return this.hostel.listExeats(p, { hostelId, status: narrowStatus(status, EXEAT_STATUSES) });
   }
 
   @Post("exeats")
@@ -283,7 +291,7 @@ export class HostelController {
     @Query("hostelId") hostelId?: string,
     @Query("status") status?: string,
   ): Promise<HostelIncidentDto[]> {
-    return this.hostel.listIncidents(p, { hostelId, status });
+    return this.hostel.listIncidents(p, { hostelId, status: narrowStatus(status, INCIDENT_STATUSES) });
   }
 
   @Post("incidents")
