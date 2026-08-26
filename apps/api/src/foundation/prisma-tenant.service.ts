@@ -73,17 +73,42 @@ export class PrismaTenantService implements TenantDatabase {
   async runAsTenantReadOnly<T>(
     ctx: TenantContext,
     fn: (tx: TenantTx) => Promise<T>,
+    /**
+     * How long this read may take. Prisma's interactive-transaction default is
+     * FIVE SECONDS, which is right for anything a person is waiting on and
+     * wrong for a bulk export.
+     *
+     * // GOTCHA: the whole-school ARCHIVE — the artifact that exists so a
+     * school can still answer a question in ten years — could not be produced
+     * by any school large enough to need one. Measured live on 173,701
+     * attendance rows: `POST /privacy/archives` answered 500 after 5,033 ms
+     * with "Transaction already closed". Every unit test passed, because a
+     * fixture holds a handful of rows and the cap is a function of VOLUME.
+     *
+     * Granted per call rather than globally: a longer transaction holds a
+     * snapshot open and blocks vacuum, so it is the caller who must decide
+     * that the trade is worth it, not the default.
+     */
+    opts?: { timeoutMs?: number },
   ): Promise<T> {
     // The replica answers this read only if it is fit to AND has caught up with
     // anything this user has just written. Otherwise the primary does, which is
     // always correct and merely more loaded — the right direction to fail.
     const { replica } = await this.router.useReplica(ctx.userId ?? null);
     const client = replica ? readPrisma : prisma;
-    return client.$transaction(async (tx) => {
-      await tx.$executeRawUnsafe("SET TRANSACTION READ ONLY");
-      await tx.$executeRaw`SELECT set_config('app.current_school_id', ${ctx.schoolId}, true)`;
-      await tx.$executeRaw`SELECT set_config('app.current_user_id', ${ctx.userId}, true)`;
-      return fn(tx as unknown as TenantTx);
-    });
+    return client.$transaction(
+      async (tx) => {
+        await tx.$executeRawUnsafe("SET TRANSACTION READ ONLY");
+        await tx.$executeRaw`SELECT set_config('app.current_school_id', ${ctx.schoolId}, true)`;
+        await tx.$executeRaw`SELECT set_config('app.current_user_id', ${ctx.userId}, true)`;
+        return fn(tx as unknown as TenantTx);
+      },
+      opts?.timeoutMs
+        ? // `maxWait` is how long to wait for a connection, `timeout` how long
+          // the transaction may then run. Raising only the second would still
+          // fail under load, waiting for a free connection.
+          { timeout: opts.timeoutMs, maxWait: Math.min(opts.timeoutMs, 30_000) }
+        : undefined,
+    );
   }
 }

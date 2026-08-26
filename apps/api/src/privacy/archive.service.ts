@@ -56,6 +56,11 @@ const PAGE = 1_000;
 /** Hard ceiling per section. A truncated archive is recorded as truncated. */
 const SECTION_CAP = 200_000;
 
+/** A whole-school export is not a page load. Long enough for fifteen years of a
+ *  large school, short enough that a runaway read still ends — and it is a
+ *  scheduled, once-a-term operation, so the open snapshot costs little. */
+const ARCHIVE_TIMEOUT_MS = 120_000;
+
 export interface ArchiveSummary {
   id: string;
   label: string;
@@ -101,6 +106,57 @@ export class SchoolArchiveService {
     return { rows, truncated: true };
   }
 
+
+  /**
+   * Read a partitioned month at a time, so nothing is sorted or skipped.
+   *
+   * OFFSET paging over a large table costs O(pages x rows) when the ordering
+   * column is unindexed, and every page pays it again. Walking the partition
+   * key instead prunes each read to a single partition. The cap is still
+   * honoured and still REPORTED — an archive that quietly holds half a year's
+   * attendance is worse than one that admits it.
+   */
+  private async byMonth(
+    tx: TenantTx,
+    section: string,
+    sections: Record<string, number>,
+    truncated: string[],
+  ): Promise<Array<Record<string, unknown>>> {
+    const bounds = (await tx.attendanceRecord.aggregate({
+      _min: { date: true },
+      _max: { date: true },
+    })) as { _min: { date: Date | null }; _max: { date: Date | null } };
+    const first = bounds._min.date;
+    const last = bounds._max.date;
+    const rows: Array<Record<string, unknown>> = [];
+    if (!first || !last) {
+      sections[section] = 0;
+      return rows;
+    }
+    let cursor = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), 1));
+    const end = new Date(Date.UTC(last.getUTCFullYear(), last.getUTCMonth() + 1, 1));
+    while (cursor < end) {
+      const next = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1));
+      const batch = (await tx.attendanceRecord.findMany({
+        where: { date: { gte: cursor, lt: next } },
+        orderBy: { date: "asc" },
+        take: SECTION_CAP - rows.length,
+      })) as Array<Record<string, unknown>>;
+      // NOT `push(...batch)`. A month can be tens of thousands of rows and the
+      // spread passes every one as an argument — `RangeError: Maximum call
+      // stack size exceeded`. The old helper only escaped it because its pages
+      // were a thousand rows; this reads a whole month at once.
+      for (const row of batch) rows.push(row);
+      if (rows.length >= SECTION_CAP) {
+        truncated.push(section);
+        break;
+      }
+      cursor = next;
+    }
+    sections[section] = rows.length;
+    return rows;
+  }
+
   /**
    * Build and store the archive.
    *
@@ -112,11 +168,31 @@ export class SchoolArchiveService {
     const label = input.label.trim();
     if (!label) throw new BadRequestException("An archive needs a label, e.g. 2025/2026.");
 
+    // A WHOLE SCHOOL, not a screen. The default 5-second interactive cap is
+    // right for a page load and wrong for this: measured live at 173,701
+    // attendance rows it failed at 5,033 ms with "Transaction already closed",
+    // so no school big enough to want an archive could produce one.
     const { bundle, sections } = await this.db.runAsTenantReadOnly(this.ctx(p), async (tx) =>
       this.assemble(tx, p.schoolId, input.sessionId),
+      { timeoutMs: ARCHIVE_TIMEOUT_MS },
     );
 
-    const body = Buffer.from(JSON.stringify(bundle, null, 1), "utf8");
+    // // GOTCHA: `JSON.stringify` THROWS on a BigInt, and this bundle carries
+    // several — `payroll_run.totalGrossMinor` and `totalNetMinor` are int8,
+    // deliberately, because "int4 can overflow a lifetime kobo total" (the same
+    // note the analytics aggregates carry). So any school that had ever run
+    // payroll could not produce an archive at all: measured live, the whole
+    // export completed and then died on "Do not know how to serialize a
+    // BigInt".
+    //
+    // Rendered as a decimal STRING, not a number: a JS number cannot hold what
+    // an int8 can, and silently rounding a payroll total inside the artifact a
+    // school keeps for fifteen years is worse than failing loudly. A reader in
+    // ten years gets exact digits.
+    const body = Buffer.from(
+      JSON.stringify(bundle, (_k, v: unknown) => (typeof v === "bigint" ? v.toString() : v), 1),
+      "utf8",
+    );
     const checksum = createHash("sha256").update(body).digest("hex");
     const storageKey = `schools/${p.schoolId}/archives/${Date.now()}-${label.replace(/[^\w.-]+/g, "-")}.json`;
     await this.storage.upload({ key: storageKey, body, contentType: "application/json" });
@@ -187,9 +263,22 @@ export class SchoolArchiveService {
     const enrollments = await take("enrollments", (skip, n) =>
       tx.enrollment.findMany({ skip, take: n, orderBy: { enrolledAt: "asc" } }),
     );
-    const attendance = await take("attendance", (skip, n) =>
-      tx.attendanceRecord.findMany({ skip, take: n, orderBy: { createdAt: "asc" } }),
-    );
+    // ATTENDANCE IS WALKED BY MONTH, not by OFFSET.
+    //
+    // `skip`/`take` with `ORDER BY createdAt` re-sorted the WHOLE table on
+    // every page — `createdAt` has never carried an index — so a school with a
+    // real register paid a 173,701-row external merge sort 174 times over and
+    // the archive blew the 5-second interactive-transaction cap: measured
+    // live, `POST /privacy/archives` answered 500 after 5,033 ms with
+    // "Transaction already closed". The artifact that exists SO A SCHOOL CAN
+    // KEEP ITS RECORD could not be produced by any school large enough to need
+    // it, and the section counts on the three archives already stored read
+    // `attendance: 0`.
+    //
+    // The table is now RANGE-partitioned by month on `date`, so asking for one
+    // month prunes to one partition and reads it whole — no sort, no offset,
+    // and the cost is O(rows) instead of O(pages x rows).
+    const attendance = await this.byMonth(tx, "attendance", sections, truncated);
     const results = await take("subjectResults", (skip, n) =>
       tx.subjectResult.findMany({ skip, take: n, orderBy: { gradedAt: "asc" } }),
     );

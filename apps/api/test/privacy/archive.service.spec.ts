@@ -42,7 +42,21 @@ function makeService(over: { rows?: Record<string, unknown[]>; employees?: unkno
     user: table("user"),
     studentProfile: table("studentProfile"),
     enrollment: table("enrollment"),
-    attendanceRecord: table("attendanceRecord"),
+    // Attendance is walked BY MONTH now, not by OFFSET — the partition key
+    // prunes each read to one partition instead of re-sorting the whole table
+    // on every page. The stub answers the month bounds and then returns the
+    // rows for the (single) month, which is what the real one does.
+    attendanceRecord: {
+      aggregate: jest.fn(async () => {
+        const all = rows["attendanceRecord"] ?? [];
+        return all.length
+          ? { _min: { date: new Date("2026-01-05") }, _max: { date: new Date("2026-01-20") } }
+          : { _min: { date: null }, _max: { date: null } };
+      }),
+      findMany: jest.fn(async ({ take = 1000 }: { take?: number }) =>
+        (rows["attendanceRecord"] ?? []).slice(0, take),
+      ),
+    },
     subjectResult: table("subjectResult"),
     invoice: table("invoice"),
     workflowRequest: table("workflowRequest"),

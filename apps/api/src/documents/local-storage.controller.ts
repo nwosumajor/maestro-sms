@@ -27,7 +27,7 @@
 // a dev-only route is not an excuse to serve one as script.
 // =============================================================================
 
-import { BadRequestException, Controller, Get, Param, Put, Query, Req, Res } from "@nestjs/common";
+import { BadRequestException, Controller, Get, Param, Put, Query, Req, Res, StreamableFile } from "@nestjs/common";
 import type { Request, Response } from "express";
 import crypto from "node:crypto";
 import { MAX_UPLOAD_BYTES } from "@sms/types";
@@ -40,7 +40,19 @@ import type { StorageProvider } from "./storage.provider";
 
 /** Keys this platform issues. Anything else is not ours and is refused before
  *  it reaches the filesystem. */
-const KEY_SHAPE = /^(schools|careers)\/[a-zA-Z0-9-]+\/[a-zA-Z0-9/_-]+$/;
+// A DOT IS ALLOWED IN THE LAST SEGMENT, and `..` never is.
+//
+// // GOTCHA: without the dot, an archive could be CREATED and never
+// DOWNLOADED. `SchoolArchiveService` writes `…/archives/<ts>-<label>.json` —
+// the only key in the app that carries an extension — so every download of the
+// artifact a school keeps for fifteen years answered 400 "Not available",
+// after a 201 create and a 201 that handed back a URL. Silent success, on the
+// one path that is supposed to get a school its data out.
+//
+// The traversal guard is kept EXPLICIT rather than expressed in the character
+// class: `[a-zA-Z0-9/_.-]` happily matches `..`, so the shape alone would have
+// traded one bug for a worse one.
+const KEY_SHAPE = /^(schools|careers)\/[a-zA-Z0-9-]+\/[a-zA-Z0-9/_.-]+$/;
 
 
 /** Collect a request body, refusing rather than buffering past the cap. Returns
@@ -73,7 +85,7 @@ export class LocalStorageController {
     const expNum = Number(exp);
     if (!sig || !exp || !Number.isFinite(expNum)) throw new BadRequestException("Not available");
     if (expNum * 1000 < Date.now()) throw new BadRequestException("Not available");
-    if (!KEY_SHAPE.test(key)) throw new BadRequestException("Not available");
+    if (!KEY_SHAPE.test(key) || key.includes("..")) throw new BadRequestException("Not available");
     const expected = signStorage(key, op, expNum);
     // Length-guard before timingSafeEqual, which THROWS on a mismatch — the
     // same trap the webhook signature checks document.
@@ -124,7 +136,7 @@ export class LocalStorageController {
     @Query("exp") exp?: string,
     @Query("sig") sig?: string,
     @Query("filename") filename?: string,
-  ): Promise<Buffer> {
+  ): Promise<StreamableFile> {
     // Two DIFFERENT operations, and which one was granted is in the signature.
     // A URL cannot be edited into serving a stored file as something a browser
     // will render — that has to have been signed for.
@@ -147,6 +159,15 @@ export class LocalStorageController {
             "X-Content-Type-Options": "nosniff",
           },
     );
-    return bytes;
+    // A StreamableFile, not the Buffer.
+    //
+    // // GOTCHA: returned bare under `passthrough`, Nest JSON-SERIALISES a
+    // Buffer — the caller received `{"type":"Buffer","data":[123,10,…]}`, three
+    // times the size and not the file. Measured on a 90.61 MB school archive:
+    // 304,025,549 bytes came back and the checksum could never match. Every
+    // status along the way was a success, which is what made it invisible: 201
+    // create, 201 for the URL, 200 on the fetch. The rest of this app already
+    // streams binary this way.
+    return new StreamableFile(bytes);
   }
 }

@@ -1432,6 +1432,55 @@ damage was.
 Gate: `every-body-is-validated-at-the-boundary.spec.ts`, exemptions named with
 reasons and each required to name a file that still exists.
 
+### A backup a school can actually take away
+Asked whether the fifteen-year archive means a school can put its record on an
+external drive. Driving it end to end found THREE defects in a row on that one
+path — and **every status along the way was a success**, which is what made them
+invisible: 201 create, 201 for the URL, 200 on the fetch, and the file you got
+was not your file.
+1. **IT TIMED OUT.** `POST /privacy/archives` answered 500 after 5,033 ms with
+   "Transaction already closed". The attendance section paged with OFFSET over
+   `createdAt`, which HAS NEVER CARRIED AN INDEX, re-sorting 173,701 rows on
+   each of 174 pages — an external merge sort per page. No school large enough
+   to need an archive could produce one, and the three archives already stored
+   read `attendance: 0`. PRE-EXISTING, not caused by the partitioning: the old
+   single table had no `createdAt` index either.
+2. **IT THREW ON A BIGINT.** `payroll_run.totalGrossMinor` is int8 —
+   deliberately, because "int4 can overflow a lifetime kobo total" — and
+   `JSON.stringify` throws on one. Any school that had ever run payroll was
+   blocked at the last step, after all the work.
+3. **IT RETURNED THE WRONG BYTES.** The stub storage route returned the Buffer
+   bare under `passthrough`, so Nest JSON-SERIALISED it:
+   `{"type":"Buffer","data":[123,10,…]}` — **304,025,549 bytes for a 90.61 MB
+   archive**, and a checksum that could never match. A separate one-character
+   bug rejected it earlier anyway: `KEY_SHAPE` allowed no dot, and the archive
+   is the ONLY key in the app carrying an extension.
+After, measured live: create 201 in 13.1 s, 90.62 MB, download 95,020,224 bytes,
+**sha256 EQUAL to the recorded checksum**, 173,701 attendance rows, nothing
+truncated, payroll totals exact.
+// THE FIXES. Attendance is walked BY MONTH — the table is now partitioned on
+`date`, so a month prunes to one partition and is read whole: no sort, no
+offset, O(rows) instead of O(pages x rows). `runAsTenantReadOnly` takes an
+optional `timeoutMs` (with `maxWait` raised alongside, or it would still fail
+waiting for a connection) and the archive asks for 120 s — granted PER CALL,
+because a long transaction holds a snapshot open and blocks vacuum, so the
+caller must decide the trade is worth it rather than the default. BigInt
+serialises as an exact decimal STRING, never a number: a JS number cannot hold
+what an int8 can, and silently rounding a payroll total inside a fifteen-year
+artifact is worse than failing loudly.
+// GOTCHA the widened key shape nearly introduced: `[a-zA-Z0-9/_.-]` happily
+matches `..`, so the traversal guard is kept EXPLICIT beside it rather than
+expressed in the character class. Verified: a `../../etc/passwd` probe still
+answers 400.
+// GOTCHA in my OWN fix, caught by a test rather than by reading: `rows.push(
+...batch)` passes every element as an argument, and a month is tens of thousands
+of rows — `RangeError: Maximum call stack size exceeded`. The helper it replaced
+only escaped it because its pages were a thousand rows.
+// Why no test caught any of the three: they are all functions of VOLUME, and a
+fixture holds a handful of rows. `a-backup-a-school-can-actually-take.spec.ts`
+pins the properties; the round trip itself is proved on the running stack.
+
+
 ### Fifteen years of registers, and the only table with no way out
 `attendance_record` is RANGE-partitioned by month on a denormalised `date`
 (migration `20270110000000`), provisioned by the same daily job that keeps

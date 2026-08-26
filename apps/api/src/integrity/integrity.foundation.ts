@@ -61,7 +61,14 @@ export interface TenantDatabase {
    * tenant GUC + RLS apply. Falls back to the primary when no replica is set, so
    * it is always safe to use for a read path. // SECURITY: still tenant-isolated.
    */
-  runAsTenantReadOnly<T>(ctx: TenantContext, fn: (tx: TenantTx) => Promise<T>): Promise<T>;
+  runAsTenantReadOnly<T>(
+    ctx: TenantContext,
+    fn: (tx: TenantTx) => Promise<T>,
+    /** Raise the interactive-transaction timeout for a BULK read. Default 5s —
+     *  right for anything a person is waiting on, wrong for a whole-school
+     *  export. See PrismaTenantService.runAsTenantReadOnly. */
+    opts?: { timeoutMs?: number },
+  ): Promise<T>;
 }
 
 export interface AuditEntry {
