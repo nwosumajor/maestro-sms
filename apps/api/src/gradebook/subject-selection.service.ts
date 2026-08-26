@@ -26,7 +26,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { Prisma } from "@sms/db";
-import type { SubjectSelectionDto, SubjectSelectionOptionsDto } from "@sms/types";
+import type { SubjectSelectionDto, SubjectSelectionOptionsDto, SubjectSelectionPageDto } from "@sms/types";
 import { LMS_PERMISSIONS , supervisorStage} from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
@@ -39,6 +39,10 @@ import {
 } from "../integrity/integrity.foundation";
 
 const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal"]);
+
+/** The two statuses that mean "nobody has dealt with this yet". */
+const OPEN_STATUSES = ["PENDING_SUPERVISOR", "PENDING_ADMIN"] as const;
+const SELECTION_PAGE_SIZE = 50;
 
 /**
  * Can this caller SEE selections beyond their own or their supervisees'?
@@ -262,22 +266,61 @@ export class SubjectSelectionService {
   // ---------------------------------------------------------------------------
   // Reads (scoped)
   // ---------------------------------------------------------------------------
-  /** Student -> own; supervisor -> rows naming them; approvers/school-wide ->
-   *  all. Others see nothing. */
-  async list(p: Principal): Promise<SubjectSelectionDto[]> {
+  /**
+   * Student -> own; supervisor -> rows naming them; approvers/school-wide ->
+   * all. Others see nothing.
+   *
+   * `filter=open` is the REVIEW QUEUE and is ordered OLDEST FIRST — the pupil
+   * who has been waiting longest is the one to deal with next. Everything else
+   * is newest-first, which is what a history wants.
+   *
+   * // GOTCHA: this used to be `take: 200` with no filter, no page and no
+   * total, and the panel decided "is anything awaiting me" with a `.filter()`
+   * over what came back. Selections are bounded by the COHORT, not by the
+   * school's lifetime — one term of a 901-pupil school is 901 rows — so the cap
+   * is passed in the first term. And `updatedAt DESC` is bumped BY A REVIEW, so
+   * every decision pushed the un-reviewed rows further out of sight: measured
+   * live, 21 pupils awaiting approval, 200 rows returned, all APPROVED, and the
+   * panel reading "Nothing awaiting review." Only APPROVED selections feed the
+   * grading roster, so those 21 were also off it.
+   */
+  async list(
+    p: Principal,
+    opts: { filter?: "open" | "decided"; page?: number } = {},
+  ): Promise<SubjectSelectionPageDto> {
+    const pageSize = SELECTION_PAGE_SIZE;
+    const page = Math.max(1, opts.page ?? 1);
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const wide = seesEverySelection(p);
-      const where = wide
+      const scope = wide
         ? {}
         : p.roles.includes("student")
           ? { studentId: p.userId }
           : { supervisorId: p.userId };
-      const rows = (await tx.subjectSelection.findMany({
-        where,
-        orderBy: { updatedAt: "desc" },
-        take: 200,
-      })) as SelectionRow[];
-      return Promise.all(rows.map((r) => this.toDto(tx, r)));
+      const byFilter =
+        opts.filter === "open"
+          ? { status: { in: [...OPEN_STATUSES] } }
+          : opts.filter === "decided"
+            ? { status: { notIn: [...OPEN_STATUSES] } }
+            : {};
+      const where = { ...scope, ...byFilter };
+      const [rows, total, pendingTotal] = await Promise.all([
+        tx.subjectSelection.findMany({
+          where,
+          // Oldest first ON THE QUEUE only: a review queue is worked from the
+          // front, and the longest wait is the one that matters.
+          orderBy: opts.filter === "open" ? { createdAt: "asc" } : { updatedAt: "desc" },
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+        }) as Promise<SelectionRow[]>,
+        tx.subjectSelection.count({ where }),
+        // Counted over the caller's WHOLE scope, never narrowed by the filter
+        // or the page — a count a filter can change is a count a filter can
+        // hide, and this one answers "is anything waiting on us".
+        tx.subjectSelection.count({ where: { ...scope, status: { in: [...OPEN_STATUSES] } } }),
+      ]);
+      const items = await Promise.all(rows.map((r) => this.toDto(tx, r)));
+      return { items, total, pendingTotal, page, pageSize };
     });
   }
 

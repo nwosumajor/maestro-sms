@@ -1,4 +1,4 @@
-import type { MeetingSlotDto, MeetingBookingDto, ChildOverviewDto, Serialized , MeetingRequestDto} from "@sms/types";
+import type { MeetingSlotDto, MeetingBookingDto, ChildOverviewDto, Serialized, MeetingRequestPageDto } from "@sms/types";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
@@ -10,6 +10,8 @@ import { MeetingRequests } from "@/components/meeting/MeetingRequests";
 
 export const dynamic = "force-dynamic";
 
+const EMPTY_REQUEST_PAGE = { items: [], total: 0, pendingTotal: 0, page: 1, pageSize: 50 };
+
 export default async function MeetingsPage() {
   const session = await auth();
   const user = session!.user;
@@ -19,7 +21,7 @@ export default async function MeetingsPage() {
   const canSeeRequests = hasPermission(user.permissions, "meeting.request.read");
   if (!canHost && !canBook) redirect("/dashboard");
 
-  const [mySlots, openSlots, myBookings, family, audiences, requests, teachers] = await Promise.all([
+  const [mySlots, openSlots, myBookings, family, audiences, requestQueue, requestHistory, teachers] = await Promise.all([
     canHost ? apiGet<Serialized<MeetingSlotDto>[]>("/meetings/slots/mine") : Promise.resolve([]),
     canBook ? apiGet<Serialized<MeetingSlotDto>[]>("/meetings/slots/open") : Promise.resolve([]),
     canBook ? apiGet<Serialized<MeetingBookingDto>[]>("/meetings/bookings/mine") : Promise.resolve([]),
@@ -30,7 +32,11 @@ export default async function MeetingsPage() {
     // Requests, and — for a parent about to raise one — the staff they could
     // address. The teacher list is the ordinary staff directory; the server
     // re-checks that whoever is picked actually teaches THIS child.
-    canSeeRequests ? apiGet<Serialized<MeetingRequestDto>[]>("/meetings/requests") : Promise.resolve([]),
+    // TWO reads: the queue (narrowed and ordered in SQL, oldest first) and the
+    // history. One capped read split in memory could only ever see the rows
+    // that survived the cap — and the unanswered ones are the oldest.
+    canSeeRequests ? apiGet<Serialized<MeetingRequestPageDto>>("/meetings/requests?filter=open") : Promise.resolve(null),
+    canSeeRequests ? apiGet<Serialized<MeetingRequestPageDto>>("/meetings/requests?filter=decided") : Promise.resolve(null),
     hasPermission(user.permissions, "directory.people.read")
       ? apiGet<Array<{ id: string; name: string }>>("/directory/people?kind=teacher")
       : Promise.resolve([]),
@@ -51,7 +57,8 @@ export default async function MeetingsPage() {
         />
         {canSeeRequests && (
           <MeetingRequests
-            requests={requests ?? []}
+            queue={requestQueue ?? EMPTY_REQUEST_PAGE}
+            history={requestHistory ?? EMPTY_REQUEST_PAGE}
             canAsk={canAsk}
             canAnswer={canHost}
             teachers={teachers ?? []}

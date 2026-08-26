@@ -102,3 +102,24 @@ export interface MeetingRequestDto {
   createdAt: Date;
   updatedAt: Date;
 }
+
+/**
+ * A page of meeting requests, with the size of the QUEUE stated separately.
+ *
+ * The service has always been able to narrow to the open ones in SQL
+ * (`?open=1`, documented on the route) and its single caller never asked for
+ * it: the page fetched a `take: 200` slice newest-first and split it with a
+ * `.filter()`. A request stays PENDING because nobody has answered it, so the
+ * unanswered ones age off the end of a newest-first cap — the rows the split
+ * existed to surface are exactly the rows it could not see.
+ *
+ * `pendingTotal` is counted in SQL over the caller's whole scope and is never
+ * narrowed by the filter or the page.
+ */
+export interface MeetingRequestPageDto {
+  items: MeetingRequestDto[];
+  total: number;
+  pendingTotal: number;
+  page: number;
+  pageSize: number;
+}

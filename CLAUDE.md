@@ -1432,6 +1432,59 @@ damage was.
 Gate: `every-body-is-validated-at-the-boundary.spec.ts`, exemptions named with
 reasons and each required to name a file that still exists.
 
+### A review queue that could only see the page it had just decided
+`subject_selection.list` / `MeetingRequestService.list` and four siblings. The
+shape is one this repo has already recorded twice — for the chargeback banner
+and the admissions queue — and it had four more instances, plus a fifth worse
+than any of them.
+**The screen asked the database for a capped page and then asked ITSELF what
+was waiting**: `rows.filter(s => s.status === "PENDING_…")` over a `take: 200`.
+Two properties combine badly. A row is PENDING precisely because nobody has
+dealt with it, so pending rows AGE — and a newest-first cap drops the OLDEST
+first. So the rows the filter exists to surface are exactly the rows it cannot
+see, and the card renders a confident **"Nothing awaiting review."**
+**SUBJECT SELECTIONS WERE THE WORST OF THE SIX, for two reasons.** They are
+bounded by the COHORT, not by the school's lifetime — one term of a 901-pupil
+school is 901 rows — so the cap is passed in the FIRST TERM, not in year five.
+And the list was ordered by `updatedAt`, **which a REVIEW bumps**: every
+decision pushed the un-reviewed rows further out of sight, so the harder an
+admin worked the blinder the queue became. Measured live on exactly that
+fixture: 21 selections awaiting approval, 200 rows returned, **every one
+APPROVED**, panel reading "Nothing awaiting review." And only APPROVED
+selections feed the grading roster, so those 21 pupils were off it too. After:
+`items=21 total=21 pendingTotal=21`, oldest first.
+**MEETING REQUESTS HAD THE TOOL AND NEVER USED IT.** `list(p, { open })`
+narrowed to the waiting statuses IN SQL, `?open=1` was documented on the route
+— and its ONE caller, the meetings page, fetched the unfiltered 200 and split
+it in memory. Somebody built the right thing and the screen next to it did not
+call it.
+Both now take `?filter=open|decided` and return a page carrying `pendingTotal`,
+**counted in SQL over the caller's whole scope and never narrowed by the filter
+or the page** — the rule the disputes banner already states: a count a filter
+can change is a count a filter can hide. `filter=open` is ordered OLDEST FIRST,
+because a review queue is worked from the front and the longest wait is the one
+that matters; everything else stays newest-first, which is what a history wants.
+The other four — promotion batches, the student and parent import batches, and
+the operator's own onboarding funnel — keep their in-memory split and are made
+CORRECT instead: the service returns every open row (oldest first) and then the
+recent history, so the split can no longer be lying. That is the cheaper fix and
+it is the right one where the open set is small; what makes it safe is that the
+gate holds both halves together.
+Gate: `a-queue-that-only-sees-the-recent-page.spec.ts`. The web half refuses a
+`.filter(... status === "PENDING…")` unless the component is EXEMPTED, and each
+exemption names the service that guarantees it is handed every open row; the
+API half asserts that guarantee. Neither half stands alone, which is the point.
+// GOTCHA: the API half first anchored to the FILE and passed with promotion's
+narrowing deleted — these files mention a status and a `PENDING` somewhere
+else. Anchored to the LIST METHOD's own body now. A gate looking one scope too
+WIDE fails exactly like one looking one scope too narrow, and only mutation
+testing tells them apart; validated three ways, one per shape of the fix.
+// GOTCHA: `SelectionReview` is a client component, so the count is fetched in
+the browser and never appears in the SSR HTML — the trap already recorded under
+`verifying a client component`. The evidence is the API response, not a grep of
+the page.
+
+
 ### The window a caller typed, the window the query used
 `dateFilter` / `dateWindow` / `boundedInt` (`apps/api/src/common/status-filter.ts`)
 finish the job `narrowStatus` and `pageNumber` started: a `?status=` was made to

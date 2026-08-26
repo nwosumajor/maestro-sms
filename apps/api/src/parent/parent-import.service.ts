@@ -335,7 +335,17 @@ export class ParentImportService {
 
   async list(p: Principal): Promise<ParentImportBatchDto[]> {
     const rows = await this.db.runAsTenant(this.ctx(p), (tx) =>
-      tx.parentImportBatch.findMany({ orderBy: { createdAt: "desc" }, take: 100 }),
+      // Open ones in full, then recent history — see StudentImportService.list.
+      tx.parentImportBatch
+        .findMany({ where: { status: "PENDING" }, orderBy: { createdAt: "asc" }, take: 500 })
+        .then(async (open) => [
+          ...open,
+          ...(await tx.parentImportBatch.findMany({
+            where: { status: { not: "PENDING" } },
+            orderBy: { createdAt: "desc" },
+            take: 100,
+          })),
+        ]),
     );
     return (rows as unknown as BatchRow[]).map((b) => this.toDto(b));
   }

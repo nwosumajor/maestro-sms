@@ -22,6 +22,7 @@ import {
   initialRequestStatus,
   isOpenRequest,
   type MeetingRequestDto,
+  type MeetingRequestPageDto,
   type MeetingRequestStatus,
 } from "@sms/types";
 import {
@@ -38,6 +39,10 @@ import { asDuplicateConflict } from "../common/unique-violation";
 
 /** Who may see every request and act on the leadership stage. */
 const LEADERSHIP = new Set(["school_admin", "principal", "head_teacher"]);
+
+/** The two statuses that mean a family is still waiting on an answer. */
+const OPEN_REQUEST_STATUSES = ["PENDING_APPROVAL", "PENDING_TEACHER"] as const;
+const REQUEST_PAGE_SIZE = 50;
 
 type RequestRow = {
   id: string;
@@ -157,21 +162,52 @@ export class MeetingRequestService {
     return this.db.runAsTenantReadOnly(this.ctx(p), (tx) => this.toDto(tx, created));
   }
 
-  /** The requests this caller may see, newest first. */
-  async list(p: Principal, opts: { open?: boolean } = {}): Promise<MeetingRequestDto[]> {
+  /**
+   * The requests this caller may see.
+   *
+   * `filter=open` is the QUEUE and comes back OLDEST FIRST — the family that
+   * has been waiting longest is the one to answer next. Anything else is
+   * newest-first, which is what a history wants.
+   *
+   * // GOTCHA: the SQL narrowing below has always existed and its ONE caller
+   * never used it — the meetings page fetched the unfiltered `take: 200` and
+   * split it with `requests.filter(r => r.status === "PENDING_…")`. A request
+   * is pending because nobody has answered it, so the unanswered ones age off
+   * the end of a newest-first cap: the rows the split existed to surface were
+   * the rows it could not see. Same defect as the subject-selection queue and
+   * as the chargeback banner before it.
+   */
+  async list(
+    p: Principal,
+    opts: { filter?: "open" | "decided"; page?: number } = {},
+  ): Promise<MeetingRequestPageDto> {
+    const pageSize = REQUEST_PAGE_SIZE;
+    const page = Math.max(1, opts.page ?? 1);
     return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
       // Each audience gets its own indexed slice — nobody reads the school's
       // whole history to find their own three rows.
-      const where: Record<string, unknown> = this.isLeadership(p)
+      const scope: Record<string, unknown> = this.isLeadership(p)
         ? {}
         : { OR: [{ parentId: p.userId }, { teacherId: p.userId }] };
-      if (opts.open) where.status = { in: ["PENDING_APPROVAL", "PENDING_TEACHER"] };
-      const rows = (await tx.meetingRequest.findMany({
-        where,
-        orderBy: { createdAt: "desc" },
-        take: 200,
-      })) as RequestRow[];
-      return this.toDtos(tx, rows);
+      const byFilter =
+        opts.filter === "open"
+          ? { status: { in: [...OPEN_REQUEST_STATUSES] } }
+          : opts.filter === "decided"
+            ? { status: { notIn: [...OPEN_REQUEST_STATUSES] } }
+            : {};
+      const where = { ...scope, ...byFilter };
+      const [rows, total, pendingTotal] = await Promise.all([
+        tx.meetingRequest.findMany({
+          where,
+          orderBy: opts.filter === "open" ? { createdAt: "asc" } : { createdAt: "desc" },
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+        }) as Promise<RequestRow[]>,
+        tx.meetingRequest.count({ where }),
+        // Never narrowed by the filter — it answers "is a family waiting on us".
+        tx.meetingRequest.count({ where: { ...scope, status: { in: [...OPEN_REQUEST_STATUSES] } } }),
+      ]);
+      return { items: await this.toDtos(tx, rows), total, pendingTotal, page, pageSize };
     });
   }
 

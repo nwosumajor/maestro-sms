@@ -5,7 +5,7 @@
 // head_teacher / principal see all. Buttons only render for the stage the
 // caller can actually act on (the API re-enforces identity + SoD).
 
-import type { SubjectSelectionDto, Serialized } from "@sms/types";
+import type { SubjectSelectionDto, SubjectSelectionPageDto, Serialized } from "@sms/types";
 import * as React from "react";
 import { sendSms } from "@/components/game/play-ui";
 import { Button } from "@/components/ui/button";
@@ -13,19 +13,41 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 type Selection = Serialized<SubjectSelectionDto>;
+type Page = Serialized<SubjectSelectionPageDto>;
 
 export function SelectionReview({ userId, canApproveFinal }: { userId: string; canApproveFinal: boolean }) {
-  const [rows, setRows] = React.useState<Selection[] | null>(null);
+  // TWO reads, because they answer two questions. The queue is asked for BY
+  // STATUS in SQL and comes back oldest-first; the history is a separate page.
+  //
+  // // GOTCHA: this used to be one capped read filtered in memory —
+  // `rows.filter(s => s.status === "PENDING_…")` over whatever survived
+  // `take: 200`. A selection stays pending because nobody has reviewed it, so
+  // pending rows AGE, and the list was ordered by `updatedAt`, which a REVIEW
+  // bumps: working through the queue pushed the rest of it off the end.
+  // Measured live on one term of a 901-pupil school — 21 awaiting review, 200
+  // rows returned, every one APPROVED, and this card reading "Nothing awaiting
+  // review."
+  const [queue, setQueue] = React.useState<Page | null>(null);
+  const [history, setHistory] = React.useState<Page | null>(null);
+  const [page, setPage] = React.useState(1);
   const [busy, setBusy] = React.useState<string | null>(null);
   const [msg, setMsg] = React.useState<string | null>(null);
 
   const load = React.useCallback(async () => {
-    const r = await fetch("/api/sms/subject-selections");
-    if (r.ok) setRows((await r.json()) as Selection[]);
-  }, []);
+    const [q, h] = await Promise.all([
+      fetch(`/api/sms/subject-selections?filter=open&page=${page}`),
+      fetch("/api/sms/subject-selections?filter=decided"),
+    ]);
+    if (q.ok) setQueue((await q.json()) as Page);
+    if (h.ok) setHistory((await h.json()) as Page);
+  }, [page]);
   React.useEffect(() => { load(); }, [load]);
 
-  if (!rows || rows.length === 0) return null;
+  if (!queue) return null;
+  const pending = queue.items;
+  const done = (history?.items ?? []).slice(0, 10);
+  const waiting = queue.pendingTotal;
+  if (pending.length === 0 && done.length === 0) return null;
 
   const actionable = (s: Selection) =>
     (s.status === "PENDING_SUPERVISOR" && s.supervisorId === userId) ||
@@ -39,9 +61,6 @@ export function SelectionReview({ userId, canApproveFinal }: { userId: string; c
     if (res.ok) load(); else setMsg(res.error ?? "Request failed.");
   };
 
-  const pending = rows.filter((s) => s.status === "PENDING_SUPERVISOR" || s.status === "PENDING_ADMIN");
-  const done = rows.filter((s) => s.status === "APPROVED" || s.status === "REJECTED").slice(0, 10);
-
   return (
     <Card>
       <CardHeader>
@@ -52,7 +71,21 @@ export function SelectionReview({ userId, canApproveFinal }: { userId: string; c
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">
-        {pending.length === 0 && <p className="text-sm text-muted-foreground">Nothing awaiting review.</p>}
+        {/* The count comes from the DATABASE, not from the rows on screen, so
+            it cannot be made to read zero by a page that happens to hold none. */}
+        {waiting === 0 ? (
+          <p className="text-sm text-muted-foreground">Nothing awaiting review.</p>
+        ) : (
+          <p className="text-sm font-medium">
+            {waiting} selection{waiting === 1 ? "" : "s"} awaiting review
+            {queue.total > pending.length && (
+              <span className="font-normal text-muted-foreground">
+                {" "}· showing {(queue.page - 1) * queue.pageSize + 1}–
+                {(queue.page - 1) * queue.pageSize + pending.length} of {queue.total}, oldest first
+              </span>
+            )}
+          </p>
+        )}
         {[...pending, ...done].map((s) => (
           <div key={s.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3 py-2">
             <div className="min-w-0">
@@ -88,6 +121,15 @@ export function SelectionReview({ userId, canApproveFinal }: { userId: string; c
             </div>
           </div>
         ))}
+        {queue.total > queue.pageSize && (
+          <div className="flex items-center gap-2 pt-1">
+            <Button size="sm" variant="outline" className="h-7 text-xs" disabled={queue.page <= 1}
+              onClick={() => setPage((n) => Math.max(1, n - 1))}>Newer</Button>
+            <Button size="sm" variant="outline" className="h-7 text-xs"
+              disabled={queue.page * queue.pageSize >= queue.total}
+              onClick={() => setPage((n) => n + 1)}>Older</Button>
+          </div>
+        )}
         {msg && <p className="text-sm text-muted-foreground">{msg}</p>}
       </CardContent>
     </Card>

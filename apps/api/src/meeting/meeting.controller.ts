@@ -2,8 +2,10 @@ import { Body, Controller, Delete, Get, Param, Post, Query } from "@nestjs/commo
 import { z } from "zod";
 import { MEETING_PERMISSIONS , MEETING_REQUEST_TOPICS} from "@sms/types";
 import { MEETING_PROVIDERS } from "@sms/types";
-import type { MeetingBookingDto, MeetingRequestDto, MeetingSlotDto } from "@sms/types";
+import type { MeetingBookingDto, MeetingRequestDto,
+  MeetingRequestPageDto, MeetingSlotDto } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
+import { narrowStatus, pageNumber } from "../common/status-filter";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
@@ -95,11 +97,20 @@ export class MeetingController {
   }
 
   /** The requests this caller may see: a parent's own, a teacher's inbox, or
-   *  every one for leadership. `?open=1` narrows to those still awaiting. */
+   *  every one for leadership. `?filter=open` is the queue, oldest first;
+   *  `?filter=decided` the history. `pendingTotal` on the response is counted
+   *  in SQL over the caller's whole scope and never narrowed by the filter. */
   @Get("requests")
   @RequirePermission(MEETING_PERMISSIONS.MEETING_REQUEST_READ)
-  listRequests(@CurrentPrincipal() p: Principal, @Query("open") open?: string): Promise<MeetingRequestDto[]> {
-    return this.requests.list(p, { open: open === "1" });
+  listRequests(
+    @CurrentPrincipal() p: Principal,
+    @Query("filter") filter?: string,
+    @Query("page") page?: string,
+  ): Promise<MeetingRequestPageDto> {
+    return this.requests.list(p, {
+      filter: narrowStatus(filter, ["open", "decided"] as const, "filter"),
+      page: pageNumber(page),
+    });
   }
 
   /** Leadership passes a request to the teacher, or refuses it. */

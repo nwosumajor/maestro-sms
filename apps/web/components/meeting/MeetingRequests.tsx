@@ -14,7 +14,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import type { MeetingRequestDto, Serialized } from "@sms/types";
+import type { MeetingRequestDto, MeetingRequestPageDto, Serialized } from "@sms/types";
 import { MEETING_REQUEST_TOPICS, MEETING_REQUEST_TOPIC_LABELS } from "@sms/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,15 +26,20 @@ import { readApiError } from "@/lib/api-error";
 import { dateTime } from "@/lib/format";
 
 type Row = Serialized<MeetingRequestDto>;
+type Page = Serialized<MeetingRequestPageDto>;
 type Teacher = { id: string; name: string };
 
 export function MeetingRequests({
-  requests,
+  queue,
+  history,
   canAsk,
   canAnswer,
   teachers = [],
 }: {
-  requests: Row[];
+  /** Those still awaiting an answer, OLDEST FIRST, filtered in SQL. */
+  queue: Page;
+  /** Those already answered, newest first. */
+  history: Page;
   /** A parent: may open a request about their own child. */
   canAsk: boolean;
   /** A teacher or leadership: may answer one. */
@@ -63,8 +68,15 @@ export function MeetingRequests({
     return false;
   };
 
-  const open = requests.filter((r) => r.status === "PENDING_APPROVAL" || r.status === "PENDING_TEACHER");
-  const done = requests.filter((r) => !open.includes(r));
+  // // GOTCHA: this used to be `requests.filter(...)` over a `take: 200`
+  // newest-first slice, while the API had always been able to narrow to the
+  // open ones in SQL and this — its only caller — never asked. A request is
+  // waiting precisely because nobody has answered it, so the waiting ones age
+  // off the end of a newest-first cap: the rows the split existed to surface
+  // were the rows it could not see.
+  const open = queue.items;
+  const done = history.items;
+  const waiting = queue.pendingTotal;
 
   return (
     <div className="space-y-4">
@@ -158,11 +170,17 @@ export function MeetingRequests({
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Meeting requests</CardTitle>
           <CardDescription>
-            {open.length === 0 ? "Nothing waiting." : `${open.length} waiting for an answer.`}
+            {waiting === 0
+              ? "Nothing waiting."
+              : `${waiting} waiting for an answer${
+                  queue.total > open.length ? ` — showing the ${open.length} that have waited longest` : ""
+                }.`}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          {requests.length === 0 && <p className="text-sm text-muted-foreground">No requests yet.</p>}
+          {open.length === 0 && done.length === 0 && (
+            <p className="text-sm text-muted-foreground">No requests yet.</p>
+          )}
           {[...open, ...done].map((r) => (
             <RequestRow key={r.id} r={r} canAnswer={canAnswer} busy={busy} send={send} />
           ))}

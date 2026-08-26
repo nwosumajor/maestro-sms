@@ -56,6 +56,7 @@ function harness(opts: {
   const bookings: Array<Record<string, unknown>> = [];
   const updates: Array<Record<string, unknown>> = [];
   let listedWhere: Record<string, unknown> | null = null;
+  const countedWheres: Array<Record<string, unknown>> = [];
 
   const tx = {
     parentChild: {
@@ -77,6 +78,12 @@ function harness(opts: {
       findMany: jest.fn((a: { where: Record<string, unknown> }) => {
         listedWhere = a.where;
         return Promise.resolve([]);
+      }),
+      // The queue size is a COUNT, not the length of a capped page — which is
+      // the whole of this fix.
+      count: jest.fn((a: { where: Record<string, unknown> }) => {
+        countedWheres.push(a.where);
+        return Promise.resolve(0);
       }),
       create: jest.fn((a: { data: Record<string, unknown> }) => {
         created.push(a.data);
@@ -112,7 +119,7 @@ function harness(opts: {
     { record: jest.fn().mockResolvedValue(undefined) } as never,
     { enqueueMany: jest.fn().mockResolvedValue({}) } as never,
   );
-  return { svc, tx, created, slots, bookings, updates, get listedWhere() { return listedWhere; } };
+  return { svc, tx, created, slots, bookings, updates, countedWheres, get listedWhere() { return listedWhere; } };
 }
 
 const ask = { studentId: "stu1", teacherId: "tea1", topic: "PROGRESS", note: "How is he doing?" };
@@ -177,8 +184,23 @@ describe("who sees which requests", () => {
 
   it("the open filter narrows to the waiting states", async () => {
     const h = harness({});
-    await h.svc.list(principal, { open: true });
+    await h.svc.list(principal, { filter: "open" });
     expect(h.listedWhere).toMatchObject({ status: { in: ["PENDING_APPROVAL", "PENDING_TEACHER"] } });
+  });
+
+  it("counts what is waiting in SQL, whatever the caller asked to see", async () => {
+    // The banner used to be `requests.filter(...)` over a capped list, so the
+    // unanswered rows it existed to surface were the ones that aged off the
+    // end. `pendingTotal` is a COUNT over the caller's whole scope and is not
+    // narrowed by the filter — a count a filter can change is a count a filter
+    // can hide.
+    const h = harness({});
+    const page = await h.svc.list(principal, { filter: "decided" });
+    expect(page).toMatchObject({ page: 1, pageSize: expect.any(Number) });
+    // Asked for the DECIDED ones, and still counted the open ones.
+    expect(h.countedWheres).toContainEqual(
+      expect.objectContaining({ status: { in: ["PENDING_APPROVAL", "PENDING_TEACHER"] } }),
+    );
   });
 });
 

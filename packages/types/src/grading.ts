@@ -628,6 +628,30 @@ export interface SubjectSelectionDto {
   updatedAt: Date;
 }
 
+/**
+ * A page of subject selections, with the size of the QUEUE stated separately.
+ *
+ * The review panel used to fetch a capped list and compute "is anything
+ * awaiting me" with a `.filter()` over what came back. A selection stays
+ * PENDING precisely because nobody has reviewed it, so pending rows AGE — and
+ * the list was ordered `updatedAt DESC`, which a REVIEW bumps. So the harder an
+ * admin worked, the further the un-reviewed selections fell past the cap.
+ * Measured live on one term of a 901-pupil school: 21 awaiting review, 200 rows
+ * returned, ALL of them APPROVED, and the panel rendering "Nothing awaiting
+ * review."
+ *
+ * `pendingTotal` is counted IN SQL over the caller's whole visible scope and is
+ * never narrowed by the current filter or page — it answers "is anything
+ * waiting on us", which a search must not be able to hide.
+ */
+export interface SubjectSelectionPageDto {
+  items: SubjectSelectionDto[];
+  total: number;
+  pendingTotal: number;
+  page: number;
+  pageSize: number;
+}
+
 /** What a student sees when prompted to pick: the current term + the subjects
  *  fixed on their class by admin/principal + any existing selection. */
 export interface SubjectSelectionOptionsDto {

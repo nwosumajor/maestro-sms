@@ -186,9 +186,16 @@ export class StudentImportService {
   }
 
   async list(p: Principal): Promise<StudentImportBatchDto[]> {
-    const rows = await this.db.runAsTenant(this.ctx(p), (tx) =>
-      tx.studentImportBatch.findMany({ orderBy: { createdAt: "desc" }, take: 100 }),
-    );
+    // See PromotionService.list — a PENDING batch ages, and a newest-first cap
+    // drops the oldest first, so the queue the screen computes in memory could
+    // not see the batches that had waited longest. Every open one is returned.
+    const rows = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+      const [open, recent] = await Promise.all([
+        tx.studentImportBatch.findMany({ where: { status: "PENDING" }, orderBy: { createdAt: "asc" }, take: 500 }),
+        tx.studentImportBatch.findMany({ where: { status: { not: "PENDING" } }, orderBy: { createdAt: "desc" }, take: 100 }),
+      ]);
+      return [...open, ...recent];
+    });
     return (rows as unknown as BatchRow[]).map((b) => this.toDto(b));
   }
 

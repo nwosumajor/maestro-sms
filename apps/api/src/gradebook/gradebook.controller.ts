@@ -4,8 +4,9 @@ import { MODULES } from "@sms/types";
 import { RequireModule } from "../auth/require-module.decorator";
 import { z } from "zod";
 import { GRADEBOOK_PERMISSIONS, GRADE_TOTAL_MAX } from "@sms/types";
-import type { SubjectAnalyticsDto } from "@sms/types";
+import type { SubjectAnalyticsDto, SubjectSelectionPageDto } from "@sms/types";
 import { RequirePermission } from "../auth/require-permission.decorator";
+import { narrowStatus, pageNumber } from "../common/status-filter";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { LMS_PERMISSIONS } from "@sms/types";
@@ -187,10 +188,20 @@ export class GradebookController {
   }
 
   /** Scoped list: student→own, supervisor→their queue, approvers/leadership→all. */
+  /** `?filter=open` is the review queue (oldest first); `?filter=decided` the
+   *  history. `pendingTotal` on the response is school-wide within the
+   *  caller's scope and is never narrowed by the filter. */
   @Get("subject-selections")
   @RequirePermission(GRADEBOOK_PERMISSIONS.GRADE_READ)
-  listSelections(@CurrentPrincipal() p: Principal) {
-    return this.selections.list(p);
+  listSelections(
+    @CurrentPrincipal() p: Principal,
+    @Query("filter") filter?: string,
+    @Query("page") page?: string,
+  ): Promise<SubjectSelectionPageDto> {
+    return this.selections.list(p, {
+      filter: narrowStatus(filter, ["open", "decided"] as const, "filter"),
+      page: pageNumber(page),
+    });
   }
 
   /** Stage review. Stage 1 = the class's named supervisor; stage 2 =

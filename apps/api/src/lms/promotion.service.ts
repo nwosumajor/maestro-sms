@@ -211,7 +211,17 @@ export class PromotionService {
 
   async list(p: Principal): Promise<PromotionBatchDto[]> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const rows = await tx.promotionBatch.findMany({ orderBy: { createdAt: "desc" }, take: 100 });
+      // TWO reads, and the reason is the whole of this class of bug: the screen
+      // splits this list with `.filter(b => b.status === "PENDING")`, and a row
+      // is PENDING precisely because nobody has dealt with it — so pending rows
+      // AGE, and a newest-first cap drops the oldest ones first. The rows the
+      // split exists to surface were the rows it could not see. Every open row
+      // is returned; the history is the most recent page of it.
+      const [open, recent] = await Promise.all([
+        tx.promotionBatch.findMany({ where: { status: "PENDING" }, orderBy: { createdAt: "asc" }, take: 500 }),
+        tx.promotionBatch.findMany({ where: { status: { not: "PENDING" } }, orderBy: { createdAt: "desc" }, take: 100 }),
+      ]);
+      const rows = [...open, ...recent];
       return Promise.all((rows as unknown as BatchRow[]).map((b) => this.toDto(tx, b)));
     });
   }

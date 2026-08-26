@@ -526,7 +526,18 @@ export class OperatorProvisioningService {
   /** List prospective-school onboarding requests (super_admin review queue). */
   async listOnboardingRequests(_p: Principal): Promise<OnboardingRequestDto[]> {
     const db = this.client();
-    const rows = await db.onboardingRequest.findMany({ orderBy: { createdAt: "desc" }, take: 200 });
+    // The owner's own funnel, and it grows for ever. A request stays NEW or
+    // REVIEWING because nobody has answered the school that applied, so the
+    // undecided ones age off the end of a newest-first cap — and the operator
+    // screen computes "pending" with a `.filter()` over exactly that slice. All
+    // undecided ones first, oldest first (the school that applied earliest has
+    // waited longest), then recent history.
+    const UNDECIDED = ["NEW", "REVIEWING"] as const;
+    const [open, recent] = await Promise.all([
+      db.onboardingRequest.findMany({ where: { status: { in: [...UNDECIDED] } }, orderBy: { createdAt: "asc" }, take: 500 }),
+      db.onboardingRequest.findMany({ where: { status: { notIn: [...UNDECIDED] } }, orderBy: { createdAt: "desc" }, take: 200 }),
+    ]);
+    const rows = [...open, ...recent];
     // `desiredModules` is a JSON column, so Prisma types it `JsonValue` while the
     // DTO promises `string[] | null` and the web reads it as one. Narrowing is
     // the stated convention for a JSON read; doing it with a RUNTIME check
