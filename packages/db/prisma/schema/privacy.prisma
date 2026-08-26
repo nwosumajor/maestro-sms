@@ -84,6 +84,13 @@ model DataBreachIncident {
   closedAt     DateTime?
   closedById   String?   @db.Uuid
 
+  /// Which deadline notice has already gone out for this incident:
+  /// APPROACHING | OVERDUE. Idempotency for the hourly sweep — the stage is
+  /// recomputed each run and a notice is sent only when it CHANGES, so an
+  /// incident produces at most one warning and one late notice rather than one
+  /// an hour. Mirrors `staff_document.reminderSentAt`.
+  deadlineNoticeStage String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

@@ -2697,6 +2697,10 @@
       "kind": "system",
       "note": "manual trigger for a SCHEDULED job — ops/runbook surface"
     },
+    "POST /privacy/compliance/breach-deadlines/run": {
+      "kind": "system",
+      "note": "manual trigger for the hourly Art. 33 deadline sweep — ops/runbook surface, not day-to-day UI"
+    },
     "POST /privacy/compliance/breaches": {
       "kind": "ui",
       "note": "referenced by a literal path in apps/web"

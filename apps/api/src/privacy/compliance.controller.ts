@@ -11,6 +11,8 @@ import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { ComplianceService } from "./compliance.service";
+import { BreachDeadlineService, type BreachDeadlineResult } from "./breach-deadline.service";
+import { JobRunsService } from "../maintenance/job-runs.service";
 
 const reportSchema = z.object({
   title: z.string().min(3).max(200),
@@ -34,7 +36,10 @@ const updateSchema = z.object({
 
 @Controller("privacy/compliance")
 export class ComplianceController {
-  constructor(private readonly compliance: ComplianceService) {}
+  constructor(private readonly compliance: ComplianceService,
+    private readonly breachDeadlines: BreachDeadlineService,
+    private readonly jobRuns: JobRunsService,
+  ) {}
 
   /** One screen for a DPO: regime, DPO contact, breach clock, retention, consent
    *  coverage — and what is MISSING as loudly as what is present. */
@@ -72,5 +77,18 @@ export class ComplianceController {
     @Body(new ZodValidationPipe(updateSchema)) body: z.infer<typeof updateSchema>,
   ): Promise<BreachIncidentDto> {
     return this.compliance.updateBreach(p, id, body);
+  }
+
+  /**
+   * Run the Art. 33 deadline sweep now (it also runs hourly).
+   *
+   * Recorded as a MANUAL run like every other hand-runnable job, so the
+   * maintenance console shows it beside the scheduled ones — a sweep whose
+   * manual runs are invisible is exactly the thing that area was about.
+   */
+  @Post("breach-deadlines/run")
+  @RequirePermission(PRIVACY_PERMISSIONS.COMPLIANCE_MANAGE)
+  runBreachDeadlines(): Promise<BreachDeadlineResult> {
+    return this.jobRuns.record("privacy.breachDeadline", "MANUAL", () => this.breachDeadlines.sweep());
   }
 }

@@ -156,6 +156,21 @@ export const SCHEDULED_JOBS = [
     },
   },
   {
+    key: "privacy.breachDeadline",
+    label: "Breach notification deadline",
+    // HOURLY. The window is 72 hours (Art. 33(1)), so a daily sweep could first
+    // warn with four hours left, or notice a school was late a day after it
+    // happened. Every other statutory-ish clock here is chased on a timer — a
+    // staff certificate gets thirty days' notice — and this one, the only one
+    // actually in law, was computed only when somebody opened the screen.
+    everyMinutes: 60,
+    manual: {
+      path: "privacy/compliance/breach-deadlines/run",
+      permission: "privacy.compliance.manage",
+      scope: "PLATFORM",
+    },
+  },
+  {
     key: "privacy.archive",
     label: "End-of-term archive sweep",
     everyMinutes: 1440,

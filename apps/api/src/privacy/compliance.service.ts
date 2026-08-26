@@ -41,6 +41,7 @@ import {
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
+import { breachClock } from "./breach-clock";
 
 const HOUR_MS = 3_600_000;
 
@@ -80,25 +81,11 @@ export class ComplianceService {
    * would let the record and the screen disagree about whether a school is late —
    * which is the single fact this whole register exists to establish.
    */
+  /** Delegated so the hourly deadline sweep gives the SAME answer — see
+   *  `breach-clock.ts`. Two definitions of "late" is the one thing this
+   *  register cannot afford. */
   private clockFor(r: Row, now: Date, regime?: string | null) {
-    // The deadline comes from the REGIME, not from a constant. 72 hours is the
-    // law under GDPR Art. 33, Nigeria's NDPA and Kenya's DPA — but POPIA sets no
-    // fixed period, and for a country whose law is not modelled here a
-    // statutory-looking countdown invents a deadline. `statutory` carries that
-    // distinction to the screen so the same number can be shown honestly as
-    // either "your deadline" or "good practice".
-    const target = breachTarget(regime);
-    const notifyDueAt = new Date(r.discoveredAt.getTime() + target.hours * HOUR_MS);
-    const hoursRemaining = Math.round((notifyDueAt.getTime() - now.getTime()) / HOUR_MS);
-    // Not notifying can be lawful — Art. 33(1) excuses it where the breach is
-    // "unlikely to result in a risk". But it must be a RECORDED decision, so an
-    // incident with neither a notification nor a stated reason is overdue.
-    const overdue =
-      !r.notifiedAuthorityAt && !r.noNotificationReason && now.getTime() > notifyDueAt.getTime() && r.status !== "CLOSED";
-    // Art. 34: high risk means the people themselves must be told, not just the
-    // regulator. Telling the regulator and stopping there is a common failing.
-    const subjectsUnnotified = r.riskLevel === "HIGH" && !!r.notifiedAuthorityAt && !r.notifiedSubjectsAt;
-    return { notifyDueAt, hoursRemaining, overdue, subjectsUnnotified, deadlineIsStatutory: target.statutory };
+    return breachClock(r, now, regime);
   }
 
   private toDto(r: Row, reporterName: string, now: Date, regime?: string | null): BreachIncidentDto {

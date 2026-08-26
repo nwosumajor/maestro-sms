@@ -1432,6 +1432,60 @@ damage was.
 Gate: `every-body-is-validated-at-the-boundary.spec.ts`, exemptions named with
 reasons and each required to name a file that still exists.
 
+### A statutory clock that nobody was watching
+`BreachDeadlineService` + `breach-clock.ts` (`privacy/`, migration
+`20270107000000`, `SCHEDULED_JOBS` key `privacy.breachDeadline`, manual
+`POST /privacy/compliance/breach-deadlines/run`). Found by asking the sibling
+question to the erasure fix one file over: the register computes
+`notifyDueAt` / `hoursRemaining` / `overdue` from the school's own compliance
+regime — **and only when somebody opens /admin/compliance.**
+This platform runs SEVENTEEN scheduled sweeps. It reminds HR that a staff
+certificate expires in THIRTY DAYS; it chases an overdue library book, a boarder
+signed out too long, an invoice past due, a lapsed subscription, a stranded
+notification, a bloated index. **The one deadline actually written in law — 72
+hours from becoming aware, Art. 33(1) — had no sweep at all.** A breach reported
+at 17:00 on a Friday by the one person who then went on leave was a missed
+statutory notification the product would not mention until somebody happened to
+open a screen.
+HOURLY, not daily, for the reason the mobile-money sweep gives about itself: the
+window is 72 hours, so a daily sweep could first warn with four hours left, or
+notice a school was late a day after it happened. Two notices per incident at
+most — `deadlineNoticeStage` records which has gone, and one is sent only when
+the stage CHANGES, because a notice per hour is one people learn to ignore
+including on the incident where it mattered.
+Live, driven end to end for the first time: 80 hours in, the register reads
+`overdue=true hoursRemaining=-8 statutory=true`, the sweep returns
+`{scanned:1, warned:0, overdue:1, failed:0}` and the inbox gains **"Breach
+notification is PAST its statutory deadline"** naming what to record and where;
+a second run returns `overdue:0`. At 12 hours left it reads **"due within 12
+hour(s)"** with the exact deadline; recording a reason for not notifying drops
+the incident out of the scan entirely (`scanned` 2 -> 1) and sends nothing.
+// ONE DEFINITION OF LATE. `clockFor` said letting "the record and the screen
+disagree about whether a school is late … is the single fact this whole register
+exists to establish", so it was extracted to `breachClock` and BOTH call it,
+rather than the sweep re-deriving 72 hours and drifting the day a regime is
+added. The notice says "target" rather than "statutory deadline" where
+`deadlineIsStatutory` is false — the same honesty the screen already carried.
+// ART. 34 IS DELIBERATELY NOT CHASED. `subjectsUnnotified` is a real omission
+and the posture screen names it, but Art. 34 says "without undue delay" and
+fixes no hour count; putting one in a timed notice invents a deadline the law
+does not set, which is the mistake `deadlineIsStatutory` exists to avoid one
+field over.
+// GOTCHA, and a test caught it rather than a reading: the first
+`breachNoticeStage` reasoned that "`overdue` is already false when the authority
+was told, so reaching here means it is still outstanding" — exactly backwards.
+`overdue` is false BOTH when there is time left and when the work is DONE, so a
+breach notified an hour after discovery would have been warned about at hour 48
+for a duty already discharged. The sweep's own `where` filters those rows, so
+nothing downstream would have shown it; the test calling the pure function
+directly did. It asks outstanding-ness directly now.
+// GOTCHA in the DOING, not the code: applying the new column by hand with
+`ADD COLUMN IF NOT EXISTS` before the container rebuilt made `migrate deploy`
+fail 42701 and the API would not boot. Drop the column, clear the failed
+`_prisma_migrations` row, restart — and let the migration be the thing that
+applies it, which also proves it replays.
+
+
 ### A tenant's data is not somebody else's cache entry
 `NoStoreMiddleware` (`common/no-store.middleware.ts`) + the `/api/sms/*` proxy.
 Every authenticated response went out with **no `Cache-Control` header at all**,

@@ -1,0 +1,11 @@
+-- A statutory clock that nobody was watching.
+--
+-- Art. 33 gives 72 hours from becoming aware, and this platform runs SEVENTEEN
+-- scheduled sweeps — including one that warns HR thirty days before a staff
+-- document expires — while the one deadline actually written in law was
+-- computed only when somebody happened to open /admin/compliance.
+--
+-- This column makes the new hourly sweep idempotent: the stage is recomputed
+-- each run and a notice goes out only when it CHANGES, so an incident yields at
+-- most one approaching-warning and one overdue-notice.
+ALTER TABLE "data_breach_incident" ADD COLUMN "deadlineNoticeStage" TEXT;
