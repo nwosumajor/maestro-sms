@@ -382,7 +382,7 @@ export class PrivacyService {
   }
 
   async reviewErasure(p: Principal, id: string, decision: "APPROVED" | "REJECTED", note?: string) {
-    const { updated, fileKeys, outcome } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+    const { updated, fileKeys, outcome, requestedById } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       const req = await tx.erasureRequest.findFirst({ where: { id } });
       if (!req) throw new NotFoundException("Request not found");
       if (req.status !== "PENDING") throw new ForbiddenException("Request is already reviewed");
@@ -477,6 +477,7 @@ export class PrivacyService {
       });
       return {
         updated,
+        requestedById: req.requestedById as string,
         fileKeys: [...fileKeys, ...suppliedKeys],
         outcome: {
           erasedSubmissionFiles: fileKeys.length,
@@ -521,6 +522,47 @@ export class PrivacyService {
         // and losing that because the follow-up record failed would be worse.
         .catch(() => this.logger.error(`erasure ${id}: could not record ${failedKeys.length} failed deletes`));
     }
+    // AND SO IS THE PERSON WHO ASKED.
+    //
+    // A right to erasure is a right to an ANSWER, which is the whole reason
+    // `listErasureRequests` computes `dueAt` / `daysRemaining` / `overdue` /
+    // `deadlineIsStatutory` off the school's own compliance regime. Deciding
+    // the request STOPS that clock — `daysRemaining` goes null the moment the
+    // status leaves PENDING — and nothing told the subject. The register read
+    // "answered within the period" while the family had heard nothing.
+    //
+    // Raising one already notified the controller. Every sibling decision in
+    // this codebase closes the loop the other way: a meeting request answers
+    // "Your meeting request was accepted", a scholarship tells the guardian at
+    // every stage. This was the outlier, and it is the one with a deadline in
+    // law behind it.
+    //
+    // TO THE REQUESTER, not to the pupil's guardians. Staff may raise an
+    // erasure themselves, and telling a family about a request they did not
+    // make discloses something they were not party to.
+    if (requestedById && requestedById !== p.userId) {
+      const kept =
+        outcome.retainedVaultDocuments > 0
+          ? ` The school keeps ${outcome.retainedVaultDocuments} record${outcome.retainedVaultDocuments === 1 ? "" : "s"} of its own (report cards, receipts, certificates) as it is required to.`
+          : "";
+      await this.notifications
+        .enqueue(this.ctx(p), {
+          recipientId: requestedById,
+          type: "WORKFLOW_UPDATE",
+          title: decision === "APPROVED" ? "Your erasure request was approved" : "Your erasure request was declined",
+          body:
+            decision === "APPROVED"
+              ? `${outcome.erasedSubmissionFiles + outcome.erasedSuppliedDocuments} uploaded file(s) have been erased.${kept}`
+              : `The school has declined the request.${note ? ` Reason: ${note}` : ""}`,
+          data: { erasureRequestId: id, decision },
+        } as never)
+        // The decision is made and recorded; losing it because the notice
+        // failed would be worse than a notice that did not arrive. It is
+        // logged, not swallowed — an unanswered subject is the failure this
+        // whole block exists to prevent.
+        .catch((err: Error) => this.logger.error(`erasure ${id}: could not notify the requester: ${err.message}`));
+    }
+
     // THE PERSON WHO SIGNED IT OFF IS TOLD WHAT HAPPENED.
     //
     // The audit row carries this either way, and that is the record a regulator

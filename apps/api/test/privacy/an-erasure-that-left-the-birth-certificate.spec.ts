@@ -42,15 +42,19 @@ function makeService(opts: {
   suppliedByApplication?: string[];
   applications?: string[];
   vaultDocs?: number;
+  requestedById?: string;
 } = {}) {
   const deleted: string[] = [];
+  const notices: Array<Record<string, unknown>> = [];
   const submissionUpdate = jest.fn().mockResolvedValue({ count: 0 });
   const suppliedUpdate = jest.fn().mockResolvedValue({ count: 0 });
   const key = (k: string) => ({ id: `id-${k}`, storageKey: k });
 
   const tx = {
     erasureRequest: {
-      findFirst: jest.fn().mockResolvedValue({ id: "er-1", studentId: STUDENT, status: "PENDING" }),
+      findFirst: jest
+        .fn()
+        .mockResolvedValue({ id: "er-1", studentId: STUDENT, status: "PENDING", requestedById: opts.requestedById ?? "parent-1" }),
       update: jest.fn().mockResolvedValue({ id: "er-1", status: "APPROVED" }),
     },
     submission: {
@@ -79,6 +83,12 @@ function makeService(opts: {
   Object.assign(svc, {
     db: { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) },
     storage: { delete: jest.fn(async (k: string) => { deleted.push(k); }) },
+    notifications: {
+      enqueue: jest.fn(async (_c: unknown, n: Record<string, unknown>) => {
+        notices.push(n);
+        return { id: "n1" };
+      }),
+    },
     logger: { log: jest.fn(), warn: jest.fn(), error: jest.fn() },
   });
   (svc as unknown as { log: unknown }).log = jest.fn(
@@ -86,7 +96,7 @@ function makeService(opts: {
       audit.push(meta);
     },
   );
-  return { svc, tx, deleted, audit, suppliedUpdate };
+  return { svc, tx, deleted, audit, notices, suppliedUpdate };
 }
 
 const controller: Principal = {
@@ -170,5 +180,70 @@ describe("a REJECTED request", () => {
     const t = makeService({ submissionFiles: ["h.pdf"], suppliedByStudent: ["a.pdf"] });
     await t.svc.reviewErasure(controller, "er-1", "REJECTED");
     expect(t.deleted).toEqual([]);
+  });
+});
+
+// =============================================================================
+// …and the person who asked is told the answer
+// =============================================================================
+// A right to erasure is a right to an ANSWER. `listErasureRequests` computes
+// `dueAt` / `daysRemaining` / `overdue` / `deadlineIsStatutory` from the
+// school's own compliance regime precisely because the subject must be answered
+// by a date — and deciding the request STOPS that clock (`daysRemaining` goes
+// null once the status leaves PENDING) while telling nobody.
+//
+// Raising one already notified the controller. Every sibling decision closes
+// the loop the other way — a meeting request answers "Your meeting request was
+// accepted", a scholarship tells the guardian at each stage. Erasure was the
+// outlier, and it is the one with a deadline in law behind it.
+// =============================================================================
+describe("answering the person who asked", () => {
+  it("tells the requester an approval went through, and what was erased", async () => {
+    const t = makeService({ submissionFiles: ["h.pdf"], suppliedByStudent: ["a.pdf"] });
+    await approve(t.svc);
+    expect(t.notices).toHaveLength(1);
+    expect(t.notices[0]).toMatchObject({ recipientId: "parent-1" });
+    expect(String(t.notices[0].title)).toMatch(/approved/i);
+    expect(String(t.notices[0].body)).toContain("2 uploaded file");
+  });
+
+  it("says what the school is KEEPING, not only what it removed", async () => {
+    // The same "report what you did not do" the approver's own screen gets.
+    // A family asking "have you deleted my child's records" is owed the whole
+    // answer, not the flattering half.
+    const t = makeService({ vaultDocs: 3 });
+    await approve(t.svc);
+    expect(String(t.notices[0].body)).toMatch(/keeps 3 records? of its own/i);
+  });
+
+  it("tells them a refusal too, with the reason", async () => {
+    const t = makeService();
+    await t.svc.reviewErasure(controller, "er-1", "REJECTED", "The pupil is still enrolled.");
+    expect(String(t.notices[0].title)).toMatch(/declined/i);
+    expect(String(t.notices[0].body)).toContain("The pupil is still enrolled.");
+  });
+
+  it("goes to the REQUESTER, never to the pupil's guardians", async () => {
+    // Staff may raise an erasure themselves. Telling a family about a request
+    // they did not make discloses something they were not party to.
+    const t = makeService({ requestedById: "hr-clerk-9" });
+    await approve(t.svc);
+    expect(t.notices[0]).toMatchObject({ recipientId: "hr-clerk-9" });
+  });
+
+  it("does not notify a controller who is answering their own request", async () => {
+    const t = makeService({ requestedById: controller.userId });
+    await approve(t.svc);
+    expect(t.notices).toEqual([]);
+  });
+
+  it("still records the decision when the notice cannot be sent", async () => {
+    // The decision is made and recorded; losing it because the notice failed
+    // would be worse than a notice that did not arrive.
+    const t = makeService({ vaultDocs: 1 });
+    (t.svc as unknown as { notifications: { enqueue: jest.Mock } }).notifications.enqueue = jest
+      .fn()
+      .mockRejectedValue(new Error("queue down"));
+    await expect(approve(t.svc)).resolves.toMatchObject({ retainedVaultDocuments: 1 });
   });
 });

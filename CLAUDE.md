@@ -1432,6 +1432,46 @@ damage was.
 Gate: `every-body-is-validated-at-the-boundary.spec.ts`, exemptions named with
 reasons and each required to name a file that still exists.
 
+### The clock stopped and the family was never told
+`reviewErasure` (`privacy/privacy.service.ts`). Found by RUNNING a path that had
+never executed: `erasure_request` had zero rows, so the NDPR right-to-erasure
+chain — raise, review, erase — had never once been driven.
+The mechanics are sound and heavily worked over: the approval reaches assignment
+uploads AND the documents a family supplied, what is deliberately KEPT is
+counted, a failed object-store delete is written down rather than swallowed, and
+`listErasureRequests` computes `dueAt` / `daysRemaining` / `overdue` /
+`deadlineIsStatutory` from the school's own compliance regime.
+**That clock is the point, and deciding the request STOPS it.**
+`daysRemaining` goes null the moment the status leaves PENDING. So the register
+read "answered inside the period" while the person who asked had heard nothing:
+the outcome went to the audit log, to the approver's own screen, and nowhere
+else. A right to erasure is a right to an ANSWER — that is what the deadline is
+a deadline for.
+**RAISING one already notified the controller**, so the loop was half-built, and
+every sibling decision in this codebase closes it the other way: a meeting
+request answers "Your meeting request was accepted", a scholarship tells the
+guardian at each stage. Erasure was the outlier, and it is the one with a period
+in law behind it.
+Live, driven end to end for the first time: parent raises it (201), the
+controller's queue shows `PENDING daysRemaining=30 statutory=false`, approval
+returns 201 — and the parent's inbox now reads **"Your erasure request was
+approved — 0 uploaded file(s) have been erased. The school keeps 14 records of
+its own (report cards, receipts, certificates) as it is required to."** A
+refusal reads "The school has declined the request. Reason: …".
+// It says what was KEPT, not only what went. Same rule the approver's own
+screen already followed: a family asking "have you deleted my child's records"
+is owed the whole answer, and "0 erased, 14 retained" is a truer sentence than
+a bare confirmation.
+// TO THE REQUESTER, never to the pupil's guardians. Staff may raise an erasure
+themselves, and telling a family about a request they did not make discloses
+something they were not party to. A controller answering their OWN request is
+not notified.
+// The notice cannot cost the decision: the send is caught and LOGGED, not
+swallowed, because the decision is already recorded and losing it to a failed
+notification would be worse — but an unanswered subject is the exact failure
+this block exists to prevent, so silence about it would defeat the purpose.
+
+
 ### Holding ₦23,300 for a school it owed ₦22,000 and $1,300
 `SettlementHoldingDto.held` (`settlement-release.service.ts`, `SettlementHolding`
 on /operator). A parent's card payment made BEFORE a school registered its
