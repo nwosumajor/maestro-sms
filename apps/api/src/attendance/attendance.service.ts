@@ -16,7 +16,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Inject, Inj
 // VALUE import: Prisma.sql/join only resolve as values, not types (CLAUDE.md).
 import { Prisma } from "@sms/db";
 import type { AttendanceStatusValue } from "@sms/types";
-import { ATTENDANCE_AMENDMENT_CHAIN, dayUtc, schoolToday, WORKFLOW_PERMISSIONS } from "@sms/types";
+import { ATTENDANCE_AMENDMENT_CHAIN, dayUtc, schoolToday, WORKFLOW_PERMISSIONS, attendanceRatePct } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -717,7 +717,10 @@ export class AttendanceService {
           const s = statBy.get(c.id) ?? { present: 0, absent: 0, late: 0, excused: 0, total: 0 };
           // LATE and EXCUSED count as attending — the pupil was in school, or the
           // absence was authorised. Same rule as the report card.
-          const ratePct = s.total > 0 ? Math.round(((s.present + s.late + s.excused) / s.total) * 100) : null;
+          // ONE definition, shared with the report card — see attendanceRatePct.
+          // This used to add `excused`, so the board and the printed card gave a
+          // pupil two different percentages.
+          const ratePct = attendanceRatePct(s);
           return {
             classId: c.id,
             className: c.name,
@@ -846,9 +849,15 @@ export class AttendanceService {
         late,
         excused,
         total,
-        // LATE counts as attending — the pupil was in school. Reporting it as an
-        // absence would understate attendance and contradict the report card.
-        percent: total > 0 ? Math.round(((present + late + excused) / total) * 100) : null,
+        // LATE counts as attending — the pupil WAS in school. EXCUSED does not:
+        // the pupil was absent and the school accepted the reason.
+        //
+        // // GOTCHA: this comment used to justify including late "so it does not
+        // contradict the report card", on a line that also added `excused` —
+        // which the report card never has. Measured on one pupil over a term
+        // (54 present, 9 late, 2 absent, 5 excused of 70) the card printed 90%
+        // and this returned 97%.
+        percent: attendanceRatePct({ present, late, absent, excused }),
       };
     });
   }

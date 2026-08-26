@@ -89,8 +89,15 @@ describe("AttendanceRollupService.totalsFor", () => {
     };
     const out = await mk(tx).totalsFor(staff, { termId: "t1", from: day(-120), to: day(-30) });
     expect(out.source).toBe("rollup");
-    // LATE and EXCUSED count as attending — same rule as the report card.
-    expect(out.ratePct).toBe(94);
+    // LATE counts as attending — the pupil was in school. EXCUSED does not.
+    // 90 present + 3 late of 100 = 93.
+    //
+    // // GOTCHA: this asserted 94, with the comment "LATE and EXCUSED count as
+    // attending — same rule as the report card". The card has never used that
+    // rule; it has always been present + late. So the test PINNED the
+    // divergence it described as agreement — the shape this repo has met before,
+    // where a plausible-sounding belief is defended by an assertion.
+    expect(out.ratePct).toBe(93);
     // The point of the rollup: the registers are never scanned.
     expect(queryRaw).not.toHaveBeenCalled();
   });

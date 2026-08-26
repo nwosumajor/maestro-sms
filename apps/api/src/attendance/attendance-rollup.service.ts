@@ -29,6 +29,7 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
+import { attendanceRatePct } from "@sms/types";
 
 /** Totals for one window, whatever produced them. */
 export interface AttendanceTotals {
@@ -117,11 +118,27 @@ export class AttendanceRollupService {
     return { schoolId: p.schoolId, userId: p.userId };
   }
 
-  /** LATE and EXCUSED count as attending — the pupil was in school, or their absence
-   *  was authorised. Counting them against attendance would understate it and
-   *  contradict the report card, which uses the same rule. */
+  /**
+   * LATE counts as attending — the pupil was in school. EXCUSED does not: they
+   * were absent and the school accepted the reason.
+   *
+   * // GOTCHA: this comment used to read "LATE and EXCUSED count as attending …
+   * contradict the report card, WHICH USES THE SAME RULE." The report card has
+   * never used that rule — it has always been present + late. A comment
+   * asserting agreement is not agreement, and this is the second one in this
+   * module to have claimed it while computing something else.
+   *
+   * Shared with the card and the board, because a rollup must give the same
+   * answer as the live query it replaces or a page changes its figure on the
+   * day the rollup is first computed.
+   */
   private rate(t: { present: number; late: number; excused: number; total: number }): number | null {
-    return t.total > 0 ? Math.round(((t.present + t.late + t.excused) / t.total) * 100) : null;
+    return attendanceRatePct({
+      present: t.present,
+      late: t.late,
+      excused: t.excused,
+      absent: t.total - t.present - t.late - t.excused,
+    });
   }
 
   /**

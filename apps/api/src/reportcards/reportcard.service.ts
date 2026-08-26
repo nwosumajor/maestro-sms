@@ -29,7 +29,7 @@ import { BrandingService } from "../branding/branding.service";
 import { DocumentsService } from "../documents/documents.service";
 import { ReportCardRemarkService } from "./report-card-remark.service";
 import { TermResultService } from "../gradebook/term-result.service";
-import { TRAIT_GROUPS, TRAIT_SCALE, reportedTermGrade, averageOf, sessionAverageScope, resolveGradeBands, gradeLetter, gradeDescriptor } from "@sms/types";
+import { TRAIT_GROUPS, TRAIT_SCALE, reportedTermGrade, averageOf, sessionAverageScope, resolveGradeBands, gradeLetter, gradeDescriptor, attendanceRatePct } from "@sms/types";
 import { GRADE_COMPONENTS, gradeComponentMax } from "@sms/types";
 import type { GradeBand } from "@sms/types";
 import { SchoolRegionService } from "../foundation/school-region.service";
@@ -717,7 +717,13 @@ export class ReportCardService {
       const total = d.att.PRESENT + d.att.LATE + d.att.ABSENT + d.att.EXCUSED;
       if (total > 0) {
         doc.text(`Present: ${d.att.PRESENT}    Late: ${d.att.LATE}    Absent: ${d.att.ABSENT}    Excused: ${d.att.EXCUSED}`, startX);
-        doc.text(`Attendance rate: ${Math.round(((d.att.PRESENT + d.att.LATE) / total) * 100)}%`, startX);
+        // The definition every other surface now shares. This one was already
+        // right; routing it through the helper is what stops the next screen
+        // inventing a seventh.
+        doc.text(
+          `Attendance rate: ${attendanceRatePct({ present: d.att.PRESENT, late: d.att.LATE, absent: d.att.ABSENT, excused: d.att.EXCUSED })}%`,
+          startX,
+        );
       } else if (d.daysOpened > 0) {
         // The register WAS taken and this pupil is in none of it. A different
         // fact from the one below, and one the school can act on.

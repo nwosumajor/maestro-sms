@@ -1,5 +1,6 @@
 // Barrel for @sms/types. Subpath imports (e.g. "@sms/types/integrity-enums")
 // also work via the package.json "./*" export, used widely across web + api.
+export * from "./attendance-rate";
 export * from "./fee-source";
 export * from "./integrity";
 export * from "./integrity-enums";

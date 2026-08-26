@@ -1432,6 +1432,47 @@ damage was.
 Gate: `every-body-is-validated-at-the-boundary.spec.ts`, exemptions named with
 reasons and each required to name a file that still exists.
 
+### Six definitions of one child's attendance rate
+`attendanceRatePct` (`@sms/types/attendance-rate.ts`). Found by generating a
+report card and reconciling every figure on it against the database — the
+subject totals, the term average (647/9 = 71.89), the cumulative (1900/27 =
+70.37), all nine annual averages and every grade band all checked out. The one
+number that did not have a single definition was the attendance rate.
+```
+present + late            report card (the printed artifact), analytics, parent
+present + late + EXCUSED  class board, student summary, attendance rollup
+```
+Measured on a real pupil over one term — 54 present, 9 late, 2 absent, 5 excused
+of 70 — **the report card printed 90% and the student summary computed 97%.**
+Seven points, on a child's attendance, between the document a family keeps and
+the screen the school reads.
+// GOTCHA, TWICE, AND THIS IS THE POINT: the divergence was written INTO COMMENTS
+CLAIMING THE OPPOSITE. `getStudentSummary` carried "LATE counts as attending …
+Reporting it as an absence would understate attendance and contradict the report
+card" — on the very line that also added `excused`, which the card never has.
+The rollup went further: "LATE and EXCUSED count as attending … contradict the
+report card, WHICH USES THE SAME RULE." It never has. **A comment asserting
+agreement is not agreement**, and two of them had been written by people
+carefully thinking about exactly this.
+// AND A TEST PINNED IT. `attendance-rollup.service.spec` asserted `ratePct` was
+94 for 90 present + 3 late + 1 excused of 100, under the comment "same rule as
+the report card". The assertion defended the divergence it described as
+agreement — the same shape as the promotion-line test that defended keying on
+the current class.
+// WHICH ONE IS RIGHT: an EXCUSED absence is an absence. The pupil was not in
+school; the school has merely accepted the reason — which is why education
+authorities report authorised absence SEPARATELY from attendance. LATE is
+different: the pupil was there. So the three FAMILY-FACING surfaces were already
+right and the three internal ones were not, which is the better way round to
+have found it. EXCUSED stays in the DENOMINATOR: it is still a school day.
+// The rate is NULL, never zero, when no register was taken — "no register yet"
+and "attended nothing" are different facts about a child, the rule the report
+card's own attendance block already documents.
+Gate: `one-definition-of-an-attendance-rate.spec.ts` refuses any hand-rolled
+formula that adds `excused`, so a seventh screen cannot quietly disagree with a
+child's own report card.
+
+
 ### A register for a day that has not happened
 `markAttendance` guarded the PAST — a term that has ended is read-only — and the
 future not at all. `daysSince` goes NEGATIVE for a future date, so such a

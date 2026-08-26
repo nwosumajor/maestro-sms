@@ -162,6 +162,9 @@ export class ParentService {
             className: classNameById.get(classByStudent.get(child.id) ?? "") ?? null,
             attendance: {
               present, absent, late, excused, total,
+              // Same rule as the card, kept to one decimal place here because a
+              // parent's own child is a small denominator and a whole number
+              // rounds too hard.
               pct: total > 0 ? Math.round(((present + late) / total) * 1000) / 10 : null,
             },
             grades,

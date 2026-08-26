@@ -13,8 +13,7 @@ import { csvCell } from "../common/csv";
 import type { AnalyticsOverviewDto } from "@sms/types";
 import { normalizeGender,
   PLATFORM_HOME_CURRENCY,
-  resolveGradeBands,
-} from "@sms/types";
+  resolveGradeBands, attendanceRatePct } from "@sms/types";
 // VALUE import: Prisma.sql only resolves as a value, not a type (CLAUDE.md).
 import { Prisma } from "@sms/db";
 import { SchoolRegionService } from "../foundation/school-region.service";
@@ -224,7 +223,7 @@ export class AnalyticsService {
         out.attendance = {
           ...by,
           total,
-          ratePct: total ? Math.round(((by.PRESENT + by.LATE) / total) * 100) : null,
+          ratePct: attendanceRatePct({ present: by.PRESENT, late: by.LATE, absent: by.ABSENT, excused: by.EXCUSED }),
         };
       }
 
