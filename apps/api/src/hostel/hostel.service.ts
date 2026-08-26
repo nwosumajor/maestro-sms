@@ -39,6 +39,27 @@ import { asDuplicate } from "../common/unique-violation";
 
 type Json = Record<string, string>;
 
+/** A hostel as the list read returns it. */
+type HostelListRow = {
+  id: string;
+  name: string;
+  type: string;
+  wardenId: string | null;
+  customFields: unknown;
+  createdAt: Date;
+};
+
+/** A hostel room as this service reads it. */
+type RoomRow = {
+  id: string;
+  hostelId: string;
+  roomNumber: string;
+  roomType: string;
+  capacity: number;
+  rentMinor: number;
+  customFields: unknown;
+};
+
 /** A hostel's gender policy must admit the student. MIXED admits anyone; a BOYS /
  *  GIRLS house admits only that gender. An UNSET student gender can't be verified,
  *  so a gendered house rejects it (fail-closed) — set the profile gender first. */
@@ -223,8 +244,51 @@ export class HostelService {
 
   async listHostels(p: Principal): Promise<HostelDto[]> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
-      const hostels = await tx.hostel.findMany({ where: this.moduleWide(p) ? {} : { wardenId: p.userId }, orderBy: { name: "asc" } });
-      return Promise.all(hostels.map((h: { id: string }) => this.hostelDto(tx, h.id)));
+      const hostels = (await tx.hostel.findMany({
+        where: this.moduleWide(p) ? {} : { wardenId: p.userId },
+        orderBy: { name: "asc" },
+      })) as HostelListRow[];
+      if (!hostels.length) return [];
+      // // GOTCHA: this was `hostelDto(tx, h.id)` per hostel, and hostelDto ran
+      // `roomDto(tx, r.id)` per room inside it — a NESTED per-row query, plus a
+      // re-fetch of every row already in hand. Six hostels of forty rooms cost
+      // roughly 500 round trips to draw one page. Four queries now, whatever
+      // the size of the school.
+      const ids = hostels.map((h) => h.id);
+      const [rooms, wardens] = await Promise.all([
+        tx.hostelRoom.findMany({ where: { hostelId: { in: ids } }, orderBy: { roomNumber: "asc" } }) as Promise<RoomRow[]>,
+        (() => {
+          const wardenIds = [...new Set(hostels.map((h) => h.wardenId).filter((x): x is string => !!x))];
+          return wardenIds.length
+            ? tx.user.findMany({ where: { id: { in: wardenIds } }, select: { id: true, name: true } })
+            : Promise.resolve([]);
+        })(),
+      ]);
+      const occ = await this.occupancyOf(tx, rooms.map((r) => r.id));
+      const wardenName = new Map(wardens.map((u: { id: string; name: string }) => [u.id, u.name]));
+      const byHostel = new Map<string, RoomRow[]>();
+      for (const r of rooms) byHostel.set(r.hostelId, [...(byHostel.get(r.hostelId) ?? []), r]);
+      return hostels.map((h) => {
+        const roomDtos = (byHostel.get(h.id) ?? []).map((r) => this.roomDtoWith(r, occ.get(r.id) ?? 0));
+        const totalBeds = roomDtos.reduce((n, r) => n + r.capacity, 0);
+        const occupiedBeds = roomDtos.reduce((n, r) => n + r.occupied, 0);
+        return {
+          id: h.id,
+          name: h.name,
+          type: h.type,
+          wardenId: h.wardenId,
+          wardenName: h.wardenId ? (wardenName.get(h.wardenId) ?? null) : null,
+          customFields: this.cf(h.customFields),
+          rooms: roomDtos,
+          totalBeds,
+          occupiedBeds,
+          // The SAME definition hostelDto uses — clamped on the total, not
+          // summed per room. The two differ once a room is over-occupied, and
+          // a list disagreeing with the detail page it links to is its own bug.
+          availableBeds: Math.max(0, totalBeds - occupiedBeds),
+          createdAt: h.createdAt,
+        };
+      });
     });
   }
 
@@ -879,9 +943,25 @@ export class HostelService {
     await assertStillHere(tx, userId, "User");
   }
 
-  private async roomDto(tx: TenantTx, roomId: string): Promise<HostelRoomDto> {
-    const r = await tx.hostelRoom.findFirstOrThrow({ where: { id: roomId } });
-    const occupied = await tx.hostelAllocation.count({ where: { roomId, status: "ACTIVE" } });
+  /**
+   * Occupancy for MANY rooms in one aggregate.
+   *
+   * // GOTCHA: this was `roomDto(tx, r.id)` per room, inside `hostelDto` per
+   * hostel — a NESTED per-row query. Six hostels of forty rooms cost roughly
+   * 500 round trips to render one page, and each `roomDto` re-fetched a row
+   * `hostelDto` had already read.
+   */
+  private async occupancyOf(tx: TenantTx, roomIds: string[]): Promise<Map<string, number>> {
+    if (!roomIds.length) return new Map();
+    const rows = (await tx.hostelAllocation.groupBy({
+      by: ["roomId"],
+      where: { roomId: { in: roomIds }, status: "ACTIVE" },
+      _count: true,
+    })) as unknown as Array<{ roomId: string; _count: number }>;
+    return new Map(rows.map((r) => [r.roomId, r._count]));
+  }
+
+  private roomDtoWith(r: RoomRow, occupied: number): HostelRoomDto {
     return {
       id: r.id,
       hostelId: r.hostelId,
@@ -895,10 +975,18 @@ export class HostelService {
     };
   }
 
+  /** One room, when the caller has only an id. */
+  private async roomDto(tx: TenantTx, roomId: string): Promise<HostelRoomDto> {
+    const r = (await tx.hostelRoom.findFirstOrThrow({ where: { id: roomId } })) as RoomRow;
+    return this.roomDtoWith(r, (await this.occupancyOf(tx, [roomId])).get(roomId) ?? 0);
+  }
+
   private async hostelDto(tx: TenantTx, hostelId: string): Promise<HostelDto> {
     const h = await tx.hostel.findFirstOrThrow({ where: { id: hostelId } });
     const rooms = await tx.hostelRoom.findMany({ where: { hostelId }, orderBy: { roomNumber: "asc" } });
-    const roomDtos = await Promise.all(rooms.map((r: { id: string }) => this.roomDto(tx, r.id)));
+    // ONE occupancy aggregate for the whole hostel, not one count per room.
+    const occ = await this.occupancyOf(tx, (rooms as RoomRow[]).map((r) => r.id));
+    const roomDtos = (rooms as RoomRow[]).map((r) => this.roomDtoWith(r, occ.get(r.id) ?? 0));
     const warden = h.wardenId ? await tx.user.findFirst({ where: { id: h.wardenId }, select: { name: true } }) : null;
     const totalBeds = roomDtos.reduce((s, r) => s + r.capacity, 0);
     const occupiedBeds = roomDtos.reduce((s, r) => s + r.occupied, 0);

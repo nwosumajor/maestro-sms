@@ -1432,6 +1432,57 @@ damage was.
 Gate: `every-body-is-validated-at-the-boundary.spec.ts`, exemptions named with
 reasons and each required to name a file that still exists.
 
+### A name lookup once per row
+`Promise.all(rows.map((r) => this.toDto(tx, r)))` reads as ordinary mapping code
+and is a query multiplier: the mapper is handed the TRANSACTION, so every row it
+touches costs its own round trips. Six services did it, in three services I went
+looking for and three the gate found afterwards. Measured live, before and
+after, as the application role with RLS in force:
+```
+GET /hostels             6 hostels / 264 rooms   545 queries  327 ms ->  4   37 ms
+GET /integrity/exemptions            500 rows  1,507 queries  654 ms ->  4   44 ms
+GET /subject-selections            50-row page    205 queries  211 ms ->  6   32 ms
+GET /transport/routes, /discussion/groups                    per-row -> 1 per table
+```
+**HOSTELS WAS NESTED**: `hostelDto` per hostel, and inside it `roomDto` per
+room — 264 reads of `hostel_allocation` and 270 of `hostel_room` to draw one
+page. **EXEMPTIONS RE-READ WHAT IT ALREADY HELD**: `list` fetched the rows and
+then called `toDto(tx, r.id)`, which fetched each row AGAIN — 501 reads of a
+table it had just read 500 rows from, plus 1,006 of `user`. That is the
+disability-accommodations screen. **SELECTIONS WERE THE SUBTLE ONE**: four
+lookups per row, and a COHORT SHARES ITS TERM AND ITS CLASS, so 49 of every 50
+term reads were the same row fetched again.
+// GOTCHA: the paging fix directly above this made the per-row cost matter MORE,
+not less — `PromotionService.list` went from 100 rows to as many as 600. A fix
+that widens a page multiplies whatever the page does per row, so the two belong
+together.
+Each mapper is now split: a `namesFor`/`classNamesFor`/`occupancyOf` batch
+resolver, a pure `toDtoWith(row, names)`, and the original single-row `toDto`
+kept for the mutation paths that genuinely hold only an id — so nothing gained
+a second definition of how a row is rendered.
+// GOTCHA: `availableBeds` had to be copied EXACTLY (`max(0, total - occupied)`,
+clamped on the total), not re-derived by summing each room's own `available`.
+The two differ once a room is over-occupied, and a list disagreeing with the
+detail page it links to is its own bug.
+Gate: `a-query-once-per-row.spec.ts` refuses `.map(x => this.something(tx, …))`
+— passing `tx` is the tell, since a mapper needing no database would not ask for
+one. It found the hostel, transport and discussion sites I had not looked at.
+// GOTCHA: a test on the mapper proves nothing about its caller — the seam that
+hid the CBT score and the report-card promotion-line bugs.
+`a-name-lookup-once-per-row.spec.ts` drives the REAL service over 40 rows and
+asserts each kind of name is resolved exactly ONCE, and that a term shared by 40
+rows is asked for with one id, not forty.
+// GOTCHA in the measuring, twice: `docker compose -f infrastructure/...` run
+from `apps/api` fails on the relative path, and with `&&` the confirmation never
+prints — so three "before" measurements were quietly taken against the FIXED
+container and read 34-41 ms. The real before was 327 ms. Check what the
+container is actually running (`grep` the symbol in `/app/apps/api/dist`) before
+believing a before/after pair.
+// GOTCHA: `pg_stat_user_tables` counters lag a request by several seconds, so a
+snapshot taken immediately after a probe reports the PREVIOUS probe's reads.
+Settle 12-18 s, and divide by the number of requests rather than trusting one.
+
+
 ### A review queue that could only see the page it had just decided
 `subject_selection.list` / `MeetingRequestService.list` and four siblings. The
 shape is one this repo has already recorded twice — for the chargeback banner

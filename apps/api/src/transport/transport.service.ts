@@ -42,6 +42,29 @@ import { asDuplicate } from "../common/unique-violation";
 
 type Json = Record<string, string>;
 
+/** A route as the list read returns it. */
+type RouteListRow = {
+  id: string;
+  name: string;
+  vehicleId: string | null;
+  sessionId: string | null;
+  fareMode: string;
+  flatFareMinor: number;
+  status: string;
+  customFields: unknown;
+  createdAt: Date;
+};
+
+/** A stop as the list read returns it. */
+type StopRow = {
+  id: string;
+  routeId: string;
+  name: string;
+  sequence: number;
+  fareMinor: number;
+  pickupTime: string | null;
+};
+
 /** How long a GPS breadcrumb is kept. A live feed is high-volume (a bus pinging
  *  every 10s is ~3k rows/day/vehicle), and only the recent trail has value, so
  *  the stream is pruned on write and can never grow without bound. */
@@ -294,7 +317,31 @@ export class TransportService {
   async listRoutes(p: Principal): Promise<TransportRouteDto[]> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const routes = await tx.transportRoute.findMany({ where: this.moduleWide(p) ? {} : { vehicle: { driverId: p.userId } }, orderBy: { name: "asc" } });
-      return Promise.all(routes.map((r: { id: string }) => this.routeDto(tx, r.id)));
+      // // GOTCHA: `routeDto(tx, r.id)` per route re-fetched a row already in
+      // hand and ran four more queries for it — stops, vehicle, seats. Five
+      // queries per route to draw the routes page. Four for the page now.
+      const rows = routes as RouteListRow[];
+      if (!rows.length) return [];
+      const ids = rows.map((r) => r.id);
+      const vehicleIds = [...new Set(rows.map((r) => r.vehicleId).filter((x): x is string => !!x))];
+      const [stops, vehicles, seatRows] = await Promise.all([
+        tx.routeStop.findMany({ where: { routeId: { in: ids } }, orderBy: { sequence: "asc" } }),
+        vehicleIds.length
+          ? tx.vehicle.findMany({ where: { id: { in: vehicleIds } }, select: { id: true, name: true, capacity: true } })
+          : Promise.resolve([]),
+        tx.transportAssignment.groupBy({
+          by: ["routeId"],
+          where: { routeId: { in: ids }, status: "ACTIVE" },
+          _count: true,
+        }) as unknown as Promise<Array<{ routeId: string; _count: number }>>,
+      ]);
+      const stopsBy = new Map<string, typeof stops>();
+      for (const st of stops) stopsBy.set(st.routeId, [...(stopsBy.get(st.routeId) ?? []), st]);
+      const vehicleBy = new Map(vehicles.map((v: { id: string; name: string; capacity: number }) => [v.id, v]));
+      const seatsBy = new Map(seatRows.map((r) => [r.routeId, r._count]));
+      return rows.map((r) =>
+        this.routeDtoWith(r, stopsBy.get(r.id) ?? [], r.vehicleId ? (vehicleBy.get(r.vehicleId) ?? null) : null, seatsBy.get(r.id) ?? 0),
+      );
     });
   }
 
@@ -851,12 +898,26 @@ export class TransportService {
     return { id: s.id, routeId: s.routeId, name: s.name, sequence: s.sequence, fareMinor: s.fareMinor, pickupTime: s.pickupTime };
   }
 
+  /** One route, when the caller has only an id. */
   private async routeDto(tx: TenantTx, routeId: string): Promise<TransportRouteDto> {
-    const r = await tx.transportRoute.findFirstOrThrow({ where: { id: routeId } });
-    const stops = await tx.routeStop.findMany({ where: { routeId }, orderBy: { sequence: "asc" } });
-    const vehicle = r.vehicleId ? await tx.vehicle.findFirst({ where: { id: r.vehicleId }, select: { name: true, capacity: true } }) : null;
+    const r = (await tx.transportRoute.findFirstOrThrow({ where: { id: routeId } })) as RouteListRow;
+    const [stops, vehicle, seatsUsed] = await Promise.all([
+      tx.routeStop.findMany({ where: { routeId }, orderBy: { sequence: "asc" } }),
+      r.vehicleId
+        ? tx.vehicle.findFirst({ where: { id: r.vehicleId }, select: { id: true, name: true, capacity: true } })
+        : Promise.resolve(null),
+      tx.transportAssignment.count({ where: { routeId, status: "ACTIVE" } }),
+    ]);
+    return this.routeDtoWith(r, stops, vehicle, seatsUsed);
+  }
+
+  private routeDtoWith(
+    r: RouteListRow,
+    stops: StopRow[],
+    vehicle: { name: string; capacity: number } | null,
+    seatsUsed: number,
+  ): TransportRouteDto {
     const capacity = vehicle?.capacity ?? 0;
-    const seatsUsed = await tx.transportAssignment.count({ where: { routeId, status: "ACTIVE" } });
     return {
       id: r.id,
       name: r.name,

@@ -61,8 +61,31 @@ export class DiscussionService {
   async listGroups(p: Principal): Promise<DiscussionGroupDto[]> {
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       const where = this.canModerate(p) ? {} : { audience: { in: this.audiences(p) } };
-      const groups = await tx.discussionGroup.findMany({ where, orderBy: { createdAt: "desc" }, take: 100 });
-      return Promise.all(groups.map((g: { id: string }) => this.groupDto(tx, g.id)));
+      const groups = (await tx.discussionGroup.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        take: 100,
+      })) as GroupRow[];
+      if (!groups.length) return [];
+      // // GOTCHA: `groupDto(tx, g.id)` per group re-fetched a row already in
+      // hand and then ran a post COUNT and a creator lookup for it — three
+      // queries per group, a hundred groups, three hundred round trips. The
+      // post counts are one aggregate now.
+      const ids = groups.map((g) => g.id);
+      const [counts, creators] = await Promise.all([
+        tx.discussionPost.groupBy({
+          by: ["groupId"],
+          where: { groupId: { in: ids }, deleted: false },
+          _count: true,
+        }) as unknown as Promise<Array<{ groupId: string; _count: number }>>,
+        tx.user.findMany({
+          where: { id: { in: [...new Set(groups.map((g) => g.createdById))] } },
+          select: { id: true, name: true },
+        }),
+      ]);
+      const postCount = new Map(counts.map((c) => [c.groupId, c._count]));
+      const nameOf = new Map(creators.map((u: { id: string; name: string }) => [u.id, u.name]));
+      return groups.map((g) => this.groupDtoWith(g, postCount.get(g.id) ?? 0, nameOf.get(g.createdById) ?? ""));
     });
   }
 
@@ -262,11 +285,18 @@ export class DiscussionService {
 
   // --- helpers --------------------------------------------------------------
 
+  /** One group, when the caller has only an id. */
   private async groupDto(tx: TenantTx, groupId: string): Promise<DiscussionGroupDto> {
-    const g = await tx.discussionGroup.findFirstOrThrow({ where: { id: groupId } });
-    const postCount = await tx.discussionPost.count({ where: { groupId, deleted: false } });
-    const creator = await tx.user.findFirst({ where: { id: g.createdById }, select: { name: true } });
-    return { id: g.id, name: g.name, description: g.description, audience: g.audience, createdByName: creator?.name ?? "", postCount, createdAt: g.createdAt };
+    const g = (await tx.discussionGroup.findFirstOrThrow({ where: { id: groupId } })) as GroupRow;
+    const [postCount, creator] = await Promise.all([
+      tx.discussionPost.count({ where: { groupId, deleted: false } }),
+      tx.user.findFirst({ where: { id: g.createdById }, select: { name: true } }),
+    ]);
+    return this.groupDtoWith(g, postCount, creator?.name ?? "");
+  }
+
+  private groupDtoWith(g: GroupRow, postCount: number, createdByName: string): DiscussionGroupDto {
+    return { id: g.id, name: g.name, description: g.description, audience: g.audience, createdByName, postCount, createdAt: g.createdAt };
   }
 
   private async postDto(tx: TenantTx, postId: string): Promise<DiscussionPostDto> {
@@ -287,6 +317,7 @@ export class DiscussionService {
 }
 
 type PostRow = { id: string; groupId: string; authorId: string; body: string; deleted: boolean; createdAt: Date };
+type GroupRow = { id: string; name: string; description: string | null; audience: string; createdById: string; createdAt: Date };
 type CommentRow = { id: string; postId: string; authorId: string; body: string; deleted: boolean; createdAt: Date };
 
 /**

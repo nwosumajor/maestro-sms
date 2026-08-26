@@ -42,6 +42,14 @@ const SCHOOL_WIDE_ROLES = new Set(["school_admin", "principal"]);
 
 /** The two statuses that mean "nobody has dealt with this yet". */
 const OPEN_STATUSES = ["PENDING_SUPERVISOR", "PENDING_ADMIN"] as const;
+
+/** Name lookups shared across a whole page of selections. */
+type SelectionNames = {
+  subject: Map<string, string>;
+  term: Map<string, string>;
+  class: Map<string, string>;
+  user: Map<string, string>;
+};
 const SELECTION_PAGE_SIZE = 50;
 
 /**
@@ -90,20 +98,53 @@ export class SubjectSelectionService {
     return { schoolId: p.schoolId, userId: p.userId };
   }
 
-  private async toDto(tx: TenantTx, row: SelectionRow): Promise<SubjectSelectionDto> {
-    const subjectIds = (row.subjectIds as string[]) ?? [];
-    const [subjects, term, klass, people] = await Promise.all([
-      tx.subject.findMany({ where: { id: { in: subjectIds } }, select: { id: true, name: true } }),
-      tx.term.findFirst({ where: { id: row.termId }, select: { name: true } }),
-      tx.class.findFirst({ where: { id: row.classId }, select: { name: true } }),
-      tx.user.findMany({
-        where: { id: { in: [row.studentId, row.supervisorId ?? row.studentId] } },
-        select: { id: true, name: true },
-      }),
+  /**
+   * The four name lookups a page of selections needs, resolved ONCE.
+   *
+   * // GOTCHA: `toDto` used to run them per row, and `list` called it through
+   * `Promise.all(rows.map(...))`. Measured live on one term of a 901-pupil
+   * school, a single 50-row page cost **205 queries** — 50 reads of `term`, 50
+   * of `class`, 50 of `subject` and 55 of `user` — in 211 ms. A cohort shares
+   * its term and its class, so 49 of each 50 were the SAME ROW fetched again.
+   * Widening the page would have multiplied it; the paging fix that preceded
+   * this made the per-row cost matter more, not less.
+   */
+  private async namesFor(tx: TenantTx, rows: SelectionRow[]): Promise<SelectionNames> {
+    const subjectIds = new Set<string>();
+    const termIds = new Set<string>();
+    const classIds = new Set<string>();
+    const userIds = new Set<string>();
+    for (const r of rows) {
+      for (const id of ((r.subjectIds as string[]) ?? [])) subjectIds.add(id);
+      termIds.add(r.termId);
+      classIds.add(r.classId);
+      userIds.add(r.studentId);
+      if (r.supervisorId) userIds.add(r.supervisorId);
+    }
+    const [subjects, terms, classes, people] = await Promise.all([
+      subjectIds.size
+        ? tx.subject.findMany({ where: { id: { in: [...subjectIds] } }, select: { id: true, name: true } })
+        : [],
+      termIds.size ? tx.term.findMany({ where: { id: { in: [...termIds] } }, select: { id: true, name: true } }) : [],
+      classIds.size ? tx.class.findMany({ where: { id: { in: [...classIds] } }, select: { id: true, name: true } }) : [],
+      userIds.size ? tx.user.findMany({ where: { id: { in: [...userIds] } }, select: { id: true, name: true } }) : [],
     ]);
-    const nameById = new Map(people.map((u) => [u.id, u.name]));
+    const map = (rs: Array<{ id: string; name: string }>) => new Map(rs.map((r) => [r.id, r.name]));
+    return { subject: map(subjects), term: map(terms), class: map(classes), user: map(people) };
+  }
+
+  /** One row, when the caller has only one — reuses the batch resolver. */
+  private async toDto(tx: TenantTx, row: SelectionRow): Promise<SubjectSelectionDto> {
+    return this.toDtoWith(row, await this.namesFor(tx, [row]));
+  }
+
+  private toDtoWith(row: SelectionRow, names: SelectionNames): SubjectSelectionDto {
+    const subjectIds = (row.subjectIds as string[]) ?? [];
+    const term = { name: names.term.get(row.termId) };
+    const klass = { name: names.class.get(row.classId) };
+    const nameById = names.user;
     // Preserve the student's pick order.
-    const subjName = new Map(subjects.map((s) => [s.id, s.name]));
+    const subjName = names.subject;
     return {
       id: row.id,
       sessionId: row.sessionId,
@@ -319,7 +360,9 @@ export class SubjectSelectionService {
         // hide, and this one answers "is anything waiting on us".
         tx.subjectSelection.count({ where: { ...scope, status: { in: [...OPEN_STATUSES] } } }),
       ]);
-      const items = await Promise.all(rows.map((r) => this.toDto(tx, r)));
+      // ONE resolve for the page, not one per row.
+      const names = await this.namesFor(tx, rows);
+      const items = rows.map((r) => this.toDtoWith(r, names));
       return { items, total, pendingTotal, page, pageSize };
     });
   }

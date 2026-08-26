@@ -21,10 +21,19 @@ function makeService(over: {
   );
   const updateMany = jest.fn().mockResolvedValue({ count: over.updateManyCount ?? 1 });
   const tx = {
-    term: { findFirst: jest.fn().mockResolvedValue(over.term ?? null) },
+    term: {
+      findFirst: jest.fn().mockResolvedValue(over.term ?? null),
+      // Name lookups are resolved ONCE PER PAGE now, not once per row — see
+      // SubjectSelectionService.namesFor. A 50-row page used to cost 205
+      // queries; the stub has to offer the batch shape or the mapper cannot run.
+      findMany: jest.fn().mockResolvedValue(over.term ? [over.term] : []),
+    },
     academicSession: { findFirst: jest.fn().mockResolvedValue(null) },
     enrollment: { findFirst: jest.fn().mockResolvedValue(over.enrollment ?? null) },
-    class: { findFirst: jest.fn().mockResolvedValue(over.klass ?? null) },
+    class: {
+      findFirst: jest.fn().mockResolvedValue(over.klass ?? null),
+      findMany: jest.fn().mockResolvedValue(over.klass ? [over.klass] : []),
+    },
     classSubjectTeacher: {
       // Respect the `subjectId: { in: [...] }` filter like Prisma would — the
       // service compares matched count to picked count.

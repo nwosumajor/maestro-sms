@@ -222,7 +222,12 @@ export class PromotionService {
         tx.promotionBatch.findMany({ where: { status: { not: "PENDING" } }, orderBy: { createdAt: "desc" }, take: 100 }),
       ]);
       const rows = [...open, ...recent];
-      return Promise.all((rows as unknown as BatchRow[]).map((b) => this.toDto(tx, b)));
+      // ONE class lookup for the page. Returning every open batch (above)
+      // raised the row count from 100 to as many as 600, so a per-row query
+      // here would have been six times the cost it already was.
+      const batches = rows as unknown as BatchRow[];
+      const nameOf = await this.classNamesFor(tx, batches);
+      return batches.map((b) => this.toDtoWith(b, nameOf));
     });
   }
 
@@ -375,18 +380,27 @@ export class PromotionService {
     return studentIds.length;
   }
 
+  /** Every class named by a page of batches, resolved ONCE. */
+  private async classNamesFor(tx: TenantTx, batches: BatchRow[]): Promise<Map<string, string>> {
+    const ids = new Set<string>();
+    for (const b of batches) {
+      ids.add(b.sourceClassId);
+      if (b.targetClassId) ids.add(b.targetClassId);
+      // Demotion destinations, so the reviewer sees a name not a uuid.
+      for (const d of decisionsOf(b)) if (d.targetClassId) ids.add(d.targetClassId);
+    }
+    if (!ids.size) return new Map();
+    const classes = await tx.class.findMany({ where: { id: { in: [...ids] } }, select: { id: true, name: true } });
+    return new Map(classes.map((c) => [c.id, c.name]));
+  }
+
+  /** One batch, when the caller has only one. */
   private async toDto(tx: TenantTx, b: BatchRow): Promise<PromotionBatchDto> {
+    return this.toDtoWith(b, await this.classNamesFor(tx, [b]));
+  }
+
+  private toDtoWith(b: BatchRow, nameOf: Map<string, string>): PromotionBatchDto {
     const raw = decisionsOf(b);
-    const ids = [
-      ...new Set([
-        b.sourceClassId,
-        ...(b.targetClassId ? [b.targetClassId] : []),
-        // Demotion destinations, so the reviewer sees a name not a uuid.
-        ...raw.map((d) => d.targetClassId).filter((x): x is string => !!x),
-      ]),
-    ];
-    const classes = await tx.class.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } });
-    const nameOf = new Map(classes.map((c) => [c.id, c.name]));
     const decisions: PromotionDecisionDto[] = raw.map((d) => ({
       ...d,
       targetClassName: d.targetClassId ? (nameOf.get(d.targetClassId) ?? null) : null,
