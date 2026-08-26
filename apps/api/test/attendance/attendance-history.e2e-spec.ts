@@ -136,9 +136,11 @@ d("Five years of attendance history (real Postgres)", () => {
           for (const [pi, u] of pupils.entries()) {
             // A deterministic pattern, so the expected totals are computable.
             const status = (dOff + pi) % 10 === 0 ? "ABSENT" : "PRESENT";
-            recParams.push(randomUUID(), SA, sessId, u, status);
+            // `date` is the partition key and comes from the SAME `day` the
+            // session was built with — the invariant partitioning rests on.
+            recParams.push(randomUUID(), SA, sessId, u, status, day);
             const r = recParams.length;
-            recRows.push(`($${r - 4},$${r - 3},$${r - 2},$${r - 1},$${r},now())`);
+            recRows.push(`($${r - 5},$${r - 4},$${r - 3},$${r - 2},$${r - 1},$${r},now())`);
           }
         }
         await admin.query(
@@ -146,7 +148,7 @@ d("Five years of attendance history (real Postgres)", () => {
           sessParams,
         );
         await admin.query(
-          `INSERT INTO attendance_record (id,"schoolId","sessionId","studentId",status,"updatedAt") VALUES ${recRows.join(",")}`,
+          `INSERT INTO attendance_record (id,"schoolId","sessionId","studentId",status,date,"updatedAt") VALUES ${recRows.join(",")}`,
           recParams,
         );
         cursor.setUTCDate(cursor.getUTCDate() + DAYS_PER_TERM + 30);

@@ -293,9 +293,12 @@ d("AnalyticsService.overview grade-band aggregate (real Postgres)", () => {
            VALUES ($1,$2,$3, (now() - interval '${offset}')::date, $4, now(), now())`,
           [id, SA, CLS, STAFF],
         );
+        // `date` is the partition key, taken FROM THE SESSION — which is also
+        // exactly what this case is about: the register's own day, not the day
+        // the row was written. `createdAt` stays `now()` for both.
         await admin.query(
-          `INSERT INTO attendance_record (id,"schoolId","sessionId","studentId",status,"createdAt","updatedAt")
-           VALUES ($1,$2,$3,$4,'PRESENT', now(), now())`,
+          `INSERT INTO attendance_record (id,"schoolId","sessionId","studentId",status,date,"createdAt","updatedAt")
+           SELECT $1,$2,$3,$4,'PRESENT', s.date, now(), now() FROM attendance_session s WHERE s.id = $3`,
           [randomUUID(), SA, id, S1],
         );
       }

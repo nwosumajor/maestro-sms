@@ -50,39 +50,62 @@ export class AuditPartitionService {
   constructor(private readonly privileged: PrivilegedDatabaseService) {}
 
   /** Ensure partitions exist for the current month and the next N months. */
+  /**
+   * EVERY partitioned table, not just the audit log.
+   *
+   * `attendance_record` joined it — the largest table in the product, and one
+   * whose partitions must exist BEFORE a register is taken, since a school
+   * marks attendance every working morning. A table whose extender stops is a
+   * bug with a start date, and the DEFAULT partition is what makes that quiet:
+   * inserts keep working and the rows pile up somewhere they must later be
+   * migrated out of. Both are checked, and both count into `failed`.
+   */
+  private static readonly PARTITIONED = [
+    { fn: "ensure_audit_log_partition", table: "audit_log" },
+    { fn: "ensure_attendance_record_partition", table: "attendance_record" },
+  ] as const;
+
   async ensureUpcoming(monthsAhead = AUDIT_PARTITION_MONTHS_AHEAD): Promise<AuditPartitionResult> {
     const client = this.privileged.client;
     if (!client) {
-      this.logger.warn("No privileged DB client — audit partition maintenance DISABLED (no-op).");
+      this.logger.warn("No privileged DB client — partition maintenance DISABLED (no-op).");
       return { ensured: [], defaultRows: 0, failed: 0, skipped: "no-privileged-client" };
     }
 
     const ensured: string[] = [];
+    let defaultRows = 0;
     const now = new Date();
-    for (let i = 0; i <= monthsAhead; i++) {
-      // First of the target month, in UTC (partition bounds are month boundaries).
-      const month = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + i, 1));
-      const iso = month.toISOString().slice(0, 10);
-      const rows = await client.$queryRawUnsafe<{ ensure_audit_log_partition: string }[]>(
-        "SELECT ensure_audit_log_partition($1::date)",
-        iso,
+
+    for (const { fn, table } of AuditPartitionService.PARTITIONED) {
+      for (let i = 0; i <= monthsAhead; i++) {
+        // First of the target month, in UTC (partition bounds are month boundaries).
+        const month = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + i, 1));
+        const iso = month.toISOString().slice(0, 10);
+        const rows = await client.$queryRawUnsafe<Array<Record<string, string>>>(
+          `SELECT ${fn}($1::date)`,
+          iso,
+        );
+        const name = rows[0]?.[fn];
+        if (name) ensured.push(name);
+      }
+
+      // The DEFAULT partition must stay empty; anything in it means a month was
+      // missed. Counted per table and summed, so one healthy table cannot hide
+      // the other.
+      const [{ count }] = await client.$queryRawUnsafe<{ count: bigint }[]>(
+        `SELECT count(*)::bigint AS count FROM "${table}_default"`,
       );
-      const name = rows[0]?.ensure_audit_log_partition;
-      if (name) ensured.push(name);
+      const n = Number(count);
+      defaultRows += n;
+      if (n > 0) {
+        this.logger.error(
+          `${table}_default holds ${n} row(s) — a month was not pre-created. ` +
+            "Those rows must be migrated into a real partition before one can be added for their month.",
+        );
+      }
     }
 
-    // The DEFAULT partition must stay empty; anything in it means we missed a month.
-    const [{ count }] = await client.$queryRawUnsafe<{ count: bigint }[]>(
-      'SELECT count(*)::bigint AS count FROM "audit_log_default"',
-    );
-    const defaultRows = Number(count);
-    if (defaultRows > 0) {
-      this.logger.error(
-        `audit_log_default holds ${defaultRows} row(s) — a month was not pre-created. ` +
-          "Those rows must be migrated into a real partition before one can be added for their month.",
-      );
-    }
-    this.logger.log(`Audit partitions ensured: ${ensured.join(", ")} (default rows: ${defaultRows}).`);
+    this.logger.log(`Partitions ensured: ${ensured.join(", ")} (default rows: ${defaultRows}).`);
     return { ensured, defaultRows, failed: defaultRows };
   }
 }

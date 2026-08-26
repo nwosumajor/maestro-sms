@@ -1432,6 +1432,66 @@ damage was.
 Gate: `every-body-is-validated-at-the-boundary.spec.ts`, exemptions named with
 reasons and each required to name a file that still exists.
 
+### Fifteen years of registers, and the only table with no way out
+`attendance_record` is RANGE-partitioned by month on a denormalised `date`
+(migration `20270110000000`), provisioned by the same daily job that keeps
+`audit_log` ahead of itself.
+Asked what a school does after fifteen years — download everything, free space,
+stop the lag. Investigating it first was the point, because two thirds of the
+answer turned out to be **no change needed**: `SchoolArchiveService` ALREADY
+produces a per-session artifact covering eleven sections, and most hot reads are
+ALREADY O(page) rather than O(lifetime) — invoices 0.10 ms at 45,000 rows,
+notifications 0.12 ms at 500,000, the register history 1.85 ms, the audit log
+0.59 ms. Deleting the institutional record to save milliseconds would trade a
+legal obligation for a page load, and the app role deliberately cannot: it holds
+DELETE on 76 of 204 tables.
+**WHAT WAS ACTUALLY WRONG was the one table nobody had a plan for.**
+`attendance_record` was 201 MB — the largest in the product, roughly 2.85 M rows
+per 1,000-pupil school over fifteen years, one row per pupil per school day —
+with NO retention path of any kind, while the archive already captured it. A
+school archived its register and then kept every row for ever regardless.
+**PARTITION, NOT DELETE, and the reason is already measured in this repo:**
+VACUUM never shrinks a btree, and retention churn once left 1,026 MB of indexes
+where 534 MB was needed — `attendance_record_sessionId_studentId_key` itself
+went 409 MB -> 8.4 MB on a REINDEX. Freeing space by DELETE trades one problem
+for another. DETACH is metadata-only. Measured on the real stack: detaching one
+month released **11,700 rows instantly**, data fully intact in the detached
+table, ready to archive or drop.
+Results, all measured: **173,701 rows preserved exactly** (the copy asserts its
+own row count before dropping the original); **201 MB -> 69 MB**, because the
+rebuild dropped accumulated bloat; a windowed read went from scanning **13
+partitions at 1.09 ms to 1 at 0.09 ms** — and the old shape scanned EVERY
+partition, so it degraded with the school's age while the new one is constant;
+all 221 migrations still replay from scratch on a fresh database.
+// WHY A DENORMALISED DATE. Postgres can only partition on a column of the table
+itself and the school day lived only on `attendance_session`. It is functionally
+determined by `sessionId` and never changes, so a row can never MOVE between
+partitions — verified across all 173,701 rows: zero date/session mismatches. It
+also removes a join from every windowed read, which is what lets Postgres prune.
+// THE UNIQUE KEY GAINS THE PARTITION KEY, and that does not weaken it.
+Postgres forces it, so `(sessionId, studentId)` becomes `(sessionId, studentId,
+date)` — and since the date is fixed by the session there is no second date the
+pair could have. The raw upsert's ON CONFLICT target moved with it; verified
+live that a correction still updates one row rather than inserting a second.
+// NO DROP POLICY IS INTRODUCED, deliberately, and it is the same line the
+audit_log migration drew: how long a school's register is kept is a POLICY
+decision with legal weight, not a refactor. This makes executing that decision
+instant when it is taken.
+// GOTCHA: the RLS sentinel. `docker-entrypoint.sh` applies each rls/*.sql keyed
+on that file's LAST policy — and for `08_attendance_rls.sql` that sentinel IS
+`attendance_record_update`. Recreating the table without recreating the policies
+IN THE MIGRATION would leave the file skipped and the table with no RLS at all.
+Verified after: school A sees 173,701 rows, school B sees 0, and the app role is
+denied direct access to a partition.
+// GOTCHA, twice in two sessions: applying a migration BY HAND before the
+container rebuilds makes `migrate deploy` fail (42P01 here, 42701 last time) and
+the API will not boot. Let the migration be the thing that applies it.
+// A DEFAULT partition means a register can NEVER fail to save — and that safety
+net is the risk, so the daily job counts BOTH tables' default partitions into
+the one `failed` number the operator console reads. A healthy audit log cannot
+hide a stalled attendance month.
+
+
 ### Is it accurate and efficient? — measured, and one of the answers was no
 Asked of the funds-by-department report the moment it shipped. Both halves were
 worth asking, and both found something.

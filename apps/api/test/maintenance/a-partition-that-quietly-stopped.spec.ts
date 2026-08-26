@@ -22,26 +22,56 @@
 import { AuditPartitionProcessor } from "../../src/maintenance/audit-partition.processor";
 import { AuditPartitionService } from "../../src/maintenance/audit-partition.service";
 
-function makeService(defaultRows: number, ensured = ["audit_log_2026_08"]) {
+/**
+ * `perTable` is the DEFAULT-partition count each partitioned table reports.
+ * There is more than one now — `attendance_record` joined `audit_log` — and the
+ * whole point of summing them is that a healthy table cannot hide a stalled
+ * one, so the harness lets them differ.
+ */
+function makeService(perTable: number | Record<string, number>, ensured = ["audit_log_2026_08"]) {
   let call = 0;
+  const rowsFor = (table: string) =>
+    typeof perTable === "number" ? perTable : (perTable[table] ?? 0);
+  const checked: string[] = [];
   const client = {
     $queryRawUnsafe: jest.fn(async (sql: string) => {
-      if (sql.includes("ensure_audit_log_partition")) {
+      const ensureFn = sql.match(/SELECT (ensure_\w+)\(/)?.[1];
+      if (ensureFn) {
         const name = ensured[Math.min(call++, ensured.length - 1)];
-        return [{ ensure_audit_log_partition: name }];
+        return [{ [ensureFn]: name }];
       }
-      return [{ count: BigInt(defaultRows) }];
+      const table = sql.match(/FROM "(\w+)_default"/)?.[1] ?? "";
+      checked.push(table);
+      return [{ count: BigInt(rowsFor(table)) }];
     }),
   };
-  return new AuditPartitionService({ client } as never);
+  const svc = new AuditPartitionService({ client } as never);
+  return Object.assign(svc, { __checked: checked }) as AuditPartitionService & { __checked: string[] };
 }
 
 describe("the audit partition sweep reports what an operator must act on", () => {
   it("reports `failed` so a run with rows in DEFAULT is flagged, not merely logged", async () => {
-    const res = await makeService(12).ensureUpcoming(0);
+    const res = await makeService({ audit_log: 12 }).ensureUpcoming(0);
     expect(res.defaultRows).toBe(12);
     // The console's rule is `(lastFailed ?? 0) > 0`; null renders healthy.
     expect(res.failed).toBe(12);
+  });
+
+  it("checks EVERY partitioned table, not just the audit log", async () => {
+    // `attendance_record` is the largest table in the product and its
+    // partitions must exist before a register is taken — a school marks
+    // attendance every working morning.
+    const svc = makeService(0);
+    await svc.ensureUpcoming(0);
+    expect(svc.__checked.sort()).toEqual(["attendance_record", "audit_log"]);
+  });
+
+  it("a healthy table cannot hide a stalled one", async () => {
+    // Summed, not reported per table: the console reads ONE number, so an
+    // attendance month that was never created must raise it even while the
+    // audit log is perfectly clean.
+    const res = await makeService({ audit_log: 0, attendance_record: 7 }).ensureUpcoming(0);
+    expect(res.failed).toBe(7);
   });
 
   it("a clean run reports zero, which is different from reporting nothing", async () => {
@@ -56,7 +86,7 @@ describe("the audit partition sweep reports what an operator must act on", () =>
     // field by field — dropping `failed` on the floor. A unit test on the
     // service alone would have gone green over a console that still showed the
     // row as healthy.
-    const svc = makeService(9);
+    const svc = makeService({ audit_log: 9 });
     const runs = { record: jest.fn(async (_k: string, _t: string, fn: () => Promise<unknown>) => fn()) };
     const proc = new AuditPartitionProcessor(svc as never, runs as never);
     const summary = await proc.process({ name: "audit-partition-ensure" } as never);

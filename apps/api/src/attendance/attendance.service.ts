@@ -252,16 +252,15 @@ export class AttendanceService {
       // An optional window so a reader can ask for one school year out of five
       // rather than paging back through all of them.
       const window = dateWindow(opts.from, opts.to);
-      const sessionWhere =
-        window.from || window.to
-          ? {
-              date: {
-                ...(window.from ? { gte: window.from } : {}),
-                ...(window.to ? { lte: window.to } : {}),
-              },
-            }
-          : undefined;
-      const where = { studentId, ...(sessionWhere ? { session: sessionWhere } : {}) };
+      // Filtered on the RECORD's own date now, not through the session. That is
+      // what lets Postgres PRUNE to the months in the window instead of reading
+      // every partition, and it drops a join from a paged read a parent opens.
+      const where = {
+        studentId,
+        ...(window.from || window.to
+          ? { date: { ...(window.from ? { gte: window.from } : {}), ...(window.to ? { lte: window.to } : {}) } }
+          : {}),
+      };
 
       const [records, total] = await Promise.all([
         tx.attendanceRecord.findMany({
@@ -270,7 +269,7 @@ export class AttendanceService {
           // Ordering by createdAt meant correcting a month-old register today put it
           // at the TOP of the history, above this week — so a parent reading down the
           // list saw an out-of-sequence date and no way to tell why.
-          orderBy: [{ session: { date: "desc" } }, { createdAt: "desc" }],
+          orderBy: [{ date: "desc" }, { createdAt: "desc" }],
           include: { session: { select: { classId: true, date: true } } },
           skip: (page - 1) * pageSize,
           take: pageSize,
@@ -416,14 +415,21 @@ export class AttendanceService {
       create: { schoolId, classId, date, takenById: actorId },
     });
     const now = new Date();
+    // `date` is the PARTITION KEY, denormalised from the session. It is taken
+    // from the same `date` the session was just upserted on, so the two can
+    // never disagree — and because it never changes for a session, a row can
+    // never move between partitions.
     const values = records.map(
       (r) => Prisma.sql`(${randomUUID()}::uuid, ${schoolId}::uuid, ${session.id}::uuid, ${r.studentId}::uuid,
-           ${r.status}::"AttendanceStatus", ${r.note ?? null}, ${now}, ${now})`,
+           ${r.status}::"AttendanceStatus", ${r.note ?? null}, ${date}::date, ${now}, ${now})`,
     );
     await tx.$executeRaw`
-      INSERT INTO "attendance_record" ("id", "schoolId", "sessionId", "studentId", "status", "note", "createdAt", "updatedAt")
+      INSERT INTO "attendance_record" ("id", "schoolId", "sessionId", "studentId", "status", "note", "date", "createdAt", "updatedAt")
       VALUES ${Prisma.join(values)}
-      ON CONFLICT ("sessionId", "studentId")
+      -- Postgres forces the partition key into the unique constraint, so the
+      -- conflict target gains "date". Same rule as before: one record per pupil
+      -- per register, since the date is fixed by the session.
+      ON CONFLICT ("sessionId", "studentId", "date")
       DO UPDATE SET "status" = EXCLUDED."status", "note" = EXCLUDED."note", "updatedAt" = EXCLUDED."updatedAt"
     `;
     await this.audit.record(

@@ -300,8 +300,13 @@ const documentSubmissionA = randomUUID();
       `INSERT INTO attendance_session (id,"schoolId","classId",date,"takenById","updatedAt") VALUES ($1,$2,$3,current_date,$4,now())`,
       [attSessionA, A, classA, userA],
     );
+    // `date` is the PARTITION KEY, and it is taken FROM THE SESSION rather than
+    // written independently — the invariant the partitioning rests on. A fixture
+    // that set its own date could put a record in a partition its register does
+    // not belong to, which the database cannot produce.
     await a.query(
-      `INSERT INTO attendance_record (id,"schoolId","sessionId","studentId",status,"updatedAt") VALUES ($1,$2,$3,$4,'PRESENT',now())`,
+      `INSERT INTO attendance_record (id,"schoolId","sessionId","studentId",status,date,"updatedAt")
+       SELECT $1,$2,$3,$4,'PRESENT',s.date,now() FROM attendance_session s WHERE s.id = $3`,
       [attRecordA, A, attSessionA, userA],
     );
     // Notifications: notification (recipient userA) -> a delivery
