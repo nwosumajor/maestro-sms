@@ -279,3 +279,96 @@ describe("every Prisma aggregate over per-row money", () => {
     }
   });
 });
+
+// =============================================================================
+// …and the sums that never reach SQL at all
+// =============================================================================
+// The two halves above cover a `$queryRaw` aggregate and a Prisma `_sum`. The
+// third shape is a `reduce` in Node over rows fetched with `findMany`, and it
+// is the one the settlement-holding read used:
+//
+//   amountMinor: rows.reduce((n, r) => n + r.amountMinor, 0)
+//
+// …over rows whose currency had just been read, one per row, three lines above.
+// Measured live on the demo tenant, which already held both: the platform owed
+// NGN 22,000.00 and USD 1,300.00, and the operator's card said "Holding
+// ₦23,300.00" — kobo added to cents, printed under the platform's own symbol.
+// A note directly BELOW it said the money was in more than one currency, so the
+// warning was right and the number above it was not.
+// =============================================================================
+describe("every Node-side sum over per-row money", () => {
+  /** A reduce that adds a minor-unit field across rows. */
+  const REDUCE = /\.reduce\(\s*\(\s*(\w+)\s*,\s*(\w+)\s*\)\s*=>\s*\1\s*\+\s*\2\.(\w*[Mm]inor)\b/g;
+
+  const found: Array<{ where: string; line: number; scoped: boolean }> = [];
+  for (const file of walk(API_SRC)) {
+    const rel = file.slice(API_SRC.length + 1);
+    const raw = readFileSync(file, "utf8");
+    const src = stripComments(raw);
+    for (const m of src.matchAll(REDUCE)) {
+      // The line in the REAL file. Reporting an offset into the stripped copy
+      // gives a number that does not open anything — a finding you cannot
+      // navigate to is one nobody acts on.
+      const at = raw.indexOf(m[0]);
+      const line = at >= 0 ? raw.slice(0, at).split("\n").length : 0;
+      // Is the thing being reduced narrowed to one currency? Look back over the
+      // enclosing statement run for a currency comparison, a per-currency
+      // group, or a filter naming one.
+      const back = src.slice(Math.max(0, m.index! - 800), m.index!);
+      const scoped =
+        /currency\b[^\n]{0,40}===|===[^\n]{0,40}\bcurrency\b|currency\s*:\s*[a-zA-Z"'`]|\bby\.get\(|byCurrency|groupBy/.test(back);
+      found.push({ where: rel, line, scoped });
+    }
+  }
+
+  it("found the reduces at all — the scan has not silently broken", () => {
+    expect(found.length).toBeGreaterThan(3);
+  });
+
+  /**
+   * COUNTED, not merely named — the rule this file already learned once.
+   *
+   * A bare file-level pass is what let `money-is-not-divided-by-a-hundred`'s
+   * GrowthManager entry quietly cover a `minor / 100` money formatter that
+   * landed in the same file later. A count means a NEW unscoped reduce in an
+   * already-exempted file still fails.
+   *
+   * What makes each of these safe is the same property: the rows being added
+   * all hang off ONE parent that carries the currency — one invoice, one
+   * payslip — so there is no second currency for them to be in.
+   */
+  const ALLOWED_REDUCE: Record<string, { count: number; reason: string }> = {
+    "fees/fees.service.ts": {
+      count: 1,
+      reason: "payments of ONE invoice; a payment inherits its invoice's currency, so there is only one",
+    },
+    "fees/payment-plans.service.ts": {
+      count: 1,
+      reason: "instalment tranches of ONE invoice, checked against that invoice's own total",
+    },
+    "hr/payroll.service.ts": {
+      count: 1,
+      reason: "NHF deduction components within ONE payslip, which is denominated once",
+    },
+  };
+
+  it("adds money only within one currency", () => {
+    const unscoped = found.filter((f) => !f.scoped);
+    const byFile = new Map<string, number>();
+    for (const f of unscoped) byFile.set(f.where, (byFile.get(f.where) ?? 0) + 1);
+    const offenders = unscoped
+      .filter((f) => (byFile.get(f.where) ?? 0) > (ALLOWED_REDUCE[f.where]?.count ?? 0))
+      .map((f) => `${f.where}:${f.line}`);
+    expect(offenders).toEqual([]);
+  });
+
+  it("gives every exemption a reason, and none that is now unused", () => {
+    const unscoped = found.filter((f) => !f.scoped);
+    for (const [file, { count, reason }] of Object.entries(ALLOWED_REDUCE)) {
+      expect(reason.length).toBeGreaterThan(30);
+      // An exemption for something that no longer happens is a hole waiting
+      // for the file to grow a real one back.
+      expect(unscoped.filter((f) => f.where === file)).toHaveLength(count);
+    }
+  });
+});

@@ -31,7 +31,9 @@ export function SettlementHolding({ schoolId, canRelease }: { schoolId: string; 
   const [note, setNote] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
-  const [open, setOpen] = React.useState(false);
+  // Which currency's payout is being recorded — a school can be owed in more
+  // than one, and each is a separate bank transfer with its own reference.
+  const [open, setOpen] = React.useState<string | null>(null);
 
   const load = React.useCallback(async () => {
     const res = await fetch(`/api/sms/operator/tenants/${schoolId}/settlement-holding`, { cache: "no-store" });
@@ -42,13 +44,13 @@ export function SettlementHolding({ schoolId, canRelease }: { schoolId: string; 
     void load();
   }, [load]);
 
-  const release = async () => {
+  const release = async (currency: string) => {
     setBusy(true);
     setMsg(null);
     const res = await fetch(`/api/sms/operator/tenants/${schoolId}/settlement-release`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ reference, note: note || null, currency: data?.currency ?? null }),
+      body: JSON.stringify({ reference, note: note || null, currency }),
     });
     setBusy(false);
     if (!res.ok) {
@@ -59,70 +61,81 @@ export function SettlementHolding({ schoolId, canRelease }: { schoolId: string; 
     setData(next);
     setReference("");
     setNote("");
-    setOpen(false);
+    setOpen(null);
     setMsg("Recorded. The school's balance now shows this as paid.");
   };
 
   if (!data) return null;
-  const owed = data.heldMinor > 0;
+  const owed = data.held.length > 0;
   // Nothing owed and nothing ever paid over: this school has never had money
   // held, so there is nothing to say about it.
   if (!owed && data.releases.length === 0) return null;
 
   return (
     <div className="mt-2 rounded-md border border-border p-2 text-xs">
+      {/* // GOTCHA: this used to print ONE figure and, when the school was owed
+          in two currencies, added them — kobo plus cents under the platform's
+          own symbol — with a note underneath saying the money was in more than
+          one currency. The note was right and the number above it was not.
+          There is no FX rate in this platform, so each currency is its own
+          line and its own bank transfer. */}
       {owed ? (
-        <p className="font-medium text-amber-700 dark:text-amber-500">
-          Holding {money(data.heldMinor, data.currency ?? undefined)} for this school
-          <span className="font-normal text-muted-foreground">
-            {" "}
-            — {data.heldPaymentCount} payment{data.heldPaymentCount === 1 ? "" : "s"} taken before they registered a bank.
-          </span>
-        </p>
+        <div className="space-y-1">
+          {data.held.map((h) => (
+            <div key={h.currency}>
+              <p className="font-medium text-amber-700 dark:text-amber-500">
+                Holding {money(h.amountMinor, h.currency)} for this school
+                <span className="font-normal text-muted-foreground">
+                  {" "}
+                  — {h.paymentCount} payment{h.paymentCount === 1 ? "" : "s"} taken before they registered a bank.
+                </span>
+              </p>
+              {canRelease && (
+                <div className="mt-1">
+                  {open !== h.currency ? (
+                    <Button size="sm" variant="outline" onClick={() => setOpen(h.currency)}>
+                      Record a {h.currency} payout
+                    </Button>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="text-muted-foreground">
+                        Make the bank transfer first. This records that you did — it does not move any money.
+                      </p>
+                      <Input
+                        aria-label={`Bank reference for the ${h.currency} transfer`}
+                        placeholder="Bank reference for the transfer"
+                        value={reference}
+                        onChange={(e) => setReference(e.target.value)}
+                        className="h-8 text-xs"
+                      />
+                      <Input
+                        aria-label={`Note on the ${h.currency} payout`}
+                        placeholder="Note (optional)"
+                        value={note}
+                        onChange={(e) => setNote(e.target.value)}
+                        className="h-8 text-xs"
+                      />
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          disabled={busy || reference.trim().length < 3}
+                          onClick={() => void release(h.currency)}
+                        >
+                          Record {money(h.amountMinor, h.currency)} paid
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => setOpen(null)}>
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
       ) : (
         <p className="text-muted-foreground">Nothing currently held. {data.releases.length} release(s) on record.</p>
-      )}
-
-      {data.currency === null && owed && (
-        <p className="mt-1 text-muted-foreground">
-          Held in more than one currency — release them one at a time from the API until this school is on one currency.
-        </p>
-      )}
-
-      {owed && canRelease && data.currency && (
-        <div className="mt-2">
-          {!open ? (
-            <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
-              Record a payout
-            </Button>
-          ) : (
-            <div className="space-y-2">
-              <p className="text-muted-foreground">
-                Make the bank transfer first. This records that you did — it does not move any money.
-              </p>
-              <Input
-                placeholder="Bank reference for the transfer"
-                value={reference}
-                onChange={(e) => setReference(e.target.value)}
-                className="h-8 text-xs"
-              />
-              <Input
-                placeholder="Note (optional)"
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                className="h-8 text-xs"
-              />
-              <div className="flex gap-2">
-                <Button size="sm" disabled={busy || reference.trim().length < 3} onClick={() => void release()}>
-                  Record {money(data.heldMinor, data.currency ?? undefined)} paid
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          )}
-        </div>
       )}
 
       {data.releases.length > 0 && (

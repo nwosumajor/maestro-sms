@@ -1432,6 +1432,50 @@ damage was.
 Gate: `every-body-is-validated-at-the-boundary.spec.ts`, exemptions named with
 reasons and each required to name a file that still exists.
 
+### Holding ₦23,300 for a school it owed ₦22,000 and $1,300
+`SettlementHoldingDto.held` (`settlement-release.service.ts`, `SettlementHolding`
+on /operator). A parent's card payment made BEFORE a school registered its
+settlement bank lands in the PLATFORM's account, and the operator's card says
+what is owed. It said ONE number: `rows.reduce((n, r) => n + r.amountMinor, 0)`
+over payments whose currency it had read, one per row, three lines above — with
+`currency: null` whenever there was more than one.
+Measured live on the DEMO tenant, which already held both: `heldMinor 2330000,
+currency null`, rendered **"Holding ₦23,300.00"**, where the truth was
+**₦22,000.00 AND $1,300.00**. A payment inherits its INVOICE's currency and this
+platform bills USD through Stripe beside a school's local rail, so a mixed
+holding is ordinary rather than a corner case.
+**THE RELEASE PATH WAS ALREADY RIGHT AND THE READ WAS NOT** — it settles one
+currency at a time, refuses a release that does not say which, and stamps only
+the payments it covers. Only the total added them up. And because `currency`
+came back null, the web hid the release control entirely, so a mixed school's
+money could not be handed over through the product at all: the card said
+"release them one at a time from the API", which is not a thing an operator can
+do. `held` is now a row per currency, each with its own payout button, its own
+bank reference and its own record. Live after: `NGN 2200000 / 3 payments` and
+`USD 130000 / 9 payments`; releasing USD left the naira owed and wrote one USD
+release.
+// GOTCHA, and it is the sharpest part: **the warning was already there and the
+number above it was wrong.** The card printed "Held in more than one currency"
+directly BELOW the added-up total. Somebody saw the case, wrote the note, and
+left the figure.
+// GOTCHA: **the test named the bug and then did not assert it.** The existing
+case reads `it("reports no single currency rather than adding them up")` with
+the comment "30000 kobo and 20000 pesewas are not 50000 of anything" — and
+checked only that the LABEL went null. `heldMinor` was 50000 and nothing looked.
+It asserts the amounts now, and that no total equal to the sum is produced.
+Gate: a THIRD half on `a-money-total-says-what-currency-it-is`. The first two
+cover a `$queryRaw` aggregate and a Prisma `_sum`; this shape never reaches SQL
+at all — a `reduce` in Node over `findMany` rows. Three sites are exempt because
+the rows all hang off ONE parent that carries the currency (payments of an
+invoice, tranches of an invoice, deduction components of a payslip), and the
+exemptions are COUNTED, not merely named — the rule this same file learned when
+a bare file-level pass let a `minor / 100` formatter in later under an unrelated
+entry.
+// GOTCHA in the gate: it first reported line numbers computed against the
+COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
+A finding you cannot navigate to is one nobody acts on.
+
+
 ### A name lookup once per row
 `Promise.all(rows.map((r) => this.toDto(tx, r)))` reads as ordinary mapping code
 and is a query multiplier: the mapper is handed the TRANSACTION, so every row it

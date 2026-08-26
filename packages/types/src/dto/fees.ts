@@ -385,13 +385,35 @@ export interface SettlementReleaseDto {
   releasedAt: Date;
 }
 
+/** What is still owed in ONE currency. */
+export interface SettlementHeldDto {
+  currency: string;
+  amountMinor: number;
+  paymentCount: number;
+}
+
 export interface SettlementHoldingDto {
   schoolId: string;
-  /** Still owed: platform-settled payments not yet covered by a release. */
-  heldMinor: number;
-  heldPaymentCount: number;
-  /** Null when the held payments span more than one currency. */
-  currency: string | null;
+  /**
+   * Still owed, PER CURRENCY: platform-settled payments not yet covered by a
+   * release. Empty when nothing is held.
+   *
+   * // GOTCHA: this used to be a scalar `heldMinor` plus a `currency` that went
+   * NULL when the payments spanned more than one — so the amount was kobo added
+   * to cents and the screen printed it under the platform's own symbol.
+   * Measured live on the demo tenant, which already had both: `heldMinor
+   * 2330000, currency null`, rendered "Holding ₦23,300.00", where the truth was
+   * ₦22,000.00 AND $1,300.00. A payment inherits its INVOICE's currency and
+   * this platform bills USD through Stripe beside a school's local rail, so a
+   * mixed holding is ordinary, not a corner case. The card even warned "held in
+   * more than one currency" directly BELOW the wrong total.
+   *
+   * The release path was already per-currency and correct; only the READ added
+   * them up — and because `currency` was null the release control was hidden,
+   * so a mixed school's money could not be handed over through the product at
+   * all.
+   */
+  held: SettlementHeldDto[];
   /** Most recent first. */
   releases: SettlementReleaseDto[];
 }

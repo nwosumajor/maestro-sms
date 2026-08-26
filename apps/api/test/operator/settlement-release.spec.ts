@@ -85,15 +85,13 @@ describe("what the platform still owes", () => {
   it("is a SUM over undischarged payments, not a stored total", async () => {
     const { service } = makeService({ held: [NGN("p1", 30000), NGN("p2", 20000)] });
     const out = await service.holding(operator, SCHOOL);
-    expect(out.heldMinor).toBe(50000);
-    expect(out.heldPaymentCount).toBe(2);
-    expect(out.currency).toBe("NGN");
+    expect(out.held).toEqual([{ currency: "NGN", amountMinor: 50000, paymentCount: 2 }]);
   });
 
   it("is zero when nothing is held", async () => {
     const { service } = makeService({ held: [] });
     const out = await service.holding(operator, SCHOOL);
-    expect(out).toMatchObject({ heldMinor: 0, heldPaymentCount: 0, currency: null });
+    expect(out.held).toEqual([]);
   });
 
   it("takes each payment's currency from its INVOICE, not the school's today", async () => {
@@ -113,8 +111,7 @@ describe("recording that it has been paid", () => {
     const { service, stamped } = makeService({ held: [NGN("p1", 30000), NGN("p2", 20000)] });
     const out = await service.release(operator, SCHOOL, { reference: "FT2026081600123" });
     expect(stamped[0].ids.sort()).toEqual(["p1", "p2"]);
-    expect(out.heldMinor).toBe(0);
-    expect(out.heldPaymentCount).toBe(0);
+    expect(out.held).toEqual([]);
   });
 
   it("records the amount and count it actually covered", async () => {
@@ -176,11 +173,21 @@ describe("recording that it has been paid", () => {
 describe("a school holding more than one currency", () => {
   const mixed = [NGN("p1", 30000), { id: "p2", amountMinor: 20000, currency: "GHS" }];
 
-  it("reports no single currency rather than adding them up", async () => {
+  it("reports each currency separately rather than adding them up", async () => {
     // 30000 kobo and 20000 pesewas are not 50000 of anything.
+    //
+    // This case existed and asserted only that the LABEL went null — it never
+    // checked the NUMBER, and the number was 50000. The reasoning was written
+    // down in the comment above and the assertion missed it, so the screen went
+    // on printing kobo-plus-pesewas under the platform's own symbol.
     const { service } = makeService({ held: mixed });
     const out = await service.holding(operator, SCHOOL);
-    expect(out.currency).toBeNull();
+    expect(out.held).toEqual([
+      { currency: "GHS", amountMinor: 20000, paymentCount: 1 },
+      { currency: "NGN", amountMinor: 30000, paymentCount: 1 },
+    ]);
+    // The sum that used to be reported is not reported by anything.
+    expect(out.held.some((h) => h.amountMinor === 50000)).toBe(false);
   });
 
   it("refuses a release that does not say which currency", async () => {
@@ -194,7 +201,7 @@ describe("a school holding more than one currency", () => {
     const out = await service.release(operator, SCHOOL, { reference: "FT-1", currency: "ngn" });
     expect(created[0]).toMatchObject({ amountMinor: 30000, currency: "NGN", paymentCount: 1 });
     expect(stamped[0].ids).toEqual(["p1"]);
-    expect(out.heldMinor).toBe(20000); // the GHS payment is still owed
+    expect(out.held).toEqual([{ currency: "GHS", amountMinor: 20000, paymentCount: 1 }]); // still owed
   });
 
   it("refuses a currency nothing is held in", async () => {

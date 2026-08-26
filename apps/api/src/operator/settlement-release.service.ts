@@ -30,7 +30,7 @@
 // =============================================================================
 
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import type { SettlementReleaseDto, SettlementHoldingDto } from "@sms/types";
+import type { SettlementReleaseDto, SettlementHoldingDto, SettlementHeldDto } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -68,9 +68,7 @@ export class SettlementReleaseService {
       }>;
       return {
         schoolId,
-        heldMinor: held.amountMinor,
-        heldPaymentCount: held.count,
-        currency: held.currency,
+        held,
         releases: releases.map((r) => ({
           id: r.id,
           amountMinor: r.amountMinor,
@@ -90,10 +88,7 @@ export class SettlementReleaseService {
    * A SUM over unreleased rows rather than a stored total, so the balance cannot
    * drift from the payments it is made of.
    */
-  private async heldInTx(
-    tx: TenantTx,
-    schoolId: string,
-  ): Promise<{ amountMinor: number; count: number; currency: string | null }> {
+  private async heldInTx(tx: TenantTx, schoolId: string): Promise<SettlementHeldDto[]> {
     // A payment carries no currency of its own — the INVOICE does, per row, so
     // an NGN invoice stays NGN whatever the school later charges in. Read
     // through it rather than assuming the school's current currency, which
@@ -103,15 +98,19 @@ export class SettlementReleaseService {
       select: { id: true, amountMinor: true, invoice: { select: { currency: true } } },
     })) as Array<{ id: string; amountMinor: number; invoice: { currency: string } | null }>;
     const rows = raw.map((r) => ({ id: r.id, amountMinor: r.amountMinor, currency: r.invoice?.currency ?? null }));
-    // Currency is per row on this ledger. A school that ever changed currency
-    // could hold two; the release names ONE, and mixing them would understate or
-    // overstate a transfer, so the caller settles one currency at a time.
-    const currencies = [...new Set(rows.map((r) => r.currency).filter((c): c is string => !!c))];
-    return {
-      amountMinor: rows.reduce((n, r) => n + r.amountMinor, 0),
-      count: rows.length,
-      currency: currencies.length === 1 ? currencies[0] : null,
-    };
+    // Currency is per row on this ledger, so the ANSWER is per currency. It used
+    // to be one scalar with `currency: null` whenever there were two — kobo
+    // added to cents, printed under the platform's own symbol. The release path
+    // already settled one currency at a time and was right; the read was not.
+    const by = new Map<string, { currency: string; amountMinor: number; paymentCount: number }>();
+    for (const r of rows) {
+      if (!r.currency) continue;
+      const e = by.get(r.currency) ?? { currency: r.currency, amountMinor: 0, paymentCount: 0 };
+      e.amountMinor += r.amountMinor;
+      e.paymentCount += 1;
+      by.set(r.currency, e);
+    }
+    return [...by.values()].sort((a, b) => a.currency.localeCompare(b.currency));
   }
 
   /**
