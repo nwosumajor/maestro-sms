@@ -6,6 +6,7 @@ import type { AnalyticsOverviewDto } from "@sms/types";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import type { Principal } from "../integrity/integrity.foundation";
 import { AnalyticsService } from "./analytics.service";
+import { safeFilename } from "../documents/safe-content-type";
 
 // Role-scoped aggregates. No special permission: any authenticated user gets
 // their OWN scope (the service decides school-wide vs family from their roles).
@@ -43,7 +44,7 @@ export class AnalyticsController {
   ) {
     const { csv, filename } = await this.analytics.overviewCsv(p, { termId, from, to });
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
-    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Disposition", `attachment; filename="${safeFilename(filename)}"`);
     res.send(csv);
   }
 }

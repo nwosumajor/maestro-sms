@@ -34,6 +34,7 @@ import { GRADE_COMPONENTS, gradeComponentMax } from "@sms/types";
 import type { GradeBand } from "@sms/types";
 import { SchoolRegionService } from "../foundation/school-region.service";
 import type { TermSubjectRowDto } from "@sms/types";
+import { createPdfDocument } from "../common/pdf-document";
 
 const STAFF_WIDE = new Set(["school_admin", "principal"]);
 
@@ -561,7 +562,7 @@ export class ReportCardService {
     logo?: Buffer | null,
   ): Promise<Buffer> {
     return new Promise((resolve, reject) => {
-      const doc = new PDFDocument({ margin: 50, size: "A4" });
+      const doc = createPdfDocument({ margin: 50, size: "A4" });
       const chunks: Buffer[] = [];
       doc.on("data", (c: Buffer) => chunks.push(c));
       doc.on("end", () => resolve(Buffer.concat(chunks)));

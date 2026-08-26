@@ -8,6 +8,7 @@ import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { ExamService } from "./exam.service";
+import { safeFilename } from "../documents/safe-content-type";
 
 const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
 const ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -224,7 +225,7 @@ export class ExamController {
   async attendanceSheet(@CurrentPrincipal() p: Principal, @Param("id") id: string, @Res() res: Response) {
     const { buffer, filename } = await this.exams.attendanceSheetPdf(p, id);
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Disposition", `attachment; filename="${safeFilename(filename)}"`);
     res.send(buffer);
   }
 

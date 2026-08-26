@@ -20,6 +20,7 @@ import {
   type TenantContext,
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
+import { createPdfDocument } from "../common/pdf-document";
 
 export type LetterType = "EMPLOYMENT" | "CONFIRMATION" | "PROMOTION" | "EXPERIENCE";
 const LETTER_TYPES = new Set<string>(["EMPLOYMENT", "CONFIRMATION", "PROMOTION", "EXPERIENCE"]);
@@ -141,7 +142,7 @@ export class LetterService {
 
   private render(t: LetterType, school: string, ref: string, f: LetterFacts, logo: Buffer | null): Promise<Buffer> {
     return new Promise<Buffer>((resolve, reject) => {
-      const doc = new PDFDocument({ size: "A4", margin: 60 });
+      const doc = createPdfDocument({ size: "A4", margin: 60 });
       const chunks: Buffer[] = [];
       doc.on("data", (c: Buffer) => chunks.push(c));
       doc.on("end", () => resolve(Buffer.concat(chunks)));

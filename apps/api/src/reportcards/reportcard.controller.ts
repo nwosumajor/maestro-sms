@@ -13,6 +13,7 @@ import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { ReportCardService } from "./reportcard.service";
 import { ReportCardRemarkService } from "./report-card-remark.service";
+import { safeFilename } from "../documents/safe-content-type";
 
 const remarkSchema = z.object({ termId: z.string().uuid(), remark: z.string().min(1).max(2000) });
 
@@ -56,7 +57,7 @@ export class ReportCardController {
     const { buffer, filename } = await this.reportcards.generate(p, studentId, termId);
     res.set({
       "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="${filename}"`,
+      "Content-Disposition": `attachment; filename="${safeFilename(filename)}"`,
     });
     return new StreamableFile(buffer);
   }

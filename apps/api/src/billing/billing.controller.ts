@@ -32,6 +32,7 @@ import { BillingService } from "./billing.service";
 import { ReferralService } from "./referral.service";
 import { MessageCreditsService } from "../notifications/message-credits.service";
 import { JobRunsService } from "../maintenance/job-runs.service";
+import { safeFilename } from "../documents/safe-content-type";
 
 const autoRenewSchema = z.object({ enabled: z.boolean() });
 const creditsSchema = z.object({ bundleId: z.string().min(1).max(10) });
@@ -85,7 +86,7 @@ export class BillingController {
   async receipt(@CurrentPrincipal() p: Principal, @Param("id") id: string, @Res() res: Response) {
     const { buffer, filename } = await this.billing.receiptPdf(p, id);
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Disposition", `attachment; filename="${safeFilename(filename)}"`);
     res.send(buffer);
   }
 

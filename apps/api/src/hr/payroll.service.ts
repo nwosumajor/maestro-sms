@@ -36,6 +36,7 @@ import {
 } from "../integrity/integrity.foundation";
 import { SchoolRegionService } from "../foundation/school-region.service";
 import { toMinor } from "../common/money";
+import { createPdfDocument } from "../common/pdf-document";
 
 @Injectable()
 export class PayrollService {
@@ -520,7 +521,7 @@ export class PayrollService {
     // be. The CFA franc and every French locale broke the same way on U+202F.
     const cash = (m: number) => formatMoneyPdf(m, region.currency, region.locale);
     const buffer = await new Promise<Buffer>((resolve, reject) => {
-      const doc = new PDFDocument({ size: "A4", margin: 50 });
+      const doc = createPdfDocument({ size: "A4", margin: 50 });
       const chunks: Buffer[] = [];
       doc.on("data", (c: Buffer) => chunks.push(c));
       doc.on("end", () => resolve(Buffer.concat(chunks)));

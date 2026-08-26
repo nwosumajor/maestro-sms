@@ -9,6 +9,7 @@ import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { PayrollService } from "./payroll.service";
+import { safeFilename } from "../documents/safe-content-type";
 
 const runSchema = z.object({
   periodYear: z.number().int().min(2000).max(2100),
@@ -59,7 +60,7 @@ export class PayrollController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<StreamableFile> {
     const { csv, filename } = await this.payroll.bankExport(p, id);
-    res.set({ "Content-Type": "text/csv", "Content-Disposition": `attachment; filename="${filename}"` });
+    res.set({ "Content-Type": "text/csv", "Content-Disposition": `attachment; filename="${safeFilename(filename)}"` });
     return new StreamableFile(Buffer.from(csv, "utf8"));
   }
 
@@ -73,7 +74,7 @@ export class PayrollController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<StreamableFile> {
     const { buffer, filename } = await this.payroll.payslipPdf(p, id, userId);
-    res.set({ "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${filename}"` });
+    res.set({ "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${safeFilename(filename)}"` });
     return new StreamableFile(buffer);
   }
 
@@ -87,7 +88,7 @@ export class PayrollController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<StreamableFile> {
     const { csv, filename } = await this.payroll.remittanceExport(p, id, q.type);
-    res.set({ "Content-Type": "text/csv", "Content-Disposition": `attachment; filename="${filename}"` });
+    res.set({ "Content-Type": "text/csv", "Content-Disposition": `attachment; filename="${safeFilename(filename)}"` });
     return new StreamableFile(Buffer.from(csv, "utf8"));
   }
 
@@ -107,7 +108,7 @@ export class PayrollController {
   ): Promise<StreamableFile> {
     // selfOnly: only the caller's own slip, only from a FINALIZED run.
     const { buffer, filename } = await this.payroll.payslipPdf(p, runId, p.userId, { selfOnly: true });
-    res.set({ "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${filename}"` });
+    res.set({ "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${safeFilename(filename)}"` });
     return new StreamableFile(buffer);
   }
 }

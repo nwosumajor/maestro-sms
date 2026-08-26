@@ -12,6 +12,7 @@ import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { LetterService } from "./letter.service";
+import { safeFilename } from "../documents/safe-content-type";
 
 const typeSchema = z.object({ type: z.enum(["EMPLOYMENT", "CONFIRMATION", "PROMOTION", "EXPERIENCE"]) });
 
@@ -29,7 +30,7 @@ export class LetterController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<StreamableFile> {
     const { buffer, filename } = await this.letters.generate(p, userId, q.type);
-    res.set({ "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${filename}"` });
+    res.set({ "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${safeFilename(filename)}"` });
     return new StreamableFile(buffer);
   }
 }

@@ -85,7 +85,11 @@ describe("the documents that carry money out of the building", () => {
   ])("%s uses the PDF-safe formatter — %s", (rel) => {
     const src = strip(readFileSync(join(SRC, rel), "utf8"));
     // The PDF builder in each of these must not reach for the symbol form.
-    const at = src.indexOf("new PDFDocument(");
+    // Anchored to the FACTORY, not to `new PDFDocument(` — that literal was
+    // replaced by `createPdfDocument` when the text fold moved to the pdfkit
+    // boundary, and this assertion went red over a change that strengthened the
+    // property it guards. The fixed-text failure mode, again.
+    const at = src.indexOf("createPdfDocument(");
     expect(at).toBeGreaterThan(-1);
     expect(src).toContain("formatMoneyPdf(");
   });

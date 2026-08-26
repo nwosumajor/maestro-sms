@@ -2075,6 +2075,64 @@ snapshot taken immediately after a probe reports the PREVIOUS probe's reads.
 Settle 12-18 s, and divide by the number of requests rather than trusting one.
 
 
+### A child whose name the report card could not print
+Found by RUNNING a path with a name this market actually uses. Renaming a pupil
+to `Ṣadé Adéọlá Ọbi` and asking for their report card returned **HTTP 500,
+"Invalid character in header content"** — Node refuses a byte outside Latin-1 in
+a header value, and `Content-Disposition` is built from the pupil's own name. So
+a child with an ordinary Yoruba or Igbo name **could not have a report card
+generated at all**, in the platform's home market.
+**THE DOCUMENT BODY FAILED DIFFERENTLY, AND WORSE.** pdfkit's built-in fonts are
+WinAnsi — single-byte — and handed a codepoint outside it pdfkit writes that
+codepoint's BYTES into a single-byte string, so the character does not go
+missing: it becomes DIFFERENT LETTERS. Measured against this app's own pdfkit
+(0.19.1): `Ṣadé Adéọlá Ọbi` emitted
+`<1e62 61 64 e9 20 4164 e9 1ecd 6c e1 20 1ecc 6269>` — `Ṣ` (U+1E62) became
+0x1e + 0x62 (`b`), `ọ` (U+1ECD) became 0x1e + 0xcd (`Í`). The card would print
+roughly `badé AdéÍlá Íbi`. Nothing errored, so nothing would ever have reported
+it — on a document that is printed, filed in the Document Vault and emailed to
+guardians.
+FOLD, DO NOT DROP: `Ṣadé` deleted is `ad`; folded to the base letter it is
+`Sadé` — the child's name imperfectly rather than somebody else's name
+confidently. Accents Latin-1 CAN carry (`é`, `ü`, `ñ`) are kept exactly as
+typed, so a French or Spanish name is untouched; `中文名` folds to nothing and
+the filename falls back to `download` rather than emitting `filename=""`.
+The fold lives at the **pdfkit boundary** (`common/pdf-document.ts`,
+`createPdfDocument`), not at the places a name is written — twelve generators
+and hundreds of `doc.text` calls between them, and a rule applied per call site
+is a rule the next generator is written without. `widthOfString`/`heightOfString`
+are wrapped too: they are how text is centred, and measuring the UNFOLDED string
+lays the page out for characters the page does not contain.
+// GOTCHA, and a test caught me getting it wrong: **WinAnsi is NOT Latin-1.**
+CP1252 fills the 0x80–0x9f range Latin-1 leaves as controls with the typographic
+characters — en and em dash, curly quotes, ellipsis, bullet. So a PDF can print
+`A 70–100 excellent` and a HEADER cannot. One shared fold replaced the en dash
+right across the grade key on every report card; `foldToLatin1` (header) and
+`foldForPdf` (WinAnsi) are two functions for two targets. Verified live by the
+BYTE: the grade key carries 0x96, the CP1252 en dash.
+// GOTCHA: the sweep fixed 22 header sites by hand and MISSED the one that runs
+in cloud production — `s3-storage.provider.ts` was a FOURTH hand-rolled copy of
+the rule, stripping control characters and no non-Latin-1 character, feeding a
+filename AWS then signs into the URL. The gate found it, not the sweep. Same
+shape this repo already records for the CSV formula guard that existed 9× under
+4 names.
+// THE REAL FIX IS AN EMBEDDED UNICODE FONT and is deliberately not done: the
+image has no system fonts at all, so it means shipping a TTF and registering it
+in all twelve generators. Until then a name is folded, and this is the record of
+what folding costs.
+Live, before and after, same pupil: **500 "Invalid character in header content"**
+-> **201**, `filename="report-card-sadé-adéolá-obi.pdf"`, and the card printing
+`Student: Sadé Adéolá Obi`.
+Gate: `a-download-name-survives-its-header.spec.ts` — every interpolated
+`Content-Disposition` filename is folded, and no PDF is built outside the
+factory. Mutation-validated three ways (unfold one header, restore one bare
+`new PDFDocument`, break the fold itself), each caught by the assertion written
+for it.
+// GOTCHA: `a-broken-bar-where-the-naira-should-be` anchored on the literal
+`new PDFDocument(` and went red over the change that MOVED the fold to the
+boundary — a change that strengthened the property it guards. Re-anchored to the
+factory. The fixed-text failure mode, again, and again firing on an improvement.
+
 ### A review queue that could only see the page it had just decided
 `subject_selection.list` / `MeetingRequestService.list` and four siblings. The
 shape is one this repo has already recorded twice — for the chargeback banner

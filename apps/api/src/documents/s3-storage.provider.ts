@@ -19,6 +19,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import type { PresignResult, StorageProvider } from "./storage.provider";
+import { safeFilename } from "./safe-content-type";
 
 @Injectable()
 export class S3StorageProvider implements StorageProvider {
@@ -101,7 +102,10 @@ export class S3StorageProvider implements StorageProvider {
     filename?: string;
     inline?: boolean;
   }): Promise<PresignResult> {
-    const safeName = (filename ?? "download").replace(/[\u0000-\u001f\u007f"\\]/g, "").slice(0, 150) || "download";
+    // The FOURTH hand-rolled copy of this rule, and the one that runs in cloud
+    // production — it also strips no non-Latin-1 character, which AWS then signs
+    // into the URL. `safeFilename` is the one definition.
+    const safeName = safeFilename(filename ?? "download");
     const url = await getSignedUrl(
       this.client,
       new GetObjectCommand({

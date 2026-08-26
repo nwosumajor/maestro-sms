@@ -26,6 +26,7 @@ import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { RecruitmentService } from "./recruitment.service";
+import { safeFilename } from "../documents/safe-content-type";
 
 const reqSchema = z.object({
   title: z.string().min(1).max(160),
@@ -74,7 +75,7 @@ export class RecruitmentController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<StreamableFile> {
     const { buffer, filename } = await this.recruit.downloadCv(p, id);
-    res.set({ "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${filename}"` });
+    res.set({ "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${safeFilename(filename)}"` });
     return new StreamableFile(buffer);
   }
 

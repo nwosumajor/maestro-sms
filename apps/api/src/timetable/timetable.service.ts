@@ -47,6 +47,7 @@ import {
 } from "../integrity/integrity.foundation";
 import { generateTimetable, unavailableKey, type Offering, type Slot } from "./auto-timetable";
 import { LessonCoverService } from "./lesson-cover.service";
+import { createPdfDocument } from "../common/pdf-document";
 
 // junior_admin owns timetabling (CLAUDE.md) and holds timetable.write. It could
 // already create periods/rooms/entries (those gate on the permission only), but
@@ -904,7 +905,7 @@ export class TimetableService {
     return new Promise<Buffer>((resolve, reject) => {
       // LANDSCAPE: five weekday columns beside a period column do not fit portrait
       // without shrinking the text past the point of being readable on a wall.
-      const doc = new PDFDocument({ margin: 30, size: "A4", layout: "landscape" });
+      const doc = createPdfDocument({ margin: 30, size: "A4", layout: "landscape" });
       const chunks: Buffer[] = [];
       doc.on("data", (c: Buffer) => chunks.push(c));
       doc.on("end", () => resolve(Buffer.concat(chunks)));

@@ -58,6 +58,7 @@ import {
 import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 import { SchoolRegionService } from "../foundation/school-region.service";
+import { createPdfDocument } from "../common/pdf-document";
 
 // Who may grade ANY class-subject in the school. `principal` was missing while
 // holding `grade.write` — a permission whose rows were all 404. Every comparable
@@ -1121,7 +1122,7 @@ export class TermResultService {
     term: StudentTermReportDto,
   ): Promise<Buffer> {
     return new Promise((resolve, reject) => {
-      const doc = new PDFDocument({ margin: 50, size: "A4" });
+      const doc = createPdfDocument({ margin: 50, size: "A4" });
       const chunks: Buffer[] = [];
       doc.on("data", (c: Buffer) => chunks.push(c));
       doc.on("end", () => resolve(Buffer.concat(chunks)));
@@ -1203,7 +1204,7 @@ export class TermResultService {
 
   private renderSessionReportPdf(report: StudentSessionReportDto): Promise<Buffer> {
     return new Promise((resolve, reject) => {
-      const doc = new PDFDocument({ margin: 50, size: "A4" });
+      const doc = createPdfDocument({ margin: 50, size: "A4" });
       const chunks: Buffer[] = [];
       doc.on("data", (c: Buffer) => chunks.push(c));
       doc.on("end", () => resolve(Buffer.concat(chunks)));

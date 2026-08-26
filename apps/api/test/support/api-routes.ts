@@ -78,6 +78,17 @@ export function walkControllers(dir: string = API_SRC): string[] {
   return out;
 }
 
+/** Every `.ts` source under the API, for gates that walk the whole tree. */
+export function walkSources(dir: string = API_SRC): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir)) {
+    const p = join(dir, entry);
+    if (statSync(p).isDirectory()) out.push(...walkSources(p));
+    else if (entry.endsWith(".ts")) out.push(p);
+  }
+  return out;
+}
+
 /**
  * The prefix of the controller a given offset belongs to — the NEAREST
  * `@Controller` at or above it, not the first in the file.

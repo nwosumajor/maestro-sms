@@ -63,6 +63,7 @@ import { TermResultService } from "../gradebook/term-result.service";
 import { NotificationService } from "../notifications/notification.service";
 import PDFDocument from "pdfkit";
 import { BrandingService } from "../branding/branding.service";
+import { createPdfDocument } from "../common/pdf-document";
 
 /** Grace after the duration elapses before a late save/submit is refused. */
 const SUBMIT_GRACE_MS = 30_000;
@@ -1296,7 +1297,7 @@ export class CbtService {
     logo: Buffer | null,
   ): Promise<Buffer> {
     return new Promise((resolve, reject) => {
-      const doc = new PDFDocument({ size: "A4", margin: 50 });
+      const doc = createPdfDocument({ size: "A4", margin: 50 });
       const chunks: Buffer[] = [];
       doc.on("data", (c: Buffer) => chunks.push(c));
       doc.on("end", () => resolve(Buffer.concat(chunks)));

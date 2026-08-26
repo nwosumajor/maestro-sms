@@ -13,6 +13,7 @@ import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { CbtService } from "./cbt.service";
 import type { Response } from "express";
+import { safeFilename } from "../documents/safe-content-type";
 
 const bankSchema = z.object({
   name: z.string().min(1).max(160),
@@ -228,7 +229,7 @@ export class CbtController {
   async paperPdf(@CurrentPrincipal() p: Principal, @Param("id") id: string, @Res() res: Response) {
     const { buffer, filename } = await this.cbt.examPaperPdf(p, id, false);
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Disposition", `attachment; filename="${safeFilename(filename)}"`);
     res.send(buffer);
   }
 
@@ -248,7 +249,7 @@ export class CbtController {
   async answerKeyPdf(@CurrentPrincipal() p: Principal, @Param("id") id: string, @Res() res: Response) {
     const { buffer, filename } = await this.cbt.examPaperPdf(p, id, true);
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Disposition", `attachment; filename="${safeFilename(filename)}"`);
     res.send(buffer);
   }
 

@@ -20,6 +20,7 @@ import { VirtualAccountsService } from "./virtual-accounts.service";
 import { PaymentPlansService } from "./payment-plans.service";
 import { FeeOpsService } from "./fee-ops.service";
 import { JobRunsService } from "../maintenance/job-runs.service";
+import { safeFilename } from "../documents/safe-content-type";
 
 const minor = z.number().int().min(0);
 const feeItemSchema = z.object({
@@ -191,7 +192,7 @@ export class FeesController {
   async receipt(@CurrentPrincipal() p: Principal, @Param("id") id: string, @Res() res: Response) {
     const { buffer, filename } = await this.feeOps.receiptPdf(p, id);
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Disposition", `attachment; filename="${safeFilename(filename)}"`);
     res.send(buffer);
   }
 
@@ -209,7 +210,7 @@ export class FeesController {
     }
     const { csv, filename } = await this.feeOps.journalCsv(p, from, to);
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
-    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Disposition", `attachment; filename="${safeFilename(filename)}"`);
     res.send(csv);
   }
 

@@ -58,6 +58,7 @@ import { FeesService } from "./fees.service";
 import { currencyDecimals, formatMoney, resolveRegion, schoolToday, toMajor } from "@sms/types";
 import { BrandingService } from "../branding/branding.service";
 import { dateWindow } from "../common/status-filter";
+import { createPdfDocument } from "../common/pdf-document";
 
 export const FEE_OPS_QUEUE = "fee-ops";
 export const LATE_FEE_JOB = "fee-late-fee-sweep";
@@ -669,7 +670,7 @@ export class FeeOpsService {
     // be. The CFA franc and every French locale broke the same way on U+202F.
     const money = (minor: number) => formatMoneyPdf(minor, data.pay.invoice.currency);
     const buffer = await new Promise<Buffer>((resolve, reject) => {
-      const doc = new PDFDocument({ size: "A5", margin: 40 });
+      const doc = createPdfDocument({ size: "A5", margin: 40 });
       const chunks: Buffer[] = [];
       doc.on("data", (c: Buffer) => chunks.push(c));
       doc.on("end", () => resolve(Buffer.concat(chunks)));

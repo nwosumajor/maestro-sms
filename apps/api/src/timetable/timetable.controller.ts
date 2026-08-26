@@ -20,6 +20,7 @@ import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { TimetableService } from "./timetable.service";
 import { LessonCoverService } from "./lesson-cover.service";
+import { safeFilename } from "../documents/safe-content-type";
 
 const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
 const periodSchema = z.object({
@@ -323,7 +324,7 @@ export class TimetableController {
     @Query("roomId") roomId?: string,
   ): Promise<StreamableFile> {
     const { csv, filename } = await this.timetable.exportCsv(p, { classId, teacherId, roomId });
-    res.set({ "Content-Type": "text/csv", "Content-Disposition": `attachment; filename="${filename}"` });
+    res.set({ "Content-Type": "text/csv", "Content-Disposition": `attachment; filename="${safeFilename(filename)}"` });
     return new StreamableFile(Buffer.from(csv, "utf8"));
   }
 
@@ -337,7 +338,7 @@ export class TimetableController {
   ) {
     const { buffer, filename } = await this.timetable.timetablePdf(p, { classId, teacherId });
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Disposition", `attachment; filename="${safeFilename(filename)}"`);
     res.send(buffer);
   }
 }

@@ -15,6 +15,8 @@
  * unrecognised, is served as a byte stream. Nothing is rejected and no existing
  * document breaks: a file still downloads, it just cannot claim to be code.
  */
+
+import { foldToLatin1 } from "@sms/types";
 const INERT_TYPES = new Set([
   "application/pdf",
   "image/png",
@@ -51,9 +53,21 @@ export function safeDownloadType(stored?: string | null): string {
  * matters too, because Node THROWS on an invalid header value — so a document
  * titled with a newline would have made its own download a 500 rather than a
  * download.
+ *
+ * // GOTCHA: SO DOES ANY NON-LATIN-1 CHARACTER, and that is not an edge case in
+ * this market. A `Content-Disposition` filename is built from a pupil's name for
+ * their report card, and Yoruba and Igbo names use letters outside Latin-1 —
+ * `ọ` U+1ECD, `Ṣ` U+1E62, `Ị` U+1ECA. Measured live: renaming a pupil to
+ * "Ṣadé Adéọlá Ọbi" and generating their report card returned **HTTP 500,
+ * "Invalid character in header content"**. Not a mangled document — no document
+ * at all, for a child whose name is ordinary where this platform is sold.
+ *
+ * `foldToLatin1` is the shared rule — the SAME one the PDF body uses, because a
+ * header and a WinAnsi PDF can carry exactly the same characters. Two copies of
+ * one rule would be right once.
  */
 export function safeFilename(title: string): string {
-  const cleaned = title
+  const cleaned = foldToLatin1(title)
     // eslint-disable-next-line no-control-regex -- reason: stripping control characters is the point
     .replace(/[\u0000-\u001f\u007f"\\]/g, "")
     .trim();

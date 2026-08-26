@@ -44,6 +44,7 @@ import { assertStillHere } from "../common/still-here";
 import { lockPerson } from "../common/person-lock";
 import { asDuplicateConflict } from "../common/unique-violation";
 import { dateFilter, dateWindow } from "../common/status-filter";
+import { createPdfDocument } from "../common/pdf-document";
 
 /** How many upcoming exams a personal list will return. A student sits a dozen a
  *  term; a parent of several children a few dozen. Well clear of real use, but it
@@ -1370,7 +1371,7 @@ export class ExamService {
   }): Promise<Buffer> {
     const { default: PDFDocument } = await import("pdfkit");
     return new Promise<Buffer>((resolve, reject) => {
-      const doc = new PDFDocument({ margin: 40, size: "A4" });
+      const doc = createPdfDocument({ margin: 40, size: "A4" });
       const chunks: Buffer[] = [];
       doc.on("data", (c: Buffer) => chunks.push(c));
       doc.on("end", () => resolve(Buffer.concat(chunks)));

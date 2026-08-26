@@ -78,6 +78,7 @@ import { GrowthService } from "./growth.service";
 import { PaymentChannelService } from "../payments/payment-channel.service";
 import { toMinor, toMinorOrNull } from "../common/money";
 import { publicWebUrl } from "../common/public-url";
+import { createPdfDocument } from "../common/pdf-document";
 
 /** Tiers a school can actually buy (all four are paid; STANDARD is the floor). */
 const SELLABLE_TIERS: Plan[] = [PLANS.STANDARD, PLANS.PREMIUM, PLANS.ULTIMATE, PLANS.ENTERPRISE];
@@ -187,7 +188,7 @@ export class BillingService {
     const amount = formatMoneyPdf(toMinor(pay.amountMinor), pay.currency);
 
     const buffer = await new Promise<Buffer>((resolve, reject) => {
-      const doc = new PDFDocument({ size: "A5", margin: 40 });
+      const doc = createPdfDocument({ size: "A5", margin: 40 });
       const chunks: Buffer[] = [];
       doc.on("data", (c: Buffer) => chunks.push(c));
       doc.on("end", () => resolve(Buffer.concat(chunks)));

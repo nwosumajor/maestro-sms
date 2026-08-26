@@ -14,6 +14,7 @@
 
 import PDFDocument from "pdfkit";
 import { drawQrCode } from "./qr";
+import { createPdfDocument } from "../common/pdf-document";
 
 type Doc = InstanceType<typeof PDFDocument>;
 
@@ -209,7 +210,7 @@ const CERT_BODIES: Record<string, string> = {
 
 export function renderCertificate(d: CertificateData, logo?: Buffer | null): Promise<Buffer> {
   return new Promise<Buffer>((resolve, reject) => {
-    const doc = new PDFDocument({ size: "A4", layout: "landscape", margin: 0 });
+    const doc = createPdfDocument({ size: "A4", layout: "landscape", margin: 0 });
     const chunks: Buffer[] = [];
     doc.on("data", (c: Buffer) => chunks.push(c));
     doc.on("end", () => resolve(Buffer.concat(chunks)));
@@ -331,7 +332,7 @@ export function renderIdCard(d: IdCardData, logo?: Buffer | null): Promise<Buffe
   return new Promise<Buffer>((resolve, reject) => {
     const W = 340;
     const H = 215;
-    const doc = new PDFDocument({ size: [W, H], margin: 0 });
+    const doc = createPdfDocument({ size: [W, H], margin: 0 });
     const chunks: Buffer[] = [];
     doc.on("data", (c: Buffer) => chunks.push(c));
     doc.on("end", () => resolve(Buffer.concat(chunks)));

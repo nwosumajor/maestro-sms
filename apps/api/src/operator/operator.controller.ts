@@ -51,6 +51,7 @@ import type { SettlementHoldingDto, CurrencyCoverageDto } from "@sms/types";
 import { OperatorPaymentsService, type PaymentFilters } from "./operator-payments.service";
 import { PaymentChannelService } from "../payments/payment-channel.service";
 import { PaymentHealthService } from "../payments/payment-health.service";
+import { safeFilename } from "../documents/safe-content-type";
 
 /** Delegation input. `days` is bounded here AND in the service — the boundary
  *  rejects nonsense, the service owns the rule. */
@@ -596,7 +597,7 @@ export class OperatorController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<StreamableFile> {
     const { csv, filename } = await this.auditSvc.exportCsv(p, auditFilter(q));
-    res.set({ "Content-Type": "text/csv", "Content-Disposition": `attachment; filename="${filename}"` });
+    res.set({ "Content-Type": "text/csv", "Content-Disposition": `attachment; filename="${safeFilename(filename)}"` });
     return new StreamableFile(Buffer.from(csv, "utf8"));
   }
 
@@ -808,7 +809,7 @@ export class OperatorController {
   ) {
     const { csv, filename } = await this.payments.csv(p, this.paymentFilters(query));
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
-    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Disposition", `attachment; filename="${safeFilename(filename)}"`);
     res.send(csv);
   }
 

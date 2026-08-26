@@ -10,6 +10,7 @@ import { CurrentPrincipal } from "../auth/current-principal.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { LibraryService } from "./library.service";
+import { safeFilename } from "../documents/safe-content-type";
 
 const customFields = z.record(z.string()).optional();
 /** How the money arrived. Optional, defaulting to CASH — the same value every
@@ -70,7 +71,7 @@ export class LibraryController {
   @RequirePermission(LIBRARY_PERMISSIONS.LIBRARY_MANAGE)
   async exportCsv(@CurrentPrincipal() p: Principal, @Res({ passthrough: true }) res: Response): Promise<StreamableFile> {
     const { csv, filename } = await this.library.exportCsv(p);
-    res.set({ "Content-Type": "text/csv", "Content-Disposition": `attachment; filename="${filename}"` });
+    res.set({ "Content-Type": "text/csv", "Content-Disposition": `attachment; filename="${safeFilename(filename)}"` });
     return new StreamableFile(Buffer.from(csv, "utf8"));
   }
 

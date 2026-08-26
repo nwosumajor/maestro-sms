@@ -14,6 +14,7 @@ import type { Principal } from "../integrity/integrity.foundation";
 import { GradebookService } from "./gradebook.service";
 import { TermResultService } from "./term-result.service";
 import { SubjectSelectionService } from "./subject-selection.service";
+import { safeFilename } from "../documents/safe-content-type";
 
 const gradeSchema = z.object({
   score: z.number().nonnegative(),
@@ -248,7 +249,7 @@ export class GradebookController {
     });
     res.set({
       "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="${filename}"`,
+      "Content-Disposition": `attachment; filename="${safeFilename(filename)}"`,
     });
     return new StreamableFile(buffer);
   }
@@ -266,7 +267,7 @@ export class GradebookController {
     const { buffer, filename } = await this.termResults.generateSessionReportPdf(p, { studentId, sessionId });
     res.set({
       "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="${filename}"`,
+      "Content-Disposition": `attachment; filename="${safeFilename(filename)}"`,
     });
     return new StreamableFile(buffer);
   }
