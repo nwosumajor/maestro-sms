@@ -33,7 +33,7 @@ import {
   effectivePaymentApprovalThresholdMinor,
   type InvoiceAdjustmentDto,
   type LateFeeConfigDto,
-  type LateFeeConfigInput, FEE_SOURCES } from "@sms/types";
+  type LateFeeConfigInput, FEE_SOURCES, formatMoneyPdf } from "@sms/types";
 
 /**
  * The library's home-currency default, quoted here so the settings screen can
@@ -663,7 +663,11 @@ export class FeeOpsService {
     // formatMoney, never minor/100: a zero-decimal currency (the CFA franc and
     // ten others in the catalogue) prints at a HUNDREDTH of its value under a
     // naive divide — on the one document every payer keeps.
-    const money = (minor: number) => formatMoney(minor, data.pay.invoice.currency);
+    // formatMoneyPdf, not formatMoney: pdfkit's built-in fonts are WinAnsi, and
+    // the naira sign has no room in it — pdfkit wrote its low byte and every
+    // Nigerian document printed the BROKEN BAR "¦" where the currency should
+    // be. The CFA franc and every French locale broke the same way on U+202F.
+    const money = (minor: number) => formatMoneyPdf(minor, data.pay.invoice.currency);
     const buffer = await new Promise<Buffer>((resolve, reject) => {
       const doc = new PDFDocument({ size: "A5", margin: 40 });
       const chunks: Buffer[] = [];

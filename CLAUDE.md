@@ -1432,6 +1432,43 @@ damage was.
 Gate: `every-body-is-validated-at-the-boundary.spec.ts`, exemptions named with
 reasons and each required to name a file that still exists.
 
+### A broken bar where the naira should be
+`formatMoneyPdf` / `toWinAnsi` (`@sms/types/currency.ts`). Found by reconciling
+a PAYSLIP against the database — the arithmetic was perfect (200,000 + 30,000 =
+230,000 gross; PAYE 21,942.67 + pension 18,400 + co-op 5,000 + loan 20,000 =
+65,342.67; net 164,657.33, matching the stored run to the kobo; pension exactly
+8% of gross). The figures were right and the CURRENCY SYMBOL was not.
+**pdfkit's built-in fonts are WinAnsi — one byte per character — and `₦` is
+U+20A6, for which WinAnsi has no room. pdfkit silently wrote its LOW BYTE:
+0xA6, the BROKEN BAR.** Verified by decoding the content stream of a real
+payslip: bytes `20 A6 32 30 30`. So a Nigerian school handed an employee a
+payslip reading **`¦200,000.00`**, and handed a parent a fee receipt the same
+way. `formatMoney` was doing its job — the symbol simply cannot be drawn.
+**IT IS NOT ONLY THE NAIRA**, and that is what makes it a class rather than a
+glyph. The CFA franc renders `F CFA` with a NARROW NO-BREAK SPACE (U+202F) in
+every locale — eleven of the catalogue's African countries — and a FRENCH locale
+uses U+202F as the GROUPING separator for every currency, so a francophone
+school's documents broke whatever it billed in. Only `$` and `£` were ever safe.
+The fix is the ISO CODE plus ASCII separators — "NGN 200,000.00" — not a font.
+Embedding a Unicode face would carry a font file and its licence into every PDF
+the product prints, to draw one glyph; and the code is less ambiguous anyway on
+a platform that bills in several currencies. The payslip already had to say
+"Figures in NGN" at the bottom, which is what a symbol you cannot trust looks
+like. The LOCALE is still honoured for grouping and decimals, so a French school
+keeps `1 234,50`.
+Live after, all three documents that carry money out of the building: payslip
+`NGN 200,000.00`, fee receipt `Amount received: NGN 20,000.00`, zero occurrences
+of 0xA6.
+// `toWinAnsi` is a WHITELIST, not a blacklist of the characters seen breaking:
+the next locale added to the catalogue must not be able to introduce a new
+broken glyph silently. Anything unrecognised becomes a plain space — wrong-
+looking at worst, never a different character that reads as data.
+// The gate asserts renderability for ten market/locale pairs AND asserts that
+the SYMBOL form is still unrenderable — without that second half it would pass
+for a formatter that changed nothing, and the reason for the change would be
+unrecorded.
+
+
 ### Six definitions of one child's attendance rate
 `attendanceRatePct` (`@sms/types/attendance-rate.ts`). Found by generating a
 report card and reconciling every figure on it against the database — the

@@ -23,8 +23,7 @@ import {
   type PayslipDto,
   formatMoney,
   toMajor,
-  currencyDecimals,
-} from "@sms/types";
+  currencyDecimals, formatMoneyPdf } from "@sms/types";
 import { decryptField, encryptField } from "../foundation/field-crypto";
 import {
   AUDIT_LOG_SERVICE,
@@ -515,7 +514,11 @@ export class PayrollService {
     // which is still scaled correctly. The catch that used to be here was
     // unreachable, and its body divided by 100, so the one arm of this that
     // would have been wrong was the one that could never run.
-    const cash = (m: number) => formatMoney(m, region.currency, region.locale);
+    // formatMoneyPdf, not formatMoney: pdfkit's built-in fonts are WinAnsi, and
+    // the naira sign has no room in it — pdfkit wrote its low byte and every
+    // Nigerian document printed the BROKEN BAR "¦" where the currency should
+    // be. The CFA franc and every French locale broke the same way on U+202F.
+    const cash = (m: number) => formatMoneyPdf(m, region.currency, region.locale);
     const buffer = await new Promise<Buffer>((resolve, reject) => {
       const doc = new PDFDocument({ size: "A4", margin: 50 });
       const chunks: Buffer[] = [];

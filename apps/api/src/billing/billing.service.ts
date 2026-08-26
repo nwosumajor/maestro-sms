@@ -52,8 +52,7 @@ import {
   type PlatformPaymentDto,
   type SubscriptionDto,
   PAYMENT_CHANNELS,
-  pickCardRail,
-} from "@sms/types";
+  pickCardRail, formatMoneyPdf } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -181,7 +180,11 @@ export class BillingService {
     const receiptNo = `SUB-${issuedAt.toISOString().slice(0, 10).replace(/-/g, "")}-${paymentId.slice(0, 8).toUpperCase()}`;
     // formatMoney, never minor/100 — a zero-decimal currency prints at a
     // hundredth of its value under a naive divide, on the one page a payer reads.
-    const amount = formatMoney(toMinor(pay.amountMinor), pay.currency);
+    // formatMoneyPdf, not formatMoney: pdfkit's built-in fonts are WinAnsi, and
+    // the naira sign has no room in it — pdfkit wrote its low byte and every
+    // Nigerian document printed the BROKEN BAR "¦" where the currency should
+    // be. The CFA franc and every French locale broke the same way on U+202F.
+    const amount = formatMoneyPdf(toMinor(pay.amountMinor), pay.currency);
 
     const buffer = await new Promise<Buffer>((resolve, reject) => {
       const doc = new PDFDocument({ size: "A5", margin: 40 });

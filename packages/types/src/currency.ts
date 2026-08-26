@@ -104,6 +104,70 @@ export function formatMoney(amountMinor: number, currency: string, locale = "en"
   }
 }
 
+/**
+ * Money for a PDF — guaranteed to survive the standard-font encoding.
+ *
+ * // GOTCHA: `formatMoney` returns the SYMBOL, and pdfkit's built-in fonts are
+ * WinAnsi — a single byte per character. `₦` is U+20A6, which WinAnsi has no
+ * room for, so pdfkit silently wrote its LOW BYTE: 0xA6, the broken bar. Every
+ * payslip a Nigerian school handed an employee read **`¦200,000.00`**, and so
+ * did every fee receipt a parent was given. Verified by decoding a real
+ * payslip's content stream: bytes `20 A6 32 30 30`.
+ *
+ * It is not only the naira. The CFA franc renders `F CFA` with a NARROW NO-BREAK
+ * SPACE (U+202F) in every locale — eleven of the catalogue's African countries —
+ * and a French locale uses U+202F as the grouping separator for EVERY currency,
+ * so a francophone school's documents broke whatever it billed in.
+ *
+ * The fix is the ISO CODE plus an ASCII-safe separator, not a symbol: "NGN
+ * 200,000.00". Embedding a Unicode font would carry a font file and its licence
+ * into every PDF the product prints, to render one glyph. The code is also less
+ * ambiguous on a platform that bills several currencies — and the payslip
+ * already had to say "Figures in NGN" at the bottom precisely because the symbol
+ * could not be trusted.
+ *
+ * The LOCALE is still honoured for grouping and decimals, so a French school
+ * keeps `1 234,50` rather than being pushed into English conventions.
+ */
+export function formatMoneyPdf(amountMinor: number, currency: string, locale = "en"): string {
+  const major = toMajor(amountMinor, currency);
+  let out: string;
+  try {
+    out = new Intl.NumberFormat(locale, {
+      style: "currency",
+      currency,
+      currencyDisplay: "code",
+    }).format(major);
+  } catch {
+    out = `${currency} ${major.toFixed(currencyDecimals(currency))}`;
+  }
+  return toWinAnsi(out);
+}
+
+/**
+ * Replace anything a WinAnsi font cannot encode.
+ *
+ * Deliberately a WHITELIST of the characters money formatting actually
+ * produces, rather than a blacklist of the ones seen breaking: the next locale
+ * added to the catalogue must not be able to introduce a new broken glyph
+ * silently. Anything unrecognised becomes a plain space, which is wrong-looking
+ * at worst — never a different character that reads as data.
+ */
+export function toWinAnsi(s: string): string {
+  return [...s]
+    .map((ch) => {
+      const cp = ch.codePointAt(0)!;
+      // Printable ASCII, and the Latin-1 range WinAnsi shares with it.
+      if (cp >= 0x20 && cp <= 0x7e) return ch;
+      if (cp >= 0xa0 && cp <= 0xff) return cp === 0xa0 ? " " : ch;
+      // Every space-like separator Intl emits.
+      if (cp === 0x202f || cp === 0x2009 || cp === 0x2007 || cp === 0x2060) return " ";
+      if (cp === 0x2212) return "-"; // MINUS SIGN, which some locales use
+      return " ";
+    })
+    .join("");
+}
+
 // =============================================================================
 // What each CARD rail can actually settle
 // =============================================================================
