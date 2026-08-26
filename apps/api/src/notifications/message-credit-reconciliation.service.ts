@@ -39,6 +39,17 @@ export interface CreditReconcileResult {
   unknownToProvider: number;
   /** Messages the provider sent that we never debited — the platform's own loss. */
   uncharged: number;
+  /**
+   * SEGMENTS the provider billed for the messages it sent in the window.
+   *
+   * A credit is debited per MESSAGE and a provider bills per SEGMENT, so this
+   * against `sent` is the platform's real exposure — one character outside
+   * GSM-7 doubles a message. Undefined when the provider does not report it;
+   * undefined is not zero.
+   */
+  billedSegments?: number;
+  /** Messages the provider sent in the window, for `billedSegments` to be read against. */
+  providerSent?: number;
   /** True when the sweep could not run at all — NOT a clean bill of health. */
   skipped?: "NO_DB" | "NO_PROVIDER";
 }
@@ -134,6 +145,13 @@ export class MessageCreditReconciliationService {
 
     result.unknownToProvider = [...debitedIds].filter((id) => !sentIds.has(id)).length;
     result.uncharged = [...sentIds].filter((id) => !debitedIds.has(id)).length;
+    // Only meaningful if the provider actually told us; a listing with no
+    // segment counts must not report zero, which reads as "cost nothing".
+    const counted = sent.filter((m) => typeof m.segments === "number");
+    if (counted.length > 0) {
+      result.providerSent = sent.length;
+      result.billedSegments = counted.reduce((a, m) => a + (m.segments ?? 0), 0);
+    }
 
     if (result.unknownToProvider > 0 || result.uncharged > 0) {
       await this.alertOwners(client, result, sent.length, debitedIds.size);
@@ -142,7 +160,10 @@ export class MessageCreditReconciliationService {
     this.logger.log(
       `Credit reconciliation (${trigger}): checkpointed=${result.checkpointed} ` +
         `debits=${debits.length} unlinked=${result.unlinked} ` +
-        `unknownToProvider=${result.unknownToProvider} uncharged=${result.uncharged}`,
+        `unknownToProvider=${result.unknownToProvider} uncharged=${result.uncharged}` +
+        (result.billedSegments !== undefined
+          ? ` billedSegments=${result.billedSegments} for ${result.providerSent} messages`
+          : ""),
     );
     return result;
   }

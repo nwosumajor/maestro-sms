@@ -37,6 +37,21 @@ export interface ChannelDeliveryRequest {
  * implementations to NOTIFICATION_CHANNEL_PROVIDER. Same optional-provider shape
  * as the integrity embeddings provider.
  */
+export interface ChannelDeliveryResult {
+  ok: boolean;
+  error?: string;
+  providerRef?: string;
+  /**
+   * Billable segments, for a channel that HAS them.
+   *
+   * One message credit is debited per MESSAGE and a provider bills per SEGMENT,
+   * so this is the gap between what a school paid and what the send cost. Left
+   * undefined by a channel where the question does not arise (email, in-app) —
+   * undefined is not 1, and reporting it as 1 would invent a fact.
+   */
+  segments?: number;
+}
+
 export interface NotificationChannelProvider {
   /**
    * `providerRef` is the PROVIDER's own id for the message (Twilio's SID).
@@ -46,7 +61,7 @@ export interface NotificationChannelProvider {
    * linking the two there is nothing to compare. Twilio returned it all along
    * and the adapter discarded it.
    */
-  deliver(req: ChannelDeliveryRequest): Promise<{ ok: boolean; error?: string; providerRef?: string }>;
+  deliver(req: ChannelDeliveryRequest): Promise<ChannelDeliveryResult>;
   /**
    * The messages the PROVIDER says it accepted since `since`.
    *
@@ -55,7 +70,9 @@ export interface NotificationChannelProvider {
    * reconciled. This is the credit-ledger equivalent of the card rails'
    * `listSuccessfulTransactions`.
    */
-  listRecentMessages?(since: Date): Promise<Array<{ providerRef: string; status?: string }>>;
+  listRecentMessages?(
+    since: Date,
+  ): Promise<Array<{ providerRef: string; status?: string; segments?: number }>>;
 }
 
 /**

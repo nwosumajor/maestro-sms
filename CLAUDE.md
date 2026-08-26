@@ -2075,6 +2075,63 @@ snapshot taken immediately after a probe reports the PREVIOUS probe's reads.
 Settle 12-18 s, and divide by the number of requests rather than trusting one.
 
 
+### One invisible character, and the SMS bill doubles
+An SMS is billed by the SEGMENT: GSM-7 holds 160 characters (153 once
+concatenated), and a message carrying ONE character outside that alphabet is
+re-encoded as UCS-2, which holds 70 (67). The school is debited **one message
+credit per MESSAGE** and the platform pays Twilio **per SEGMENT** — so a single
+character is the difference between charging once for one segment and charging
+once for two. Measured against this repo's own templates filled with realistic
+values: **13 extra segments across 28 templates**, and EVERY fee notification —
+the commonest kind, and the ones about money — came out at two.
+The cause per currency, and it is not the obvious one:
+```
+NGN  "₦25,000.00"       ₦ U+20A6   <- the platform's HOME currency
+GHS  "GH₵25,000.00"     ₵ U+20B5
+KES  "Ksh 25,000.00"    U+00A0     <- an INVISIBLE no-break space
+ZAR  "R 25 000,00"      U+00A0
+XOF  "2 500 000 F CFA"  U+202F, U+00A0
+USD / GBP                          (fine — $ and £ are in GSM-7)
+```
+Five of seven, and the two that are fine are the two this platform is least sold
+in. The KES/ZAR/XOF cases are the sharpest: the character is a SPACE that looks
+exactly like a space, is indistinguishable on any screen, and doubles the bill.
+**`formatMoneyPdf` already existed for precisely this problem in a different
+output** — a target that cannot carry the symbol, so it prints the ISO code.
+SMS is a third target with the same constraint and had nothing. Sibling
+asymmetry again, with the correct one written first.
+`toSmsSafe` (`@sms/types/sms-text.ts`) at the TWILIO CHANNEL BOUNDARY, not at
+the producers — the same placement as the pdfkit fold, and for the same reason.
+TWO PASSES AND THE ORDER MATTERS: invisible separators and typographic
+punctuation are normalised ALWAYS (imperceptible, so there is no reason to pay
+for them); a currency symbol is swapped for its ISO code ONLY IF the message is
+still not GSM-7 after that — a visible change, made only when it buys something.
+// **IT NEVER MANGLES A NAME TO SAVE MONEY.** A pupil called `Ṣadé` is sent as
+`Ṣadé`, in UCS-2, at whatever it costs — and since that message is UCS-2 either
+way, `₦` is left as the nicer form. Folding a child's name into a cheaper
+alphabet is a different act from swapping a symbol for the code it stands for,
+and only one of them is legitimate.
+// GOTCHA: `GH₵` naively becomes `GHGHS `, and a doubled prefix reads as a typo.
+Live through the SHIPPED provider, intercepted at the wire: NGN fee notice
+**UCS-2/2 segments -> GSM-7/1**, KES **UCS-2/2 -> GSM-7/1**, and the Yoruba-named
+one unchanged at UCS-2/2 with the name and the ₦ intact.
+**AND THE COST IS NOW RECORDED.** `num_segments` was dropped by the adapter —
+exactly as the SID once was, and the listing dropped it too, so the question
+"what did the platform pay for what it charged once?" could not be asked from
+our own data. `ChannelDeliveryResult.segments` carries it, the send logs
+encoding + segments, and `CreditReconcileResult.billedSegments` reports it
+against `providerSent`. Undefined when the provider does not say — undefined is
+not zero, and reporting zero reads as "cost nothing".
+// DEBITING N CREDITS PER N SEGMENTS IS DELIBERATELY NOT DONE: that changes what
+a credit MEANS to a school that has already bought bundles, which is the owner's
+pricing decision, not a correctness fix. The exposure is measured and surfaced
+so the decision can be taken on a number.
+Gate/tests: `a-character-that-doubles-the-bill.spec.ts`, mutation-validated two
+ways (stop normalising the spaces; always apply the symbol swap).
+// GOTCHA in my own test, not the code: 80 `€` is EXACTLY 160 septets and 81 is
+two segments — the extension table costs two septets each. I asserted 2 for 80
+and the implementation was right.
+
 ### A child whose name the report card could not print
 Found by RUNNING a path with a name this market actually uses. Renaming a pupil
 to `Ṣadé Adéọlá Ọbi` and asking for their report card returned **HTTP 500,

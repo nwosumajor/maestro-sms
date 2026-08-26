@@ -1,8 +1,9 @@
 import crypto from "node:crypto";
 import { envOrNull } from "../common/env";
 import { Injectable, Logger } from "@nestjs/common";
-import type { ChannelDeliveryRequest, NotificationChannelProvider } from "./notification.constants";
+import type { ChannelDeliveryRequest, ChannelDeliveryResult, NotificationChannelProvider } from "./notification.constants";
 import { fetchWithTimeout, GATEWAY_TIMEOUT_MS } from "../common/http";
+import { smsCost, toSmsSafe } from "@sms/types";
 
 /**
  * Production channel provider with a LIVE SMS gateway (Twilio) for SMS deliveries.
@@ -17,7 +18,7 @@ import { fetchWithTimeout, GATEWAY_TIMEOUT_MS } from "../common/http";
 export class TwilioChannelProvider implements NotificationChannelProvider {
   private readonly logger = new Logger("NotificationChannel");
 
-  async deliver(req: ChannelDeliveryRequest): Promise<{ ok: boolean; error?: string; providerRef?: string }> {
+  async deliver(req: ChannelDeliveryRequest): Promise<ChannelDeliveryResult> {
     if (req.channel !== "SMS" && req.channel !== "WHATSAPP") {
       // EMAIL / PUSH / in-app: log-only here (replace with SES/FCM as needed).
       this.logger.log(`[non-sms] ${req.channel} -> ${req.target}`);
@@ -64,10 +65,20 @@ export class TwilioChannelProvider implements NotificationChannelProvider {
       const auth = Buffer.from(`${sid}:${token}`).toString("base64");
       // Twilio's WhatsApp transport is the same Messages API with a prefix.
       const prefix = req.channel === "WHATSAPP" ? "whatsapp:" : "";
+      // An SMS is billed by the SEGMENT and the school is debited ONE credit
+      // per message, so a single character outside GSM-7 doubles what the
+      // platform pays for a message it charges once for. `toSmsSafe` removes
+      // the characters that cost without saying anything — the invisible
+      // no-break space `Intl` puts in "Ksh 25,000.00", and the currency symbol,
+      // swapped for its own ISO code exactly as `formatMoneyPdf` already does
+      // for a PDF. It never touches a NAME: a pupil called `Ṣadé` is sent as
+      // `Ṣadé` at whatever that costs.
+      const text = toSmsSafe(`${req.title}\n${req.body}`);
+      const cost = smsCost(text);
       const body = new URLSearchParams({
         To: `${prefix}${req.target}`,
         From: `${prefix}${from}`,
-        Body: `${req.title}\n${req.body}`,
+        Body: text,
       });
       // A BOUNDED wait. Node's fetch has no default timeout, so a stalled
       // connection here hung the delivery worker indefinitely — and until this
@@ -95,9 +106,20 @@ export class TwilioChannelProvider implements NotificationChannelProvider {
       // not delivered it. A carrier reject afterwards still spent the school's
       // credit — closing that needs Twilio's status callback, which the SID is
       // also the key for.
-      const json = (await res.json().catch(() => null)) as { sid?: string } | null;
-      this.logger.log(`[sent] ${req.channel} -> ${req.target}${json?.sid ? ` (${json.sid})` : ""}`);
-      return { ok: true, providerRef: json?.sid };
+      const json = (await res.json().catch(() => null)) as
+        | { sid?: string; num_segments?: string }
+        | null;
+      // KEEP THE SEGMENT COUNT TOO. One credit is debited per MESSAGE and the
+      // provider bills per SEGMENT, so this is the difference between what the
+      // school paid and what the send cost — invisible until it is recorded.
+      // Twilio's own count is authoritative; ours is the fallback when the
+      // response does not carry one.
+      const segments = Number(json?.num_segments) || cost.segments;
+      this.logger.log(
+        `[sent] ${req.channel} -> ${req.target}${json?.sid ? ` (${json.sid})` : ""}` +
+          ` ${cost.encoding} ${segments} segment${segments === 1 ? "" : "s"}`,
+      );
+      return { ok: true, providerRef: json?.sid, segments };
     } catch (err) {
       return { ok: false, error: String(err) };
     }
@@ -111,12 +133,14 @@ export class TwilioChannelProvider implements NotificationChannelProvider {
    * silently truncated listing would report every un-listed message as
    * "uncharged" — an alarm about a problem that does not exist.
    */
-  async listRecentMessages(since: Date): Promise<Array<{ providerRef: string; status?: string }>> {
+  async listRecentMessages(
+    since: Date,
+  ): Promise<Array<{ providerRef: string; status?: string; segments?: number }>> {
     const sid = process.env.TWILIO_ACCOUNT_SID;
     const token = process.env.TWILIO_AUTH_TOKEN;
     if (!sid || !token) return [];
     const auth = Buffer.from(`${sid}:${token}`).toString("base64");
-    const out: Array<{ providerRef: string; status?: string }> = [];
+    const out: Array<{ providerRef: string; status?: string; segments?: number }> = [];
     let url: string | null =
       `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json` +
       `?DateSent%3E=${since.toISOString().slice(0, 10)}&PageSize=1000`;
@@ -133,10 +157,19 @@ export class TwilioChannelProvider implements NotificationChannelProvider {
         throw new Error(`twilio listing ${res.status}`);
       }
       const json = (await res.json()) as {
-        messages?: Array<{ sid?: string; status?: string }>;
+        messages?: Array<{ sid?: string; status?: string; num_segments?: string }>;
         next_page_uri?: string | null;
       };
-      for (const m of json.messages ?? []) if (m.sid) out.push({ providerRef: m.sid, status: m.status });
+      // Carry the SEGMENT COUNT, for the same reason the SID is carried: the
+      // question "what did the platform actually pay for what it charged once?"
+      // cannot be asked from a listing that drops the answer.
+      for (const m of json.messages ?? [])
+        if (m.sid)
+          out.push({
+            providerRef: m.sid,
+            status: m.status,
+            segments: Number(m.num_segments) || undefined,
+          });
       url = json.next_page_uri ? `https://api.twilio.com${json.next_page_uri}` : null;
     }
     return out;

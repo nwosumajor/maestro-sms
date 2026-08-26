@@ -9,6 +9,7 @@ export * from "./modules";
 export * from "./notifications";
 export * from "./pagination";
 export * from "./pdf-text";
+export * from "./sms-text";
 export * from "./currency";
 export * from "./payment-channels";
 export * from "./mobile-money";
