@@ -39,6 +39,22 @@ function makeService(over: { rows?: Record<string, unknown[]>; employees?: unkno
   });
   const created: Array<Record<string, unknown>> = [];
   const tx = {
+    // `windowFor` resolves, IN THE TENANT TX, the term or session the archive
+    // names — that is what bounds the sections to it instead of dumping the
+    // whole school under a term's label.
+    term: {
+      findFirst: jest.fn(async ({ where }: { where: { id: string } }) => {
+        const t = ((over as { terms?: Array<Record<string, unknown>> }).terms ?? []).find((x) => x.id === where.id);
+        return t ?? { name: "First Term", startDate: new Date("2025-09-01"), endDate: new Date("2026-01-01") };
+      }),
+    },
+    academicSession: {
+      findFirst: jest.fn().mockResolvedValue({
+        name: "2025/26",
+        startDate: new Date("2025-09-01"),
+        endDate: new Date("2026-07-31"),
+      }),
+    },
     user: table("user"),
     studentProfile: table("studentProfile"),
     enrollment: table("enrollment"),
@@ -87,7 +103,22 @@ function makeService(over: { rows?: Record<string, unknown[]>; employees?: unkno
   };
   const privileged = {
     client: {
-      term: { findMany: jest.fn().mockResolvedValue((over as { terms?: unknown[] }).terms ?? []) },
+      term: {
+        findMany: jest.fn().mockResolvedValue((over as { terms?: unknown[] }).terms ?? []),
+        // `windowFor` resolves the term the archive NAMES, so the sections can
+        // actually be bounded to it. Answers with dates, like a real term.
+        findFirst: jest.fn(async ({ where }: { where: { id: string } }) => {
+          const t = ((over as { terms?: Array<Record<string, unknown>> }).terms ?? []).find((x) => x.id === where.id);
+          return t ?? { name: "First Term", startDate: new Date("2025-09-01"), endDate: new Date("2026-01-01") };
+        }),
+      },
+      academicSession: {
+        findFirst: jest.fn().mockResolvedValue({
+          name: "2025/26",
+          startDate: new Date("2025-09-01"),
+          endDate: new Date("2026-07-31"),
+        }),
+      },
       schoolArchive: { findMany: jest.fn().mockResolvedValue((over as { existing?: unknown[] }).existing ?? []) },
     },
   };
@@ -207,9 +238,15 @@ describe("retrieving one", () => {
 });
 
 describe("the term sweep — the part a school will actually rely on", () => {
+  // A term now needs BOTH dates: the window is what makes the archive about
+  // that term rather than about the whole school, which is what every archive
+  // silently was before.
   const ended = (id: string, school = SCHOOL) => ({
-    id, schoolId: school, name: "First Term", sessionId: "sess-1", endDate: new Date("2026-01-01"),
+    id, schoolId: school, name: "First Term", sessionId: "sess-1",
+    startDate: new Date("2025-09-01"), endDate: new Date("2026-01-01"),
   });
+  /** An ended term nobody gave a start date to. */
+  const undated = (id: string, school = SCHOOL) => ({ ...ended(id, school), startDate: null });
 
   it("archives a term that has ended", async () => {
     const { svc, created } = makeService({ terms: [ended("t-1")] });
@@ -256,5 +293,26 @@ describe("the term sweep — the part a school will actually rely on", () => {
     const { svc } = makeService();
     (svc as unknown as { privileged: { client: unknown } }).privileged = { client: null };
     await expect(svc.archiveEndedTerms("SCHEDULED")).resolves.toMatchObject({ scanned: 0, archived: 0 });
+  });
+});
+
+describe("a term the sweep cannot scope", () => {
+  const ended = (id: string) => ({
+    id, schoolId: SCHOOL, name: "Undated Term", sessionId: "sess-1",
+    startDate: null, endDate: new Date("2026-01-01"),
+  });
+
+  it("is REPORTED, not retried and logged every night", async () => {
+    // An archive labelled with a term and holding the whole school is the
+    // defect this replaces, so it is refused. Counted separately from `skipped`
+    // — a sweep that fails on the same rows for ever teaches its reader to
+    // ignore it, and "0 archived" with no reason is not an answer.
+    const { svc, created } = makeService({ terms: [ended("t-x")] });
+    await expect(svc.archiveEndedTerms("SCHEDULED")).resolves.toMatchObject({
+      scanned: 0,
+      archived: 0,
+      undated: 1,
+    });
+    expect(created).toEqual([]);
   });
 });

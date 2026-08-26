@@ -121,11 +121,16 @@ export class SchoolArchiveService {
     section: string,
     sections: Record<string, number>,
     truncated: string[],
+    window: { from: Date; to: Date } | null,
   ): Promise<Array<Record<string, unknown>>> {
-    const bounds = (await tx.attendanceRecord.aggregate({
-      _min: { date: true },
-      _max: { date: true },
-    })) as { _min: { date: Date | null }; _max: { date: Date | null } };
+    // A scoped archive walks only its own months — which, on a table
+    // partitioned by `date`, means it touches only its own partitions.
+    const bounds = window
+      ? { _min: { date: window.from }, _max: { date: window.to } }
+      : ((await tx.attendanceRecord.aggregate({
+          _min: { date: true },
+          _max: { date: true },
+        })) as { _min: { date: Date | null }; _max: { date: Date | null } });
     const first = bounds._min.date;
     const last = bounds._max.date;
     const rows: Array<Record<string, unknown>> = [];
@@ -138,7 +143,12 @@ export class SchoolArchiveService {
     while (cursor < end) {
       const next = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1));
       const batch = (await tx.attendanceRecord.findMany({
-        where: { date: { gte: cursor, lt: next } },
+        where: {
+          date: {
+            gte: window && window.from > cursor ? window.from : cursor,
+            ...(window && window.to < next ? { lte: window.to } : { lt: next }),
+          },
+        },
         orderBy: { date: "asc" },
         take: SECTION_CAP - rows.length,
       })) as Array<Record<string, unknown>>;
@@ -173,7 +183,7 @@ export class SchoolArchiveService {
     // attendance rows it failed at 5,033 ms with "Transaction already closed",
     // so no school big enough to want an archive could produce one.
     const { bundle, sections } = await this.db.runAsTenantReadOnly(this.ctx(p), async (tx) =>
-      this.assemble(tx, p.schoolId, input.sessionId),
+      this.assemble(tx, p.schoolId, { sessionId: input.sessionId, termId: input.termId }),
       { timeoutMs: ARCHIVE_TIMEOUT_MS },
     );
 
@@ -240,9 +250,66 @@ export class SchoolArchiveService {
   }
 
   /** Everything the institution did, as at now. */
-  private async assemble(tx: TenantTx, schoolId: string, sessionId?: string) {
+  /**
+   * The window an archive covers, resolved from the term or session it names.
+   *
+   * // GOTCHA: `sessionId` was accepted, stored on the row, written into the
+   * manifest — and FILTERED NOTHING. Every archive was a whole-school dump
+   * whatever it was labelled. The tell was sitting in the data: three stored
+   * archives named "Term 1", "Second Term" and "Third Term" measured 1422,
+   * 1422 and 1423 KB — near-identical, because they were the same export three
+   * times.
+   *
+   * Two costs, and the second is worse. The daily sweep archives EVERY ENDED
+   * TERM, so fifteen years is 45 copies of the school's entire history, each
+   * larger than the last — at today's 90 MB and growing, hundreds of gigabytes
+   * of near-duplicate. And a reader opening "Third Term 2026" in ten years got
+   * a document that misrepresented itself: the whole school, including years
+   * either side of the one on the label.
+   */
+  private async windowFor(
+    tx: TenantTx,
+    scope: { sessionId?: string; termId?: string },
+  ): Promise<{ from: Date; to: Date; label: string } | null> {
+    if (scope.termId) {
+      const t = (await tx.term.findFirst({
+        where: { id: scope.termId },
+        select: { name: true, startDate: true, endDate: true },
+      })) as { name: string; startDate: Date | null; endDate: Date | null } | null;
+      if (!t) throw new NotFoundException("Term not found");
+      if (!t.startDate || !t.endDate) {
+        // Refused, not silently widened. An archive that claims to be a term
+        // and holds everything is the defect this replaces.
+        throw new BadRequestException(
+          `Term "${t.name}" has no start or end date, so an archive cannot be scoped to it. Set the dates, or archive without naming a term.`,
+        );
+      }
+      return { from: t.startDate, to: t.endDate, label: t.name };
+    }
+    if (scope.sessionId) {
+      const sess = (await tx.academicSession.findFirst({
+        where: { id: scope.sessionId },
+        select: { name: true, startDate: true, endDate: true },
+      })) as { name: string; startDate: Date | null; endDate: Date | null } | null;
+      if (!sess) throw new NotFoundException("Session not found");
+      if (!sess.startDate || !sess.endDate) {
+        throw new BadRequestException(
+          `Session "${sess.name}" has no start or end date, so an archive cannot be scoped to it. Set the dates, or archive without naming a session.`,
+        );
+      }
+      return { from: sess.startDate, to: sess.endDate, label: sess.name };
+    }
+    // Neither named: a deliberate WHOLE-SCHOOL export, which is what a school
+    // leaving or backing up everything actually wants.
+    return null;
+  }
+
+  private async assemble(tx: TenantTx, schoolId: string, scope: { sessionId?: string; termId?: string }) {
     const sections: Record<string, number> = {};
     const truncated: string[] = [];
+    const window = await this.windowFor(tx, scope);
+    /** Sections bounded by the window; the rest are point-in-time snapshots. */
+    const inWindow = window ? { gte: window.from, lte: window.to } : undefined;
     const take = async <T>(name: string, read: (skip: number, take: number) => Promise<T[]>) => {
       const { rows, truncated: cut } = await this.page(read);
       sections[name] = rows.length;
@@ -261,7 +328,10 @@ export class SchoolArchiveService {
       tx.studentProfile.findMany({ skip, take: n, orderBy: { createdAt: "asc" } }),
     );
     const enrollments = await take("enrollments", (skip, n) =>
-      tx.enrollment.findMany({ skip, take: n, orderBy: { enrolledAt: "asc" } }),
+      tx.enrollment.findMany({
+        where: inWindow ? { enrolledAt: inWindow } : {},
+        skip, take: n, orderBy: { enrolledAt: "asc" },
+      }),
     );
     // ATTENDANCE IS WALKED BY MONTH, not by OFFSET.
     //
@@ -278,18 +348,36 @@ export class SchoolArchiveService {
     // The table is now RANGE-partitioned by month on `date`, so asking for one
     // month prunes to one partition and reads it whole — no sort, no offset,
     // and the cost is O(rows) instead of O(pages x rows).
-    const attendance = await this.byMonth(tx, "attendance", sections, truncated);
+    const attendance = await this.byMonth(tx, "attendance", sections, truncated, window);
+    // Scoped on its OWN columns, not on a date window: a result carries the
+    // term and session it belongs to, so this is exact rather than inferred
+    // from when somebody happened to enter the mark.
     const results = await take("subjectResults", (skip, n) =>
-      tx.subjectResult.findMany({ skip, take: n, orderBy: { gradedAt: "asc" } }),
+      tx.subjectResult.findMany({
+        where: scope.termId ? { termId: scope.termId } : scope.sessionId ? { sessionId: scope.sessionId } : {},
+        skip, take: n, orderBy: { gradedAt: "asc" },
+      }),
     );
     const invoices = await take("invoices", (skip, n) =>
-      tx.invoice.findMany({ include: { lineItems: true, payments: true }, skip, take: n, orderBy: { createdAt: "asc" } }),
+      tx.invoice.findMany({
+        where: inWindow ? { createdAt: inWindow } : {},
+        include: { lineItems: true, payments: true },
+        skip, take: n, orderBy: { createdAt: "asc" },
+      }),
     );
     const workflows = await take("workflowRequests", (skip, n) =>
-      tx.workflowRequest.findMany({ skip, take: n, orderBy: { createdAt: "asc" } }),
+      tx.workflowRequest.findMany({
+        where: inWindow ? { createdAt: inWindow } : {},
+        skip, take: n, orderBy: { createdAt: "asc" },
+      }),
     );
+    // Prunes to the months in the window — audit_log is partitioned on
+    // createdAt, so a term's archive reads a term's partitions.
     const auditLog = await take("auditLog", (skip, n) =>
-      tx.auditLog.findMany({ skip, take: n, orderBy: { createdAt: "asc" } }),
+      tx.auditLog.findMany({
+        where: inWindow ? { createdAt: inWindow } : {},
+        skip, take: n, orderBy: { createdAt: "asc" },
+      }),
     );
 
     // STAFF — employment records with the encrypted fields RESOLVED. See the file
@@ -319,9 +407,31 @@ export class SchoolArchiveService {
       bundle: {
         manifest: {
           schoolId,
-          sessionId: sessionId ?? null,
+          sessionId: scope.sessionId ?? null,
+          termId: scope.termId ?? null,
           producedAt: new Date().toISOString(),
-          formatVersion: 1,
+          formatVersion: 2,
+          /**
+           * WHAT THIS ARCHIVE ACTUALLY COVERS.
+           *
+           * Absent means the WHOLE school — a deliberate full export, which is
+           * what a school leaving or backing everything up wants. Present means
+           * the sections below were bounded to it.
+           */
+          coversFrom: window ? window.from.toISOString().slice(0, 10) : null,
+          coversTo: window ? window.to.toISOString().slice(0, 10) : null,
+          coversLabel: window ? window.label : "whole school",
+          /** Bounded to the window above. */
+          scopedSections: window
+            ? ["enrollments", "attendance", "subjectResults", "invoices", "workflowRequests", "auditLog"]
+            : [],
+          /**
+           * NOT bounded — a point-in-time picture as at `producedAt`, and said
+           * so rather than left to be assumed. A roster and an employment
+           * record have no term: scoping them to one would produce an archive
+           * missing the very people its other sections are about.
+           */
+          snapshotSections: ["students", "studentProfiles", "staff", "payrollRuns"],
           // Named loudly: whoever opens this in ten years must know what is in it
           // before they forward it to anyone.
           contains: "Whole institutional record, INCLUDING staff employment records and decrypted salaries.",
@@ -412,9 +522,11 @@ export class SchoolArchiveService {
    * Runs as SYSTEM, per school, through the ordinary tenant path so RLS still
    * bounds every read.
    */
-  async archiveEndedTerms(trigger: "SCHEDULED" | "MANUAL"): Promise<{ scanned: number; archived: number; skipped: number }> {
+  async archiveEndedTerms(
+    trigger: "SCHEDULED" | "MANUAL",
+  ): Promise<{ scanned: number; archived: number; skipped: number; undated: number }> {
     const client = this.privileged.client;
-    const result = { scanned: 0, archived: 0, skipped: 0 };
+    const result = { scanned: 0, archived: 0, skipped: 0, undated: 0 };
     if (!client) {
       if (trigger === "SCHEDULED") this.logger.log("term archive skipped (no privileged client)");
       return result;
@@ -426,10 +538,23 @@ export class SchoolArchiveService {
     const cutoff = new Date(Date.now() - TERM_ARCHIVE_GRACE_DAYS * 86_400_000);
     const terms = (await client.term.findMany({
       where: { endDate: { not: null, lt: cutoff } },
-      select: { id: true, schoolId: true, name: true, sessionId: true, endDate: true },
+      select: { id: true, schoolId: true, name: true, sessionId: true, endDate: true, startDate: true },
       orderBy: { endDate: "asc" },
       take: 500,
-    })) as Array<{ id: string; schoolId: string; name: string; sessionId: string; endDate: Date }>;
+    })) as Array<{ id: string; schoolId: string; name: string; sessionId: string; endDate: Date; startDate: Date | null }>;
+
+    // A term with no START date cannot be archived AS a term — the window is
+    // what makes the archive about that term rather than about everything.
+    // Counted and reported rather than retried and logged every night: a sweep
+    // that fails on the same rows for ever teaches its reader to ignore it.
+    const undated = terms.filter((t) => !t.startDate);
+    result.undated = undated.length;
+    if (undated.length > 0) {
+      this.logger.warn(
+        `${undated.length} ended term(s) have no start date and were not archived: ` +
+          undated.map((t) => `${t.name} (school=${t.schoolId})`).join(", "),
+      );
+    }
 
     const already = new Set(
       (
@@ -440,7 +565,7 @@ export class SchoolArchiveService {
       ).map((a) => a.termId),
     );
 
-    for (const t of terms) {
+    for (const t of terms.filter((t) => t.startDate)) {
       result.scanned++;
       if (already.has(t.id)) {
         result.skipped++;

@@ -97,3 +97,61 @@ describe("the tenant read wrapper", () => {
     expect(src).toMatch(/maxWait: Math\.min\(opts\.timeoutMs/);
   });
 });
+
+// =============================================================================
+// …and an archive labelled with a term actually contains that term
+// =============================================================================
+// `sessionId` was accepted, stored on the row, written into the manifest — and
+// FILTERED NOTHING. Every archive was a whole-school dump whatever it was
+// labelled. The tell was sitting in the data: three stored archives named
+// "Term 1", "Second Term" and "Third Term" measured 1422, 1422 and 1423 KB.
+//
+// The daily sweep archives EVERY ENDED TERM, so fifteen years is 45 copies of
+// the school's entire history, each larger than the last. And a reader opening
+// "Third Term 2026" in ten years got a document that misrepresented itself.
+// =============================================================================
+describe("what an archive says it covers", () => {
+  const src = read("privacy/archive.service.ts");
+
+  it("resolves a window from the term or session it names", () => {
+    expect(src).toMatch(/private async windowFor\(/);
+    expect(src).toMatch(/const inWindow = window \? \{ gte: window\.from, lte: window\.to \} : undefined/);
+  });
+
+  it("bounds every section that is genuinely time-bound", () => {
+    for (const line of [
+      /enrollment\.findMany\(\{\s*where: inWindow \? \{ enrolledAt: inWindow \}/,
+      /invoice\.findMany\(\{\s*where: inWindow \? \{ createdAt: inWindow \}/,
+      /workflowRequest\.findMany\(\{\s*where: inWindow \? \{ createdAt: inWindow \}/,
+      /auditLog\.findMany\(\{\s*where: inWindow \? \{ createdAt: inWindow \}/,
+    ]) {
+      expect(src).toMatch(line);
+    }
+  });
+
+  it("scopes results on their OWN columns, not on when a mark was typed", () => {
+    // A subject result carries the term and session it belongs to, so this is
+    // exact rather than inferred from a date.
+    expect(src).toMatch(/where: scope\.termId \? \{ termId: scope\.termId \}/);
+  });
+
+  it("DECLARES which sections are bounded and which are snapshots", () => {
+    // The ambiguity the student export bundle's coverage manifest already
+    // removed one level down: a reader cannot otherwise tell whether a roster
+    // is the term's or today's.
+    expect(src).toMatch(/scopedSections/);
+    expect(src).toMatch(/snapshotSections/);
+    expect(src).toMatch(/coversFrom/);
+    expect(src).toMatch(/formatVersion: 2/);
+  });
+
+  it("refuses to label an archive with a term it cannot bound", () => {
+    // Silently widening is exactly the defect being replaced.
+    expect(src).toMatch(/has no start or end date, so an archive cannot be scoped to it/);
+  });
+
+  it("keeps the WHOLE-SCHOOL export when nothing is named", () => {
+    // Which is what a school leaving, or backing everything up, wants.
+    expect(src).toMatch(/Neither named: a deliberate WHOLE-SCHOOL export/);
+  });
+});

@@ -21,7 +21,19 @@ import { JobRunsService } from "../maintenance/job-runs.service";
 const createSchema = z.object({
   /** e.g. "2025/2026" — how a human will look for it in ten years. */
   label: z.string().min(1).max(80),
+  /** Bound the archive to one academic session. Omit BOTH for a whole-school
+   *  export — what a school leaving, or taking a full backup, wants. */
   sessionId: z.string().uuid().optional(),
+  /**
+   * Bound it to one TERM, which is narrower and is what the nightly sweep
+   * uses.
+   *
+   * // GOTCHA: the sweep passed `termId` from the day it was written and the
+   * HTTP schema never accepted it, so it was silently dropped from every
+   * hand-made archive — a term could only ever be archived by the timer, and
+   * asking for one by hand quietly widened to the session.
+   */
+  termId: z.string().uuid().optional(),
 });
 
 @Controller("privacy/archives")

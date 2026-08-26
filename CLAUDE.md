@@ -1432,6 +1432,48 @@ damage was.
 Gate: `every-body-is-validated-at-the-boundary.spec.ts`, exemptions named with
 reasons and each required to name a file that still exists.
 
+### An archive labelled with a term that held every term
+`SchoolArchiveService.windowFor` + the manifest's `scopedSections` /
+`snapshotSections` (format version 2). Found by checking a claim I had just
+made: I told the user the archive was per-session, then noticed the one I had
+produced covered the whole school.
+**`sessionId` was accepted, stored on the row, written into the manifest — and
+FILTERED NOTHING.** Every archive was a whole-school dump whatever it was
+labelled. The tell was already in the data and I had read past it: the three
+stored archives named "Term 1", "Second Term" and "Third Term" measured 1422,
+1422 and 1423 KB — near-identical, because they were the same export three
+times.
+Two costs, and the second is worse. The daily sweep archives EVERY ENDED TERM,
+so fifteen years is **45 copies of the school's entire history, each larger than
+the last** — at today's 90 MB and growing, hundreds of gigabytes of
+near-duplicate for one school. And a reader opening "Third Term 2026" in ten
+years got a document that MISREPRESENTED ITSELF: the whole school, including
+years either side of the one on the label.
+Measured after, same school: whole-school **90.61 MB**, one term **0.92 MB**.
+Scoping a session took enrolments 930 -> 1, invoices 14 -> 2, workflow requests
+2 -> 0 and the audit log 24,549 -> 3,341.
+// WHAT IS SCOPED AND WHAT IS NOT IS NOW DECLARED, because the alternative is
+the ambiguity the student export bundle's `coverage` manifest already removed
+one level down. `scopedSections` are bounded to the window; `snapshotSections`
+(students, profiles, staff, payroll) are a point-in-time picture as at
+`producedAt` and say so — a roster has no term, and scoping it to one would
+produce an archive missing the very people its other sections are about.
+// SUBJECT RESULTS ARE SCOPED ON THEIR OWN COLUMNS, not on a date window: a
+result carries the term and session it belongs to, so it is exact rather than
+inferred from when somebody happened to type the mark.
+// A TERM IT CANNOT BOUND IS REFUSED, never silently widened — that is the
+defect being replaced. The sweep therefore EXCLUDES undated terms and reports
+them as `undated` rather than failing on the same rows every night, which is how
+a log teaches its reader to ignore it.
+// GOTCHA: **the sweep passed `termId` from the day it was written and the HTTP
+schema never accepted it.** So a term could only ever be archived by the timer;
+asking for one by hand quietly widened to the session — which, before this, was
+the whole school anyway, so nothing looked wrong. Verified after: a hand-made
+term archive reports `coversLabel: First Term, 2026-09-07 -> 2026-12-18`.
+// Archiving an already-archived term is a 409, which is right and is what the
+unique key exists for.
+
+
 ### A backup a school can actually take away
 Asked whether the fifteen-year archive means a school can put its record on an
 external drive. Driving it end to end found THREE defects in a row on that one
