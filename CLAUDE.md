@@ -2075,6 +2075,43 @@ snapshot taken immediately after a probe reports the PREVIOUS probe's reads.
 Settle 12-18 s, and divide by the number of requests rather than trusting one.
 
 
+### An archive that named what it held and never what it did not
+`SchoolArchiveService` is the artifact a school takes away for its own retention
+— the answer to "can we keep our record if we leave". Its manifest declares
+`scopedSections`, `snapshotSections`, `truncatedSections` and `sectionCounts`:
+four careful statements about what IS in the file, and **nothing about what is
+not**. Measured live on the demo tenant: ten sections with counts (students 901,
+attendance 173,701, auditLog 24,796 …) and no field naming a single omission.
+Not in it: **medical records, emergency contacts, guardian links, Document Vault
+entries, discipline records, class-teacher remarks and character ratings.** A
+school opening this in ten years cannot tell whether a missing emergency contact
+means the child had none or means the archive never carried them — the exact
+ambiguity the student export bundle's `coverage` manifest was built to remove,
+one level down. That bundle went from "COMPLETE" to 18 sections and 9 excluded
+CATEGORIES each with a reason; the ARCHIVE, the bigger artifact, never got the
+same treatment.
+`excludedSections` now names each with a reason that gives the reader a NEXT
+STEP — "ask the school's data controller", "download them from the Document
+Vault", "a pupil's own are in their NDPR export bundle" — because "not included"
+alone reproduces the ambiguity rather than removing it. Live, read out of the
+real 95 MB file: the manifest carries all five.
+// **THE MEDICAL ONE IS A DECISION, NOT AN OVERSIGHT, AND IT IS NOT MINE TO
+TAKE.** Widening what leaves the building for minors' medical data has Golden
+Rule #5 weight; what is taken here is SAYING SO. And adding the section
+naively would have been worse than omitting it: `medical_record` is
+field-encrypted per tenant, its columns are NOT `Enc`-suffixed, and the
+archive's decryption pass keys on exactly that suffix and runs only over
+`staff` — so the archive would have carried a child's allergies as unreadable
+ciphertext while looking complete.
+// CHECKED WHILE THERE, and clean: `SisService` is the ONLY writer of the four
+medical columns and always through `encryptField`; and the archive's `invoices`
+section DOES include `lineItems` and `payments`, so the financial record is not
+half a ledger.
+// The four existing statements stay — omissions are an ADDITION, not a
+replacement: a reader needs both halves to judge completeness. The gate asserts
+that, and that no exclusion names a section the archive in fact carries, which
+would send a reader away from data they already have.
+
 ### One definition of "paid", and three places that could not express it
 `FeesService.paidMinor` has always stated the rule in its own doc comment: **net
 paid is POSTED payments MINUS POSTED refunds; PENDING_APPROVAL and REJECTED rows

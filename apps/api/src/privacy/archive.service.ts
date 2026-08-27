@@ -71,6 +71,55 @@ export interface ArchiveSummary {
   createdAt: Date;
 }
 
+/**
+ * Categories deliberately NOT carried by a school archive.
+ *
+ * Declared as DATA so the manifest and this list cannot drift, and so adding a
+ * section is visibly a decision: something either moves into the archive or
+ * gains an entry here.
+ *
+ * // THE MEDICAL ONE IS THE LOAD-BEARING DECISION. `medical_record` is
+ * field-encrypted per tenant (Golden Rule #5) and its columns are NOT
+ * `Enc`-suffixed, so the staff decryption pass — which keys on that suffix —
+ * would not have reached them even if the section existed: the archive would
+ * have carried a child's allergies as unreadable ciphertext while looking
+ * complete. Widening what leaves the building for minors' medical data is a
+ * policy decision with Golden Rule #5 weight and is NOT taken here; what is
+ * taken here is saying so.
+ */
+const EXCLUDED_SECTIONS: ReadonlyArray<{ section: string; reason: string }> = [
+  {
+    section: "medicalRecords",
+    reason:
+      "Minors' medical data is field-encrypted per tenant and every read is audited. " +
+      "Ask the school's data controller for a medical extract; a pupil's own record is " +
+      "also in their NDPR export bundle.",
+  },
+  {
+    section: "emergencyContacts",
+    reason: "Contact details for named third parties. Ask the data controller.",
+  },
+  {
+    section: "guardians",
+    reason:
+      "The parent-child links are personal data about the ADULT, not the pupil. " +
+      "A pupil's own guardian links are in their NDPR export bundle.",
+  },
+  {
+    section: "documents",
+    reason:
+      "Report cards, receipts and certificates live in object storage; this file " +
+      "carries no bytes. Download them from the Document Vault.",
+  },
+  {
+    section: "disciplineAndRemarks",
+    reason:
+      "Discipline records, class-teacher remarks and character ratings are OPINION " +
+      "data about a child. Ask the data controller; a pupil's own are in their " +
+      "NDPR export bundle.",
+  },
+];
+
 @Injectable()
 export class SchoolArchiveService {
   private readonly logger = new Logger("SchoolArchive");
@@ -435,6 +484,20 @@ export class SchoolArchiveService {
           // Named loudly: whoever opens this in ten years must know what is in it
           // before they forward it to anyone.
           contains: "Whole institutional record, INCLUDING staff employment records and decrypted salaries.",
+          /**
+           * WHAT IS NOT IN HERE, and why.
+           *
+           * The same ambiguity the student export bundle's `coverage` manifest
+           * exists to remove, one level up: a school opening this in ten years
+           * cannot otherwise tell whether a missing emergency contact means the
+           * child had none or means the archive never carried them. This
+           * artifact is what a school takes away for its own retention, so the
+           * question "is this all of it?" has to be answerable FROM the file.
+           *
+           * Each entry says what to ask for instead — a reader ten years from
+           * now has no other route.
+           */
+          excludedSections: EXCLUDED_SECTIONS,
           // A capped section is stated. An archive that silently holds half a
           // year would be believed to be complete.
           truncatedSections: truncated,
