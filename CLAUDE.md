@@ -4406,11 +4406,16 @@ The forged-token path still gets the vague message — verified live alongside.
   has NO DELETE on those tables; the purge connects via `DATABASE_RETENTION_URL`
   (falls back to `DATABASE_MIGRATE_URL`); unset → retention DISABLED. See
   `apps/api/src/integrity/retention` and `prisma/rls/06_*`.
-- Tests: **`pnpm --filter @sms/api test:db` runs ALL of it.** A bare `jest` runs
-  3,619 tests and SKIPS 28 suites (396 tests, the RLS e2e among them) because
-  every DB-gated spec `describe.skip`s without `TEST_DATABASE_URL`. CI supplies
-  the variables and runs 4,015, so **a green local run says nothing about a
-  quarter of the suite** — CI sat red for three days (0 of 71 runs after 17 Aug
+- Tests: **`pnpm --filter @sms/api test:db` runs ALL of it.** A bare `jest`
+  SKIPS every DB-gated suite (the RLS e2e among them) because each
+  `describe.skip`s without `TEST_DATABASE_URL`, so **a green local run says
+  nothing about a quarter of the suite**. It now SAYS SO: `a-green-run-that-
+  skipped-a-quarter-of-itself.spec.ts` prints the count and the command on every
+  bare invocation, and DERIVES the count rather than restating it — the figures
+  that used to be written here ("3,619 tests, 28 suites, 396 tests, CI runs
+  4,015") had all rotted by the time I read them, which is what a number typed
+  into prose does. As measured today: bare runs 4,433 and skips 427 across 33
+  gated suites; `test:db` runs 4,858 in 460 suites, all passing — CI sat red for three days (0 of 71 runs after 17 Aug
   2026) on three of those tests and no local run could have shown it. The script
   reads `infrastructure/.env` and points at the `sms-test-pg` container on 5434.
   It needs FOUR variables, not two, and each was found by hitting it: the raw-pool
