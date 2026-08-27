@@ -2075,6 +2075,38 @@ snapshot taken immediately after a probe reports the PREVIOUS probe's reads.
 Settle 12-18 s, and divide by the number of requests rather than trusting one.
 
 
+### The operator console rendered a school's money in the platform's naira
+Finishing the sweep one entry up rather than stopping at the first find. `money()`
+in the web defaults to `PLATFORM_REGION.currency`, and on the operator's
+CROSS-TENANT views two figures were rendered with no currency at all:
+```
+money(s.outstandingMinor)        seat arrears — in the BILLING currency
+money(s.admissionFormFeeMinor)   the school's OWN fee currency
+```
+The subscription price beside them passes one (`money(s.priceMinor, s.currency)`)
+and so does every payment row (`money(pmt.amountMinor, pmt.currency)`) — **the
+same page got it right twice and wrong twice.**
+// THE TWO ARE NOT THE SAME CURRENCY, which is what makes this more than a
+missing argument: a school pays the PLATFORM in one and bills its FAMILIES in
+another — this file already says "a Ghanaian school can be billed in USD". The
+DTO's existing `currency` is the SUBSCRIPTION's, so reaching for it to render the
+admission fee would have been a second wrong answer that looked like a fix.
+`outstandingCurrency` and `feeCurrency` are separate fields for that reason.
+Live on exactly that school — billed USD, charging families GHS:
+`admissionFormFeeMinor 500000 feeCurrency "GHS"` -> **GH₵5,000.00** (was
+₦5,000.00) and `outstandingMinor 125000 outstandingCurrency "USD"` -> **$1,250.00**
+(was ₦1,250.00).
+// Resolved through `resolveRegion`, never a hard-coded fallback, so a school
+predating the region model keeps the platform's home currency — what it has
+always billed in.
+// GOTCHA: the DTO's own comment documented the units as "(kobo)". A field
+comment naming a currency is the same rot as a count typed into prose — it was
+true when written and became a claim nobody rechecked.
+Gate: `school-money-says-which-money.spec.ts` refuses a bare `money(s.*Minor)` on
+either operator page, and asserts the service SELECTS both currencies — a DTO
+field left undefined falls straight back to the platform default, which is the
+same bug silently.
+
 ### A NGN 350 library fine billed as USD 350.00
 Found by SWEEPING the class rather than waiting to trip over it again: every
 `*Minor` column on a table with no `currency` of its own — nineteen of them.

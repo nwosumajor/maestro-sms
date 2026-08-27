@@ -23,6 +23,7 @@ import {
   type SchoolDirectoryPageDto,
   type SchoolDirectoryRowDto,
   type SchoolProfileDto,
+  resolveRegion,
 } from "@sms/types";
 import {
   TENANT_DATABASE,
@@ -56,6 +57,10 @@ const PROFILE_SCHOOL_SELECT = {
   ownerName: true,
   ownerPhone: true,
   address: true,
+  // The SCHOOL's own currency — what it bills FAMILIES in, which is not what it
+  // pays the platform in. Both the directory row and the profile render money
+  // figures denominated in it.
+  currency: true,
 } as const;
 
 @Injectable()
@@ -173,6 +178,7 @@ export class OperatorDirectoryService {
       : null;
     const ent = await this.entitlements.resolve(schoolId);
 
+    const schoolCurrency = resolveRegion(school as { currency?: string | null }).currency;
     return {
       ...row,
       admins: detail.contacts.admins,
@@ -184,6 +190,11 @@ export class OperatorDirectoryService {
       seats: detail.sub?.seats ?? null,
       priceMinor: toMinorOrNull(detail.sub?.priceMinor),
       currency: detail.sub?.currency ?? null,
+      // The arrears are metered in the currency the school is BILLED in; the
+      // admission-form fee is in the school's OWN. Rendering either without
+      // saying which put both under the platform's naira sign.
+      outstandingCurrency: detail.sub?.currency ?? schoolCurrency,
+      feeCurrency: schoolCurrency,
       graceDays: detail.sub?.graceDays ?? null,
       autoRenew: detail.sub?.autoRenew ?? false,
       cardLast4: detail.sub?.cardLast4 ?? null,
@@ -208,7 +219,9 @@ export class OperatorDirectoryService {
       const head = await headcountInTenant(tx, s.id);
       const sub = await tx.schoolSubscription.findFirst({
         where: { schoolId: s.id },
-        select: { plan: true, status: true, currentPeriodEnd: true, seatArrearsMinor: true },
+        // `currency` comes along because the ROW renders `seatArrearsMinor`, and
+        // arrears are metered in the currency the school is billed in.
+        select: { plan: true, status: true, currentPeriodEnd: true, seatArrearsMinor: true, currency: true },
       });
       const lastPaid = await tx.platformSubscriptionPayment.findFirst({
         where: { schoolId: s.id, status: "PAID" },
@@ -233,6 +246,9 @@ export class OperatorDirectoryService {
       currentPeriodEnd: e.sub?.currentPeriodEnd ?? null,
       lastPaymentAt: e.lastPaid?.paidAt ?? e.lastPaid?.createdAt ?? null,
       outstandingMinor: toMinor(e.sub?.seatArrearsMinor),
+      // Arrears are metered in the BILLING currency; the row rendered them with
+      // none, so `money()` fell back to the platform's naira for every school.
+      outstandingCurrency: e.sub?.currency ?? resolveRegion(s as { currency?: string | null }).currency,
       students: e.head.students,
       staff: e.head.staff,
       parents: e.head.parents,

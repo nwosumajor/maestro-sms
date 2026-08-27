@@ -291,9 +291,14 @@ export interface SchoolDirectoryRowDto {
   currentPeriodEnd: Date | null;
   /** Most recent PAID platform-subscription payment (null = never paid). */
   lastPaymentAt: Date | null;
-  /** Outstanding metered seat arrears (kobo) — usage above the billed seat
-   *  count, collected at next checkout/renewal. */
+  /** Outstanding metered seat arrears — usage above the billed seat count,
+   *  collected at next checkout/renewal. In {@link outstandingCurrency}, which is
+   *  the currency the school is BILLED in, not the platform's. */
   outstandingMinor: number;
+  /** The currency `outstandingMinor` is in. The operator console rendered it
+   *  with no currency at all, so `money()` fell back to the platform's naira and
+   *  a school billed in USD had its arrears shown under a naira sign. */
+  outstandingCurrency: string;
   /** Pupils holding the student ROLE — the same definition as the billing seat
    *  count, so the two reconcile. */
   students: number;
@@ -346,6 +351,14 @@ export interface SchoolProfileDto extends SchoolDirectoryRowDto {
   settlementBankName: string | null;
   settlementAccountLast4: string | null;
   admissionFormFeeMinor: number;
+  /** The SCHOOL's own fee currency — what it bills FAMILIES in.
+   *
+   * Deliberately not the `currency` field above, which is what the school pays
+   * the PLATFORM in: a Ghanaian school can be billed in USD and charge its
+   * families in cedis, and this file already says so. Without it the admission
+   * fee rendered in the platform's naira.
+   */
+  feeCurrency: string;
   /** Referrer school name when this school arrived via a referral code. */
   referredBy: string | null;
   /** Recent platform-subscription payments, newest first. */

@@ -151,7 +151,7 @@ export default async function OperatorSchoolProfilePage({ params }: { params: { 
               </Field>
               <Field label="Outstanding seat arrears">
                 {s.outstandingMinor > 0 ? (
-                  <span className="font-medium text-destructive">{money(s.outstandingMinor)}</span>
+                  <span className="font-medium text-destructive">{money(s.outstandingMinor, s.outstandingCurrency)}</span>
                 ) : (
                   "none"
                 )}
@@ -193,7 +193,7 @@ export default async function OperatorSchoolProfilePage({ params }: { params: { 
                   : "Not configured"}
               </Field>
               <Field label="Admission-form fee">
-                {s.admissionFormFeeMinor > 0 ? money(s.admissionFormFeeMinor) : "Free"}
+                {s.admissionFormFeeMinor > 0 ? money(s.admissionFormFeeMinor, s.feeCurrency) : "Free"}
               </Field>
             </CardContent>
           </Card>

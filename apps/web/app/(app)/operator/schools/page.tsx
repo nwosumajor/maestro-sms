@@ -130,7 +130,7 @@ export default async function OperatorSchoolsPage({
                     </td>
                     <td className="tnum px-4 py-3 text-right">
                       {s.outstandingMinor > 0 ? (
-                        <span className="font-medium text-destructive">{money(s.outstandingMinor)}</span>
+                        <span className="font-medium text-destructive">{money(s.outstandingMinor, s.outstandingCurrency)}</span>
                       ) : (
                         <span className="text-muted-foreground">—</span>
                       )}
