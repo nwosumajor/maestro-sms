@@ -137,11 +137,39 @@ export class LeaveService implements OnModuleInit {
     });
     if (!type) throw new NotFoundException("Leave type not found");
 
+    // WHAT THE APPROVER WILL ACTUALLY SEE.
+    //
+    // The workflow inbox renders ONE field from the payload — `summary`, a
+    // string a service wrote — and never the raw payload, deliberately, because
+    // payloads carry ids and a future type could put anything in there. Nothing
+    // here wrote one, so a three-stage chain (head -> HR manager -> principal)
+    // was asked to approve a request titled "Leave: Annual" and nothing else:
+    // not the dates, not how many days, not whether the person has them.
+    //
+    // Neither the raise nor the finalized hook checks the balance — the control
+    // IS the human — so the human has to be able to see it.
+    const year = new Date(input.startDate).getUTCFullYear();
+    const balance = await this.db.runAsTenantReadOnly(this.ctx(p), (tx) =>
+      tx.leaveBalance.findFirst({
+        where: { userId: p.userId, leaveTypeId: input.leaveTypeId, year },
+        select: { usedDays: true, entitledDays: true },
+      }),
+    );
+    const used = balance?.usedDays ?? 0;
+    const entitled = balance?.entitledDays ?? type.daysPerYear ?? 0;
+    const after = used + input.days;
+    const summary =
+      `${input.days} day${input.days === 1 ? "" : "s"} · ${input.startDate.slice(0, 10)} → ${input.endDate.slice(0, 10)} · ` +
+      `${used} of ${entitled} used this year, ${after} if approved` +
+      // Named rather than left for the approver to work out, because it is the
+      // one fact that should change a decision.
+      (entitled > 0 && after > entitled ? ` — OVER their ${entitled}-day entitlement` : "");
+
     // 1) staged workflow request (head → HR → principal), 2) the leave row, 3) submit.
     const wf = await this.workflow.createRequest(p, {
       type: "LEAVE",
       title: `Leave: ${type.name}`,
-      payload: { leaveTypeId: input.leaveTypeId, startDate: input.startDate, endDate: input.endDate, days: input.days, reason: input.reason ?? null },
+      payload: { leaveTypeId: input.leaveTypeId, startDate: input.startDate, endDate: input.endDate, days: input.days, reason: input.reason ?? null, summary },
       stages: STAFF_REQUEST_CHAIN,
     });
     const created = await this.db.runAsTenant(this.ctx(p), async (tx) => {

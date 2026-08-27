@@ -2075,6 +2075,42 @@ snapshot taken immediately after a probe reports the PREVIOUS probe's reads.
 Settle 12-18 s, and divide by the number of requests rather than trusting one.
 
 
+### A three-stage chain approving "Leave: Annual" and nothing else
+The workflow inbox renders ONE field from a request's payload — `summary`, a
+string a SERVICE wrote — and never the raw payload, deliberately: payloads carry
+ids and a future type could put anything in there. Sound rule; only ONE of the
+nine request-producing services ever wrote one.
+`requestLeave` did not. So head teacher -> HR manager -> principal were each
+asked to approve a request titled **"Leave: Annual"**, with no dates, no day
+count, and no way to tell whether the person had the days. The web renders
+`w.summary` and nothing else, and the approvals page fetches nothing further.
+**AND NOTHING ELSE CHECKS.** `requestLeave` validates days > 0, the date order,
+the attachment and that the type exists — never the balance — and
+`applyFinalizedLeave` adds `lr.days` to `usedDays` with no check either. So a
+30-day request against a 20-day entitlement is accepted, approved and applied,
+and `usedDays` simply passes `entitledDays`. The control IS the human, which
+means the human has to be able to see it.
+Live, before: `Leave: Annual`. After:
+`30 days · 2026-11-02 → 2026-12-11 · 4 of 20 used this year, 34 if approved
+— OVER their 20-day entitlement`.
+// THE OVER-ENTITLEMENT IS NAMED, not left as two numbers to compare. It is the
+one fact that should change a decision, and an approver reading a queue should
+not have to do arithmetic to find it. Silent when the school has set no
+entitlement, because "OVER their 0-day entitlement" is noise, not a warning.
+// NOT TURNED INTO A REFUSAL. Leave beyond entitlement is legitimate — unpaid
+leave, compassionate leave, a school that tracks entitlement loosely — and a
+three-stage chain of humans is the designed control. What was missing was the
+information, not the gate.
+// THE OTHER SEVEN PRODUCERS STILL WRITE NO SUMMARY, and that is recorded rather
+than half-fixed: the fee runs at least carry scope and due date in the TITLE
+(`Hostel fee run (all in scope) due 2026-11-30`), and a student exit carries the
+pupil's name — thinner than they should be, but not blank the way leave was.
+Anything approving MONEY deserves the same treatment as this.
+// GOTCHA: the existing `leave.service.spec` stubbed `db` with `runAsTenant`
+only, and the balance read is `runAsTenantReadOnly` — a shape the real
+`TenantDatabase` always has. Same fixture-modelling trap as the notification and
+library stubs: the stub described something the system cannot produce.
+
 ### The term lock was checked when the amendment was raised, not when it applied
 A register older than `STALE_REGISTER_DAYS` cannot be corrected by a plain
 teacher directly: it raises an `ATTENDANCE_AMENDMENT` that a DIFFERENT senior

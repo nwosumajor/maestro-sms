@@ -38,7 +38,12 @@ function makeService(over: {
     user: { findMany: jest.fn().mockResolvedValue([]) },
     document: { findFirst: jest.fn().mockResolvedValue(over.document ?? null) },
   } as unknown as TenantTx;
-  const db = { runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx) };
+  // Both halves, as the real TenantDatabase has: `requestLeave` reads the
+  // leave balance read-only to build the summary an APPROVER sees.
+  const db = {
+    runAsTenant: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
+    runAsTenantReadOnly: <T>(_c: TenantContext, fn: (t: TenantTx) => Promise<T>) => fn(tx),
+  };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const workflow = { createRequest: jest.fn().mockResolvedValue({ id: "wf1" }), submit: jest.fn().mockResolvedValue({}) };
   let captured: ((tx: TenantTx, req: FinalizedRequest) => Promise<void>) | undefined;
