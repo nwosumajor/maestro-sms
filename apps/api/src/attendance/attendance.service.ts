@@ -26,7 +26,7 @@ import {
   type TenantDatabase,
   type TenantTx,
 } from "../integrity/integrity.foundation";
-import { currentTermStartInTx, holidayOn } from "./register-window";
+import { currentTermStartInTx, holidayOn, registerClosedReason } from "./register-window";
 import { NotificationService } from "../notifications/notification.service";
 import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
@@ -99,15 +99,30 @@ export class AttendanceService {
       // report card for it has already been printed and filed in the vault, and
       // `attendance_term_rollup` has already been computed — neither follows a
       // register that moves afterwards.
-      const lockBefore = await this.currentTermStart(tx, req.schoolId);
-      if (lockBefore && date < lockBefore) {
+      // THE HOLIDAY IS RE-ASKED FOR THE SAME REASON, and was not.
+      //
+      // Both rules are checked when the amendment is RAISED and on the direct
+      // write path; only the term lock was re-checked here. A school can declare
+      // a holiday — a closure for weather, a public holiday announced late —
+      // covering a date whose amendment is already pending, and approving it
+      // then wrote a register for a day the school itself records as closed.
+      // Same argument, same window: approval happens LATER than the check.
+      const today = await this.region.todayInTx(tx, req.schoolId);
+      const closed = await registerClosedReason(tx, date, today);
+      if (closed) {
         // THROWN, not skipped. The hook runs in the SAME transaction as the
         // transition, so this rolls the approval back and tells the approver
         // why — applying nothing while recording APPROVED would leave them
         // believing a register had been corrected.
+        //
+        // Each reason says what CHANGED while the request was waiting, not the
+        // wording the raise path uses: the approver did nothing wrong and needs
+        // to know why an approval they just gave did not take effect.
         throw new ConflictException(
-          "That term closed while this amendment was awaiting approval, and past-term registers are read-only. " +
-            "The correction was not applied.",
+          closed.kind === "TERM_CLOSED"
+            ? "That term closed while this amendment was awaiting approval, and past-term registers are read-only. " +
+              "The correction was not applied."
+            : `${closed.reason} That was declared while this amendment was awaiting approval, so the correction was not applied.`,
         );
       }
       await this.applyRegister(tx, req.schoolId, req.initiatorId, pl.classId, date, pl.records, {

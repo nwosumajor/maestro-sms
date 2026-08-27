@@ -2665,6 +2665,25 @@ nothing while recording APPROVED is the silent-success shape this repo keeps
 finding — the approver would believe a register had been corrected.
 // FAILS OPEN when `currentTermStart` returns null, matching the direct-write
 path: unconfigured terms must not make every correction impossible.
+// **AND THE SIBLING RULE WAS STILL MISSING, FOUND BY RE-READING THIS ENTRY.**
+The raise path and the direct-write path each ask TWO questions on adjacent
+lines — is this a declared HOLIDAY, and is the date inside the current TERM —
+and this fix re-asked only the second at approval. A school can declare a
+closure (weather, a strike, a public holiday announced late) covering a date
+whose amendment is already pending, and approving it then wrote a register for a
+day the school itself records as closed. Same argument, same window, one rule
+short. Both now go through the one `registerClosedReason` that the ID-card scan
+desk also calls, so there is a single definition of "may a register be written
+for this day" rather than three.
+// THE REFUSAL SAYS WHAT CHANGED WHILE THE REQUEST WAITED, rather than reusing
+the raise path's wording: the approver did nothing wrong, and needs to know why
+an approval they have just given did not take effect.
+// COVERAGE, stated exactly: the test drives the REAL reactor (constructed for
+real, capturing the callback) and is mutation-validated by restoring the
+term-lock-only check, which fails precisely the two holiday cases. It is NOT
+driven live — the demo school is between terms today, so every past date is
+already term-locked and no amendment can be raised at all. The helper it calls
+IS live-proven, on the scan desk, in the same session.
 // CHECKED AND SOUND in the same pass: a workflow request's PAYLOAD is immutable
 once raised — there is no PUT or PATCH on the controller and nothing updates
 `payload` — so what a second person approves is what the first person submitted.

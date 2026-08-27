@@ -64,7 +64,43 @@ describe("a term that closed while the amendment waited", () => {
   });
 });
 
-function reactorWith(opts: { currentTermStartsOn: string | null }) {
+describe("a holiday declared while the amendment waited", () => {
+  // THE SIBLING RULE, AND IT WAS THE ONE STILL MISSING. Both the holiday and the
+  // term lock are checked when an amendment is RAISED and on the direct write
+  // path; only the term lock was re-checked at APPROVAL. A school can declare a
+  // closure — weather, a strike, a public holiday announced late — covering a
+  // date whose amendment is already pending, and approving it then wrote a
+  // register for a day the school itself records as closed.
+  it("refuses to apply once that day is a declared holiday", async () => {
+    const { run, applied } = reactorWith({
+      currentTermStartsOn: null,
+      holidayNamed: { name: "Emergency closure" },
+    });
+    await expect(run()).rejects.toBeInstanceOf(ConflictException);
+    expect(applied).toHaveLength(0);
+  });
+
+  it("names the holiday and says it was declared while the request waited", async () => {
+    // The approver did nothing wrong and needs to know why an approval they just
+    // gave did not take effect — so the wording differs from the raise path's.
+    const { run } = reactorWith({
+      currentTermStartsOn: null,
+      holidayNamed: { name: "Emergency closure" },
+    });
+    await expect(run()).rejects.toThrow(/Emergency closure/);
+    await expect(run()).rejects.toThrow(/while this amendment was awaiting approval/);
+  });
+
+  it("still applies on an ordinary day", async () => {
+    // Magnitude: both refusals above would pass against a reactor that applied
+    // nothing at all.
+    const { run, applied } = reactorWith({ currentTermStartsOn: null });
+    await run();
+    expect(applied).toHaveLength(1);
+  });
+});
+
+function reactorWith(opts: { currentTermStartsOn: string | null; holidayNamed?: { name: string } | null }) {
   const applied: Array<{ date: Date }> = [];
   let onFinalized: ((tx: unknown, req: unknown) => Promise<void>) | null = null;
 
@@ -98,6 +134,11 @@ function reactorWith(opts: { currentTermStartsOn: string | null }) {
   };
 
   const tx = {
+    // A REAL TenantTx ALWAYS HAS THIS. The reactor now re-asks the HOLIDAY as
+    // well as the term lock — both rules go through one shared
+    // `registerClosedReason` — so a stub with only `term` models something the
+    // database cannot produce. Default: no holiday declared.
+    schoolHoliday: { findFirst: async () => opts.holidayNamed ?? null },
     term: {
       findFirst: async (a: { where?: { isCurrent?: boolean } }) =>
         a.where?.isCurrent && opts.currentTermStartsOn
