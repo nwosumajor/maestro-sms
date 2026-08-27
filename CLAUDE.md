@@ -2075,6 +2075,47 @@ snapshot taken immediately after a probe reports the PREVIOUS probe's reads.
 Settle 12-18 s, and divide by the number of requests rather than trusting one.
 
 
+### The term lock was checked when the amendment was raised, not when it applied
+A register older than `STALE_REGISTER_DAYS` cannot be corrected by a plain
+teacher directly: it raises an `ATTENDANCE_AMENDMENT` that a DIFFERENT senior
+approves, and a WorkflowHooks reactor applies the marks in-tx.
+The term lock — *"a register in a term that has ENDED is read-only for everyone,
+including leadership"* — is checked in TWO places: when the amendment is RAISED,
+and on the direct-write path. **The reactor called `applyRegister`, the
+low-level write, with NEITHER.**
+Approval happens LATER and a term roll-over is a nightly job, so an amendment
+raised inside the current term can sit pending while that term closes. Approving
+it then wrote into a frozen register. The rule as stated here is not "hard to
+do", it is **"no edit EVEN WITH APPROVAL"** — and this was the one path where an
+approval was the thing doing it. Same shape as the notification queue two entries
+up: a guard at the funnel, and the act happening somewhere later.
+Live, on a pending amendment for **2026-07-01** (Third Term, ended 2026-07-24)
+approved while the current term began 2026-09-07: **409** naming the reason, the
+request left `PENDING_REVIEW`, and the register untouched at 785 PRESENT rows
+before and after.
+// IT MATTERS BECAUSE A CLOSED TERM IS TREATED AS FROZEN EVERYWHERE ELSE. The
+report card for it is already printed and filed in the Document Vault, and
+`attendance_term_rollup` is already computed — neither follows a register that
+moves afterwards, so the correction would have made the child's own documents
+disagree with the school's register.
+// THROWN, NOT SKIPPED. The hook runs in the SAME transaction as the transition,
+so the throw rolls the approval back and the approver is told why. Applying
+nothing while recording APPROVED is the silent-success shape this repo keeps
+finding — the approver would believe a register had been corrected.
+// FAILS OPEN when `currentTermStart` returns null, matching the direct-write
+path: unconfigured terms must not make every correction impossible.
+// CHECKED AND SOUND in the same pass: a workflow request's PAYLOAD is immutable
+once raised — there is no PUT or PATCH on the controller and nothing updates
+`payload` — so what a second person approves is what the first person submitted.
+// GOTCHA in the test: the reactor is registered IN THE CONSTRUCTOR, so an
+`Object.create(prototype)` instance never wires it up — the fixture would have
+exercised nothing and passed. It constructs the service for real and captures
+the callback from a stubbed `WorkflowHooksService`.
+// GOTCHA while probing: a hand-inserted `stages` array of bare strings makes the
+engine refuse with **"You are not the undefined approver"**. The stage is an
+OBJECT (`{key,label,permission}`); the message reads the missing field. Not worth
+a fix on its own, but worth knowing when a workflow probe refuses oddly.
+
 ### An archive that named what it held and never what it did not
 `SchoolArchiveService` is the artifact a school takes away for its own retention
 — the answer to "can we keep our record if we leave". Its manifest declares

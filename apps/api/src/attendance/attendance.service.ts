@@ -83,7 +83,33 @@ export class AttendanceService {
       if (req.type !== "ATTENDANCE_AMENDMENT" || req.state !== "APPROVED") return;
       const pl = req.payload as { classId?: string; date?: string; records?: MarkInput["records"] } | null;
       if (!pl?.classId || !pl.date || !pl.records) return;
-      await this.applyRegister(tx, req.schoolId, req.initiatorId, pl.classId, new Date(pl.date), pl.records, {
+      const date = new Date(pl.date);
+      // THE TERM LOCK IS RE-ASKED HERE, because approval happens LATER.
+      //
+      // It is checked when the amendment is RAISED and again on the direct-write
+      // path, and this reactor called `applyRegister` — the low-level write —
+      // with neither. An amendment raised inside the current term can sit
+      // pending while the term rolls over (the roll-over is a nightly job), and
+      // approving it then wrote into a term that is closed. The rule is not
+      // "hard to do": it is "no edit EVEN WITH APPROVAL", and this was the one
+      // path where an approval was the thing doing it.
+      //
+      // It matters because a closed term is treated as frozen everywhere else: a
+      // report card for it has already been printed and filed in the vault, and
+      // `attendance_term_rollup` has already been computed — neither follows a
+      // register that moves afterwards.
+      const lockBefore = await this.currentTermStart(tx, req.schoolId);
+      if (lockBefore && date < lockBefore) {
+        // THROWN, not skipped. The hook runs in the SAME transaction as the
+        // transition, so this rolls the approval back and tells the approver
+        // why — applying nothing while recording APPROVED would leave them
+        // believing a register had been corrected.
+        throw new ConflictException(
+          "That term closed while this amendment was awaiting approval, and past-term registers are read-only. " +
+            "The correction was not applied.",
+        );
+      }
+      await this.applyRegister(tx, req.schoolId, req.initiatorId, pl.classId, date, pl.records, {
         makerChecker: true,
         requestId: req.id,
       });
