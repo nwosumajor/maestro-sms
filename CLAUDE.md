@@ -2067,6 +2067,18 @@ walked in because of what the calendar says.
 `attendanceNote: "This register is locked: it falls in a term that has ended.
 Movement recorded."` — the demo school is between terms today, so the guard is
 visibly doing its job — and the `scan_event` row survives.
+Gate: `an-upsert-that-names-a-key-that-exists.spec.ts` pairs every raw
+`ON CONFLICT (...)` with a unique key DECLARED ON THAT MODEL — read from the
+Prisma schema rather than a live database, so it runs in CI with no container
+and a migration that changes a unique key fails the build beside the raw SQL
+that depends on it. Mutation-validated with the exact shipped statement, and the
+failure names the file, the bad target and what IS declared.
+// A SEPARATE SWEEP CAME BACK CLEAN and is worth recording so it is not redone:
+every quoted identifier in all 98 raw statements was checked against the live
+`information_schema`, and the only non-schema names are output aliases
+(`AS "invoicedMinor"`) and one enum cast. The raw SQL does not reference a
+column that has been renamed; this bug was a stale CONSTRAINT reference, which
+is why the identifier check would not have found it either.
 // GOTCHA: the existing fixture had no `schoolHoliday` or `term` on its `tx`, so
 the new lookups threw `Cannot read properties of undefined`. Same trap this repo
 already records three times — a stub describing something the database cannot
