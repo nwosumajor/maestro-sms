@@ -151,6 +151,11 @@ model SalaryChangeRequest {
   newSalaryEnc  String?
   reason        String?
   effectiveDate DateTime? @db.Date
+  /// When the new figure actually reached the employee. NULL on an APPROVED row
+  /// means approved but NOT YET IN FORCE — the nightly sweep applies it on its
+  /// effective date. Before this column the approval applied the salary at once
+  /// and the effectiveDate was recorded and ignored.
+  appliedAt     DateTime?
   /// PENDING | APPROVED | REJECTED.
   status        String    @default("PENDING")
   requestedById String    @db.Uuid

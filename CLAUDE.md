@@ -2024,6 +2024,45 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### A raise dated for October, paid from August
+`salary_change_request.effectiveDate` was accepted by the API, stored on the
+row, returned in the DTO and rendered on the screen — and consulted by NOTHING.
+`decide` applied `employee.salaryEnc` immediately and unconditionally.
+Proven live on exactly those dates: a raise requested **effective 2026-10-01**,
+approved on **2026-08-27**, moved the salary on **2026-08-27** — five weeks
+early, and payroll reads `employee.salaryEnc` at run time, so the next run pays
+it. The record said October and the money said August.
+The same shape as the archive's `sessionId` — "accepted, stored on the row,
+written into the manifest — and FILTERED NOTHING" — except this one is money
+leaving the school early, every month between the two dates.
+// APPROVED AND NOT YET IN FORCE is now a real state. `appliedAt` (migration
+`20270113000000`) records when the figure actually reached the employee; NULL on
+an APPROVED row means the decision is made and the money has not moved. The
+BACKFILL stamps every existing APPROVED row with its `decidedAt`, because that
+is what the old code did — without it the new sweep would re-apply the school's
+whole salary history on its first night.
+// THE SWEEP IS AN ARM OF THE NIGHTLY HR JOB, mirroring `revokeElapsedExits`
+beside it: privileged, cross-tenant, each school's OWN day, its own try block so
+a failed document reminder cannot leave a due raise unpaid. It CLAIMS the row
+(`updateMany where appliedAt: null`) before writing the salary, so two
+overlapping runs cannot both pay it.
+// REFUSING A FUTURE DATE WAS THE OTHER OPTION AND IS WORSE PRODUCT: a principal
+approving a raise in August for October should not have to come back on the day.
+Deferring is what the field always promised.
+// AGAINST THE SCHOOL'S DAY, not the server's — a date is a DAY, and the whole
+point is that it starts when the school says it starts. Ninth surface in that
+class, one entry after the eighth.
+// GOTCHA: the nightly HR sweep had NO TEST OF ANY KIND, and it revokes access
+and now pays raises. Its idempotency guard was invisible — removing
+`appliedAt: null` from the claim left all 210 HR tests green. Both halves are
+pinned now, mutation-validated.
+// **A PROBE THAT CANNOT BE UNDONE, recorded rather than hidden.** Driving this
+maker-checker path changed `hr@demo.school`'s salary to 25,000,000 in the dev
+database, and it CANNOT be restored: `hr.employee.upsert` deliberately records a
+`created` flag and never the plaintext salary, which is the correct posture and
+also means the previous value is gone. Anyone reconciling demo payroll figures
+should know that one employee's salary is a probe artefact.
+
 ### Locked out during their own last working day
 `endsOnOrBefore` (`hr/staff-access.ts`) decides when a departed member of staff
 loses access, and compared a `@db.Date` last working day against the SERVER's

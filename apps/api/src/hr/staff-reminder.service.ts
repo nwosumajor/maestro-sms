@@ -20,6 +20,8 @@ export interface ReminderResult {
   scanned: number;
   /** Departed staff whose access this run actually closed. */
   accessRevoked?: number;
+  /** Approved raises this run put into force on their effective date. */
+  salaryChangesApplied?: number;
   skipped?: "NO_DB";
 }
 
@@ -43,12 +45,15 @@ export class StaffReminderService {
     // notify HR about an expiring certificate must never leave a departed
     // teacher's account open, so the two do not share a try block.
     const accessRevoked = await this.revokeElapsedExits(client);
+    // Same reasoning, its own try block: a failed document reminder must never
+    // leave an approved raise unpaid on the month it was due to start.
+    const salaryChangesApplied = await this.applyDueSalaryChanges(client);
     const cutoff = new Date(Date.now() + 30 * 86_400_000);
     const due = await client.staffDocument.findMany({
       where: { reminderSentAt: null, expiresAt: { not: null, lte: cutoff } },
       select: { id: true, schoolId: true, userId: true, kind: true, name: true, expiresAt: true },
     });
-    if (due.length === 0) return { reminded: 0, scanned: 0, accessRevoked };
+    if (due.length === 0) return { reminded: 0, scanned: 0, accessRevoked, salaryChangesApplied };
 
     // Group due docs by school so we notify each school's HR.
     const bySchool = new Map<string, typeof due>();
@@ -84,7 +89,7 @@ export class StaffReminderService {
     }
     this.logger.log(`Staff reminder sweep: scanned=${due.length} reminded=${due.length}`);
     await this.sweepContracts(client);
-    return { reminded: due.length, scanned: due.length, accessRevoked };
+    return { reminded: due.length, scanned: due.length, accessRevoked, salaryChangesApplied };
   }
 
   /** Fixed-term contracts ending within 30 days: nudge each school's HR once
@@ -144,6 +149,54 @@ export class StaffReminderService {
    * re-running it is safe and it never reopens or overwrites a status a human
    * has since changed.
    */
+  /**
+   * Apply APPROVED salary changes whose effective date has arrived.
+   *
+   * A future-dated approval is deliberately NOT applied at approval time — the
+   * effective date was previously recorded and ignored, so a raise dated for
+   * October moved the salary in August and payroll paid it. This is the arm that
+   * makes the date real, and it mirrors `revokeElapsedExits` exactly: privileged
+   * and cross-tenant, each school's OWN day, guarded so a re-run cannot apply
+   * the same change twice.
+   */
+  private async applyDueSalaryChanges(
+    client: NonNullable<PrivilegedDatabaseService["client"]>,
+  ): Promise<number> {
+    try {
+      const now = new Date();
+      const due = await client.salaryChangeRequest.findMany({
+        where: { status: "APPROVED", appliedAt: null, effectiveDate: { not: null, lte: now } },
+        select: { id: true, schoolId: true, employeeId: true, newSalaryEnc: true, effectiveDate: true },
+      });
+      if (due.length === 0) return 0;
+      const todayBySchool = new Map<string, Date>();
+      for (const schoolId of new Set(due.map((d) => d.schoolId))) {
+        todayBySchool.set(schoolId, schoolToday((await this.region.forSchool(schoolId)).timezone));
+      }
+      let applied = 0;
+      for (const d of due) {
+        const today = todayBySchool.get(d.schoolId) ?? now;
+        if (!d.effectiveDate || new Date(d.effectiveDate) > today) continue;
+        // Guarded on `appliedAt: null` in the WRITE, not just the read, so two
+        // overlapping runs cannot both pay the same raise.
+        const claim = await client.salaryChangeRequest.updateMany({
+          where: { id: d.id, appliedAt: null },
+          data: { appliedAt: now },
+        });
+        if (claim.count === 0) continue;
+        await client.employee.update({ where: { id: d.employeeId }, data: { salaryEnc: d.newSalaryEnc } });
+        applied += 1;
+      }
+      if (applied > 0) {
+        this.logger.log(`applied ${applied} salary change(s) that reached their effective date`);
+      }
+      return applied;
+    } catch (err) {
+      this.logger.error(`salary effective-date sweep failed: ${(err as Error).message}`);
+      return 0;
+    }
+  }
+
   private async revokeElapsedExits(
     client: NonNullable<PrivilegedDatabaseService["client"]>,
   ): Promise<number> {

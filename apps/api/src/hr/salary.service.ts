@@ -11,6 +11,7 @@
 
 import { hasSecondApprover, noSecondApproverMessage } from "../common/approvers";
 import { NotificationService } from "../notifications/notification.service";
+import { SchoolRegionService } from "../foundation/school-region.service";
 import { HR_PERMISSIONS } from "@sms/types";
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { SalaryChangeDto } from "@sms/types";
@@ -30,6 +31,9 @@ export class SalaryService {
     @Inject(TENANT_DATABASE) private readonly db: TenantDatabase,
     @Inject(AUDIT_LOG_SERVICE) private readonly audit: AuditLogService,
     private readonly notifications: NotificationService,
+    // Last, so the positional constructor calls in the existing suites keep
+    // meaning what they meant — the convention this module already follows.
+    private readonly region: SchoolRegionService,
   ) {}
 
   private ctx(p: Principal): TenantContext {
@@ -102,19 +106,39 @@ export class SalaryService {
         throw new ForbiddenException("A salary change must be approved by a different person");
       }
       const status = approve ? "APPROVED" : "REJECTED";
+      // A RAISE TAKES EFFECT WHEN IT SAYS IT DOES.
+      //
+      // `effectiveDate` was accepted, stored, returned in the DTO and shown on
+      // the screen — and consulted by NOTHING. Approval applied the new salary
+      // immediately and unconditionally, so a raise requested "effective 1
+      // October" and approved on 27 August moved the salary on 27 August and the
+      // next payroll run paid it. Proven live on exactly those dates.
+      //
+      // The same shape as the archive's `sessionId`, which was "accepted, stored
+      // on the row, written into the manifest — and FILTERED NOTHING" — except
+      // this one is money leaving the school early.
+      //
+      // Against the SCHOOL's day, not the server's: a date is a DAY, and the
+      // whole point is that it should start when the school says it starts.
+      const today = await this.region.todayInTx(tx, p.schoolId);
+      const dueNow = !row.effectiveDate || new Date(row.effectiveDate) <= today;
+      const appliedAt = approve && dueNow ? new Date() : null;
       await tx.salaryChangeRequest.update({
         where: { id },
-        data: { status, decidedById: p.userId, decidedAt: new Date(), reason: reason ?? row.reason },
+        data: { status, decidedById: p.userId, decidedAt: new Date(), reason: reason ?? row.reason, appliedAt },
       });
-      if (approve) {
+      if (approve && dueNow) {
         // Apply the new salary to the employment record only now.
         await tx.employee.update({ where: { id: row.employeeId }, data: { salaryEnc: row.newSalaryEnc } });
       }
+      // A FUTURE-DATED approval is APPROVED and NOT YET IN FORCE. The nightly HR
+      // sweep applies it on the day, exactly once, keyed on `appliedAt` — the
+      // same arm and the same school's-day rule as the exit revocation beside it.
       await this.audit.record(
         { actorId: p.userId, action: approve ? "hr.salary.approve" : "hr.salary.reject", entity: "salary_change_request", entityId: id, schoolId: p.schoolId, metadata: { employeeId: row.employeeId } },
         tx,
       );
-      const updated = { ...row, status, decidedById: p.userId, decidedAt: new Date() };
+      const updated = { ...row, status, decidedById: p.userId, decidedAt: new Date(), appliedAt };
       return this.decorate(updated, p.schoolId, null);
     });
   }
