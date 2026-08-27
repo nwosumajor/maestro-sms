@@ -582,7 +582,7 @@ export class TransportService {
     const explicitDay = input.date ? new Date(`${input.date}T00:00:00.000Z`) : null;
     if (explicitDay && Number.isNaN(explicitDay.getTime())) throw new BadRequestException("Invalid date");
     const direction = input.direction === "DROPOFF" ? "DROPOFF" : "PICKUP";
-    const { dto, notify, passengerType } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
+    const { dto, notify, retract, passengerType } = await this.db.runAsTenant(this.ctx(p), async (tx) => {
       await this.assertRouteInScope(tx, p, input.routeId);
       // "TODAY" IS THE SCHOOL'S DAY, not the server's.
       //
@@ -627,12 +627,37 @@ export class TransportService {
       return {
         dto: await this.boardingDto(tx, row.id),
         notify: status === "BOARDED" && !alreadyBoarded,
+        // A BOARDING THAT IS TAKEN BACK IS TAKEN BACK OUT LOUD.
+        //
+        // A driver scans the wrong child, or a child steps off again before the
+        // bus leaves, and the record is corrected to ABSENT. The guardians had
+        // already been emailed "Your child has boarded the school bus"; nothing
+        // told them otherwise, so the school's own record said the child was NOT
+        // on the bus while the last thing their family heard was that they were.
+        //
+        // Same rule this codebase already applies to a withdrawn duty — a notice
+        // given is a notice retracted — and here the subject is a child's
+        // whereabouts rather than a teacher's free period.
+        retract: status === "ABSENT" && alreadyBoarded,
         passengerType: assignment.passengerType,
       };
     });
     // Only STUDENT boardings alert guardians; a PICKUP is the safety-critical event.
-    if (notify && direction === "PICKUP" && passengerType === "STUDENT") {
+    const familyWasTold = direction === "PICKUP" && passengerType === "STUDENT";
+    if (notify && familyWasTold) {
       await this.notifyGuardians(p, input.passengerId, "Your child boarded the bus", "Your child has boarded the school bus for pickup.");
+    }
+    // RETRACT ONLY WHAT WAS ACTUALLY SENT. The conditions mirror the send above
+    // exactly — a correction for a notice that never went out would be the first
+    // a family heard of any of it, and `direction` is part of the row's unique
+    // key so it cannot have changed since.
+    if (retract && familyWasTold) {
+      await this.notifyGuardians(
+        p,
+        input.passengerId,
+        "Correction: your child did not board the bus",
+        "An earlier message said your child had boarded the school bus for pickup. That has been corrected — the school has recorded them as NOT on the bus. Please contact the school office if you expected them to travel.",
+      );
     }
     return dto;
   }

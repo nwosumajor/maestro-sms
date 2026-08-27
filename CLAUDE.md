@@ -2024,6 +2024,52 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### The family was told the child boarded, and never that they had not
+`recordBoarding` (`transport.service.ts`). Recording a PICKUP emails the
+guardians "Your child has boarded the school bus for pickup." The write is
+idempotent on `(passengerId, date, direction)` and correctly does NOT re-alert on
+a re-scan — and the correction case sent nothing at all. `notify` was
+`status === "BOARDED" && !alreadyBoarded`, so a boarding taken BACK was silent.
+Driven live on the running stack, the whole path for the first time
+(`transport_boarding` had never held a row):
+```
+record BOARDED  ->  parent's inbox: "Your child has boarded the school bus for pickup."
+correct ABSENT  ->  transport_boarding.status = ABSENT, and nothing sent
+```
+So the school's own record said the child was NOT on the bus while the last
+thing their family had heard was that they were. A driver scanning the wrong
+child, or a child stepping back off before the bus leaves, is an ordinary
+afternoon.
+// SAME CLASS AS THE WITHDRAWN DUTIES this repo already fixed — "a duty that is
+given with a notice is taken away with one" — with a child's whereabouts as the
+subject rather than a teacher's free period, which is why it is worth its own
+entry rather than a line in that one.
+// **RETRACT ONLY WHAT WAS ACTUALLY SENT.** The alert fires only for a PICKUP by
+a STUDENT, so the retraction shares ONE `familyWasTold` condition rather than
+restating it — two spellings of one rule is how a pair drifts, which is the
+defect directly above this. A DROPOFF correction and a STAFF passenger send
+nothing, because nothing was sent to correct: a retraction for a notice that
+never went out would be the first a family heard of any of it.
+// The message STANDS ALONE — "the school has recorded them as NOT on the bus"
+plus what to do next — because a family reading it may not have the earlier one
+to hand, and a correction that only makes sense next to the thing it corrects is
+not a correction.
+// Live after, same probe: both messages in the inbox, in order, and the record
+agreeing with the second.
+// GOTCHA, twice in one fixture and both the same trap this repo keeps
+recording: the stub had no `transportRoute` (the scope check runs first) and the
+constructor takes SIX arguments, not four — `workflow` and `hooks` sit before
+`region`, and `hooks.onFinalized` is called IN THE CONSTRUCTOR, so a stub
+missing it never wires the service up at all.
+// GOTCHA in my own test, caught by mutation rather than by reading: every case
+used PICKUP + STUDENT, so dropping `familyWasTold` from the retraction changed
+nothing and the suite stayed green. The property was untested until a DROPOFF
+and a STAFF case were added.
+// FIXTURE GAP, same as the exeat sweep already records: no bus passenger in the
+demo data has a guardian link, so the notification arm is unobservable without
+adding one. A temporary `parent_child` row was added for the probe and removed
+afterwards, along with every row the probe wrote.
+
 ### The column was denormalised to prune, and eight readers never used it
 `attendance_record` is RANGE-partitioned by month on a DENORMALISED `date`, and
 that column exists for exactly one reason, written in its own schema comment:
