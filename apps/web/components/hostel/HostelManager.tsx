@@ -14,7 +14,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { money } from "@/lib/format";
+
+import { useFormat } from "@/components/shell/RegionProvider";
 import { personLabel } from "@/lib/people";
 
 type Hostel = Serialized<HostelDto>;
@@ -37,6 +38,11 @@ export function HostelManager({
   /** Creating a hostel is admin-only; a warden manages their existing hostel. */
   canCreate?: boolean;
 }) {
+  // The SCHOOL's currency, not the platform's. `money` from `@/lib/format`
+  // defaults to `PLATFORM_REGION.currency`, so this rendered in naira whatever
+  // the school bills in — the region rides the session and `useFormat()` is how
+  // a client island reaches it.
+  const { money } = useFormat();
   const router = useRouter();
   const [msg, setMsg] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);

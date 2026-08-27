@@ -21,6 +21,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { money, shortDate } from "@/lib/format";
+import { useFormat } from "@/components/shell/RegionProvider";
 
 type Portal = Serialized<ScholarshipPortalDto>;
 type Application = Serialized<ScholarshipApplicationDto>;
@@ -272,6 +273,14 @@ function DecisionCard({
   busy: string | null;
   run: (key: string, fn: () => Promise<{ ok: boolean; error: string | null }>, okText: string) => Promise<void>;
 }) {
+  // MIXED CURRENCIES ON ONE SCREEN, and that is not an accident.
+  //
+  // A scholarship AWARD is the PLATFORM's money — the programme is
+  // platform-sponsored and denominated in its currency — so `money` stays the
+  // platform default here. The pupil's OUTSTANDING FEES are the SCHOOL's money,
+  // and rendering those with the same helper put a family's own currency under
+  // a naira sign.
+  const { money: schoolMoney } = useFormat();
   const [note, setNote] = React.useState("");
   const form = (app.answers ?? {}) as Partial<ScholarshipRequestForm>;
   const sig = app.signals;
@@ -308,7 +317,7 @@ function DecisionCard({
             {sig.classNames && sig.classNames.length > 0 && <span>Class: {sig.classNames.join(", ")}</span>}
             {sig.publishedSessionAverage != null && <span>Grade avg: {sig.publishedSessionAverage}%</span>}
             {sig.attendanceRatePct != null && <span>Attendance: {sig.attendanceRatePct}%</span>}
-            <span>Outstanding fees: {money(sig.outstandingFeesMinor)}</span>
+            <span>Outstanding fees: {schoolMoney(sig.outstandingFeesMinor)}</span>
             {sig.disciplineUpheld != null || sig.disciplineOpen != null ? (
   <span>
     Discipline: {sig.disciplineUpheld ?? 0} upheld

@@ -15,7 +15,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { money } from "@/lib/format";
+
+import { useFormat } from "@/components/shell/RegionProvider";
 import { personLabel } from "@/lib/people";
 
 type Vehicle = Serialized<VehicleDto>;
@@ -28,6 +29,11 @@ export function TransportManager({
 }: {
   vehicles: Vehicle[]; routes: Route[]; assignments: Assignment[]; students: Person[]; staff?: Person[]; canManage: boolean;
 }) {
+  // The SCHOOL's currency, not the platform's. `money` from `@/lib/format`
+  // defaults to `PLATFORM_REGION.currency`, so these read in naira for a school
+  // that bills in anything else — the region rides the session and
+  // `useFormat()` is how a client island gets at it.
+  const { money } = useFormat();
   const router = useRouter();
   const [msg, setMsg] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);

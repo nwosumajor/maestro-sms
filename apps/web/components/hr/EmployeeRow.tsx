@@ -13,11 +13,17 @@ import { sendSms } from "@/components/game/play-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { money, shortDate, titleCase } from "@/lib/format";
+import { shortDate, titleCase } from "@/lib/format";
+import { useFormat } from "@/components/shell/RegionProvider";
 
 type Employee = Serialized<EmployeeDto>;
 
 export function EmployeeRow({ e, canWrite }: { e: Employee; canWrite: boolean }) {
+  // The SCHOOL's currency, not the platform's. `money` from `@/lib/format`
+  // defaults to `PLATFORM_REGION.currency`, so this rendered in naira whatever
+  // the school bills in — the region rides the session and `useFormat()` is how
+  // a client island reaches it.
+  const { money } = useFormat();
   const router = useRouter();
   const [editing, setEditing] = React.useState(false);
   const [busy, setBusy] = React.useState(false);

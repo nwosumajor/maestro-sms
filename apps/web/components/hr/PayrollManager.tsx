@@ -8,7 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { money } from "@/lib/format";
+
+import { useFormat } from "@/components/shell/RegionProvider";
 import { readApiError } from "@/lib/api-error";
 
 type Run = Serialized<PayrollRunDto>;
@@ -16,6 +17,11 @@ type Run = Serialized<PayrollRunDto>;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 export function PayrollManager({ runs, canRun }: { runs: Run[]; canRun: boolean }) {
+  // The SCHOOL's currency, not the platform's. `money` from `@/lib/format`
+  // defaults to `PLATFORM_REGION.currency`, so this rendered in naira whatever
+  // the school bills in — the region rides the session and `useFormat()` is how
+  // a client island reaches it.
+  const { money } = useFormat();
   const router = useRouter();
   const now = new Date();
   const [year, setYear] = React.useState(String(now.getUTCFullYear()));

@@ -2024,6 +2024,38 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### A salary rendered in a currency the school does not pay in
+`money` from `apps/web/lib/format.ts` defaults to `PLATFORM_REGION.currency`.
+That is CORRECT for platform money — a subscription charge, a message-credit
+bundle, a scholarship award — and wrong for anything a SCHOOL bills or pays,
+which follows `school.currency` and reaches a client island through
+`useFormat()`.
+Six screens took the default for the school's own money: a boarder's room rent,
+a member of staff's SALARY on the HR register, a payroll run's gross total, a
+payment sitting in the maker-checker queue, a transport fare and a library fine.
+So a British school's HR register printed a naira sign in front of a figure
+typed in pounds.
+// THE WRITING HALF OF THIS WAS FIXED LONG BEFORE THE READING HALF, and this is
+the mirror of that entry: `minorFrom`/`majorFrom` corrected fourteen sites that
+STORED a hundred times what the bursar typed, and the payroll exports were
+corrected for currency in the statutory-remittance CSV and the payslip PDF. The
+SCREEN those exports are generated from was never asked.
+// THE SCHOLARSHIP PORTAL IS THE INTERESTING ONE, and why this is not a blanket
+rule: it renders BOTH. The award is the PLATFORM's money and keeps the platform
+helper; only the pupil's outstanding fees move to `useFormat()`. A sweep that
+converted every `money()` in that file would have been a second wrong answer in
+place of the first.
+Gate: `school-money-uses-the-schools-region.spec.ts`, with `PLATFORM_MONEY`
+naming each genuine platform site and its reason, and every named file required
+to still exist.
+// GOTCHA: **the IMPORT is not the tell and my first gate keyed on it**, flagging
+17 files of which nearly all were correct — the fees and group-console work had
+already been done and those files pass a currency at every call. What silently
+means "the platform's currency" is a call with ONE argument, in a file that has
+not rebound `money` locally. An over-wide gate is the same failure as a blind
+one: it teaches whoever meets it to add an exemption, and an exemption granted
+for a false positive is a hole with a note on it.
+
 ### A name lookup once per row
 `Promise.all(rows.map((r) => this.toDto(tx, r)))` reads as ordinary mapping code
 and is a query multiplier: the mapper is handed the TRANSACTION, so every row it

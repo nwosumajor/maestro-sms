@@ -6,12 +6,18 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { money, titleCase } from "@/lib/format";
+import { titleCase } from "@/lib/format";
+import { useFormat } from "@/components/shell/RegionProvider";
 import { readApiError } from "@/lib/api-error";
 
 export type PendingPayment = Serialized<PendingPaymentDto>;
 
 export function PendingPayments({ payments }: { payments: PendingPayment[] }) {
+  // The SCHOOL's currency, not the platform's. `money` from `@/lib/format`
+  // defaults to `PLATFORM_REGION.currency`, so this rendered in naira whatever
+  // the school bills in — the region rides the session and `useFormat()` is how
+  // a client island reaches it.
+  const { money } = useFormat();
   const router = useRouter();
   const [busy, setBusy] = React.useState<string | null>(null);
   const [msg, setMsg] = React.useState<string | null>(null);
