@@ -2075,6 +2075,40 @@ snapshot taken immediately after a probe reports the PREVIOUS probe's reads.
 Settle 12-18 s, and divide by the number of requests rather than trusting one.
 
 
+### The exeat chain — a child-safety flow, driven for the first time and sound
+`hostel_exeat` had no rows, so signing a boarder out of a boarding house had
+never once been done. Driven end to end, and every property held:
+- **REQUESTED is not OUT.** A raised exeat leaves the child in the house, and the
+  overdue sweep correctly ignores it (`scanned: 0`).
+- **MAKER-CHECKER ON A CHILD LEAVING.** The warden who raised it cannot approve
+  it — `403 "An exeat must be decided by a different person"`. A principal can.
+- **The sweep found the late boarder and alerted** (`scanned:1, alerted:1`), and
+  a second run returned `{scanned:0, alerted:0}` — it does not re-alert, which is
+  what `overdueNotifiedAt` is for, and returning CLEARS that mark so a SECOND
+  late return is a fresh alert.
+- **`overdue` IS COMPUTED LIVE, never stored** — `status === DEPARTED &&
+  !actualReturnAt && expectedReturnAt < now` — with its own comment saying why:
+  *"a boarder who became overdue ten minutes ago must show as overdue now, not
+  after the next sweep."* The register cannot be staler than the situation.
+- **`?status=OVERDUE` is a 400 naming the six real statuses**, not a silent empty
+  list — the `a-filter-nobody-validated` fix holding on the very endpoint that
+  entry cites ("one overdue boarder into none ... a safety statement about a
+  child made by a typo").
+// GOTCHA IN MY OWN PROBE, worth recording because it nearly became a false
+finding: I read `?status=OVERDUE` as "the register shows 0 overdue" and started
+writing it up. The probe parsed a 400 body as an empty list — `Array.isArray(j)`
+false, `j.items` undefined, `?? []`, length 0. **A probe that cannot tell a
+refusal from an empty answer reports the wrong one**, which is exactly the defect
+found in the family-scope probe two entries up, committed by me an hour later.
+Assert the STATUS before interpreting the body.
+// KNOWN GAP IN THE DEMO FIXTURES, not in the product: **no boarder has a
+guardian link** (`boarders WITH a guardian: 0`), so the sweep's family arm cannot
+fire locally. It is implemented — `parentChild.findMany` -> `guardiansOf` ->
+`family` — and the staff alert reached warden, head_warden, school_admin and
+principal by name. The claim that it "alerts the FAMILY in their own words"
+remains UNVERIFIED end to end for want of a fixture, and that is the honest
+standing rather than a tick.
+
 ### Hiding the name is not enough while the row carries the instant
 Found by driving a path that had never executed: `form` and `form_response` were
 both empty, so the anonymous-survey flow had never once been used.
