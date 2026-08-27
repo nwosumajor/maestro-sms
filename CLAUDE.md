@@ -2075,6 +2075,40 @@ snapshot taken immediately after a probe reports the PREVIOUS probe's reads.
 Settle 12-18 s, and divide by the number of requests rather than trusting one.
 
 
+### The operator directory named the admin who had left
+Found by sweeping for services with NO TEST FILE AT ALL — ten of them, and this
+is the one that reads cross-tenant PII. `contactsIn` supplies the name, email and
+phone the PLATFORM OWNER rings: to chase an overdue subscription, answer an
+onboarding question, warn about a chargeback. It had NO status filter and took
+the EARLIEST-appointed holder.
+A staff exit deliberately KEEPS the `user_role` row — it is employment history,
+and auth refuses the login instead — so the directory went on naming whoever was
+appointed first whether or not they still work there. Measured live: a school
+whose founding admin had left and whose current admin was appointed afterwards
+was listed as **`admin=Demo Admin`, the departed one**, with the active one not
+shown at all. After: `admin=Current Admin`, the other schools unchanged.
+An EXITED user cannot authenticate, so the owner would also have been emailing an
+inbox its owner can no longer open — and been told it was delivered. Same shape
+as the assignment sweep, on the platform's own console.
+// NOBODY ACTIVE IS REPORTED AS NULL, never a fallback to a leaver. Verified live
+by exiting both: the row reads `admin=—`. A school with no reachable admin is a
+fact the operator needs; a name that cannot be reached is worse than a blank,
+because it gets dialled.
+// Same rule as `holdersOf` ("an approver is somebody who is still here") and
+`assertStillHere` ("work is only ever given to somebody who is still here"),
+reusing the same `STILL_HERE` constant rather than a fourth hand-rolled filter.
+`schoolProfile` shares the read, so the drill-down was fixed with it.
+// CHECKED AND SOUND in the same pass, so neither is re-litigated:
+`role-permissions.service.ts` — the authorization spine, also untested — resolves
+role→permissions from the DB with the `@sms/types` map as its outage fallback,
+and the two agree exactly: **19 roles compared, 0 diverged**, so a DB outage
+changes nobody's authority. And the clickwrap chain is complete: a fresh public
+onboarding request stores `legalVersion: 1.0` as evidence at submit, and the
+school's own acceptance is taken in-app by `LegalAcceptBanner`. The unused
+`"ONBOARDING"` context on `legal_acceptance` is a dead enum value, deliberately
+left: carrying the APPLICANT's acceptance forward as the SCHOOL's would weaken
+the evidence, since they need not be the same person.
+
 ### A letter dated a day early, and a duty withdrawn for a lesson already taught
 An earlier sweep moved "today" onto the SCHOOL's calendar day across the
 register, the gate scan, the term lock and the rest, and recorded that the

@@ -31,6 +31,7 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 import { headcountInTenant } from "./operator-people";
+import { STILL_HERE } from "../common/still-here";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
 import { ModuleEntitlementService } from "../foundation/module-entitlement.service";
 import { toMinor, toMinorOrNull } from "../common/money";
@@ -239,10 +240,31 @@ export class OperatorDirectoryService {
     };
   }
 
-  /** The school's admin/principal ACCOUNT holders (name/email/phone). */
+  /**
+   * The school's admin/principal ACCOUNT holders who are STILL HERE.
+   *
+   * This is the name, email and phone the platform owner rings — to chase an
+   * overdue subscription, answer an onboarding question, or warn about a
+   * chargeback. It had no status filter, and a staff exit deliberately KEEPS the
+   * `user_role` row (it is employment history; auth refuses the login instead),
+   * so the directory went on naming whoever was appointed FIRST whether or not
+   * they still work there.
+   *
+   * Measured live: a school whose founding admin had left and whose current
+   * admin was appointed afterwards was listed as `admin=Demo Admin` — the
+   * departed one — with the active one not shown at all. An EXITED user cannot
+   * authenticate, so the owner would also be emailing an inbox its owner can no
+   * longer open, and be told it was delivered.
+   *
+   * Same rule as `holdersOf` ("an approver is somebody who is still here") and
+   * `assertStillHere` ("work is only ever given to somebody who is still here").
+   * NOBODY active is reported as `null` rather than falling back to a leaver: a
+   * school with no reachable admin is a fact the operator needs, and a name that
+   * cannot be reached is worse than a blank, because it gets dialled.
+   */
   private async contactsIn(tx: TenantTx): Promise<{ admins: SchoolContactDto[]; principals: SchoolContactDto[] }> {
     const holders = await tx.userRole.findMany({
-      where: { role: { name: { in: ["school_admin", "principal"] } } },
+      where: { role: { name: { in: ["school_admin", "principal"] } }, user: STILL_HERE },
       select: {
         role: { select: { name: true } },
         user: { select: { name: true, email: true, phone: true } },
