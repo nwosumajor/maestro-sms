@@ -2075,6 +2075,42 @@ snapshot taken immediately after a probe reports the PREVIOUS probe's reads.
 Settle 12-18 s, and divide by the number of requests rather than trusting one.
 
 
+### Wait for the timer, read the answer, post it back
+Found by driving a path that had never executed: `live_quiz_session`,
+`live_quiz_participant` and `live_quiz_answer` all had zero rows, so the Live
+Quiz — the largest of the five untested game services — had never once been
+played end to end.
+The core is SOUND and was verified rather than assumed: mid-question a pupil's
+own payload carries `answerIndex: null` while the host's carries `1`; the answer
+key behind `GET /quizzes/:id` is gated on `game.quiz.host`, which no pupil holds
+(checked against the seeded role map); a second answer to the same question is a
+409; and scoring is server-side off `questionStartedAt`.
+**WHAT WAS NOT SOUND WAS THE BOUNDARY BETWEEN TWO RULES.** `buildSessionView`
+REVEALS `answerIndex` to players once a question's clock runs out — deliberate,
+so the class sees what the answer was — and `answer` had NO CLOCK CHECK AT ALL.
+The two boundaries were computed in different places and only one of them
+existed, so the gap between them was an exploit needing no tooling: wait for the
+timer, `GET /quiz-sessions/:id` and read the answer out of your OWN payload,
+post it back.
+// **THE ENGINE ZEROING THE POINTS IS WHY THIS LOOKED HARMLESS.**
+`scoreQuizAnswer` returns `{points: 0, newStreak: 0}` once `elapsedMs >= limitMs`,
+so the exploit earned nothing — and the service went on writing `correct: true`
+beside it and incrementing `participant.correct`, which is a PUBLIC LEADERBOARD
+COLUMN shown by display name to the whole class. Measured live: a pupil who
+genuinely answered ONE of two questions was listed as
+`{"displayName":"Demo Student","score":798,"correct":2,"rank":1}`. After:
+**409 "The clock ran out on that question"**, and the row reads `correct: 1`.
+// ONE `clockOf`, read by BOTH — the reveal and the refusal are now the same
+instant by construction. They were two computations of one fact, which is the
+shape this repo keeps finding; here only one of the two was ever written.
+// NO GRACE WINDOW, deliberately, and the reasoning is the point: any latency
+grace on the SUBMISSION side would have to be a grace on the REVEAL side too, or
+it reopens the window it exists to close. A pupil whose click arrives late
+already scored zero before this change, so refusing costs them nothing they were
+getting — it only stops a tally that was never true.
+// The refusal is also the truer message: `{"correct":true,"points":0}` reads to
+a pupil as a scoring bug, and "the clock ran out" reads as what happened.
+
 ### The operator directory named the admin who had left
 Found by sweeping for services with NO TEST FILE AT ALL — ten of them, and this
 is the one that reads cross-tenant PII. `contactsIn` supplies the name, email and

@@ -319,6 +319,29 @@ export class LiveQuizService {
   }
 
   /**
+   * How far into the current question we are, and whether its clock has run out.
+   *
+   * ONE definition, because two things hang off this instant and they must be
+   * the same instant: the view REVEALS `answerIndex` once a question closes, and
+   * `answer` must stop ACCEPTING submissions at exactly that moment. While they
+   * were computed separately — and only the view computed it at all — a pupil
+   * could wait for the timer, read the revealed answer out of their own session
+   * payload, and post it back.
+   *
+   * Any grace allowed on the submission side would have to be a grace on the
+   * reveal side too, or it reopens that window; so there is none.
+   */
+  private clockOf(
+    startedAt: Date | null,
+    difficulty: string,
+  ): { elapsedMs: number; limitMs: number; closed: boolean } {
+    const spec = QUIZ_DIFFICULTY_SPECS[isGameDifficulty(difficulty) ? difficulty : "MEDIUM"];
+    const limitMs = spec.timeLimitSeconds * 1000;
+    const elapsedMs = startedAt ? Math.max(0, Date.now() - startedAt.getTime()) : 0;
+    return { elapsedMs, limitMs, closed: elapsedMs >= limitMs };
+  }
+
+  /**
    * Submit an answer to the CURRENT question. Server-authoritative: computes
    * elapsed from questionStartedAt, scores via the engine, records an append-only
    * answer (unique per question → no double-answer), and updates the running
@@ -348,7 +371,17 @@ export class LiveQuizService {
 
       const quiz = await tx.liveQuiz.findFirst({ where: { id: session.quizId }, select: { difficulty: true } });
       const diff = (quiz?.difficulty ?? "MEDIUM") as GameDifficulty;
-      const elapsedMs = Math.max(0, Date.now() - session.questionStartedAt.getTime());
+      const { elapsedMs, closed } = this.clockOf(session.questionStartedAt, diff);
+      // THE CLOCK IS SERVER LAW. Past the limit the view has already revealed
+      // `answerIndex` to this pupil, so accepting a submission here is accepting
+      // one they were just shown. The engine zeroed the POINTS, which made this
+      // look harmless — but the row still recorded `correct: true` and the
+      // participant's tally still went up, and that tally is a PUBLIC
+      // leaderboard column. Measured live: a pupil who answered one of two
+      // questions was listed as "correct 2".
+      if (closed) {
+        throw new ConflictException("The clock ran out on that question");
+      }
       const correct = choiceIndex === question.answerIndex;
       const { points, newStreak } = scoreQuizAnswer({
         correct,
@@ -595,8 +628,9 @@ export class LiveQuizService {
       });
       if (q) {
         const startedAt = session.questionStartedAt;
-        const elapsedMs = startedAt ? Date.now() - startedAt.getTime() : 0;
-        const closed = elapsedMs >= timeLimitSeconds * 1000;
+        // The SAME clock the answer path refuses on — the moment this reveals is
+        // the moment submissions close.
+        const { closed } = this.clockOf(startedAt, difficulty);
         // Reveal the answer to the HOST always, and to players only once closed.
         const reveal = isHost || closed;
         question = {
