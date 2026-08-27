@@ -48,6 +48,7 @@ import {
   type Principal,
   type TenantDatabase,
 } from "../integrity/integrity.foundation";
+import { netPaidMinor } from "../fees/net-paid";
 
 type IntentRow = {
   id: string;
@@ -182,11 +183,11 @@ export class MobileMoneyService {
             `${cover.label} settles in ${cover.currency}; this invoice is in ${inv.currency}.`,
           );
         }
-        const paid = (await tx.payment.aggregate({
-          where: { invoiceId: inv.id, status: "POSTED" },
-          _sum: { amountMinor: true },
-        } as never)) as unknown as { _sum: { amountMinor: number | null } };
-        let outstanding = Math.max(0, inv.totalMinor - (paid._sum.amountMinor ?? 0));
+        // POSTED payments MINUS POSTED refunds. This was a `_sum` over every
+        // POSTED row, which adds a REFUND as a positive — so after a refund the
+        // rail asked a parent for the balance less TWICE the refunded amount,
+        // and once that reached zero it told them the invoice was settled.
+        let outstanding = Math.max(0, inv.totalMinor - (await netPaidMinor(tx, inv.id)));
         if (outstanding <= 0) throw new BadRequestException("This invoice is already settled.");
 
         // A rail that only takes whole units (M-Pesa) gets a whole-unit ask, floored.

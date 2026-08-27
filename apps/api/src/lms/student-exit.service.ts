@@ -39,6 +39,7 @@ import {
 import { WorkflowService } from "../workflow/workflow.service";
 import { WorkflowHooksService } from "../workflow/workflow-hooks.service";
 import { PrivilegedDatabaseService } from "../common/privileged-database.service";
+import { netPaidByInvoice } from "../fees/net-paid";
 
 export type ExitKind = "WITHDRAWN" | "TRANSFERRED" | "GRADUATED";
 
@@ -213,11 +214,14 @@ export class StudentExitService {
         where: { studentId, status: { in: ["ISSUED", "PARTIALLY_PAID"] } },
         _sum: { totalMinor: true },
       })) as unknown as Array<{ currency: string; _sum: { totalMinor: number | null } }>;
-      const paid = (await tx.payment.groupBy({
-        by: ["invoiceId"],
-        where: { invoice: { studentId }, status: "POSTED", kind: "PAYMENT" },
-        _sum: { amountMinor: true },
-      })) as unknown as Array<{ invoiceId: string; _sum: { amountMinor: number | null } }>;
+      // Net of refunds. `kind: "PAYMENT"` excluded them, so a refunded invoice
+      // made a leaver look LESS in debt than they are — on the screen where a
+      // transcript is released or withheld.
+      const paidByInvoice = await netPaidByInvoice(tx, { invoice: { studentId } });
+      const paid = [...paidByInvoice].map(([invoiceId, amt]) => ({
+        invoiceId,
+        _sum: { amountMinor: amt },
+      }));
       // A payment has no currency of its own, so map each back to its invoice.
       const invoiceCurrency = new Map(
         (

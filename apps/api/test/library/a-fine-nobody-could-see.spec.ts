@@ -76,6 +76,7 @@ function makeService(opts: {
         return Promise.resolve(args.data);
       }),
       aggregate: jest.fn().mockResolvedValue({ _sum: { amountMinor: 0 } }),
+      findMany: jest.fn().mockResolvedValue([]),
     },
     school: { findFirst: jest.fn().mockResolvedValue({ currency: "NGN" }) },
     parentChild: { findMany: jest.fn().mockResolvedValue([{ parentId: "mum-1" }]) },

@@ -50,7 +50,7 @@ function makeService(over: Record<string, unknown> = {}) {
       create: jest.fn(),
     },
     invoice: { findFirst: jest.fn() },
-    payment: { aggregate: jest.fn() },
+    payment: { aggregate: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
   } as unknown as TenantTx;
 
   const db = {

@@ -33,6 +33,7 @@ import {
   type TenantTx,
 } from "../integrity/integrity.foundation";
 import { dateWindow } from "../common/status-filter";
+import { netPaidMinor } from "../fees/net-paid";
 
 type Json = Record<string, string>;
 
@@ -653,11 +654,10 @@ export class LibraryService {
       select: { totalMinor: true, status: true },
     });
     if (!invoice) return;
-    const paid = await tx.payment.aggregate({
-      where: { invoiceId, status: "POSTED", kind: "PAYMENT" },
-      _sum: { amountMinor: true },
-    });
-    const settled = paid._sum?.amountMinor ?? 0;
+    // Net of refunds: POSTED payments MINUS POSTED refunds. Filtering
+    // `kind: "PAYMENT"` excluded refunds entirely, so a refunded invoice read as
+    // more settled than it is — and this decides whether it is marked PAID.
+    const settled = await netPaidMinor(tx, invoiceId);
     const status = settled >= invoice.totalMinor ? "PAID" : settled > 0 ? "PARTIALLY_PAID" : invoice.status;
     if (status !== invoice.status) {
       await tx.invoice.update({ where: { id: invoiceId }, data: { status } });

@@ -45,7 +45,7 @@ function makeService(loan: Record<string, unknown> | null, line: { invoiceId: st
       create: jest.fn().mockResolvedValue({ id: "inv-1" }),
       update: jest.fn().mockResolvedValue({}),
     },
-    payment: { create: paymentCreate, aggregate: jest.fn().mockResolvedValue({ _sum: { amountMinor: 15000 } }) },
+    payment: { create: paymentCreate, aggregate: jest.fn().mockResolvedValue({ _sum: { amountMinor: 15000 } }), findMany: jest.fn().mockResolvedValue([{ amountMinor: 15000, kind: "PAYMENT" }]) },
     school: { findFirst: jest.fn().mockResolvedValue({ currency: "NGN" }) },
   };
   const db = {

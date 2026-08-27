@@ -39,7 +39,7 @@ function makeService(over: Record<string, unknown> = {}) {
         (over.invoice as unknown) ?? { id: "inv-1", totalMinor: 50_000, currency: "KES", status: "ISSUED", studentId: "st-1" },
       ),
     },
-    payment: { aggregate: jest.fn().mockResolvedValue({ _sum: { amountMinor: 0 } }) },
+    payment: { aggregate: jest.fn().mockResolvedValue({ _sum: { amountMinor: 0 } }), findMany: jest.fn().mockResolvedValue([{ amountMinor: 0, kind: "PAYMENT" }]) },
     mobileMoneyIntent: {
       create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => ({ ...INTENT, ...data })),
       update: intentUpdate,
@@ -130,7 +130,7 @@ describe("charge", () => {
 
   it("refuses an invoice with nothing outstanding", async () => {
     const { svc, tx } = makeService();
-    (tx.payment.aggregate as jest.Mock).mockResolvedValue({ _sum: { amountMinor: 50_000 } });
+    (tx.payment.findMany as jest.Mock).mockResolvedValue([{ amountMinor: 50_000, kind: "PAYMENT" }]);
     await expect(svc.charge(payer, { invoiceId: "inv-1", provider: "MPESA", phone: "0712345678" })).rejects.toThrow(
       /already settled/,
     );
@@ -155,7 +155,7 @@ describe("charge", () => {
     // The intent is written first, deliberately: it is what the callback will be
     // settled against, so it must exist before anything leaves the building.
     const { svc, tx, charge } = makeService();
-    (tx.payment.aggregate as jest.Mock).mockResolvedValue({ _sum: { amountMinor: 20_000 } });
+    (tx.payment.findMany as jest.Mock).mockResolvedValue([{ amountMinor: 20_000, kind: "PAYMENT" }]);
     const out = await svc.charge(payer, { invoiceId: "inv-1", provider: "MPESA", phone: "0712345678" });
 
     expect((tx.mobileMoneyIntent.create as jest.Mock).mock.calls[0][0].data).toMatchObject({

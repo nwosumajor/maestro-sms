@@ -2075,6 +2075,48 @@ snapshot taken immediately after a probe reports the PREVIOUS probe's reads.
 Settle 12-18 s, and divide by the number of requests rather than trusting one.
 
 
+### One definition of "paid", and three places that could not express it
+`FeesService.paidMinor` has always stated the rule in its own doc comment: **net
+paid is POSTED payments MINUS POSTED refunds; PENDING_APPROVAL and REJECTED rows
+never count toward the balance.** Fifteen sites hand-write that reduce — and
+three used a Prisma `_sum`, which CANNOT subtract a REFUND, so they approximated
+it two different ways and **both understate what a family owes**:
+```
+where: { status: POSTED, kind: PAYMENT }   refunds EXCLUDED    -> short by the refund
+where: { status: POSTED }                  refunds POSITIVE    -> short by TWICE it
+```
+On an invoice of 500 paid 300 and refunded 100 the school is owed 300. The first
+shape says 200; the second says 100.
+The three, and what each decides:
+- **`MobileMoneyService.charge`** had the second shape — no `kind` filter at all,
+  so a REFUND was added as a positive. It is the amount the rail ASKS A PARENT
+  FOR, and once it clamps to zero the parent is told **"This invoice is already
+  settled"** and cannot pay on that rail at all.
+- **`StudentExitService`** had the first, on the screen where a transcript is
+  RELEASED OR WITHHELD. Live after: a GHS invoice of 5,000,000 paid 3,000,000 and
+  refunded 1,000,000 reports **3,000,000** outstanding; `kind: "PAYMENT"` reported
+  2,000,000.
+- **`LibraryService.settleInvoiceIfPaid`** had the first, and it decides whether
+  an invoice is marked PAID.
+// THE CARD RAIL WAS ALWAYS RIGHT, which is what made this visible: it does the
+reduce properly, and on a live NGN 50,000 invoice paid 30,000 and refunded 10,000
+it asked for exactly **NGN 30,000** while the aggregates disagreed. Sibling
+asymmetry once more, with the correct one written first — the mobile-money rail
+came later and reached for `_sum`, which is the one tool that cannot say it.
+// TOO LOW IS THE DANGEROUS DIRECTION. A balance that is too high is an argument
+at the bursar's desk; one that is too low is money the school never asks for.
+`fees/net-paid.ts` is now the one definition (`netPaidOf` / `netPaidMinor` /
+`netPaidByInvoice`), and the batched form exists because a `groupBy` cannot
+express the sign — one extra round trip for the correct number is the trade.
+// `netPaidOf` deliberately does NOT clamp at zero: a refund larger than the
+payments leaves a NEGATIVE net, and hiding that from whoever reconciles it would
+be its own defect. The CALLERS clamp the outstanding, which is a different number.
+// GOTCHA: nine existing tests broke, all stubbing `payment.aggregate` with a
+PRE-SUMMED total — a shape the database never returns for this question. They
+model the ROWS now, which is what makes them able to see a refund at all.
+// Mutation-validated against all three shipped shapes: refunds positive, refunds
+excluded, and the POSTED filter dropped so a pending payment moves a balance.
+
 ### A renewal erased the fine that had already accrued
 The overdue fine is computed ONLY at return, from the loan's CURRENT `dueAt`:
 `max(0, floor((now - dueAt) / day)) * perDay`. And `renew` sets
