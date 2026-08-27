@@ -69,6 +69,8 @@ import { Prisma } from "@sms/db";
 const INCONSISTENT_COLUMN_DATA = "P2023";
 /** Prisma's marker for a unique constraint violation. */
 const UNIQUE_VIOLATION = "P2002";
+/** Prisma's marker for a RAW query that the database rejected. */
+const RAW_QUERY_FAILED = "P2010";
 
 /**
  * "leaveType" -> "leave type". Best effort: the model is the only thing the
@@ -84,6 +86,27 @@ export function duplicateMessage(e: Prisma.PrismaClientKnownRequestError): strin
 
 export function isMalformedUuidError(e: unknown): boolean {
   if (!(e instanceof Prisma.PrismaClientKnownRequestError)) return false;
+  // RAW SQL FAILS DIFFERENTLY, and the gap was live.
+  //
+  // This filter caught the shape the Prisma CLIENT produces (P2023, "Error
+  // creating UUID"). A raw statement that casts the id itself — `${id}::uuid` —
+  // never reaches that code path: Postgres rejects the cast and Prisma reports
+  // P2010 wrapping SQLSTATE 22P02.
+  //
+  // It matters because the routes that touch an id with RAW SQL FIRST are the
+  // ones that take a ROW LOCK before reading, which is the careful thing to do.
+  // `POST /invoices/:id/payments` locks the invoice `FOR UPDATE` before its
+  // findFirst, deliberately, so two recorders cannot both pass the overpayment
+  // check — and that made it the one write in the API still answering 500 to a
+  // malformed id while `issue` and `cancel` on the same resource answered 404.
+  //
+  // MATCHED ON THE TYPE NAME, not on 22P02, which is "invalid text
+  // representation" generally and fires for a bad integer, enum or json too.
+  // Turning those into a quiet 404 would hide real faults — the same line this
+  // filter already draws around a general P2023.
+  if (e.code === RAW_QUERY_FAILED) {
+    return /invalid input syntax for type uuid/i.test(String(e.message));
+  }
   if (e.code !== INCONSISTENT_COLUMN_DATA) return false;
   // Verified against the running database, not assumed: meta.message reads
   // "Error creating UUID, invalid character: ...". The last error translator in

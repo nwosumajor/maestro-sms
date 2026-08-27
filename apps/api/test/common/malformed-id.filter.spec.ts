@@ -33,6 +33,40 @@ describe("recognising a malformed id", () => {
   });
 });
 
+describe("a raw statement that casts the id itself", () => {
+  it("matches the P2010/22P02 shape the database actually sends", () => {
+    // Captured from the live API, not invented. `POST /invoices/:id/payments`
+    // locks the invoice FOR UPDATE before its findFirst — deliberately, so two
+    // recorders cannot both pass the overpayment check — and that raw cast
+    // rejects a malformed id before Prisma's own UUID parsing ever runs. It was
+    // the one write in the API still answering 500 where `issue` and `cancel`
+    // on the same resource answered 404.
+    expect(
+      isMalformedUuidError(
+        known("P2010", undefined, 'Invalid `prisma.$executeRaw()` invocation:\n\n\nRaw query failed. Code: `22P02`. Message: `ERROR: invalid input syntax for type uuid: "undefined"`'),
+      ),
+    ).toBe(true);
+  });
+
+  it("leaves other 22P02s alone — a bad integer or enum is not a missing record", () => {
+    // 22P02 is "invalid text representation" generally. Matching the SQLSTATE
+    // rather than the TYPE NAME would turn real faults into a quiet 404, the
+    // same line this filter already draws around a general P2023.
+    for (const detail of [
+      'Raw query failed. Code: `22P02`. Message: `ERROR: invalid input syntax for type integer: "abc"`',
+      'Raw query failed. Code: `22P02`. Message: `ERROR: invalid input syntax for type json`',
+    ]) {
+      expect(isMalformedUuidError(known("P2010", undefined, detail))).toBe(false);
+    }
+  });
+
+  it("leaves an unrelated raw failure alone", () => {
+    expect(
+      isMalformedUuidError(known("P2010", undefined, "Raw query failed. Code: `42P01`. Message: `ERROR: relation does not exist`")),
+    ).toBe(false);
+  });
+});
+
 describe("what it must NOT swallow", () => {
   it("leaves other P2023s alone — corrupt data must stay loud", () => {
     // A bad enum value in a column is also P2023. Reporting that as 404 would

@@ -2024,6 +2024,38 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### The row lock that reached the database before the id was ever checked
+`MalformedIdFilter` already exists for this exact class, and its header says so:
+"Every `:id` route in the API had this". It matches the shape the Prisma CLIENT
+produces — P2023 with "Error creating UUID" — and a RAW statement that casts the
+id itself never reaches that code path. Postgres rejects the cast and Prisma
+reports **P2010 wrapping SQLSTATE 22P02**, which fell straight through to a 500.
+ONE route was affected, and it is the one you would least want: `POST
+/invoices/:id/payments`, the bursar's record-payment desk. It is affected
+BECAUSE it is careful — it locks the invoice `FOR UPDATE` before its `findFirst`
+so two recorders cannot both pass the overpayment check, and that raw lock is
+the first thing to touch the id. Measured live across ten GETs and seven writes:
+every other route answered 404, including `issue` and `cancel` on the same
+resource; this one answered **500**. After: 404 everywhere, 0 of 7.
+// MATCHED ON THE TYPE NAME, never on 22P02 — that SQLSTATE is "invalid text
+representation" generally and fires for a bad integer, enum or json too.
+Swallowing those would hide real faults, the same line the filter already draws
+around a general P2023. Mutation-validated both ways, including the over-wide
+version that keys on the SQLSTATE.
+// THE FIX IS IN THE FILTER, not at the call site, for the reason the file
+itself gives about its P2002 arm: "Fixing eight call sites would leave the
+ninth". Any future route that locks a row before reading is now covered.
+// **HOW IT WAS FOUND, and the honest half of it.** A reconciliation of every
+invoice against the ledger flagged one marked PAID with only a third paid —
+₦1,500 billed, ₦500 received. It was chased: no adjustment (the DISCOUNT is
+still PENDING_APPROVAL), one line item, one payment, and all SEVEN places that
+derive the status compute `paid >= total` correctly. Driving the same sequence
+through the API today produced **PARTIALLY_PAID**, correctly. So the row is
+contamination from an earlier ad-hoc probe — dev-data, not a defect — and the
+real find came from a MALFORMED URL my broken probe sent while chasing it.
+Worth writing down: the reconciliation's anomaly was a false lead and saying so
+is cheaper than the next person re-chasing it.
+
 ### The hall shrank under the candidates already seated in it
 `updateSitting` (`exam.service.ts`). The SIBLING of the bus fix below, found by
 asking the same question of the other two modules that enforce a capacity rather
