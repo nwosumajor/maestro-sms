@@ -2062,6 +2062,22 @@ claimed fixed: `generateTimetable` blocks the Node event loop for the duration,
 so a whole-school generation makes the API unresponsive for every tenant on the
 task. Bounding that means chunking or yielding inside an exhaustively-tested
 pure solver, or accepting worse plans — a real design decision, not a tidy-up.
+// **THE REST OF THE CLASS WAS SWEPT AND IS CLEAN**, recorded so it is not
+redone. Every `runAsTenant` block was scanned for expensive work: none contains
+bcrypt or PDF generation (the bulk import's bcrypt was moved out long ago and
+says so), and of 22 loops that await a `tx` call per row, the ones bounded by
+SCHOOL SIZE were measured rather than reasoned about:
+```
+payroll createRun   134 staff     606 ms   (one payslip.create + 4 encryptions each)
+payroll finalize    134 payslips  102 ms   (decrypts every slip, per-loan queries)
+promotion approve   whole cohort  bulk     updateMany + enrollInto; the loop is over
+                                           demote TARGETS, a handful of classes
+```
+The timetable was the only one that outgrew the cap, because it is the only one
+doing CPU-bound SEARCH rather than round trips. A per-row loop inside a
+transaction is not automatically a defect — 134 round trips cost 0.6 s — and
+saying which were checked is what stops the next reader re-opening them.
+
 // GOTCHA, three times on ONE assertion, each found by mutation and not by
 reading: (1) the method slice ran to `clearTimetable`, which does not exist, so
 `indexOf` returned -1 and the window swallowed three later methods that
