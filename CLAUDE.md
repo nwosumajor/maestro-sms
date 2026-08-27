@@ -2075,6 +2075,35 @@ snapshot taken immediately after a probe reports the PREVIOUS probe's reads.
 Settle 12-18 s, and divide by the number of requests rather than trusting one.
 
 
+### The meeting-request chain, and the paging change tested against itself
+`meeting_request` had no rows, so the parent-teacher request chain had never been
+driven — including the queue paging changed earlier in this same session. Driven
+end to end, and everything held.
+**MY OWN CHANGE, VERIFIED LIVE** rather than left on unit tests: `?filter=decided`
+returns `items=0, total=0` and **`pendingTotal=1`** — the count is NOT narrowed by
+the filter, which is the whole property ("a count a filter can change is a count a
+filter can hide"). `?filter=nonsense` is a 400 naming `open, decided`. After the
+teacher accepted: `open=0 pendingTotal=0, decided=1`.
+**SCOPING AND CONTROLS, all measured:** a parent requesting about ANOTHER family's
+child gets `404 "Pupil not found"`; a second open request for the same
+parent+child+teacher is `409 "You already have a request open with that teacher."`
+(the partial unique index doing its job); DECLINE without a reason is refused
+with *"Say why, so the parent knows what to do next."*; ACCEPT without a time with
+*"Choose a time for the meeting."*
+// THE TWO STAGES RUN LEADERSHIP-FIRST, which is the opposite of what the names
+suggest and cost me two wrong probes: `review` is the LEADERSHIP stage
+(`isLeadership` or 404) moving PENDING_APPROVAL -> PENDING_TEACHER, and `decide`
+is the TEACHER's answer. `decide` also admits leadership, with the reason written
+down — *"the escalation path when a teacher has left or is on leave"*.
+// CHECKED RATHER THAN ASSUMED, because it looked wrong: `decide` validates
+DECLINE-needs-a-note BEFORE the scope check, so an UNRELATED teacher posting
+`{action:"DECLINE"}` gets "Say why..." rather than a 404 — which reads like an
+existence oracle. It is not: that branch is INPUT-ONLY and never consults the
+row, so it answers identically for a ghost id. Verified byte-for-byte across all
+three shapes (`DECLINE` bare, `DECLINE` with a note, `ACCEPT`) — real and ghost
+IDENTICAL every time. Validation before authorization is safe exactly when the
+validation cannot see the record.
+
 ### The exeat chain — a child-safety flow, driven for the first time and sound
 `hostel_exeat` had no rows, so signing a boarder out of a boarding house had
 never once been done. Driven end to end, and every property held:
