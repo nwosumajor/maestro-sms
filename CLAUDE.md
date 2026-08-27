@@ -2024,6 +2024,42 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### A warning the entry tier could never clear
+Found by smoke-testing a tier nobody had: the route smoke has only ever run
+against the demo school on ENTERPRISE. Set to STANDARD, all 107 routes still
+render for all 18 roles — but rendering is not working, as this file already
+records ("it passed 1,734 renders while half the app was broken").
+ANALYTICS is a PREMIUM add and the dashboard is ALWAYS-ON, so on the entry tier
+`/analytics/overview` answers **404** — and `apiGet` returns null for a 404
+exactly as it does for a network error or a 5xx. The page read that as a failed
+fetch and rendered, on every load, for every STANDARD school:
+```
+Some figures could not be loaded, so they are shown as "—" or left out.
+Reload to try again — this is not a report that everything is at zero.
+```
+Reloading could never clear it. Nothing had failed; the school simply does not
+have the module.
+// THE COST IS NOT THE NOISE, IT IS WHAT THE NOISE SPENDS. That banner is how a
+PREMIUM school learns a figure is GENUINELY missing — the page goes to real
+trouble over it, rendering "—" rather than 0 because "Approvals 0 — nothing
+pending" is a work queue reporting itself clear. Showing it permanently to the
+tier with the most schools is how it stops being read anywhere, which is the
+argument this repo already makes about repeating an alert on the one day it
+matters.
+// GATE BEFORE FETCHING, the rule already recorded for permissions ("pages ask
+for endpoints they can't have"). The page had a `mod()` helper on line 149 and
+used it for tiles and quick actions; it simply never used it for this. It now
+skips the call entirely when unentitled, and `overviewFailed` requires
+`hasAnalytics` — so the distinction the whole block is built on, COULD NOT ASK
+versus NOTHING THERE, survives for the tier that cannot ask at all.
+// The banner is KEPT for a school that has analytics: a null overview there is
+a real failure, and saying nothing would report zeros as fact.
+// `MODULES.ANALYTICS`, not the bare string its neighbours pass. `mod` takes a
+`string`, so a typo returns false silently and the figure would simply never be
+fetched — the type-safety spine's whole argument, in a file that had drifted.
+Live, both tiers: STANDARD `/analytics/overview` 404 and NO banner; ENTERPRISE
+200 and no banner. Mutation-validated both ways.
+
 ### A control the product imposes and gives no way to finish
 `WorkflowController` was gated, at the CLASS level, on `MODULES.WORKFLOW` — a
 PREMIUM add. Five producers can RAISE a maker-checker request on STANDARD,

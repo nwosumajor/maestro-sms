@@ -7,6 +7,9 @@ import type {
   PlatformAnalyticsDto,
   Serialized,
 } from "@sms/types";
+// A VALUE import: the neighbours pass module keys as bare strings, and a typo
+// there silently returns false — the figure would simply never be fetched.
+import { MODULES } from "@sms/types";
 import Link from "next/link";
 import {
   BellIcon,
@@ -184,8 +187,22 @@ export default async function DashboardPage() {
   // rows, and events windowed from yesterday by the server rather than fetched wide
   // and filtered here.
   const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString().slice(0, 10);
+  // NOT ASKED FOR WHAT THIS SCHOOL DOES NOT HAVE.
+  //
+  // ANALYTICS is a PREMIUM add and this dashboard is always-on, so on the entry
+  // tier `/analytics/overview` answered 404 — and `apiGet` returns null for a
+  // 404 exactly as it does for a network failure. The page read that as "the
+  // fetch failed" and showed the amber "Some figures could not be loaded …
+  // Reload to try again" banner to EVERY STANDARD school, permanently, about a
+  // module they never bought. Reloading could never help.
+  //
+  // Worse than noise: that banner is how a PREMIUM school learns a figure is
+  // genuinely missing. Showing it forever to the tier with the most schools is
+  // how it stops being read anywhere — the same argument this codebase makes
+  // about repeating an alert on the one day it matters.
+  const hasAnalytics = mod(MODULES.ANALYTICS);
   const [overview, summary, inbox, events] = await Promise.all([
-    apiGet<Overview>("/analytics/overview"),
+    hasAnalytics ? apiGet<Overview>("/analytics/overview") : Promise.resolve(null),
     apiGet<Serialized<DashboardSummaryDto>>("/dashboard/summary"),
     apiGet<Inbox>("/notifications?limit=6"),
     apiGet<Ev[]>(`/events?from=${since}`),
@@ -198,7 +215,10 @@ export default async function DashboardPage() {
   // fall back to 0, and "Approvals 0 — nothing pending" is a work queue
   // reporting itself as clear. An approver who reads that stops looking.
   const summaryFailed = summary === null;
-  const overviewFailed = overview === null;
+  // Only a school that HAS analytics can have failed to load it. Without this
+  // the distinction the whole block is built on — "could not ask" versus
+  // "nothing there" — is lost for the tier that cannot ask at all.
+  const overviewFailed = hasAnalytics && overview === null;
   const someFiguresMissing = summaryFailed || overviewFailed;
 
   const pending = summary?.pendingApprovals ?? 0;
