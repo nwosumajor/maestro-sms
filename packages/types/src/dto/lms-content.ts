@@ -277,6 +277,23 @@ export interface XapiResult {
 }
 
 /** One stored xAPI learning statement (the LRS record, read side). */
+/**
+ * A page of the Learning Record Store.
+ *
+ * The LRS is APPEND-ONLY — the app role holds INSERT and SELECT and no DELETE —
+ * and statements are emitted automatically on every completion and quiz, so it
+ * grows with a class's whole history. A capped newest-first list therefore made
+ * the oldest records unreachable by any query the product offered, on the one
+ * table whose entire purpose is to BE the queryable record.
+ */
+export interface XapiStatementPageDto {
+  items: XapiStatementDto[];
+  /** Matching the filter, not the page. */
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 export interface XapiStatementDto {
   id: string;
   actorId: string;

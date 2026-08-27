@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { LmsAnalyticsDto, Serialized, XapiStatementDto } from "@sms/types";
+import type { LmsAnalyticsDto, Serialized, XapiStatementPageDto } from "@sms/types";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { apiGet } from "@/lib/api";
@@ -27,7 +27,7 @@ export default async function ClassAnalyticsPage({ params }: { params: { id: str
 
   const [data, statements] = await Promise.all([
     apiGet<Serialized<LmsAnalyticsDto>>(`/classes/${classId}/analytics`),
-    apiGet<Serialized<XapiStatementDto>[]>(`/xapi/statements?classId=${classId}`),
+    apiGet<Serialized<XapiStatementPageDto>>(`/xapi/statements?classId=${classId}`),
   ]);
 
   return (
@@ -54,7 +54,7 @@ export default async function ClassAnalyticsPage({ params }: { params: { id: str
                 An empty feed here would read as &ldquo;nobody has engaged with this content&rdquo;.
               </LoadFailure>
             ) : (
-              <XapiActivity statements={statements} />
+              <XapiActivity statements={statements.items} total={statements.total} />
             )}
           </>
         )}

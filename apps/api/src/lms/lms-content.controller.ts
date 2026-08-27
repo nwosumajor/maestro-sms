@@ -26,6 +26,7 @@ import type {
   LmsRevisionDto,
   LmsSubmissionDto,
   XapiStatementDto,
+  XapiStatementPageDto,
   QuizAttemptGradeDto,
   LmsPresignDto,
   QuizAttemptResultDto,
@@ -33,6 +34,7 @@ import type {
 import { RequireModule } from "../auth/require-module.decorator";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { CurrentPrincipal } from "../auth/current-principal.decorator";
+import { dateWindow, pageNumber } from "../common/status-filter";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { Principal } from "../integrity/integrity.foundation";
 import { LmsContentService } from "./lms-content.service";
@@ -222,8 +224,21 @@ export class LmsContentController {
     @CurrentPrincipal() p: Principal,
     @Query("classId") classId?: string,
     @Query("studentId") studentId?: string,
-  ): Promise<XapiStatementDto[]> {
-    return this.content.listStatements(p, { classId, studentId });
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+    @Query("page") page?: string,
+  ): Promise<XapiStatementPageDto> {
+    // Through the SHARED narrowers, so a typo is a 400 naming the range rather
+    // than a 500 or a silently-ignored filter — the rule the rest of the list
+    // endpoints already follow.
+    const window = dateWindow(from, to);
+    return this.content.listStatements(p, {
+      classId,
+      studentId,
+      from: window.from,
+      to: window.to,
+      page: pageNumber(page),
+    });
   }
 
   // --- engagement: achievement badges ---------------------------------------

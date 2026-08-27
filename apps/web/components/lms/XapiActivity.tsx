@@ -26,7 +26,7 @@ function result(s: Statement): string {
   return bits.join(" · ");
 }
 
-export function XapiActivity({ statements }: { statements: Statement[] }) {
+export function XapiActivity({ statements, total }: { statements: Statement[]; total: number }) {
   return (
     <Card>
       <CardHeader>
@@ -37,6 +37,12 @@ export function XapiActivity({ statements }: { statements: Statement[] }) {
         </CardDescription>
       </CardHeader>
       <CardContent>
+        {statements.length > 0 && total > statements.length && (
+          <p className="text-xs text-muted-foreground">
+            Showing the {statements.length} most recent of {total.toLocaleString()} statements. The record store keeps
+            them all &mdash; narrow by date to reach the rest.
+          </p>
+        )}
         {statements.length === 0 ? (
           <p className="text-sm text-muted-foreground">No activity recorded yet.</p>
         ) : (
@@ -52,7 +58,7 @@ export function XapiActivity({ statements }: { statements: Statement[] }) {
                 </tr>
               </thead>
               <tbody>
-                {statements.slice(0, 50).map((s) => (
+                {statements.map((s) => (
                   <tr key={s.id} className="border-b last:border-0">
                     <td className="py-1.5 pr-2 font-medium">{s.actorName}</td>
                     <td className="px-2">

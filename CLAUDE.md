@@ -1638,7 +1638,7 @@ ALREADY O(page) rather than O(lifetime) — invoices 0.10 ms at 45,000 rows,
 notifications 0.12 ms at 500,000, the register history 1.85 ms, the audit log
 0.59 ms. Deleting the institutional record to save milliseconds would trade a
 legal obligation for a page load, and the app role deliberately cannot: it holds
-DELETE on 76 of 204 tables.
+DELETE on 76 of 229 tables.
 **WHAT WAS ACTUALLY WRONG was the one table nobody had a plan for.**
 `attendance_record` was 201 MB — the largest in the product, roughly 2.85 M rows
 per 1,000-pupil school over fifteen years, one row per pupil per school day —
@@ -2023,6 +2023,44 @@ entry.
 COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
+
+### A record store that only ever showed the recent page
+`listStatements` (the xAPI LRS). `xapi_statement` is APPEND-ONLY — the app role
+holds INSERT and SELECT and no DELETE — and a statement is emitted automatically
+on every content completion and quiz, so it grows with a class's whole history.
+The query returned the most-recent 500 newest-first, with no filter, no paging
+and no total.
+Measured live on a class seeded to 602 statements: the query reached back three
+and a half weeks and **the older 102 were unreachable by anything the product
+offered**, with nothing saying rows had been withheld — on the one table whose
+entire purpose is to BE the queryable record.
+Live after: `total=602` on every page, page 12 reaching 2026-08-02, a date
+window returning the 2026-07-11 rows that nothing could previously reach, and
+`?page=abc` a 400 naming the range through the shared narrower.
+// NEWEST-FIRST IS KEPT, unlike the review queues. A queue is worked from the
+FRONT because the longest wait is the one that matters; a record store is
+BROWSED, and recent activity is what a teacher opens it for. The DATE WINDOW is
+what reaches the rest, and it is the standard xAPI query shape.
+// The page carries a tiebreak (`storedAt desc, id desc`): two statements at the
+same instant would otherwise let one row appear on two pages and another on
+none.
+// The component's own second cap (`statements.slice(0, 50)`) is gone — a cap
+inside a cap hides the paging from the reader — and the page now says "Showing
+the 50 most recent of 602" rather than presenting a page as everything.
+// **HOW IT WAS FOUND, AND WHY IT WAS MISSED.** The sweep that fixed the
+chargeback banner and the admissions queue scoped itself to "the 128 tables the
+app role cannot DELETE from". That count is now **153** — and 76 of **229**
+tables, not 204. Both numbers were typed into prose as current fact and both had
+rotted, exactly as this file warns ("a count typed into prose rots the moment a
+role is added"). The rot is not cosmetic: the stale denominator is the
+COMPLETENESS CLAIM of a sweep, and `xapi_statement` is one of the ~25 tables that
+appeared after it. Correcting a number in a sentence would have missed the
+defect; re-running the sweep against the current set is what found it.
+// A NEGATIVE RESULT from the same pass, recorded so it is not redone: the other
+large capped reads were checked and are sound — `data_breach_incident` (500 on a
+register that holds a handful of rows), the feedback thread (bounded by one
+conversation, ordered ASC), and the operator onboarding funnel (already every
+undecided row, oldest-first).
 
 ### The row lock that reached the database before the id was ever checked
 `MalformedIdFilter` already exists for this exact class, and its header says so:
@@ -4689,7 +4727,7 @@ Third instance of the class already recorded for approvals, leave and
 assessments: **filtering in memory still only ever sees the rows that survived
 the cap.**
 **AND ITS SIBLING HAD IT TOO.** Rather than stop at the one that hurt — the
-mistake this repo keeps recording — the class was swept: of the 128 tables the
+mistake this repo keeps recording — the class was swept: of the 153 tables the
 app role cannot DELETE from, 27 had a list read with a hard cap. `GET /admissions`
 was byte-for-byte the same shape, `findMany({ orderBy: { createdAt: "desc" },
 take: 200 })`, no filter, no page, no total. An application still NEW or

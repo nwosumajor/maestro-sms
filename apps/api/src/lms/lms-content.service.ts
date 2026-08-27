@@ -46,6 +46,7 @@ import type {
   WorkflowAction,
   XapiResult,
   XapiStatementDto,
+  XapiStatementPageDto,
   XapiVerb,
 } from "@sms/types";
 import { badgeMeta, gradeComponentMax, isBadgeKey, LMS_PERMISSIONS,
@@ -132,6 +133,9 @@ type SubmissionRow = {
   submittedAt: Date;
   updatedAt: Date;
 };
+
+/** One page of the LRS. Fifty is a screenful; the window reaches the rest. */
+const XAPI_PAGE_SIZE = 50;
 
 @Injectable()
 export class LmsContentService {
@@ -1355,8 +1359,24 @@ export class LmsContentService {
    *  class (optionally one student); everyone else → their OWN statements. */
   async listStatements(
     p: Principal,
-    q: { classId?: string; studentId?: string },
-  ): Promise<XapiStatementDto[]> {
+    q: { classId?: string; studentId?: string; from?: Date; to?: Date; page?: number },
+  ): Promise<XapiStatementPageDto> {
+    // PAGED AND WINDOWED, because this is a RECORD, not a queue.
+    //
+    // It used to return the most-recent 500 and say nothing. The LRS is
+    // append-only — the app role has INSERT and SELECT and no DELETE — and a
+    // statement is emitted automatically on every completion and quiz, so a
+    // class outruns 500 within a term. Measured live on 602 statements: the
+    // query reached back three and a half weeks and the older 102 were
+    // unreachable by anything the product offered, with no total and nothing
+    // saying rows had been withheld.
+    //
+    // NEWEST-FIRST is kept. A review queue is worked from the front — the rule
+    // the meeting and selection queues follow — but a record store is BROWSED,
+    // and the recent activity is what a teacher opens it for. The date window
+    // is what reaches the rest, and it is the standard xAPI query shape.
+    const page = Math.max(1, q.page ?? 1);
+    const pageSize = XAPI_PAGE_SIZE;
     return this.db.runAsTenant(this.ctx(p), async (tx) => {
       let where: Prisma.XapiStatementWhereInput;
       if (q.classId && (await this.canAuthor(tx, p, q.classId))) {
@@ -1365,9 +1385,27 @@ export class LmsContentService {
         // Non-staff (or no class): only your own record.
         where = { actorId: p.userId, ...(q.classId ? { classId: q.classId } : {}) };
       }
-      const rows = await tx.xapiStatement.findMany({ where, orderBy: { storedAt: "desc" }, take: 500 });
+      if (q.from || q.to) {
+        where = { ...where, storedAt: { ...(q.from ? { gte: q.from } : {}), ...(q.to ? { lte: q.to } : {}) } };
+      }
+      // The total MATCHES THE FILTER, so a reader can tell the difference
+      // between "this is everything" and "this is the first page of many".
+      const [total, rows] = await Promise.all([
+        tx.xapiStatement.count({ where }),
+        tx.xapiStatement.findMany({
+          where,
+          orderBy: [{ storedAt: "desc" }, { id: "desc" }],
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+        }),
+      ]);
       const names = await this.nameMap(tx, rows.map((r) => r.actorId));
-      return rows.map((r) => this.toXapiDto(r, names.get(r.actorId) ?? "User"));
+      return {
+        items: rows.map((r) => this.toXapiDto(r, names.get(r.actorId) ?? "User")),
+        total,
+        page,
+        pageSize,
+      };
     });
   }
 
