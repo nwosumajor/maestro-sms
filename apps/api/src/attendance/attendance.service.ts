@@ -245,15 +245,26 @@ export class AttendanceService {
           // Two types, not one message with two keys: a guardian must be able to
           // switch off "arrived late" without also switching off "did not
           // arrive". ATTENDANCE_ABSENCE is essential and cannot be muted.
+          // A CORRECTION rides the ABSENCE type, which is essential and cannot
+          // be muted: a family that switched off absence alerts would otherwise
+          // keep the wrong one and never receive the fix.
           type: g.status === "LATE" ? "ATTENDANCE_LATE" : "ATTENDANCE_ABSENCE",
           // Written in each GUARDIAN's own language — enqueueMany renders per
           // recipient, so a class whose families do not share one still gets it
           // right. The title/body below stay as the English fallback for a
           // recipient whose language has no catalogue entry.
-          key: g.status === "LATE" ? "attendance.late" : "attendance.absent",
+          key:
+            g.status === "CORRECTED"
+              ? "attendance.corrected"
+              : g.status === "LATE"
+                ? "attendance.late"
+                : "attendance.absent",
           params: { date: input.date },
-          title: "Attendance alert",
-          body: `Your child was marked ${g.status} on ${input.date}.`,
+          title: g.status === "CORRECTED" ? "Attendance correction" : "Attendance alert",
+          body:
+            g.status === "CORRECTED"
+              ? `An earlier message said your child was absent or late on ${input.date}. That has been corrected — the register now records them as present.`
+              : `Your child was marked ${g.status} on ${input.date}.`,
           data: { classId, date: input.date, studentId: g.studentId, status: g.status },
           channels: ["EMAIL"],
         });
@@ -484,6 +495,21 @@ export class AttendanceService {
       update: { takenById: actorId },
       create: { schoolId, classId, date, takenById: actorId },
     });
+    // WHAT EACH PUPIL WAS MARKED BEFORE, so an alert can be about a CHANGE.
+    //
+    // The guardian alerts were built from the submitted records alone, so every
+    // save of the register re-notified every absent pupil's family — a teacher
+    // fixing one pupil's mark sent a second identical "absent" email to all the
+    // others. Measured live: saving the same unchanged register twice produced
+    // two alerts 116ms apart. One indexed read per save, bounded by class size.
+    const prior = new Map<string, AttendanceStatusValue>(
+      (
+        await tx.attendanceRecord.findMany({
+          where: { sessionId: session.id, studentId: { in: records.map((r) => r.studentId) } },
+          select: { studentId: true, status: true },
+        })
+      ).map((r: { studentId: string; status: string }) => [r.studentId, r.status as AttendanceStatusValue]),
+    );
     const now = new Date();
     // `date` is the PARTITION KEY, denormalised from the session. It is taken
     // from the same `date` the session was just upserted on, so the two can
@@ -513,18 +539,42 @@ export class AttendanceService {
       },
       tx,
     );
+    // ONLY WHAT CHANGED. A mark that is re-submitted unchanged is not news, and
+    // an alert channel that repeats itself is one families learn to ignore —
+    // including on the day it matters.
     const alertStudents = records
-      .filter((r) => ALERTING_STATUSES.has(r.status))
+      .filter((r) => ALERTING_STATUSES.has(r.status) && prior.get(r.studentId) !== r.status)
       .map((r) => ({ studentId: r.studentId, status: r.status }));
-    const alerts: { guardianId: string; studentId: string; status: AttendanceStatusValue }[] = [];
-    if (alertStudents.length > 0) {
+
+    // A MARK THAT IS TAKEN BACK IS TAKEN BACK OUT LOUD.
+    //
+    // Correcting an absence to PRESENT left the family holding an alert saying
+    // their child missed school, while the register said they were there. Same
+    // rule as a withdrawn duty and a retracted bus boarding.
+    //
+    // PRESENT only, deliberately: an EXCUSED absence IS an absence — the pupil
+    // was not in school and the school has merely accepted the reason — so
+    // "they were here after all" would be false. ABSENT -> LATE needs no
+    // retraction either, because the LATE alert above already carries the new
+    // fact and supersedes it.
+    const retractStudents = records
+      .filter((r) => r.status === "PRESENT" && ALERTING_STATUSES.has(prior.get(r.studentId) as AttendanceStatusValue))
+      .map((r) => r.studentId);
+    const alerts: { guardianId: string; studentId: string; status: AttendanceStatusValue | "CORRECTED" }[] = [];
+    const touched = [...new Set([...alertStudents.map((sx) => sx.studentId), ...retractStudents])];
+    if (touched.length > 0) {
       const links = await tx.parentChild.findMany({
-        where: { studentId: { in: alertStudents.map((sx) => sx.studentId) } },
+        where: { studentId: { in: touched } },
         select: { parentId: true, studentId: true },
       });
       for (const sx of alertStudents) {
         for (const l of links.filter((x: { studentId: string }) => x.studentId === sx.studentId)) {
           alerts.push({ guardianId: l.parentId, studentId: sx.studentId, status: sx.status });
+        }
+      }
+      for (const studentId of retractStudents) {
+        for (const l of links.filter((x: { studentId: string }) => x.studentId === studentId)) {
+          alerts.push({ guardianId: l.parentId, studentId, status: "CORRECTED" });
         }
       }
     }

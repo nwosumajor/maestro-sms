@@ -2024,6 +2024,53 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### The same absence, emailed twice, and the correction never sent
+`applyRegister`. Marking a pupil ABSENT or LATE emails their guardians. The
+alert list was built from the SUBMITTED records alone — filtered by status, with
+no reference to what each pupil was marked BEFORE — which cost two things.
+Both measured live on the running stack, one probe, one pupil:
+```
+save the register ABSENT      ->  alert
+save it again, UNCHANGED      ->  a SECOND identical alert, 116 ms later
+correct the pupil to PRESENT  ->  nothing sent; the register read PRESENT while
+                                  the family held two absence alerts
+```
+**THE DUPLICATE IS THE ONE THAT SCALES.** A register is saved repeatedly — a
+teacher fixing one pupil's mark re-submits the class — and every save re-alerted
+every absent pupil's family. On a 60-pupil register that is a second identical
+email to every absent child's home for one typo. The bus register beside it got
+this right (`!alreadyBoarded`); the class register did not.
+**THE MISSING CORRECTION IS THE ONE THAT MISLEADS**, and it is the third
+instance of the class in this file after the withdrawn duties and the retracted
+bus boarding: the school's own record said the child was in school and the last
+thing their family heard was that they were not.
+// ONE INDEXED READ buys both — the prior statuses for the submitted pupils,
+bounded by class size. An alert now fires only on a CHANGE, and a retraction
+only when an alerting mark becomes PRESENT.
+// **PRESENT ONLY, AND THAT IS THE CAREFUL PART.** An EXCUSED absence IS an
+absence — the pupil was not in school and the school has merely accepted the
+reason, the rule `attendanceRatePct` already settles across six screens — so
+ABSENT -> EXCUSED sends nothing, because "they were here after all" would be a
+false statement about a child. ABSENT -> LATE sends nothing extra either: the
+LATE alert already carries the new fact and a retraction beside it would be two
+messages about one change.
+// THE CORRECTION RIDES `ATTENDANCE_ABSENCE`, which is ESSENTIAL and cannot be
+muted. A family that had switched absence alerts off would otherwise keep the
+wrong message and never receive the fix.
+// TRANSLATED, not hard-coded: `attendance.corrected` joins the message
+catalogue in English and French like its two siblings, so a correction reaches a
+guardian in the language the original was written in.
+// Live after, same probe: ONE absence alert, then "Attendance correction",
+and the register reading PRESENT.
+// GOTCHA: the demo school is BETWEEN TERMS, so every date — today included — is
+term-locked and no register can be taken at all. Driving this needed the current
+term's `startDate` moved back for the probe and restored afterwards. Worth
+knowing before concluding that an attendance endpoint is broken.
+// GOTCHA: taking a register is scoped harder than it looks —
+`REGISTER_COVER_ROLES` is school_admin only, so the class's own subject teacher
+gets 403 ("Only History 101's supervisor takes its register"). That is
+deliberate and documented; it is also why the probe signs in as the admin.
+
 ### The family was told the child boarded, and never that they had not
 `recordBoarding` (`transport.service.ts`). Recording a PICKUP emails the
 guardians "Your child has boarded the school bus for pickup." The write is

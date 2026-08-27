@@ -78,6 +78,17 @@ export const NOTIFICATION_MESSAGES: Record<string, MessageTemplate> = {
       fr: "Votre enfant a été porté(e) EN RETARD le {date}.",
     },
   },
+  // A correction to an absence or lateness already reported to the family. It
+  // must stand on its own — a guardian reading it may not have the earlier one
+  // to hand — and it names PRESENT rather than "ignore that", so the message is
+  // a statement of the record rather than a retraction of a message.
+  "attendance.corrected": {
+    title: { en: "Attendance correction", fr: "Correction de présence" },
+    body: {
+      en: "An earlier message said your child was absent or late on {date}. That has been corrected — the register now records them as PRESENT.",
+      fr: "Un message précédent indiquait que votre enfant était absent(e) ou en retard le {date}. Cela a été corrigé : le registre indique maintenant PRÉSENT(E).",
+    },
+  },
   "fees.payment_received": {
     title: { en: "Payment received", fr: "Paiement reçu" },
     body: {
