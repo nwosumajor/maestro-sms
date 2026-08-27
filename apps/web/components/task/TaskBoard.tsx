@@ -22,6 +22,28 @@ import { personLabel } from "@/lib/people";
 type Task = Serialized<TaskDto>;
 type Person = { id: string; name: string; roles?: string[] };
 
+/**
+ * A DUE DATE THAT HAS PASSED SAYS SO.
+ *
+ * The row rendered "due 3 Aug" in the same muted grey whether that was next week
+ * or three weeks ago, so an overdue task looked exactly like a fresh one — the
+ * shape this repo already fixed for the operator's onboarding queue, where a
+ * lead submitted three weeks earlier was indistinguishable from this morning's.
+ *
+ * ONLY WHILE IT IS STILL OPEN. "Overdue" on a task somebody finished is a false
+ * statement about their work, and it would teach a reader to ignore the marker
+ * on the rows where it is true — the same reasoning the breach sweep uses for
+ * sending at most two notices per incident.
+ *
+ * NO SWEEP, deliberately. This is a list a manager already reads; adding a timer
+ * to chase what the screen can simply say is the more elaborate answer to the
+ * smaller problem, exactly as the onboarding-lead fix concluded.
+ */
+function isOverdue(dueAt: string, status: string): boolean {
+  if (status === "COMPLETED" || status === "CANCELLED") return false;
+  return new Date(dueAt).getTime() < Date.now();
+}
+
 export function TaskBoard({
   page, staff, students, canAssign,
 }: {
@@ -104,7 +126,14 @@ export function TaskBoard({
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
               {t.title} <Badge variant={t.status === "COMPLETED" ? "outline" : "secondary"}>{t.status}</Badge>
-              {t.dueAt && <span className="text-xs font-normal text-muted-foreground">due {shortDate(t.dueAt)}</span>}
+              {t.dueAt &&
+                (isOverdue(t.dueAt, t.status) ? (
+                  <span className="text-xs font-medium text-destructive">
+                    overdue &mdash; was due {shortDate(t.dueAt)}
+                  </span>
+                ) : (
+                  <span className="text-xs font-normal text-muted-foreground">due {shortDate(t.dueAt)}</span>
+                ))}
             </CardTitle>
             <CardDescription>By {t.createdByName}{t.description ? ` · ${t.description}` : ""}</CardDescription>
           </CardHeader>

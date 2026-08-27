@@ -2024,6 +2024,34 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### A task due date that had passed, in the same grey as one due next week
+`TaskBoard` rendered `due {shortDate(t.dueAt)}` in muted grey whether the date
+was next week or three weeks ago, and nothing else in the product chases a task
+deadline — no sweep, no badge, no ordering. Third instance of the class this
+file records for the operator's onboarding queue and for every other waiting
+thing that states its age: the data was on the row the whole time and the defect
+was in the DRAWING, which is why no API test could have found it.
+// SAID ONLY WHILE THE TASK IS OPEN. "Overdue" on work somebody finished is a
+false statement about them, and it teaches a reader to ignore the marker on the
+rows where it is true — the same reasoning the breach sweep uses for at most two
+notices per incident, and the lead-age fix for decided requests.
+// NO SWEEP, deliberately, and for the reason that fix already gives: this is a
+list a manager already reads, and adding an eighteenth timer to chase what a
+screen can simply say is the more elaborate answer to the smaller problem.
+// GOTCHA in my own test, caught by mutation: asserting the WORDING
+("overdue — was due") passes against a dead branch. It asserts the CALL drives
+the ternary.
+
+// CHECKED AND DELIBERATELY NOT CHANGED, in the same pass: **no scheduled sweep
+consults module entitlement**, and that is right rather than an oversight.
+`@RequireModule` is an HTTP guard; the seventeen jobs run for every school
+whatever its plan. A school degraded to the STANDARD floor by non-payment keeps
+its hostel rows, and the exeat-overdue sweep still tells somebody a boarder is
+late. Gating that on billing would stop a child-safety alert because an invoice
+is late — the same line this file already draws for retention, where "the
+obligation to delete minors' telemetry on time does not pause because a school
+stopped paying".
+
 ### Every always-on page audited for calls into gated modules
 The dashboard defect one entry down was the second in two rounds caused by an
 always-on surface consuming a module-gated endpoint, so the seam was swept
