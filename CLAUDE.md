@@ -2075,6 +2075,37 @@ snapshot taken immediately after a probe reports the PREVIOUS probe's reads.
 Settle 12-18 s, and divide by the number of requests rather than trusting one.
 
 
+### Global search — the probes' blind spot, checked and sound
+All four probes are ID-ADDRESSED: they ask what happens when a caller already
+knows a valid id. `GET /search?q=` is QUERY-addressed — you type a name and need
+no id at all — so a leak there is invisible to every one of them. Probed live
+across five roles on a school of 900 pupils:
+```
+searching "Volume" (900 pupils, none of them theirs)   parent/student/teacher/driver/librarian -> no hits
+searching "Demo"   (their own child / their own pupil) parent -> 1   student -> 1 (themselves)   teacher -> 1
+                                                       driver -> 0   librarian -> 0
+```
+Correct on every row. A parent sees only their own child, a pupil only
+themselves, a teacher only pupils in classes they teach, and the two roles with
+no business opening a pupil's profile get nothing at all — which is the point the
+service's own comment makes: it gates on **what the DESTINATION requires**
+(`student.profile.read`), not on anything that merely implies an interest in
+pupils, because *"a result that cannot be opened is worse than no result: it
+tells a user the record exists and that they are being refused it."*
+// OBSERVED AND DELIBERATELY NOT CHANGED: the two branches disagree about
+LEAVERS. The whole-school branch applies `ON_ROLL_STUDENT` (which includes
+`status: ACTIVE`) and the relationship-scoped branch does not — so, measured
+live on one exited pupil, **the school office finds 0 and the teacher finds 1**.
+That reads backwards at first, and it is NOT obviously a defect: leavers have
+their OWN page (`/students/exited`, which feeds the bursar's chase and the
+transcript decision), and a teacher finding a former pupil of theirs is
+defensible on the same reasoning that keeps a leaver's name on their old records.
+Deciding it needs establishing whether a leaver's profile opens for each role,
+which I could not settle cheaply — the demo's obvious candidates have no
+`student_profile` row, so the 404 says nothing either way. Left alone rather than
+shipping a guess into a read path, and written down so the next person starts
+from the measurement instead of the surprise.
+
 ### The runbook's most important command, pointed at the wrong port
 Four probes exist and each answers a question the unit tests cannot: route smoke
 (SSR 500s), isolation (school A reaching school B BY ID through the real front
