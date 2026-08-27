@@ -2024,6 +2024,33 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### The bus shrank under the children already on it
+`updateVehicle`. Assigning a passenger counts the seats and ROW-LOCKS the route
+first, with a comment saying why — "these are physical seats on a bus, and a
+count-then-insert lets two racers take the last one". Careful, and it guards one
+side of a comparison. Nothing guarded the other: the vehicle's own `capacity` is
+editable afterwards, so the check is bypassed by moving the number it compares
+against. Measured live — a 40-seat bus carrying 5, set to capacity 2, returned
+**HTTP 200**. After: 400 naming the route, both numbers and the way out.
+// COMPARED AGAINST THE BIGGEST SINGLE ROUTE, not the total. A vehicle can serve
+a morning and an afternoon route, which is exactly why the assignment check is
+per-route; summing them would refuse a bus perfectly able to run both.
+// ZERO STILL MEANS NO LIMIT — the column default, and what the assignment check
+already treats as unset — so a school that has never entered capacities is
+unaffected. Refusing rather than warning matches the hostel room and the exam
+hall, which both 409 on capacity.
+// **TWO HYPOTHESES WERE REFUTED BY THE SAME PROBE, and they are recorded so
+nobody re-investigates them.** A NEGATIVE capacity is already rejected by the
+boundary schema (400) even though the service checks it only on create; and a
+route's `vehicleId` is settable only at CREATE, when the route has no
+passengers, so there is no swap-a-route-onto-a-smaller-bus path. I predicted
+three gaps and measurement left one — which is the argument for driving it
+rather than reading it, in the direction that usually goes unreported.
+// GOTCHA in the mutation testing: replacing the guard's condition with `false`
+made the file fail to COMPILE, so jest reported "Tests: 0 total" — which is not
+a pass and must not be read as one. A mutation has to compile to prove anything;
+the real check used a comparison that can never fire.
+
 ### A bill the family was told about, withdrawn in silence
 `cancelInvoice`. Issuing emails the guardians "Invoice X for Y is due on Z";
 cancelling told them nothing. So the family's last word was that they owed money

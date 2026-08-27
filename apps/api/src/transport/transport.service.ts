@@ -156,6 +156,32 @@ export class TransportService {
       const v = await tx.vehicle.findFirst({ where: { id } });
       if (!v) throw new NotFoundException("Vehicle not found");
       if (input.driverId) await this.assertUserInSchool(tx, input.driverId);
+      // A BUS CANNOT SHRINK BELOW THE CHILDREN ALREADY ON IT.
+      //
+      // Assigning a passenger checks the seat count and row-locks the route,
+      // because these are physical seats. Nothing checked the OTHER side of that
+      // comparison: a 40-seat bus carrying 5 could simply be edited to capacity
+      // 2 and the guard was bypassed by moving the number it compares against.
+      // Measured live — that exact edit returned 200.
+      //
+      // Compared against the BIGGEST single route, not the total: a vehicle can
+      // serve a morning and an afternoon route, and the assignment check is
+      // per-route for that reason. Summing them would refuse a legitimate bus.
+      //
+      // Zero still means NO LIMIT — the column default, and what the assignment
+      // check already treats as unset — so a school that has not entered
+      // capacities is unaffected.
+      if (input.capacity !== undefined && input.capacity > 0) {
+        const routes = await tx.transportRoute.findMany({ where: { vehicleId: id }, select: { id: true, name: true } });
+        for (const r of routes) {
+          const used = await tx.transportAssignment.count({ where: { routeId: r.id, status: "ACTIVE" } });
+          if (used > input.capacity) {
+            throw new BadRequestException(
+              `${r.name} has ${used} passenger(s) assigned, so this vehicle cannot be set to ${input.capacity} seat(s). Move or remove passengers first.`,
+            );
+          }
+        }
+      }
       const updated = await tx.vehicle.update({
         where: { id },
         data: {
