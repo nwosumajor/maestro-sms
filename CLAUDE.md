@@ -2024,6 +2024,51 @@ COMMENT-STRIPPED copy of each file, so every finding pointed at the wrong line.
 A finding you cannot navigate to is one nobody acts on.
 
 
+### The column was denormalised to prune, and eight readers never used it
+`attendance_record` is RANGE-partitioned by month on a DENORMALISED `date`, and
+that column exists for exactly one reason, written in its own schema comment:
+Postgres can only partition on a column of the table itself, and the school day
+lived only on `attendance_session`. Filtering through the JOINED session cannot
+prune — Postgres has to scan every partition and join to discover which rows are
+in the window — so the cost tracks the school's AGE rather than the size of the
+window asked for.
+The migration denormalised the column and moved SOME readers. **Eight windowed
+reads were still going through the session**: both halves of the nightly rollup,
+the report card's attendance block, the analytics attendance figure, a pupil's
+own summary, the by-class board and two group-console aggregates.
+Measured as the APPLICATION role with RLS in force (never as `postgres`), one
+term of a school with 173,701 records:
+```
+via s.date   10 partitions seq-scanned, 173,701 rows read, 2,851 buffers, 63.9 ms
+via r.date    4 partitions,  planning 16.6 ms -> 1.1 ms,                  41.0 ms
+```
+The absolute times are small on one school; the SHAPE is the finding. The old
+plan reads every register row the school has ever written to aggregate one term,
+so it degrades every year while the new one is bounded by the window — the same
+O(lifetime) class this repo already fixed for invoices and the staff inbox.
+// EQUIVALENT BY CONSTRUCTION, and checked rather than asserted: the date is
+copied from the session and can never change for a given session, so the filters
+select the same rows. Verified across all 173,701 rows — **zero mismatches**,
+and the aggregates identical either way (900 groups, nothing in one and not the
+other).
+// LIVE-VERIFIED THE OTHER WAY TOO, which is the part that matters for a change
+that touches a report card: `/analytics/overview` over Third Term returns
+`53356 / 4786 / 4858 / 0 / 63000` through the new filter, byte-identical to the
+OLD `s.date` filter computed directly in SQL.
+// GOTCHA, and this file already records it twice: **a backtick inside an SQL
+comment closes the template literal.** Writing "the denormalised `date` column"
+into the rollup's SQL broke the parse in four places. Written down twice and
+walked into a third time.
+// GOTCHA while verifying: `/analytics/overview` with no range returned all
+zeros and looked like a regression. It defaults to the `isCurrent` term, which
+for this fixture starts 2026-09-07 — the demo school is between terms — so zero
+is the correct answer. Check what window a read actually used before calling an
+empty result a bug.
+Gate: `a-window-that-prunes-partitions.spec.ts` refuses a Prisma
+`session: { date: … }` on `attendanceRecord` and a raw `s.date` bound against
+`attendance_record`, and asserts the moved readers still window on SOMETHING —
+both rules pass trivially against code that stopped filtering by date at all.
+
 ### Every check-in at the scan desk was a 500, and recorded nothing at all
 `member-scan.service.ts`. The ID-card desk marks a pupil PRESENT on CHECK_IN,
 with a raw upsert written as a COPY of `AttendanceService.applyRegister`. When

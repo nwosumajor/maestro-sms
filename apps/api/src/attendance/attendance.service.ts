@@ -721,7 +721,7 @@ export class AttendanceService {
           JOIN attendance_session s ON s.id = r."sessionId"
           WHERE r."schoolId" = ${p.schoolId}::uuid
             AND s."classId" = ANY(ARRAY[${Prisma.join(classIds)}]::uuid[])
-            AND s.date BETWEEN ${from}::date AND ${to}::date
+            AND r.date BETWEEN ${from}::date AND ${to}::date
           GROUP BY s."classId"
         ` as Promise<Array<{ classId: string; present: number; absent: number; late: number; excused: number; total: number }>>),
         tx.attendanceSession.groupBy({
@@ -865,7 +865,7 @@ export class AttendanceService {
 
       const grouped = (await tx.attendanceRecord.groupBy({
         by: ["status"],
-        where: { studentId, ...(window ? { session: { date: window } } : {}) },
+        where: { studentId, ...(window ? { date: window } : {}) },
         _count: { _all: true },
       } as never)) as unknown as Array<{ status: string; _count: { _all: number } }>;
 

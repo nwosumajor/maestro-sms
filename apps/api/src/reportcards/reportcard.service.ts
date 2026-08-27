@@ -313,12 +313,16 @@ export class ReportCardService {
         }
       }
 
-      // Attendance summary — SCOPED to the term's date window (via session.date).
+      // Attendance summary — SCOPED to the term's date window.
+      //
+      // On the RECORD's own `date`, not the session's: the table is partitioned
+      // on it, so this prunes to the term's months instead of scanning every
+      // partition the school has ever written. Equivalent by construction.
       const recs = await tx.attendanceRecord.findMany({
         where: {
           studentId,
           ...(term?.startDate && term?.endDate
-            ? { session: { date: { gte: term.startDate, lte: term.endDate } } }
+            ? { date: { gte: term.startDate, lte: term.endDate } }
             : {}),
         },
         select: { status: true },

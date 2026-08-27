@@ -220,7 +220,7 @@ export class GroupService {
       headcountBySchool(client, schoolIds),
       client.attendanceRecord.groupBy({
         by: ["schoolId"],
-        where: { schoolId: { in: schoolIds }, session: { date: { gte: period.from, lte: period.to } } },
+        where: { schoolId: { in: schoolIds }, date: { gte: period.from, lte: period.to } },
         _count: { _all: true },
       }),
       client.attendanceRecord.groupBy({
@@ -230,7 +230,7 @@ export class GroupService {
           // LATE and EXCUSED count as attending — the same rule as the report card,
           // so a campus's figure here matches the one its own staff see.
           status: { in: ["PRESENT", "LATE", "EXCUSED"] },
-          session: { date: { gte: period.from, lte: period.to } },
+          date: { gte: period.from, lte: period.to },
         },
         _count: { _all: true },
       }),
@@ -368,7 +368,7 @@ export class GroupService {
                count(*)::int AS total
         FROM attendance_record r
         JOIN attendance_session s ON s.id = r."sessionId"
-        WHERE r."schoolId" = ${schoolId}::uuid AND s.date >= ${trendFrom}
+        WHERE r."schoolId" = ${schoolId}::uuid AND r.date >= ${trendFrom}
         GROUP BY 1 ORDER BY 1
       `),
     ]);

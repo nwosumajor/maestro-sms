@@ -203,7 +203,7 @@ export class AnalyticsService {
         // createdAt. Correcting a register weeks later wrote a row with today's
         // createdAt, so a back-filled absence counted against the wrong period and
         // silently vanished from the one it belonged to.
-        const where: Record<string, unknown> = { session: { date: { gte: period.from, lte: period.to } } };
+        const where: Record<string, unknown> = { date: { gte: period.from, lte: period.to } };
         if (!staff) {
           if (!studentIds || studentIds.length === 0) where.studentId = "__none__";
           else where.studentId = { in: studentIds };
