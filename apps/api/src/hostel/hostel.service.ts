@@ -21,7 +21,7 @@ import type {
   HostelRoomDto,
   HostelSummaryDto,
 } from "@sms/types";
-import { HOSTEL_PERMISSIONS, FEE_SOURCES } from "@sms/types";
+import { HOSTEL_PERMISSIONS, FEE_SOURCES, formatMoney } from "@sms/types";
 import {
   AUDIT_LOG_SERVICE,
   TENANT_DATABASE,
@@ -816,10 +816,24 @@ export class HostelService {
       });
       // Snapshot the initiator's billing scope so approval can't widen it.
       const scopeWardenId = p.roles.includes("head_warden") ? null : p.userId;
+      // WHAT THIS RUN WILL COST A FAMILY, before somebody approves it.
+      //
+      // The inbox shows a request's `summary` and nothing else, and this wrote
+      // none — so the approver of a run that posts rent onto every boarder's
+      // invoice saw only the scope and the due date. How many families, and how
+      // much, are the two facts the decision turns on.
+      const preview = await this.previewFeeRun(p, { hostelId: input.hostelId, scopeWardenId });
       const req = (await this.workflow.createRequest(p, {
         type: "FEE_SCHEDULE",
         title: `Hostel fee run (${input.hostelId ? "one hostel" : "all in scope"}) due ${input.dueDate.slice(0, 10)}`,
-        payload: { module: "hostel", hostelId: input.hostelId ?? null, dueDate: input.dueDate, description: input.description ?? null, scopeWardenId },
+        payload: {
+          module: "hostel",
+          hostelId: input.hostelId ?? null,
+          dueDate: input.dueDate,
+          description: input.description ?? null,
+          scopeWardenId,
+          summary: preview,
+        },
       })) as { id: string };
       await this.workflow.submit(p, req.id);
       return { pendingApproval: true, requestId: req.id };
@@ -832,6 +846,43 @@ export class HostelService {
 
   /** Post a hostel fee run (rent -> invoice line items). Runs either directly
    *  (admin) or from the FEE_SCHEDULE approval hook, always inside a tenant tx. */
+  /**
+   * What the run would bill AS AT NOW — the sentence an approver reads.
+   *
+   * Deliberately says "as at today": the roll can change between raising and
+   * approving, and a figure presented as exact would be believed. It uses the
+   * same scope and the same rent source as `postFeeRun`, so it is the right
+   * number for the right boarders on the day it is written.
+   */
+  private async previewFeeRun(
+    p: Principal,
+    scope: { hostelId?: string; scopeWardenId: string | null },
+  ): Promise<string> {
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      const roomWhere = scope.hostelId
+        ? { hostelId: scope.hostelId }
+        : scope.scopeWardenId
+          ? { hostel: { wardenId: scope.scopeWardenId } }
+          : {};
+      const rooms = (await tx.hostelRoom.findMany({
+        where: roomWhere,
+        select: { id: true, rentMinor: true },
+      })) as Array<{ id: string; rentMinor: number }>;
+      if (rooms.length === 0) return "No rooms in scope — this run would bill nobody.";
+      const rent = new Map(rooms.map((r) => [r.id, r.rentMinor]));
+      const allocs = (await tx.hostelAllocation.findMany({
+        where: { roomId: { in: rooms.map((r) => r.id) }, status: "ACTIVE" },
+        select: { roomId: true },
+      })) as Array<{ roomId: string }>;
+      const total = allocs.reduce((n, a) => n + (rent.get(a.roomId) ?? 0), 0);
+      const school = await tx.school.findFirst({ where: { id: p.schoolId }, select: { currency: true } });
+      const currency = school?.currency ?? "NGN";
+      return allocs.length === 0
+        ? "No boarders currently allocated in scope — this run would bill nobody."
+        : `Bills ${allocs.length} boarder${allocs.length === 1 ? "" : "s"}, ${formatMoney(total, currency)} in total (as at today).`;
+    });
+  }
+
   private async postFeeRun(
     tx: TenantTx,
     schoolId: string,

@@ -2101,11 +2101,33 @@ entitlement, because "OVER their 0-day entitlement" is noise, not a warning.
 leave, compassionate leave, a school that tracks entitlement loosely — and a
 three-stage chain of humans is the designed control. What was missing was the
 information, not the gate.
-// THE OTHER SEVEN PRODUCERS STILL WRITE NO SUMMARY, and that is recorded rather
-than half-fixed: the fee runs at least carry scope and due date in the TITLE
-(`Hostel fee run (all in scope) due 2026-11-30`), and a student exit carries the
-pupil's name — thinner than they should be, but not blank the way leave was.
-Anything approving MONEY deserves the same treatment as this.
+**THE TWO FEE RUNS GOT THE SAME TREATMENT**, because they are the other half of
+"approving something that moves money". A hostel or transport run posts a charge
+onto EVERY boarder's or passenger's invoice, and its approver saw only the scope
+and the due date — `Hostel fee run (all in scope) due 2026-11-30`. How many
+families and how much are the two facts the decision turns on. Live now:
+`Bills 19 boarders, NGN 28,500.00 in total (as at today).` and
+`Bills 30 passengers, NGN 24,000.00 in total (as at today).`
+// "AS AT TODAY" IS LOAD-BEARING WORDING: the roll can change between raising and
+approving, and a figure presented as exact would be believed.
+// GOTCHA, and only running it caught this: my first transport preview summed
+`routeStop.fareMinor` and reported **"30 passengers, NGN 0.00"**. A route has a
+`fareMode`, and on a FLAT route the fare is on the ROUTE with every assignment
+carrying a null `stopId` — ZERO of the demo's 30 had one. It also missed
+`postFeeRun`'s other two rules (only STUDENT passengers are invoiced, and a
+zero fare is skipped). It calls the service's own `fareFor` now: **a preview
+that reimplements the rule is a preview that can disagree with the run it is
+previewing**, which is worse than no preview at all.
+// The remaining producers are named in the gate with what their TITLE carries,
+so a reader can judge whether it is still enough — a student exit names the
+pupil, an attendance amendment names the date, a content publish names the
+content. The generic `/workflows` create route is exempt with a reason: the
+CALLER supplies title and payload, so there is no service there to write a
+summary, and a money-moving type added to `WORKFLOW_TYPE_META` needs a producer
+of its own rather than that route.
+Gate: `what-the-approver-is-shown.spec.ts` — every producer either summarises or
+is named as title-only, and a money-moving one must actually put `summary` in its
+PAYLOAD (a summary computed and not passed is the same blank inbox).
 // GOTCHA: the existing `leave.service.spec` stubbed `db` with `runAsTenant`
 only, and the balance read is `runAsTenantReadOnly` — a shape the real
 `TenantDatabase` always has. Same fixture-modelling trap as the notification and

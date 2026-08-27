@@ -11,7 +11,7 @@
 
 import { ConflictException, BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@sms/db";
-import { schoolToday, TRANSPORT_PERMISSIONS, FEES_PERMISSIONS, FEE_SOURCES } from "@sms/types";
+import { schoolToday, TRANSPORT_PERMISSIONS, FEES_PERMISSIONS, FEE_SOURCES, formatMoney } from "@sms/types";
 import type {
   RouteStopDto,
   TransportAssignmentDto,
@@ -771,10 +771,21 @@ export class TransportService {
     // driver's run becomes a FEE_SCHEDULE workflow request approved by a
     // DIFFERENT workflow.review holder; the hook posts it on approval.
     if (!this.wide(p)) {
+      // WHAT THIS RUN WILL COST A FAMILY — the same gap as the hostel run one
+      // module over. The inbox shows a request's `summary` and nothing else, so
+      // the approver of a run that posts a fare onto every passenger's invoice
+      // saw only the scope and the due date.
+      const preview = await this.previewFeeRun(p, input.routeId);
       const req = (await this.workflow.createRequest(p, {
         type: "FEE_SCHEDULE",
         title: `Transport fee run (${input.routeId ? "one route" : "all routes"}) due ${input.dueDate.slice(0, 10)}`,
-        payload: { module: "transport", routeId: input.routeId ?? null, dueDate: input.dueDate, description: input.description ?? null },
+        payload: {
+          module: "transport",
+          routeId: input.routeId ?? null,
+          dueDate: input.dueDate,
+          description: input.description ?? null,
+          summary: preview,
+        },
       })) as { id: string };
       await this.workflow.submit(p, req.id);
       return { pendingApproval: true, requestId: req.id };
@@ -786,6 +797,44 @@ export class TransportService {
 
   /** Post a transport fee run (fares -> invoice line items); direct (admin) or
    *  from the FEE_SCHEDULE approval hook — always inside a tenant tx. */
+  /**
+   * What the run would bill AS AT NOW — the sentence an approver reads.
+   *
+   * A fare lives on the STOP, not the assignment, so this resolves it the same
+   * way `postFeeRun` does. Says "as at today" because the roll can change
+   * between raising and approving.
+   */
+  private async previewFeeRun(p: Principal, routeId?: string): Promise<string> {
+    return this.db.runAsTenantReadOnly(this.ctx(p), async (tx) => {
+      const assignments = (await tx.transportAssignment.findMany({
+        where: routeId ? { routeId, status: "ACTIVE" } : { status: "ACTIVE" },
+        select: { routeId: true, stopId: true, passengerType: true },
+      })) as Array<{ routeId: string; stopId: string | null; passengerType: string }>;
+      let count = 0;
+      let total = 0;
+      for (const a of assignments) {
+        // The SAME three rules `postFeeRun` applies, and using its own
+        // `fareFor` rather than a second reading of where a fare lives.
+        //
+        // // GOTCHA, caught by running it: my first version summed `routeStop
+        // .fareMinor` and reported "30 passengers, NGN 0.00" — a route has a
+        // `fareMode`, and on a FLAT route the fare is on the ROUTE, with every
+        // assignment carrying a null `stopId`. Zero of the demo's 30 had one.
+        // A preview that reimplements the rule is a preview that can disagree
+        // with the run it is previewing.
+        if (a.passengerType !== "STUDENT") continue; // only students are invoiced
+        const fare = await this.fareFor(tx, a.routeId, a.stopId);
+        if (fare <= 0) continue;
+        count += 1;
+        total += fare;
+      }
+      if (count === 0) return "No fare-paying passengers in scope — this run would bill nobody.";
+      const school = await tx.school.findFirst({ where: { id: p.schoolId }, select: { currency: true } });
+      const currency = school?.currency ?? "NGN";
+      return `Bills ${count} passenger${count === 1 ? "" : "s"}, ${formatMoney(total, currency)} in total (as at today).`;
+    });
+  }
+
   private async postFeeRun(
     tx: TenantTx,
     schoolId: string,
